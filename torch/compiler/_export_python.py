@@ -58,10 +58,7 @@ _MODULE_TRAINING_TAG = "# torch.compiler.export_python module-training: "
 _INPUT_OVERLAP_TAG = "# torch.compiler.export_python input-overlap: "
 _INPUT_DUPLICATE_TAG = "# torch.compiler.export_python input-duplicates: "
 _AUTOCAST_TAG = "# torch.compiler.export_python autocast: "
-# Ambient process state the generated code bakes that no other stamp covers: the default
-# dtype and device a factory op with no explicit argument resolves against, and whether
-# deterministic algorithms were on when inductor chose between a deterministic and an
-# atomic lowering.
+# Ambient state the generated code bakes that no other stamp covers; see _global_state.
 _GLOBAL_STATE_TAG = "# torch.compiler.export_python global-state: "
 # The CPU vector ISA the artifact's C++ kernels were generated against. Inductor bakes
 # the host's vector width into a C++ loop's stride -- a reduction emitted on AVX-512
@@ -70,7 +67,7 @@ _GLOBAL_STATE_TAG = "# torch.compiler.export_python global-state: "
 # and each store covers half of its own step, leaving the rest of the output as whatever
 # the allocator held: no error, no warning, and a result that is not close to anything.
 # Unlike the CUDA case there is no kernel-image error to fall back on, and no other stamp
-# covers it, so this one raises rather than warns.
+# covers it, so this one raises rather than warns. Recorded as (bit width, ISA name).
 _CPU_ISA_TAG = "# torch.compiler.export_python cpu-vec-isa: "
 
 # os.link failures that mean the filesystem cannot do hard links at all, as opposed to
@@ -211,6 +208,28 @@ def _reports_no_bytes(t: torch.Tensor) -> bool:
     return not is_traceable_wrapper_subclass(t) and (t.numel() == 0 or t.is_meta)
 
 
+def _device_types(t: torch.Tensor, leaves: list[torch.Tensor] | None) -> set[str]:
+    """The device types t's bytes can be on, for the unlocatable fallback.
+
+    Read off the leaves when there are any. Otherwise every type t or a tensor inside
+    it reports: a wrapper with one unlocatable component still has its other
+    components' bytes, and its own report can differ from theirs (torch.load).
+    """
+    if leaves is not None:
+        return {x.device.type for x in leaves}
+    types = {t.device.type}
+    if is_traceable_wrapper_subclass(t):
+        try:
+            attrs, _ = t.__tensor_flatten__()
+        except Exception:
+            return types
+        for attr in attrs:
+            component = getattr(t, attr, None)
+            if isinstance(component, torch.Tensor):
+                types |= _device_types(component, None)
+    return types
+
+
 def _shares_memory(a: torch.Tensor, b: torch.Tensor) -> bool:
     """Whether two tensors can touch the same bytes.
 
@@ -238,10 +257,8 @@ def _shares_memory(a: torch.Tensor, b: torch.Tensor) -> bool:
     a_leaves, b_leaves = _dense_leaves(a), _dense_leaves(b)
     if a_leaves is None or b_leaves is None:
         # Bytes unknown (sparse, nested, an undecomposable wrapper): assume it aliases
-        # anything of the same device type, read off the leaves where there are any.
-        a_types = {x.device.type for x in ([a] if a_leaves is None else a_leaves)}
-        b_types = {x.device.type for x in ([b] if b_leaves is None else b_leaves)}
-        return not a_types.isdisjoint(b_types)
+        # anything of the same device type.
+        return not _device_types(a, a_leaves).isdisjoint(_device_types(b, b_leaves))
     if is_traceable_wrapper_subclass(a) or is_traceable_wrapper_subclass(b):
         return any(_shares_memory(x, y) for x in a_leaves for y in b_leaves)
     if a.device != b.device:
@@ -415,8 +432,8 @@ def _autocast_state(
     ]
 
 
-def _cpu_vec_isa(code: str) -> str | None:
-    """The CPU vector ISA a C++ kernel in ``code`` was generated against, or None.
+def _cpu_vec_isa(code: str) -> tuple[int, str] | None:
+    """(bit width, name) of the ISA a C++ kernel in ``code`` was generated for, or None.
 
     None for an artifact with no C++ kernel, where the question does not arise -- a CUDA
     artifact must not start refusing to run because it moved between two hosts whose CPUs
@@ -426,7 +443,8 @@ def _cpu_vec_isa(code: str) -> str | None:
         return None
     from torch._inductor.cpu_vec_isa import pick_vec_isa
 
-    return str(pick_vec_isa())
+    isa = pick_vec_isa()
+    return (isa.bit_width(), str(isa))
 
 
 def _global_state() -> list[list[str]]:
@@ -479,6 +497,17 @@ class ExportedPythonArtifact:
     ) -> None:
         self._fn = fn
         self._call_signature = inspect.signature(fn)
+        kw_only = [
+            p.name
+            for p in self._call_signature.parameters.values()
+            if p.kind == inspect.Parameter.KEYWORD_ONLY
+        ]
+        if kw_only:
+            raise TypeError(
+                "torch.compiler.export_python does not support functions that "
+                f"declare keyword-only parameters ({kw_only}); the precompile "
+                "calling convention is positional."
+            )
         self._path = path
         self._backend = backend
         self._tracer = tracer
@@ -515,8 +544,8 @@ class ExportedPythonArtifact:
                     "example_inputs=... to precompile against dedicated inputs."
                 ) from e
         else:
-            example = self._bind_positional(example, {}, "example_inputs=")
-            self._check_supported_args(example)
+            example = self._bind_positional(example, {}, "example_inputs")
+            self._check_supported_args(example, "example_inputs")
         # Before capture: fn may call train()/eval() itself, and the per-call check reads
         # the caller's modules before the call runs.
         module_training = _module_training_state(example)
@@ -675,8 +704,8 @@ class ExportedPythonArtifact:
             log.warning(
                 "torch.compiler.export_python: the artifact at %s carries no recorded "
                 "global-state stamp, so calling it under a different default dtype, "
-                "default device or determinism setting than capture "
-                "is unchecked. Delete %s to regenerate it.",
+                "default device, determinism setting or fill_uninitialized_memory "
+                "than capture is unchecked. Delete %s to regenerate it.",
                 self._path,
                 self._path,
             )
@@ -723,9 +752,12 @@ class ExportedPythonArtifact:
         # Checked once, before _load compiles the C++ kernel: the ISA that kernel is
         # built under is pick_vec_isa() at that moment, and later calls cannot change it.
         captured = self._read_stamp(code, _CPU_ISA_TAG)
-        if captured is None:
-            # A recorded None (no C++ kernel) is a stamp; a dropped or unparsable line
-            # is not.
+        try:
+            width, name = captured
+            features = set(name.split())
+        except (TypeError, ValueError, AttributeError):
+            # A recorded None (no C++ kernel) is a stamp; a dropped, unparsable or
+            # reshaped line is not.
             if self._read_raw_stamp(code, _CPU_ISA_TAG) != "None":
                 log.warning(
                     "torch.compiler.export_python: the artifact at %s carries no "
@@ -738,16 +770,21 @@ class ExportedPythonArtifact:
             return
         from torch._inductor.cpu_vec_isa import pick_vec_isa
 
-        live_isa = str(pick_vec_isa())
-        if live_isa != captured:
+        live = pick_vec_isa()
+        # Only the width is baked into loop strides, but a feature the live ISA lacks
+        # may be an intrinsic the kernel emits (an AMX tile op compiles without
+        # -mamx-tile and then faults). Extra live features at the same width are safe.
+        if live.bit_width() != width or not features <= set(str(live).split()):
             raise _precompile_error(
-                "torch.compiler.export_python: this machine's CPU vector ISA is "
-                f"{live_isa!r} but the artifact's C++ kernels were generated for "
-                f"{captured!r}. The vector width is baked into their loop strides "
-                "while the ISA is re-picked at compile time, so running them here "
-                "would write past the end of an output or leave part of it "
-                f"uninitialized. Delete {self._path} to regenerate on this machine, "
-                "or run where the captured ISA is available."
+                "torch.compiler.export_python: the artifact's C++ kernels were "
+                f"generated for CPU vector ISA {name!r} ({width}-bit), but the ISA "
+                f"inductor picks here is {str(live)!r} ({live.bit_width()}-bit). The "
+                "width is baked into their loop strides and they may use an "
+                "instruction this ISA lacks, so running them would write past the end "
+                "of an output, leave part of it uninitialized, or crash. Delete "
+                f"{self._path} to regenerate, set torch._inductor.config.cpp.simdlen "
+                "or ATEN_CPU_CAPABILITY to the captured ISA if this machine has it, "
+                "or run where it is available."
             )
 
     def _check_module_training(self, args: tuple[Any, ...]) -> None:
@@ -879,12 +916,21 @@ class ExportedPythonArtifact:
         self._input_overlaps = self._read_stamp(code, _INPUT_OVERLAP_TAG)
         self._input_duplicates = self._read_stamp(code, _INPUT_DUPLICATE_TAG)
         self._autocast = self._read_stamp(code, _AUTOCAST_TAG)
-        global_state = self._read_stamp(code, _GLOBAL_STATE_TAG)
-        try:
-            self._global_state = None if global_state is None else dict(global_state)
-        except (TypeError, ValueError):
-            # Not [key, value] pairs: a hand-edit, treated like a dropped stamp.
-            self._global_state = None
+        pairs = self._read_stamp(code, _GLOBAL_STATE_TAG)
+        # Anything but a non-empty list of [str, str] pairs is a hand-edit, treated like a
+        # dropped stamp so the missing-stamp warning fires instead of every check silently
+        # turning off.
+        well_formed = (
+            isinstance(pairs, list)
+            and bool(pairs)
+            and all(
+                isinstance(p, list)
+                and len(p) == 2
+                and all(isinstance(s, str) for s in p)
+                for p in pairs
+            )
+        )
+        self._global_state = dict(pairs) if well_formed else None
         self._code_devices = _code_devices(code)
         self._check_cpu_isa(code)
         entry = self._load(code, from_disk=from_disk)
@@ -952,21 +998,9 @@ class ExportedPythonArtifact:
                 f"{getattr(self._fn, '__name__', 'fn')}'s signature: {e}"
             ) from e
         bound.apply_defaults()
-        # After apply_defaults every positional-or-keyword parameter is placed, so
-        # bound.kwargs holds only keyword-only and **kwargs entries.
+        # After apply_defaults every positional-or-keyword parameter is placed and
+        # __init__ refused keyword-only ones, so bound.kwargs holds only **kwargs.
         if bound.kwargs:
-            params = sig.parameters
-            kw_only = sorted(
-                n
-                for n in bound.kwargs
-                if n in params and params[n].kind == inspect.Parameter.KEYWORD_ONLY
-            )
-            if kw_only:
-                raise TypeError(
-                    "torch.compiler.export_python does not support functions that "
-                    f"declare keyword-only parameters ({kw_only}); the precompile "
-                    "calling convention is positional."
-                )
             raise TypeError(
                 "torch.compiler.export_python does not support **kwargs parameters "
                 f"(got {sorted(bound.kwargs)}); the precompile calling convention is "
@@ -974,7 +1008,9 @@ class ExportedPythonArtifact:
             )
         return bound.args
 
-    def _check_supported_args(self, args: tuple[Any, ...]) -> None:
+    def _check_supported_args(
+        self, args: tuple[Any, ...], source: str = "the call arguments"
+    ) -> None:
         # args is the bound positional layout: the named positional parameters in
         # order, then any *args values.
         P = inspect.Parameter
@@ -993,27 +1029,28 @@ class ExportedPythonArtifact:
             if not unsupported:
                 continue
             name = names[pos] if pos < len(names) else f"{var}[{pos - len(names)}]"
+            where = f"parameter {name!r} of {source}"
             # These two land often enough that the generic "close the constant over"
             # advice is actively wrong for them: a module must stay an argument, and an
             # optional parameter has no constant to close over in the first place.
             if any(isinstance(leaf, torch.nn.Module) for leaf in unsupported):
                 raise TypeError(
                     "torch.compiler.export_python: nn.Module arguments must be passed "
-                    f"directly, not nested inside a container (parameter {name!r}). "
+                    f"directly, not nested inside a container ({where}). "
                     "Pass the module itself as its own positional argument."
                 )
             if all(leaf is None for leaf in unsupported):
                 raise TypeError(
                     "torch.compiler.export_python does not support None arguments "
-                    f"(parameter {name!r}); make_fx specializes the None branch without "
+                    f"({where}); make_fx specializes the None branch without "
                     "a runtime guard. Split the function, or pass a tensor."
                 )
             raise TypeError(
                 "torch.compiler.export_python supports only Tensor pytrees and "
                 "nn.Module positional arguments; Python scalar/config values are "
                 "specialized by make_fx without runtime guards. Close constants "
-                f"over in the function instead of passing parameter {name!r} "
-                f"({unsupported[0]!r})."
+                f"over in the function instead of passing {unsupported[0]!r} as "
+                f"{where}."
             )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:

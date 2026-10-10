@@ -3547,6 +3547,36 @@ class TestPrecompile(TestCase):
             )
         self.assertEqual(torch.random.get_rng_state(), before)
 
+    @unittest.skipUnless(TEST_CUDA, "needs CUDA")
+    def test_capture_drawing_from_a_cuda_generator_restores_only_the_default(self):
+        x = torch.empty(4, device="cuda")
+        torch.manual_seed(0)
+        before = torch.cuda.get_rng_state(0)
+        default = torch.cuda.default_generators[0]
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(
+                lambda a: a + torch.rand(4, device="cuda", generator=default),
+                x,
+                backend="eager",
+            )
+        self.assertEqual(torch.cuda.get_rng_state(0), before)
+
+        # torch.Generator("cuda") has no device index; a reseed of the default made
+        # during capture must stand.
+        gen = torch.Generator("cuda").manual_seed(0)
+        gen_before = gen.get_state()
+
+        def reseed_then_draw(a):
+            default.manual_seed(7)
+            return a + torch.rand(4, device="cuda", generator=gen)
+
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            _precompile_pair(reseed_then_draw, x, backend="eager")
+        self.assertTrue(any("explicit torch.Generator" in m for m in cm.output))
+        reseeded = torch.Generator("cuda").manual_seed(7).get_state()
+        self.assertEqual(torch.cuda.get_rng_state(0), reseeded)
+        self.assertNotEqual(gen.get_state(), gen_before)
+
     def test_capture_drawing_from_explicit_and_default_generators(self):
         gen = torch.Generator().manual_seed(0)
         gen_before = gen.get_state()
@@ -6453,13 +6483,21 @@ class TestExportPython(TestCase):
         self.assertEqual(run(a=x, b=x + 1), x - (x + 1))
 
     def test_keyword_only_params_rejected(self, device):
-        @torch.compiler.export_python(path=self._tmp_path("ko.py"), backend="eager")
-        def run(a, *, b):
+        default = make_tensor((4,), device=device, dtype=torch.float32)
+
+        def required(a, *, b):
             return a + b
 
-        x = make_tensor((4,), device=device, dtype=torch.float32)
-        with self.assertRaisesRegex(TypeError, "declare keyword-only parameters"):
-            run(x, b=x)
+        def defaulted(a, *, b=default):
+            return a + b
+
+        # Refused when decorated, so a defaulted one the caller never passes is caught
+        # and a required one does not first fail binding.
+        path = self._tmp_path("ko.py")
+        deco = torch.compiler.export_python(path=path, backend="eager")
+        for fn in (required, defaulted):
+            with self.assertRaisesRegex(TypeError, "declare keyword-only parameters"):
+                deco(fn)
 
     def test_positional_defaults_are_canonicalized(self, device):
         default = make_tensor((4,), device=device, dtype=torch.float32)
@@ -6492,7 +6530,7 @@ class TestExportPython(TestCase):
         def scaled(a, s):
             return a * s
 
-        with self.assertRaisesRegex(TypeError, "only Tensor pytrees"):
+        with self.assertRaisesRegex(TypeError, "parameter 's' of example_inputs"):
             scaled(x, x)
 
     def test_non_tensor_arguments_rejected(self, device):
@@ -7386,8 +7424,8 @@ class TestExportPython(TestCase):
             torch.backends.cuda.matmul.fp32_precision = previous
 
     def test_malformed_global_state_stamp_degrades_to_a_warning(self, device):
-        # A literal that is not [key, value] pairs is a hand-edit like a dropped stamp:
-        # the check turns off with the missing-stamp warning instead of raising.
+        # Anything but [key, value] string pairs is a hand-edit like a dropped stamp: the
+        # check turns off with the missing-stamp warning instead of raising or going silent.
         path = self._tmp_path("mangled_state.py")
         x = make_tensor((4,), device=device, dtype=torch.float32)
 
@@ -7396,17 +7434,27 @@ class TestExportPython(TestCase):
 
         torch.compiler.export_python(path=path)(fn)(x)
         with open(path, encoding="utf-8") as f:
-            lines = f.read().splitlines(True)
-        for i, line in enumerate(lines):
-            if "global-state:" in line:
-                lines[i] = "# torch.compiler.export_python global-state: 42\n"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("".join(lines))
-        with self.assertLogs("torch.compiler._export_python", "WARNING") as logs:
-            self.assertEqual(torch.compiler.export_python(path=path)(fn)(x), fn(x))
-        self.assertTrue(
-            any("no recorded global-state stamp" in m for m in logs.output), logs.output
-        )
+            original = f.read().splitlines(True)
+        for stamp in ("42", "[]", "['ab']", "[['deterministic', False]]"):
+            lines = [
+                f"# torch.compiler.export_python global-state: {stamp}\n"
+                if "global-state:" in line
+                else line
+                for line in original
+            ]
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("".join(lines))
+            with self.subTest(stamp=stamp):
+                with self.assertLogs(
+                    "torch.compiler._export_python", "WARNING"
+                ) as logs:
+                    self.assertEqual(
+                        torch.compiler.export_python(path=path)(fn)(x), fn(x)
+                    )
+                self.assertTrue(
+                    any("no recorded global-state stamp" in m for m in logs.output),
+                    logs.output,
+                )
 
     def test_ambient_global_state_is_stamped_and_checked(self, device):
         # The generated code resolves these once, at capture, and bakes the answer: a
@@ -7647,6 +7695,16 @@ class TestExportPython(TestCase):
         self.assertTrue(_shares_memory(opaque, lying))
         self.assertTrue(_shares_memory(lying, opaque))
 
+        # A wrapper with one unlocatable component falls back as a whole, but the
+        # devices of its other components still count, not only the one it reports.
+        mixed = _MisreportedDevice(base[:4], _type_lying_device(device))
+        mixed.opaque = opaque
+        attrs = ["payload", "opaque"]
+        mixed.__tensor_flatten__ = lambda: (attrs, None)  # type: ignore[method-assign]
+        self.assertIsNone(_dense_leaves(mixed))
+        self.assertTrue(_shares_memory(base[:4], mixed))
+        self.assertTrue(_shares_memory(mixed, base[:4]))
+
     def test_overlap_sweep_matches_the_pairwise_predicate(self, device):
         # _input_overlaps sweeps sorted byte spans instead of running _shares_memory
         # over every pair; the two must agree exactly, including the shapes that leave
@@ -7830,23 +7888,33 @@ class TestExportPython(TestCase):
 
         x = make_tensor((256, 256), device=device, dtype=torch.float32)
         y = make_tensor((256, 256), device=device, dtype=torch.float32)
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.cpu_vec_isa import pick_vec_isa
         from torch.compiler._export_python import _CPU_ISA_TAG
 
         expected = torch.compiler.export_python(path=path)(fn)(x, y)
         with open(path, encoding="utf-8") as f:
             source = f.read()
         stamp = next(l for l in source.splitlines() if l.startswith(_CPU_ISA_TAG))
-        self.assertNotEqual(stamp, f"{_CPU_ISA_TAG}None")
+        isa = pick_vec_isa()
+        width, name = isa.bit_width(), str(isa)
+        self.assertEqual(stamp, f"{_CPU_ISA_TAG}{(width, name)!r}")
         self.assertEqual(torch.compiler.export_python(path=path)(fn)(x, y), expected)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(source.replace(stamp, f"{_CPU_ISA_TAG}'sse2'"))
-        from torch._inductor.async_compile import AsyncCompile
 
+        def load_with_stamp(captured):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(source.replace(stamp, f"{_CPU_ISA_TAG}{captured!r}"))
+            return torch.compiler.export_python(path=path)(fn)(x, y)
+
+        # Only the width is baked into the strides, so a host whose ISA adds features
+        # at the same width (AVX-512 -> AVX-512 VNNI) runs the artifact.
+        self.assertEqual(load_with_stamp((width, "")), expected)
         # The refusal must come before the kernel is compiled under the wrong ISA.
         compiled = AssertionError("compiled the C++ kernel")
         with mock.patch.object(AsyncCompile, "cpp_pybinding", side_effect=compiled):
-            with self.assertRaisesRegex(PrecompileError, "CPU vector ISA"):
-                torch.compiler.export_python(path=path)(fn)(x, y)
+            for captured in ((width * 2 or 128, name), (width, f"{name} amx_tile")):
+                with self.assertRaisesRegex(PrecompileError, "CPU vector ISA"):
+                    load_with_stamp(captured)
 
     def test_a_cpu_isa_change_after_load_is_not_refused(self, device):
         # The kernel's ISA is fixed when it compiles at load, so a later simdlen change
@@ -7909,8 +7977,8 @@ class TestExportPython(TestCase):
         self.assertEqual(sorted(os.listdir(directory)), ["artifact.py"])
 
     def test_a_missing_or_malformed_cpu_isa_stamp_warns(self, device):
-        # The only checked stamp that raises must not go quiet when a hand-edit drops it
-        # or leaves it unparsable: it warns, once per load.
+        # The only checked stamp that raises must not go quiet when a hand-edit drops
+        # it, leaves it unparsable or changes its shape: it warns, once per load.
         if torch.device(device).type != "cpu":
             self.skipTest("the stamp is about C++ kernels")
         from torch.compiler._export_python import _CPU_ISA_TAG
@@ -7927,8 +7995,9 @@ class TestExportPython(TestCase):
             source = f.read()
         stamp = next(l for l in source.splitlines() if l.startswith(_CPU_ISA_TAG))
         dropped = "\n".join(l for l in source.splitlines() if l != stamp)
-        unquoted = source.replace(stamp, f"{_CPU_ISA_TAG}avx512")
-        for edited in (dropped, unquoted):
+        unparsable = source.replace(stamp, f"{_CPU_ISA_TAG}avx512")
+        reshaped = source.replace(stamp, f"{_CPU_ISA_TAG}'avx512'")
+        for edited in (dropped, unparsable, reshaped):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(edited)
             with self.assertLogs("torch.compiler._export_python", "WARNING") as logs:
