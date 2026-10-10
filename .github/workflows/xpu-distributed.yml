@@ -1,0 +1,57 @@
+# Owner(s): ["module: xpu"]
+name: xpu-distributed
+
+on:
+  push:
+    tags:
+      - ciflow/xpu-distributed/*
+  workflow_dispatch:
+  schedule:
+    - cron: 45 2 * * *
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-noble-xpu-n-py3_10-distributed-build:
+    name: linux-noble-xpu-n-py3.10-distributed
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "mt-"
+      build-environment: linux-noble-xpu-n-py3.10-distributed
+      docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
+      runner: l-x86iavx512-48-384
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      test-matrix: |
+        { include: [
+          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.xe.xpu.dist" },
+        ]}
+    secrets: inherit
+
+  linux-noble-xpu-n-py3_10-distributed-test:
+    name: linux-noble-xpu-n-py3.10-distributed
+    uses: ./.github/workflows/_xpu-test.yml
+    needs: linux-noble-xpu-n-py3_10-distributed-build
+    with:
+      build-environment: ${{ needs.linux-noble-xpu-n-py3_10-distributed-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-xpu-n-py3_10-distributed-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-xpu-n-py3_10-distributed-build.outputs.test-matrix }}
+    secrets: inherit
