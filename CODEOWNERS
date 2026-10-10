@@ -1138,7 +1138,6 @@
 # /test/scripts/
 # /test/spincli/
 # /test/strobelight/
-# /test/torchci/
 /test/test_public_bindings.py @albanD
 # /test/test_reuse_old_whl.py
 # /test/test_testing.py
