@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
+#include <c10/util/safe_conv.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 
@@ -26,13 +27,13 @@ inline std::tuple<int, int, int> get_kernel(IntArrayRef kernel_size) {
   TORCH_CHECK(
       kernel_size.size() == 1 || kernel_size.size() == 3,
       "avg_pool3d: kernel_size must either be a single int, or a tuple of three ints");
-  const int kD = c10::checked_convert<int>(kernel_size[0], "int");
+  const int kD = c10::safe_conv<int>(kernel_size[0]);
   const int kH = kernel_size.size() == 1
       ? kD
-      : c10::checked_convert<int>(kernel_size[1], "int");
+      : c10::safe_conv<int>(kernel_size[1]);
   const int kW = kernel_size.size() == 1
       ? kD
-      : c10::checked_convert<int>(kernel_size[2], "int");
+      : c10::safe_conv<int>(kernel_size[2]);
   return std::make_tuple(kW, kH, kD);
 }
 
@@ -40,13 +41,13 @@ inline std::tuple<int, int, int> get_stride(IntArrayRef stride, int kW, int kH, 
   TORCH_CHECK(
       stride.empty() || stride.size() == 1 || stride.size() == 3,
       "avg_pool3d: stride must either be omitted, a single int, or a tuple of three ints");
-  const int dD = stride.empty() ? kD : c10::checked_convert<int>(stride[0], "int");
+  const int dD = stride.empty() ? kD : c10::safe_conv<int>(stride[0]);
   const int dH = stride.empty()
       ? kH
-      : stride.size() == 1 ? dD : c10::checked_convert<int>(stride[1], "int");
+      : stride.size() == 1 ? dD : c10::safe_conv<int>(stride[1]);
   const int dW = stride.empty()
       ? kW
-      : stride.size() == 1 ? dD : c10::checked_convert<int>(stride[2], "int");
+      : stride.size() == 1 ? dD : c10::safe_conv<int>(stride[2]);
   return std::make_tuple(dW, dH, dD);
 }
 
@@ -54,11 +55,11 @@ inline std::tuple<int, int, int> get_padding(IntArrayRef padding) {
   TORCH_CHECK(
       padding.size() == 1 || padding.size() == 3,
       "avg_pool3d: padding must either be a single int, or a tuple of three ints");
-  const int padD = c10::checked_convert<int>(padding[0], "int");
+  const int padD = c10::safe_conv<int>(padding[0]);
   const int padH =
-      padding.size() == 1 ? padD : c10::checked_convert<int>(padding[1], "int");
+      padding.size() == 1 ? padD : c10::safe_conv<int>(padding[1]);
   const int padW =
-      padding.size() == 1 ? padD : c10::checked_convert<int>(padding[2], "int");
+      padding.size() == 1 ? padD : c10::safe_conv<int>(padding[2]);
   return std::make_tuple(padW, padH, padD);
 }
 

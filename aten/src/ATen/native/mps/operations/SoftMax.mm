@@ -3,8 +3,8 @@
 #include <ATen/ceil_div.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/SoftMax.h>
-#include <c10/util/TypeCast.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/safe_conv.h>
 #include <bit>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -28,16 +28,16 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #endif
 
 static SoftmaxParams<uint32_t> narrow_params(const SoftmaxParams<uint64_t>& params) {
-  SoftmaxParams<uint32_t> result{.dim_size = c10::checked_convert<uint32_t>(params.dim_size, "uint32_t"),
-                                 .num_rows = c10::checked_convert<uint32_t>(params.num_rows, "uint32_t"),
-                                 .inner_size = c10::checked_convert<uint32_t>(params.inner_size, "uint32_t"),
-                                 .chunk_size = c10::checked_convert<uint32_t>(params.chunk_size, "uint32_t"),
-                                 .n_chunks = c10::checked_convert<uint32_t>(params.n_chunks, "uint32_t"),
+  SoftmaxParams<uint32_t> result{.dim_size = c10::safe_conv<uint32_t>(params.dim_size),
+                                 .num_rows = c10::safe_conv<uint32_t>(params.num_rows),
+                                 .inner_size = c10::safe_conv<uint32_t>(params.inner_size),
+                                 .chunk_size = c10::safe_conv<uint32_t>(params.chunk_size),
+                                 .n_chunks = c10::safe_conv<uint32_t>(params.n_chunks),
                                  .ndim = params.ndim,
                                  .dim = params.dim};
   for (const auto d : c10::irange(params.ndim)) {
-    result.sizes[d] = c10::checked_convert<uint32_t>(params.sizes[d], "uint32_t");
-    result.strides[d] = c10::checked_convert<uint32_t>(params.strides[d], "uint32_t");
+    result.sizes[d] = c10::safe_conv<uint32_t>(params.sizes[d]);
+    result.strides[d] = c10::safe_conv<uint32_t>(params.strides[d]);
   }
   return result;
 }

@@ -11,6 +11,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/ReduceOps.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_conv.h>
 #include <algorithm>
 #include <bit>
 #include <numeric>
@@ -397,8 +398,8 @@ static std::optional<ReductionPlan> select_flat_strided(const Tensor& input, uin
     return std::nullopt;
   }
   const bool has_rows = ndim == 2;
-  const auto rows = has_rows ? safe_downcast<uint32_t, int64_t>(sizes[0]) : 1u;
-  const auto run = safe_downcast<uint32_t, int64_t>(sizes[ndim - 1]);
+  const auto rows = has_rows ? c10::safe_conv<uint32_t, int64_t>(sizes[0]) : 1u;
+  const auto run = c10::safe_conv<uint32_t, int64_t>(sizes[ndim - 1]);
   // Split long runs so rows * chunks can occupy every threadgroup a few times
   // over. Only exact divisors, so the kernel needs no ragged tail.
   constexpr uint32_t MIN_CHUNK = 1024;
@@ -415,11 +416,11 @@ static std::optional<ReductionPlan> select_flat_strided(const Tensor& input, uin
     return std::nullopt;
   }
   ReductionPlan plan{.kernel = ReductionKernel::FlatStrided,
-                     .layout = ReductionLayout::contiguous(1, safe_downcast<uint32_t, int64_t>(input.numel()), 1),
+                     .layout = ReductionLayout::contiguous(1, c10::safe_conv<uint32_t, int64_t>(input.numel()), 1),
                      .num_segments = num_groups};
   plan.flat_sizes = {rows, run / chunks, chunks, 0};
-  plan.flat_strides = {has_rows ? safe_downcast<uint32_t, int64_t>(strides[0]) : 0u,
-                       safe_downcast<uint32_t, int64_t>(strides[ndim - 1]),
+  plan.flat_strides = {has_rows ? c10::safe_conv<uint32_t, int64_t>(strides[0]) : 0u,
+                       c10::safe_conv<uint32_t, int64_t>(strides[ndim - 1]),
                        0,
                        0};
   return plan;
@@ -437,12 +438,12 @@ static std::optional<ReductionLayout> outer_reduction_layout(const Tensor& input
   }
   const bool has_outer = collapsed_dim > 0;
   const bool has_inner = collapsed_dim < collapsed_ndim - 1;
-  return ReductionLayout{has_outer ? safe_downcast<uint32_t, int64_t>(sizes[0]) : 1u,
-                         safe_downcast<uint32_t, int64_t>(sizes[collapsed_dim]),
-                         has_inner ? safe_downcast<uint32_t, int64_t>(sizes[collapsed_dim + 1]) : 1u,
-                         {safe_downcast<uint32_t, int64_t>(strides[collapsed_dim]),
-                          has_inner ? safe_downcast<uint32_t, int64_t>(strides[collapsed_dim + 1]) : 0u,
-                          has_outer ? safe_downcast<uint32_t, int64_t>(strides[0]) : 0u,
+  return ReductionLayout{has_outer ? c10::safe_conv<uint32_t, int64_t>(sizes[0]) : 1u,
+                         c10::safe_conv<uint32_t, int64_t>(sizes[collapsed_dim]),
+                         has_inner ? c10::safe_conv<uint32_t, int64_t>(sizes[collapsed_dim + 1]) : 1u,
+                         {c10::safe_conv<uint32_t, int64_t>(strides[collapsed_dim]),
+                          has_inner ? c10::safe_conv<uint32_t, int64_t>(strides[collapsed_dim + 1]) : 0u,
+                          has_outer ? c10::safe_conv<uint32_t, int64_t>(strides[0]) : 0u,
                           0},
                          input.is_contiguous()};
 }
@@ -531,8 +532,8 @@ static ReductionPlan select_inner_reduction(const ReductionLayout& layout, bool 
 }
 
 static ReductionPlan select_reduction_plan(const Tensor& input, const Tensor& output, bool is_arg) {
-  const auto reduction_size = safe_downcast<uint32_t, int64_t>(input.numel() / output.numel());
-  const auto num_outputs = safe_downcast<uint32_t, int64_t>(output.numel());
+  const auto reduction_size = c10::safe_conv<uint32_t, int64_t>(input.numel() / output.numel());
+  const auto num_outputs = c10::safe_conv<uint32_t, int64_t>(output.numel());
   ReductionPlan plan{.layout = ReductionLayout::contiguous(num_outputs, reduction_size, 1)};
 
   // Two-pass for large full reductions: pass 1 splits input into <=512

@@ -6,6 +6,7 @@
 #include <c10/util/TypeCast.h>
 #include <c10/util/safe_numerics.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_conv.h>
 
 #include <utility>
 
@@ -50,11 +51,13 @@ DECLARE_DISPATCH(max_pool3d_fn, max_pool3d_kernel)
 DECLARE_DISPATCH(max_pool3d_backward_fn, max_pool3d_backward_kernel)
 namespace {
 
+// Deprecated: use c10::safe_conv directly. Retained as a thin alias for
+// out-of-tree callers (e.g. third_party/torch-xpu-ops) that still reference
+// safe_downcast.
 template <typename dest_t, typename src_t>
-inline dest_t
-safe_downcast(src_t v)
-{
-  return c10::checked_convert<dest_t>(v, "dest_t");
+[[deprecated("use c10::safe_conv instead")]] inline dest_t safe_downcast(
+    src_t v) {
+  return c10::safe_conv<dest_t>(v);
 }
 
 // dilation * (kernelSize - 1) + 1, i.e. how far the kernel reaches into the

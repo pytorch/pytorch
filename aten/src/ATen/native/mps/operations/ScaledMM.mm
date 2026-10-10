@@ -5,7 +5,7 @@
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/ScaledMM.h>
-#include <c10/util/TypeCast.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -149,9 +149,9 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   check_alignment(mat_b, "mat_b");
   const auto bias_vec = bias.has_value() ? std::make_optional(bias->contiguous().view({n})) : std::nullopt;
   const ScaledMMParams<> params{
-      .m = c10::checked_convert<uint32_t>(m, "m"),
-      .n = c10::checked_convert<uint32_t>(n, "n"),
-      .k = c10::checked_convert<uint32_t>(k, "k"),
+      .m = c10::safe_conv<uint32_t>(m, "m"),
+      .n = c10::safe_conv<uint32_t>(n, "n"),
+      .k = c10::safe_conv<uint32_t>(k, "k"),
       .a_row_stride = mat_a.stride(0),
       .a_col_stride = mat_a.stride(1),
       .b_row_stride = mat_b.stride(0),

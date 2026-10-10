@@ -127,14 +127,14 @@ class C10_API Scalar {
     if (Tag::HAS_b == tag) {                                               \
       return c10::checked_convert<type, bool>(v.i, #type);                 \
     } else if (Tag::HAS_i == tag) {                                        \
-      return c10::checked_convert<type, int64_t>(v.i, #type);              \
+      return c10::unsafe_wrapping_convert<type, int64_t>(v.i, #type);      \
     } else if (Tag::HAS_u == tag) {                                        \
       return c10::checked_convert<type, uint64_t>(v.u, #type);             \
     } else if (Tag::HAS_si == tag) {                                       \
-      return c10::checked_convert<type, int64_t>(                          \
+      return c10::unsafe_wrapping_convert<type, int64_t>(                  \
           toSymInt().guard_int(__FILE__, __LINE__), #type);                \
     } else if (Tag::HAS_sb == tag) {                                       \
-      return c10::checked_convert<type, int64_t>(                          \
+      return c10::unsafe_wrapping_convert<type, int64_t>(                  \
           toSymBool().guard_bool(__FILE__, __LINE__), #type);              \
     }                                                                      \
     TORCH_CHECK(false)                                                     \

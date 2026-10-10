@@ -336,10 +336,20 @@ C10_HOST_DEVICE To convert(From f) {
       std::move(oss).str()); // runtime_error rather than domain_error (#33562)
 }
 
+// Range-checked narrowing conversion.
+//
+// For integer->integer this is strict, matching c10::safe_conv: it rejects ANY
+// value not representable in To (including negative->unsigned; there is no
+// two's-complement wraparound). For floating-point/complex sources it
+// range-checks via c10::overflows and then converts (a lossy-but-in-range cast
+// such as 3.9 -> 3 is permitted). If you deliberately want modular wrap, use
+// c10::unsafe_wrapping_convert.
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
   // Converting to bool can't overflow so we exclude this case from checking.
-  if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
+  // strict_unsigned only affects integer sources; it is a no-op otherwise.
+  if (!std::is_same_v<To, bool> &&
+      overflows<To, From>(f, /*strict_unsigned=*/true)) {
     report_overflow(name);
   }
   return convert<To, From>(f);

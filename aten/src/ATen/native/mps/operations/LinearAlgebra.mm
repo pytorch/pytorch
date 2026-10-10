@@ -64,6 +64,7 @@
 
 #include <c10/util/TypeCast.h>
 #include <c10/util/env.h>
+#include <c10/util/safe_conv.h>
 #include <algorithm>
 #include <limits>
 #include <string>
@@ -383,9 +384,9 @@ Tensor& int_mm_out_mps_impl(const Tensor& self, const Tensor& mat2, Tensor& resu
     return result.zero_();
   }
 
-  const auto m = c10::checked_convert<uint32_t>(self.size(0), "self.size(0)");
-  const auto k = c10::checked_convert<uint32_t>(self.size(1), "self.size(1)");
-  const auto n = c10::checked_convert<uint32_t>(mat2.size(1), "mat2.size(1)");
+  const auto m = c10::safe_conv<uint32_t>(self.size(0), "self.size(0)");
+  const auto k = c10::safe_conv<uint32_t>(self.size(1), "self.size(1)");
+  const auto n = c10::safe_conv<uint32_t>(mat2.size(1), "mat2.size(1)");
   constexpr auto int_max = static_cast<uint32_t>(std::numeric_limits<int32_t>::max());
   constexpr const char* mpp_kernel = "int_mm_mpp_64_64_4";
   // MPP integer matmul requires operands with matching signedness, while _int_mm permits uint8 only for self.
@@ -1096,7 +1097,7 @@ static void lu_inv_small_encode(const Tensor& A, const Tensor& result, const Ten
   const auto batch = c10::multiply_integers(A.sizes().begin(), A.sizes().end() - 2);
   const auto A_ = A.reshape({batch, n, n});
   const auto X = result.view({batch, n, n});
-  const auto threads = c10::checked_convert<uint32_t>(batch, "uint32_t");
+  const auto threads = c10::safe_conv<uint32_t>(batch);
   const LUSmallInvParams<> params{.A_bstride = A_.stride(0),
                                   .A_rstride = A_.stride(1),
                                   .A_cstride = A_.stride(2),
@@ -1707,9 +1708,9 @@ static void triangular_solve_metal(const Tensor& A_,
   const uint64_t k = B_.size(-1);
 
   TriangularSolveParams params;
-  params.nbatch = safe_downcast<uint32_t, uint64_t>(batchSize);
-  params.n = safe_downcast<uint32_t, uint64_t>(n);
-  params.k = safe_downcast<uint32_t, uint64_t>(k);
+  params.nbatch = c10::safe_conv<uint32_t, uint64_t>(batchSize);
+  params.n = c10::safe_conv<uint32_t, uint64_t>(n);
+  params.k = c10::safe_conv<uint32_t, uint64_t>(k);
   params.upper = upper;
   params.transpose = transpose;
   params.conj = conjugate;
@@ -1943,9 +1944,9 @@ static void unpack_pivots_stub_impl(TensorIterator& iter, const int64_t dim_size
   MPSStream* stream = getCurrentMPSStream();
 
   UnpackPivotsParams params;
-  params.perm_batch_stride = safe_downcast<uint32_t, int64_t>((perm.dim() > 1) ? perm.stride(-2) : 0);
-  params.pivots_batch_stride = safe_downcast<uint32_t, int64_t>((pivots.dim() > 1) ? pivots.stride(-2) : 0);
-  params.dim_size = safe_downcast<uint32_t, int64_t>(dim_size);
+  params.perm_batch_stride = c10::safe_conv<uint32_t, int64_t>((perm.dim() > 1) ? perm.stride(-2) : 0);
+  params.pivots_batch_stride = c10::safe_conv<uint32_t, int64_t>((pivots.dim() > 1) ? pivots.stride(-2) : 0);
+  params.dim_size = c10::safe_conv<uint32_t, int64_t>(dim_size);
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -2070,12 +2071,12 @@ static GeqrfParams<> get_geqrf_params(const Tensor& A, const Tensor& tau) {
   TORCH_CHECK_NOT_IMPLEMENTED(A.dim() <= c10::metal::max_ndim, "MPS QR: at most ", c10::metal::max_ndim, " dims");
   TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(A) && canUse32BitIndexMath(tau),
                               "MPS QR requires tensors addressable with 32-bit indices");
-  GeqrfParams params{.num_batch_dims = c10::checked_convert<int32_t>(A.dim() - 2, "int32_t")};
+  GeqrfParams params{.num_batch_dims = c10::safe_conv<int32_t>(A.dim() - 2)};
   for (const auto dim : c10::irange(A.dim())) {
-    params.A_sizes[dim] = c10::checked_convert<uint32_t>(A.size(dim), "uint32_t");
-    params.A_strides[dim] = c10::checked_convert<uint32_t>(A.stride(dim), "uint32_t");
+    params.A_sizes[dim] = c10::safe_conv<uint32_t>(A.size(dim));
+    params.A_strides[dim] = c10::safe_conv<uint32_t>(A.stride(dim));
     if (dim < tau.dim()) {
-      params.tau_strides[dim] = c10::checked_convert<uint32_t>(tau.stride(dim), "uint32_t");
+      params.tau_strides[dim] = c10::safe_conv<uint32_t>(tau.stride(dim));
     }
   }
   return params;
