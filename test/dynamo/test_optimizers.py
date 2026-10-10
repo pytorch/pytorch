@@ -5,11 +5,13 @@ with test_adam in OptimizerTests)
 """
 
 import functools
+from copy import deepcopy
 
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.variables.optimizer import OptimizerVariable
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import HardwareClassification
 
@@ -128,6 +130,36 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
                     compiled_step()
                 self.assertFalse(torch.equal(p, before))
                 torch._dynamo.reset()
+
+    def test_capturable_optim_on_privateuse1(self):
+        if not torch.utils._triton.has_triton():
+            self.skipTest("triton unavailable on this device")
+        backend_name = torch._C._get_privateuse1_backend_name()
+        if (
+            backend_name == "privateuseone"
+            or not getattr(torch, backend_name).is_available()
+        ):
+            self.skipTest("no PrivateUse1 accelerator available")
+
+        dev = backend_name
+        p = torch.randn(8, device=dev).requires_grad_(True)
+        p.grad = torch.full_like(p, 1.0)
+        opt = torch.optim.Adam([p], lr=1e-2)
+
+        original_capturable = opt.param_groups[0]["capturable"]
+        self.assertFalse(original_capturable)
+
+        ov = OptimizerVariable(opt)
+        self.assertTrue(ov._safe_to_set_capturable(opt.param_groups[0]))
+
+        opt.step()
+        self.assertEqual(opt.param_groups[0]["capturable"], original_capturable)
+
+        sd = deepcopy(opt.state_dict())
+        self.assertEqual(
+            sd["param_groups"][0].get("capturable", False),
+            original_capturable,
+        )
 
 
 if __name__ == "__main__":
