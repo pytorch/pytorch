@@ -1,0 +1,42 @@
+{
+    "test_args": {
+        "num_operations": 300000,
+        "num_cuda_streams": 4,
+        "prob_cuda_malloc": 0.0001,
+        "min_iters_kernel": 1,
+        "max_iters_kernel": 5,
+        "kernel_block_size": 256,
+        "thread_blocks_per_kernel": 32,
+        "memset_prob": 0.005,
+        "min_idle_us": 0,
+        "max_idle_us": 1,
+        "do_warmup": false,
+        "simulate_host_time": false,
+        "num_workers": 1,
+        "use_uvm_buffers": false,
+        "uvm_kernel_prob": 0.01,
+        "parallel_uvm_alloc": true,
+        "uvm_len": 4026531840,
+        "is_multi_rank": true,
+        "num_ranks": 0,
+        "sz_nccl_buff_KB": 18432,
+        "num_iters_nccl_sync": 1000,
+        "pre_alloc_streams": true,
+        "use_memcpy_stream": true,
+        "use_uvm_stream": true,
+        "monitor_mem_usage": false,
+        "trace_delay_us": 10000000,
+        "trace_length_us": 1000000,
+        "cupti_buffer_mb": 0
+    },
+    "cache_args": {
+        "sz_cache_KB": 16000000,
+        "sz_GPU_memory_KB": 16777216,
+        "sz_min_tensor_KB": 10240,
+        "sz_max_tensor_KB": 16384,
+        "prob_h2d": 0.0003,
+        "prob_d2h": 0.0001,
+        "num_increments": 1,
+        "num_pairs_per_increment": 10
+    }
+}
