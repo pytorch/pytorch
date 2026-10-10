@@ -70,6 +70,7 @@ from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED as TEST_ON_CUDA,
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED as TEST_ON_XPU,
     largeTensorTest,
+    onlyMPS,
     skipCPUIf,
     skipCUDAIf,
     skipMPSIf,
@@ -1308,6 +1309,75 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
 
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestFlexAttention(InductorTestCase):
+    @onlyMPS
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @common_utils.parametrize(
+        "qk_dim,v_dim",
+        [
+            (32, 32),
+            (47, 47),
+            (48, 48),
+            (63, 63),
+            (96, 96),
+            (129, 129),
+            (256, 256),
+            (768, 768),
+            (769, 769),
+            (64, 96),
+        ],
+    )
+    @common_utils.parametrize("block_size", [(32, 128), (128, 256)])
+    def test_mps_cooperative_forward(self, device, dtype, qk_dim, v_dim, block_size):
+        # Partial tiles, GQA, broadcast KV batches, and non-dense outer strides.
+        q = torch.randn(2, 138, 4, qk_dim, device=device, dtype=dtype)
+        k = torch.randn(1, 194, 2, qk_dim, device=device, dtype=dtype)
+        v = torch.randn(1, 194, 2, v_dim, device=device, dtype=dtype)
+        q, k, v = (x[:, 1:].transpose(1, 2) for x in (q, k, v))
+        bias = torch.linspace(-0.15, 0.2, 4, device=device)
+
+        def mask_mod(b, h, q, kv):
+            return (q >= kv) & (q - kv < 129) & (q % 11 != 0)
+
+        def score_mod(score, b, h, q, kv):
+            return score + bias[h] + (q - kv) * 0.007
+
+        block_mask = create_block_mask(
+            mask_mod, 2, None, 137, 193, device=device, BLOCK_SIZE=block_size
+        )
+        (actual, aux), code = run_and_get_code(
+            torch.compile(flex_attention, fullgraph=True),
+            q,
+            k,
+            v,
+            block_mask=block_mask,
+            score_mod=score_mod,
+            enable_gqa=True,
+            return_aux=AuxRequest(lse=True, max_scores=True),
+        )
+        q_ref, k_ref, v_ref = (x.cpu().double() for x in (q, k, v))
+        k_ref = k_ref.repeat_interleave(2, dim=1)
+        v_ref = v_ref.repeat_interleave(2, dim=1)
+        qi, ki = torch.arange(137)[:, None], torch.arange(193)[None, :]
+        scores = (q_ref @ k_ref.transpose(-2, -1)) / math.sqrt(qk_dim)
+        scores += bias.cpu().double()[None, :, None, None] + (qi - ki) * 0.007
+        scores.masked_fill_(~mask_mod(0, 0, qi, ki), -float("inf"))
+        expected = scores.softmax(-1).nan_to_num(0.0) @ v_ref
+        atol = {torch.float32: 8e-5, torch.float16: 5e-3, torch.bfloat16: 3e-2}[dtype]
+        rtol = 1e-3 if dtype == torch.float32 else 3e-2
+        self.assertEqual(actual.cpu().double(), expected, atol=atol, rtol=rtol)
+        self.assertEqual(
+            aux.lse.cpu().double(), scores.logsumexp(-1), atol=atol, rtol=rtol
+        )
+        self.assertEqual(
+            aux.max_scores.cpu().double(), scores.amax(-1), atol=atol, rtol=rtol
+        )
+        use_cooperative = (
+            dtype != torch.bfloat16 and 48 <= qk_dim <= 768 and qk_dim == v_dim
+        )
+        self.assertEqual(
+            "Cooperative MPS FlexAttention:" in "\n".join(code), use_cooperative
+        )
+
     def setUp(self):
         super().setUp()
         skipCPUIf(
