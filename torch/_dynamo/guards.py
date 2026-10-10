@@ -5108,6 +5108,9 @@ def _resolves_by_reference(value: object) -> bool:
     if _is_nested_named_tuple_type(value):
         # GuardsStatePickler.reducer_override rebuilds it as a fresh class.
         return False
+    if isinstance(value, type) and type(value).__qualname__ != type(value).__name__:
+        # GuardsStatePickler.reducer_override refuses a nested or local metaclass.
+        return False
     if isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
         return FunctionPicklerBase._fqn_resolves(value)  # type: ignore[arg-type]
     return False
