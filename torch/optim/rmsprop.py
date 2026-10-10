@@ -335,9 +335,15 @@ def _single_tensor_rmsprop(
             if is_complex_param:
                 buf = torch.view_as_real(buf)
             buf.mul_(momentum).addcdiv_(grad, avg)
-            param.add_(buf, alpha=-lr)  # type: ignore[arg-type]
+            if differentiable:
+                param.add_(buf.clone() * -lr)
+            else:
+                param.add_(buf, alpha=-lr)  # type: ignore[arg-type]
         else:
-            param.addcdiv_(grad, avg, value=-lr)  # type: ignore[arg-type]
+            if differentiable:
+                param.addcdiv_(grad * -lr, avg)
+            else:
+                param.addcdiv_(grad, avg, value=-lr)  # type: ignore[arg-type]
 
 
 def _multi_tensor_rmsprop(
