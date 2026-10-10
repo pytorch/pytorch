@@ -1666,20 +1666,6 @@ class GraphModule(torch.nn.Module):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
 
-    def test_allow_in_graph_callable_graph_breaks(self):
-        @torch._dynamo.allow_in_graph
-        def make(x, requires_grad=False):
-            return x.clone().requires_grad_(requires_grad)
-
-        def fn(x):
-            return make(x, requires_grad=True) * 2
-
-        x = torch.randn(4)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, self.FACTORY_GRAPH_BREAK
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-
     @torch._dynamo.config.patch(trace_autograd_ops=True)
     def test_full_tensor_fill_value(self):
         # `full` with a tensor fill value is traced as `empty().fill_()`; the
@@ -1702,27 +1688,39 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(TypeError, "must be Number, not Tensor"):
             fn(v)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "TypeError when making fake tensor call"
+            torch._dynamo.exc.Unsupported, self.FACTORY_GRAPH_BREAK
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(v)
         torch._dynamo.reset()
         with self.assertRaisesRegex(TypeError, "must be Number, not Tensor"):
             torch.compile(fn, backend="eager")(v)
 
-    def test_non_factory_keeps_kwarg(self):
-        # Only tensor factories are rewritten: `requires_grad` reaches every
-        # other callable untouched, so they behave exactly as in eager.
-        def sin(x):
+    def test_non_factory_kwarg_reaches_fake_call(self):
+        def fn(x):
             return torch.sin(x, requires_grad=True)
 
         x = torch.randn(4)
         with self.assertRaisesRegex(TypeError, "unexpected keyword argument"):
-            sin(x)
+            fn(x)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported, "TypeError when making fake tensor call"
         ):
-            torch.compile(sin, backend="eager", fullgraph=True)(x)
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
 
+    @parametrize("case", ("allow_in_graph", "custom_op", "asarray", "out"))
+    def test_non_factory_call_keeps_graph_break(self, case):
+        # Only allowlisted factories without `out=` are rewritten; `asarray` may
+        # return its input. Everything else keeps the kwarg and the old break.
+        @torch._dynamo.allow_in_graph
+        def make(x, requires_grad=False):
+            return x.clone().requires_grad_(requires_grad)
+
+        fns = {
+            "allow_in_graph": lambda x: make(x, requires_grad=True) * 2,
+            "custom_op": lambda x: torch.ops.mylib.scale(x, requires_grad=True),
+            "asarray": lambda x: torch.asarray(x, requires_grad=True) * 2,
+            "out": lambda x: torch.zeros(4, out=torch.empty(4), requires_grad=True) + x,
+        }
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("scale(Tensor x, *, bool requires_grad=False) -> Tensor")
             lib.impl(
@@ -1730,38 +1728,15 @@ class GraphModule(torch.nn.Module):
                 lambda x, *, requires_grad=False: x * (2 if requires_grad else 1),
                 "CompositeExplicitAutograd",
             )
-
-            def custom(x):
-                return torch.ops.mylib.scale(x, requires_grad=True)
-
+            fn = fns[case]
+            x = torch.randn(4)
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported, self.FACTORY_GRAPH_BREAK
             ):
-                torch.compile(custom, backend="eager", fullgraph=True)(x)
+                torch.compile(fn, backend="eager", fullgraph=True)(x.clone())
             torch._dynamo.reset()
-            self.assertEqual(torch.compile(custom, backend="eager")(x), x * 2)
-
-    def test_asarray_graph_breaks(self):
-        # `asarray` may return its input, so `requires_grad_()` on the result
-        # would act on a graph input.
-        def fn(x):
-            return torch.asarray(x, requires_grad=True).sum().detach()
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, self.FACTORY_GRAPH_BREAK
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(4))
-
-    def test_out_kwarg_graph_breaks(self):
-        out = torch.empty(4)
-
-        def fn(x):
-            return (torch.zeros(4, out=out, requires_grad=True) + x).detach()
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, self.FACTORY_GRAPH_BREAK
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(4))
+            compiled = torch.compile(fn, backend="eager")(x.clone())
+            self.assertEqual(compiled, fn(x.clone()))
 
     @torch._dynamo.config.patch(graph_break_on_factory_requires_grad=True)
     def test_gated_graph_breaks(self):
