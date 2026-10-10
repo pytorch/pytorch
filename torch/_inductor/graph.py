@@ -2495,11 +2495,6 @@ class GraphLowering(torch.fx.Interpreter):
         )
         if wrapper_code_gen_cls is None:
             raise AssertionError(f"Device {self.device_type} not supported")
-        from .codegen.wrapper_readable import select_wrapper_codegen
-
-        wrapper_code_gen_cls = select_wrapper_codegen(
-            self.device_type, wrapper_code_gen_cls, self.cpp_wrapper, self.fx_wrapper
-        )
         self.wrapper_code = wrapper_code_gen_cls.create(
             is_subgraph,
             subgraph_name,
@@ -3119,13 +3114,8 @@ class GraphLowering(torch.fx.Interpreter):
         self, wrapper_code: ValueWithLineMap
     ) -> CompiledModule:
         from .codecache import PyCodeCache
-        from .codegen.wrapper_readable import ReadablePythonWrapperCodegen
 
-        # The tuning block is a record of code that was exec'd at compile time, carried
-        # in the module as an inert string. It is a debugging aid, and it is the single
-        # largest thing in a small readable artifact, so that mode leaves it out.
-        readable = isinstance(self.wrapper_code, ReadablePythonWrapperCodegen)
-        if config.triton.autotune_at_compile_time and not readable:
+        if config.triton.autotune_at_compile_time:
             # sanitize docstrings in kernel defs (#155006)
             kernel_autotune_defs = self.wrapper_code.kernel_autotune_defs.getvalue()
             kernel_autotune_defs = kernel_autotune_defs.replace('"""', '\\"\\"\\"')
@@ -3137,7 +3127,12 @@ class GraphLowering(torch.fx.Interpreter):
                 + self.wrapper_code.kernel_autotune_calls.getvalue()
                 + '"""\n'
             )
-            wrapper_code.value = tuning_code + wrapper_code.value
+            if self.wrapper_code.defines_triton_kernels_as_code():
+                # A record of what ran at compile time, which repeats every kernel. The
+                # module defines the kernels itself, so keep the record in the log only.
+                output_code_log.debug("%s", tuning_code)
+            else:
+                wrapper_code.value = tuning_code + wrapper_code.value
         if GraphLowering.save_output_code is not None:
             GraphLowering.save_output_code(wrapper_code.value)
         output_code_log.debug("Output code: \n%s", wrapper_code.value)
@@ -3181,6 +3176,7 @@ class GraphLowering(torch.fx.Interpreter):
                     **self.torchbind_constants,
                     **self.opaque_value_type_classes,
                 },
+                kernel_sources=self.wrapper_code.kernel_sources,
             )
         self.cache_key = key
         self.cache_path = path
