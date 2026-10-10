@@ -6,6 +6,7 @@
 
 #include <ATen/core/grad_mode.h>
 #include <ATen/functorch/BatchRulesHelper.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 
 #include <algorithm>
 
@@ -284,6 +285,19 @@ threeOutputs linalg_lu_unpack_batch_rule(
 
   auto res = at::lu_unpack(LU_, pivots_, unpack_data, unpack_pivots);
   return std::make_tuple(std::move(std::get<0>(res)), 0, std::move(std::get<1>(res)), 0, std::move(std::get<2>(res)), 0);
+}
+
+threeOutputs linalg_qr_piv_batch_rule(
+    const Tensor& A, std::optional<int64_t> A_bdim, std::string_view mode) {
+  TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2,
+      "linalg.qr_piv: The input tensor A must have at least 2 dimensions.");
+  auto A_ = moveBatchDimToFront(A, A_bdim);
+  auto [Q, R, P] = at::linalg_qr_piv(A_, mode);
+  // Without compute_q (mode='r'), Q is an empty placeholder of shape (0,)
+  // that carries no batch dimension, so it must not be reported as batched.
+  auto compute_q = std::get<0>(at::native::_parse_qr_piv_mode(mode));
+  std::optional<int64_t> Q_bdim = compute_q ? std::optional<int64_t>(0) : std::nullopt;
+  return std::make_tuple(std::move(Q), Q_bdim, std::move(R), 0, std::move(P), 0);
 }
 
 oneOutput linalg_lu_solve_batch_rule(
@@ -843,7 +857,6 @@ LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_inv_ex, linalg.inv_ex)
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(linalg_ldl_factor_ex, torch.linalg.ldl_factor_ex)
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_polar, linalg.polar)
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_qr, linalg.qr)
-LINALG_CHECK_MATRIX_UNARY_THREE_OUT(linalg_qr_piv, linalg.qr_piv)
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_slogdet, linalg.slogdet)
 LINALG_CHECK_MATRIX_BINARY_ONE_OUT(linalg_solve_triangular, linalg.solve_triangular)
 
@@ -865,6 +878,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(mv, mv_batch_rule);
   VMAP_SUPPORT(mm, mm_batch_rule);
   VMAP_SUPPORT(lu_unpack, linalg_lu_unpack_batch_rule);
+  VMAP_SUPPORT(linalg_qr_piv, linalg_qr_piv_batch_rule);
   VMAP_SUPPORT(linalg_lu_solve, linalg_lu_solve_batch_rule);
   VMAP_SUPPORT(linalg_householder_product, householder_product_batch_rule);
   VMAP_SUPPORT(cholesky_solve, cholesky_solve_batch_rule);  // custom dim error
