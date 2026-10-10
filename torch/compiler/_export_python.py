@@ -6,14 +6,6 @@ self-contained, human-readable Python source artifact (see
 decorator keyed off a file on disk: the first run writes the emitted
 ``python_code`` to ``path``; every later run reads the ``.py`` back and executes
 it directly instead of recompiling.
-
-Because the artifact is self-contained, re-executable Python, ``path`` is meant to be
-committed and shipped -- and, when a kernel starts to matter, hand-edited in place by
-an engineer or an agent. This is ejectable compilation: the emitted source is the
-source of truth and is always exec'd, so an edit is simply what runs from then on, in
-production as much as in development. There is no acceleration cache and no
-``precompile.load`` round-trip, so keeping the edited source correct is the caller's
-responsibility.
 """
 
 import copy
