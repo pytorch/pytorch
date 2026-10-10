@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 from unittest import mock
 
 import torch
@@ -17,7 +18,7 @@ from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwis
 from torch._inductor import CompiledArtifact, config, load_from_python
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import PyCodeCache
-from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.codegen.wrapper import _rename_kernel_module_globals
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
@@ -54,6 +55,11 @@ def _softmax(x):
 
 def _double(x):
     return x * 2
+
+
+def _row_sum(x):
+    # Long enough rows that the reduction autotunes between several configs.
+    return x.sum(1)
 
 
 def _cond_softmax(x):
@@ -102,6 +108,21 @@ def {op}_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
 """
 
 
+# A user kernel whose source holds a backslash escape.
+_DOC_MODULE = r'''
+import triton
+import triton.language as tl
+
+
+@triton.jit
+def doc_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    """Adds one.\n"""
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n
+    tl.store(out_ptr + offs, tl.load(in_ptr + offs, mask=mask) + 1, mask=mask)
+'''
+
+
 def _import_kernels(d, template, kernels):
     for name, fields in kernels.items():
         with open(os.path.join(d, f"{name}.py"), "w") as f:
@@ -115,6 +136,51 @@ def _import_kernels(d, template, kernels):
 
 def _compiled_in_this_process(*args, **kwargs):
     raise AssertionError("a kernel was compiled in the compiling process")
+
+
+class TestRenameKernelModuleGlobals(TestCase):
+    def test_renames_only_what_refers_to_a_kernel_global(self):
+        # Parameters and locals that shadow a global keep their names, as do the
+        # header imports above the first def; the non-ASCII text checks byte offsets.
+        src = """\
+import triton
+X = 1
+from triton.language import exp as exp
+
+@triton.jit
+def k(a, SCALE):
+    b = ("\u00e9", SCALE + X)
+    return helper(exp(b))
+
+@triton.jit
+def helper(x):
+    X = 2
+    return x * SCALE * X + op(x)
+
+SCALE = 4
+from triton.language import floor as op
+import triton.language.math
+"""
+        expected = """\
+import triton
+X_k_0 = 1
+from triton.language import exp as exp
+
+@triton.jit
+def k_0(a, SCALE):
+    b = ("\u00e9", SCALE + X_k_0)
+    return helper_k_0(exp(b))
+
+@triton.jit
+def helper_k_0(x):
+    X = 2
+    return x * SCALE_k_0 * X + op_k_0(x)
+
+SCALE_k_0 = 4
+from triton.language import floor as op_k_0
+import triton.language.math
+"""
+        self.assertEqual(_rename_kernel_module_globals(src, "k_0", "k"), expected)
 
 
 class TestModuleLevelKernels(TestCase):
@@ -133,7 +199,6 @@ class TestModuleLevelKernels(TestCase):
 
     @requires_cuda_and_triton
     def test_default_wrapper_defines_kernels_as_code(self):
-        self.assertTrue(PythonWrapperCodegen.defines_triton_kernels_as_code(None))
         x = torch.randn(64, 128, device="cuda")
         _, code = _code_for(_softmax, x)
         self.assertRegex(code, r"(?m)^def triton_\w+\(")
@@ -244,16 +309,27 @@ class TestModuleLevelKernels(TestCase):
         # kernels from the defs in it, so a hand edit there takes effect. They compile
         # at async_compile.wait, and key the autotune cache on the same per-kernel name
         # as the pool's kernels rather than on the module they share.
+        loaded_on = []
+        make_launchers = CachingAutotuner._make_launchers
+
+        def _record_thread(autotuner):
+            loaded_on.append(threading.current_thread())
+            make_launchers(autotuner)
+
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "module.py")
             with open(path, "w") as f:
                 f.write(code)
             ns = {"__file__": path, "__name__": "_module_level_kernels"}
-            exec(compile(code, path, "exec"), ns)
+            with mock.patch.object(CachingAutotuner, "_make_launchers", _record_thread):
+                exec(compile(code, path, "exec"), ns)
         for k in kernels:
             self.assertEqual(ns[k].fn.fn.__code__.co_filename, path)
             self.assertTrue(ns[k].launchers, k)
             self.assertEqual(ns[k].kernel_hash, pooled[k])
+            self.assertEqual(ns[k].filename, getattr(loaded, k).filename)
+        # Only the Triton compile runs on the pool's threads.
+        self.assertEqual(set(loaded_on), {threading.main_thread()})
         self.assertEqual(ns["call"]([x])[0], result)
 
     @requires_cuda_and_triton
@@ -276,6 +352,41 @@ class TestModuleLevelKernels(TestCase):
         self.assertTrue(kernels)
         for k in kernels:
             self.assertFalse(ns[k].launchers, k)
+
+    @requires_cuda_and_triton
+    @config.patch(compile_threads=2)
+    @parametrize("case", ["template", "foreach", "combo"])
+    def test_template_and_combo_kernels_compile_on_the_worker_pool(self, case):
+        # Their decorators must key inductor_meta["kernel_name"] on the def's name too.
+        self.assertTrue(AsyncCompile.wait_process_pool_ready())
+        if case == "template":
+
+            def fn(x):
+                return flex_attention(x, x, x, score_mod=lambda s, b, h, m, n: s * 2)
+
+            args = [torch.randn(1, 2, 128, 64, device="cuda")]
+        elif case == "foreach":
+
+            def fn(x, y):
+                return torch._foreach_add([x, y], [y, x])
+
+            args = [torch.randn(128, device="cuda"), torch.randn(128, device="cuda")]
+        else:
+
+            def fn(x, y):
+                return x.sin(), y.cos()
+
+            args = [torch.randn(128, device="cuda"), torch.randn(96, device="cuda")]
+        counters.clear()
+        with mock.patch.object(
+            CachingAutotuner, "_precompile_config", _compiled_in_this_process
+        ):
+            result, code = _code_for(fn, *args, combo_kernels=case == "combo")
+        self.assertEqual(result, fn(*args), atol=2e-2, rtol=2e-2)
+        marker = {"template": "def triton_tem_", "foreach": "def triton_for_"}
+        self.assertIn(marker.get(case, "pid_offset"), code)
+        kernels = re.findall(r"^def (triton_\w+)\(", code, re.MULTILINE)
+        self.assertEqual(counters["inductor"]["async_compile_cache_hit"], len(kernels))
 
     @requires_cuda_and_triton
     @config.patch(compile_threads=2)
@@ -357,10 +468,15 @@ class TestModuleLevelKernels(TestCase):
         self.assertIn("2.0, tl.float32", code)
         with open(path, "w") as f:
             f.write(code.replace("2.0, tl.float32", "8.0, tl.float32"))
-        PyCodeCache.cache_clear()
-        with counter:
-            result, _ = _code_for(_double, x)
-        self.assertEqual(result, x * 8)
+        # The first recompile misses the FX graph cache and caches the edited module;
+        # the second loads that entry.
+        for hits in (0, 1):
+            PyCodeCache.cache_clear()
+            counters.clear()
+            with counter, config.patch(fx_graph_cache=True):
+                result, _ = _code_for(_double, x)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], hits)
+            self.assertEqual(result, x * 8)
 
     @requires_cuda_and_triton
     @config.patch({"compile_threads": 2, "triton.unique_kernel_names": False})
@@ -385,49 +501,77 @@ class TestModuleLevelKernels(TestCase):
         [
             {"benchmark_kernel": True},
             {"benchmark_combo_kernel": True, "combo_kernels": True},
+            {
+                "benchmark_kernel": True,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
         ],
     )
+    # In-process compiles, so each kernel's module is loaded into PyCodeCache here.
+    @config.patch(compile_threads=1)
     def test_kernel_benchmark_harness(self, patch):
-        def fn(x, y):
-            # Independent pointwise kernels, which combo_kernels fuses into one.
-            return x.sin() * 2, y.cos() + 1
+        if "max_autotune" in patch and not is_big_gpu():
+            self.skipTest("Triton GEMM templates need a big GPU")
 
+        def fn(a, b, x, y):
+            # Independent pointwise kernels, which combo_kernels fuses into one, and a
+            # matmul, which max_autotune emits through the template path.
+            return a @ b, x.sin() * 2, y.cos() + 1
+
+        a, b = torch.randn(64, 64, device="cuda"), torch.randn(64, 64, device="cuda")
         x, y = torch.randn(64, 128, device="cuda"), torch.randn(32, device="cuda")
         PyCodeCache.cache_clear()
-        result, code = _code_for(fn, x, y, **patch)
-        self.assertEqual(result, fn(x, y))
+        result, code = _code_for(fn, a, b, x, y, **patch)
+        self.assertEqual(result, fn(a, b, x, y))
+        if "max_autotune" in patch:
+            self.assertIn("triton_tem_", code)
         # Only the wrapper's own harness is at module level; each kernel's stays in the
         # module the kernel is compiled from, where benchmark_all_kernels finds it.
         self.assertEqual(code.count("__main__"), 1, code)
         self.assertNotIn("def get_args", code.split("def call(")[0])
-        kernels = [m for m in PyCodeCache.modules if hasattr(m, "get_args")]
-        self.assertTrue(kernels)
+        # The wrapper defines get_args too; only a kernel's harness has this.
+        mods = [m for m in PyCodeCache.modules if hasattr(m, "benchmark_all_configs")]
+        self.assertTrue(mods)
+
         # Run as a script, the wrapper compiles its kernels from its own defs, so
         # benchmark_all_kernels has to find their harnesses from those.
-        with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "module.py")
-            with open(path, "w") as f:
-                f.write(code)
-            env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
-            cmd = [sys.executable, path, "-kc"]
-            out = subprocess.check_output(cmd, env=env, stderr=subprocess.STDOUT)
+        def run_script(code, flag):
+            with tempfile.TemporaryDirectory() as d:
+                path = os.path.join(d, "module.py")
+                with open(path, "w") as f:
+                    f.write(code)
+                env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+                cmd = [sys.executable, path, flag]
+                out = subprocess.check_output(cmd, env=env, stderr=subprocess.STDOUT)
+            return out.decode()
+
         defs = re.findall(r"^def triton_\w+\(", code, re.MULTILINE)
         keys = ast.literal_eval(re.search(r"kernel_modules=(\[.*?\])", code).group(1))
         self.assertEqual(len(keys), len(defs), keys)
         # -c prints each kernel's key, then a line per config, which needs the kernel
         # precompiled.
+        out = run_script(code, "-kc")
         for key in keys:
-            self.assertRegex(out.decode(), rf"{key[:10]}\n  .*GB/s")
+            self.assertRegex(out, rf"{key[:10]}\n  .*GB/s")
+        # A module missing from the cache dir is skipped and the rest still run.
+        missing = "z" * len(keys[0])
+        code = code.replace("kernel_modules=[", f"kernel_modules=[{missing!r}, ")
+        out = run_script(code, "-k")
+        self.assertIn(f"Skipping kernel module {missing}", out)
+        for key in keys:
+            self.assertRegex(out, rf"{key[:10]} .*GB/s")
 
     @requires_cuda_and_triton
     @parametrize("wrapper", ["cpp_wrapper", "fx_wrapper"])
-    def test_wrappers_that_keep_kernels_as_strings(self, wrapper):
+    @parametrize("fn", [_softmax, _cond_softmax])
+    def test_wrappers_that_keep_kernels_as_strings(self, wrapper, fn):
         # Both consume each kernel's async_compile.triton(...) source themselves.
         x = torch.randn(64, 128, device="cuda")
         torch._dynamo.reset()
         with config.patch({wrapper: True}):
-            result = torch.compile(_softmax)(x)
-        self.assertEqual(result, _softmax(x))
+            result = torch.compile(fn)(x)
+        self.assertEqual(result, fn(x))
 
     @requires_cuda_and_triton
     def test_user_defined_kernels(self):
@@ -454,12 +598,7 @@ class TestModuleLevelKernels(TestCase):
             self.assertEqual(len(kernels), 2, code)
             # The pool compiles each kernel from its own module; only a standalone run
             # of the wrapper resolves the kernels' globals in the one shared namespace.
-            path = os.path.join(d, "module.py")
-            with open(path, "w") as f:
-                f.write(code)
-            ns = {"__file__": path, "__name__": "_module_level_kernels"}
-            exec(compile(code, path, "exec"), ns)
-            self.assertEqual(tuple(ns["call"]([x])), expected)
+            self.assertEqual(tuple(_run_from_file(code, [x])), expected)
 
     @requires_cuda_and_triton
     def test_user_defined_kernels_that_import_the_same_alias(self):
@@ -478,15 +617,29 @@ class TestModuleLevelKernels(TestCase):
             expected = (x.abs() + 1, x.floor() + 1)
             result, code = _code_for(fn, x)
             self.assertEqual(result, expected)
-            path = os.path.join(d, "module.py")
-            with open(path, "w") as f:
-                f.write(code)
-            ns = {"__file__": path, "__name__": "_module_level_kernels"}
-            exec(compile(code, path, "exec"), ns)
-            self.assertEqual(tuple(ns["call"]([x])), expected)
+            self.assertNotIn("async_compile.triton", code)
+            for op in ("abs", "floor"):
+                self.assertRegex(code, rf"(?m) import {op} as op_{op}_kernel_\d+$")
+            self.assertEqual(tuple(_run_from_file(code, [x])), expected)
 
     @requires_cuda_and_triton
-    def test_kernel_source_with_backslashes(self):
+    def test_user_defined_kernel_source_with_backslashes(self):
+        with tempfile.TemporaryDirectory() as d:
+            (mod,) = _import_kernels(d, _DOC_MODULE, {"_kd_doc": {}})
+
+            def fn(x):
+                out = torch.empty_like(x)
+                mod.doc_kernel[(4,)](x, out, x.numel(), BLOCK=64)
+                return out
+
+            x = torch.randn(256, device="cuda")
+            result, code = _code_for(fn, x)
+            self.assertEqual(result, x + 1)
+            self.assertIn(r'"""Adds one.\n"""', code)
+
+    @requires_cuda_and_triton
+    @parametrize("autotune_at_compile_time", [False, True])
+    def test_kernel_source_with_backslashes(self, autotune_at_compile_time):
         # Inline asm escapes its newlines for the string form's ''' literal.
         asm = "{\n.reg .pred p;\nsetp.ge.s32 p, $1, $2;\nselp.u32 $0, 1, 0, p;\n}"
 
@@ -497,8 +650,11 @@ class TestModuleLevelKernels(TestCase):
 
         x = torch.randint(-8, 8, (256,), device="cuda", dtype=torch.int32)
         y = torch.randint(-8, 8, (256,), device="cuda", dtype=torch.int32)
-        result, _ = _code_for(fn, x, y)
+        cfg = {"triton.autotune_at_compile_time": autotune_at_compile_time}
+        result, code = _code_for(fn, x, y, **cfg)
         self.assertEqual(result, (x >= y).int())
+        # The def holds the asm as the string form's literal decodes it.
+        self.assertIn(r"{\n.reg .pred p;\n", code)
 
     @requires_cuda_and_triton
     def test_load_from_python(self):
@@ -506,6 +662,27 @@ class TestModuleLevelKernels(TestCase):
         x = torch.randn(64, 128, device="cuda")
         result, code = _code_for(_softmax, x)
         self.assertEqual(load_from_python(code)([x])[0], result)
+
+    @requires_cuda_and_triton
+    def test_load_from_python_reads_the_autotune_configs_of_a_bundle(self):
+        # The bundle restores each kernel's .best_config beside its string-form file,
+        # not beside the wrapper, so the loaded kernels must name that file too.
+        x = torch.randn(64, 2**18, device="cuda")
+        with fresh_cache():
+            result, code = _code_for(_row_sum, x)
+            cache, info = torch.compiler.save_cache_artifacts()
+        self.assertTrue(info.autotune_artifacts)
+        with (
+            fresh_cache(),
+            mock.patch.object(
+                CachingAutotuner,
+                "benchmark_all_configs",
+                autospec=True,
+                side_effect=CachingAutotuner.benchmark_all_configs,
+            ) as benchmark,
+        ):
+            self.assertEqual(load_from_python(code, cache)([x])[0], result)
+        self.assertEqual(benchmark.call_count, 0)
 
     @requires_cuda_and_triton
     def test_load_from_python_after_a_whitespace_only_edit(self):
