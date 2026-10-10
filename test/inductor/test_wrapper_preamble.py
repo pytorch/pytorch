@@ -34,6 +34,13 @@ def _softmax(x):
     return torch.softmax(x * 2, dim=-1)
 
 
+def _cond_softmax(x):
+    # Kernels in both the root and the branch subgraphs, whose text the root splices in.
+    return torch.cond(
+        x.sum() > 0, lambda t: torch.softmax(t * 2, dim=-1), lambda t: t.cos(), (x,)
+    )
+
+
 class TestWrapperPreamble(TestCase):
     """The python wrapper imports and binds only the names its module uses."""
 
@@ -75,15 +82,17 @@ class TestWrapperPreamble(TestCase):
         # carries `'device': 0` in its metadata. None of those is a use of the wrapper's
         # binding.
         x = torch.randn(64, 128, device="cuda")
-        result, code = _code_for(_softmax, x)
-        self.assertIn("math as tl_math", code)
-        self.assertNotIn("\nimport math\n", code)
-        self.assertNotIn("start_graph", code)
-        kernels = len(re.findall(r"^def triton_\w+\(", code, re.MULTILINE))
-        self.assertGreater(kernels, 0)
-        for line in ("import triton\n", "import triton.language as tl\n"):
-            self.assertEqual(code.count(line), kernels, line)
-        self.assertEqual(_run_from_file(code, [x])[0], result)
+        for fn in (_softmax, _cond_softmax):
+            with self.subTest(fn.__name__):
+                result, code = _code_for(fn, x)
+                self.assertIn("math as tl_math", code)
+                self.assertNotIn("\nimport math\n", code)
+                self.assertNotIn("start_graph", code)
+                kernels = len(re.findall(r"^def triton_\w+\(", code, re.MULTILINE))
+                self.assertGreater(kernels, 0)
+                for line in ("import triton\n", "import triton.language as tl\n"):
+                    self.assertEqual(code.count(line), kernels, line)
+                self.assertEqual(_run_from_file(code, [x])[0], result)
 
     @requires_cuda_and_triton
     def test_names_the_wrapper_uses_are_kept(self):
@@ -97,6 +106,20 @@ class TestWrapperPreamble(TestCase):
         self.assertIn("device=device(type='cuda'", code)
         self.assertIn("from torch import device, empty_strided", code)
         self.assertIn("from math import inf, nan", code)
+        self.assertEqual(_run_from_file(code, [x])[0], result)
+
+    @requires_cuda_and_triton
+    def test_a_name_used_only_in_a_subgraph_is_kept(self):
+        # Only the true branch calls extern_kernels.mm, and the root does not scan the
+        # branches' code.
+        def fn(x):
+            return torch.cond(x.sum() > 0, lambda t: t @ t, lambda t: t.cos(), (x,))
+
+        x = torch.randn(16, 16, device="cuda")
+        result, code = _code_for(fn, x)
+        self.assertIn("extern_kernels.mm(", code)
+        self.assertNotIn("extern_kernels.mm(", code.split("def call(")[-1])
+        self.assertIn("import extern_kernels", code)
         self.assertEqual(_run_from_file(code, [x])[0], result)
 
     @requires_cuda_and_triton
