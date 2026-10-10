@@ -64,20 +64,16 @@ class ExportedPythonArtifact:
         example_inputs: Sequence[object] | None,
     ) -> None:
         self._fn = fn
-        self._signature = inspect.signature(fn)
-        self._call_signature = self._signature
+        self._call_signature = inspect.signature(fn)
         self._path = path
         self._backend = backend
         self._tracer = tracer
         self._decompositions = decompositions
         self._example_inputs = None if example_inputs is None else tuple(example_inputs)
         self._loaded: Callable[..., Any] | None = None
-        # (pid, tid) currently inside _materialize. There is deliberately no
-        # per-artifact lock: capture is already serialized process-wide, so a second
-        # lock would add nothing but a second acquisition order to deadlock against.
-        # This is the re-entrancy guard the (reentrant) capture lock cannot provide.
-        # The pid makes it fork-safe without a registry -- a child never matches a
-        # marker left by a thread it did not inherit.
+        # (pid, tid) currently inside _materialize: the re-entrancy guard the reentrant
+        # capture lock cannot provide. The pid keeps it correct in a forked child, which
+        # never matches a marker left by a thread it did not inherit.
         self._materializing: tuple[int, int] | None = None
 
     def _precompile_and_save(self, args: tuple[Any, ...]) -> str:
@@ -101,16 +97,18 @@ class ExportedPythonArtifact:
         else:
             example = self._bind_positional(example, {}, "example_inputs=")
             self._check_supported_args(example)
-        # precompile returns (python_code, cache); the cache is an acceleration
-        # artifact that export_python does not use -- the emitted source is
-        # self-contained and always exec'd -- so only the code is written to disk.
-        code, _cache = torch.compiler.precompile(
+        # Only the python_code is written: the emitted source is self-contained and
+        # always exec'd, so export_python never builds precompile's acceleration cache.
+        from torch._precompile import PrecompiledModule
+
+        compiled = PrecompiledModule(
             self._fn,
-            *example,
             backend=self._backend,
             tracer=self._tracer,
             decompositions=self._decompositions,
         )
+        compiled._compile(example)
+        code = compiled.to_python_code()
         parent = os.path.dirname(self._path)
         if parent:
             os.makedirs(parent, exist_ok=True)
@@ -127,30 +125,37 @@ class ExportedPythonArtifact:
                 return f.read()
         except FileNotFoundError:
             return None
-        except OSError as e:
+        except (OSError, UnicodeDecodeError) as e:
+            hint = (
+                " rather than a directory" if isinstance(e, IsADirectoryError) else ""
+            )
             raise _precompile_error(
                 f"torch.compiler.export_python: could not read the artifact at "
-                f"{self._path} ({e.strerror}). Check that the path names a readable "
-                "file rather than a directory."
+                f"{self._path} ({e}). Check that the path names a readable UTF-8 "
+                f"file{hint}."
             ) from e
 
     def _load(self, code: str, *, from_disk: bool) -> Callable[..., Any]:
         # The emitted source is self-contained: exec it directly (no cache, no
-        # precompile.load round-trip). A clobbered hand-edit (dropped forward / syntax
-        # error) and an environment or version mismatch (an import that fails under the
-        # current torch) surface as distinct, actionable PrecompileErrors rather than
-        # one catch-all "delete to regenerate".
+        # precompile.load round-trip). A broken hand-edit and an environment or version
+        # mismatch (an import that fails under the current torch) surface as distinct,
+        # actionable PrecompileErrors rather than one catch-all "delete to regenerate".
         from torch._precompile import _make_inlined_forward, PrecompileError
 
-        try:
-            if from_disk:
-                log.warning(
-                    "torch.compiler.export_python is about to EXEC the artifact at %s; "
-                    "the file is trusted executable Python and may have been edited or "
-                    "replaced since export. Only load paths whose contents you trust.",
-                    self._path,
-                )
+        if not from_disk:
+            # Source this call just captured is precompile's own output, so a failure
+            # running it is a bug to surface as-is, not a file to fix or delete.
             return _make_inlined_forward(code, warn=False, filename=self._path)
+        log.warning(
+            "torch.compiler.export_python is about to EXEC the artifact at %s; "
+            "the file is trusted executable Python and may have been edited or "
+            "replaced since export. Only load paths whose contents you trust.",
+            self._path,
+        )
+        try:
+            return _make_inlined_forward(code, warn=False, filename=self._path)
+        except PrecompileError:
+            raise
         except SyntaxError as e:
             # Kernels are hoisted to module level, so Python reports a typo in one
             # against this file at the right line. Say so: telling someone to delete an
@@ -160,13 +165,6 @@ class ExportedPythonArtifact:
                 f"torch.compiler.export_python: the artifact at {self._path} does not "
                 f"parse{where}: {e.msg}. Fix it there, or delete the file to regenerate "
                 "from the original function."
-            ) from e
-        except KeyError as e:
-            raise PrecompileError(
-                f"torch.compiler.export_python: the artifact at {self._path} could "
-                "not be run as precompile source; it is not a valid "
-                "torch.compiler.precompile artifact (a hand-edit may have clobbered "
-                "it, e.g. dropping forward()). Delete it to regenerate."
             ) from e
         except ImportError as e:
             raise PrecompileError(
@@ -178,7 +176,8 @@ class ExportedPythonArtifact:
         except Exception as e:
             raise PrecompileError(
                 "torch.compiler.export_python: an unexpected error occurred running "
-                f"the artifact at {self._path}. Delete it to regenerate."
+                f"the artifact at {self._path} ({type(e).__name__}: {e}). Fix it there, "
+                "or delete it to regenerate."
             ) from e
 
     def _materialize(self, args: tuple[Any, ...]) -> Callable[..., Any]:
@@ -216,10 +215,12 @@ class ExportedPythonArtifact:
             return self._loaded
 
     def _serialize_first_launch(self, entry: Callable[..., Any]) -> Callable[..., Any]:
-        # The artifact compiles its Triton kernels on their first launch, and inductor's
-        # autotuner does that lazily with no lock of its own: two threads can both find
-        # no launchers and both build them. So racing first calls take turns under the
-        # capture lock until one launch succeeds, and only then see the bare entry.
+        # CachingAutotuner.run checks its launcher count outside the autotuner's lock, and
+        # autotune_to_one_config (benchmark every config, release the losers, replace the
+        # launchers) takes no lock, so two first launches of a kernel compile-time
+        # autotuning did not pin race each other. Racing first calls take turns under the
+        # capture lock until one launch succeeds, and only then see the bare entry; a
+        # launch that raises leaves the next call serialized too.
         import torch._precompile as precompile_impl
 
         def first_launch(*args: Any) -> Any:
@@ -249,10 +250,8 @@ class ExportedPythonArtifact:
                 f"{getattr(self._fn, '__name__', 'fn')}'s signature: {e}"
             ) from e
         bound.apply_defaults()
-        # bound.kwargs holds every argument bind() could not place positionally. That
-        # is a keyword-only / **kwargs param (never positional), or a plain
-        # positional-or-keyword param passed by keyword while an earlier one was left
-        # to its default -- distinguish them so the error names the real cause.
+        # After apply_defaults every positional-or-keyword parameter is placed, so
+        # bound.kwargs holds only keyword-only and **kwargs entries.
         if bound.kwargs:
             params = sig.parameters
             kw_only = sorted(
@@ -262,25 +261,14 @@ class ExportedPythonArtifact:
             )
             if kw_only:
                 raise TypeError(
-                    "torch.compiler.export_python does not support keyword-only "
-                    f"parameters (got {kw_only}); the precompile calling convention "
-                    "is positional."
-                )
-            # Names not declared as parameters were absorbed by a **kwargs param;
-            # they are never positional, so name **kwargs as the cause rather than
-            # misreporting them as a positional-or-keyword arg left to its default.
-            var_kw = sorted(n for n in bound.kwargs if n not in params)
-            if var_kw:
-                raise TypeError(
-                    "torch.compiler.export_python does not support **kwargs "
-                    f"parameters (got {var_kw}); the precompile calling convention "
-                    "is positional."
+                    "torch.compiler.export_python does not support functions that "
+                    f"declare keyword-only parameters ({kw_only}); the precompile "
+                    "calling convention is positional."
                 )
             raise TypeError(
-                "torch.compiler.export_python could not place keyword arguments "
-                f"{sorted(bound.kwargs)} positionally because an earlier positional "
-                "parameter was left to its default; pass those arguments positionally "
-                "or provide example_inputs."
+                "torch.compiler.export_python does not support **kwargs parameters "
+                f"(got {sorted(bound.kwargs)}); the precompile calling convention is "
+                "positional."
             )
         return bound.args
 
