@@ -156,7 +156,7 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
 
     Args:
         src (int): Source rank
-        group (ProcessGroup or List[int]): The process group to work on.
+        group: The process group to work on. See :func:`all_reduce`.
         tag (str, optional): A unique identifier for the collective. Default: empty string
     """
     group = _resolve_group(group, tag)
@@ -175,20 +175,15 @@ def all_reduce(
 
     The input tensor is left unmodified.
 
-    Group can be one of:
-        List[int]: ranks participating in the collective.
-        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
-        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
-        DeviceMesh: Do a SPMD collective over all ranks of the mesh
-        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+    ``group`` can be a ``ProcessGroup``, a ``DeviceMesh`` (collective over all
+    ranks of the mesh), a ``(DeviceMesh, int)`` tuple (collective over one mesh
+    dimension) or a group name. Lists of ranks are deprecated.
 
-    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
-    that information and perform collective algebraic optimization. Use other forms of input for that.
-
-    :: N.B. ``premul_sum`` backward assumes the pre-multiplier is identical on
-    every rank. With a per-rank (or tensor) factor the backward is incorrect: it
-    re-applies ``premul_sum`` to the gradient, yielding ``sum_s k_s * g_s``,
-    instead of scaling the summed gradient locally by this rank's ``k_r``.
+    .. note::
+        ``premul_sum`` backward assumes the pre-multiplier is identical on
+        every rank. With a per-rank (or tensor) factor the backward is incorrect: it
+        re-applies ``premul_sum`` to the gradient, yielding ``sum_s k_s * g_s``,
+        instead of scaling the summed gradient locally by this rank's ``k_r``.
     """
     group = _resolve_group(group, tag)
     reduce_op = reduceOp.lower() if isinstance(reduceOp, str) else reduceOp
@@ -210,15 +205,9 @@ def all_gather_single(
     Note that it currently only supports gather_dim = 0.
 
     The input tensor is left unmodified.
-    Group can be one of:
-        List[int]: ranks participating in the collective.
-        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
-        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
-        DeviceMesh: Do a SPMD collective over all ranks of the mesh
-        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
-
-    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
-    that information and perform collective algebraic optimization. Use other forms of input for that.
+    ``group`` can be a ``ProcessGroup``, a ``DeviceMesh`` (collective over all
+    ranks of the mesh), a ``(DeviceMesh, int)`` tuple (collective over one mesh
+    dimension) or a group name. Lists of ranks are deprecated.
     """
     group = _resolve_group(group, tag)
     group_size = c10d._get_group_size_by_name(group)
@@ -277,14 +266,9 @@ def reduce_scatter_single(
 
 
     The input tensor is left unmodified.
-    Group can be one of:
-        List[int]: ranks participating in the collective.
-        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
-        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
-        DeviceMesh: Do a SPMD collective over all ranks of the mesh
-        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
-    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
-    that information and perform collective algebraic optimization. Use other forms of input for that.
+    ``group`` can be a ``ProcessGroup``, a ``DeviceMesh`` (collective over all
+    ranks of the mesh), a ``(DeviceMesh, int)`` tuple (collective over one mesh
+    dimension) or a group name. Lists of ranks are deprecated.
     """
     group = _resolve_group(group, tag)
     group_size = c10d._get_group_size_by_name(group)
@@ -343,7 +327,7 @@ def all_gather_tensor(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.all_gather_tensor` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.all_gather_single` instead.",
+            "Please use `torch.distributed.functional_collectives.all_gather_single` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -359,7 +343,7 @@ def all_gather_tensor_autograd(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.all_gather_tensor_autograd` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.all_gather_single_autograd` instead.",
+            "Please use `torch.distributed.functional_collectives.all_gather_single` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -376,7 +360,7 @@ def reduce_scatter_tensor(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.reduce_scatter_tensor` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.reduce_scatter_single` instead.",
+            "Please use `torch.distributed.functional_collectives.reduce_scatter_single` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -393,7 +377,7 @@ def reduce_scatter_tensor_autograd(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.reduce_scatter_tensor_autograd` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.reduce_scatter_single_autograd` instead.",
+            "Please use `torch.distributed.functional_collectives.reduce_scatter_single` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -412,20 +396,15 @@ def all_reduce_coalesced(
 
     The all tensors in the input list are left unmodified.
 
-    Group can be one of:
-        List[int]: ranks participating in the collective.
-        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
-        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
-        DeviceMesh: Do a SPMD collective over all ranks of the mesh
-        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+    ``group`` can be a ``ProcessGroup``, a ``DeviceMesh`` (collective over all
+    ranks of the mesh), a ``(DeviceMesh, int)`` tuple (collective over one mesh
+    dimension) or a group name. Lists of ranks are deprecated.
 
-    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
-    that information and perform collective algebraic optimization. Use other forms of input for that.
-
-    :: N.B. ``premul_sum`` backward assumes the pre-multiplier is identical on
-    every rank. With a per-rank (or tensor) factor the backward is incorrect: it
-    re-applies ``premul_sum`` to the gradient, yielding ``sum_s k_s * g_s``,
-    instead of scaling the summed gradient locally by this rank's ``k_r``.
+    .. note::
+        ``premul_sum`` backward assumes the pre-multiplier is identical on
+        every rank. With a per-rank (or tensor) factor the backward is incorrect: it
+        re-applies ``premul_sum`` to the gradient, yielding ``sum_s k_s * g_s``,
+        instead of scaling the summed gradient locally by this rank's ``k_r``.
     """
     group = _resolve_group(group, tag)
     reduce_op = reduceOp.lower() if isinstance(reduceOp, str) else reduceOp
@@ -446,15 +425,9 @@ def all_gather_single_coalesced(
     Note that it currently only supports gather_dim = 0.
 
     The input tensor is left unmodified.
-    Group can be one of:
-        List[int]: ranks participating in the collective.
-        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
-        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
-        DeviceMesh: Do a SPMD collective over all ranks of the mesh
-        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
-
-    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
-    that information and perform collective algebraic optimization. Use other forms of input for that.
+    ``group`` can be a ``ProcessGroup``, a ``DeviceMesh`` (collective over all
+    ranks of the mesh), a ``(DeviceMesh, int)`` tuple (collective over one mesh
+    dimension) or a group name. Lists of ranks are deprecated.
     """
     group = _resolve_group(group, tag)
     group_size = c10d._get_group_size_by_name(group)
@@ -478,15 +451,9 @@ def reduce_scatter_single_coalesced(
     the final result, then scatter the results to corresponding ranks.
 
     The input tensors are left unmodified.
-    Group can be one of:
-        List[int]: ranks participating in the collective.
-        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
-        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
-        DeviceMesh: Do a SPMD collective over all ranks of the mesh
-        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
-
-    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
-    that information and perform collective algebraic optimization. Use other forms of input for that.
+    ``group`` can be a ``ProcessGroup``, a ``DeviceMesh`` (collective over all
+    ranks of the mesh), a ``(DeviceMesh, int)`` tuple (collective over one mesh
+    dimension) or a group name. Lists of ranks are deprecated.
     """
     group = _resolve_group(group, tag)
     group_size = c10d._get_group_size_by_name(group)
@@ -523,7 +490,7 @@ def all_gather_into_tensor_coalesced(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.all_gather_into_tensor_coalesced` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.all_gather_single_coalesced` instead.",
+            "Please use `torch.distributed.functional_collectives.all_gather_single_coalesced` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -540,7 +507,7 @@ def reduce_scatter_tensor_coalesced(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.reduce_scatter_tensor_coalesced` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.reduce_scatter_single_coalesced` instead.",
+            "Please use `torch.distributed.functional_collectives.reduce_scatter_single_coalesced` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -577,15 +544,9 @@ def all_to_all_single(
     to all processes in a group. Then concatenate the received tensors from all
     the processes in the group and return single output tensor.
 
-    Group can be one of:
-        List[int]: ranks participating in the collective.
-        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
-        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
-        DeviceMesh: Do a SPMD collective over all ranks of the mesh
-        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
-
-    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
-    that information and perform collective algebraic optimization. Use other forms of input for that.
+    ``group`` can be a ``ProcessGroup``, a ``DeviceMesh`` (collective over all
+    ranks of the mesh), a ``(DeviceMesh, int)`` tuple (collective over one mesh
+    dimension) or a group name. Lists of ranks are deprecated.
     """
     if output_split_sizes is not None:
         if not all(
@@ -1156,12 +1117,9 @@ def permute_tensor(
     Permutes the elements of the tensor according to the given source/destination pairs. `src_dst` should
     be defined such that src_dst[m] == n means m sends to n.
 
-    Group can be one of:
-        List[int]: ranks participating in the collective.
-        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
-        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
-        DeviceMesh: Do a SPMD collective over all ranks of the mesh
-        (DeviceMesh, int): Do a MPMD collective over one
+    ``group`` can be a ``ProcessGroup``, a ``DeviceMesh`` (collective over all
+    ranks of the mesh), a ``(DeviceMesh, int)`` tuple (collective over one mesh
+    dimension) or a group name. Lists of ranks are deprecated.
     """
     t, rankset, group_size = _expand_group(group, tag)
     local_pg = c10d._find_or_create_pg_by_ranks_and_tag(t, rankset, group_size)
@@ -1179,13 +1137,9 @@ def permute_tensor(
 
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
-    A Tensor wrapper subclass that is used to trigger a call to wait
-    prior to first use of the underlying tensor.
-    Use it inside functional collective pytorch wrappers like the following:
-    def functional_collective(self, group, tag):
-        tag, rankset, group_size = _expand_group(group, tag)
-        tensor = torch.ops.c10d_functional.{collective}(self, tag, rankset, group_size)
-        return _maybe_wrap_tensor(tensor)
+    Tensor returned by functional collectives in eager mode. It waits on the
+    collective prior to first use of the underlying tensor. Call :meth:`wait`
+    to wait explicitly.
     """
 
     elem: torch.Tensor
@@ -1244,6 +1198,7 @@ class AsyncCollectiveTensor(torch.Tensor):
             return self.elem
 
     def wait(self) -> torch.Tensor:
+        """Wait on the collective and return the result tensor."""
         return wait_tensor(self.elem)
 
     def _get_acs_underlying_tensor(self):
@@ -1816,7 +1771,7 @@ _ASYNC_OP_REMAP_ERROR = (
     "Dynamo can only remap synchronous torch.distributed collectives "
     "(async_op=False) to functional collectives. If your program does not need "
     "the Work handle, set async_op=False. Otherwise, rewrite the collective "
-    "with torch.distributed._functional_collectives and synchronize the "
+    "with torch.distributed.functional_collectives and synchronize the "
     "returned tensor with wait_tensor or wait_tensors. Tracking issue: "
     "https://github.com/pytorch/pytorch/issues/119890"
 )
@@ -2228,3 +2183,8 @@ class _LegacyToFunctionalCollectiveMode(torch.overrides.TorchFunctionMode):
             mapped_func, mapped_args, mapped_kwargs = remapped
             return mapped_func(*mapped_args, **mapped_kwargs)
         return func(*args, **(kwargs or {}))
+
+
+# Ensure the public module, which sets ``__module__`` on the public API, is
+# loaded: FX codegen resolves functions in graphs by their ``__module__`` path.
+import torch.distributed.functional_collectives
