@@ -750,11 +750,23 @@ void svd_cusolver(const Tensor& A,
 
   static constexpr const char* check_svd_doc = "Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html";
 
-  // The default heuristic is to use gesvdj driver
+  // Default heuristic (driver=None). Explicit driver= still wins.
+  // - m,n <= 32: gesvdjBatched is fastest (PR #88502)
+  // - batched with m or n > 32: per-matrix gesvdj loops and cliffs at n=32→33;
+  //   prefer gesvdaStridedBatched (see #200486, #175585)
+  // - single matrix with m or n > 32: keep gesvdj
+  // Convergence check + gesvd fallback below still apply when driver=None.
 #ifdef USE_ROCM
   const auto driver_v = std::string_view("gesvdj");
 #else
-  const auto driver_v = driver.value_or("gesvdj");
+  std::string_view driver_v;
+  if (driver.has_value()) {
+    driver_v = *driver;
+  } else if ((m > 32 || n > 32) && batchCount(A) > 1) {
+    driver_v = "gesvda";
+  } else {
+    driver_v = "gesvdj";
+  }
 #endif
 
   if (driver_v == "gesvd") {
