@@ -49,7 +49,7 @@ except ImportError:
 test_classes = {}
 
 
-def make_nested_cls(cls):
+def make_nested_cls(cls, *extra_patches):
     config = torch._dynamo.config
 
     test_class = make_test_cls_with_patches(
@@ -59,6 +59,7 @@ def make_nested_cls(cls):
         (config, "nested_graph_breaks", True),
         (config, "debug_force_nested_calls", True),
         (config, "debug_disable_compile_counter", True),
+        *extra_patches,
         xfail_prop="_expected_failure_nested_graph_breaks",
     )
 
@@ -87,7 +88,6 @@ tests = [
     test_recompiles.RecompileTests,
     test_repros.ReproTests,
     test_subgraphs.SubGraphTests,
-    test_unspec.UnspecTests,
 ]
 
 test = None
@@ -97,6 +97,12 @@ for test in tests:
     make_nested_cls(test)
 
 del test
+
+# Wrap the class under its @config.patch decorator and reapply that patch per test
+make_nested_cls(
+    test_unspec.UnspecTests.__bases__[0],
+    *((torch._dynamo.config, k, v) for k, v in test_unspec.UNSPEC_CONFIG.items()),
+)
 
 # Bind generated classes so static checkers see the names.
 NestedGraphBreaksDecoratorTests = test_classes["NestedGraphBreaksDecoratorTests"]
@@ -118,7 +124,8 @@ xfails = [
     NestedGraphBreaksMiscTests.test_guard_sym_node_fstring_when_used_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_replay_side_effects_config_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_replay_side_effects_model_attr_nested_graph_breaks,
-    # doesn't work due to debug_force_nested_calls wrapping the top frame
+    # caching_precompile initializes the package before debug_force_nested_calls
+    # replaces the top frame, so the package is keyed to a different code object
     NestedGraphBreaksMiscTests.test_dynamo_cache_move_to_front_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_dynamo_reset_clears_cache_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_fail_on_recompile_error_message_nested_graph_breaks,
@@ -127,6 +134,7 @@ xfails = [
     NestedGraphBreaksMiscTests.test_precompile_entry_hit_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_precompile_fail_on_recompile_nested_graph_breaks,
     NestedGraphBreaksDecoratorTests.test_compile_staticmethod_caching_precompile_nested_graph_breaks,
+    NestedGraphBreaksDecoratorTests.test_compile_class_caching_precompile_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_torch_guards_stack_frame_register_inlining_deep_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_torch_guards_stack_frame_register_inlining_nested_graph_breaks,
     # differing op_count
@@ -146,7 +154,6 @@ xfails = [
     NestedGraphBreaksTupleTests.test_index_nested_graph_breaks,
     NestedGraphBreaksTupleTests.test___iter___nested_graph_breaks,
     NestedGraphBreaksTupleTests.test_list_mul_constant_tuple_nested_graph_breaks,
-    NestedGraphBreaksFunctionTests.test_itertools_islice_basic_ops_nested_graph_breaks,
     # generate_pycode cannot reconstruct a GetItemSource, which is what
     # debug_force_nested_calls sources the wrapped frame's *args by
     NestedGraphBreaksFunctionTests.test_method_vt_reconstruct_pycode_nested_graph_breaks,
@@ -157,10 +164,6 @@ xfails = [
     NestedGraphBreaksDecoratorTests.test_torch_guards_stack_frame_register_inlining_disable_nested_graph_breaks,
     NestedGraphBreaksSubGraphTests.test_resume_paths_join_nested_graph_breaks,
     NestedGraphBreaksReproTests.test_udf_classes_reconstruction_nested_graph_breaks,
-    NestedGraphBreaksUnspecTests.test_unspecialized_float_multiply_precision,
-    # size(0) specializes to ConstantVariable(int); Method arity is not traced
-    NestedGraphBreaksUnspecTests.test_symint_bit_length_wrong_arity,
-    NestedGraphBreaksUnspecTests.test_symint_bit_length_wrong_arity_nested_graph_breaks,
 ]
 
 case = None
