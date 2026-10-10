@@ -1817,6 +1817,9 @@ class PythonWrapperCodegen(CodeGen):
         # until _generate scans the module, and until then every such line is emitted.
         self.used_names: OrderedSet[str] | None = None
         self.scanning_for_uses = False
+        # Whether write_if_used wrote a line, so that _generate scans. The FX wrapper
+        # writes this header too but has its own _generate, which never scans, so it
+        # keeps every line.
         self.has_conditional_preamble = False
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Map key is the kernel argument name; value is a tuple of the resulting example
@@ -1981,17 +1984,33 @@ class PythonWrapperCodegen(CodeGen):
         """Write a line that is kept only if the module uses a name in ``names``, by
         default the names the import or binding on it binds."""
         if names is None:
-            if " = " in line:
-                names = (line.split(" = ")[0],)
-            else:
-                imported = line.split("import ", 1)[1].split(",")
-                names = tuple(name.split(" as ")[-1].strip() for name in imported)
+            names = self._names_bound_by(line)
         if "torch" in names:
             # The rest of the preamble is written in terms of it.
             buf.writeline(line)
             return
         self.has_conditional_preamble = True
         buf.writeline(_LineIfNamesUsed(line, names, self))
+
+    @staticmethod
+    def _names_bound_by(line: str) -> tuple[str, ...]:
+        """The names bound by ``line``: ``x = ...``, ``import a.b[ as c], ...`` or
+        ``from m import a[ as b], ...`` on a single line."""
+        if m := re.fullmatch(r"(\w+) = .+", line):
+            return (m.group(1),)
+        if m := re.fullmatch(r"(import|from [\w.]+ import) ([\w., ]+)", line):
+            names = []
+            for item in m.group(2).split(","):
+                target, _, alias = item.strip().partition(" as ")
+                # `import a.b` binds `a`.
+                name = alias or target.split(".")[0]
+                if re.fullmatch(r"\w+", name):
+                    names.append(name)
+            if len(names) == m.group(2).count(",") + 1:
+                return tuple(names)
+        raise AssertionError(
+            f"cannot tell what {line!r} binds; write it with an explicit `names`"
+        )
 
     def write_omitted_from_scan(self, buf: IndentedBuffer, code: str) -> None:
         """Splice ``code`` into ``buf`` as one line, so that leaving it out of the scan
@@ -3967,6 +3986,22 @@ class PythonWrapperCodegen(CodeGen):
             if config.triton.autotune_at_compile_time
             else None
         )
+        # benchmark_kernel and benchmark_combo_kernel append a get_args()/call()/__main__
+        # harness to every kernel. It stays in the per-kernel modules the pool builds,
+        # which is where benchmark_all_kernels looks for it, but at module level each
+        # kernel's __main__ block would run whenever the wrapper does.
+        if harness := _KERNEL_BENCHMARK_HARNESS.search(src_code):
+            src_code = src_code[: harness.start()]
+        if "if __name__ == '__main__':" in src_code:
+            raise AssertionError(f"kernel {kernel_name} kept its benchmark harness")
+        # The string form passes filename=__file__ from its own module, which is named by
+        # the hash of this source, and the autotune cache keys on that basename. Here
+        # __file__ is the wrapper, which every kernel shares, so name the module the
+        # string form would have used, in the wrapper's directory.
+        if "filename=__file__" in src_code:
+            path = f"os.path.join(os.path.dirname(__file__), {kernel_file!r})"
+            src_code = src_code.replace("filename=__file__", f"filename={path}")
+            src_code = f"import os\n{src_code}"
         # src_code is already a complete module: the triton imports, the
         # @triton_heuristics.* decorator that builds the CachingAutotuner, and the
         # @triton.jit def. Spliced at module level it binds kernel_name to the same
@@ -3977,20 +4012,6 @@ class PythonWrapperCodegen(CodeGen):
         # flex attention's forward_inner, ...) and, from a user kernel's closure, helper
         # defs and constants. In one shared namespace the later binding would win for
         # all of them, so _rename_kernel_module_globals makes each kernel-unique.
-        # benchmark_kernel and benchmark_combo_kernel append a get_args()/call()/__main__
-        # harness to every kernel. It stays in the per-kernel modules the pool builds,
-        # which is where benchmark_all_kernels looks for it, but at module level each
-        # kernel's __main__ block would run whenever the wrapper does.
-        if harness := _KERNEL_BENCHMARK_HARNESS.search(src_code):
-            src_code = src_code[: harness.start()]
-        # The string form passes filename=__file__ from its own module, which is named by
-        # the hash of this source, and the autotune cache keys on that basename. Here
-        # __file__ is the wrapper, which every kernel shares, so name the module the
-        # string form would have used, in the wrapper's directory.
-        if "filename=__file__" in src_code:
-            path = f"os.path.join(os.path.dirname(__file__), {kernel_file!r})"
-            src_code = src_code.replace("filename=__file__", f"filename={path}")
-            src_code = f"import os\n{src_code}"
         src_code = _rename_kernel_module_globals(src_code, kernel_name, subs_name)
         self.define_kernel(
             kernel_name,

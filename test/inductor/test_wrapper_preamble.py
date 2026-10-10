@@ -8,8 +8,11 @@ import tempfile
 
 import torch
 from torch._inductor import config
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import IndentedBuffer, run_and_get_code
+from torch._inductor.virtualized import V
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -56,6 +59,24 @@ class TestWrapperPreamble(TestCase):
         ):
             self.assertNotIn(unused, code, f"{unused!r} kept but unused")
         self.assertEqual(_run_from_file(code, [x])[0], result)
+
+    def _wrapper(self):
+        with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda x: x))):
+            return PythonWrapperCodegen()
+
+    def test_a_dotted_import_is_kept_when_its_first_component_is_used(self):
+        wrapper, buf = self._wrapper(), IndentedBuffer()
+        wrapper.write_if_used(buf, "import os.path")
+        wrapper.write_if_used(buf, "import xml.dom as dom")
+        buf.writeline("p = os.path.join('a')")
+        wrapper.scan_for_used_names(buf)
+        self.assertEqual(buf.getvalue(), "import os.path\np = os.path.join('a')\n")
+
+    def test_a_line_whose_bindings_cannot_be_read_raises(self):
+        wrapper, buf = self._wrapper(), IndentedBuffer()
+        for line in ("from m import (a, b)", "from m import *", "del x"):
+            with self.assertRaisesRegex(AssertionError, "cannot tell what"):
+                wrapper.write_if_used(buf, line)
 
     @requires_cuda_and_triton
     def test_a_binding_is_not_kept_alive_by_its_own_definition(self):
@@ -104,6 +125,13 @@ class TestWrapperPreamble(TestCase):
         x = torch.randn(64, 128, device="cuda")
         result, code = _code_for(_softmax, x, profile_bandwidth=True)
         self.assertIn("start_graph", code.split("def call(")[0])
+        self.assertEqual(_run_from_file(code, [x])[0], result)
+
+    @requires_cuda_and_triton
+    def test_autotune_at_compile_time_runs_from_file(self):
+        x = torch.randn(64, 128, device="cuda")
+        at_compile_time = {"triton.autotune_at_compile_time": True}
+        result, code = _code_for(_softmax, x, **at_compile_time)
         self.assertEqual(_run_from_file(code, [x])[0], result)
 
     @requires_cuda_and_triton
