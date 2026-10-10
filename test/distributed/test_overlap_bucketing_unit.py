@@ -1744,6 +1744,77 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         super().tearDownClass()
         dist.destroy_process_group()
 
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.overlap_scheduling_autofix_cycles": False}
+    )
+    def test_restore_failed_bucket_probe_timeline_edges(self, device):
+        """A rejected bucket probe must restore edges through merged node aliases."""
+
+        def func(a, b, c):
+            group_name = dist.distributed_c10d._get_default_group().group_name
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(a, 16, group_name)
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(b, 16, group_name)
+            ag3 = torch.ops._c10d_functional.all_gather_into_tensor(c, 16, group_name)
+            wait1 = torch.ops._c10d_functional.wait_tensor(ag1)
+            wait2 = torch.ops._c10d_functional.wait_tensor(ag2)
+            wait3 = torch.ops._c10d_functional.wait_tensor(ag3)
+            return wait1 + wait2 + wait3
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=device)
+            b = torch.ones(4, 4, device=device)
+            c = torch.ones(4, 4, device=device)
+            traced = make_fx(func)(a, b, c)
+
+        ag1, ag2, ag3 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        collective_info = build_collective_info(traced.graph, {})
+
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+        from torch._inductor.fx_passes.overlap_scheduling import get_group_name
+
+        bucketer = OverlapPreservingBucketer(
+            traced.graph,
+            collective_info,
+            OrderedSet(traced.graph.nodes),
+            collective_bucketing=False,
+        )
+        bucketer._populate_node_to_event(get_group_name(ag2))
+
+        prev_event, next_event = bucketer.remove_from_event(ag2)
+        if prev_event is None or next_event is None:
+            self.fail("the middle collective must have two timeline neighbors")
+        bucketer.restore_to_event(ag2, prev_event, next_event)
+        bucketer._apply_deps_and_effect_tokens()
+
+        self.assertIn(ag2, bucketer.aug_graph.extra_deps[next_event.node])
+        self.assertIs(bucketer.node_to_event[ag2].prev.node, ag1)
+        self.assertIs(bucketer.node_to_event[ag2].next.node, ag3)
+
+        first_prev, first_next = bucketer.remove_from_event(ag1)
+        self.assertIsNone(first_prev)
+        if first_next is None:
+            self.fail("the first collective must have a successor")
+        self.assertIs(first_next.node, ag2)
+        bucketer.aug_graph.merge_to_set(ag1, ag2)
+        bucketer.node_to_event[ag1] = bucketer.node_to_event[ag2]
+
+        alias_prev, alias_next = bucketer.remove_from_event(ag1)
+        self.assertIsNone(alias_prev)
+        if alias_next is None:
+            self.fail("the merged event must have a successor")
+        self.assertIs(alias_next.node, ag3)
+        self.assertNotIn(ag2, bucketer.aug_graph.extra_deps[ag3])
+
+        bucketer.restore_to_event(ag1, alias_prev, alias_next)
+        bucketer._apply_deps_and_effect_tokens()
+        self.assertIn(ag2, bucketer.aug_graph.extra_deps[ag3])
+        self.assertNotIn(ag1, bucketer.aug_graph.extra_deps[ag3])
+
     def test_no_self_dependency_cycle_with_dtype_conversion(self, device):
         """
         Test that bucketing collectives with dtype conversion doesn't create
