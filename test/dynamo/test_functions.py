@@ -6740,6 +6740,201 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), expected)
 
+    @parametrize("mapping_type", (collections.OrderedDict, collections.defaultdict))
+    def test_unbound_dict_descriptor_on_specialized_subclass(self, mapping_type):
+        obj = (
+            mapping_type(list, a=1)
+            if mapping_type is collections.defaultdict
+            else mapping_type(a=1)
+        )
+
+        def fn(x):
+            result = dict.copy(obj)
+            return x + len(result), type(result) is dict
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(
+            Unsupported, "Unbound builtin method on unsupported subclass"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_method_descriptor_list_count_tensor_equality(self):
+        def fn(x):
+            try:
+                count = list.count([torch.tensor([1, 2])], torch.tensor([1, 2]))
+            except RuntimeError as exc:
+                return x + 10, type(exc).__name__
+            return x + count, type(count).__name__
+
+        x = torch.tensor(1)
+        self.assertEqual(fn(x), (x + 10, "RuntimeError"))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_builtin_type_dict_mappingproxy_identity(self):
+        def fn(x):
+            first = list.__dict__
+            second = list.__dict__
+            alias = first
+            return (
+                x + 1,
+                first is second,
+                first is alias,
+                first == second,
+                first["count"] is list.count,
+            )
+
+        x = torch.tensor(1)
+        expected = (x + 1, False, True, True, True)
+        self.assertEqual(fn(x), expected)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(opt_fn(x), expected)
+
+        def across_graph_break(x):
+            proxy = list.__dict__
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x, proxy["count"] is list.count, proxy is list.__dict__
+
+        expected_break = (x + 1, True, False)
+        self.assertEqual(across_graph_break(x), expected_break)
+        opt_break = torch.compile(across_graph_break, backend="eager")
+        self.assertEqual(opt_break(x), expected_break)
+        self.assertEqual(opt_break(x), expected_break)
+
+    def test_bound_builtin_method_comparison(self):
+        receiver = [1, 1]
+        other_receiver = [1, 1]
+        alias_left = (1).conjugate
+        alias_right = (1).__trunc__
+
+        def fn(x):
+            left = list.count.__get__(receiver, list)
+            same = list.count.__get__(receiver, list)
+            other_self = list.count.__get__(other_receiver, list)
+            other_method = list.index.__get__(receiver, list)
+            fresh_receiver = [1, 1]
+            fresh = list.count.__get__(fresh_receiver, list)
+            fresh_same = list.count.__get__(fresh_receiver, list)
+            fresh_other = list.count.__get__([1, 1], list)
+            return (
+                left == same,
+                left != same,
+                left == other_self,
+                left != other_self,
+                left == other_method,
+                left != other_method,
+                alias_left == alias_right,
+                alias_left != alias_right,
+                fresh == fresh_same,
+                fresh != fresh_other,
+                x + 1,
+            )
+
+        x = torch.tensor(1)
+        expected = (
+            True,
+            False,
+            False,
+            True,
+            False,
+            True,
+            True,
+            False,
+            True,
+            True,
+            x + 1,
+        )
+        self.assertEqual(fn(x), expected)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
+    def test_bound_builtin_method_comparison_literal_receivers(self):
+        def fn(x):
+            int_descriptor = int.__dict__["conjugate"]
+            str_descriptor = str.__dict__["upper"]
+            int_left = int_descriptor.__get__(1, int)
+            int_right = int_descriptor.__get__(1, int)
+            str_left = str_descriptor.__get__("identical literal", str)
+            str_right = str_descriptor.__get__("identical literal", str)
+            return (
+                int_left == int_right,
+                int_left != int_right,
+                int_left.__self__ is int_right.__self__,
+                str_left == str_right,
+                str_left != str_right,
+                str_left.__self__ is str_right.__self__,
+                x + 1,
+            )
+
+        x = torch.tensor(1)
+        expected = (True, False, True, True, False, True, x + 1)
+        self.assertEqual(fn(x), expected)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
+    def test_bound_builtin_method_comparison_mixed_receiver_sources(self):
+        receiver = [1]
+
+        def fn(x):
+            sourced = list.count.__get__(receiver, list)
+            sourceless = list.count.__get__([1], list)
+            return sourced == sourceless, x + 1
+
+        x = torch.tensor(1)
+        with self.assertRaisesRegex(
+            Unsupported, "builtin method comparison with undecidable identity"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    @parametrize("alias_first", (False, True))
+    def test_bound_builtin_method_comparison_guards_receiver_identity(
+        self, alias_first
+    ):
+        def fn(x, a, b):
+            equal = list.count.__get__(a, list) == list.count.__get__(b, list)
+            return equal, x + 1
+
+        x = torch.tensor(1)
+        a = [1]
+        b = a if alias_first else [1]
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x, a, b), fn(x, a, b))
+        self.assertEqual(cnt.frame_count, 1)
+
+        b = [1] if alias_first else a
+        self.assertEqual(opt_fn(x, a, b), fn(x, a, b))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_bound_builtin_method_hash(self):
+        receiver = [1, 1]
+        source_backed = receiver.count
+
+        def sourced(x):
+            return x + hash(source_backed)
+
+        x = torch.tensor(1)
+        self.assertEqual(
+            torch.compile(sourced, backend="eager", fullgraph=True)(x), sourced(x)
+        )
+
+        def newly_bound(x):
+            return x + hash(list.count.__get__(receiver, list))
+
+        with self.assertRaisesRegex(
+            Unsupported, "Hashing a newly bound builtin method"
+        ):
+            torch.compile(newly_bound, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(newly_bound, backend="eager")(x), newly_bound(x))
+
     def test_prebound_method_descriptor_bypasses_subclass_override(self):
         class L(list):
             def count(self, value):
@@ -6863,6 +7058,30 @@ class GraphModule(torch.nn.Module):
             (x + 1, "fromkeys", "fromkeys", True),
         )
 
+    @parametrize("descriptor_kind", ("classmethod", "method"))
+    def test_descriptor_source_from_type_dict(self, descriptor_kind):
+        if descriptor_kind == "classmethod":
+            descriptor = dict.__dict__["fromkeys"]
+            replacement = int.__dict__["from_bytes"]
+        else:
+            descriptor = list.count
+            replacement = list.index
+
+        class D:
+            target = descriptor
+
+        def fn(x):
+            return x + 1, D.__dict__["target"].__name__
+
+        x = torch.ones(1)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+        D.target = replacement
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
     @parametrize("use_subclass", (False, True))
     def test_bound_fromkeys_ordered_dict_input(self, use_subclass):
         class OD(collections.OrderedDict):
@@ -6912,19 +7131,35 @@ class GraphModule(torch.nn.Module):
         )
 
     @parametrize("descriptor_kind", ("classmethod", "method"))
-    def test_descriptor_from_metaclass_dict(self, descriptor_kind):
+    @parametrize("metaclass_hook", ("dict_property", "getattribute"))
+    def test_descriptor_source_rejects_metaclass_dict(
+        self, descriptor_kind, metaclass_hook
+    ):
         descriptor = (
             dict.__dict__["fromkeys"]
             if descriptor_kind == "classmethod"
             else list.count
         )
+        calls = []
 
-        class Meta(type):
+        class DictPropertyMeta(type):
             @property
             def __dict__(cls):
+                calls.append(cls)
                 return {"target": descriptor}
 
-        class D(metaclass=Meta):
+        class GetattributeMeta(type):
+            def __getattribute__(cls, name):
+                if name == "__dict__":
+                    calls.append(cls)
+                    return {"target": descriptor}
+                return type.__getattribute__(cls, name)
+
+        meta = (
+            DictPropertyMeta if metaclass_hook == "dict_property" else GetattributeMeta
+        )
+
+        class D(metaclass=meta):
             pass
 
         def fn(x):
@@ -6934,7 +7169,36 @@ class GraphModule(torch.nn.Module):
             return x + raw.__get__([1, 1], list)(1)
 
         x = torch.ones(1)
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+        with self.assertRaisesRegex(Unsupported, "custom metaclass __dict__"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(calls, [D])
+
+    def test_prebound_classmethod_descriptor_avoids_metaclass_hooks(self):
+        calls = []
+
+        class Meta(type):
+            def __getattribute__(cls, name):
+                if name in ("__module__", "__mro__", "__dict__"):
+                    calls.append(name)
+                    raise AssertionError(f"unexpected metaclass lookup: {name}")
+                return type.__getattribute__(cls, name)
+
+        class D(dict, metaclass=Meta):
+            pass
+
+        bound = D.fromkeys
+
+        def fn(x):
+            return x + len(bound(("a", "b")))
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(
+            Unsupported, "Bound builtin classmethod with custom metaclass"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        self.assertEqual(calls, [])
 
     def test_torch_function_metadata_attrs_constant(self):
         def fn(x):

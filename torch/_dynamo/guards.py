@@ -93,7 +93,11 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
-from torch._dynamo.utils import CompileEventLogger, get_metrics_context
+from torch._dynamo.utils import (
+    CompileEventLogger,
+    get_metrics_context,
+    get_type_dict_no_user_code,
+)
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -4507,6 +4511,10 @@ class GuardsStatePickler(FunctionPicklerBase):
         return types.MappingProxyType(d)
 
     @classmethod
+    def _unpickle_type_dict_item(cls, owner: type, name: str) -> object:
+        return get_type_dict_no_user_code(owner)[name]
+
+    @classmethod
     def _unpickle_dict_keys(cls, elems: list[Any]) -> Any:
         return dict.fromkeys(elems).keys()
 
@@ -4944,6 +4952,22 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(obj, types.MappingProxyType):
             return type(self)._unpickle_mapping_proxy, (obj.copy(),)
 
+        elif isinstance(
+            obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
+        ):
+            owner = obj.__objclass__
+            flags = type.__dict__["__flags__"].__get__(owner, type(owner))
+            if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+                raise torch._dynamo.exc.PackageError(
+                    f"Cannot serialize {type(obj).__name__} with a mutable owner"
+                )
+            for name, value in get_type_dict_no_user_code(owner).items():
+                if value is obj:
+                    return type(self)._unpickle_type_dict_item, (owner, name)
+            raise torch._dynamo.exc.PackageError(
+                f"Cannot locate {obj!r} in {owner!r}.__dict__"
+            )
+
         elif type(obj) is _COUNT_ITERATOR_TYPE:
             item, step = normalize_count_iter(obj)
             if item is not NotImplemented and step is not NotImplemented:
@@ -5228,7 +5252,10 @@ class CheckFunctionManager:
                 for keep, g in zip(_guard_filter_fn(guards), guards):
                     if not keep:
                         ret.append(False)
-                    elif (
+                    elif g.guard_type not in (
+                        "TYPE_MATCH",
+                        "BUILTIN_MATCH",
+                    ) and (
                         g.guard_type
                         in (
                             "ID_MATCH",

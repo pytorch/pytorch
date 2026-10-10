@@ -241,7 +241,9 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     ``torch._dynamo.config.caching_precompile``: its wrapper around every guard
     filter trips over the same artifact and drops, with a warning, any guard
     of type ID_MATCH, CLOSURE_MATCH, WEAKREF_ALIVE or DICT_VERSION or deriving
-    ID_MATCH or DICT_VERSION.
+    ID_MATCH or DICT_VERSION, except for direct TYPE_MATCH and BUILTIN_MATCH
+    guards. The serializer accepts those two by their own type; in particular,
+    BUILTIN_MATCH normally derives ID_MATCH but still has a serializable guard.
 
     Passing this filter does not mean the artifact serializes: the pre-check
     also refuses a kept TYPE_MATCH on a local-scope type, which cannot be
