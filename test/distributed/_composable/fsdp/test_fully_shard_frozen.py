@@ -13,29 +13,44 @@ from torch.distributed.fsdp import fully_shard
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     RegisterPostBackwardFunction,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     FSDPTest,
-    get_devtype,
     MLP,
     patch_reduce_scatter,
     patch_register_post_backward_hook_backward,
     reduce_scatter_with_assert,
 )
-from torch.testing._internal.common_utils import run_tests
-
-
-device_type = torch.device(get_devtype())
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestFullyShardFrozen(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # `instantiate_device_type_tests` injects `DeviceTypeTestBase`, whose
+    # `precision`/`rel_tol` are thread-local properties populated only on the
+    # thread that imports the module. The reduce-scatter numel check below
+    # (`assert_fn` in `_test_train_mixed_requires_grad_per_group`) runs
+    # `assertEqual` from an autograd worker thread during backward; since
+    # `assertEqual` always reads `self.rel_tol`, that worker thread's empty
+    # thread-local raises `AttributeError`. Override with the plain `TestCase`
+    # defaults (0 = no tolerance override) to shadow the thread-local
+    # properties; this is safe because this test sets no custom tolerance.
+    precision = TestCase._precision
+    rel_tol = TestCase._rel_tol
+
     @property
     def world_size(self) -> int:
-        return min(4, torch.get_device_module(device_type).device_count())
+        return min(4, torch.get_device_module(self.device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_train_mixed_requires_grad_per_group(self):
+    def test_train_mixed_requires_grad_per_group(self, device):
         """
         Tests training parity with DDP when mixing frozen and non-frozen
         parameters in the same FSDP communication group. This checks that
@@ -69,7 +84,7 @@ class TestFullyShardFrozen(FSDPTest):
                 if "bias" not in param_name:
                     param.requires_grad_(False)
         ref_model = replicate(
-            copy.deepcopy(model).to(device_type),
+            copy.deepcopy(model).to(self.device_type),
             device_ids=[self.rank],
             find_unused_parameters=freeze_after_init,
         )
@@ -114,7 +129,7 @@ class TestFullyShardFrozen(FSDPTest):
             return orig_backward(*args, **kwargs)
 
         torch.manual_seed(42 + self.rank + 1)
-        device = device_type
+        device = self.device_type
         with (
             patch_reduce_scatter(reduce_scatter),
             patch_register_post_backward_hook_backward(backward_with_count),
@@ -135,7 +150,7 @@ class TestFullyShardFrozen(FSDPTest):
                 self.assertTrue(backward_count >= num_mlps - 1)
 
     @skip_if_lt_x_gpu(2)
-    def test_train_mixed_requires_grad_across_groups(self):
+    def test_train_mixed_requires_grad_across_groups(self, device):
         """
         Tests training parity with DDP when mixing frozen and non-frozen
         parameters across different FSDP communication groups, including
@@ -161,7 +176,7 @@ class TestFullyShardFrozen(FSDPTest):
             modules += [nn.Linear(lin_dim, lin_dim), nn.ReLU()]
         model = nn.Sequential(*modules)
         ref_model = replicate(
-            copy.deepcopy(model).to(device_type),
+            copy.deepcopy(model).to(self.device_type),
             device_ids=[self.rank],
             find_unused_parameters=True,
         )
@@ -189,7 +204,7 @@ class TestFullyShardFrozen(FSDPTest):
         _set_requires_grad(ref_model, False)
         num_iters, no_grad_iter_idx = (3, 1)
         torch.manual_seed(42 + self.rank)
-        inp = torch.randn((8, lin_dim), device=device_type)
+        inp = torch.randn((8, lin_dim), device=self.device_type)
         with patch_register_post_backward_hook_backward(backward_with_count):
             for iter_idx in range(num_iters):
                 losses: list[torch.Tensor] = []
@@ -213,7 +228,7 @@ class TestFullyShardFrozen(FSDPTest):
             self.assertTrue(backward_count >= num_linears - 1)
 
     @skip_if_lt_x_gpu(2)
-    def test_multi_forward_mixed_requires_grad(self):
+    def test_multi_forward_mixed_requires_grad(self, device):
         """
         Tests training parity with DDP when having trainable and frozen modules
         that participate multiple times in forward.
@@ -248,7 +263,7 @@ class TestFullyShardFrozen(FSDPTest):
         torch.manual_seed(42)
         model = MultiForwardModule(torch.device("cpu"))
         ref_model = replicate(
-            copy.deepcopy(model).to(device_type), device_ids=[self.rank]
+            copy.deepcopy(model).to(self.device_type), device_ids=[self.rank]
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for module in model.modules():
@@ -257,7 +272,7 @@ class TestFullyShardFrozen(FSDPTest):
         fully_shard(model, reshard_after_forward=reshard_after_forward)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         for iter_idx in range(10):
-            inp = torch.randn((8, 5), device=device_type)
+            inp = torch.randn((8, 5), device=self.device_type)
             losses: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
@@ -265,6 +280,14 @@ class TestFullyShardFrozen(FSDPTest):
                 losses[-1].backward()
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
+
+
+instantiate_device_type_tests(
+    TestFullyShardFrozen,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
