@@ -1947,7 +1947,6 @@ def _adjust_group_norm_scalars(
     for d in local_shape[2:]:
         hxw_local *= d
     args = list(schema.args_schema)
-    # Resolve scalar positions from the ATen schema, including optional args.
     arg_indices = {
         arg.name: i for i, arg in enumerate(schema.op._schema.arguments)
     }
