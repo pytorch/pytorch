@@ -4111,7 +4111,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         else:
             descriptor_var = UserDefinedObjectVariable(descriptor)
 
-        owner_var = UserDefinedClassVariable(type(self.value))
+        owner_var = VariableTracker.build(tx, type(self.value))
         return variables.UserMethodVariable(
             variables.UserFunctionVariable(
                 # descriptor_get_source is type(descriptor).__get__, which is
