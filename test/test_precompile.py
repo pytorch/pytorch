@@ -3498,6 +3498,36 @@ class TestPrecompile(TestCase):
             )
         self.assertEqual(torch.random.get_rng_state(), before)
 
+    @unittest.skipUnless(TEST_CUDA, "needs CUDA")
+    def test_capture_drawing_from_a_cuda_generator_restores_only_the_default(self):
+        x = torch.empty(4, device="cuda")
+        torch.manual_seed(0)
+        before = torch.cuda.get_rng_state(0)
+        default = torch.cuda.default_generators[0]
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(
+                lambda a: a + torch.rand(4, device="cuda", generator=default),
+                x,
+                backend="eager",
+            )
+        self.assertEqual(torch.cuda.get_rng_state(0), before)
+
+        # torch.Generator("cuda") has no device index; a reseed of the default made
+        # during capture must stand.
+        gen = torch.Generator("cuda").manual_seed(0)
+        gen_before = gen.get_state()
+
+        def reseed_then_draw(a):
+            default.manual_seed(7)
+            return a + torch.rand(4, device="cuda", generator=gen)
+
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            _precompile_pair(reseed_then_draw, x, backend="eager")
+        self.assertTrue(any("explicit torch.Generator" in m for m in cm.output))
+        reseeded = torch.Generator("cuda").manual_seed(7).get_state()
+        self.assertEqual(torch.cuda.get_rng_state(0), reseeded)
+        self.assertNotEqual(gen.get_state(), gen_before)
+
     def test_capture_drawing_from_explicit_and_default_generators(self):
         gen = torch.Generator().manual_seed(0)
         gen_before = gen.get_state()
@@ -6046,13 +6076,21 @@ class TestExportPython(TestCase):
         self.assertEqual(run(a=x, b=x + 1), x - (x + 1))
 
     def test_keyword_only_params_rejected(self, device):
-        @torch.compiler.export_python(path=self._tmp_path("ko.py"), backend="eager")
-        def run(a, *, b):
+        default = make_tensor((4,), device=device, dtype=torch.float32)
+
+        def required(a, *, b):
             return a + b
 
-        x = make_tensor((4,), device=device, dtype=torch.float32)
-        with self.assertRaisesRegex(TypeError, "declare keyword-only parameters"):
-            run(x, b=x)
+        def defaulted(a, *, b=default):
+            return a + b
+
+        # Refused when decorated, so a defaulted one the caller never passes is caught
+        # and a required one does not first fail binding.
+        path = self._tmp_path("ko.py")
+        deco = torch.compiler.export_python(path=path, backend="eager")
+        for fn in (required, defaulted):
+            with self.assertRaisesRegex(TypeError, "declare keyword-only parameters"):
+                deco(fn)
 
     def test_positional_defaults_are_canonicalized(self, device):
         default = make_tensor((4,), device=device, dtype=torch.float32)
@@ -6085,7 +6123,7 @@ class TestExportPython(TestCase):
         def scaled(a, s):
             return a * s
 
-        with self.assertRaisesRegex(TypeError, "only Tensor pytrees"):
+        with self.assertRaisesRegex(TypeError, "parameter 's' of example_inputs"):
             scaled(x, x)
 
     def test_non_tensor_arguments_rejected(self, device):
