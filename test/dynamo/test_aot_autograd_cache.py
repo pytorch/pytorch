@@ -57,7 +57,10 @@ from torch.compiler._cache import CacheArtifactManager
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -3933,6 +3936,89 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         )
         self.assertNotEqual(base, self.gen_cache_key(fn, config_with_backend))
 
+    def test_sdpa_backend_state(self):
+        def fn(x):
+            return x.sin().cos()
+
+        config = self.default_config()
+
+        with torch.nn.attention.sdpa_kernel(
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION
+        ):
+            flash1 = self.gen_cache_key(fn, config)
+            flash2 = self.gen_cache_key(fn, config)
+        self.assertEqual(flash1, flash2)
+
+        with torch.nn.attention.sdpa_kernel(
+            torch.nn.attention.SDPBackend.CUDNN_ATTENTION
+        ):
+            cudnn = self.gen_cache_key(fn, config)
+        self.assertNotEqual(flash1, cudnn)
+
+        # Enabling any single backend must differ from the all-disabled baseline,
+        # otherwise a flag pair moving together leaves one of them unpinned.
+        with torch.nn.attention.sdpa_kernel([]):
+            no_backend = self.gen_cache_key(fn, config)
+        for name in torch.nn.attention._backend_names.values():
+            backend = torch.nn.attention.SDPBackend.__members__[name]
+            with torch.nn.attention.sdpa_kernel(backend):
+                self.assertNotEqual(no_backend, self.gen_cache_key(fn, config))
+
+        backends = [
+            torch.nn.attention.SDPBackend.CUDNN_ATTENTION,
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+        ]
+        with torch.nn.attention.sdpa_kernel(backends, set_priority=True):
+            cudnn_first = self.gen_cache_key(fn, config)
+        with torch.nn.attention.sdpa_kernel(backends[::-1], set_priority=True):
+            flash_first = self.gen_cache_key(fn, config)
+        self.assertNotEqual(cudnn_first, flash_first)
+
+        old_fa3 = torch._C._get_fa3_sdp_enabled()
+        try:
+            torch._C._set_sdp_use_fa3(False)
+            fa3_off = self.gen_cache_key(fn, config)
+            torch._C._set_sdp_use_fa3(True)
+            fa3_on = self.gen_cache_key(fn, config)
+        finally:
+            torch._C._set_sdp_use_fa3(old_fa3)
+        self.assertNotEqual(fa3_off, fa3_on)
+
+        old_fa4 = torch._C._get_fa4_sdp_enabled()
+        try:
+            torch._C._set_sdp_use_fa4(False)
+            fa4_off = self.gen_cache_key(fn, config)
+            torch._C._set_sdp_use_fa4(True)
+            fa4_on = self.gen_cache_key(fn, config)
+        finally:
+            torch._C._set_sdp_use_fa4(old_fa4)
+        self.assertNotEqual(fa4_off, fa4_on)
+
+        old_fp16_bf16 = torch.backends.cuda.fp16_bf16_reduction_math_sdp_allowed()
+        try:
+            torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
+            fp16_bf16_off = self.gen_cache_key(fn, config)
+            torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
+            fp16_bf16_on = self.gen_cache_key(fn, config)
+        finally:
+            torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(old_fp16_bf16)
+        self.assertNotEqual(fp16_bf16_off, fp16_bf16_on)
+
+        old_library = torch.backends.cuda.preferred_rocm_fa_library()
+        try:
+            default_value = torch.backends.cuda.preferred_rocm_fa_library("default")
+            default_library = self.gen_cache_key(fn, config)
+            aotriton_value = torch.backends.cuda.preferred_rocm_fa_library("aotriton")
+            aotriton_library = self.gen_cache_key(fn, config)
+        finally:
+            torch.backends.cuda.preferred_rocm_fa_library(old_library)
+        # On ROCm the getter normalizes Default to AOTriton, so the two settings
+        # collapse to one value; the key must differ iff the value differs.
+        if default_value != aotriton_value:
+            self.assertNotEqual(default_library, aotriton_library)
+        else:
+            self.assertEqual(default_library, aotriton_library)
+
     def test_different_act_input_paths(self):
         def fn(x):
             return x.sin().cos()
@@ -5530,6 +5616,107 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
                 fake_mode=standalone_fake_mode,
             )
             self.assertEqual(captured_key, sc_key)
+
+
+class SDPAContextCacheTests(InductorTestCase):
+    @functorch_config.patch(
+        enable_autograd_cache=True, enable_remote_autograd_cache=False
+    )
+    @inductor_config.patch(fx_graph_cache=True, fx_graph_remote_cache=False)
+    @parametrize("nested", (False, True))
+    def test_issue_194007_context_cache(self, device, nested):
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        def fn(q, k, v):
+            with sdpa_kernel([SDPBackend.MATH]):
+                if nested:
+                    with sdpa_kernel(SDPBackend.MATH):
+                        return torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                return torch.nn.functional.scaled_dot_product_attention(q, k, v)
+
+        def state():
+            return (
+                torch.backends.cuda.flash_sdp_enabled(),
+                torch.backends.cuda.mem_efficient_sdp_enabled(),
+                torch.backends.cuda.math_sdp_enabled(),
+                torch.backends.cuda.cudnn_sdp_enabled(),
+                torch._C._get_overrideable_sdp_enabled(),
+                tuple(torch._C._get_sdp_priority_order()),
+            )
+
+        with fresh_cache():
+            counters.clear()
+            for iteration in range(2):
+                torch._dynamo.reset()
+                torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
+                inputs = [
+                    torch.randn(2, 2, 8, 16, device=device, requires_grad=True)
+                    for _ in range(3)
+                ]
+                refs = [x.detach().clone().requires_grad_() for x in inputs]
+                expected = fn(*refs)
+                expected.sum().backward()
+                before = state()
+                actual = torch.compile(fn, backend="inductor", fullgraph=True)(*inputs)
+                actual.sum().backward()
+                self.assertEqual(actual, expected)
+                self.assertEqual([x.grad for x in inputs], [x.grad for x in refs])
+                self.assertEqual(before, state())
+                event = (
+                    "autograd_cache_miss" if iteration == 0 else "autograd_cache_hit"
+                )
+                self.assertEqual(counters["aot_autograd"][event], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+
+instantiate_device_type_tests(
+    SDPAContextCacheTests, globals(), only_for=("cpu", "cuda")
+)
+
+
+class SDPAContextAdmissionTests(torch._dynamo.test_case.TestCase):
+    def test_issue_194007_static_nodes(self):
+        graph = torch.fx.Graph()
+        backend = graph.call_function(
+            torch.nn.attention._backend_from_string, ("MATH",)
+        )
+        check_node_safe(backend)
+        check_node_safe(
+            graph.call_function(torch.nn.attention._sdpa_kernel, ([backend],))
+        )
+        check_node_safe(
+            graph.call_function(torch.nn.attention._sdpa_kernel, ([backend], False))
+        )
+        check_node_safe(
+            graph.call_function(
+                torch.nn.attention._sdpa_kernel,
+                (),
+                {"backends": [backend], "set_priority": False},
+            )
+        )
+        with self.assertRaises(BypassAOTAutogradCache):
+            check_node_safe(
+                graph.call_function(torch.nn.attention._sdpa_kernel, ([backend], True))
+            )
+        with self.assertRaises(BypassAOTAutogradCache):
+            check_node_safe(
+                graph.call_function(
+                    torch.nn.attention._sdpa_kernel,
+                    (),
+                    {"backends": [backend], "set_priority": True},
+                )
+            )
+        dynamic = graph.placeholder("backends")
+        with self.assertRaises(BypassAOTAutogradCache):
+            check_node_safe(
+                graph.call_function(torch.nn.attention._sdpa_kernel, (dynamic,))
+            )
+        with self.assertRaises(BypassAOTAutogradCache):
+            check_node_safe(
+                graph.call_function(
+                    torch.nn.attention._backend_from_string, ("UNKNOWN",)
+                )
+            )
 
 
 if __name__ == "__main__":
