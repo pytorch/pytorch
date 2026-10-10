@@ -23,6 +23,7 @@ def _is_supported_device(tensor: torch.Tensor) -> bool:
         "cpu",
         "hpu",
         "mtia",
+        "mps",
         "xpu",
         torch._C._get_privateuse1_backend_name(),
     )
@@ -41,6 +42,17 @@ class _GeneralMultiDeviceReplicator(_MultiDeviceReplicator):
             )
         self.master = master_tensor
         self._per_device_tensors: dict[torch.device, torch.Tensor] = {}
+
+
+def _infer_default_device() -> str:
+    try:
+        accel = torch.accelerator.current_accelerator(check_available=True)
+    except RuntimeError:
+        # A privateuse1 backend can register accelerator hooks without a
+        # matching Python device module, making the probe raise. Fall back
+        # to the historical default instead of failing construction.
+        return "cuda"
+    return accel.type if accel is not None else "cuda"
 
 
 class ShardedGradScaler(GradScaler):
@@ -78,6 +90,10 @@ class ShardedGradScaler(GradScaler):
     See :class:`GradScaler` for explanation of scaling/unscaling and more use cases.
 
     Args:
+        device (str, optional, default=None): Device type to use. If ``None``
+            (default), it is inferred from the available accelerator via
+            ``torch.accelerator.current_accelerator``, falling back to ``"cuda"``
+            when no accelerator is available (or when ``enabled=False``).
         init_scale (float, optional, default=2.**16):  Initial scale factor.
         growth_factor (float, optional, default=2.0):  Factor by which the scale is multiplied during
             :meth:`update` if no inf/NaN gradients occur for ``growth_interval`` consecutive iterations.
@@ -94,7 +110,7 @@ class ShardedGradScaler(GradScaler):
 
     def __init__(
         self,
-        device: str = "cuda",
+        device: str | None = None,
         init_scale: float = 2.0**16,
         backoff_factor: float = 0.5,
         growth_factor: float = 2.0,
@@ -102,6 +118,11 @@ class ShardedGradScaler(GradScaler):
         enabled: bool = True,
         process_group: ProcessGroup | None = dist.group.WORLD,
     ) -> None:
+        if device is None:
+            # Only probe the accelerator when scaling will actually run;
+            # the availability check may initialize device state (e.g. the
+            # CUDA check poisons fork).
+            device = _infer_default_device() if enabled else "cuda"
         super().__init__(
             device,
             init_scale=init_scale,
@@ -334,7 +355,7 @@ class ShardedGradScaler(GradScaler):
                 self._scale.fill_(new_scale)  # type: ignore[union-attr]
             else:
                 reason = (
-                    "new_scale should be a float or a 1-element torch.cuda.FloatTensor or "
+                    f"new_scale should be a float or a 1-element torch.{self._device}.FloatTensor or "
                     "torch.FloatTensor with requires_grad=False."
                 )
                 if new_scale.device.type != self._device:
@@ -364,9 +385,16 @@ class ShardedGradScaler(GradScaler):
             if _scale.device.type == "cpu":
                 self._amp_update_scale_cpu_(found_inf_combined)
             else:
+                # Some device kernels require 1-element-shaped (rather than
+                # scalar 0-dim) tensors here. ``self._scale`` /
+                # ``self._growth_tracker`` are 0-dim (see
+                # ``GradScaler._lazy_init_scale_growth_tracker``); the views
+                # share storage, so the in-place update still applies to the
+                # user-visible tensors. ``found_inf_combined`` is already
+                # 1-element.
                 torch._amp_update_scale_(
-                    self._scale,  # type: ignore[arg-type]
-                    self._growth_tracker,  # type: ignore[arg-type]
+                    self._scale.view(1),  # type: ignore[arg-type]
+                    self._growth_tracker.view(1),  # type: ignore[arg-type]
                     found_inf_combined,
                     self._growth_factor,  # type: ignore[arg-type]
                     self._backoff_factor,  # type: ignore[arg-type]
