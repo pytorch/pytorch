@@ -254,6 +254,15 @@ class _TupleOwner:
         x: int
 
 
+class _MetaOwner:
+    class Meta(type):
+        pass
+
+
+class _WithNestedMeta(metaclass=_MetaOwner.Meta):
+    pass
+
+
 class _EnumOwner:
     class Level(enum.Enum):
         LOW = 1
@@ -1392,6 +1401,18 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertFalse(is_portable_identity_guard("ID_MATCH", (), member))
             GuardsStatePickler({}, {}, {}, {}, buf).dump({"perms": member})
         self.assertIs(load_guards_state(buf.getvalue())["perms"], member)
+
+    def test_a_main_class_resolves_against_the_loading_main(self):
+        main = sys.modules["__main__"]
+        cls = type("_MainOnly", (), {"__module__": "__main__"})
+        buf = io.BytesIO()
+        with mock.patch.object(main, "_MainOnly", cls, create=True):
+            self.assertTrue(is_portable_identity_guard("CLASS_MATCH", (), cls))
+            GuardsStatePickler({}, {}, {}, {}, buf).dump({"cls": cls})
+            self.assertIs(load_guards_state(buf.getvalue())["cls"], cls)
+        # A loading process whose __main__ does not define it fails the load.
+        with self.assertRaisesRegex(AttributeError, "_MainOnly"):
+            load_guards_state(buf.getvalue())
 
     def test_an_unguarded_grad_loads_as_none(self):
         # The .grad of a guarded leaf is a tensor the guard tree may not reach;
@@ -3513,6 +3534,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             # Its __qualname__ leads to _wrapped_target instead.
             (_wraps_wrapper, False),
             (_TupleOwner.Point, False),
+            # The guard-state pickler refuses a class with a nested metaclass.
+            (_WithNestedMeta, False),
             # Bound to the module's Random instance, with no __module__.
             (random.random, False),
             # pybind11: bound to an instance, so its __qualname__ names the
