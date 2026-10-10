@@ -132,10 +132,65 @@ jobs:
         with:
           no-sudo: true
 
+      # TheRock exposes rocminfo/amd-smi only after /etc/rocm_env.sh.
+      # GitHub bash does not source bashrc. Each step is a new shell.
+      - name: Job pod ROCm version
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f /etc/rocm_env.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/rocm_env.sh
+          fi
+          amd-smi version || true
+          rocminfo 2>&1 | grep -m1 -E '^Runtime Version' | sed 's/^/rocminfo: /' || true
+
+      - name: Job pod system info
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat /etc/os-release || true
+          cat /etc/apt/sources.list.d/rocm.list || true
+          cat /opt/rocm/.info/version || true
+          whoami
+          id
+          # Host amdgpu debs are not in this image. Do not fail when grep
+          # finds nothing (grep exits 1 on no match).
+          dpkg -l | grep -E " amdgpu" || true
+
+      - name: Job pod amd-smi
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f /etc/rocm_env.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/rocm_env.sh
+          fi
+          amd-smi monitor -ptumv
+          amd-smi list
+
+      - name: Job pod rocminfo
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f /etc/rocm_env.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/rocm_env.sh
+          fi
+          rocminfo
+
       - name: Job pod GPU check
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -f /etc/rocm_env.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/rocm_env.sh
+          fi
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           required=1
           config="${{ matrix.config }}"
