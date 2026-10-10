@@ -7,12 +7,9 @@ strings handed to ``AsyncCompile`` (as ``triton.module_level_kernels`` does), an
 emits only the preamble lines (including the ``AsyncCompile`` lifecycle) that the
 finished module uses. See ``torch.compiler.export_python``, which is the consumer.
 
-The tradeoffs are deliberate and are the reason this is opt-in: run on its own, a
+The tradeoff is deliberate and is the reason this is opt-in: run on its own, a
 kernel defined at module level compiles serially, in process, on its first launch,
-instead of fanning out to the compile worker pool. And every hoisted kernel names
-itself by the wrapper's ``__file__``, so they all share one autotune-cache key; that
-cache is effectively off in this mode (its configs_hash check keeps a wrong config
-from being applied).
+instead of fanning out to the compile worker pool.
 
 Only Triton kernels inductor generates are hoisted. A user-defined ``@triton.jit`` kernel
 is still emitted as a source string passed to ``async_compile.triton``, and so are the
