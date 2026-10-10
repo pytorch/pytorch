@@ -680,6 +680,11 @@ class FSDPParamGroup:
             self.wait_for_unshard()
             if default_prefetch:
                 self._backward_prefetch()
+            elif self._post_forward_indices:
+                # Only _backward_prefetch pops the index otherwise; popping it
+                # here too lets the root tell when the post-forward order is
+                # stale.
+                self._post_forward_indices.pop()
 
     @_dynamo_disable
     def post_backward(self, *unused: Any):
