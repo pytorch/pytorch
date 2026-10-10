@@ -2495,6 +2495,11 @@ class GraphLowering(torch.fx.Interpreter):
         )
         if wrapper_code_gen_cls is None:
             raise AssertionError(f"Device {self.device_type} not supported")
+        from .codegen.wrapper_readable import select_wrapper_codegen
+
+        wrapper_code_gen_cls = select_wrapper_codegen(
+            self.device_type, wrapper_code_gen_cls, self.cpp_wrapper, self.fx_wrapper
+        )
         self.wrapper_code = wrapper_code_gen_cls.create(
             is_subgraph,
             subgraph_name,
