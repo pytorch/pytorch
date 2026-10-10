@@ -12128,9 +12128,7 @@ print(json.dumps([
         ptr = 0x1234
         with (
             patch.object(runtime, "cudaMallocManaged", return_value=(success, ptr)),
-            patch.object(
-                runtime, "cudaDeviceGetAttribute", return_value=(success, 1)
-            ),
+            patch.object(runtime, "cudaDeviceGetAttribute", return_value=(success, 1)),
             patch.object(
                 runtime,
                 "cudaMemAdvise",

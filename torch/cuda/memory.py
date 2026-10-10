@@ -1938,9 +1938,7 @@ def _make_uvm_pool():
             if result[0] == _runtime.cudaError_t.cudaErrorMemoryAllocation:
                 return 0
             ptr = int(
-                _check_cuda_bindings(
-                    result, operation=f"cudaMallocManaged({size})"
-                )
+                _check_cuda_bindings(result, operation=f"cudaMallocManaged({size})")
             )
             try:
                 if _device_supports_uvm_advise(device, _runtime):
