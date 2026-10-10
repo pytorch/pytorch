@@ -6,6 +6,11 @@
 
 Functional collectives take the group as an argument. Under `torch.compile` they are traced into the graph so the compiler can reorder and overlap communication.
 
+```{eval-rst}
+.. note::
+    The :mod:`torch.distributed.nn.functional` module is deprecated in favor of this module.
+```
+
 ```python
 import torch.distributed as dist
 import torch.distributed.functional_collectives as funcol
