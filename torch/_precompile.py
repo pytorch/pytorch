@@ -406,9 +406,10 @@ class DynamoTracer:
     ``torch.compiler.precompile`` API, so it may change without a deprecation cycle.
 
     ``guard_filter_fn`` takes the ``GuardFilterEntry`` records (``guard_type``,
-    ``name``, ...) and returns one keep flag per entry, filtering the guards kept
-    in the SERIALIZED artifact (runtime capture guards are always retained; the
-    default drops only what cannot be serialized); ``recompile_limit`` caps
+    ``name``, ...) and returns one keep flag per entry. It filters the runtime
+    guards during capture as well as the serialized ones, so a dropped guard never
+    triggers a recompile during capture (the default drops only what cannot be
+    serialized); ``recompile_limit`` caps
     recompilations per frame, and a call past it runs eager and is absent from
     the artifact without any gate refusing it; ``dynamic`` forces dynamic shapes
     as ``torch.compile(dynamic=)`` does. The ``require_*`` gates refuse, at write
@@ -700,7 +701,7 @@ class _DynamoCapture(Capture[_P, _R]):
 
     def __init__(
         self,
-        session: PrecompileSession,
+        session: PrecompileSession[_P, _R],
         artifact_path: str | os.PathLike[str],
         cache_path: str | os.PathLike[str],
         *,
@@ -2281,6 +2282,9 @@ def _build_multigraph_python_source(
     buf.writeline(f"DROPPED_GUARDS = {[list(g) for g in summary.dropped_guards]!r}")
     buf.writeline(
         f"RISKY_DROPPED_GUARDS = {[list(g) for g in summary.risky_dropped_guards]!r}"
+    )
+    buf.writeline(
+        f"POLICY_DROPPED_GUARDS = {[list(g) for g in summary.policy_dropped_guards]!r}"
     )
     buf.writeline("")
     buf.writeline("# What a dropped slot above actually checked, where it renders one.")
