@@ -20,7 +20,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     IterateExprs,
     ShapeEnv,
-    SymNode,
+    SymNodeTypes,
 )
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
@@ -1139,7 +1139,7 @@ class SizeVarAllocator:
             optimization_hint: For cases where fallback/heuristic values are acceptable
                 for unbacked symbols.
         """
-        if isinstance(expr, SymNode):
+        if isinstance(expr, SymNodeTypes):
             raise TypeError(
                 f"guarding_hint_or_throw expects a sympy Expr or int, not {type(expr)}. "
                 "Use expr.expr to extract the sympy expression from a SymNode."
