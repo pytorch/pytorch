@@ -190,7 +190,6 @@ add_executable(RocmActivityProfilerTest
     MockCpuActivityBuffer.cpp
     TestUtils.cpp)
 target_compile_definitions(RocmActivityProfilerTest PRIVATE
-    "__HIP_PLATFORM_HCC__"
     "__HIP_PLATFORM_AMD__")
 target_link_libraries(RocmActivityProfilerTest PRIVATE
     gtest_main
