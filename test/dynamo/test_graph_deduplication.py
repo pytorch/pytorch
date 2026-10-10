@@ -9,6 +9,7 @@ from torch._dynamo.output_graph import FakeRootModule
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import extract_graph, extract_graph_and_tracker, normalize_gm
 from torch.compiler import allow_in_graph
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -17,6 +18,8 @@ def graph_str(gm):
 
 
 class GraphDededuplicationTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.exit_stack = contextlib.ExitStack()
