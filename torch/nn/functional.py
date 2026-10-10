@@ -1125,6 +1125,16 @@ def lp_pool3d(
     padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool3d` for details.
+
+    Args:
+        input (Tensor): the input tensor.
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int or tuple of int): the size of the pooling window.
+        stride (int or tuple of int, optional): the stride between windows.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -1174,6 +1184,16 @@ def lp_pool2d(
     padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool2d` for details.
+
+    Args:
+        input (Tensor): the input tensor.
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int or tuple of int): the size of the pooling window.
+        stride (int or tuple of int, optional): the stride between windows.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -1220,6 +1240,16 @@ def lp_pool1d(
     padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool1d` for details.
+
+    Args:
+        input (Tensor): the input tensor.
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int): the size of the pooling window.
+        stride (int or tuple of int, optional): the stride between windows.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -3774,11 +3804,19 @@ def linear_cross_entropy(
 
     The statement::
 
-      loss = linear_cross_entropy(input, linear_weight, target, **kwargs)
+      loss = linear_cross_entropy(
+          input, linear_weight, target, linear_bias=linear_bias, **kwargs
+      )
 
     is equivalent to the following reference implementation of linear_cross_entropy::
 
-      logits = linear(input, linear_weight)
+      C, *out_features, in_features = linear_weight.shape
+      logits = linear(
+          input,
+          linear_weight.reshape(-1, in_features),
+          None if linear_bias is None else linear_bias.reshape(-1),
+      )
+      logits = logits.reshape(*input.shape[:-1], C, *out_features)
       loss = cross_entropy(logits, target, **kwargs)
 
     provided that :attr:`ignore_index` is not explicitly set to `None`
@@ -3864,7 +3902,9 @@ def linear_cross_entropy(
         The reference path (``options=None``) supports all of the above.
 
     Shape:
-        - Input: :math:`(in_features)` or :math:`(N, in\_features)`.
+        - Input: :math:`(in_features)` or :math:`(N, in\_features)`. There is
+          no :math:`(B, T, in\_features)` form: flatten sequence inputs to
+          :math:`(N, in\_features)` with target :math:`(N)`.
         - Linear weight: :math:`(C, in\_features)` or :math:`(C, d_1,
           ..., d_K, in\_features)` with :math:`K \geq 1` in the case of
           K-dimensional loss.  Note: multi-dimensional weights (K > 0)

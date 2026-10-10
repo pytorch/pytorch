@@ -1551,14 +1551,15 @@ class CppFlexAttentionTemplate(CppTemplate):
 
     def choose_flex_template(
         self,
-        query: ir.Buffer,
-        key: ir.Buffer,
+        query: ir.IRNode,
+        key: ir.IRNode,
         num_threads,
     ):
         # choose from FLEX_ATTENTION or FLEX_DECODING
         FLEX_TEMPLATE = FLEX_ATTENTION_TEMPLATE
-        q_batch_size, q_num_heads, q_seq_len, _ = query.data.data.layout.size  # type: ignore[attr-defined]
-        k_seq_len = key.data.data.layout.size[2]  # type: ignore[attr-defined]
+        # Logical (B, H, S, D) sizes; the backing buffer may have a different shape.
+        q_batch_size, q_num_heads, q_seq_len, _ = query.get_size()
+        k_seq_len = key.get_size()[2]
         if all(
             sympy.sympify(val).is_number
             for val in [q_batch_size, q_num_heads, q_seq_len, k_seq_len, num_threads]
@@ -1641,7 +1642,9 @@ class CppFlexAttentionTemplate(CppTemplate):
                 stack.enter_context(
                     patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
                 )
-            FLEX_TEMPLATE = self.choose_flex_template(query, key, num_threads)
+            FLEX_TEMPLATE = self.choose_flex_template(
+                self.input_nodes[0], self.input_nodes[1], num_threads
+            )
             return self._template_from_string(INIT_PARAMS + FLEX_TEMPLATE).render(
                 **options
             )
