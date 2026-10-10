@@ -1947,12 +1947,11 @@ def _adjust_group_norm_scalars(
     for d in local_shape[2:]:
         hxw_local *= d
     args = list(schema.args_schema)
-    # Find scalar arg positions: tensor slots (DTensorSpec or None for optionals)
-    # precede N, C, HxW. Count both to find the offset.
-    num_tensor_args = sum(isinstance(a, (DTensorSpec, type(None))) for a in args)
-    args[num_tensor_args] = n_local
-    args[num_tensor_args + 1] = c_local
-    args[num_tensor_args + 2] = hxw_local
+    # Use fixed schema positions, including optional tensor arguments.
+    scalar_start = 3 if schema.op == aten.native_group_norm.default else 5
+    args[scalar_start] = n_local
+    args[scalar_start + 1] = c_local
+    args[scalar_start + 2] = hxw_local
     return OpSchema(schema.op, tuple(args), schema.kwargs_schema)
 
 
@@ -2049,6 +2048,32 @@ def group_norm_strategy(
     return [placements]
 
 
+@register_single_dim_strategy(
+    [aten.native_group_norm_backward.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def group_norm_backward_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    # native_group_norm_backward(grad_out, input, mean, rstd, weight?,
+    #                            N, C, HxW, group, output_mask)
+    output_mask = args_schema[9]
+    placements: list[Placement | _ShardingPlaceholder | None] = [
+        _ShardingPlaceholder(0) if output_mask[0] else None,
+        Partial("sum") if output_mask[1] else None,
+        Partial("sum") if output_mask[2] else None,
+        _ShardingPlaceholder(0),  # grad_out
+        _ShardingPlaceholder(0),  # input
+        _ShardingPlaceholder(0),  # mean
+        _ShardingPlaceholder(0),  # rstd
+    ]
+    if args_schema[4] is not None:
+        placements.append(Replicate())
+    return [placements]
+
+
 # Register scalar shape adjuster for group_norm so the sharding propagator
 # rewrites the N/C/HxW args to local values when the input is sharded.
 from torch.distributed.tensor._api import DTensor
@@ -2056,4 +2081,7 @@ from torch.distributed.tensor._api import DTensor
 
 DTensor._op_dispatcher.sharding_propagator.op_to_scalar_shape_adjuster[
     aten.native_group_norm.default
+] = _adjust_group_norm_scalars
+DTensor._op_dispatcher.sharding_propagator.op_to_scalar_shape_adjuster[
+    aten.native_group_norm_backward.default
 ] = _adjust_group_norm_scalars
