@@ -292,7 +292,7 @@ inline void get_strides<trans_type_t::nt>(
 using primitive_cache =
     at::native::onednn::lru_cache<memory::dims, primitive_ext>;
 
-template <trans_type_t Tt, joint_dtypes_t Ts, typename F>
+template <trans_type_t Tt, joint_dtypes_t Ts, at::ScalarType Sd, typename F>
 struct matmul_primitive_cache_t {
   static inline primitive_ext& get(
       const int m,
@@ -305,7 +305,6 @@ struct matmul_primitive_cache_t {
           b_dims, // for shapeless bias, not put it into template parameter
       const int device_id,
       F f_attr,
-      const at::ScalarType scale_dtype,
       const int64_t scale_group_size,
       const int64_t zp_group_size) {
     auto& cached = get_cache(device_id);
@@ -319,8 +318,7 @@ struct matmul_primitive_cache_t {
         k,
         int(b_dims),
         int(scale_group_size),
-        int(zp_group_size),
-        scale_dtype);
+        int(zp_group_size));
     auto iter = cached.find(pri_key);
     if (iter == cached.end()) {
       auto [src_dt, wei_dt] = onednn_types_mapper<Ts>::get();
@@ -373,6 +371,39 @@ struct matmul_primitive_cache_t {
   }
 };
 
+template <joint_dtypes_t Ts, at::ScalarType Sd, typename F>
+static inline primitive_ext& matmul_primitive_create_and_cache(
+    const trans_type_t Tt,
+    const bias_type_t b_dims,
+    const int m,
+    const int n,
+    const int k,
+    const int64_t lda,
+    const int64_t ldb,
+    const int64_t ldc,
+    const int device_id,
+    F attr,
+    const int64_t scale_group_size,
+    const int64_t zp_group_size) {
+  switch (Tt) {
+    case trans_type_t::nt:
+      return matmul_primitive_cache_t<trans_type_t::nt, Ts, Sd, F>::get(
+          m,
+          n,
+          k,
+          lda,
+          ldb,
+          ldc,
+          b_dims,
+          device_id,
+          attr,
+          scale_group_size,
+          zp_group_size);
+    default:
+      TORCH_INTERNAL_ASSERT(false, "unsupported trans type ...");
+  }
+}
+
 template <joint_dtypes_t Ts, typename F>
 static inline primitive_ext& matmul_primitive_create_and_cache(
     const trans_type_t Tt,
@@ -388,23 +419,52 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
     const at::ScalarType scale_dtype,
     const int64_t scale_group_size,
     const int64_t zp_group_size) {
-  switch (Tt) {
-    case trans_type_t::nt:
-      return matmul_primitive_cache_t<trans_type_t::nt, Ts, F>::get(
+  switch (scale_dtype) {
+    case at::ScalarType::Float:
+      return matmul_primitive_create_and_cache<Ts, at::ScalarType::Float, F>(
+          Tt,
+          b_dims,
           m,
           n,
           k,
           lda,
           ldb,
           ldc,
-          b_dims,
           device_id,
           attr,
-          scale_dtype,
+          scale_group_size,
+          zp_group_size);
+    case at::ScalarType::Half:
+      return matmul_primitive_create_and_cache<Ts, at::ScalarType::Half, F>(
+          Tt,
+          b_dims,
+          m,
+          n,
+          k,
+          lda,
+          ldb,
+          ldc,
+          device_id,
+          attr,
+          scale_group_size,
+          zp_group_size);
+    case at::ScalarType::BFloat16:
+      return matmul_primitive_create_and_cache<Ts, at::ScalarType::BFloat16, F>(
+          Tt,
+          b_dims,
+          m,
+          n,
+          k,
+          lda,
+          ldb,
+          ldc,
+          device_id,
+          attr,
           scale_group_size,
           zp_group_size);
     default:
-      TORCH_INTERNAL_ASSERT(false, "unsupported trans type ...");
+      TORCH_INTERNAL_ASSERT(
+          false, "Unsupported scale dtype for int4 matmul: ", scale_dtype);
   }
 }
 
