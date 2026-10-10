@@ -4166,7 +4166,13 @@ def meta_randint_like(self, high, **kwargs):
     )
 
 
-@register_meta([aten._fused_adam_.default, aten._fused_adamw_.default])
+@register_meta(
+    [
+        aten._fused_adam_.default,
+        aten._fused_adamw_.default,
+        aten._fused_adamw_.tensor_lr,
+    ]
+)
 def meta__fused_adam_(
     self,
     grads,

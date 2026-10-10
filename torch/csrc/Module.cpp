@@ -103,6 +103,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_layouts.h>
+#include <torch/csrc/utils/tensor_list.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
@@ -261,6 +262,7 @@ static PyObject* THPModule_crashIfCsrcASAN(PyObject* module, PyObject* arg) {
       THPUtils_typename(arg));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
   volatile char x[3];
+  // NOLINTNEXTLINE(clang-analyzer-security.ArrayBound)
   x[THPUtils_unpackInt(arg)] = 0;
   // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   return THPUtils_packInt32(x[0]);
@@ -2866,6 +2868,10 @@ Call this whenever a new thread is created in order to propagate values from
     return py::cast(at::Tensor(std::move(real)));
   });
 
+  py_module.def("_clear_fake_real_tensor", [](const at::Tensor& fake) {
+    fake.unsafeGetTensorImpl()->set_real_tensor(nullptr);
+  });
+
   py_module.def("_get_fake_constant", [](const at::Tensor& t) -> py::object {
     TORCH_CHECK(t.defined(), "Expected a defined tensor");
     TORCH_CHECK(t.is_fake(), "Expected a fake tensor");
@@ -2897,6 +2903,11 @@ Call this whenever a new thread is created in order to propagate values from
       },
       py::arg("fake"),
       py::arg("constant"));
+
+  py_module.def("_fake_tensor_to_list", [](const at::Tensor& t) {
+    return py::reinterpret_steal<py::object>(
+        torch::utils::fake_tensor_to_list(t));
+  });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
