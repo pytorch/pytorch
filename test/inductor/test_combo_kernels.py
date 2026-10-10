@@ -3183,7 +3183,8 @@ class ComboKernelMetadataTests(TestCase):
             return torch.relu(a), torch.sigmoid(b)
 
         inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
-        _, kernels = run_and_get_kernels(torch.compile(fn), *inps)
+        out_compiled, kernels = run_and_get_kernels(torch.compile(fn), *inps)
+        self.assertEqual(out_compiled, fn(*inps))
         code = " ".join(kernels)
         self.assertRegex(code, r"num_gb = \d*\.\d+")
         self.assertIn(f"device='{GPU_TYPE}'", code)
