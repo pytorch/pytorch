@@ -359,15 +359,13 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 pytree._deregister_pytree_node(cls)
 
         def register(cls):
-            # The Python registry only, as _deregister_pytree_node is, so the
-            # class does not stay in the optree registry register_pytree_node
-            # also writes. The name is only a registry key here, so the <locals>
-            # in it is harmless; it must be unique because nameless registrations
-            # share one slot of SERIALIZED_TYPE_TO_PYTHON_TYPE, so the first
+            # The name is only a registry key here, so the <locals> in it is
+            # harmless; it must be unique because nameless registrations share
+            # one slot of SERIALIZED_TYPE_TO_PYTHON_TYPE, so the first
             # deregistration deletes it and the next raises KeyError after it has
             # already dropped its class from SUPPORTED_NODES.
             name = f"{__name__}.{cls.__qualname__}"
-            pytree._private_register_pytree_node(
+            pytree.register_pytree_node(
                 cls, lambda n: ([], None), lambda c, _: cls(), serialized_type_name=name
             )
             self.addCleanup(deregister, cls)
@@ -2487,6 +2485,16 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         self.assertEqual((blob["backend"], blob["tracer"]), (backend, "dynamo"))
+
+    def test_precompile_session_snapshot_refuses_behind_the_gates(self):
+        from torch._precompile import _parse_artifact_metadata
+
+        def step(model, x):
+            y = model(x)
+            torch._dynamo.graph_break()
+            return y.sum(dim=0) + y.shape[0]
+
+        model = torch.nn.Linear(4, 4)
         # A session that never ran its callable has nothing to render, and one
         # whose call raised is refused as incomplete unless the caller accepts it.
         empty = precompile_package.precompile_capture(step, backend="eager")
