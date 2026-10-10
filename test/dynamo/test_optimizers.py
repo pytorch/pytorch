@@ -129,6 +129,42 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
                 self.assertFalse(torch.equal(p, before))
                 torch._dynamo.reset()
 
+    def test_capturable_optim_on_privateuse1(self):
+        # PrivateUse1 backends must be recognized as capturable-supported.
+        if not torch.utils._triton.has_triton():
+            self.skipTest("triton unavailable on this device")
+        backend_name = torch._C._get_privateuse1_backend_name()
+        if (
+            backend_name == "privateuseone"
+            or not getattr(torch, backend_name).is_available()
+        ):
+            self.skipTest("no PrivateUse1 accelerator available")
+        dev = backend_name
+
+        base = torch.randn(8, device=dev)
+        grad = torch.full_like(base, 1.0)
+
+        def run(compiled):
+            p = base.clone().requires_grad_(True)
+            p.grad = grad.clone()
+            opt = torch.optim.Adam([p], lr=1e-2)
+            if compiled:
+
+                @torch.compile(fullgraph=False, backend="inductor")
+                def step(o):
+                    o.step()
+
+                step(opt)
+                self.assertTrue(
+                    opt.param_groups[0].get("capturable", False),
+                    "capturable was not injected on PrivateUse1",
+                )
+            else:
+                opt.step()
+            return p.detach()
+
+        self.assertEqual(run(True), run(False), atol=1e-5, rtol=1e-5)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
