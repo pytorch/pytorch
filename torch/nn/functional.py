@@ -5319,7 +5319,7 @@ def interpolate(  # noqa: F811
         if not torch.jit.is_scripting():
             if (
                 not input.is_cpu
-                and (not input.is_cuda or torch.version.hip is not None)
+                and not (input.is_cuda and torch.version.hip is None)
                 and torch.are_deterministic_algorithms_enabled()
             ):
                 # Use slow decomp whose backward will be in terms of index_put
