@@ -12288,7 +12288,7 @@ op_db: list[OpInfo] = [
                # MPS arange does not support complex dtypes yet
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
                             dtypes=(torch.complex64, torch.complex128)),
-                # XPU arange does not support complex dtypes.
+                # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
                 DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
                              dtypes=(torch.complex64, torch.complex128)),
            )),
@@ -23739,6 +23739,9 @@ python_ref_db = [
         "_refs.arange",
         torch_opinfo_name="arange",
         skips=(
+            # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
+            DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
+                         dtypes=(torch.complex64, torch.complex128)),
             # Tests that assume input is a tensor or sequence of tensors
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
