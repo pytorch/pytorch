@@ -7,14 +7,14 @@ namespace torch::fake_tensor {
 // A C++ FakeTensorMode is exposed to Python through a CppFakeTensorMode
 // wrapper. Ownership:
 //
-//   fake tensor        --shared_ptr-------------> C++ FakeTensorMode
-//   Python wrapper     --shared_ptr (capsule)---> C++ FakeTensorMode
+//   fake tensor        --shared_ptr--> C++ FakeTensorMode
+//   Python wrapper     --> _CppFakeTensorMode --shared_ptr--> C++ mode
 //   C++ FakeTensorMode --fake_mode_pyobj_ (weakref)--> Python wrapper
 //
 // The C++ mode only weakly references its wrapper; a strong reference would
-// form a cycle through the capsule. So fake tensors can outlive the wrapper:
-// once Python drops it, it is collected while the C++ mode lives on through
-// its fakes.
+// form a cycle through the bound _CppFakeTensorMode object. So fake tensors can
+// outlive the wrapper: once Python drops it, it is collected while the C++ mode
+// lives on through its fakes.
 //
 // getCppFakeTensorModePyObj returns the wrapper while it is alive. Otherwise it
 // builds a new CppFakeTensorMode around the same C++ mode and caches a weakref
@@ -54,8 +54,12 @@ py::object getCppFakeTensorModePyObj(
       ? py::reinterpret_borrow<py::object>(
             mode->shape_env_->ptr(getPyInterpreter()))
       : py::none();
-  py::object cls = py::module::import("torch._subclasses.fake_tensor")
-                       .attr("CppFakeTensorMode");
+  py::object fake_tensor = py::module::import("torch._subclasses.fake_tensor");
+  TORCH_CHECK(
+      py::hasattr(fake_tensor, "CppFakeTensorMode"),
+      "The Python wrapper of this C++ FakeTensorMode was garbage collected, "
+      "and rebuilding it requires torch._subclasses.fake_tensor.CppFakeTensorMode");
+  py::object cls = fake_tensor.attr("CppFakeTensorMode");
   py::object wrapper =
       cls.attr("_from_cpp_mode")(py::cast(mode), converter, shape_env);
   // SafePyObject owns the weakref with interpreter-safe lifetime management,
