@@ -1157,11 +1157,11 @@ def generic_getiter(
             raise_type_error(tx, err_str)
         return res
     elif pysequence_check(T):
-        from .functions import UserFunctionVariable
+        from .builder import SourcelessBuilder
 
-        return UserFunctionVariable(polyfills.builtins.sequence_iterator).call_function(
-            tx, [obj], {}
-        )
+        return SourcelessBuilder.create_internal_user_function(
+            polyfills.builtins.sequence_iterator
+        ).call_function(tx, [obj], {})
     else:
         raise_type_error(tx, f"'{obj.python_type_name()}' object is not iterable")
 
