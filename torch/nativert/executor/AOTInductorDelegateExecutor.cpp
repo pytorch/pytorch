@@ -57,8 +57,8 @@ std::unique_ptr<torch::inductor::AOTIModelContainerRunner>
 create_aoti_model_container_runner_cpu(
     const std::string& model_so_path,
     size_t num_models,
-    const std::string& device_str,
-    const std::string& cubin_dir,
+    const std::string& /*device_str*/,
+    const std::string& /*cubin_dir*/,
     const bool run_single_threaded) {
   return std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
       model_so_path,
@@ -78,7 +78,7 @@ AOTIDelegateExecutor::AOTIDelegateExecutor(
     const std::shared_ptr<Weights>& weights,
     const ExecutorConfig& executorConfig,
     caffe2::serialize::PyTorchStreamReader* packageReader,
-    const MakeProxyExecutorFn& makeProxyExecutorFunc)
+    const MakeProxyExecutorFn& /*makeProxyExecutorFunc*/)
     : ETDelegateExecutor(torch::_export::archive_spec::AOTINDUCTOR_DIR, node) {
   TORCH_CHECK(
       packageReader, "Package reader cannot be null for lowered modules");
