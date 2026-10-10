@@ -17,6 +17,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU_AND_TRITON,
     IS_BIG_GPU,
 )
+from torch.utils._triton import has_triton_cuda_tma_device
 
 
 # Make the helper files in test/ importable
@@ -33,7 +34,9 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     skip_if_cpp_wrapper,
 )
 from torch._inductor import config
+from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.scheduler import Scheduler
+from torch._inductor.select_algorithm import TritonTemplate
 
 
 class TestCase(InductorTestCase):
@@ -252,7 +255,7 @@ if HAS_GPU_AND_TRITON:
                     {
                         "benchmark_kernel": True,
                         "benchmark_fusion": True,
-                        "benchmark_epilogue_fusion": True,
+                        "benchmark_template_fusion": True,
                     }
                 )
             )
@@ -284,7 +287,7 @@ if HAS_GPU_AND_TRITON:
                 res, code = run_and_get_code(foo_c, m, inp)
 
             torch._dynamo.reset()
-            with config.patch(benchmark_epilogue_fusion=False):
+            with config.patch(benchmark_template_fusion=False):
                 foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
                 with torch.no_grad():
                     res2, code2 = run_and_get_code(foo_c, m, inp)
@@ -296,7 +299,7 @@ if HAS_GPU_AND_TRITON:
         @config.patch(
             {
                 "max_autotune_gemm_backends": "TRITON",
-                "benchmark_epilogue_fusion": False,
+                "benchmark_template_fusion": False,
             }
         )
         def test_equivalent_template_code(self):
@@ -344,6 +347,84 @@ if HAS_GPU_AND_TRITON:
             self.assertEqual(expected, actual)
 
             torch._dynamo.reset()
+
+        def _check_tma_store_view_epilogue_fuses(self):
+            # TMA-store choices tile the output 2D over (M, N). This epilogue
+            # views the (384, 512) output as (256, 3, 256), which that tiling
+            # can't split, so fusing it into a TMA-store choice raises CantSplit
+            # while the other choices fuse fine.
+            def f(a, b, bias):
+                return (a @ b).view(256, 3, 256) * bias.view(3, 1)
+
+            a = torch.randn(384, 256, device=GPU_TYPE, dtype=torch.float16)
+            b = torch.randn(256, 512, device=GPU_TYPE, dtype=torch.float16)
+            bias = torch.randn(3, device=GPU_TYPE, dtype=torch.float16)
+
+            out, code = run_and_get_code(torch.compile(f), a, b, bias)
+            self.assertEqual(out, f(a, b, bias), atol=1e-1, rtol=1e-2)
+            FileCheck().check("triton_tem_fused").check_count(
+                "async_compile.triton(", 1, exactly=True
+            ).run(code[0])
+
+        @unittest.skipIf(
+            not has_triton_cuda_tma_device(), "Needs TMA-store template choices"
+        )
+        @fresh_cache()
+        @config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_template_tma_store": True,
+                "multi_kernel_hints": [64],
+            }
+        )
+        def test_multi_kernel_hints_skips_cant_split_choice(self):
+            self._check_tma_store_view_epilogue_fuses()
+
+        @unittest.skipIf(
+            not has_triton_cuda_tma_device(), "Needs TMA-store template choices"
+        )
+        @fresh_cache()
+        @config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_template_tma_store": True,
+                "max_template_fusion_benchmarked_choices": 1,
+            }
+        )
+        def test_cant_split_choice_not_counted_as_benchmarked(self):
+            # Rank the TMA-store choices first, so the one benchmarked slot goes
+            # to a choice whose fused kernel raises CantSplit.
+            orig_generate = TritonTemplate.generate
+            orig_choice_timings = MultiTemplateBuffer.choice_timings
+            tma_store_choices = []
+
+            def generate(self, *args, **kwargs):
+                choice = orig_generate(self, *args, **kwargs)
+                if choice is not None and kwargs.get("tma_store", False):
+                    choice._test_tma_store = True
+                    tma_store_choices.append(choice)
+                return choice
+
+            def choice_timings(self, hint_override=None):
+                timings = orig_choice_timings(self, hint_override)
+                ranked = sorted(timings.items(), key=lambda kv: kv[1])
+                return {
+                    c: 1.0 if getattr(c, "_test_tma_store", False) else 1.0 + 1e-6 * i
+                    for i, (c, _) in enumerate(ranked, 1)
+                }
+
+            with (
+                unittest.mock.patch.object(TritonTemplate, "generate", generate),
+                unittest.mock.patch.object(
+                    MultiTemplateBuffer, "choice_timings", choice_timings
+                ),
+            ):
+                self._check_tma_store_view_epilogue_fuses()
+            self.assertTrue(tma_store_choices)
 
 
 if HAS_CPU and not torch.backends.mps.is_available():
