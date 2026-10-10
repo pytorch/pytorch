@@ -266,6 +266,7 @@ from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
     ByteArrayVariable,
+    DequeVariable,
     ListIteratorVariable,
     ListReverseIteratorVariable,
     ListVariable,
@@ -2502,7 +2503,9 @@ class VariableBuilder:
 
     def wrap_listlike(
         self,
-        value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple],
+        value: Union[
+            tuple[Any, ...], list[Any], collections.deque[Any], odict_values, NamedTuple
+        ],
     ) -> VariableTracker:
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
@@ -2632,8 +2635,20 @@ class VariableBuilder:
             # https://github.com/pytorch/pytorch/issues/153701.
             for vt in output:
                 vt.realize()
-        # type: ignore[arg-type]
-        result = BaseListVariable.cls_for_instance(value)(output, source=self.source)
+        if isinstance(value, collections.deque):
+            install_guard(
+                AttrSource(self.source, "maxlen").make_guard(GuardBuilder.EQUALS_MATCH)
+            )
+            result = DequeVariable(
+                output,
+                maxlen=ConstantVariable.create(value.maxlen),
+                source=self.source,
+            )
+        else:
+            # type: ignore[arg-type]
+            result = BaseListVariable.cls_for_instance(value)(
+                output, source=self.source
+            )
         if istype(value, (list, collections.deque)):
             return self.tx.output.side_effects.track_mutable(value, result)
         return result
