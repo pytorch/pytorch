@@ -564,9 +564,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     def test_should_reinplace_scatter_indexed_update_chain(self, put_op):
         from torch._inductor.fx_passes.control_dependencies import control_deps
         from torch._inductor.fx_passes.reinplace import (
-            ViewOp,
             _generalized_scatter,
             should_reinplace_scatter,
+            ViewOp,
         )
 
         def build_graph(
@@ -606,6 +606,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 live_result = g.call_function(
                     put_op, (scatter, [indices], values, False)
                 )
+            elif post_copy_use == "view_sibling_output":
+                view = g.call_function(aten.slice.Tensor, (scatter, 0, 0, 2))
+                live_result = g.call_function(put_op, (view, [indices], values, False))
             elif post_copy_use == "indexed_split_output":
                 split = g.call_function(aten.split.Tensor, (put, 1))
                 live_result = g.call_function(operator.getitem, (split, 0))
@@ -621,6 +624,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 "indexed_output",
                 "intermediate_view_output",
                 "sibling_output",
+                "view_sibling_output",
                 "indexed_split_output",
             ):
                 raise AssertionError(f"unexpected post_copy_use: {post_copy_use}")
@@ -666,6 +670,15 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                     values_from_scatter=False,
                     copy_dst_is_inp=True,
                     post_copy_use="sibling_output",
+                )
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="view_sibling_output",
                 )
             )
         )

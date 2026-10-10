@@ -210,12 +210,15 @@ class CPUReproTests(TestCase):
         self.assertFalse(torch._C._is_alias_of(expected, expected_field))
         self.assertFalse(torch._C._is_alias_of(actual, actual_field))
 
-    @parametrize("output_kind", ("terminal", "intermediate_view", "sibling"))
+    @parametrize(
+        "output_kind", ("terminal", "intermediate_view", "sibling", "view_sibling")
+    )
     def test_generalized_scatter_copy_back_preserves_live_indexed_update(
         self, output_kind
     ):
         # Path-wide liveness: reinplacing must not overwrite returned terminal,
-        # intermediate-view, or sibling indexed-update results via copy-back.
+        # intermediate-view, sibling, or view-sibling indexed-update results
+        # via copy-back.
         def composed(field, src, indices, first_values, second_values):
             scatter = aten.slice_scatter.default(field, src, 0, 1, -1)
             first = aten.index_put.default(scatter, [indices], first_values)
@@ -224,6 +227,10 @@ class CPUReproTests(TestCase):
                 updated = aten.index_put.default(first, [indices], second_values)
             elif output_kind == "sibling":
                 result = aten.index_put.default(scatter, [indices], second_values)
+                updated = first
+            elif output_kind == "view_sibling":
+                view = aten.slice.Tensor(scatter, 0, 0, 2)
+                result = aten.index_put.default(view, [indices], second_values)
                 updated = first
             else:
                 result = updated = first

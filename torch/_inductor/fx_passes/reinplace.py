@@ -231,6 +231,14 @@ _SCATTER_COPY_BACK_THROUGH_OPS = OrderedSet(
 )
 
 
+def _is_aliasing_view_user(user: torch.fx.Node, alias: torch.fx.Node) -> bool:
+    return (bool(_is_view_op(user.target)) and user.args[0] is alias) or (
+        user.target is operator.getitem
+        and user.args[0] is alias
+        and bool(_is_view_op(alias.target))
+    )
+
+
 def _has_data_use_of_aliases_after_node(
     nodes: Sequence[torch.fx.Node], after: torch.fx.Node
 ) -> bool:
@@ -250,11 +258,7 @@ def _has_data_use_of_aliases_after_node(
             continue
         seen.add(alias)
         for user in alias.users:
-            if (_is_view_op(user.target) and user.args[0] is alias) or (
-                user.target is operator.getitem
-                and user.args[0] is alias
-                and _is_view_op(alias.target)
-            ):
+            if _is_aliasing_view_user(user, alias):
                 pending.append(user)
             elif (
                 node_order[user] > after_loc
@@ -276,24 +280,21 @@ def _scatter_copied_back_through_indexed_updates(
 ) -> bool:
     """True if a reachable copy-back leaves no indexed-update aliases live.
 
-    Collect every indexed update reachable over the mutation-base edge, then
-    accept reinplacing only when some copy_(inp, ...) has no real later use of
-    the root scatter, any reachable indexed-update result, or a view/getitem
-    alias of those. Checking only the terminal path would leave sibling
-    branches unsafe after reinplace + copy-back.
+    Collect every indexed update reachable over the mutation-base edge,
+    including through view/getitem aliases. Accept reinplacing only when some
+    copy_(inp, ...) has no real later use of the root scatter, any reachable
+    indexed-update result, or an alias of those. Checking only the terminal
+    path would leave sibling branches unsafe after reinplace + copy-back.
     """
-    pending = [
-        user
-        for user in node.users
-        if user.target in _SCATTER_COPY_BACK_THROUGH_OPS and user.args[0] is node
-    ]
+    pending = [node]
     reachable: OrderedSet[torch.fx.Node] = OrderedSet([node])
+    seen: OrderedSet[torch.fx.Node] = OrderedSet()
     copy_backs: OrderedSet[torch.fx.Node] = OrderedSet()
     while pending:
         current = pending.pop()
-        if current in reachable:
+        if current in seen:
             continue
-        reachable.add(current)
+        seen.add(current)
         for user in current.users:
             if (
                 user.target is aten.copy_.default
@@ -301,11 +302,14 @@ def _scatter_copied_back_through_indexed_updates(
                 and user.args[1] is current
             ):
                 copy_backs.add(user)
-        pending.extend(
-            user
-            for user in current.users
-            if user.target in _SCATTER_COPY_BACK_THROUGH_OPS and user.args[0] is current
-        )
+            elif _is_aliasing_view_user(user, current):
+                pending.append(user)
+            elif (
+                user.target in _SCATTER_COPY_BACK_THROUGH_OPS
+                and user.args[0] is current
+            ):
+                reachable.add(user)
+                pending.append(user)
     return any(
         not _has_data_use_of_aliases_after_node(tuple(reachable), copy_back)
         for copy_back in copy_backs
