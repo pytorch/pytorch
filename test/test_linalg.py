@@ -4973,6 +4973,108 @@ class TestLinalg(TestCase):
 
                 self.assertEqual(*torch.broadcast_tensors(B, B_other))
 
+    @dtypes(*floating_and_complex_types())
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
+    def test_linalg_solve_triangular_isneg(self, device, dtype):
+        # Regression test for #178379: out= with the neg bit set must not flip the sign of the result.
+        n, k, b = 4, 3, 2
+
+        left_options = [True, False]
+        upper_options = [True, False]
+
+        for left, upper in itertools.product(left_options, upper_options):
+            a_dim = n if left else k
+            b_shape = (b, n, k)
+
+            a_kinds = ['plain', 'neg_bit']
+            a_layouts = ['row major', 'column major', 'expanded']
+            out_kinds = ['aliased_neg', 'separate_neg_row', 'separate_neg_column', 'plain_control']
+
+            for a_kind, a_layout, out_kind in itertools.product(a_kinds, a_layouts, out_kinds):
+                conj_options = [(), ('A',), ('out',)] if dtype.is_complex else [()]
+
+                for conj_target in conj_options:
+
+                    case_desc = (
+                        f"device = {device}, left = {left}, upper = {upper}, dtype = {dtype}, "
+                        f"a_kind = {a_kind}, a_layout = {a_layout}, out_kind = {out_kind}, "
+                        f"conj_target = {conj_target}"
+                    )
+
+                    A_base = torch.randn(b, a_dim, a_dim, device=device, dtype=dtype)
+
+                    a_is_transposed = (a_layout == 'column major')  # .mT swaps the triangles
+                    if upper != a_is_transposed:
+                        A_base = torch.triu(A_base)
+                    else:
+                        A_base = torch.tril(A_base)
+
+                    A_base = A_base + 5.0 * torch.eye(a_dim, device=device, dtype=dtype)
+                    B_base = torch.randn(b_shape, device=device, dtype=dtype)
+
+                    A_init = A_base
+                    if a_kind == 'neg_bit':
+                        A_init = A_init._neg_view()
+                    if 'A' in conj_target:
+                        A_init = A_init.conj()
+
+                    if a_layout == 'row major':
+                        A = A_init
+                        self.assertTrue(A.is_contiguous(), msg=f"A must be row major: {case_desc}")
+                    elif a_layout == 'column major':
+                        A = A_init.mT
+                        self.assertFalse(A.is_contiguous(), msg=f"A must be column major: {case_desc}")
+                    elif a_layout == 'expanded':
+                        A = A_init[0].expand(b, a_dim, a_dim)
+                        self.assertEqual(A.stride(0), 0, msg=f"A must have batch stride of 0: {case_desc}")
+
+                    if out_kind == 'aliased_neg':
+                        B = B_base._neg_view()
+                        if 'out' in conj_target:
+                            B = B.conj()
+                        out = B
+                    else:
+                        B = B_base
+                        if out_kind == 'separate_neg_row':
+                            out_alloc = torch.empty(b_shape, device=device, dtype=dtype)
+                            out = out_alloc._neg_view()
+                            self.assertTrue(out_alloc.is_contiguous(), msg=f"out must be row major: {case_desc}")
+                            self.assertEqual(out.shape, b_shape, msg=f"out has the wrong shape: {case_desc}")
+                        elif out_kind == 'separate_neg_column':
+                            out_alloc = torch.empty((b, k, n), device=device, dtype=dtype).mT
+                            out = out_alloc._neg_view()
+                            self.assertFalse(out.is_contiguous(), msg=f"out must be column major: {case_desc}")
+                            self.assertEqual(out.shape, b_shape, msg=f"out has the wrong shape: {case_desc}")
+                        elif out_kind == 'plain_control':
+                            out = torch.empty(b_shape, device=device, dtype=dtype)
+                            self.assertEqual(out.shape, b_shape, msg=f"out has the wrong shape: {case_desc}")
+
+                        if 'out' in conj_target:
+                            out = out.conj()
+
+                    self.assertEqual(A.is_neg(), a_kind == "neg_bit", msg=f"A neg view mismatch: {case_desc}")
+                    self.assertEqual(A.is_conj(), "A" in conj_target, msg=f"A conj view mismatch: {case_desc}")
+
+                    if out_kind != "plain_control":
+                        self.assertTrue(out.is_neg(), msg=f"out must have neg view: {case_desc}")
+                    self.assertEqual(out.is_conj(), "out" in conj_target, msg=f"out conj view mismatch: {case_desc}")
+
+                    A_ref = A.resolve_conj().resolve_neg().contiguous()
+                    B_ref = B.resolve_conj().resolve_neg().contiguous()
+
+                    expected_tri = torch.triu(A_ref) if upper else torch.tril(A_ref)
+                    self.assertEqual(A_ref, expected_tri, msg=f"A has the wrong triangle: {case_desc}")
+
+                    ref_solution = torch.linalg.solve_triangular(A_ref, B_ref, upper=upper, left=left)
+
+                    result = torch.linalg.solve_triangular(A, B, upper=upper, left=left, out=out)
+
+                    self.assertIs(result, out, msg=f"Return value is not exactly out tensor reference: {case_desc}")
+                    self.assertEqual(out, ref_solution, msg=f"Numerical error in case: {case_desc}")
+
+                    if out_kind != "plain_control":
+                        self.assertTrue(out.is_neg(), msg=f"out lost its neg bit flag post-execution: {case_desc}")
+
     def triangular_solve_test_helper(self, A_dims, b_dims, upper, unitriangular,
                                      device, dtype):
         triangle_function = torch.triu if upper else torch.tril
