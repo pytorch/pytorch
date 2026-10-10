@@ -10,6 +10,16 @@ if(NOT __NCCL_INCLUDED)
       target_include_directories(__caffe2_nccl INTERFACE ${NCCL_INCLUDE_DIRS})
     endif()
   else()
+    # cmake/PreBuildSteps.cmake clones NCCL from the pinned tag when the pin is
+    # available; without it ExternalProject would fail with an unhelpful
+    # "No download info given" error.
+    if(NOT EXISTS "${PROJECT_SOURCE_DIR}/third_party/nccl/Makefile")
+      message(FATAL_ERROR
+        "NCCL sources not found at ${PROJECT_SOURCE_DIR}/third_party/nccl. "
+        "Provide them there, build against an installed NCCL with "
+        "USE_SYSTEM_NCCL=1, or disable NCCL with USE_NCCL=0."
+      )
+    endif()
     torch_cuda_get_nvcc_gencode_flag(NVCC_GENCODE)
     string(REPLACE "-gencode;" "-gencode=" NVCC_GENCODE "${NVCC_GENCODE}")
     # this second replacement is needed when there are multiple archs
