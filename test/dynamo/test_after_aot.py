@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
-    TEST_CUDA,
 )
 from torch.utils._traceback import report_compile_source_on_error
 from torch.utils._triton import has_triton
