@@ -376,6 +376,7 @@ _device_mapping["AMD INSTINCT MI250X / MI250"] = _device_mapping["AMD MI250X"]
 _device_mapping["RADEON RX 7900 XT"] = _device_mapping["AMD RADEON RX 7900 XT"]
 _device_mapping["Intel(R) Arc(TM) B580 Graphics"] = _device_mapping["INTEL B580"]
 _device_mapping["Intel(R) Arc(TM) Pro B70 Graphics"] = _device_mapping["INTEL B70"]
+_device_mapping["NVIDIA GB300 Max-Q"] = _device_mapping["NVIDIA GB300"]
 
 # Enforce the upper-case-key invariant so entries cannot silently miss
 # `lookup_device_info` (which upper-cases the query before lookup).
