@@ -6614,9 +6614,8 @@ if HAS_CUDA_AND_TRITON:
             eager_out = foo(x, y)
             compiled_out, code = run_and_get_code(compiled_foo, x, y)
             self.assertEqual(eager_out, compiled_out)
-            FileCheck().check_count(
-                "async_compile.triton('add_kernel',", 1, exactly=True
-            ).run(code[0])
+            defs = re.findall(r"^def add_kernel\w*\(", code[0], re.MULTILINE)
+            self.assertEqual(len(defs), 1, code[0])
 
         def test_meta_tensor(self):
             def foobar(x, y):
