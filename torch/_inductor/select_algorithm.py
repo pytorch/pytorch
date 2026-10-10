@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import copy
 import dataclasses
 import functools
 import hashlib
@@ -683,6 +684,10 @@ class TritonTemplateKernel(TritonKernel):
         # With a reduction epilogue and tma_load_for_template_epilogue, the
         # full-tile epilogue inputs the row pass TMA-loads. See _tile_tma_load.
         self.tma_load_epilogue_inputs: OrderedSet[str] = OrderedSet()
+        # Which of a reduction epilogue's full-tile extra outputs and inputs use
+        # TMA: "budget" (those that fit in shared memory), "plain" (none) or
+        # "all". See TritonTemplateCaller.with_epilogue_tma_plan.
+        self.epilogue_tma_plan = "budget"
         self.tma_load_for_template_epilogue = tma_load_for_template_epilogue
         self.transpose_discontiguous_tensor_descriptors_override = (
             transpose_discontiguous_tensor_descriptors_override
@@ -2441,19 +2446,21 @@ class TritonTemplateKernel(TritonKernel):
         # extra inputs such as addmm's bias, and plain-stores share one layout
         # conversion buffer. Read through TMA, each also has its own staging.
         numel = sympy_product(template.get_size())
-        reads = [
-            node.get_dtype().itemsize
+        # Each buffer stages once, however many epilogue nodes read it.
+        reads = {
+            node.get_name(): node.get_dtype().itemsize
             for node in (
                 *self.input_nodes[: self.prefix_args],
                 *self.input_nodes[len(self.input_nodes) - self.suffix_args :],
             )
             if sympy_product(node.get_size()) == numel
-        ]
+        }
         for n in nodes:
             for dep in n.read_writes.reads:
                 buf = V.graph.try_get_buffer(dep.name)
                 if (
                     dep.name not in produced
+                    and dep.name not in reads
                     and isinstance(dep, MemoryDep)
                     and buf is not None
                     and dep.get_numel() == numel
@@ -2461,15 +2468,21 @@ class TritonTemplateKernel(TritonKernel):
                         sympy_product(buf.get_size()), numel
                     )
                 ):
-                    reads.append(buf.get_dtype().itemsize)
+                    reads[dep.name] = buf.get_dtype().itemsize
         if self.tma_load_for_template_epilogue:
-            budget -= (self._staged_tile_elems() or 0) * sum(reads)
-        scratch = self._plain_store_scratch([*plain, *reads])
+            budget -= (self._staged_tile_elems() or 0) * sum(reads.values())
+        if self.epilogue_tma_plan == "all":
+            return OrderedSet(name for name, _ in outputs), OrderedSet(
+                name
+                for name, _ in self._full_tile_epilogue_inputs(template_node, nodes)
+                if self.tma_load_for_template_epilogue
+            )
+        scratch = self._plain_store_scratch([*plain, *reads.values()])
         kept = tma_store_outputs_within_budget(outputs, budget - scratch)
         if len(kept) < len(outputs):
             # Some outputs fall back to tl.store, so they need the scratch too.
             scratch = self._plain_store_scratch(
-                [*plain, *reads, *(nbytes // staged for _, nbytes in outputs)]
+                [*plain, *reads.values(), *(nbytes // staged for _, nbytes in outputs)]
             )
             kept = tma_store_outputs_within_budget(outputs, budget - scratch)
         inputs: OrderedSet[str] = OrderedSet()
@@ -2576,8 +2589,10 @@ class TritonTemplateKernel(TritonKernel):
             # tma_load_for_template_epilogue (off by default), which on
             # fb-triton builds without facebookexperimental/triton#3938-#3940
             # can give wrong results for single-K-tile templates.
-            outputs, self.tma_load_epilogue_inputs = self._tma_epilogue_accesses(
-                template_node, epilogue_nodes
+            outputs, self.tma_load_epilogue_inputs = (
+                (OrderedSet(), OrderedSet())
+                if self.epilogue_tma_plan == "plain"
+                else self._tma_epilogue_accesses(template_node, epilogue_nodes)
             )
             if self.tma_store:
                 self.tma_store_epilogue_outputs = outputs
@@ -4356,6 +4371,21 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
     def get_make_kernel_render(self):
         return self.make_kernel_render
+
+    def with_epilogue_tma_plan(self, plan: str) -> "TritonTemplateCaller":
+        """This choice with its reduction epilogue's full-tile extra outputs and
+        inputs all off TMA (plan "plain") or all on it ("all"), for when keeping
+        only those that fit in shared memory spills registers."""
+        make_kernel_render = self.make_kernel_render
+
+        def make_plan_kernel_render(out_node, hint_override: int | None = None):
+            kernel, render = make_kernel_render(out_node, hint_override=hint_override)
+            kernel.epilogue_tma_plan = plan
+            return kernel, render
+
+        variant = copy.copy(self)
+        variant.make_kernel_render = make_plan_kernel_render
+        return variant
 
     def autoheuristic_id(self):
         type_name = "triton"
