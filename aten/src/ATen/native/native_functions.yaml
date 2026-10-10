@@ -9320,6 +9320,7 @@
   device_guard: False
   dispatch:
     CompositeImplicitAutograd: index_select_backward_symint
+    CUDA: index_select_backward_cuda
 
 - func: masked_select.out(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
