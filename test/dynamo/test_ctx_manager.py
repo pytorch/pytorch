@@ -2503,6 +2503,44 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
                 torch.compile(fn, backend="eager", fullgraph=True)(pool)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_mempool_begin_end_through_device_interface(self):
+        # Drive mempool::begin/mempool::end directly so the path through
+        # _get_mempool_and_iface -> get_interface_for_device is covered without
+        # going through Dynamo's use_mem_pool context manager.
+        from torch._dynamo.graph_bytecode_inputs import set_external_object_by_index
+
+        torch.cuda.empty_cache()
+        pool = torch.cuda.MemPool()
+        mempool_index = 1001
+        set_external_object_by_index(mempool_index, pool)
+        try:
+            torch.ops.mempool.begin(torch.cuda.current_device(), mempool_index)
+            x = torch.ones(16, device="cuda")
+            torch.cuda.synchronize()
+            self.assertEqual(x.sum(), 16.0)
+            # begin routed the allocation into the user pool, so the pool now
+            # owns at least one live segment.
+            self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        finally:
+            torch.ops.mempool.end(torch.cuda.current_device(), mempool_index)
+            torch.cuda.synchronize()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_mempool_begin_type_mismatch_raises(self):
+        # A sidetable entry that is not a MemPool must be rejected by
+        # _get_mempool_and_iface with a type-mismatch RuntimeError that names the
+        # expected type and the offending index.
+        from torch._dynamo.graph_bytecode_inputs import set_external_object_by_index
+
+        mempool_index = 1002
+        set_external_object_by_index(mempool_index, torch.zeros(1))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"use_mem_pool expected a MemPool object at index 1002",
+        ):
+            torch.ops.mempool.begin(torch.cuda.current_device(), mempool_index)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):
         def fn(x):
             s = torch.cuda.Stream()

@@ -15,20 +15,12 @@ from .ctx_manager import ContextWrappingVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.device_interface import DeviceInterface
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from ..codegen import PyCodegen
 
 from torch._library.custom_ops import custom_op
-
-
-def _get_mempool_by_index(index: int) -> torch.cuda.MemPool:
-    mempool = get_external_object_by_index(index)
-    if not isinstance(mempool, torch.cuda.MemPool):
-        raise RuntimeError(
-            f"use_mem_pool expected a torch.cuda.MemPool object at index {index}"
-        )
-    return mempool
 
 
 def _current_cuda_device_source() -> CallFunctionNoArgsSource:
@@ -37,14 +29,35 @@ def _current_cuda_device_source() -> CallFunctionNoArgsSource:
     )
 
 
+def _get_mempool_and_iface(
+    mempool_index: int,
+) -> tuple[type["DeviceInterface"], Any]:
+    """Fetch the mempool object at ``mempool_index`` and the device interface
+    that manages it, raising if the object is not a valid mempool or if no
+    accelerator is available."""
+    mempool = get_external_object_by_index(mempool_index)
+    acc = torch.accelerator.current_accelerator()
+    if acc is None:
+        raise RuntimeError("No accelerator available for mempool operations")
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    iface = get_interface_for_device(acc.type)
+    if not isinstance(mempool, iface.get_mempool_type()):
+        raise RuntimeError(
+            f"use_mem_pool expected a {iface.get_mempool_type().__qualname__} "
+            f"object at index {mempool_index}"
+        )
+    return iface, mempool
+
+
 # These marker ops are intentional even though Inductor also annotates enclosed
 # FX nodes. The annotations tell Inductor which scheduler nodes allocate in a
 # user pool, while begin/end keep the pool lifetime visible as ordered FX
 # side-effects for non-Inductor backends.
 @custom_op("mempool::begin", mutates_args=())
 def begin_mempool(device_index: int, mempool_index: int) -> None:
-    mempool = _get_mempool_by_index(mempool_index)
-    torch.cuda.memory._cuda_beginAllocateCurrentThreadToPool(device_index, mempool.id)
+    iface, mempool = _get_mempool_and_iface(mempool_index)
+    iface.begin_allocate_current_thread_to_pool(device_index, mempool.id)
 
 
 @begin_mempool.register_fake
@@ -57,9 +70,9 @@ has_side_effect(torch.ops.mempool.begin.default)
 
 @custom_op("mempool::end", mutates_args=())
 def end_mempool(device_index: int, mempool_index: int) -> None:
-    mempool = _get_mempool_by_index(mempool_index)
-    torch.cuda.memory._cuda_endAllocateToPool(device_index, mempool.id)
-    torch.cuda.memory._cuda_releasePool(device_index, mempool.id)
+    iface, mempool = _get_mempool_and_iface(mempool_index)
+    iface.end_allocate_current_thread_to_pool(device_index, mempool.id)
+    iface.release_pool(device_index, mempool.id)
 
 
 @end_mempool.register_fake
