@@ -337,7 +337,7 @@ std::vector<scalar_t> accessorScatter(
       at::as_strided(base, {2, 3}, {row_stride, col_stride}, offset);
 
   accessor_scatter_kernel<scalar_t>
-      <<<1, 1>>>(view.packed_accessor64<scalar_t, 2>(), i0, i1);
+      <<<1, 1>>>(view.template packed_accessor64<scalar_t, 2>(), i0, i1);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   const auto out = base.cpu();
