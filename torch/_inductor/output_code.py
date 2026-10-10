@@ -529,6 +529,8 @@ class CompiledFxGraph(OutputCode):
         repr=False
     )  # Do not display graph
     cache_linemap: list[tuple[int, str]] | None
+    # See PyCodeCache.load_by_key_path.
+    kernel_sources: dict[str, tuple[str, str]] | None
     device_types: OrderedSet[str]
     device_idxs: OrderedSet[int]
     mutated_inputs: OrderedSet[str]
@@ -608,6 +610,7 @@ class CompiledFxGraph(OutputCode):
         self.inductor_provenance_mapping_str = inductor_provenance_mapping_str
         self.inductor_provenance_stack_traces_str = inductor_provenance_stack_traces_str
         self.cache_linemap = graph.cache_linemap
+        self.kernel_sources = graph.wrapper_code.kernel_sources
         # TODO - ordered set
         self.device_types = OrderedSet(graph.device_types)
         self.device_idxs = OrderedSet(graph.device_idxs)
@@ -1033,6 +1036,14 @@ class CompiledFxGraph(OutputCode):
         from torch._inductor.codecache import PyCodeCache
 
         artifact_path = self.write_to_disk()
+        kernel_sources = self.kernel_sources
+        if kernel_sources:
+            # The module may already be on disk as someone's hand-edited copy (e.g. a
+            # standalone_compile artifact saved unpacked). Its defs must then compile
+            # themselves, not bind the kernels built from this entry's sources.
+            with open(artifact_path) as f:
+                if f.read() != self.source_code:
+                    kernel_sources = None
 
         try:
             with dynamo_timed(
@@ -1044,6 +1055,7 @@ class CompiledFxGraph(OutputCode):
                     artifact_path,
                     self.cache_linemap,
                     constants.unwrap(self),
+                    kernel_sources=kernel_sources,
                 )
                 self.current_callable = code_cache.call
                 self.recursively_apply_fns = getattr(
