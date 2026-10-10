@@ -816,8 +816,18 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   Vectorized<T> acos() const {
     return mapSleef(Sleef_acosf4_u10, Sleef_acosd2_u10);
   }
+  Vectorized<T> acosh() const {
+    if constexpr (std::is_same_v<T, float>) {
+      return mapOrdinary(std::acosh);
+    } else {
+      return mapSleef(Sleef_acoshf4_u10, Sleef_acoshd2_u10);
+    }
+  }
   Vectorized<T> asin() const {
     return mapSleef(Sleef_asinf4_u10, Sleef_asind2_u10);
+  }
+  Vectorized<T> asinh() const {
+    return mapSleef(Sleef_asinhf4_u10, Sleef_asinhd2_u10);
   }
   Vectorized<T> atan() const {
     return mapSleef(Sleef_atanf4_u10, Sleef_atand2_u10);
@@ -1363,6 +1373,25 @@ inline void convert(const int64_t* src, double* dst, int64_t n) {
     dst[i] = static_cast<double>(src[i]);
   }
 }
+
+// Define this specialization to match c10::convert, as defined in TypeCast.h
+template <>
+struct VecConvert<uint8_t, 1, float, 1> {
+  static inline VectorizedN<uint8_t, 1> apply(
+      const VectorizedN<float, 1>& src) {
+    constexpr int count = std::min(
+        VectorizedN<uint8_t, 1>::size(), VectorizedN<float, 1>::size());
+    __at_align__ float src_buf[VectorizedN<uint8_t, 1>::size()];
+    src.store(src_buf);
+    __at_align__ uint8_t dst_buf[VectorizedN<float, 1>::size()];
+
+    for (int i = 0; i < count; i++) {
+      dst_buf[i] = static_cast<uint8_t>(static_cast<int64_t>(src_buf[i]));
+    }
+
+    return VectorizedN<uint8_t, 1>::loadu(dst_buf, count);
+  }
+};
 
 #define DEFINE_REINTERPRET_CAST_FUNCS(Fst, Cst)     \
   template <>                                       \
@@ -2201,7 +2230,6 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
     // acos(x) = pi/2 - asin(x)
     return Vectorized<T>(vinner_type(pi_half<underline_type>())) - asin();
   }
-
   Vectorized<T> sin() const {
     return mapOrdinary(std::sin);
   }
