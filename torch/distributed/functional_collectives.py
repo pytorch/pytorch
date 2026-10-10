@@ -1,6 +1,4 @@
 """
-Functional collectives.
-
 Functional collectives return new tensors instead of mutating their inputs and
 are traceable by ``torch.compile``. In eager mode the result is an
 :class:`AsyncCollectiveTensor` which waits on the collective on first use.

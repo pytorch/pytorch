@@ -200,9 +200,7 @@ def all_gather_single(
     tag: str = "",
 ) -> torch.Tensor:
     """
-    Gather tensor data across from all machines and concatenate over ``gather_dim``.
-
-    Note that it currently only supports gather_dim = 0.
+    Gather tensor data from all ranks and concatenate over ``gather_dim``.
 
     The input tensor is left unmodified.
     ``group`` can be a ``ProcessGroup``, a ``DeviceMesh`` (collective over all
@@ -240,9 +238,7 @@ def all_gather_single_autograd(
     tag: str = "",
 ):
     """
-    Gather tensor data across from all machines and concatenate over ``gather_dim``.
-
-    Note that it currently only supports gather_dim = 0.
+    Gather tensor data from all ranks and concatenate over ``gather_dim``.
 
     This function is the same as all_gather_single but will propagate the
     backwards gradient across workers.
@@ -394,7 +390,7 @@ def all_reduce_coalesced(
     Reduces a list of tensors across all machines in such a way that all get
     the final result.
 
-    The all tensors in the input list are left unmodified.
+    The tensors in the input list are left unmodified.
 
     ``group`` can be a ``ProcessGroup``, a ``DeviceMesh`` (collective over all
     ranks of the mesh), a ``(DeviceMesh, int)`` tuple (collective over one mesh
@@ -420,9 +416,9 @@ def all_gather_single_coalesced(
     self: list[torch.Tensor], group: RANK_TYPES, tag: str = ""
 ) -> list[torch.Tensor]:
     """
-    Gather a list of tensors across from all machines.
+    Gather a list of tensors from all ranks.
 
-    Note that it currently only supports gather_dim = 0.
+    Each output is concatenated over dim 0.
 
     The input tensor is left unmodified.
     ``group`` can be a ``ProcessGroup``, a ``DeviceMesh`` (collective over all
@@ -1114,8 +1110,8 @@ def permute_tensor(
     tag: str = "",
 ) -> torch.Tensor:
     """
-    Permutes the elements of the tensor according to the given source/destination pairs. `src_dst` should
-    be defined such that src_dst[m] == n means m sends to n.
+    Permutes the elements of the tensor according to the given source/destination pairs. ``src_dst`` should
+    be defined such that ``src_dst[m] == n`` means m sends to n.
 
     ``group`` can be a ``ProcessGroup``, a ``DeviceMesh`` (collective over all
     ranks of the mesh), a ``(DeviceMesh, int)`` tuple (collective over one mesh
