@@ -32,6 +32,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
+from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
@@ -40,14 +41,15 @@ log = logging.getLogger(__name__)
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
+# Every stamp must stay in the artifact's LEADING comment block: the reader stops at the
+# first line that is not a comment, so inserting code above them turns every check off.
+# Each checked stamp then warns per call, and the version warning is the only one that
+# goes quiet.
+
 # Written as the artifact's first line so a later load can detect it was produced
 # by a different torch (see _warn_on_version_skew). It is a comment, so it does not
 # affect exec; a hand-edit that drops it just disables the skew warning, so
 # hill-climbing an artifact never triggers a spurious version warning.
-# All seven stamps must stay in the artifact's LEADING comment block: the reader stops
-# at the first line that is not a comment, so inserting code above them turns every
-# check off -- each checked stamp warns per call while it is missing, and the version
-# warning is the only one that goes quiet.
 _VERSION_TAG = "# torch.compiler.export_python torch-version: "
 # The train()/eval() flags of every nn.Module argument at capture. Python control flow
 # on ``self.training`` is specialized into the graph with no runtime guard, so this
@@ -81,10 +83,19 @@ _GLOBAL_STATE_TAG = "# torch.compiler.export_python global-state: "
 _CPU_ISA_TAG = "# torch.compiler.export_python cpu-vec-isa: "
 
 # os.link failures that mean the filesystem cannot do hard links at all, as opposed to
-# a real I/O problem (a full disk, a bad permission) that must not be swallowed.
+# a real I/O problem (a full disk, a bad permission) that must not be swallowed. EINVAL
+# is how Windows reports a volume without hard links (FAT, exFAT).
 _NO_HARDLINK_ERRNOS = frozenset(
     getattr(errno, name)
-    for name in ("EPERM", "EOPNOTSUPP", "ENOTSUP", "EXDEV", "EMLINK", "ENOSYS")
+    for name in (
+        "EPERM",
+        "EOPNOTSUPP",
+        "ENOTSUP",
+        "EXDEV",
+        "EMLINK",
+        "ENOSYS",
+        "EINVAL",
+    )
     if hasattr(errno, name)
 )
 
@@ -144,29 +155,23 @@ def _check_enabled() -> bool:
 
 
 def _check_tolerances(dtype: torch.dtype) -> tuple[float, float, float | None]:
-    """Tolerances for comparing THIS artifact against eager, overridable by env var.
+    """Tolerances ``(rtol, atol, atol_frac)`` for comparing an artifact against eager.
 
-    Returns ``(rtol, atol, atol_frac)``. Deliberately looser than torch.testing's
-    defaults, which are calibrated for eager-vs-eager. Inductor fuses and reassociates
-    reductions, so a correct artifact differs from eager by more than that on the first
-    call -- torch.compile produces the same divergence on the same graph. Using the tight
-    defaults rejected freshly exported, never-edited artifacts, which would make the
-    check useless.
-
-    ``atol_frac`` exists because a fixed absolute tolerance is meaningless without
-    knowing how big the outputs are. A softmax over 4096 columns has every element near
-    2.4e-4, which is FOUR TIMES SMALLER than the fp16 atol of 1e-3 -- so the whole output
-    sat inside the tolerance and no edit to that kernel could ever fail the check. The
-    effective absolute tolerance is therefore capped at ``atol_frac`` of the reference's
-    own magnitude, which can only make the check stricter than a bare ``atol``, never
-    looser.
+    Looser than torch.testing's eager-vs-eager defaults: inductor fuses and reassociates
+    reductions, so an unedited artifact differs from eager by more than those allow, as
+    torch.compile does on the same graph. ``atol_frac`` caps the absolute tolerance at
+    that fraction of the reference's own magnitude, so a tensor whose every element is
+    below ``atol`` (a softmax over 4096 columns) is still checked; the cap only ever
+    tightens. Integer and bool results are compared exactly.
+    ``COMPILER_EXPORT_PYTHON_CHECK_RTOL`` and ``_ATOL`` override the per-dtype values;
+    an explicit ``_ATOL`` is not capped.
     """
-    # Calibrated against freshly exported, never-edited artifacts for softmax,
-    # layernorm+gelu, gemm+bias+gelu, silu(linear) and a fused fp32 reduction. The worst
-    # honest artifact in that set sits at 2.9e-3 relative and 2.3e-3 of its own
-    # magnitude (an fp16 softmax, where the reassociated reduction costs the most), so
-    # these leave roughly 2-4x over the honest floor rather than the 10x the old fp16
-    # numbers implied -- the extra room was not free, it was what let a real edit through.
+    if not (dtype.is_floating_point or dtype.is_complex):
+        return 0.0, 0.0, None
+    # Calibrated against freshly exported, unedited artifacts for softmax, layernorm+gelu,
+    # gemm+bias+gelu, silu(linear) and a fused fp32 reduction. The worst of them (an fp16
+    # softmax) sits at 2.9e-3 relative and 2.3e-3 of its own magnitude; these leave
+    # roughly 2-4x headroom over that.
     per_dtype = {
         torch.float64: (1e-7, 1e-9, 1e-7),
         torch.float32: (1e-3, 1e-4, 1e-4),
@@ -174,19 +179,21 @@ def _check_tolerances(dtype: torch.dtype) -> tuple[float, float, float | None]:
         torch.bfloat16: (2e-2, 5e-3, 5e-3),
     }
     rtol, atol, atol_frac = per_dtype.get(dtype, (1e-3, 1e-4, 1e-4))
-    override_rtol = os.environ.get(f"{_CHECK_ENV}_RTOL")
-    override_atol = os.environ.get(f"{_CHECK_ENV}_ATOL")
-    if override_atol:
-        # An explicit absolute tolerance is an escape hatch; take it at face value.
-        # atol_frac None means "do not cap", which is the whole point of the override --
-        # capping it against the reference's magnitude made the escape hatch unusable,
-        # and made it do nothing at all on an all-zero reference.
-        return (
-            float(override_rtol) if override_rtol else rtol,
-            float(override_atol),
-            None,
-        )
-    return (float(override_rtol) if override_rtol else rtol, atol, atol_frac)
+    overrides: list[float | None] = []
+    for suffix in ("RTOL", "ATOL"):
+        name = f"{_CHECK_ENV}_{suffix}"
+        raw = os.environ.get(name)
+        try:
+            overrides.append(float(raw) if raw else None)
+        except ValueError:
+            raise _precompile_error(f"{name}={raw!r} is not a number.") from None
+    override_rtol, override_atol = overrides
+    if override_rtol is not None:
+        rtol = override_rtol
+    # An explicit atol is taken at face value: atol_frac None leaves it uncapped.
+    if override_atol is not None:
+        return rtol, override_atol, None
+    return rtol, atol, atol_frac
 
 
 def _allclose(a: torch.Tensor, b: torch.Tensor, rtol: float, atol: float) -> bool:
@@ -231,30 +238,35 @@ def _verify_against_eager(
     function. Under COMPILER_EXPORT_PYTHON_CHECK every call does exactly that.
     """
     expected = fn(*reference_args)
-    got_leaves = [
-        t for t in pytree.tree_leaves(produced) if isinstance(t, torch.Tensor)
-    ]
-    want_leaves = [
-        t for t in pytree.tree_leaves(expected) if isinstance(t, torch.Tensor)
-    ]
-    if len(got_leaves) != len(want_leaves):
+    name = getattr(fn, "__name__", "fn")
+    got_flat, got_spec = pytree.tree_flatten(produced)
+    want_flat, want_spec = pytree.tree_flatten(expected)
+    if got_spec != want_spec:
         raise _precompile_error(
-            f"{_CHECK_ENV}: the artifact at {path} returned {len(got_leaves)} tensors "
-            f"but {getattr(fn, '__name__', 'fn')} returns {len(want_leaves)}."
+            f"{_CHECK_ENV}: the artifact at {path} returns {got_spec} but {name} "
+            f"returns {want_spec}."
         )
+    for got, want in zip(got_flat, want_flat):
+        is_tensor = isinstance(want, torch.Tensor)
+        same_kind = isinstance(got, torch.Tensor) == is_tensor
+        if not same_kind or (not is_tensor and got != want):
+            raise _precompile_error(
+                f"{_CHECK_ENV}: the artifact at {path} returns {got!r} where {name} "
+                f"returns {want!r}. If you have hand-edited the artifact, the edit changed "
+                f"its result; otherwise delete {path} to recapture."
+            )
+    got_leaves = [t for t in got_flat if isinstance(t, torch.Tensor)]
+    want_leaves = [t for t in want_flat if isinstance(t, torch.Tensor)]
     for i, (got, want) in enumerate(zip(got_leaves, want_leaves)):
         rtol, atol, atol_frac = _check_tolerances(got.dtype)
-        if got.shape != want.shape or got.dtype != want.dtype:
+        if (got.shape, got.dtype, got.device) != (want.shape, want.dtype, want.device):
             raise _precompile_error(
                 f"{_CHECK_ENV}: output {i} of the artifact at {path} is "
-                f"{tuple(got.shape)}/{got.dtype} but eager gives "
-                f"{tuple(want.shape)}/{want.dtype}."
+                f"{tuple(got.shape)}/{got.dtype}/{got.device} but eager gives "
+                f"{tuple(want.shape)}/{want.dtype}/{want.device}."
             )
-        want = want.to(got.device)
-        # Where each is finite has to agree before any tolerance is meaningful. An edit
-        # that leaves part of the output unwritten reads back whatever the allocator
-        # held, which is how "max abs diff nan" and "max abs diff 2.8e+38" both showed up
-        # for the same edit; say that plainly instead of reporting it as numeric drift.
+        # Where each is finite has to agree before any tolerance is meaningful: an edit
+        # that leaves part of the output unwritten reads back uninitialized memory.
         finite_want, finite_got = _finite_mask(want), _finite_mask(got)
         if (
             finite_want is not None
@@ -264,7 +276,7 @@ def _verify_against_eager(
             bad = int((finite_got != finite_want).sum())
             raise _precompile_error(
                 f"{_CHECK_ENV}: output {i} of the artifact at {path} disagrees with "
-                f"{getattr(fn, '__name__', 'fn')} about where the result is finite "
+                f"{name} about where the result is finite "
                 f"({bad} of {got.numel()} elements). A kernel that leaves part of its "
                 "output unwritten reads back uninitialized memory, which looks like "
                 "this. If you have hand-edited the artifact, check the store and its "
@@ -272,30 +284,31 @@ def _verify_against_eager(
             )
         # Cap the absolute tolerance at a fraction of how big the reference actually is,
         # so a tensor whose every element is smaller than atol is still checked.
-        values = want[finite_want] if finite_want is not None else want.flatten()
-        magnitude = values.double().abs().max().item() if values.numel() else 0.0
+        wide = torch.complex128 if want.is_complex() else torch.float64
+        flat_got = got[finite_want] if finite_want is not None else got.flatten()
+        flat_want = want[finite_want] if finite_want is not None else want.flatten()
+        values = flat_want.to(wide)
+        magnitude = values.abs().max().item() if values.numel() else 0.0
         if atol_frac is not None:
             atol = min(atol, atol_frac * magnitude)
         if _allclose(got, want, rtol, atol):
             continue
-        diff = (got.double() - want.double()).abs()
-        # Report the relative diff only where the reference is big enough for a ratio to
-        # mean anything. Clamping to float64 tiny made every exactly-zero element (gelu
-        # and relu produce them constantly) report a ratio near 1e308 and swamp the stat.
-        # A ratio is only informative where the reference is big enough to divide by.
-        # Deriving this floor from atol_frac meant that with an explicit _ATOL (frac 1.0)
-        # nothing was ever "significant" and the message always claimed the reference was
-        # all near-zero, directly beside the magnitude proving otherwise.
+        # Finite positions only: inf/nan positions already agreed, and inf - inf is nan.
+        diff = (flat_got.to(wide) - values).abs()
+        max_abs = diff.max().item() if diff.numel() else 0.0
+        # A ratio is only informative where the reference is big enough to divide by;
+        # exact zeros (relu, gelu) would otherwise dominate it.
+        reference = values.abs()
         floor = _REL_REPORT_FLOOR * magnitude
-        significant = want.double().abs() > floor if floor > 0 else want.double() != 0
+        significant = reference > floor if floor > 0 else reference != 0
         if significant.any():
-            rel = f"{(diff[significant] / want.double().abs()[significant]).max().item():.3e}"
+            rel = f"{(diff[significant] / reference[significant]).max().item():.3e}"
         else:
             rel = "n/a (reference is all near-zero)"
         raise _precompile_error(
             f"{_CHECK_ENV}: output {i} of the artifact at {path} does not match "
-            f"{getattr(fn, '__name__', 'fn')} run eagerly on the same inputs "
-            f"(max abs diff {diff.max().item():.3e}, max rel diff {rel}, reference "
+            f"{name} run eagerly on the same inputs "
+            f"(max abs diff {max_abs:.3e}, max rel diff {rel}, reference "
             f"magnitude {magnitude:.3e}, tolerances rtol={rtol} atol={atol:.3e}). "
             "If you have hand-edited the artifact, the edit changed its numerics; "
             f"otherwise delete {path} to recapture."
@@ -357,12 +370,8 @@ def _dense_leaves(t: torch.Tensor) -> list[torch.Tensor] | None:
         # and let a donor be written over a live input.
         return leaves if saw_tensor else None
     if t.numel() == 0 or t.is_meta:
-        # Owns no bytes, which is not the same as "bytes we cannot find". Both report
-        # data_ptr 0, so without this one such component (an absent bias, an empty KV
-        # cache, an uneven shard, a meta-initialized slot) would poison its whole
-        # wrapper into "assume it aliases everything" and refuse every donation against
-        # it. This is about a leaf that genuinely IS meta; a wrapper merely presenting
-        # meta over live payloads is still distrusted, in _reports_no_bytes.
+        # Owns no bytes, unlike "bytes we cannot find" (both report data_ptr 0): one empty
+        # component must not make its whole wrapper alias everything.
         return []
     try:
         if t.data_ptr() == 0:
@@ -412,28 +421,14 @@ def _shares_memory(a: torch.Tensor, b: torch.Tensor) -> bool:
         return False
     a_leaves, b_leaves = _dense_leaves(a), _dense_leaves(b)
     if a_leaves is None or b_leaves is None:
-        # An addressless or undecomposable tensor (a wrapper subclass whose components
-        # we cannot reach, sparse, nested). Its bytes are unknown, so the only safe
-        # answer is "assume it aliases" -- NOT storage identity, which is the predicate
-        # that made byte-disjoint arena slices look aliased in the first place. Device
-        # type is all that can still rule a pair out. Note this reads the OUTER device
-        # of both operands, including one that did resolve, because there is no leaf on
-        # the unresolved side to pair its leaves against; a wrapper misreporting its
-        # type is therefore still taken at its word here.
+        # Bytes unknown (sparse, nested, an undecomposable wrapper): assume it aliases
+        # anything of the same OUTER device type, the only evidence left without leaves.
         return a.device.type == b.device.type
-    if not (
-        len(a_leaves) == 1
-        and a_leaves[0] is a
-        and len(b_leaves) == 1
-        and b_leaves[0] is b
-    ):
+    if is_traceable_wrapper_subclass(a) or is_traceable_wrapper_subclass(b):
         return any(_shares_memory(x, y) for x in a_leaves for y in b_leaves)
     if a.device != b.device:
-        # Compared here, on the LEAF, and never on the wrapper: a subclass can report a
-        # device that differs from the one holding its bytes in index (torch.load with
-        # map_location="cuda" over a "cuda:0" payload) or in TYPE (map_location=
-        # {"cuda:0": "cpu"}). Gating above reported such a tensor as sharing memory with
-        # nothing -- including with its own payload.
+        # On the leaf, never the wrapper: a subclass can report a device differing from
+        # its bytes' in index (torch.load map_location="cuda" over "cuda:0") or in type.
         return False
     try:
         (a_start, a_end), (b_start, b_end) = _byte_span(a), _byte_span(b)
@@ -475,11 +470,8 @@ def _span_atoms(
 ) -> list[tuple[torch.device, int, int]] | None:
     """t's byte ranges as (leaf device, start, end), or None if they cannot be located.
 
-    Keyed on the LEAF device only, matching _shares_memory: a wrapper subclass can
-    report a device that differs from the one holding its bytes, in index (torch.load
-    with map_location="cuda" over a "cuda:0" payload) or in type (map_location=
-    {"cuda:0": "cpu"}), so the wrapper's own report decides nothing. An empty list means
-    t owns no addressable bytes, so it overlaps nothing.
+    Keyed on the leaf device, never the wrapper's, matching _shares_memory. An empty list
+    means t owns no addressable bytes, so it overlaps nothing.
     """
     if _reports_no_bytes(t):
         return []
@@ -488,8 +480,6 @@ def _span_atoms(
         return None
     atoms = []
     for leaf in leaves:
-        if leaf.numel() == 0 or leaf.is_meta:
-            continue
         try:
             start, end = _byte_span(leaf)
         except RuntimeError:
@@ -561,18 +551,20 @@ def _input_duplicates(
 
 
 def _code_devices(code: str) -> set[str]:
-    """The device types the emitted artifact names, from its own source.
+    """The device types the emitted artifact names as literals in its own source.
 
     The stamp and the per-call check have to agree, so this is computed from the source
-    once at capture and once at load rather than from anything ambient.
+    once at capture and once at load rather than from anything ambient. A device held in
+    a variable (``x.to(dev)``) is not seen.
     """
-    found = set(re.findall(r"empty_strided_(\w+)\(", code))
-    found.update(re.findall(r"device\(type=[\'\"](\w+)[\'\"]", code))
-    found.update(re.findall(r"\.to\([\'\"](\w+)[\'\"]", code))
+    allocators = re.findall(r"empty_strided_(\w+)\(", code)
+    found = {name.removesuffix("_pinned") for name in allocators}
+    literal = r"(?:\bdevice\(|\bdevice=|\.to\()(?:type=)?['\"](\w+)"
+    found.update(re.findall(literal, code))
+    found.update(re.findall(r"\.(cpu|cuda|xpu)\(", code))
     devices = set()
     for name in found:
-        # The allocator names are not all device types -- empty_strided_cpu_pinned is a
-        # cpu allocator -- and a hand-edited artifact can contain anything at all.
+        # A hand-edited artifact can name anything at all.
         try:
             devices.add(torch.device(name).type)
         except (RuntimeError, ValueError):
@@ -613,28 +605,28 @@ def _cpu_vec_isa(code: str) -> str | None:
     artifact must not start refusing to run because it moved between two hosts whose CPUs
     differ in a way it never depended on.
     """
-    if not re.search(r"cpp_pybinding|cpp_fused", code):
+    if "async_compile.cpp_pybinding(" not in code:
         return None
     from torch._inductor.cpu_vec_isa import pick_vec_isa
 
     return str(pick_vec_isa())
 
 
-def _global_state() -> list[list[Any]]:
-    """Ambient globals the emitted code resolves against, as sorted [key, value] pairs.
+def _global_state() -> list[list[str]]:
+    """Ambient globals the emitted code resolves against, as [key, value] pairs.
 
-    Recorded as strings so the stamp round-trips through ast.literal_eval. Both are read
-    at CAPTURE and baked: a factory op with no dtype= takes the default dtype then, and
-    inductor picks a deterministic or an atomic-add lowering from the determinism flag.
-    The artifact never re-consults either, so a process that changes one and replays gets
-    capture's answer with no error.
+    Recorded as strings so the stamp round-trips through ast.literal_eval. All three are
+    read at CAPTURE and baked: a factory op with no dtype= or device= takes the defaults
+    then, and inductor (or a decomposition) picks a deterministic or an atomic-add
+    lowering from the determinism flag. The artifact never re-consults them, so a process
+    that changes one and replays gets capture's answer with no error.
 
     float32_matmul_precision is deliberately NOT here. torch.get_float32_matmul_precision
     raises outright in a process that has used the per-backend fp32_precision API, so
-    stamping it killed capture there; and on the default config the artifact reaches
-    extern_kernels.mm, which re-reads the setting at run time, so the check refused calls
-    the artifact would have served correctly. Only a max_autotune Triton GEMM template
-    bakes it as a tl.constexpr.
+    stamping it would kill capture there; and on the default config the artifact reaches
+    extern_kernels.mm, which re-reads the setting at run time, so the check would refuse
+    calls the artifact serves correctly. Only a max_autotune Triton GEMM template bakes it
+    as a tl.constexpr.
     """
     return [
         ["default_dtype", str(torch.get_default_dtype())],
@@ -665,8 +657,7 @@ class ExportedPythonArtifact:
         example_inputs: Sequence[object] | None,
     ) -> None:
         self._fn = fn
-        self._signature = inspect.signature(fn)
-        self._call_signature = self._signature
+        self._call_signature = inspect.signature(fn)
         self._path = path
         self._backend = backend
         self._tracer = tracer
@@ -675,18 +666,15 @@ class ExportedPythonArtifact:
         self._module_training: list[tuple[int, list[tuple[str, bool]]]] | None = None
         self._input_overlaps: list[list[int]] | None = None
         self._input_duplicates: list[list[int]] | None = None
-        self._global_state: list[list[str]] | None = None
+        self._global_state: dict[str, str] | None = None
         self._cpu_isa: str | None = None
         self._cpu_isa_stamped = False
         self._code_devices: set[str] = set()
         self._autocast: list[list[Any]] | None = None
         self._loaded: Callable[..., Any] | None = None
-        # (pid, tid) currently inside _materialize. There is deliberately no
-        # per-artifact lock: capture is already serialized process-wide, so a second
-        # lock would add nothing but a second acquisition order to deadlock against.
-        # This is the re-entrancy guard the (reentrant) capture lock cannot provide.
-        # The pid makes it fork-safe without a registry -- a child never matches a
-        # marker left by a thread it did not inherit.
+        # (pid, tid) currently inside _materialize: the re-entrancy guard the reentrant
+        # capture lock cannot provide. The pid keeps it correct in a forked child, which
+        # never matches a marker left by a thread it did not inherit.
         self._materializing: tuple[int, int] | None = None
 
     def _precompile_and_save(self, args: tuple[Any, ...]) -> tuple[str, bool]:
@@ -722,16 +710,18 @@ class ExportedPythonArtifact:
         else:
             example = self._bind_positional(example, {}, "example_inputs=")
             self._check_supported_args(example)
-        # precompile returns (python_code, cache); the cache is an acceleration
-        # artifact that export_python does not use -- the emitted source is
-        # self-contained and always exec'd -- so only the code is written to disk.
-        code, _cache = torch.compiler.precompile(
+        # Only the python_code is written: the emitted source is self-contained and
+        # always exec'd, so export_python never builds precompile's acceleration cache.
+        from torch._precompile import PrecompiledModule
+
+        compiled = PrecompiledModule(
             self._fn,
-            *example,
             backend=self._backend,
             tracer=self._tracer,
             decompositions=self._decompositions,
         )
+        compiled._compile(example)
+        code = compiled.to_python_code()
         parent = os.path.dirname(self._path)
         if parent:
             os.makedirs(parent, exist_ok=True)
@@ -740,7 +730,7 @@ class ExportedPythonArtifact:
         # each just turns its own check off.
         example_tensors = _input_tensors(example)
         code = (
-            f"{_VERSION_TAG}{torch.__version__!r}\n"
+            f"{_VERSION_TAG}{torch.__version__}\n"
             f"{_MODULE_TRAINING_TAG}{_module_training_state(example)!r}\n"
             f"{_INPUT_OVERLAP_TAG}{_input_overlaps(example, example_tensors)!r}\n"
             f"{_INPUT_DUPLICATE_TAG}{_input_duplicates(example, example_tensors)!r}\n"
@@ -749,7 +739,9 @@ class ExportedPythonArtifact:
             f"{_GLOBAL_STATE_TAG}{_global_state()!r}\n"
             f"{_CPU_ISA_TAG}{_cpu_vec_isa(code)!r}\n{code}"
         )
-        if _atomic_publish(self._path, code.encode("utf-8")):
+        # os.link does not follow a symlink at its destination, so resolve one first: a
+        # dangling symlink at path would otherwise read as a lost race forever.
+        if _atomic_publish(os.path.realpath(self._path), code.encode("utf-8")):
             return code, False
         # Lost the publish race; the winner's file is complete and already linked.
         winner = self._load_from_disk()
@@ -769,11 +761,14 @@ class ExportedPythonArtifact:
                 return f.read()
         except FileNotFoundError:
             return None
-        except OSError as e:
+        except (OSError, UnicodeDecodeError) as e:
+            hint = (
+                " rather than a directory" if isinstance(e, IsADirectoryError) else ""
+            )
             raise _precompile_error(
                 f"torch.compiler.export_python: could not read the artifact at "
-                f"{self._path} ({e.strerror}). Check that the path names a readable "
-                "file rather than a directory."
+                f"{self._path} ({e}). Check that the path names a readable UTF-8 "
+                f"file{hint}."
             ) from e
 
     @staticmethod
@@ -791,22 +786,16 @@ class ExportedPythonArtifact:
 
     @staticmethod
     def _read_stamp(code: str, tag: str) -> Any:
-        for line in code.splitlines():
-            if line.startswith(tag):
-                try:
-                    return ast.literal_eval(line[len(tag) :])
-                except (ValueError, SyntaxError):
-                    # A mangled stamp is a hand-edit like any other: turn the check off
-                    # rather than raise a SyntaxError from a comment line that does not
-                    # affect what the artifact runs.
-                    return None
-            # An INDENTED comment is still a comment. The documented rule is "the
-            # first non-comment line", and stopping early here silently turns every
-            # later stamp's check off rather than reading it.
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#"):
-                break
-        return None
+        raw = ExportedPythonArtifact._read_raw_stamp(code, tag)
+        if raw is None:
+            return None
+        try:
+            return ast.literal_eval(raw)
+        except (ValueError, SyntaxError):
+            # A mangled stamp is a hand-edit like any other: turn the check off rather
+            # than raise a SyntaxError from a comment line that does not affect what the
+            # artifact runs.
+            return None
 
     def _check_capture_environment(self, args: tuple[Any, ...]) -> None:
         # Two more things make_fx specialized with no runtime guard. Input ALIASING
@@ -872,21 +861,7 @@ class ExportedPythonArtifact:
             )
         else:
             actual_state = dict(_global_state())
-            try:
-                recorded = dict(self._global_state)
-            except (TypeError, ValueError):
-                # A hand-edit can leave a literal that is not [key, value] pairs. Every
-                # other stamp degrades to warn-and-continue for that; this one must not
-                # be the only one that raises a raw unpack error out of the load path.
-                log.warning(
-                    "torch.compiler.export_python: the global-state stamp at %s is not a "
-                    "list of [key, value] pairs, so that check is off. Delete %s to "
-                    "regenerate it.",
-                    self._path,
-                    self._path,
-                )
-                recorded = {}
-            for key, captured in recorded.items():
+            for key, captured in self._global_state.items():
                 if key not in actual_state:
                     continue  # a key this torch no longer records
                 live = actual_state[key]
@@ -922,10 +897,6 @@ class ExportedPythonArtifact:
                     "same autocast context you call it in."
                 )
         if not self._cpu_isa_stamped:
-            # Every other checked stamp warns per call while it is missing. This one was
-            # silent, which made it the only guard a hand-edit could switch off without
-            # saying anything -- and it is the one guarding the loudest failure, a C++
-            # kernel whose baked vector width does not match the host's.
             log.warning(
                 "torch.compiler.export_python: the artifact at %s carries no recorded "
                 "cpu-vec-isa stamp, so running a C++ kernel built for a different "
@@ -935,8 +906,10 @@ class ExportedPythonArtifact:
                 self._path,
             )
         elif self._cpu_isa is not None:
-            live_isa = _cpu_vec_isa("cpp_fused")
-            if live_isa is not None and live_isa != self._cpu_isa:
+            from torch._inductor.cpu_vec_isa import pick_vec_isa
+
+            live_isa = str(pick_vec_isa())
+            if live_isa != self._cpu_isa:
                 raise _precompile_error(
                     "torch.compiler.export_python: this machine's CPU vector ISA is "
                     f"{live_isa!r} but the artifact's C++ kernels were generated for "
@@ -975,13 +948,7 @@ class ExportedPythonArtifact:
         # not match the current torch, so a committed artifact gone stale across a
         # torch upgrade is visible rather than silently running old logic. A missing
         # stamp (dropped by a hand-edit) is silent, so hill-climbing never warns.
-        produced = self._read_stamp(code, _VERSION_TAG)
-        if produced is None:
-            # Artifacts written before the stamp became a repr() carry a bare version
-            # string, which literal_eval rejects. Falling back to the raw text keeps the
-            # skew warning working for every artifact already committed -- silently
-            # losing it is exactly the case the stamp exists for.
-            produced = self._read_raw_stamp(code, _VERSION_TAG)
+        produced = self._read_raw_stamp(code, _VERSION_TAG)
         # str(): TorchVersion.__eq__ PEP-440-parses its operand and re-raises anything
         # that is not InvalidVersion, so a stamp of 4300+ digits took the whole load path
         # down with a ValueError. Comparing text keeps a mangled stamp to a warning.
@@ -999,21 +966,25 @@ class ExportedPythonArtifact:
 
     def _load(self, code: str, *, from_disk: bool) -> Callable[..., Any]:
         # The emitted source is self-contained: exec it directly (no cache, no
-        # precompile.load round-trip). A clobbered hand-edit (dropped forward / syntax
-        # error) and an environment or version mismatch (an import that fails under the
-        # current torch) surface as distinct, actionable PrecompileErrors rather than
-        # one catch-all "delete to regenerate".
+        # precompile.load round-trip). A broken hand-edit and an environment or version
+        # mismatch (an import that fails under the current torch) surface as distinct,
+        # actionable PrecompileErrors rather than one catch-all "delete to regenerate".
         from torch._precompile import _make_inlined_forward, PrecompileError
 
-        try:
-            if from_disk:
-                log.warning(
-                    "torch.compiler.export_python is about to EXEC the artifact at %s; "
-                    "the file is trusted executable Python and may have been edited or "
-                    "replaced since export. Only load paths whose contents you trust.",
-                    self._path,
-                )
+        if not from_disk:
+            # Source this call just captured is precompile's own output, so a failure
+            # running it is a bug to surface as-is, not a file to fix or delete.
             return _make_inlined_forward(code, warn=False, filename=self._path)
+        log.warning(
+            "torch.compiler.export_python is about to EXEC the artifact at %s; "
+            "the file is trusted executable Python and may have been edited or "
+            "replaced since export. Only load paths whose contents you trust.",
+            self._path,
+        )
+        try:
+            return _make_inlined_forward(code, warn=False, filename=self._path)
+        except PrecompileError:
+            raise
         except SyntaxError as e:
             # Kernels are hoisted to module level, so Python reports a typo in one
             # against this file at the right line. Say so: telling someone to delete an
@@ -1023,13 +994,6 @@ class ExportedPythonArtifact:
                 f"torch.compiler.export_python: the artifact at {self._path} does not "
                 f"parse{where}: {e.msg}. Fix it there, or delete the file to regenerate "
                 "from the original function."
-            ) from e
-        except KeyError as e:
-            raise PrecompileError(
-                f"torch.compiler.export_python: the artifact at {self._path} could "
-                "not be run as precompile source; it is not a valid "
-                "torch.compiler.precompile artifact (a hand-edit may have clobbered "
-                "it, e.g. dropping forward()). Delete it to regenerate."
             ) from e
         except ImportError as e:
             raise PrecompileError(
@@ -1041,7 +1005,8 @@ class ExportedPythonArtifact:
         except Exception as e:
             raise PrecompileError(
                 "torch.compiler.export_python: an unexpected error occurred running "
-                f"the artifact at {self._path}. Delete it to regenerate."
+                f"the artifact at {self._path} ({type(e).__name__}: {e}). Fix it there, "
+                "or delete it to regenerate."
             ) from e
 
     def _materialize(self, args: tuple[Any, ...]) -> Callable[..., Any]:
@@ -1055,9 +1020,16 @@ class ExportedPythonArtifact:
         self._input_overlaps = self._read_stamp(code, _INPUT_OVERLAP_TAG)
         self._input_duplicates = self._read_stamp(code, _INPUT_DUPLICATE_TAG)
         self._autocast = self._read_stamp(code, _AUTOCAST_TAG)
-        self._global_state = self._read_stamp(code, _GLOBAL_STATE_TAG)
+        global_state = self._read_stamp(code, _GLOBAL_STATE_TAG)
+        try:
+            self._global_state = None if global_state is None else dict(global_state)
+        except (TypeError, ValueError):
+            # Not [key, value] pairs: a hand-edit, treated like a dropped stamp.
+            self._global_state = None
         self._cpu_isa = self._read_stamp(code, _CPU_ISA_TAG)
-        self._cpu_isa_stamped = self._read_raw_stamp(code, _CPU_ISA_TAG) is not None
+        # A recorded None (no C++ kernel) is a stamp; a dropped or unparsable line is not.
+        raw_isa = self._read_raw_stamp(code, _CPU_ISA_TAG)
+        self._cpu_isa_stamped = self._cpu_isa is not None or raw_isa == "None"
         self._code_devices = _code_devices(code)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None
@@ -1089,10 +1061,12 @@ class ExportedPythonArtifact:
             return self._loaded
 
     def _serialize_first_launch(self, entry: Callable[..., Any]) -> Callable[..., Any]:
-        # The artifact compiles its Triton kernels on their first launch, and inductor's
-        # autotuner does that lazily with no lock of its own: two threads can both find
-        # no launchers and both build them. So racing first calls take turns under the
-        # capture lock until one launch succeeds, and only then see the bare entry.
+        # CachingAutotuner.run checks its launcher count outside the autotuner's lock, and
+        # autotune_to_one_config (benchmark every config, release the losers, replace the
+        # launchers) takes no lock, so two first launches of a kernel compile-time
+        # autotuning did not pin race each other. Racing first calls take turns under the
+        # capture lock until one launch succeeds, and only then see the bare entry; a
+        # launch that raises leaves the next call serialized too.
         import torch._precompile as precompile_impl
 
         def first_launch(*args: Any) -> Any:
@@ -1122,10 +1096,8 @@ class ExportedPythonArtifact:
                 f"{getattr(self._fn, '__name__', 'fn')}'s signature: {e}"
             ) from e
         bound.apply_defaults()
-        # bound.kwargs holds every argument bind() could not place positionally. That
-        # is a keyword-only / **kwargs param (never positional), or a plain
-        # positional-or-keyword param passed by keyword while an earlier one was left
-        # to its default -- distinguish them so the error names the real cause.
+        # After apply_defaults every positional-or-keyword parameter is placed, so
+        # bound.kwargs holds only keyword-only and **kwargs entries.
         if bound.kwargs:
             params = sig.parameters
             kw_only = sorted(
@@ -1135,25 +1107,14 @@ class ExportedPythonArtifact:
             )
             if kw_only:
                 raise TypeError(
-                    "torch.compiler.export_python does not support keyword-only "
-                    f"parameters (got {kw_only}); the precompile calling convention "
-                    "is positional."
-                )
-            # Names not declared as parameters were absorbed by a **kwargs param;
-            # they are never positional, so name **kwargs as the cause rather than
-            # misreporting them as a positional-or-keyword arg left to its default.
-            var_kw = sorted(n for n in bound.kwargs if n not in params)
-            if var_kw:
-                raise TypeError(
-                    "torch.compiler.export_python does not support **kwargs "
-                    f"parameters (got {var_kw}); the precompile calling convention "
-                    "is positional."
+                    "torch.compiler.export_python does not support functions that "
+                    f"declare keyword-only parameters ({kw_only}); the precompile "
+                    "calling convention is positional."
                 )
             raise TypeError(
-                "torch.compiler.export_python could not place keyword arguments "
-                f"{sorted(bound.kwargs)} positionally because an earlier positional "
-                "parameter was left to its default; pass those arguments positionally "
-                "or provide example_inputs."
+                "torch.compiler.export_python does not support **kwargs parameters "
+                f"(got {sorted(bound.kwargs)}); the precompile calling convention is "
+                "positional."
             )
         return bound.args
 
@@ -1208,10 +1169,11 @@ class ExportedPythonArtifact:
         try:
             reference = copy.deepcopy(args)
         except Exception:
-            log.warning(
+            warning_once(
+                log,
                 "%s is set but the arguments to %s could not be deep-copied, so an "
                 "eager comparison would see whatever the artifact mutated. Skipping "
-                "the check for this call.",
+                "the check for calls with such arguments.",
                 _CHECK_ENV,
                 self._path,
             )
