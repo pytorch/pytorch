@@ -256,6 +256,17 @@ class DeviceInterface:
             )
 
     @staticmethod
+    def get_fp32_attention_precision() -> str:
+        """Device-specific fp32 attention precision policy.
+
+        Returns "none" by default, meaning no device-specific policy applies
+        and the caller should use its generic fallback. Backends with a real
+        policy (e.g. CUDA, MTIA) override this to return "ieee", "tf32",
+        or "bfx9".
+        """
+        return "none"
+
+    @staticmethod
     def is_fp32_attention_fusion_safe(dtype: torch.dtype) -> bool:
         """Queried by inductor's SDPA pattern matcher (_sfdp_params_check) to
         decide whether fusing an fp32 attention pattern is safe. True fuses;
@@ -433,15 +444,19 @@ class CudaInterface(DeviceInterface):
             raise TritonUnavailableError("triton not built with the 'nvidia' backend")
 
     @staticmethod
+    def get_fp32_attention_precision() -> str:
+        return torch.backends.cuda.matmul.fp32_precision
+
+    @staticmethod
     def is_fp32_attention_fusion_safe(dtype: torch.dtype) -> bool:
         return (
             dtype != torch.float32
-            or torch.backends.cuda.matmul.fp32_precision == "tf32"
+            or CudaInterface.get_fp32_attention_precision() == "tf32"
         )
 
     @staticmethod
     def should_warn_tf32_disabled() -> bool:
-        if torch.backends.cuda.matmul.fp32_precision == "bfx9":
+        if CudaInterface.get_fp32_attention_precision() == "bfx9":
             return False
         return torch.cuda.is_available() and torch.cuda.is_tf32_supported()
 
