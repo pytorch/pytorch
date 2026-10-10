@@ -93,7 +93,11 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
-from torch._dynamo.utils import CompileEventLogger, get_metrics_context
+from torch._dynamo.utils import (
+    CompileEventLogger,
+    get_metrics_context,
+    get_type_dict_no_user_code,
+)
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -780,24 +784,10 @@ class GuardManagerWrapper:
             return body.getvalue()
 
     def check(self, x: Any) -> bool:
-        # RootGuardManager::check_nopybind_template disables the TorchFunction
-        # TLS for its accessors and restores it on every exit but a throw, which
-        # would leave the calling thread disabled: put it back on that exit.
-        torch_function_state = torch._C._get_torch_function_state()
-        try:
-            return self.root.check(x)
-        except BaseException:
-            torch._C._set_torch_function_state(torch_function_state)
-            raise
+        return self.root.check(x)
 
     def check_verbose(self, x: Any) -> GuardDebugInfo:
-        # check_verbose_nopybind has the same non-RAII exit as check() above.
-        torch_function_state = torch._C._get_torch_function_state()
-        try:
-            return self.root.check_verbose(x)
-        except BaseException:
-            torch._C._set_torch_function_state(torch_function_state)
-            raise
+        return self.root.check_verbose(x)
 
     def populate_code_parts_for_debugging(self) -> None:
         # This should be called when the guard manager is fully populated
@@ -3591,6 +3581,28 @@ class GuardBuilder(GuardBuilderBase):
 
     # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
+    def FX_ANNOTATION(self, guard: Guard) -> None:
+        """Guard on the torch.fx.traceback annotation active at frame entry."""
+        output_graph = self.check_fn_manager.output_graph
+        if output_graph is None:
+            raise AssertionError("check_fn_manager.output_graph must not be None")
+        annotation = output_graph.fx_annotation
+        code = [f"torch.fx.traceback._get_current_annotation() == {annotation!r}"]
+        self._set_guard_export_info(guard, code)
+
+        get_annotation = torch.fx.traceback._get_current_annotation
+
+        # If == raises (e.g. multi-element tensor values), LAMBDA_GUARD treats it
+        # as a guard failure, so the frame recompiles.
+        def fn(x: object) -> bool:
+            return get_annotation() == annotation
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    # Global state guard — not source-specific, checked separately at runtime.
+    @skip_guard_check_spec
     def DEFAULT_DEVICE(self, guard: Guard) -> None:
         """Guard on CURRENT_DEVICE per torch.utils._device"""
         if guard.source is not GuardSource.GLOBAL:
@@ -4507,6 +4519,10 @@ class GuardsStatePickler(FunctionPicklerBase):
         return types.MappingProxyType(d)
 
     @classmethod
+    def _unpickle_type_dict_item(cls, owner: type, name: str) -> object:
+        return get_type_dict_no_user_code(owner)[name]
+
+    @classmethod
     def _unpickle_dict_keys(cls, elems: list[Any]) -> Any:
         return dict.fromkeys(elems).keys()
 
@@ -4944,6 +4960,22 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(obj, types.MappingProxyType):
             return type(self)._unpickle_mapping_proxy, (obj.copy(),)
 
+        elif isinstance(
+            obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
+        ):
+            owner = obj.__objclass__
+            flags = type.__dict__["__flags__"].__get__(owner, type(owner))
+            if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+                raise torch._dynamo.exc.PackageError(
+                    f"Cannot serialize {type(obj).__name__} with a mutable owner"
+                )
+            for name, value in get_type_dict_no_user_code(owner).items():
+                if value is obj:
+                    return type(self)._unpickle_type_dict_item, (owner, name)
+            raise torch._dynamo.exc.PackageError(
+                f"Cannot locate {obj!r} in {owner!r}.__dict__"
+            )
+
         elif type(obj) is _COUNT_ITERATOR_TYPE:
             item, step = normalize_count_iter(obj)
             if item is not NotImplemented and step is not NotImplemented:
@@ -5228,7 +5260,10 @@ class CheckFunctionManager:
                 for keep, g in zip(_guard_filter_fn(guards), guards):
                     if not keep:
                         ret.append(False)
-                    elif (
+                    elif g.guard_type not in (
+                        "TYPE_MATCH",
+                        "BUILTIN_MATCH",
+                    ) and (
                         g.guard_type
                         in (
                             "ID_MATCH",

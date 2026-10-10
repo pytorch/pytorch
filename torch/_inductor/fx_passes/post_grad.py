@@ -23,6 +23,7 @@ from torch._inductor.custom_graph_pass import (
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import (
+    canonicalize_dim,
     is_boolean_dtype,
     is_expandable_to,
     is_integer_dtype,
@@ -1138,13 +1139,16 @@ def pointless_cumsum_check(match: Match) -> bool:
             _users=MULTIPLE,
         ),
         KeywordArg("dim"),
+        dtype=KeywordArg("out_dtype"),
         _users=MULTIPLE,
     ),
     extra_check=pointless_cumsum_check,
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
 )
-def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype, dim):
+def pointless_cumsum_replacement(
+    match: Match, shape, fill_value, device, dtype, dim, out_dtype
+):
     """Based on a pattern in OPTForCausalLM"""
 
     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
@@ -1153,7 +1157,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
         # cumsum promotes all integral types to int64
         dtype = torch.int64
 
-    out_dtype = match.output_node().kwargs.get("dtype") or dtype
+    out_dtype = out_dtype or dtype
     bool_out = is_boolean_dtype(out_dtype)  # pyrefly: ignore[bad-argument-type]
     # pyrefly: ignore[bad-argument-type]
     integral_out = bool_out or is_integer_dtype(out_dtype)
@@ -1243,8 +1247,12 @@ def is_valid_splitwithsizes_cat(match):
     if len(split_nodes) != 1 or len(cat_nodes) != 1:
         return False
     split_node, cat_node = split_nodes[0], cat_nodes[0]
-    # The dim of split and cat should match for passthrough
-    if get_arg_value(split_node, 2, "dim") != get_arg_value(cat_node, 1, "dim"):
+    # The dim of split and cat should match for passthrough; a negative dim
+    # and its positive twin name the same axis
+    split_dim = get_arg_value(split_node, 2, "dim")
+    cat_dim = get_arg_value(cat_node, 1, "dim")
+    rank = cat_node.meta["val"].ndim
+    if _canonicalize_dim_arg(rank, split_dim) != _canonicalize_dim_arg(rank, cat_dim):
         return False
     get_item_args = OrderedSet(
         get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes
@@ -1265,6 +1273,18 @@ def is_valid_splitwithsizes_cat(match):
         return False
 
     return True
+
+
+def _canonicalize_dim_arg(rank, dim):
+    # a dim left at its default comes through as None; that default is 0
+    d = dim if dim is not None else 0
+    try:
+        return canonicalize_dim(rank, d)
+    except IndexError:
+        # eager cat tolerates any dim when every input is a legacy (0,)
+        # empty, so an out-of-range dim can reach this check; compare raw
+        # rather than crash the pattern match
+        return d
 
 
 def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
@@ -1926,30 +1946,33 @@ def decompose_auto_functionalized(graph):
         raise AssertionError("auto_functionalized_v2 was not removed")
 
 
-@register_lowering_pattern(
-    CallFunction(
-        aten.cat,
-        ListOf(
-            CallFunction(
-                operator.getitem,
+# see cat_splitwithsizes below for why both arities are registered
+for _cat_arity, _split_arity in itertools.product((1, 2), (2, 3)):
+
+    @register_lowering_pattern(
+        CallFunction(
+            aten.cat,
+            ListOf(
                 CallFunction(
-                    aten.split_with_sizes,
-                    KeywordArg("input_"),
+                    operator.getitem,
+                    CallFunction(
+                        aten.split_with_sizes,
+                        KeywordArg("input_"),
+                        Ignored(),
+                        *([Ignored()] * (_split_arity - 2)),
+                        _users=MULTIPLE,
+                    ),
                     Ignored(),
-                    Ignored(),
-                    _users=MULTIPLE,
                 ),
-                Ignored(),
             ),
+            *([Ignored()] * (_cat_arity - 1)),
         ),
-        Ignored(),
-    ),
-    pass_number=2,
-    extra_check=is_valid_splitwithsizes_cat,
-    output_metadata_is_input="input_",
-)
-def splitwithsizes_cat_replace(match, input_):
-    return input_
+        pass_number=2,
+        extra_check=is_valid_splitwithsizes_cat,
+        output_metadata_is_input="input_",
+    )
+    def splitwithsizes_cat_replace(match, input_):
+        return input_
 
 
 def is_valid_cat_splitwithsizes(match):
@@ -1963,12 +1986,17 @@ def is_valid_cat_splitwithsizes(match):
     if len(cat_node.users) > 1:
         return False
 
-    # the dim of the cat and split should match
-    dim = get_arg_value(split_node, 2, "dim")
-    if dim != get_arg_value(cat_node, 1, "dim"):
+    cat_inputs = list(get_arg_value(cat_node, 0))
+
+    # the dim of the cat and split should match; a negative dim and its
+    # positive twin name the same axis. rank comes from the cat output since
+    # inputs can be legacy 1D empties
+    rank = cat_node.meta["val"].ndim
+    dim = _canonicalize_dim_arg(rank, get_arg_value(split_node, 2, "dim"))
+    cat_dim = _canonicalize_dim_arg(rank, get_arg_value(cat_node, 1, "dim"))
+    if dim != cat_dim:
         return False
 
-    cat_inputs = list(get_arg_value(cat_node, 0))
     split_sizes = get_arg_value(split_node, 1, "split_sizes")
     # the number of input tensors in cat and the
     # length of the split sizes should match
@@ -1980,6 +2008,10 @@ def is_valid_cat_splitwithsizes(match):
         # should match the corresponding split size
         if "val" not in cat_input.meta:
             return False
+        if cat_input.meta["val"].ndim != rank:
+            # legacy 1D empties ride along in cat with a lower rank than the
+            # output; indexing them on the canonical dim would raise
+            return False
         cat_input_size = cat_input.meta["val"].size(dim)
         if cat_input_size != split_size:
             return False
@@ -1987,24 +2019,28 @@ def is_valid_cat_splitwithsizes(match):
     return True
 
 
-@register_lowering_pattern(
-    CallFunction(
-        aten.split_with_sizes,
+# dim defaults to 0 for both ops, and aot autograd does not fill in defaults,
+# so every omitted trailing dim arg needs its own pattern arity
+for _split_arity, _cat_arity in itertools.product((2, 3), (1, 2)):
+
+    @register_lowering_pattern(
         CallFunction(
-            aten.cat,
-            KeywordArg("input_"),
+            aten.split_with_sizes,
+            CallFunction(
+                aten.cat,
+                KeywordArg("input_"),
+                *([Ignored()] * (_cat_arity - 1)),
+                _users=MULTIPLE,
+            ),
             Ignored(),
-            _users=MULTIPLE,
+            *([Ignored()] * (_split_arity - 2)),
         ),
-        Ignored(),
-        Ignored(),
-    ),
-    pass_number=2,
-    extra_check=is_valid_cat_splitwithsizes,
-    output_metadata_is_input="input_",
-)
-def cat_splitwithsizes_replace(match, input_):
-    return input_
+        pass_number=2,
+        extra_check=is_valid_cat_splitwithsizes,
+        output_metadata_is_input="input_",
+    )
+    def cat_splitwithsizes_replace(match, input_):
+        return input_
 
 
 # reciprocal(sqrt(x)) -> rsqrt(x): an unconditional algebraic identity
@@ -2084,11 +2120,9 @@ def should_prefer_unfused_addmm(match):
         return False
     if inp_val.device != mat1_val.device or inp_val.device != mat2_val.device:
         return False
-    beta = match.kwargs.get("beta", 1)
-    if inp_val.device.type != "cuda" and beta == 0:
-        mm_shape = mat1_val.shape[0], mat2_val.shape[1]
-        if not is_expandable_to(inp_val.shape, mm_shape):
-            return False
+    # tuned_addmm drops the ignored input when beta == 0.
+    if match.kwargs.get("beta", 1) == 0:
+        return False
 
     output = match.output_node()
     if not _is_bias_like_addmm_input(inp, output):
@@ -2101,6 +2135,9 @@ def should_prefer_unfused_baddbmm(match):
     if not is_gpu(inp.meta["val"].device.type):
         return False
     if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return False
+    # tuned_baddbmm drops the ignored input when beta == 0.
+    if match.kwargs.get("beta", 1) == 0:
         return False
 
     output = match.output_node()
@@ -2141,16 +2178,10 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         ):
             return
 
-    drop_input_for_beta_zero = inp.meta["val"].device.type == "cuda"
-
     def repl(inp, x1, x2, alpha, beta):
-        if alpha == 0 and beta == 0 and drop_input_for_beta_zero:
-            return x1.new_zeros((x1.shape[0], x2.shape[1]))
         mm_result = x1 @ x2
         if alpha != 1:
             mm_result = alpha * mm_result
-        if beta == 0 and drop_input_for_beta_zero:
-            return mm_result
         if beta != 1:
             inp = beta * inp
         return inp + mm_result
@@ -2207,11 +2238,6 @@ def is_valid_addmm_fusion(match):
     ):
         return False
 
-    # addmm skips the operand scaled by 0, so it wouldn't propagate its NaN/inf
-    alpha = match.output_node().kwargs.get("alpha", 1)
-    if not isinstance(alpha, (int, float)) or alpha == 0:
-        return False
-
     mat1, mat2 = match.args
     inp = match.kwargs["inp"]
 
@@ -2256,13 +2282,8 @@ def is_valid_addmm_fusion(match):
     extra_check=is_valid_addmm_fusion,
 )
 def addmm(match, mat1, mat2, *, inp):
-    add = match.output_node()
-    alpha = add.kwargs.get("alpha", 1)
-    # add(inp, mm, alpha) = inp + alpha * mm; add(mm, inp, alpha) = mm + alpha * inp
-    scale = {} if alpha == 1 else {"alpha" if add.args[0] is inp else "beta": alpha}
-
     def repl(inp, mat1, mat2):
-        return aten.addmm(inp, mat1, mat2, **scale)
+        return aten.addmm(inp, mat1, mat2)
 
     match.replace_by_example(repl, [inp, mat1, mat2])
 

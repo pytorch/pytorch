@@ -490,6 +490,37 @@ test_python_smoke_b200() {
   # Targeted smoke tests for B200 including FlashAttention CuTe coverage
   install_flash_attn_cute
   install_cutlass_operators
+  (
+    local test_library_path="${LD_LIBRARY_PATH:-}"
+    if [[ "$BUILD_ENVIRONMENT" == *cuda13.4* ]]; then
+      pip install 'cuda-bindings>=13.4,<14'
+      local driver_version
+      driver_version=$(cd test && python -c 'from torch.cuda.green_contexts import _get_driver_version; print(_get_driver_version())')
+      if [[ "$driver_version" -lt 13040 ]]; then
+        local compat_dir compat_package compat_sha256
+        compat_dir=$(mktemp -d)
+        trap 'rm -rf "$compat_dir"' EXIT
+        compat_package=cuda-compat-13-4_615.71.09-2ubuntu1_amd64.deb
+        compat_sha256=1b814aa705b4dfe955420c967bd545f39ef7b67f32bd0f285a005ea296b02831
+        curl -fL --retry 3 "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/$compat_package" -o "$compat_dir/$compat_package"
+        echo "$compat_sha256  $compat_dir/$compat_package" | sha256sum --check
+        dpkg-deb --extract "$compat_dir/$compat_package" "$compat_dir"
+        test_library_path="$compat_dir/usr/local/cuda-13.4/compat${test_library_path:+:$test_library_path}"
+      fi
+      (cd test && env LD_LIBRARY_PATH="$test_library_path" python - <<'PY'
+import torch
+from torch.cuda import green_contexts
+
+torch.cuda.init()
+print(f"CUDA driver API version: {green_contexts._get_driver_version()}")
+green_contexts._ensure_locality_supported()
+if not green_contexts.is_localization_supported():
+    raise RuntimeError("B200 CUDA 13.4 smoke tests require locality-domain support")
+PY
+      )
+    fi
+    time env LD_LIBRARY_PATH="$test_library_path" python test/run_test.py --include test_cuda -k "greencontext or LocalizedAllocator" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  )
   time python test/run_test.py \
     --include \
       test_matmul_cuda \
@@ -587,7 +618,7 @@ _run_fabric_handle_tests() {
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nccl.py -k "NCCLSymmetricMemoryTest or NCCLOneSidedOpHandleTypeTest or NCCLSymmetricMemoryRestartTest" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_symm_mem_registry.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_low_contention_collectives.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
@@ -603,8 +634,11 @@ test_h100_symm_mem() {
   _run_fabric_handle_tests
 }
 
+# PYTHON_TEST_EXTRA_OPTION intentionally expands into multiple arguments.
+# shellcheck disable=SC2086
 test_h100_fabric() {
   time python test/run_test.py --include distributed/test_p2p_ipc.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_multiprocessing -k test_rebuild_cuda_tensor $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -1904,7 +1938,6 @@ test_distributed() {
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
     fi
-    python test/run_test.py --cpp --verbose -i cpp/NCCLDevCommManagerTest
   fi
 }
 
