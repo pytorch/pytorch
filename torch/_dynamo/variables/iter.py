@@ -104,11 +104,15 @@ class ItertoolsVariable(VariableTracker):
         args: list["VariableTracker"],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker | None":
+        from .builder import SourcelessBuilder
+
         # Only itertools.chain has from_iterable; declining (None) falls
         # through to the generic protocol for other itertools callables.
         if self.value is not itertools.chain:
             return None
-        return ItertoolsVariable(_CHAIN_FROM_ITERABLE).call_function(tx, args, kwargs)
+        return SourcelessBuilder.create_internal_itertools(
+            _CHAIN_FROM_ITERABLE
+        ).call_function(tx, args, kwargs)
 
     tp_methods = {
         "from_iterable": Method(_from_iterable),

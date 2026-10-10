@@ -882,6 +882,12 @@ class CurrentDeviceContextVariable(ContextWrappingVariable):
         "device_context",
     }
 
+    @classmethod
+    def create(
+        cls, device_type: str, device_context: type
+    ) -> "CurrentDeviceContextVariable":
+        return cls(device_type, device_context)
+
     def __init__(
         self,
         device_type: str,
@@ -1459,8 +1465,9 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
         from ..tensor_version_op import _unsafe_set_version_counter
+        from .builder import SourcelessBuilder
 
-        return variables.TorchInGraphFunctionVariable(
+        return SourcelessBuilder.create_internal_torch_function(
             _unsafe_set_version_counter
         ).call_function(tx, [self.tensors, self.prev_versions], {})
 
