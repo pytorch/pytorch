@@ -13,7 +13,8 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import IndentedBuffer, run_and_get_code
 from torch._inductor.virtualized import V
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 def _code_for(fn, *args, **config_kwargs):
@@ -107,24 +108,24 @@ class TestWrapperPreamble(TestCase):
             with self.assertRaisesRegex(AssertionError, "cannot tell what"):
                 wrapper.write_if_used(buf, line)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_a_binding_is_not_kept_alive_by_its_own_definition(self):
         # `_quantized = torch.ops._quantized` names itself on the right-hand side.
-        _, code = _code_for(_softmax, torch.randn(64, 128, device="cuda"))
+        _, code = _code_for(_softmax, torch.randn(64, 128, device=GPU_TYPE))
         self.assertNotIn("_quantized", code)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_a_name_mentioned_only_in_a_comment_is_not_a_use(self):
-        _, code = _code_for(_softmax, torch.randn(64, 128, device="cuda"))
+        _, code = _code_for(_softmax, torch.randn(64, 128, device=GPU_TYPE))
         self.assertIn("Original ATen: [aten.", code)
         self.assertNotIn("aten = torch.ops.aten", code)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_a_name_used_only_inside_a_kernel_is_not_a_wrapper_use(self):
         # A module-level kernel brings its own imports (`math as tl_math`, triton) and
         # carries `'device': 0` in its metadata. None of those is a use of the wrapper's
         # binding.
-        x = torch.randn(64, 128, device="cuda")
+        x = torch.randn(64, 128, device=GPU_TYPE)
         for fn in (_softmax, _cond_softmax):
             with self.subTest(fn.__name__):
                 result, code = _code_for(fn, x)
@@ -137,28 +138,28 @@ class TestWrapperPreamble(TestCase):
                     self.assertEqual(code.count(line), kernels, line)
                 self.assertEqual(_run_from_file(code, [x])[0], result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_names_the_wrapper_uses_are_kept(self):
         # Extern calls name `device(...)` and `inf` only through repr().
         def fn(x):
             perm = torch.randperm(x.shape[0], device=x.device)
             return torch.cdist(x, x * 2, p=float("inf")).sum() + perm.sum()
 
-        x = torch.randn(8, 4, device="cuda")
+        x = torch.randn(8, 4, device=GPU_TYPE)
         result, code = _code_for(fn, x)
-        self.assertIn("device=device(type='cuda'", code)
+        self.assertIn(f"device=device(type='{GPU_TYPE}'", code)
         self.assertIn("from torch import device, empty_strided", code)
         self.assertIn("from math import inf, nan", code)
         self.assertEqual(_run_from_file(code, [x])[0], result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_a_name_used_only_in_a_subgraph_is_kept(self):
         # Only the true branch calls extern_kernels.mm, and the root does not scan the
         # branches' code.
         def fn(x):
             return torch.cond(x.sum() > 0, lambda t: t @ t, lambda t: t.cos(), (x,))
 
-        x = torch.randn(16, 16, device="cuda")
+        x = torch.randn(16, 16, device=GPU_TYPE)
         result, code = _code_for(fn, x)
         self.assertIn("extern_kernels.mm(", code)
         self.assertNotIn("extern_kernels.mm(", code.split("def call(")[-1])
@@ -176,17 +177,17 @@ class TestWrapperPreamble(TestCase):
         self.assertNotIn("AsyncCompile", code)
         self.assertEqual(_run_from_file(code, [a, b])[0], result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_module_level_kernels_keep_async_compile_wait(self):
         # Nothing but the wait names async_compile, and the wait is what compiles the
         # kernels when the module runs on its own.
-        x = torch.randn(64, 128, device="cuda")
+        x = torch.randn(64, 128, device=GPU_TYPE)
         _, code = _code_for(_softmax, x)
         self.assertNotIn("async_compile.triton(", code)
         self.assertIn("async_compile = AsyncCompile()", code)
         self.assertIn("async_compile.wait(globals())\ndel async_compile", code)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_a_name_used_only_in_a_nested_subgraph_is_kept(self):
         # Only the inner true branch calls extern_kernels.mm. Its code is spliced into
         # the outer branch's, which does not scan it either.
@@ -197,30 +198,30 @@ class TestWrapperPreamble(TestCase):
             return torch.cond(x.sum() > 0, outer, lambda t: t.cos(), (x,))
 
         # Positive, so both predicates take the branch that calls mm.
-        x = torch.rand(16, 16, device="cuda")
+        x = torch.rand(16, 16, device=GPU_TYPE)
         result, code = _code_for(fn, x)
         self.assertIn("extern_kernels.mm(", code)
         self.assertIn("import extern_kernels", code)
         self.assertEqual(_run_from_file(code, [x])[0], result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_profile_bandwidth_keeps_start_graph(self):
-        x = torch.randn(64, 128, device="cuda")
+        x = torch.randn(64, 128, device=GPU_TYPE)
         result, code = _code_for(_softmax, x, profile_bandwidth=True)
         self.assertIn("start_graph", code.split("def call(")[0])
         self.assertEqual(_run_from_file(code, [x])[0], result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_autotune_at_compile_time_runs_from_file(self):
-        x = torch.randn(64, 128, device="cuda")
+        x = torch.randn(64, 128, device=GPU_TYPE)
         at_compile_time = {"triton.autotune_at_compile_time": True}
         result, code = _code_for(_softmax, x, **at_compile_time)
         self.assertEqual(_run_from_file(code, [x])[0], result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_benchmark_harness_runs(self):
         # The harness is appended to the module last, and is run as a script.
-        x = torch.randn(64, 128, device="cuda")
+        x = torch.randn(64, 128, device=GPU_TYPE)
         _, code = _code_for(_softmax, x)
         self.assertIn("def benchmark_compiled_module(", code)
         with tempfile.TemporaryDirectory() as d:
