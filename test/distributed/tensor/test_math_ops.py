@@ -2057,33 +2057,39 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         # Batch-sharded GroupNorm backward, including bias-only affine parameters.
         batch = self.world_size * 2
         group_input = torch.randn(batch, C, H, W, device=self.device_type)
-        for use_weight, use_bias in [(True, True), (False, False), (False, True), (True, False)]:
-            ref_input = group_input.detach().clone().requires_grad_(True)
-            dt_input = distribute_tensor(
-                group_input.detach().clone().requires_grad_(True),
-                device_mesh,
-                [Shard(0)],
-            )
-            ref_weight = weight.detach().clone().requires_grad_(True) if use_weight else None
-            ref_bias = bias.detach().clone().requires_grad_(True) if use_bias else None
-            dt_weight_bwd = (
-                distribute_tensor(ref_weight.detach().clone().requires_grad_(True), device_mesh, replicate)
-                if use_weight else None
-            )
-            dt_bias_bwd = (
-                distribute_tensor(ref_bias.detach().clone().requires_grad_(True), device_mesh, replicate)
-                if use_bias else None
-            )
-            ref_output = F.group_norm(ref_input, num_groups, ref_weight, ref_bias)
-            dt_output = F.group_norm(dt_input, num_groups, dt_weight_bwd, dt_bias_bwd)
-            self.assertEqual(dt_output.full_tensor(), ref_output)
-            ref_output.sum().backward()
-            dt_output.sum().backward()
-            self.assertEqual(dt_input.grad.full_tensor(), ref_input.grad)
-            if use_weight:
-                self.assertEqual(dt_weight_bwd.grad.full_tensor(), ref_weight.grad)
-            if use_bias:
-                self.assertEqual(dt_bias_bwd.grad.full_tensor(), ref_bias.grad)
+        for use_weight, use_bias in [
+            (True, True),
+            (False, False),
+            (False, True),
+            (True, False),
+        ]:
+            with self.subTest(use_weight=use_weight, use_bias=use_bias):
+                ref_input = group_input.detach().clone().requires_grad_(True)
+                dt_input = distribute_tensor(
+                    group_input.detach().clone().requires_grad_(True),
+                    device_mesh,
+                    [Shard(0)],
+                )
+                ref_weight = weight.detach().clone().requires_grad_(True) if use_weight else None
+                ref_bias = bias.detach().clone().requires_grad_(True) if use_bias else None
+                dt_weight_bwd = (
+                    distribute_tensor(ref_weight.detach().clone().requires_grad_(True), device_mesh, replicate)
+                    if use_weight else None
+                )
+                dt_bias_bwd = (
+                    distribute_tensor(ref_bias.detach().clone().requires_grad_(True), device_mesh, replicate)
+                    if use_bias else None
+                )
+                ref_output = F.group_norm(ref_input, num_groups, ref_weight, ref_bias)
+                dt_output = F.group_norm(dt_input, num_groups, dt_weight_bwd, dt_bias_bwd)
+                self.assertEqual(dt_output.full_tensor(), ref_output)
+                ref_output.sum().backward()
+                dt_output.sum().backward()
+                self.assertEqual(dt_input.grad.full_tensor(), ref_input.grad)
+                if use_weight:
+                    self.assertEqual(dt_weight_bwd.grad.full_tensor(), ref_weight.grad)
+                if use_bias:
+                    self.assertEqual(dt_bias_bwd.grad.full_tensor(), ref_bias.grad)
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
