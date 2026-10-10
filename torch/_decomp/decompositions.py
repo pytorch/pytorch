@@ -660,11 +660,18 @@ def binary_cross_entropy(
     weight: Tensor | None = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
-    # We cannot currently model this without introducing data-dependent control flow
-    # TORCH_CHECK(
-    #     (input_val >= 0) && (input_val <= 1),
-    #     "all elements of input should be between 0 and 1"
-    # )
+    # The ATen kernels check the [0, 1] domain per element; a pointwise
+    # decomposition has to assert on the whole tensor instead. Without this the
+    # log terms below clamp to -100 and an out-of-domain value silently returns
+    # a finite loss. _assert_async is side-effectful and won't be DCE'd.
+    aten._assert_async.msg(
+        torch.all((self >= 0) & (self <= 1)),
+        "all elements of input should be between 0 and 1",
+    )
+    aten._assert_async.msg(
+        torch.all((target >= 0) & (target <= 1)),
+        "all elements of target should be between 0 and 1",
+    )
     loss = (target - 1) * torch.maximum(
         torch.log1p(-self), self.new_full((), -100)
     ) - target * torch.maximum(torch.log(self), self.new_full((), -100))
