@@ -406,7 +406,7 @@ class TestReadableWrapperCodegen(TestCase):
 
         x = torch.randn(64, 128, device="cuda")
         _, code = _code_for(fn, x, readable_wrapper=False)
-        self.assertIn("async_compile.triton", code)
+        self.assertIn("async_compile.wait(globals())", code)
         self.assertIn("AsyncCompile()", code)
 
     @parametrize("flag", ["cpp_wrapper", "fx_wrapper"])

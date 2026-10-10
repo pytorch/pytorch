@@ -112,10 +112,11 @@ class TestModuleLevelKernels(TestCase):
         self.assertIn("# kernel path:", code)
 
     @requires_cuda_and_triton
-    def test_default_wrapper_still_uses_async_compile(self):
+    def test_kernels_are_module_level_by_default(self):
         x = torch.randn(64, 128, device="cuda")
         _, code = _code_for(_softmax, x)
-        self.assertIn("async_compile.triton(", code)
+        self.assertNotIn("async_compile.triton(", code)
+        self.assertTrue(re.search(r"^def triton_\w+\(", code, re.MULTILINE), code)
 
     @requires_cuda_and_triton
     @config.patch({"compile_threads": 2, "triton.unique_kernel_names": False})
