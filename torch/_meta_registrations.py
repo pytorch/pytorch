@@ -2933,6 +2933,27 @@ def meta_miopen_batch_norm(
     return out, save_mean, save_var
 
 
+@register_meta(aten._nnpack_spatial_convolution.default)
+def meta_nnpack_spatial_convolution(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None,
+    padding: list[int],
+    stride: list[int] | int = 1,
+):
+    # Same output shape as a plain conv2d (dilation=1, groups=1, not transposed).
+    shape_out = calc_conv_nd_return_shape(
+        input,
+        weight,
+        stride,
+        padding,
+        dilation=1,
+        is_transposed=False,
+        groups=1,
+    )
+    return input.new_empty(shape_out)
+
+
 @register_meta(aten.convolution.default)
 def meta_conv(
     input_tensor: torch.Tensor,
