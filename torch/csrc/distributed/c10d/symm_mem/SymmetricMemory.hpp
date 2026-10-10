@@ -41,6 +41,25 @@ inline void check_rank(int rank, int world_size) {
 // provided that the signal pads remain zero-filled following successful
 // synchronization.
 //
+// On the CUDA backend, PyTorch's own operations (barrier(), put_signal(),
+// wait_signal() and the collectives) do not use the pad get_signal_pad()
+// returns. They synchronize through a separate pad that belongs to the process
+// group on a device, so that groups sharing an allocation cannot take each
+// other's signals; it has the same layout and is internal. The pad
+// get_signal_pad() returns stays the allocation's, for kernels outside PyTorch,
+// which alone decide what it holds. The NCCL and NVSHMEM backends use the
+// allocation's pad for both.
+//
+// Because the internal pad is the group's, signals are scoped to the group:
+// put_signal() on one allocation can satisfy wait_signal() on another
+// allocation of the same group on the same channel. As for other collectives, a
+// group's operations on one channel must be issued in the same order on every
+// rank, whichever allocation they use. Replays of captured graphs are not
+// ordered, so graphs that use the same group must not replay concurrently. The
+// pad is created by the group's first rendezvous on a device, which every rank
+// must reach on its own device of that mapping; using the group later with a
+// different mapping of ranks to devices raises. Use a new group for that.
+//
 // NOTE [symmetric memory synchronization channel]
 // Synchronization channels allow users to use a single SymmetricMemory object
 // to perform isolated synchronizations on different streams. For example,
@@ -116,6 +135,16 @@ class TORCH_API SymmetricMemory : public torch::CustomClassHolder {
   // memory load and store.
   virtual bool world_within_direct_access() {
     TORCH_CHECK(false, "NYI");
+  }
+
+  // The peer pad pointers PyTorch's own operations synchronize through, and
+  // that pad's size: on the CUDA backend, the group's internal pad; otherwise
+  // the allocation's pad.
+  virtual void** get_group_signal_pad_ptrs_dev() {
+    return get_signal_pad_ptrs_dev();
+  }
+  virtual size_t get_group_signal_pad_size() {
+    return get_signal_pad_size();
   }
 };
 
@@ -231,7 +260,8 @@ TORCH_API std::optional<std::string> get_backend(c10::Device device);
 // Returns the user-configured size if set, otherwise returns the default size.
 TORCH_API size_t get_signal_pad_size();
 
-// Set the signal pad size for future symmetric memory allocations.
+// Set the signal pad size for future symmetric memory allocations, and on the
+// CUDA backend for process groups' internal pads created from now on.
 // This must be called before any symmetric memory allocations are made.
 // The size should be proportional to the number of blocks the user launches
 // and the world size.

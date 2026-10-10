@@ -9,9 +9,11 @@
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
+#include <torch/csrc/distributed/c10d/symm_mem/SignalPad.hpp>
 
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace c10d::symmetric_memory {
 
@@ -27,6 +29,10 @@ struct GroupStreamGuard::State {
   std::optional<c10::cuda::CaptureId_t> done_capture;
   // Owning group, for liveness only.
   std::optional<c10::weak_intrusive_ptr<c10d::ProcessGroup>> pg;
+  // Guards `pad`. Distinct from `mu`, which a guard holds across a launch:
+  // creating the pad is a collective and launches no guarded op.
+  std::mutex pad_mu;
+  std::shared_ptr<const SignalPad> pad;
 };
 
 namespace {
@@ -56,6 +62,9 @@ StreamStateMap& stream_states() {
 std::shared_ptr<GroupStreamGuard::State> get_group_stream_state(
     const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
     c10::DeviceIndex device) {
+  // Declared before the lock so that dropped entries, which may hold the last
+  // reference to a pad, are destroyed after it is released.
+  std::vector<std::shared_ptr<GroupStreamGuard::State>> dropped;
   std::lock_guard<std::mutex> lock(g_stream_map_mutex);
   const StreamStateKey key{pg.get(), device};
   auto it = stream_states().find(key);
@@ -63,9 +72,11 @@ std::shared_ptr<GroupStreamGuard::State> get_group_stream_state(
       !it->second->pg.has_value() || it->second->pg->expired();
   if (stale) {
     // Drop entries whose group is gone, otherwise transient groups leak an
-    // event each. Insertions are rare, so the scan is off any hot path.
+    // event and a signal pad each. Insertions are rare, so the scan is off any
+    // hot path.
     for (auto i = stream_states().begin(); i != stream_states().end();) {
       if (!i->second->pg.has_value() || i->second->pg->expired()) {
+        dropped.push_back(std::move(i->second));
         i = stream_states().erase(i);
       } else {
         ++i;
@@ -154,6 +165,21 @@ GroupStreamGuard::~GroupStreamGuard() {
     state_->last_stream.reset();
     state_->done_capture.reset();
   }
+}
+
+std::shared_ptr<const SignalPad> get_or_create_signal_pad(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    c10::DeviceIndex device,
+    const std::function<std::shared_ptr<const SignalPad>()>& create) {
+  TORCH_CHECK(pg != nullptr, "get_or_create_signal_pad: null ProcessGroup");
+  auto state = get_group_stream_state(pg, device);
+  std::lock_guard<std::mutex> lock(state->pad_mu);
+  if (state->pad == nullptr) {
+    // Published only once fully built, so no other thread sees a partial pad.
+    state->pad = create();
+    TORCH_INTERNAL_ASSERT(state->pad != nullptr);
+  }
+  return state->pad;
 }
 
 } // namespace c10d::symmetric_memory

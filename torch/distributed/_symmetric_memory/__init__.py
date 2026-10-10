@@ -2436,7 +2436,10 @@ def set_signal_pad_size(size: int) -> None:
 
     .. warning::
         This must be called before any symmetric memory allocations are made.
-        The size cannot be changed after allocations have been performed.
+        The size cannot be changed after allocations have been performed. On
+        the CUDA backend it also sizes the internal signal pad that a process
+        group creates on its first rendezvous on a device, which keeps the
+        size it was created with.
 
     Args:
         size (int): the signal pad size in bytes. The size should be
