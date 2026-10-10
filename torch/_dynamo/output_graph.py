@@ -877,11 +877,12 @@ class OutputGraph(OutputGraphCommon):
         # can sit in several unrelated classes, and a source through one of
         # them does not notice the attribute being reassigned on another.
         self.mro_source_cache: dict[tuple[int, str], DictGetItemSource] = {}
-        # Tracks (id(klass), attr_name) pairs that already have a
-        # DICT_CONTAINS absent guard installed during MRO walks.  When
-        # multiple subclasses share the same intermediate MRO class, we
-        # only need to guard the absence once per (class, attr) pair.
-        self.guarded_mro_absent_keys: set[tuple[int, str]] = set()
+        # Tracks (id(klass), mro_index, attr_name) for the DICT_NOT_CONTAINS
+        # absent guards installed while walking klass.__mro__. Keyed on the
+        # walked class rather than the entry: the caller's guards pin klass but
+        # not its MRO, so a base shared by two classes needs a guard through
+        # each, since either can reassign __bases__.
+        self.guarded_mro_absent_keys: set[tuple[int, int, str]] = set()
         # Cache for inspect.signature results: function -> VariableTracker
         self.signature_cache: dict[Any, VariableTracker] = {}
         self.unique_var_id = itertools.count()
