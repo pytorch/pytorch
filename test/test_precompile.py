@@ -1020,6 +1020,9 @@ class TestPrecompile(TestCase):
         x = torch.randn(3, 8, device="cuda")
         code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
         self.assertRegex(code, r"(?m)^def triton_\w+\(")
+        self.assertIn(
+            '#     import runpy\n#     ns = runpy.run_path("this_file.py")', code
+        )
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "artifact.py")
             with open(path, "w") as f:
