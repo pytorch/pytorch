@@ -2,14 +2,14 @@
 
 Inductor's normal python wrapper is written to be loaded by inductor. This variant is
 written to be opened by a person (or an agent) who wants to retune the generated kernel
-in place: it emits Triton kernels as ordinary module-level code rather than as source
-strings handed to ``AsyncCompile`` (as ``triton.module_level_kernels`` does), and it
-emits only the preamble lines (including the ``AsyncCompile`` lifecycle) that the
-finished module uses. See ``torch.compiler.export_python``, which is the consumer.
+in place: like the default wrapper it emits Triton kernels as ordinary module-level
+code, and on top of that it emits only the preamble lines (including the
+``AsyncCompile`` lifecycle) that the finished module uses. See
+``torch.compiler.export_python``, which is the consumer.
 
-The tradeoff is deliberate and is the reason this is opt-in: run on its own, a
-kernel defined at module level compiles serially, in process, on its first launch,
-instead of fanning out to the compile worker pool.
+The tradeoff is deliberate and is the reason this is opt-in: without the
+``AsyncCompile`` lifecycle, a module run on its own compiles each kernel serially, in
+process, on its first launch, instead of fanning out to the compile worker pool.
 
 Only Triton kernels, inductor's and user-defined ``@triton.jit`` ones, are hoisted. The
 kernels of other backends (C++, MPS, Halide, Pallas) are still emitted as source strings
@@ -63,7 +63,7 @@ class _LineIfNamesUsed(DeferredLineBase):
 
 
 class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
-    """Emit kernels as code rather than as strings passed to AsyncCompile."""
+    """Emit a module meant to be read and hand-edited, with only the bindings it uses."""
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
@@ -162,10 +162,6 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
         # and edited, and the harness is also written into the output buffer after the
         # preamble has been scanned, so it could reference a binding already dropped.
         return
-
-    @override
-    def defines_triton_kernels_as_code(self) -> bool:
-        return True
 
     @override
     def emit_triton_kernel_definition(

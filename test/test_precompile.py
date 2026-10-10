@@ -1006,7 +1006,6 @@ class TestPrecompile(TestCase):
         self.assertEqual(ns["forward"](m, x), m(x))
 
     @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA + Triton")
-    @torch._inductor.config.patch({"triton.module_level_kernels": True})
     def test_artifact_with_module_level_kernels_runs_from_its_file(self):
         # A module-level Triton kernel reads its source back from the module's file,
         # which both the header's runpy.run_path recipe and the inlined load provide.
