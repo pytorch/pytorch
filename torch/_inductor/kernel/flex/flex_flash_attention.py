@@ -368,7 +368,7 @@ def _use_flex_flash_attention(
     mask_graph: Subgraph,
     kernel_options: dict[str, Any],
     num_score_mod_placeholders: int,
-    backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
+    backend: Literal["AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE"],
 ) -> bool:
     """Determine if we should use flex flash attention for the given inputs.
 
@@ -626,7 +626,7 @@ def _can_use_flex_flash_attention_backward(
 def _use_flex_flash_attention_backward(
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
-    backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
+    backend: Literal["AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE"],
     joint_outputs: Any | None = None,
     score_mod_other_buffers: Sequence[TensorBox] | None = None,
 ) -> bool:

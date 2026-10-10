@@ -85,7 +85,7 @@ S3_URL = f"https://{S3_BUCKET}.s3.amazonaws.com"
 REPO = "pytorch/pytorch"
 
 # Regex to parse test job names like:
-# "cuda13.0-py3.10-gcc11-sm80 / test (inductor_huggingface_perf, 1, 5, linux.aws.a100)"
+# "cuda13.0-py3.10-gcc11-sm80 / test (inductor_huggingface_perf, 1, 5, mt-l-x86iavx512-11-125-a100)"
 JOB_RE = re.compile(
     r"(?P<job_name>test(?:-osdc)?) \((?P<config>[^,]+),\s*(?P<shard>\d+),\s*(?P<num_shards>\d+),\s*(?P<runner>[^)]+)\)"
 )
