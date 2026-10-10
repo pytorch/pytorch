@@ -21,8 +21,8 @@ from torch.testing._internal.common_cuda import \
     (ROCM_VERSION, SM80OrLater)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, dtypesIfXPU, onlyCPU, precisionOverride,
-     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, onlyAccelerator,
-     largeTensorTest)
+     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, expectedFailureXPU,
+     onlyAccelerator, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
@@ -700,6 +700,7 @@ class TestSparse(TestSparseBase):
         sparse_matrix = sparse_matrix.coalesce()
 
     @onlyAccelerator
+    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5669
     @dtypes(torch.float32, torch.float16, torch.bool)
     @dtypesIfMPS(torch.float32)
     def test_coalesce_wide_dense_dims(self, device, dtype):
@@ -2711,7 +2712,8 @@ class TestSparse(TestSparseBase):
             self.assertTrue(result.layout == torch.strided)
 
         with self.assertRaisesRegex(
-            RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA|MPS)' backend"
+            RuntimeError,
+            rf"Could not run 'aten::empty_strided' with arguments from the 'Sparse({torch.device(device).type.upper()})' backend",
         ):
             dense_tensor = sparse_tensor.to_dense()
             result = torch.empty_like(dense_tensor, layout=torch.sparse_coo)
@@ -4437,21 +4439,30 @@ class TestSparseOneOff(TestCase):
         sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4).long().to(device),
                                            torch.randn(4, 4, 4).to(device),
                                            [3, 4, 4])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a (CUDA|XPU) tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"add: expected 'self' to be a {torch.device(device).type.upper()} tensor, but got a CPU tensor",
+        ):
             x + sparse_y
 
         x = torch.zeros(3, 4, 4, 0)
         sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4).long().to(device),
                                            torch.randn(4, 4, 4, 0).to(device),
                                            [3, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a (CUDA|XPU) tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"add: expected 'self' to be a {torch.device(device).type.upper()} tensor, but got a CPU tensor",
+        ):
             x + sparse_y
 
         x = torch.zeros(0, 4, 4, 0)
         sparse_y = torch.sparse_coo_tensor(torch.empty(1, 0).long().to(device),
                                            torch.randn(0, 4, 4, 0).to(device),
                                            [0, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a (CUDA|XPU) tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"add: expected 'self' to be a {torch.device(device).type.upper()} tensor, but got a CPU tensor",
+        ):
             x + sparse_y
 
 
@@ -5483,7 +5494,8 @@ class TestSparseAny(TestCase):
         if layout is torch.sparse_bsr and not masked or layout is torch.sparse_bsc:
             with self.assertRaisesRegex(
                     RuntimeError,
-                    r"addmm: computation on (CPU|CUDA) is not implemented for Strided \+ Sparse(Bsr|Bsc) @ Strided"):
+                    rf"addmm: computation on {torch.device(device).type.upper()} is not implemented for "
+                    r"Strided \+ Sparse(Bsr|Bsc) @ Strided"):
                 torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
             self.skipTest('NOT IMPL')
         elif layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc} and masked:
@@ -5491,7 +5503,7 @@ class TestSparseAny(TestCase):
                     RuntimeError,
                     r"(sparse_addmm_sparse_backward: unsupported combination of layouts,"
                     r" grad: Strided, mat1: Sparse(Csc|Bsr|Bsc), mat2: Strided"
-                    r"|addmm: computation on (CPU|CUDA) is not implemented for "
+                    rf"|addmm: computation on {torch.device(device).type.upper()} is not implemented for "
                     r"Strided \+ Sparse(Csc|Bsr|Bsc) @ Strided without MKL)"):
                 torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
             self.skipTest('NOT IMPL')
