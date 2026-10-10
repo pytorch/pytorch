@@ -44,12 +44,15 @@ class TestHwClassificationLinter(unittest.TestCase):
     # --- file parse errors ---
 
     def test_syntax_error_in_file(self) -> None:
-        """A file with invalid syntax is logged and skipped, not reported."""
-        src = "this is not valid python @@@"
-        with self.assertLogs(level="ERROR") as captured:
-            msgs = self._run(src)
-        self.assertEqual(msgs, [])
-        self.assertTrue(any("Failed to parse" in m for m in captured.output))
+        """A file that does not parse is reported, not silently skipped."""
+        msgs = self._run("this is not valid python @@@")
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0].name, test_linter.PARSE_ERROR_NAME)
+        self.assertEqual(msgs[0].severity, LintSeverity.ERROR)
+        self.assertEqual(msgs[0].line, 1)
+        self.assertEqual(
+            msgs[0].description, "Failed to parse the file: invalid syntax"
+        )
 
     def test_unreadable_file_raises(self) -> None:
         with self.assertRaises(OSError):
@@ -667,7 +670,7 @@ class TestHwClassificationLinter(unittest.TestCase):
             )
 
     def test_regenerate_writes_only_failing_files(self) -> None:
-        """_regenerate_allowlist rebuilds the file from actual lint results.
+        """regenerate_allowlist rebuilds the file from actual lint results.
 
         It clears the module-global _allowlist and writes ALLOWLIST_PATH, so
         both are patched: otherwise the real allowlist file gets overwritten
@@ -699,7 +702,7 @@ class TestHwClassificationLinter(unittest.TestCase):
                 mock.patch.object(test_linter, "_allowlist", {"test/stale.py"}),
                 mock.patch("builtins.print"),
             ):
-                test_linter._regenerate_allowlist()
+                test_linter.regenerate_allowlist()
 
             # The passing file is excluded, the failing one is listed, and the
             # pre-existing stale entry is not carried over.

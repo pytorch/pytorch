@@ -9,6 +9,10 @@ A JSON allowlist tracks test files that are not yet migrated to this linter's
 requirements. Files in the allowlist are skipped silently. Files not in the
 allowlist must satisfy the test case requirements defined below.
 
+A file that cannot be parsed is reported as ``[parse_error]``. Such a file is
+never allowlisted, because an allowlist entry would hide the parse failure from
+every later run.
+
 A test class is any class defining a `test*` method; detection is by the
 presence of test methods rather than by `TestCase` inheritance, which cannot
 be resolved reliably through the AST. Every such class must declare a valid
@@ -85,6 +89,7 @@ EXCLUDE_PREFIXES = (
     "test/cpp_extensions/open_registration_extension/",
     "test/cpython/",
 )
+PARSE_ERROR_NAME = "[parse_error]"
 
 
 class _UnknownKwarg:
@@ -510,11 +515,6 @@ def _register(*groups: HardwareClassification) -> Callable[[type[Rule]], type[Ru
     return decorator
 
 
-# ---------------------------------------------------------------------------
-# Rules. Keep this list in sync with the module docstring.
-# ---------------------------------------------------------------------------
-
-
 # The gate rule: it must run before dispatch, when the classification is not
 # known yet, so it is called explicitly instead of being registered.
 class HwClassificationRule(Rule):
@@ -775,8 +775,15 @@ def check_file(filename: str) -> list[LintMessage]:
             source = f.read()
         tree = ast.parse(source, filename=filename)
     except SyntaxError as e:
-        logging.error("Failed to parse '%s': %s", filename, e)
-        return []
+        return [
+            error_msg(
+                name=PARSE_ERROR_NAME,
+                path=filename,
+                line=e.lineno,
+                char=e.offset,
+                description=f"Failed to parse the file: {e.msg}",
+            )
+        ]
 
     test_classes = _collect_test_classes(tree)
 
@@ -801,7 +808,7 @@ def check_file(filename: str) -> list[LintMessage]:
     return messages
 
 
-def _regenerate_allowlist() -> None:
+def regenerate_allowlist() -> None:
     """Regenerate the allowlist from the linter's results on all test files."""
 
     # check_file() returns nothing for files already in the allowlist, which
@@ -811,11 +818,16 @@ def _regenerate_allowlist() -> None:
     _allowlist = set()
 
     files = _discover_files()
-    entries = [
-        path.relative_to(REPO_ROOT).as_posix()
-        for path in files
-        if check_file(str(path))
-    ]
+    entries: list[str] = []
+    unparsable: list[str] = []
+    for path in files:
+        rel_path = path.relative_to(REPO_ROOT).as_posix()
+        messages = check_file(str(path))
+        if any(msg.name == PARSE_ERROR_NAME for msg in messages):
+            # Allowlisting the file would silence the parse failure for good.
+            unparsable.append(rel_path)
+        elif messages:
+            entries.append(rel_path)
 
     old_content = (
         ALLOWLIST_PATH.read_text(encoding="utf-8") if ALLOWLIST_PATH.exists() else ""
@@ -831,6 +843,9 @@ def _regenerate_allowlist() -> None:
     for prefix, paths in (("+", added), ("-", removed)):
         for path in paths:
             print(f"  {prefix} {path}")
+
+    for path in unparsable:
+        print(f"  ! {path}: does not parse, not allowlisted")
 
     ALLOWLIST_PATH.write_text(json.dumps(entries, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {len(entries)} entries to {ALLOWLIST_REL_PATH}")
@@ -866,7 +881,7 @@ def main() -> None:
     if args.regenerate:
         if args.filenames:
             parser.error("filenames cannot be combined with --regenerate")
-        _regenerate_allowlist()
+        regenerate_allowlist()
         return
 
     logging.basicConfig(
