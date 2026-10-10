@@ -827,8 +827,9 @@ def _build_installed_forward():
     except Exception as _e:
         raise _PrecompileError(
             f"precompile: this installed artifact could not be installed onto "
-            f"{module_name}.{FN_NAME} ({type(_e).__name__}: {_e}). If that source "
-            f"changed since capture, regenerate the artifact against it."
+            f"{module_name}.{FN_NAME} ({type(_e).__name__}: {_e}). If a source it "
+            f"captured changed since capture (named above), regenerate the artifact "
+            f"against it."
         ) from _e
 
     def forward(*args, **kwargs):
