@@ -3181,6 +3181,7 @@ class GraphLowering(torch.fx.Interpreter):
                     **self.torchbind_constants,
                     **self.opaque_value_type_classes,
                 },
+                kernel_sources=self.wrapper_code.kernel_sources,
             )
         self.cache_key = key
         self.cache_path = path

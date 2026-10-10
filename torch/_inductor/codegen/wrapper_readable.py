@@ -5,12 +5,12 @@ written to be opened by a person (or an agent) who wants to retune the generated
 in place: it emits Triton kernels as ordinary module-level code rather than as source
 strings handed to ``AsyncCompile`` (as ``triton.module_level_kernels`` does), and it
 emits only the preamble lines (including the ``AsyncCompile`` lifecycle) that the
-finished module uses. See
-``torch.compiler.export_python``, which is the consumer.
+finished module uses. See ``torch.compiler.export_python``, which is the consumer.
 
-The tradeoffs are deliberate and are the reason this is opt-in: a kernel defined at
-module level compiles serially, in process, on its first launch, instead of fanning out
-to the compile worker pool. And every hoisted kernel names itself by the wrapper's
+The tradeoffs are deliberate and are the reason this is opt-in: run on its own (and,
+for now, when loaded from the FX graph cache), a kernel defined at module level
+compiles serially, in process, on its first launch, instead of fanning out to the
+compile worker pool. And every hoisted kernel names itself by the wrapper's
 ``__file__``, so they all share one autotune-cache key; that cache is effectively off in
 this mode (its configs_hash check keeps a wrong config from being applied).
 

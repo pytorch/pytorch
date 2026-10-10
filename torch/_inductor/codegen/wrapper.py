@@ -1694,6 +1694,9 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
+        # Each module-level Triton kernel's (name in source, source), which
+        # AsyncCompile compiles it from; see PyCodeCache.load_by_key_path.
+        self.kernel_sources: dict[str, tuple[str, str]] = {}
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Map key is the kernel argument name; value is a tuple of the resulting example
         # tensor name with the kernel where that tensor was most recently used.
@@ -3840,6 +3843,12 @@ class PythonWrapperCodegen(CodeGen):
         helpers = re.findall(r"^def (\w+)\(", src_code, re.MULTILINE)
         for helper in OrderedSet(helpers) - OrderedSet([kernel_name, subs_name]):
             src_code = re.sub(rf"\b{helper}\b", f"{helper}_{kernel_name}", src_code)
+        # When inductor loads this module, the def binds the kernel AsyncCompile built
+        # from this source rather than compiling itself in process, so the worker pool
+        # can start on it now, as it does for a string kernel.
+        self.kernel_sources[kernel_name] = (subs_name, src_code)
+        if async_compile.AsyncCompile.use_process_pool():
+            async_compile.AsyncCompile().triton(subs_name, src_code)
         self.define_kernel(
             kernel_name,
             src_code,
@@ -5563,6 +5572,8 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.src_to_kernel = root.src_to_kernel
         # Same here, only define user-defined Triton kernels in the main graph
         self.user_defined_kernel_cache = root.user_defined_kernel_cache
+        # This subgraph's kernels are spliced into the root module.
+        self.kernel_sources = root.kernel_sources
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
