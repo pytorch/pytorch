@@ -780,24 +780,10 @@ class GuardManagerWrapper:
             return body.getvalue()
 
     def check(self, x: Any) -> bool:
-        # RootGuardManager::check_nopybind_template disables the TorchFunction
-        # TLS for its accessors and restores it on every exit but a throw, which
-        # would leave the calling thread disabled: put it back on that exit.
-        torch_function_state = torch._C._get_torch_function_state()
-        try:
-            return self.root.check(x)
-        except BaseException:
-            torch._C._set_torch_function_state(torch_function_state)
-            raise
+        return self.root.check(x)
 
     def check_verbose(self, x: Any) -> GuardDebugInfo:
-        # check_verbose_nopybind has the same non-RAII exit as check() above.
-        torch_function_state = torch._C._get_torch_function_state()
-        try:
-            return self.root.check_verbose(x)
-        except BaseException:
-            torch._C._set_torch_function_state(torch_function_state)
-            raise
+        return self.root.check_verbose(x)
 
     def populate_code_parts_for_debugging(self) -> None:
         # This should be called when the guard manager is fully populated
@@ -3493,37 +3479,6 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: [
-            id(key) for key in collections.OrderedDict.keys(value)
-        ],
-        eval_fn=lambda value, metadata: [
-            id(key) for key in collections.OrderedDict.keys(value)
-        ]
-        == metadata,
-    )
-    def ORDERED_DICT_KEYS_MATCH(self, guard: Guard) -> None:
-        key_ids = [
-            self.id_ref(key, guard.name)
-            for key in collections.OrderedDict.keys(self.get(guard))
-        ]
-
-        def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
-            return collections.OrderedDict.__len__(value) == len(key_ids) and all(
-                id(current) == expected
-                for current, expected in zip(
-                    collections.OrderedDict.keys(value), key_ids
-                )
-            )
-
-        code = [f"___check_order({self.arg_ref(guard)})"]
-        self.add_python_lambda_leaf_guard_to_root(
-            code,
-            get_verbose_code_parts(code, guard),
-            _get_closure_vars() | {"___check_order": guard_fn},
-        )
-        self._set_guard_export_info(guard, code)
-
-    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(dict.keys(value)),
         eval_fn=lambda value, metadata: constants_identical(
             list(dict.keys(value)), metadata
@@ -3618,6 +3573,28 @@ class GuardBuilder(GuardBuilderBase):
             self.check_fn_manager.torch_function_mode_stack,
             ["___check_torch_function_mode_stack()"],
             guard.user_stack,
+        )
+
+    # Global state guard — not source-specific, checked separately at runtime.
+    @skip_guard_check_spec
+    def FX_ANNOTATION(self, guard: Guard) -> None:
+        """Guard on the torch.fx.traceback annotation active at frame entry."""
+        output_graph = self.check_fn_manager.output_graph
+        if output_graph is None:
+            raise AssertionError("check_fn_manager.output_graph must not be None")
+        annotation = output_graph.fx_annotation
+        code = [f"torch.fx.traceback._get_current_annotation() == {annotation!r}"]
+        self._set_guard_export_info(guard, code)
+
+        get_annotation = torch.fx.traceback._get_current_annotation
+
+        # If == raises (e.g. multi-element tensor values), LAMBDA_GUARD treats it
+        # as a guard failure, so the frame recompiles.
+        def fn(x: object) -> bool:
+            return get_annotation() == annotation
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     # Global state guard — not source-specific, checked separately at runtime.

@@ -2297,6 +2297,45 @@ class TestMetaKernelConv(TestCase):
 class TestMetaKernelRegistrations(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("tensor_lr", [False, True])
+    @parametrize("amsgrad", [False, True])
+    @parametrize("fake", [False, True])
+    def test_fused_adamw(self, tensor_lr, amsgrad, fake):
+        from contextlib import nullcontext
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        mode = FakeTensorMode(allow_fallback_kernels=False) if fake else nullcontext()
+        with mode:
+            device = "cpu" if fake else "meta"
+            parameter = torch.empty(2, 3, device=device)
+            gradient = torch.empty_like(parameter)
+            exp_avg = torch.empty_like(parameter)
+            exp_avg_sq = torch.empty_like(parameter)
+            max_exp_avg_sqs = [torch.empty_like(parameter)] if amsgrad else []
+            step = torch.empty((), device=device)
+            lr = torch.empty((), device=device) if tensor_lr else 0.001
+            operation = (
+                torch.ops.aten._fused_adamw_.tensor_lr
+                if tensor_lr
+                else torch.ops.aten._fused_adamw_.default
+            )
+            result = operation(
+                [parameter],
+                [gradient],
+                [exp_avg],
+                [exp_avg_sq],
+                max_exp_avg_sqs,
+                [step],
+                lr=lr,
+                beta1=0.9,
+                beta2=0.999,
+                weight_decay=0.01,
+                eps=1e-8,
+                amsgrad=amsgrad,
+                maximize=False,
+            )
+            self.assertIsNone(result)
+
     @parametrize("dtype", [torch.uint16, torch.uint32, torch.uint64])
     def test_arange_meta_barebones_unsigned(self, dtype):
         result = torch.arange(256, dtype=dtype, device="meta")
