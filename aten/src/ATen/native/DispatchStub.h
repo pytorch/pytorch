@@ -228,6 +228,18 @@ struct DispatchStub<rT (*)(Args...), T> {
 
 private:
   FnPtr get_call_ptr(const c10::DeviceType device_type) {
+    // NOTE [ DispatchStub CPU fast path ]
+    // CPU is the only device whose kernel is chosen dynamically (by CPU
+    // capability) and cached lazily in cpu_dispatch_ptr; every other device
+    // holds a plain pointer set at registration time. cpu_dispatch_ptr is a
+    // write-once cache: a non-null value is final and points at static code,
+    // so a relaxed load is sufficient. Null (first call) falls through to the
+    // out-of-line slow path, which computes, caches, and does all error checks.
+    if (device_type == c10::DeviceType::CPU) {
+      if (void* fptr = impl.cpu_dispatch_ptr.load(std::memory_order_relaxed)) {
+        return reinterpret_cast<FnPtr>(fptr);
+      }
+    }
     return reinterpret_cast<FnPtr>(
       impl.get_call_ptr(device_type
       , reinterpret_cast<void*>(DEFAULT)
