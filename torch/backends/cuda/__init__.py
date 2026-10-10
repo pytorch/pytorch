@@ -158,6 +158,8 @@ class cuBLASModule:
     def __getattr__(self, name):
         if name == "allow_tf32":
             return torch._C._get_cublas_allow_tf32()
+        elif name == "allow_gfx942_tf32_rounding_to_nearest":
+            return torch._C._get_cublas_allow_gfx942_tf32_rounding_to_nearest()
         elif name == "prefer_cublaslt_grouped_gemm":
             return torch._C._get_cublaslt_prefer_grouped_gemm()
         elif name == "allow_fp16_reduced_precision_reduction":
@@ -189,6 +191,10 @@ class cuBLASModule:
     def __setattr__(self, name, value):
         if name == "allow_tf32":
             return torch._C._set_cublas_allow_tf32(value)
+        elif name == "allow_gfx942_tf32_rounding_to_nearest":
+            return torch._C._set_cublas_allow_gfx942_tf32_rounding_to_nearest(
+                value
+            )
         elif name == "prefer_cublaslt_grouped_gemm":
             return torch._C._set_cublaslt_prefer_grouped_gemm(value)
         elif name == "allow_fp16_reduced_precision_reduction":

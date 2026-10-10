@@ -15110,6 +15110,30 @@ instantiate_device_type_tests(TestCudaDeviceParametrized, globals())
 instantiate_device_type_tests(TestCudaGreenContexts, globals(), except_for="cpu")
 
 
+class TestCudaBackendFlags(TestCase):
+    def test_cublas_allow_gfx942_tf32_rounding_to_nearest_get_set(self):
+        orig = torch.backends.cuda.matmul.allow_gfx942_tf32_rounding_to_nearest
+        self.assertEqual(
+            torch._C._get_cublas_allow_gfx942_tf32_rounding_to_nearest(), orig
+        )
+        try:
+            torch.backends.cuda.matmul.allow_gfx942_tf32_rounding_to_nearest = (
+                not orig
+            )
+            self.assertEqual(
+                torch._C._get_cublas_allow_gfx942_tf32_rounding_to_nearest(),
+                not orig,
+            )
+        finally:
+            torch.backends.cuda.matmul.allow_gfx942_tf32_rounding_to_nearest = orig
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "set_allow_gfx942_tf32_rounding_to_nearest expects a bool",
+        ):
+            torch._C._set_cublas_allow_gfx942_tf32_rounding_to_nearest(1)
+
+
 # Tests for fp32_precision flag propagation that don't require an actual CUDA
 # device — they only exercise C++ context state management.
 class TestFP32PrecisionFlags(TestCase):
