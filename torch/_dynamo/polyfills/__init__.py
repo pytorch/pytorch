@@ -532,6 +532,14 @@ def construct_dict(
     return self
 
 
+def dict_fromkeys(cls: Any, /, iterable: Iterable[Any], value: Any = None) -> Any:
+    # Mirrors the subclass path in CPython's _PyDict_FromKeys.
+    result = cls()
+    for key in iterable:
+        result[key] = value
+    return result
+
+
 def foreach_map_fn(*args: Any) -> Any:
     op = args[0]
     new_args: list[Any] = []
