@@ -2955,14 +2955,11 @@ class TestPrecompile(TestCase):
             backend_id: EagerCacheArtifact(key=backend_id, content=backend)
             for backend_id, backend in package.cached_backends.items()
         }
-        torch._dynamo.reset()
-        self._scrub_minted(step.__globals__)
-        binding = {"defaults": None, "kwdefaults": None}
-        build = self._multigraph_driver(frames, backends, binding)
         # Dynamo records a callback the continuation calls while it runs eager,
         # trivial and with no resume names. Defined in the capturing script, its
         # record names __main__; nothing names it, so that module is never
-        # imported and the load does not refuse.
+        # imported and the load does not refuse. Captured before the scrub, so
+        # the scrub also removes the globals this capture mints.
         cb_package = CompilePackage(_callback_step)
         torch._dynamo.optimize(
             backend="eager", package=cb_package, guard_filter_fn=default_guard_filter_fn
@@ -2970,6 +2967,12 @@ class TestPrecompile(TestCase):
         *_, recorded = _multigraph_frames(cb_package.cache_entry())
         self.assertEqual((recorded["trivial"], recorded["resume_names"]), (True, []))
         callback = {**recorded, "python_module": "__main__"}
+        torch._dynamo.reset()
+        scrub = self._scrub_minted(step.__globals__)
+        binding = {"defaults": None, "kwdefaults": None}
+        # Nothing captured after the scrub left a minted name behind.
+        self.assertEqual(scrub(), {})
+        build = self._multigraph_driver(frames, backends, binding)
         with mock.patch.dict(build.__globals__, {"_FRAMES": _b64([*frames, callback])}):
             forward = build()
         served = torch.nn.Linear(4, 4)
@@ -5015,6 +5018,50 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("refused", out.stdout)
 
+    def test_an_installed_artifact_names_a_changed_helper_module_at_load(self):
+        # The changed source is a helper in another module, inlined into a
+        # frame of the entry's: the refusal names that module, not the entry's.
+        helper = self.module_name + "_helper"
+        entry = self.module_name + "_entry"
+        helper_path = os.path.join(self.dir, helper + ".py")
+        with open(helper_path, "w") as f:
+            f.write("def scaled(y):\n    return y.sin()\n")
+        with open(os.path.join(self.dir, entry + ".py"), "w") as f:
+            f.write(
+                f"import torch\nimport {helper} as helper\n\n\n"
+                "def breaking(y):\n    y = helper.scaled(y)\n"
+                "    torch._dynamo.graph_break()\n    return y.cos()\n\n\n"
+                "def entry(model, x):\n    return breaking(model(x)) + 1\n"
+            )
+        for name in (helper, entry):
+            self.addCleanup(sys.modules.pop, name, None)
+        importlib.invalidate_caches()
+        fn = importlib.import_module(entry).entry
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        with open(helper_path, "w") as f:
+            f.write("def scaled(y):\n    return y.sin() * 1\n")
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "try:\n"
+            "    torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "except torch.compiler.PrecompileError as e:\n"
+            "    cause = f'Source code changes detected for {sys.argv[4]} '\n"
+            "    assert cause in str(e), e\n"
+            "    assert 'If the cause names a source that changed' in str(e), e\n"
+            "    print('refused')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache, helper]
+        out = subprocess.run(
+            [sys.executable, "-c", script, *argv],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("refused", out.stdout)
+
     @skipIfCrossRef
     def test_an_installed_artifact_passes_the_models_own_errors_through(self):
         # Only Dynamo's fail_on_recompile refusal becomes a PrecompileError; a
@@ -6399,6 +6446,33 @@ class TestPrecompileNoCompilation(TestCase):
             MultiKernelCall.benchmark_sub_kernels(multi_kernel)
         benchmark.assert_not_called()
         self.assertEqual(multi_kernel.mock_calls, [])
+
+    def test_no_compilation_runs_a_cached_multi_kernel_choice(self):
+        from torch._inductor.codegen.multi_kernel import MultiKernelCall
+        from torch._inductor.utils import fresh_cache
+
+        def kernels():
+            return [
+                types.SimpleNamespace(
+                    fn=types.SimpleNamespace(cache_key=f"k{i}"),
+                    size_hints={},
+                    triton_meta={},
+                    inductor_meta={"kernel_name": f"k{i}"},
+                    run=mock.Mock(),
+                )
+                for i in range(2)
+            ]
+
+        arg_index = {0: [slice(0, 1)], 1: [slice(0, 1)]}
+        with fresh_cache():
+            stored = MultiKernelCall("mk", kernels(), arg_index)
+            stored.picked_kernel = 1
+            stored.store_cache()
+            cached = MultiKernelCall("mk", kernels(), arg_index)
+            with torch.compiler.precompile.no_compilation():
+                cached.run("arg")
+        cached._kernels[1].run.assert_called_once_with("arg")
+        cached._kernels[0].run.assert_not_called()
 
     @parametrize("backend", ("cutedsl", "flydsl", "pallas", "nv_universal_gemm"))
     def test_no_compilation_loads_alternate_runtime_kernel_in_process(self, backend):
