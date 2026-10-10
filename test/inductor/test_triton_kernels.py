@@ -6409,6 +6409,57 @@ else:
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_reset_to_zero_restore_value_with_prune_configs_by(
+        self, backend
+    ):
+        def noop_prune(configs, named_args, **kwargs):
+            return configs
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 64}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 32}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 16}, num_stages=3, num_warps=8),
+            ],
+            key=[],
+            reset_to_zero=["acc_ptr"],
+            restore_value=["counter_ptr"],
+            prune_configs_by={"early_config_prune": noop_prune},
+        )
+        @triton.jit
+        def accumulate_kernel(
+            in_ptr0,
+            acc_ptr,  # accumulated into, so reset to zero before every config
+            counter_ptr,  # updated in place, so restored after every config
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            tl.atomic_add(acc_ptr + offsets, x, mask=mask)
+            counter = tl.load(counter_ptr + offsets, mask=mask)
+            tl.store(counter_ptr + offsets, counter + 1, mask=mask)
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(x, counter):
+            acc = torch.zeros_like(x)
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            accumulate_kernel[grid](x, acc, counter, n_elements=n_elements)
+            return acc
+
+        x = torch.rand(4, device=GPU_TYPE)
+        counter = torch.zeros(4, device=GPU_TYPE)
+
+        # The autotuner rebuilt after pruning must keep reset_to_zero and
+        # restore_value, or every benchmarking run leaks into acc and counter.
+        self.assertEqual(f(x, counter), x)
+        self.assertEqual(counter, torch.ones_like(counter))
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_single_autotune(self, backend):
         @triton.autotune(
             configs=[
