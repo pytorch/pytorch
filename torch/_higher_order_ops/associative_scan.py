@@ -250,15 +250,6 @@ def associative_scan(
     if reverse:
         leaves_xs = [torch.flip(elem, [0]) for elem in leaves_xs]
 
-    # Gradients are computed through the generic implementation, see
-    # associative_scan_autograd.
-    if (
-        combine_mode == "pointwise"
-        and torch.is_grad_enabled()
-        and any(x.requires_grad for x in leaves_xs)
-    ):
-        combine_mode = "generic"
-
     if combine_mode == "generic":
         # The generic_associative_scan implementation calls the combine_fn with a `batch` along the scan dimension
         # For example, consider:

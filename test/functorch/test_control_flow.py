@@ -6296,7 +6296,7 @@ class AssociativeScanTestsDevice(TestCase):
             )
 
     @skipCUDAIf(not SM70OrLater, "triton")
-    def test_associative_scan_pointwise_dependent_leaves_functorch_grads(self, device):
+    def test_associative_scan_pointwise_dependent_leaves_vmap_grads(self, device):
         def affine(left, right):
             (a_l, b_l), (a_r, b_r) = left, right
             return a_l * a_r, b_r + a_r * b_l
@@ -6308,7 +6308,6 @@ class AssociativeScanTestsDevice(TestCase):
         b = torch.rand(2, 7, 3, device=device, dtype=torch.double) + 0.5
         xs = (a.requires_grad_(), b.requires_grad_())
 
-        # vmap hides requires_grad from the frontend, so the HOP has to fall back
         y = torch.vmap(keep_y)(*xs)
         y_exp = torch.stack(
             [_fake_associative_scan(affine, (a[i], b[i]), 0)[1] for i in range(2)]
@@ -6317,16 +6316,26 @@ class AssociativeScanTestsDevice(TestCase):
         expected_grads = self._check_autograd(y, y_exp, xs)
         self.assertTrue(all(g.abs().max() > 1e-3 for g in expected_grads))
 
-        # torch.func.grad cannot trace the HOP, so the frontend has to fall back
+    # torch.func.grad does not support HOPs yet
+    @unittest.expectedFailure
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_pointwise_func_grad(self, device):
+        def affine(left, right):
+            (a_l, b_l), (a_r, b_r) = left, right
+            return a_l * a_r, b_r + a_r * b_l
+
         w = torch.rand(7, 3, device=device, dtype=torch.double) + 0.5
 
         def loss(a, b):
-            return (keep_y(a, b) * w).sum()
+            y = associative_scan(affine, (a, b), 0, combine_mode="pointwise")[1]
+            return (y * w).sum()
 
         def loss_exp(a, b):
             return (_fake_associative_scan(affine, (a, b), 0)[1] * w).sum()
 
-        args = (a[0].detach(), b[0].detach())
+        args = tuple(
+            torch.rand(7, 3, device=device, dtype=torch.double) + 0.5 for _ in range(2)
+        )
         grads = torch.func.grad(loss, argnums=(0, 1))(*args)
         self.assertEqual(grads, torch.func.grad(loss_exp, argnums=(0, 1))(*args))
 
@@ -6878,7 +6887,6 @@ class AssociativeScanTestsDevice(TestCase):
         def combine_fn(x, y):
             return x + y + H
 
-        # Without gradients for xs, only the HOP sees that H requires them
         xs = torch.randn(4, 2, device=device, requires_grad=xs_requires_grad)
         scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, "pointwise")
         result = scan_fct(combine_fn, xs, 0, False)
