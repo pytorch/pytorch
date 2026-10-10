@@ -1699,15 +1699,37 @@ class TestCxxPytree(TestCase):
         self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
 
     @unittest.skipIf(IS_FBCODE, "Optree is not available in fbcode")
-    def test_nested_custom_spec_polyfill(self):
-        tree = GlobalDummyType([1, 2], {"a": 3})
-        leaves, spec = cxx_pytree.tree_flatten(tree)
+    @parametrize(
+        "tree",
+        [
+            GlobalDummyType([1, 2], {"a": 3}),
+            GlobalDummyType(GlobalDummyType(1, None), 2),
+            [GlobalDummyType(1, None)],
+            (GlobalDummyType(1, None),),
+            {"a'b\\c": GlobalDummyType(1, None)},
+            OrderedDict(a=GlobalDummyType(1, None)),
+            defaultdict(list, a=GlobalDummyType(1, None)),
+            deque([GlobalDummyType(1, None)]),
+            deque([GlobalDummyType(1, None)], maxlen=2),
+            GlobalPoint(GlobalDummyType(1, None), 2),
+            getattr(builtins, "frozendict", dict)(a=GlobalDummyType(1, None)),
+            GlobalDummyType([GlobalDummyType(1, None)], {"a": GlobalDummyType(2, 3)}),
+        ],
+    )
+    def test_nested_custom_spec_polyfill(self, tree):
+        # Keep the reference out of Dynamo's polyfill substitution.
+        @torch.compiler.disable
+        def eager_reference(tree):
+            leaves, spec = cxx_pytree.tree_flatten(tree)
+            return leaves, repr(spec)
+
+        leaves, expected_repr = eager_reference(tree)
         polyfill_flatten = dynamo_pytree.tree_flatten.__torch_dynamo_polyfill__
         polyfill_leaves, polyfill_spec = polyfill_flatten(
             tree, none_is_leaf=True, namespace="torch"
         )
         self.assertEqual(polyfill_leaves, leaves)
-        self.assertEqual(repr(polyfill_spec), repr(spec))
+        self.assertEqual(repr(polyfill_spec), expected_repr)
         self.assertEqual(polyfill_spec.flatten_up_to(tree), leaves)
 
     def test_pytree_custom_type_serialize(self):
