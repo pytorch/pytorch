@@ -6,14 +6,6 @@ self-contained, human-readable Python source artifact (see
 decorator keyed off a file on disk: the first run writes the emitted
 ``python_code`` to ``path``; every later run reads the ``.py`` back and executes
 it directly instead of recompiling.
-
-Because the artifact is self-contained, re-executable Python, ``path`` is meant to be
-committed and shipped -- and, when a kernel starts to matter, hand-edited in place by
-an engineer or an agent. This is ejectable compilation: the emitted source is the
-source of truth and is always exec'd, so an edit is simply what runs from then on, in
-production as much as in development. There is no acceleration cache and no
-``precompile.load`` round-trip, so keeping the edited source correct is the caller's
-responsibility.
 """
 
 import copy
@@ -65,10 +57,7 @@ def _atomic_publish(path: str, data: bytes) -> bool:
     # or a permissions problem must surface rather than silently weaken the guarantee.
     dir_name = os.path.dirname(path) or "."
     base = os.path.basename(path)
-    tmp = os.path.join(
-        dir_name,
-        f".{base}.{os.getpid()}.{threading.get_ident()}.{secrets.token_hex(8)}.tmp",
-    )
+    tmp = os.path.join(dir_name, f".{base}.{secrets.token_hex(8)}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
     try:
         with os.fdopen(fd, "wb") as f:
@@ -177,16 +166,14 @@ class ExportedPythonArtifact:
             os.makedirs(parent, exist_ok=True)
         # os.link does not follow a symlink at its destination, so resolve one first: a
         # dangling symlink at path would otherwise read as a lost race forever.
-        if _atomic_publish(os.path.realpath(self._path), code.encode("utf-8")):
-            return code, False
-        # Lost the publish race; the winner's file is complete and already linked.
-        winner = self._load_from_disk()
-        if winner is None:
-            raise _precompile_error(
-                f"torch.compiler.export_python: another writer published {self._path} "
-                "and it was deleted before this call could load it. Retry."
-            )
-        return winner, True
+        target, data = os.path.realpath(self._path), code.encode("utf-8")
+        while not _atomic_publish(target, data):
+            # Lost the publish race. If the winner's file is already gone (a peer
+            # deleting it to force a regenerate), publish again rather than fail.
+            winner = self._load_from_disk()
+            if winner is not None:
+                return winner, True
+        return code, False
 
     def _load_from_disk(self) -> str | None:
         # None means "not there after all" -- the presence gate raced a peer deleting
@@ -198,9 +185,7 @@ class ExportedPythonArtifact:
         except FileNotFoundError:
             return None
         except (OSError, UnicodeDecodeError) as e:
-            hint = (
-                " rather than a directory" if isinstance(e, IsADirectoryError) else ""
-            )
+            hint = " rather than a directory" if os.path.isdir(self._path) else ""
             raise _precompile_error(
                 f"torch.compiler.export_python: could not read the artifact at "
                 f"{self._path} ({e}). Check that the path names a readable UTF-8 "
@@ -229,6 +214,14 @@ class ExportedPythonArtifact:
         except PrecompileError:
             raise
         except SyntaxError as e:
+            if e.filename != self._path:
+                # Raised by code the artifact runs (an import, a nested exec); the
+                # line belongs to that file, so report it like any other failure.
+                raise PrecompileError(
+                    "torch.compiler.export_python: an unexpected error occurred running "
+                    f"the artifact at {self._path} ({type(e).__name__}: {e}). Fix it "
+                    "there, or delete it to regenerate."
+                ) from e
             # Kernels are hoisted to module level, so Python reports a typo in one
             # against this file at the right line. Say so: telling someone to delete an
             # artifact they are midway through tuning is the wrong advice.
@@ -241,9 +234,9 @@ class ExportedPythonArtifact:
         except ImportError as e:
             raise PrecompileError(
                 f"torch.compiler.export_python: the artifact at {self._path} failed "
-                "to import a dependency; it was likely produced by a different torch "
-                f"version or environment. Delete {self._path} to regenerate against "
-                "the current torch."
+                f"to import a dependency ({e}); it was edited, or produced by a "
+                "different torch version or environment. Fix it there, or delete it "
+                "to regenerate against the current torch."
             ) from e
         except Exception as e:
             raise PrecompileError(
@@ -345,7 +338,13 @@ class ExportedPythonArtifact:
         return bound.args
 
     def _check_supported_args(self, args: tuple[Any, ...]) -> None:
-        params = list(self._call_signature.parameters)
+        # args is the bound positional layout: the named positional parameters in
+        # order, then any *args values.
+        P = inspect.Parameter
+        params = self._call_signature.parameters.values()
+        positional = (P.POSITIONAL_ONLY, P.POSITIONAL_OR_KEYWORD)
+        names = [p.name for p in params if p.kind in positional]
+        var = next((p.name for p in params if p.kind == P.VAR_POSITIONAL), None)
         for pos, arg in enumerate(args):
             if isinstance(arg, torch.nn.Module):
                 continue
@@ -356,7 +355,7 @@ class ExportedPythonArtifact:
             ]
             if not unsupported:
                 continue
-            name = params[pos] if pos < len(params) else f"argument {pos}"
+            name = names[pos] if pos < len(names) else f"{var}[{pos - len(names)}]"
             # These two land often enough that the generic "close the constant over"
             # advice is actively wrong for them: a module must stay an argument, and an
             # optional parameter has no constant to close over in the first place.
