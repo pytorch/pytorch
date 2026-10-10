@@ -66,5 +66,5 @@ gathered = funcol.all_gather_single(tensor, gather_dim=0, group=mesh)
 
 ```{eval-rst}
 .. autoclass:: AsyncCollectiveTensor
-    :members: wait
+    :members: wait, trigger_wait, tolist, numpy
 ```

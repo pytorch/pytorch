@@ -1163,6 +1163,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return ["elem"], None
 
     def tolist(self):
+        """Wait on the collective and return the result as a list."""
         return self.trigger_wait().tolist()
 
     @staticmethod
@@ -1186,6 +1187,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return f"AsyncCollectiveTensor({self.trigger_wait()})"
 
     def trigger_wait(self):
+        """Wait on the collective if not yet completed and return the result tensor."""
         if not self.completed:
             out = wait_tensor(self.elem)
             self.completed = True
@@ -1241,6 +1243,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return out
 
     def numpy(self):  # type: ignore[override]
+        """Wait on the collective and return the result as a NumPy array."""
         return self.wait().numpy()
 
 
