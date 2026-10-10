@@ -9,7 +9,7 @@
 #include <iterator>
 #include <type_traits>
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
 // The PtrTraits argument to the TensorAccessor/GenericPackedTensorAccessor
 // is used to enable the __restrict__ keyword/modifier for the data
@@ -459,4 +459,4 @@ using HeaderOnlyGenericPackedTensorAccessor =
         PtrTraits,
         index_t>;
 
-} // namespace torch::headeronly
+HIDDEN_NAMESPACE_END(torch, headeronly)

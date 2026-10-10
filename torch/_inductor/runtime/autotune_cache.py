@@ -341,6 +341,10 @@ class AutotuneCache:
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
             "triton_cache_hash": triton_cache_hash,
         }
+        # Two configs can differ only in their register cap, so a cache entry
+        # without it would reload as the uncapped one.
+        if (maxnreg := getattr(config, "maxnreg", None)) is not None:
+            data["maxnreg"] = maxnreg
         # Save extra_options if present on the config. This allows third-party
         # backends to store custom tuned options alongside the standard config.
         if extra_options := getattr(config, "extra_options", None):
@@ -664,6 +668,7 @@ def _should_use_remote_autotune_cache(inductor_meta: _InductorMetaTy) -> bool:
 def _reconstruct_triton_config(
     best_config: dict[str, Any],
     extra_options: JsonDataTy | None,
+    maxnreg: JsonDataTy = None,
 ) -> Config:
     num_warps = best_config.pop("num_warps")
     num_stages = best_config.pop("num_stages")
@@ -671,6 +676,8 @@ def _reconstruct_triton_config(
         "num_warps": num_warps,
         "num_stages": num_stages,
     }
+    if maxnreg is not None:
+        config_args["maxnreg"] = maxnreg
     if HAS_WARP_SPEC:
         config_args.update(
             {
@@ -709,6 +716,10 @@ def _load_cached_autotuning(
         "coordinate_descent_tuning"
     ) and best_config.pop("found_by_coordesc", False)
 
+    # Popped before matching, or it would be compared as (and later rebuilt
+    # into) a kernel kwarg.
+    maxnreg = best_config.pop("maxnreg", None)
+
     if not found_by_coordesc:
         matching_configs = [
             cfg
@@ -719,6 +730,7 @@ def _load_cached_autotuning(
             and cfg.num_warps == best_config.get("num_warps")
             # pyrefly: ignore [missing-attribute]
             and cfg.num_stages == best_config.get("num_stages")
+            and getattr(cfg, "maxnreg", None) == maxnreg
         ]
         if len(matching_configs) == 1:
             matched_config = matching_configs[0]
@@ -730,7 +742,7 @@ def _load_cached_autotuning(
     # configs and dynamically added configs (e.g. _dynamic_scale_rblock)
     # that aren't in the original config list.
     best_config.pop("found_by_coordesc", None)
-    triton_config = _reconstruct_triton_config(best_config, extra_options)
+    triton_config = _reconstruct_triton_config(best_config, extra_options, maxnreg)
     if found_by_coordesc:
         # pyrefly: ignore [missing-attribute]
         triton_config.found_by_coordesc = True
