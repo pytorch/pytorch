@@ -88,7 +88,7 @@ torch::lazy::TSOpVector Cast::Lower(
 }
 
 torch::lazy::TSOpVector DeviceData::Lower(
-    std::shared_ptr<torch::jit::GraphFunction> function,
+    std::shared_ptr<torch::jit::GraphFunction> /*function*/,
     torch::lazy::TSLoweringContext* loctx) const {
   auto infoptr = data_->info();
   auto deviceDataInfoPtr =
@@ -119,7 +119,7 @@ torch::lazy::TSOpVector Expand::Lower(
 }
 
 torch::lazy::TSOpVector Scalar::Lower(
-    std::shared_ptr<torch::jit::GraphFunction> function,
+    std::shared_ptr<torch::jit::GraphFunction> /*function*/,
     torch::lazy::TSLoweringContext* loctx) const {
   auto options =
       at::TensorOptions()
