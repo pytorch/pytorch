@@ -1149,11 +1149,14 @@ def export_python(
     and the ambient ``torch.autocast`` state (which picks the dtypes the kernels were
     built for, for every device type the artifact's own source names, not only the ones
     its inputs live on; any difference raises, even for a graph with no op autocast
-    would cast), and the ambient globals the generated code resolves against rather than
-    re-reads: the default dtype and device a factory op with no explicit argument takes,
-    and whether deterministic algorithms were enabled when inductor chose between a
-    deterministic and an atomic lowering (checked one-way -- capturing with determinism
-    on and calling with it off is safe, the reverse is not). What is *not* guarded is a
+    would cast). The fifth is the ambient globals the generated code resolves against
+    rather than re-reads: the default dtype and device a factory op with no explicit
+    argument takes, whether deterministic algorithms were enabled when inductor or a
+    decomposition (so under any ``backend``) chose between a deterministic and an atomic
+    lowering, and, under determinism, the
+    ``torch.utils.deterministic.fill_uninitialized_memory`` value inductor's
+    ``empty_strided`` lowering bakes. Those last two are checked one-way: capturing with
+    one on and calling with it off is safe, the reverse is not. What is *not* guarded is a
     change in *how* two aliased inputs overlap: when capture and the call both pass
     intersecting views, the artifact runs with capture's relative offsets baked in and
     may compute the wrong thing. ``torch.compile`` has the same hole *there*, but this
@@ -1176,13 +1179,12 @@ def export_python(
 
     Capturing does not advance the default generators the first call is about to draw
     from: capture restores the generator state it consumed, within the limits
-    ``torch.compiler.precompile.MakeFxTracer`` documents. A draw from an explicit
+    :class:`torch.compiler.precompile.MakeFxTracer` documents. A draw from an explicit
     ``torch.Generator`` leaves it advanced and logs a warning. When capture restores a
     generator, it also rewinds any draw a concurrent thread made from that generator
     during capture. This is about generator position, not value parity with eager:
-    ``backend="inductor"``
-    lowers random ops to its own philox and produces different values than eager at the
-    same seed.
+    ``backend="inductor"`` lowers random ops to its own philox and produces different
+    values than eager at the same seed.
 
     Args:
         path: Filesystem path for the emitted Python source. Parent directories are
