@@ -1920,6 +1920,7 @@ L['x'].size()[1] == L['x'].size()[0]
 L['x'].storage_offset() == 0
 2 <= L['x'].size()[0]
 utils_device.CURRENT_DEVICE == None
+torch.fx.traceback._get_current_annotation() == None
 str(L['x'].dtype) == 'torch.float32'
 str(L['x'].device) == 'cpu'
 L['x'].requires_grad == False
@@ -14160,6 +14161,92 @@ def ___make_guard_fn():
                 return torch.ops.mylib.foo_validate_outputs_unbacked(x0, x1)
 
             f(torch.randn(9, requires_grad=True), torch.tensor([3, 6]))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_custom_op_int_list_error_reports_symint_elements(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::split_with_sizes_and_clone_int_list_error",
+                "(Tensor input, int[] sizes) -> Tensor[]",
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "mylib::split_with_sizes_and_clone_int_list_error",
+                "cpu",
+                lib=lib,
+            )
+            @torch.library.register_fake(
+                "mylib::split_with_sizes_and_clone_int_list_error", lib=lib
+            )
+            def split_with_sizes_and_clone(input, sizes):
+                return [
+                    t.clone()
+                    for t in torch.ops.aten.split_with_sizes.default(input, sizes)
+                ]
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def f(sz, x):
+                s0, s1 = sz.tolist()
+                _, r1 = torch.ops.mylib.split_with_sizes_and_clone_int_list_error(
+                    x, [s0, s1]
+                )
+                return torch.ops.aten.sort.default(r1)
+
+            with self.assertRaises(torch._dynamo.exc.TorchRuntimeError) as cm:
+                f(torch.tensor([3, 6]), torch.randn(9, requires_grad=True))
+
+            message = str(cm.exception)
+            self.assertIn("Expected a value of type 'List[int]'", message)
+            self.assertIn(
+                "instead found type 'immutable_list(SymInt, SymInt)'", message
+            )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_custom_op_int_list_error_truncates_long_symint_list(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::truncated_split_with_sizes_and_clone_int_list_error",
+                "(Tensor input, int[] sizes) -> Tensor[]",
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "mylib::truncated_split_with_sizes_and_clone_int_list_error",
+                "cpu",
+                lib=lib,
+            )
+            @torch.library.register_fake(
+                "mylib::truncated_split_with_sizes_and_clone_int_list_error", lib=lib
+            )
+            def split_with_sizes_and_clone(input, sizes):
+                return [
+                    t.clone()
+                    for t in torch.ops.aten.split_with_sizes.default(input, sizes)
+                ]
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def f(sz, x):
+                s0, s1, s2, s3, s4, s5, s6 = sz.tolist()
+                _, r1, r2, r3, r4, r5, r6 = (
+                    torch.ops.mylib.truncated_split_with_sizes_and_clone_int_list_error(
+                        x, [s0, s1, s2, s3, s4, s5, s6]
+                    )
+                )
+                return torch.ops.aten.sort.default(r1)
+
+            with self.assertRaises(torch._dynamo.exc.TorchRuntimeError) as cm:
+                f(
+                    torch.tensor([3, 6, 5, 11, 4, 0, 1]),
+                    torch.randn(30, requires_grad=True),
+                )
+
+            message = str(cm.exception)
+            self.assertIn("Expected a value of type 'List[int]'", message)
+            self.assertIn(", ...)", message)
+            self.assertNotIn(
+                "SymInt, SymInt, SymInt, SymInt, SymInt, SymInt, SymInt", message
+            )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_dim_order(self):

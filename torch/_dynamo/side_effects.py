@@ -208,6 +208,7 @@ _MUTABLE_GETATTRIBUTES: tuple[Any, ...] = (
     str.__getattribute__,
     list.__getattribute__,
     tuple.__getattribute__,
+    collections.defaultdict.__getattribute__,
     collections.deque.__getattribute__,
     BaseException.__getattribute__,
 )
