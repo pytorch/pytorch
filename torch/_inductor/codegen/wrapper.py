@@ -1911,7 +1911,8 @@ class PythonWrapperCodegen(CodeGen):
     def write_preamble_line(
         self, buf: IndentedBuffer, names: tuple[str, ...], line: str
     ) -> None:
-        """Emit one line that exists only for ``names``: an import or binding of them.
+        """Emit one line that exists only for ``names``: an import or binding of
+        them, or the AsyncCompile wait/del that retires async_compile.
 
         The default emits every line: which of them a given graph will use is not known
         here, since write_header runs before anything has been lowered.
@@ -2136,13 +2137,9 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
-        self.prefix.splice(
-            """
-
-            async_compile.wait(globals())
-            del async_compile
-            """
-        )
+        # The two blank separator lines are gated too, so a dropped wait leaves no gap.
+        for line in ("", "", "async_compile.wait(globals())", "del async_compile"):
+            self.write_preamble_line(self.prefix, ("async_compile",), line)
 
     def write_args(self, input_names: list[str]):
         lhs = ", ".join(input_names)
