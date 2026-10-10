@@ -188,7 +188,11 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, type[Any]] = {}
 # NB: we try really hard to not import _cxx_pytree (which depends on optree)
 # as much as possible. This is for isolation: a user who is not using C++ pytree
 # shouldn't pay for it, and it helps makes things like cpython upgrades easier.
-_optree_minimum_version = _TorchVersion("0.20.0" if torch._has_frozendict else "0.13.0")
+_optree_minimum_version = _TorchVersion(
+    "0.20.0"  # the first version that provides Python 3.15 wheels while also the first version that supports frozendict
+    if torch._has_frozendict
+    else "0.13.0"
+)
 try:
     _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
@@ -1093,8 +1097,8 @@ if torch._has_frozendict:
         serialized_type_name="builtins.frozendict",
         flatten_with_keys_fn=_dict_flatten_with_keys,
     )
-    STANDARD_DICT_TYPES |= {torch._frozendict}
-    BUILTIN_TYPES |= {torch._frozendict}
+    STANDARD_DICT_TYPES |= frozenset({torch._frozendict})
+    BUILTIN_TYPES |= frozenset({torch._frozendict})
 
 
 @deprecated(
