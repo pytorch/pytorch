@@ -277,6 +277,17 @@ class ExportedPythonArtifact:
     ) -> None:
         self._fn = fn
         self._call_signature = inspect.signature(fn)
+        kw_only = [
+            p.name
+            for p in self._call_signature.parameters.values()
+            if p.kind == inspect.Parameter.KEYWORD_ONLY
+        ]
+        if kw_only:
+            raise TypeError(
+                "torch.compiler.export_python does not support functions that "
+                f"declare keyword-only parameters ({kw_only}); the precompile "
+                "calling convention is positional."
+            )
         self._path = path
         self._backend = backend
         self._tracer = tracer
@@ -309,8 +320,8 @@ class ExportedPythonArtifact:
                     "example_inputs=... to precompile against dedicated inputs."
                 ) from e
         else:
-            example = self._bind_positional(example, {}, "example_inputs=")
-            self._check_supported_args(example)
+            example = self._bind_positional(example, {}, "example_inputs")
+            self._check_supported_args(example, "example_inputs")
         # Before capture: fn may call train()/eval() itself, and the per-call check reads
         # the caller's modules before the call runs.
         module_training = _module_training_state(example)
@@ -635,21 +646,9 @@ class ExportedPythonArtifact:
                 f"{getattr(self._fn, '__name__', 'fn')}'s signature: {e}"
             ) from e
         bound.apply_defaults()
-        # After apply_defaults every positional-or-keyword parameter is placed, so
-        # bound.kwargs holds only keyword-only and **kwargs entries.
+        # After apply_defaults every positional-or-keyword parameter is placed and
+        # __init__ refused keyword-only ones, so bound.kwargs holds only **kwargs.
         if bound.kwargs:
-            params = sig.parameters
-            kw_only = sorted(
-                n
-                for n in bound.kwargs
-                if n in params and params[n].kind == inspect.Parameter.KEYWORD_ONLY
-            )
-            if kw_only:
-                raise TypeError(
-                    "torch.compiler.export_python does not support functions that "
-                    f"declare keyword-only parameters ({kw_only}); the precompile "
-                    "calling convention is positional."
-                )
             raise TypeError(
                 "torch.compiler.export_python does not support **kwargs parameters "
                 f"(got {sorted(bound.kwargs)}); the precompile calling convention is "
@@ -657,7 +656,9 @@ class ExportedPythonArtifact:
             )
         return bound.args
 
-    def _check_supported_args(self, args: tuple[Any, ...]) -> None:
+    def _check_supported_args(
+        self, args: tuple[Any, ...], source: str = "the call arguments"
+    ) -> None:
         # args is the bound positional layout: the named positional parameters in
         # order, then any *args values.
         P = inspect.Parameter
@@ -676,27 +677,28 @@ class ExportedPythonArtifact:
             if not unsupported:
                 continue
             name = names[pos] if pos < len(names) else f"{var}[{pos - len(names)}]"
+            where = f"parameter {name!r} of {source}"
             # These two land often enough that the generic "close the constant over"
             # advice is actively wrong for them: a module must stay an argument, and an
             # optional parameter has no constant to close over in the first place.
             if any(isinstance(leaf, torch.nn.Module) for leaf in unsupported):
                 raise TypeError(
                     "torch.compiler.export_python: nn.Module arguments must be passed "
-                    f"directly, not nested inside a container (parameter {name!r}). "
+                    f"directly, not nested inside a container ({where}). "
                     "Pass the module itself as its own positional argument."
                 )
             if all(leaf is None for leaf in unsupported):
                 raise TypeError(
                     "torch.compiler.export_python does not support None arguments "
-                    f"(parameter {name!r}); make_fx specializes the None branch without "
+                    f"({where}); make_fx specializes the None branch without "
                     "a runtime guard. Split the function, or pass a tensor."
                 )
             raise TypeError(
                 "torch.compiler.export_python supports only Tensor pytrees and "
                 "nn.Module positional arguments; Python scalar/config values are "
                 "specialized by make_fx without runtime guards. Close constants "
-                f"over in the function instead of passing parameter {name!r} "
-                f"({unsupported[0]!r})."
+                f"over in the function instead of passing {unsupported[0]!r} as "
+                f"{where}."
             )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
