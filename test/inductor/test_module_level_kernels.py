@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import itertools
 import os
 import re
 import tempfile
@@ -10,6 +11,7 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._inductor import CompiledArtifact, config
 from torch._inductor.async_compile import AsyncCompile
+from torch._inductor.codecache import PyCodeCache
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
@@ -43,6 +45,10 @@ def _run_from_file(code, args):
 
 def _softmax(x):
     return torch.softmax(x * 2, dim=-1)
+
+
+def _double(x):
+    return x * 2
 
 
 def _cond_softmax(x):
@@ -255,6 +261,25 @@ class TestModuleLevelKernels(TestCase):
                 loaded = CompiledArtifact.load(path=d, format="unpacked")
                 self.assertEqual(loaded(x)[0], x * 8)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @requires_cuda_and_triton
+    @config.patch(fx_graph_cache=False)
+    def test_hand_edit_to_a_cached_module_survives_a_recompile(self):
+        x = torch.ones(4, device="cuda")
+        # A fresh AOT counter makes the recompile emit the same module, at the same path.
+        counter = mock.patch(
+            "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
+        )
+        with counter:
+            _, code = _code_for(_double, x)
+        _, path = PyCodeCache.write(code)
+        self.assertIn("2.0, tl.float32", code)
+        with open(path, "w") as f:
+            f.write(code.replace("2.0, tl.float32", "8.0, tl.float32"))
+        PyCodeCache.cache_clear()
+        with counter:
+            result, _ = _code_for(_double, x)
+        self.assertEqual(result, x * 8)
 
 
 class TestDefaultWrapper(TestCase):
