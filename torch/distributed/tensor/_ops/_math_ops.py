@@ -1947,9 +1947,7 @@ def _adjust_group_norm_scalars(
     for d in local_shape[2:]:
         hxw_local *= d
     args = list(schema.args_schema)
-    arg_indices = {
-        arg.name: i for i, arg in enumerate(schema.op._schema.arguments)
-    }
+    arg_indices = {arg.name: i for i, arg in enumerate(schema.op._schema.arguments)}
     for name, value in zip(
         ("N", "C", "HxW"),
         (n_local, c_local, hxw_local),
