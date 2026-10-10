@@ -9,6 +9,7 @@ import torch._dynamo
 import torch.utils._pytree as python_pytree
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     subtest,
@@ -129,6 +130,8 @@ def _assert_trees_allclose(test_case: TestCase, ref, res) -> None:
 
 @instantiate_parametrized_tests
 class TreeMapCompileTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -1119,6 +1122,8 @@ class TreeMapCompileTests(TestCase):
 
 @instantiate_parametrized_tests
 class TreeMapWithPathCompileTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
