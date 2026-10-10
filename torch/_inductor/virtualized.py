@@ -112,6 +112,7 @@ if TYPE_CHECKING:
         compute: IndentedBuffer
         current_node: SchedulerNode | None
         args: KernelArgs
+        split_as_grid_reduction: int | None
 
         def create_cse_var(self, *args: Any, **kwargs: Any) -> CSEVariable: ...
         def __getattr__(self, name: str) -> Any: ...
@@ -202,6 +203,7 @@ class NullKernelHandler(NullHandler):
         self.removed_buffers = OrderedSet[Any]()
         self.inplaced_to_remove = OrderedSet[Any]()
         self.index_dtype = "tl.int64"
+        self.split_as_grid_reduction = None
 
     def get_index_dtype_as_torch_dtype(self):
         import torch
