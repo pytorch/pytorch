@@ -407,13 +407,17 @@ def _tensorify_impl(
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
+    # This cleanup bypasses Graph.eliminate_dead_code, so it must also keep
+    # the producers needed by deferred assertions.
+    assertion_bindings = shape_env._get_deferred_assertion_bindings(graph)
     for node in reversed(graph.nodes):
         if node.op == "output" or node.op == "placeholder":
             continue
 
         with graph.inserting_before(node):
             if len(node.users) == 0 and not node.is_impure():
-                graph.erase_node(node)
+                if node not in assertion_bindings:
+                    graph.erase_node(node)
                 continue
 
             if isinstance(

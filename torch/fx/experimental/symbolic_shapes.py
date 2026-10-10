@@ -4519,6 +4519,85 @@ class ShapeEnv:
     def _eliminate_unbacked(self, orig_s: sympy.Symbol, new_s: sympy.Expr) -> None:
         self._set_replacement(orig_s, new_s, "eliminate_unbacked")
 
+    def _get_deferred_assertion_bindings(
+        self, graph: torch.fx.Graph
+    ) -> dict[torch.fx.Node, OrderedSet[sympy.Symbol]]:
+        r"""_get_deferred_assertion_bindings(graph) -> dict
+
+        Map producer FX nodes to the binding keys required by deferred checks.
+        For ``_check(u0 == u1)``, returns
+        ``{item0: OrderedSet([u0]), item1: OrderedSet([u1])}``.
+        Sets contain the node's own binding keys; renamed symbols are matched too.
+        Returns ``{}`` when no binding is needed or deferred checks are disabled.
+        """
+        if torch._dynamo.config.do_not_emit_runtime_asserts:
+            return {}
+        # Deferred assertions are not FX users until inserted into the graph.
+        # Keep raw inputs: _check(u0 == s0) needs u0's actual value, even when
+        # replacements contain u0 -> s0 under the assumption that it passes.
+        symbols = free_unbacked_symbols(
+            [ra.expr for ras in self.deferred_runtime_asserts.values() for ra in ras]
+        )
+        required: dict[torch.fx.Node, OrderedSet[sympy.Symbol]] = {}
+        if not symbols:
+            return required
+        for node in graph.nodes:
+            bindings = node.meta.get("unbacked_bindings") or {}
+            # Fake propagation may rename bindings while assertions keep old names.
+            used = OrderedSet(
+                s
+                for s in bindings
+                if s in symbols or self.unbacked_renamings.get(s, s) in symbols
+            )
+            if used:
+                required[node] = used
+        return required
+
+    def _repair_unbacked_bindings(self, graph: torch.fx.Graph) -> None:
+        r"""_repair_unbacked_bindings(graph) -> None
+
+        Memo hits allocate fresh binding symbols for CSE/retracing and record
+        their equality in replacements. For example::
+
+            n.item()  # item0 binds u0
+            value = n.item()  # item1 binds fresh u1; u1 -> u0
+            return x * value  # the symbolic scalar expression uses u0
+
+        DCE can delete item0 while item1 still binds u1. Repair item1's binding
+        from {u1: ()} to {u0: ()}, reusing its keypath to define the missing u0.
+        Bindings needed by deferred checks keep their original names.
+        """
+        assertion_bindings = self._get_deferred_assertion_bindings(graph)
+        bound = OrderedSet()
+        for node in graph.nodes:
+            bound.update(
+                resolve_unbacked_bindings(self, node.meta.get("unbacked_bindings"))
+                or {}
+            )
+            if node.op == "placeholder":
+                value = node.meta.get("val", node.meta.get("example_value"))
+                bound.update(free_unbacked_symbols(value))
+
+        for node in graph.nodes:
+            old_bindings = node.meta.get("unbacked_bindings")
+            if not old_bindings:
+                continue
+            bindings: dict[sympy.Symbol, pytree.KeyPath] = {}
+            for symbol, path in old_bindings.items():
+                terminal = self._find(symbol)
+                if (
+                    symbol not in assertion_bindings.get(node, ())
+                    and isinstance(terminal, sympy.Symbol)
+                    and free_unbacked_symbols(terminal)
+                    and terminal not in bound
+                ):
+                    bindings[terminal] = path
+                    bound.add(terminal)
+                else:
+                    bindings[symbol] = path
+            if bindings != old_bindings:
+                node.meta = {**node.meta, "unbacked_bindings": bindings}
+
     @record_shapeenv_event()
     def set_real_tensor_prop_unbacked_vals(
         self, k: sympy.Symbol, v: int | float | torch.Tensor
