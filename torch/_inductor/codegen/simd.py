@@ -36,7 +36,6 @@ from torch.utils._sympy.symbol import (
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
-from ..autows_utils import meta_ws_enabled
 from ..codecache import code_hash, PyCodeCache
 from ..dependencies import MemoryDep, StarDep, WeakDep
 
@@ -581,12 +580,6 @@ def tile_fits_reduction_epilogue(
     for node in epilogue_nodes:
         produced |= node.get_buffer_names()
     reductions = [node for node in epilogue_nodes if node.is_reduction()]
-    # Meta automatic warp specialization can hoist a subtile's tmem_load above
-    # the accumulator-ready wait when the epilogue reduces over subtiles, which
-    # gives wrong, nondeterministic results.
-    # TODO: drop once facebookexperimental/triton#3803 lands.
-    if reductions and tile[2] > 1 and meta_ws_enabled():
-        return False
     axes = [template_reduction_axis(node, template, produced) for node in reductions]
     if any(axis not in (0, 1) for axis in axes):
         return False
