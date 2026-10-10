@@ -21,8 +21,9 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     TestCase,
@@ -83,6 +84,8 @@ def deepcopy_convert_from_dtensor(val: Any) -> Any:
 
 
 class DistElementwiseOpsTest(DTensorOpTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _compare_pairwise_ops(
         self,
         *,
@@ -128,6 +131,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
     def _run_sharded_elementwise_ops(
         self,
         *,
+        device_type,
         device_mesh: DeviceMesh,
         placements: Sequence[Placement],
         pre_op_fn: Callable | None = None,
@@ -140,7 +144,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         input_tensor = torch.randn(
             *input_size,
-            device=self.device_type,
+            device=device_type,
             requires_grad=True,
         )
 
@@ -155,7 +159,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     @with_comms
     @skip("This test will sometimes hang and a timeout error will be thrown")
-    def test_partial_add(self):
+    def test_partial_add(self, device):
         device_mesh = self.build_device_mesh()
         d_1 = DTensor.from_local(torch.rand(2, 2), device_mesh, [Partial()])
         d_2 = DTensor.from_local(torch.rand(2, 2), device_mesh, [Partial()])
@@ -163,7 +167,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(d_3._spec.placements[0].is_partial())
 
     @with_comms
-    def test_partial_replicate_add(self):
+    def test_partial_replicate_add(self, device):
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
@@ -188,50 +192,58 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             self.assertEqual(d_3.full_tensor(), d_1.full_tensor() + d_2.full_tensor())
 
     @with_comms
-    def test_activations(self):
+    def test_activations(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         self._run_sharded_elementwise_ops(
             device_mesh=device_mesh,
             placements=[Shard(0)],
             input_size=(8, 5),
             op=torch.nn.functional.gelu,
+            device_type=device_type,
         )
         self._run_sharded_elementwise_ops(
             device_mesh=device_mesh,
             placements=[Replicate()],
             input_size=(8, 5),
             op=torch.nn.functional.gelu,
+            device_type=device_type,
         )
         self._run_sharded_elementwise_ops(
             device_mesh=device_mesh,
             placements=[Shard(1)],
             input_size=(3, 12),
             op=torch.nn.functional.relu,
+            device_type=device_type,
         )
         self._run_sharded_elementwise_ops(
             device_mesh=device_mesh,
             placements=[Replicate()],
             input_size=(8, 5),
             op=torch.nn.functional.relu,
+            device_type=device_type,
         )
         self._run_sharded_elementwise_ops(
             device_mesh=device_mesh,
             placements=[Shard(0)],
             input_size=(8, 5),
             op=torch.sigmoid,
+            device_type=device_type,
         )
         self._run_sharded_elementwise_ops(
             device_mesh=device_mesh,
             placements=[Replicate()],
             input_size=(8, 5),
             op=torch.sigmoid,
+            device_type=device_type,
         )
 
     @with_comms
     @skip(
         "testing RNG based ops is broken: https://github.com/pytorch/PiPPy/issues/494"
     )
-    def test_dropout(self):
+    def test_dropout(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
 
         def _reset_random_seed():
@@ -245,6 +257,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             pre_op_fn=_reset_random_seed,
             p=0.4,
             training=False,
+            device_type=device_type,
         )
         self._run_sharded_elementwise_ops(
             device_mesh=device_mesh,
@@ -254,11 +267,13 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             pre_op_fn=_reset_random_seed,
             p=0.5,
             training=True,
+            device_type=device_type,
         )
 
     @with_comms
     @skip_unless_torch_gpu
-    def test_dropout_backward(self):
+    def test_dropout_backward(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         placements = [Shard(0)]
 
@@ -266,13 +281,13 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         grad_output = torch.rand(
             input_size,
-            device=self.device_type,
+            device=device_type,
             requires_grad=True,
         )
         mask = (
             torch.rand(
                 input_size,
-                device=self.device_type,
+                device=device_type,
                 requires_grad=False,
             )
             < 0.8
@@ -291,28 +306,30 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
-    def test_dropout_partial_redistributes(self):
+    def test_dropout_partial_redistributes(self, device):
         """Dropout on Partial input redistributes to Replicate first (no error)."""
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
-        input_tensor = torch.randn(8, 5, device=self.device_type)
+        input_tensor = torch.randn(8, 5, device=device_type)
         dt = DTensor.from_local(input_tensor, device_mesh, [Partial("sum")])
         result = torch.nn.functional.dropout(dt, training=True)
         self.assertIsInstance(result, DTensor)
         self.assertEqual(result.placements, (Replicate(),))
 
     @with_comms
-    def test_mul_out(self):
+    def test_mul_out(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         torch.manual_seed(self.rank)
         shard_spec = [Shard(0)]
         input_size = (8, 4)
-        input_tensor = torch.randn(*input_size, device=self.device_type)
+        input_tensor = torch.randn(*input_size, device=device_type)
         dtensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
 
-        other_tensor = torch.randn(*input_size, device=self.device_type)
+        other_tensor = torch.randn(*input_size, device=device_type)
         other_dtensor = DTensor.from_local(other_tensor, device_mesh, shard_spec)
 
-        output_tensor = torch.randn(*input_size, device=self.device_type)
+        output_tensor = torch.randn(*input_size, device=device_type)
         output_dtensor = DTensor.from_local(output_tensor, device_mesh, shard_spec)
         dt = torch.mul(dtensor, other_dtensor, out=output_dtensor)
         expected = torch.mul(input_tensor, other_tensor, out=output_tensor)
@@ -320,23 +337,24 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(expected, dt.to_local())
 
     @with_comms
-    def test_mul_out_partial(self):
+    def test_mul_out_partial(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         input_size = (8, 4)
         # P(sum) * R -> P(sum), with out= kwarg
         partial_tensor = DTensor.from_local(
-            torch.ones(*input_size, device=self.device_type),
+            torch.ones(*input_size, device=device_type),
             device_mesh,
             [Partial("sum")],
         )
         replicate_tensor = DTensor.from_local(
-            torch.full(input_size, 2.0, device=self.device_type),
+            torch.full(input_size, 2.0, device=device_type),
             device_mesh,
             [Replicate()],
             run_check=False,
         )
         output_tensor = DTensor.from_local(
-            torch.empty(*input_size, device=self.device_type),
+            torch.empty(*input_size, device=device_type),
             device_mesh,
             [Partial("sum")],
         )
@@ -345,9 +363,10 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(output_tensor.placements, (Partial("sum"),))
 
     @with_comms
-    def test_mul_partial(self):
+    def test_mul_partial(self, device):
         # we only test the partial behavior for mul op as other placement
         # behaviors should be well tested in test_dtensor_ops.py
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
         # 1. simple test for partial * partial
@@ -362,13 +381,13 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(d_3.to_local(), torch.ones(2, 2) * (self.world_size))
 
         # 2. test the partial input DTensor * scalar/replicate input
-        input = torch.full((8, 8), 1.0, device=self.device_type)
+        input = torch.full((8, 8), 1.0, device=device_type)
 
         # test for different types of other inputs
         other_inps = (
             2.0,  # scalar
-            torch.tensor(2.0, device=self.device_type),  # scalar tensor
-            torch.full((8, 8), 2.0, device=self.device_type),  # tensor
+            torch.tensor(2.0, device=device_type),  # scalar tensor
+            torch.full((8, 8), 2.0, device=device_type),  # tensor
         )
 
         for partial_op in ["sum", "avg"]:
@@ -402,21 +421,22 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(z.to_local(), input)
 
     @with_comms
-    def test_div_partial(self):
+    def test_div_partial(self, device):
         # we only test the partial behavior for div op as other placement
         # behaviors should be well tested in test_dtensor_ops.py
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
         # 1. test the partial input DTensor / scalar/replicate input
         # This is mathematically sound: (a1 + a2) / b = a1/b + a2/b
-        input = torch.full((8, 8), 2.0, device=self.device_type)
+        input = torch.full((8, 8), 2.0, device=device_type)
 
         # test for different types of other inputs
         other_inps = (
             2.0,  # scalar
-            torch.tensor(2.0, device=self.device_type),  # scalar tensor
-            torch.full((8, 8), 2.0, device=self.device_type),  # tensor
+            torch.tensor(2.0, device=device_type),  # scalar tensor
+            torch.full((8, 8), 2.0, device=device_type),  # tensor
         )
 
         for partial_op in ["sum", "avg"]:
@@ -444,7 +464,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         # test other partial to assert the partial not getting propagated
         d_input = DTensor.from_local(input, device_mesh, [Partial("max")])
         d_other = distribute_tensor(
-            torch.full((8, 8), 2.0, device=self.device_type), device_mesh, [Replicate()]
+            torch.full((8, 8), 2.0, device=device_type), device_mesh, [Replicate()]
         )
 
         z = d_input / d_other
@@ -452,14 +472,15 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(z.to_local(), input / 2.0)
 
     @with_comms
-    def test_masked_fill_scalar(self):
+    def test_masked_fill_scalar(self, device):
         """Test masked_fill_ with scalar value."""
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
 
         # Test with deterministic values to avoid random seed issues in threaded tests
         # Test with Shard(0) placement
         input_tensor = torch.arange(
-            40, dtype=torch.float32, device=self.device_type
+            40, dtype=torch.float32, device=device_type
         ).reshape(8, 5)
         mask = input_tensor > 20
         fill_value = -999.0
@@ -477,8 +498,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         # Test with Replicate placement
         input_tensor2 = (
-            torch.arange(40, dtype=torch.float32, device=self.device_type).reshape(8, 5)
-            - 20
+            torch.arange(40, dtype=torch.float32, device=device_type).reshape(8, 5) - 20
         )
         mask2 = input_tensor2 < 0
         fill_value2 = 42.0
@@ -493,7 +513,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         # Test with Shard(1) placement
         input_tensor3 = torch.arange(
-            48, dtype=torch.float32, device=self.device_type
+            48, dtype=torch.float32, device=device_type
         ).reshape(4, 12)
         mask3 = input_tensor3 % 2 == 0  # even numbers
         fill_value3 = 0.0
@@ -507,12 +527,13 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(input_tensor3, dt_input3.full_tensor())
 
     @with_comms
-    def test_inplace_op_partial_to_replicate(self):
+    def test_inplace_op_partial_to_replicate(self, device):
         # test that in-place operations that require redistribution raise an error
         # to preserve aliasing semantics (issue #163374)
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
 
-        input_tensor = torch.tensor(64.0, device=self.device_type)
+        input_tensor = torch.tensor(64.0, device=device_type)
         partial_dt = DTensor.from_local(
             input_tensor, device_mesh, placements=(Partial(),)
         )
@@ -527,7 +548,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             partial_dt.clamp_(max=10)
 
     @with_comms
-    def test_mul_div_scalar_partial(self):
+    def test_mul_div_scalar_partial(self, device):
         aten = torch.ops.aten
         mesh = self.build_device_mesh()
 
@@ -561,7 +582,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(res.full_tensor(), expected)
 
     @with_comms
-    def test_mul_div_scalar_norm_partial(self):
+    def test_mul_div_scalar_norm_partial(self, device):
         mesh = self.build_device_mesh()
         aten = torch.ops.aten
         local_tensor = torch.tensor([1.0, 1.0, 7.0, 7.0])
@@ -576,7 +597,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(aten.div.Scalar(norm, -2).full_tensor(), -5)
 
     @with_comms
-    def test_add_sub_scalar_partial(self):
+    def test_add_sub_scalar_partial(self, device):
         mesh = self.build_device_mesh()
 
         rank = self.rank
@@ -626,7 +647,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(res.full_tensor(), 0)
 
     @with_comms
-    def test_add_sub_scalar_norm_partial(self):
+    def test_add_sub_scalar_norm_partial(self, device):
         mesh = self.build_device_mesh()
 
         # norm partial + scalar
@@ -651,7 +672,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     @with_comms
     @parametrize("op,reduce_op", [(torch.maximum, "max"), (torch.minimum, "min")])
-    def test_partial_propagation(self, op, reduce_op):
+    def test_partial_propagation(self, device, op, reduce_op):
         # Test that torch.maximum/minimum preserves Partial("max"/"min") placements
         # since max(max(a), max(b)) == max(a, b) and min(min(a), min(b)) == min(a, b)
         device_mesh = self.build_device_mesh()
@@ -672,19 +693,20 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(result.placements, (Partial(reduce_op),))
 
     @with_comms
-    def test_neg_partial(self):
+    def test_neg_partial(self, device):
         # test that neg preserves Partial placement without communication
         # math: -(A1 + A2) = -A1 + -A2
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
-        input = torch.full((8, 8), 2.0, device=self.device_type)
+        input = torch.full((8, 8), 2.0, device=device_type)
 
         for partial_op in ["sum", "avg"]:
             expected_full = (
-                torch.full((8, 8), -2.0 * self.world_size, device=self.device_type)
+                torch.full((8, 8), -2.0 * self.world_size, device=device_type)
                 if partial_op == "sum"
-                else torch.full((8, 8), -2.0, device=self.device_type)
+                else torch.full((8, 8), -2.0, device=device_type)
             )
 
             d_input = DTensor.from_local(input, device_mesh, [Partial(partial_op)])
@@ -719,7 +741,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(z.placements, (Partial("max"),))
 
     @with_comms
-    def test_maximum_mixed_partials_redistribution(self):
+    def test_maximum_mixed_partials_redistribution(self, device):
         # Test that mixing Partial("max") with Partial("sum") correctly
         # redistributes the incompatible partial before computing maximum
         device_mesh = self.build_device_mesh()
@@ -749,15 +771,16 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(result.full_tensor()[0, 0].item(), expected_value)
 
     @with_comms
-    def test_add_partial_with_replicate_rules(self):
+    def test_add_partial_with_replicate_rules(self, device):
         # P(x) + R -> P(x) for x in {avg, max, min}: adding a replicated constant
         # preserves the partial reduce type (constant is the same on all ranks)
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
         other_val = 3.0
         d_other = distribute_tensor(
-            torch.full((8, 8), other_val, device=self.device_type),
+            torch.full((8, 8), other_val, device=device_type),
             device_mesh,
             [Replicate()],
         )
@@ -769,7 +792,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         }
 
         for reduce_op in ("avg", "max", "min"):
-            input_tensor = torch.ones(8, 8, device=self.device_type) * (self.rank + 1)
+            input_tensor = torch.ones(8, 8, device=device_type) * (self.rank + 1)
             d_input = DTensor.from_local(
                 input_tensor, device_mesh, [Partial(reduce_op)]
             )
@@ -781,22 +804,23 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             self.assertEqual(result.placements, (Partial(reduce_op),))
             self.assertEqual(
                 result.full_tensor(),
-                torch.full((8, 8), expected_full[reduce_op], device=self.device_type),
+                torch.full((8, 8), expected_full[reduce_op], device=device_type),
             )
 
     @with_comms
-    def test_add_replicate_with_partial_avg(self):
+    def test_add_replicate_with_partial_avg(self, device):
         # R + P(avg) -> P(avg): avg is linear, so this holds for any alpha
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
         replicate_val = 3.0
         d_input = distribute_tensor(
-            torch.full((8, 8), replicate_val, device=self.device_type),
+            torch.full((8, 8), replicate_val, device=device_type),
             device_mesh,
             [Replicate()],
         )
-        other_tensor = torch.ones(8, 8, device=self.device_type) * (self.rank + 1)
+        other_tensor = torch.ones(8, 8, device=device_type) * (self.rank + 1)
         d_other = DTensor.from_local(other_tensor, device_mesh, [Partial("avg")])
 
         with comm_mode:
@@ -808,14 +832,15 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         expected = torch.full(
             (8, 8),
             replicate_val + (self.world_size + 1) / 2.0,
-            device=self.device_type,
+            device=device_type,
         )
         self.assertEqual(result.full_tensor(), expected)
 
     @with_comms
-    def test_mul_div_replicate_partial_asymmetry(self):
+    def test_mul_div_replicate_partial_asymmetry(self, device):
         # mul is bilinear: r * (p1 + p2) = r*p1 + r*p2, so R * P(sum) -> P(sum).
         # div is only linear in the numerator: r / (p1 + p2) != r/p1 + r/p2.
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
@@ -823,14 +848,14 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         partial_local_val = 2.0
 
         d_replicate = distribute_tensor(
-            torch.full((8, 8), replicate_val, device=self.device_type),
+            torch.full((8, 8), replicate_val, device=device_type),
             device_mesh,
             [Replicate()],
         )
 
         # R * P(sum) -> P(sum): valid, zero communication
         d_partial = DTensor.from_local(
-            torch.full((8, 8), partial_local_val, device=self.device_type),
+            torch.full((8, 8), partial_local_val, device=device_type),
             device_mesh,
             [Partial("sum")],
         )
@@ -843,13 +868,13 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         expected_mul = torch.full(
             (8, 8),
             replicate_val * partial_local_val * self.world_size,
-            device=self.device_type,
+            device=device_type,
         )
         self.assertEqual(mul_result.full_tensor(), expected_mul)
 
         # R / P(sum) -> requires communication (not linear in denominator)
         d_partial2 = DTensor.from_local(
-            torch.full((8, 8), partial_local_val, device=self.device_type),
+            torch.full((8, 8), partial_local_val, device=device_type),
             device_mesh,
             [Partial("sum")],
         )
@@ -861,21 +886,22 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         expected_div = torch.full(
             (8, 8),
             replicate_val / (partial_local_val * self.world_size),
-            device=self.device_type,
+            device=device_type,
         )
         self.assertEqual(div_result.full_tensor(), expected_div)
 
     @with_comms
-    def test_inplace_add_partial_avg_with_replicate(self):
+    def test_inplace_add_partial_avg_with_replicate(self, device):
         # P(avg) += R -> P(avg): self is P(avg), other is R, valid inplace
         # because the rule P(avg)+R->P(avg) keeps output == self placement.
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
-        self_tensor = torch.ones(8, 8, device=self.device_type) * (self.rank + 1)
+        self_tensor = torch.ones(8, 8, device=device_type) * (self.rank + 1)
         d_self = DTensor.from_local(self_tensor, device_mesh, [Partial("avg")])
         d_other = distribute_tensor(
-            torch.full((8, 8), 3.0, device=self.device_type),
+            torch.full((8, 8), 3.0, device=device_type),
             device_mesh,
             [Replicate()],
         )
@@ -889,21 +915,22 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         expected = torch.full(
             (8, 8),
             (self.world_size + 1) / 2.0 + 3.0,
-            device=self.device_type,
+            device=device_type,
         )
         self.assertEqual(d_self.full_tensor(), expected)
 
     @with_comms
-    def test_inplace_add_replicate_with_partial_avg_requires_comm(self):
+    def test_inplace_add_replicate_with_partial_avg_requires_comm(self, device):
         # R += P(avg): the out-of-place rule R+P(avg)->P(avg) is valid, but
         # inplace requires output == self == R, so P(avg) output is rejected.
         # The runtime must redistribute P(avg) to R first (communication).
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
-        self_tensor = torch.full((8, 8), 3.0, device=self.device_type)
+        self_tensor = torch.full((8, 8), 3.0, device=device_type)
         d_self = distribute_tensor(self_tensor, device_mesh, [Replicate()])
-        other_tensor = torch.ones(8, 8, device=self.device_type) * (self.rank + 1)
+        other_tensor = torch.ones(8, 8, device=device_type) * (self.rank + 1)
         d_other = DTensor.from_local(other_tensor, device_mesh, [Partial("avg")])
 
         with comm_mode:
@@ -915,7 +942,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         expected = torch.full(
             (8, 8),
             3.0 + (self.world_size + 1) / 2.0,
-            device=self.device_type,
+            device=device_type,
         )
         self.assertEqual(d_self.full_tensor(), expected)
 
@@ -934,8 +961,9 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         ],
     )
     def test_foreach_placement_propagation(
-        self, op_fn, second_arg, placement, expected
+        self, device, op_fn, second_arg, placement, expected
     ):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
@@ -943,14 +971,14 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         if placement.is_shard():
             dts = [
                 distribute_tensor(
-                    torch.rand(s, device=self.device_type), device_mesh, [placement]
+                    torch.rand(s, device=device_type), device_mesh, [placement]
                 )
                 for s in shapes
             ]
         else:
             dts = [
                 DTensor.from_local(
-                    torch.rand(s, device=self.device_type), device_mesh, [placement]
+                    torch.rand(s, device=device_type), device_mesh, [placement]
                 )
                 for s in shapes
             ]
@@ -959,7 +987,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             if placement.is_shard():
                 args = [
                     distribute_tensor(
-                        torch.rand(s, device=self.device_type),
+                        torch.rand(s, device=device_type),
                         device_mesh,
                         [placement],
                     )
@@ -968,7 +996,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             else:
                 args = [
                     DTensor.from_local(
-                        torch.rand(s, device=self.device_type),
+                        torch.rand(s, device=device_type),
                         device_mesh,
                         [placement],
                     )
@@ -990,26 +1018,27 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             self.assertEqual(r.placements, (expected,))
 
     @with_comms
-    def test_foreach_mixed_placements(self):
+    def test_foreach_mixed_placements(self, device):
         """Each element in a foreach list independently preserves its placement."""
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
         dt1 = DTensor.from_local(
-            torch.rand(8, 8, device=self.device_type),
+            torch.rand(8, 8, device=device_type),
             device_mesh,
             [Partial("sum")],
         )
         ds1 = DTensor.from_local(
-            torch.rand(8, 8, device=self.device_type),
+            torch.rand(8, 8, device=device_type),
             device_mesh,
             [Partial("sum")],
         )
         dt2 = distribute_tensor(
-            torch.rand(8, 4, device=self.device_type), device_mesh, [Shard(0)]
+            torch.rand(8, 4, device=device_type), device_mesh, [Shard(0)]
         )
         ds2 = distribute_tensor(
-            torch.rand(8, 4, device=self.device_type), device_mesh, [Shard(0)]
+            torch.rand(8, 4, device=device_type), device_mesh, [Shard(0)]
         )
 
         with comm_mode:
@@ -1020,11 +1049,12 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(result[1].placements, (Shard(0),))
 
     @with_comms
-    def test_auto_registered_foreach_unary(self):
+    def test_auto_registered_foreach_unary(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         inputs = [
-            torch.linspace(0.05, 0.95, 32, device=self.device_type).reshape(8, 4),
-            torch.linspace(0.1, 0.9, 32, device=self.device_type).reshape(4, 8),
+            torch.linspace(0.05, 0.95, 32, device=device_type).reshape(8, 4),
+            torch.linspace(0.1, 0.9, 32, device=device_type).reshape(4, 8),
         ]
         dtensors = [
             distribute_tensor(input, device_mesh, [Shard(0)]) for input in inputs
@@ -1064,13 +1094,14 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             ("cross", False),
         ],
     )
-    def test_fused_adam(self, mesh_type, amsgrad):
+    def test_fused_adam(self, device, mesh_type, amsgrad):
+        device_type = torch.device(device).type
         if mesh_type == "same":
             param_mesh = self.build_device_mesh()
             step_mesh = param_mesh
         else:
             mesh_2d = init_device_mesh(
-                self.device_type,
+                device_type,
                 (2, self.world_size // 2),
                 mesh_dim_names=("dp", "tp"),
             )
@@ -1079,28 +1110,28 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         d_params = [
             distribute_tensor(
-                torch.rand(8, 8, device=self.device_type), param_mesh, [Shard(0)]
+                torch.rand(8, 8, device=device_type), param_mesh, [Shard(0)]
             )
         ]
         d_grads = [
             distribute_tensor(
-                torch.rand(8, 8, device=self.device_type), param_mesh, [Shard(0)]
+                torch.rand(8, 8, device=device_type), param_mesh, [Shard(0)]
             )
         ]
         d_exp_avgs = [
             distribute_tensor(
-                torch.zeros(8, 8, device=self.device_type), param_mesh, [Shard(0)]
+                torch.zeros(8, 8, device=device_type), param_mesh, [Shard(0)]
             )
         ]
         d_exp_avg_sqs = [
             distribute_tensor(
-                torch.zeros(8, 8, device=self.device_type), param_mesh, [Shard(0)]
+                torch.zeros(8, 8, device=device_type), param_mesh, [Shard(0)]
             )
         ]
         d_max_exp_avg_sqs = (
             [
                 distribute_tensor(
-                    torch.zeros(8, 8, device=self.device_type),
+                    torch.zeros(8, 8, device=device_type),
                     param_mesh,
                     [Shard(0)],
                 )
@@ -1110,7 +1141,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         )
         d_state_steps = [
             distribute_tensor(
-                torch.tensor(1.0, device=self.device_type), step_mesh, [Replicate()]
+                torch.tensor(1.0, device=device_type), step_mesh, [Replicate()]
             )
         ]
 
@@ -1136,11 +1167,12 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
-    def test_fused_adamw_strided_shard_cross_mesh(self):
+    def test_fused_adamw_strided_shard_cross_mesh(self, device):
         """Reproduce the torchtitan pattern: params with _StridedShard on a 2D
         mesh, state_steps with Replicate on a 1D DP sub-mesh."""
+        device_type = torch.device(device).type
         mesh_2d = init_device_mesh(
-            self.device_type,
+            device_type,
             (2, self.world_size // 2),
             mesh_dim_names=("dp", "tp"),
         )
@@ -1149,7 +1181,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         d_params = [
             DTensor.from_local(
-                torch.randn(4, 8, device=self.device_type),
+                torch.randn(4, 8, device=device_type),
                 mesh_2d,
                 placements,
                 run_check=False,
@@ -1157,7 +1189,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         ]
         d_grads = [
             DTensor.from_local(
-                torch.randn(4, 8, device=self.device_type),
+                torch.randn(4, 8, device=device_type),
                 mesh_2d,
                 placements,
                 run_check=False,
@@ -1165,7 +1197,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         ]
         d_exp_avgs = [
             DTensor.from_local(
-                torch.zeros(4, 8, device=self.device_type),
+                torch.zeros(4, 8, device=device_type),
                 mesh_2d,
                 placements,
                 run_check=False,
@@ -1173,7 +1205,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         ]
         d_exp_avg_sqs = [
             DTensor.from_local(
-                torch.zeros(4, 8, device=self.device_type),
+                torch.zeros(4, 8, device=device_type),
                 mesh_2d,
                 placements,
                 run_check=False,
@@ -1181,7 +1213,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         ]
         d_state_steps = [
             DTensor.from_local(
-                torch.tensor(1.0, device=self.device_type),
+                torch.tensor(1.0, device=device_type),
                 dp_mesh,
                 [Replicate()],
                 run_check=False,
@@ -1209,39 +1241,40 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(d_params[0].device_mesh, mesh_2d)
 
     @with_comms
-    def test_fused_adamw_tensor_lr(self):
+    def test_fused_adamw_tensor_lr(self, device):
         """Test _fused_adamw_ with tensor lr kwarg."""
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
 
         d_params = [
             distribute_tensor(
-                torch.rand(8, 8, device=self.device_type), device_mesh, [Shard(0)]
+                torch.rand(8, 8, device=device_type), device_mesh, [Shard(0)]
             )
         ]
         d_grads = [
             distribute_tensor(
-                torch.rand(8, 8, device=self.device_type), device_mesh, [Shard(0)]
+                torch.rand(8, 8, device=device_type), device_mesh, [Shard(0)]
             )
         ]
         d_exp_avgs = [
             distribute_tensor(
-                torch.zeros(8, 8, device=self.device_type), device_mesh, [Shard(0)]
+                torch.zeros(8, 8, device=device_type), device_mesh, [Shard(0)]
             )
         ]
         d_exp_avg_sqs = [
             distribute_tensor(
-                torch.zeros(8, 8, device=self.device_type), device_mesh, [Shard(0)]
+                torch.zeros(8, 8, device=device_type), device_mesh, [Shard(0)]
             )
         ]
         d_state_steps = [
             distribute_tensor(
-                torch.tensor(1.0, device=self.device_type),
+                torch.tensor(1.0, device=device_type),
                 device_mesh,
                 [Replicate()],
             )
         ]
         d_lr = distribute_tensor(
-            torch.tensor(0.001, device=self.device_type),
+            torch.tensor(0.001, device=device_type),
             device_mesh,
             [Replicate()],
         )
@@ -1267,13 +1300,14 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(d_params[0].placements, (Shard(0),))
 
     @with_comms
-    def test_new_pointwise_ops(self):
+    def test_new_pointwise_ops(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         torch.manual_seed(self.rank)
         shard_spec = [Shard(0)]
 
         # hardshrink: non-decreasing unary, decomp-blocked
-        inp = torch.randn(8, 5, device=self.device_type)
+        inp = torch.randn(8, 5, device=device_type)
         dt = DTensor.from_local(inp, device_mesh, shard_spec)
         self.assertEqual(
             torch.nn.functional.hardshrink(dt).to_local(),
@@ -1281,14 +1315,14 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         )
 
         # lcm: binary integer pointwise
-        a = torch.randint(1, 100, (8, 5), device=self.device_type)
-        b = torch.randint(1, 100, (8, 5), device=self.device_type)
+        a = torch.randint(1, 100, (8, 5), device=device_type)
+        b = torch.randint(1, 100, (8, 5), device=device_type)
         da = DTensor.from_local(a, device_mesh, shard_spec)
         db = DTensor.from_local(b, device_mesh, shard_spec)
         self.assertEqual(torch.lcm(da, db).to_local(), torch.lcm(a, b))
 
         # special_xlog1py and special_entr
-        pos = torch.rand(8, 5, device=self.device_type) + 0.1
+        pos = torch.rand(8, 5, device=device_type) + 0.1
         dp = DTensor.from_local(pos, device_mesh, shard_spec)
         self.assertEqual(
             torch.special.xlog1py(dp, dp).to_local(),
@@ -1300,13 +1334,14 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         )
 
     @with_comms
-    def test_new_special_pointwise_ops(self):
+    def test_new_special_pointwise_ops(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         torch.manual_seed(self.rank)
         shard_spec = [Shard(0)]
 
         # Unary special functions
-        inp = torch.rand(8, 5, device=self.device_type) + 0.1
+        inp = torch.rand(8, 5, device=device_type) + 0.1
         dt = DTensor.from_local(inp, device_mesh, shard_spec)
         for op in [
             torch.special.airy_ai,
@@ -1322,8 +1357,8 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             self.assertEqual(op(dt).to_local(), op(inp))
 
         # Binary special polynomial ops
-        x = torch.rand(8, 5, device=self.device_type)
-        n = torch.randint(0, 5, (8, 5), device=self.device_type, dtype=x.dtype)
+        x = torch.rand(8, 5, device=device_type)
+        n = torch.randint(0, 5, (8, 5), device=device_type, dtype=x.dtype)
         dx = DTensor.from_local(x, device_mesh, shard_spec)
         dn = DTensor.from_local(n, device_mesh, shard_spec)
         for op in [
@@ -1337,11 +1372,10 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             self.assertEqual(op(dx, dn).to_local(), op(x, n))
 
 
-instantiate_parametrized_tests(DistElementwiseOpsTest)
-
-
 class TestPointwiseRuleValidation(TestCase):
     """Validate registered partial-placement rules via OpInfo samples."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     world_size = 2
 
@@ -1434,6 +1468,16 @@ class TestPointwiseRuleValidation(TestCase):
 
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistElementwiseOpsTest, base_class=LocalDTensorOpTestBase
+)
+
+instantiate_device_type_tests(
+    DistElementwiseOpsTest, globals(), except_for=["cpu"], allow_xpu=True
+)
+instantiate_device_type_tests(
+    DistElementwiseOpsTestWithLocalTensor,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
 )
 
 
