@@ -7,11 +7,11 @@ from unittest import mock
 
 import torch
 from torch._dynamo.utils import counters
-from torch._inductor import config
+from torch._inductor import CompiledArtifact, config
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -126,6 +126,47 @@ class TestModuleLevelKernels(TestCase):
         with mock.patch.object(CachingAutotuner, "_dynamic_scale_rblock", reload_first):
             result, _ = _code_for(_softmax, x, **flags)
         self.assertEqual(result, _softmax(x))
+
+    @requires_cuda_and_triton
+    @config.patch(compile_threads=2, fx_graph_cache=True)
+    def test_cached_kernels_compile_on_the_worker_pool(self):
+        self.assertTrue(AsyncCompile.wait_process_pool_ready())
+        # torch.cond bypasses the FX graph cache, so this uses a graph without one.
+        x = torch.randn(64, 128, device="cuda")
+        flags = {"triton.module_level_kernels": True}
+        _code_for(_softmax, x, **flags)
+        counters.clear()
+        with mock.patch.object(
+            CachingAutotuner, "_precompile_config", _compiled_in_this_process
+        ):
+            result, _ = _code_for(_softmax, x, **flags)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(result, _softmax(x))
+
+    @requires_cuda_and_triton
+    def test_hand_edit_to_a_saved_module_takes_effect(self):
+        x = torch.ones(4, device="cuda")
+        gms = []
+        torch.compile(lambda t: t * 2, backend=lambda gm, _: gms.append(gm) or gm)(x)
+        flags = {"triton.module_level_kernels": True, "fx_graph_cache": True}
+        with tempfile.TemporaryDirectory() as d, config.patch(flags):
+            with fresh_cache():
+                artifact = torch._inductor.standalone_compile(gms[0], [x])
+                self.assertEqual(artifact(x)[0], x * 2)
+                artifact.save(path=d, format="unpacked")
+            paths = [os.path.join(r, n) for r, _, ns in os.walk(d) for n in ns]
+            for path in paths:
+                if path.endswith(".py"):
+                    with open(path) as f:
+                        code = f.read()
+                    if "def call(" in code:
+                        with open(path, "w") as f:
+                            f.write(code.replace("2.0, tl.float32", "8.0, tl.float32"))
+            counters.clear()
+            with fresh_cache():
+                loaded = CompiledArtifact.load(path=d, format="unpacked")
+                self.assertEqual(loaded(x)[0], x * 8)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     @requires_cuda_and_triton
     @config.patch(compile_threads=1)
