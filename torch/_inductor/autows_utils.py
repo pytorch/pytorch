@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import inspect
 
 
 @functools.cache
@@ -22,3 +23,12 @@ def meta_ws_enabled() -> bool:
     from triton import knobs
 
     return bool(knobs.nvidia.use_meta_ws)
+
+
+@functools.cache
+def has_two_ctas() -> bool:
+    try:
+        import triton.language as tl
+    except ImportError:
+        return False
+    return "two_ctas" in inspect.signature(tl.dot).parameters
