@@ -332,6 +332,10 @@ std::string _memory_snapshot_pickled() {
   IValue forward_frames_s = "forward_frames";
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
+  IValue expandable_segment_base_s = "expandable_segment_base";
+  IValue expandable_reservation_size_s = "expandable_reservation_size";
+  IValue expandable_segment_size_s = "expandable_segment_size";
+  IValue expandable_segment_handle_type_s = "expandable_segment_handle_type";
   IValue time_us_s = "time_us";
   IValue compile_contexts_s = "compile_context";
   IValue user_metadata_s = "user_metadata";
@@ -372,6 +376,18 @@ std::string _memory_snapshot_pickled() {
         segment_pool_id,
         std::tuple<int64_t, int64_t>(segmentInfo.owner_private_pool_id));
     segmentDict.insert(is_expandable_s, segmentInfo.is_expandable);
+    segmentDict.insert(
+        expandable_segment_base_s,
+        (int64_t)segmentInfo.expandable_segment_base);
+    segmentDict.insert(
+        expandable_reservation_size_s,
+        (int64_t)segmentInfo.expandable_reservation_size);
+    segmentDict.insert(
+        expandable_segment_size_s,
+        (int64_t)segmentInfo.expandable_segment_size);
+    segmentDict.insert(
+        expandable_segment_handle_type_s,
+        (int64_t)segmentInfo.expandable_segment_handle_type);
 
     add_frame_key(segmentDict, segmentInfo.context_when_allocated);
 
@@ -562,6 +578,10 @@ std::string _memory_snapshot_pickled() {
         segment_pool_id,
         std::tuple<int64_t, int64_t>(seg.owner_private_pool_id));
     segmentDict.insert(is_expandable_s, false);
+    segmentDict.insert(expandable_segment_base_s, (int64_t)0);
+    segmentDict.insert(expandable_reservation_size_s, (int64_t)0);
+    segmentDict.insert(expandable_segment_size_s, (int64_t)0);
+    segmentDict.insert(expandable_segment_handle_type_s, (int64_t)0);
     add_frame_key(segmentDict, seg.context_when_allocated);
 
     auto blockDict = new_dict();

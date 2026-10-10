@@ -673,7 +673,6 @@ class ConstDictVariable(VariableTracker):
                     (
                         variables.UserDefinedObjectVariable,
                         MappingProxyVariable,
-                        FrozenDictVariable,
                     ),
                 )
                 and other.call_obj_hasattr(tx, "keys").as_python_constant()
