@@ -1954,6 +1954,7 @@ def _adjust_group_norm_scalars(
     for name, value in zip(
         ("N", "C", "HxW"),
         (n_local, c_local, hxw_local),
+        strict=True,
     ):
         args[arg_indices[name]] = value
     return OpSchema(schema.op, tuple(args), schema.kwargs_schema)
