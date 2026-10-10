@@ -3913,6 +3913,10 @@ class PythonWrapperCodegen(CodeGen):
                 metadata,
             )
             return
+        if "\\" in src_code:
+            # The string form compiles what its ''' literal decodes to, and codegen
+            # escapes for that (inline asm doubles its backslashes), so decode it here.
+            src_code = ast.literal_eval(f"'''{src_code}'''")
         # When inductor loads this module, the def binds the kernel AsyncCompile built
         # from this source rather than compiling itself in process, so the worker pool
         # can start on it now, as it does for a string kernel. It gets the source the
@@ -4332,13 +4336,14 @@ class PythonWrapperCodegen(CodeGen):
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
         metadata = f"# Original path: {srcfile}:{lineno}"
+        # emit_triton_kernel_definition decodes a module-level kernel from the source
+        # the string form would splice, so both forms take it escaped.
+        compile_wrapper.splice(_escape_triton_kernel_source_for_wrapper(kernel_src))
         if as_code:
-            compile_wrapper.splice(kernel_src)
             self.emit_triton_kernel_definition(
                 name, subs_name, compile_wrapper.getvalue(), device_type, metadata
             )
         else:
-            compile_wrapper.splice(_escape_triton_kernel_source_for_wrapper(kernel_src))
             compile_wrapper.writeline(f"''', device_str='{device_type}')")
             self.define_kernel(name, compile_wrapper.getvalue(), metadata)
         # Add to the cache for the next use
