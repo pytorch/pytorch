@@ -134,7 +134,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
             return input
 
         def fn_list(x):
-            return list((x,))[0]
+            return list(iter((x,)))
 
         def fn_type(x):
             return type(x)
@@ -145,7 +145,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
             torch.compile(fn_input, backend="eager", fullgraph=True)(), builtins.input
         )
         x = torch.randn(4, 4)
-        self.assertIs(torch.compile(fn_list, backend="eager", fullgraph=True)(x), x)
+        self.assertIs(torch.compile(fn_list, backend="eager", fullgraph=True)(x)[0], x)
         self.assertIs(
             torch.compile(fn_type, backend="eager", fullgraph=True)(x), torch.Tensor
         )

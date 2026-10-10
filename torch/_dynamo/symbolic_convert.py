@@ -6653,9 +6653,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def _load_global(self, inst: Instruction) -> None:
         name = inst.argval
-        if name not in self.f_globals:
-            return self.load_builtin(inst)
-
         if self.output.global_scope is self.f_globals:
             # If the global scope matches that of the root frame, use handler in
             # root frame instruction translator, to enforce consistency.
@@ -6664,6 +6661,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
             if self.output.side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
                 self.push(self.output.side_effects.load_attr(fglobals_vt, name))
+            elif name not in self.f_globals:
+                return self.load_builtin(inst)
             else:
                 value = self.f_globals[name]
                 self.push(VariableTracker.build(self, value, global_source))
