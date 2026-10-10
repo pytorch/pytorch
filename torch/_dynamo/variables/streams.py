@@ -334,6 +334,9 @@ class SymbolicStreamState:
 class StreamContextVariable(FxTracebackAnnotateVariable):
     """This represents torch.cuda.StreamContext"""
 
+    # Re-entering only the stream annotation would not restore the stream.
+    _reenter_after_graph_break = False
+
     @staticmethod
     def create(
         tx: "InstructionTranslatorBase",
