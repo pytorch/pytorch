@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import ast
+import itertools
 import os
 import re
 import subprocess
@@ -46,6 +48,10 @@ def _run_from_file(code, args):
 
 def _softmax(x):
     return torch.softmax(x * 2, dim=-1)
+
+
+def _double(x):
+    return x * 2
 
 
 def _cond_softmax(x):
@@ -170,6 +176,7 @@ class TestModuleLevelKernels(TestCase):
         self.assertTrue(AsyncCompile.wait_process_pool_ready())
         x = torch.randn(64, 128, device="cuda")
         counters.clear()
+        PyCodeCache.cache_clear()
         with mock.patch.object(
             CachingAutotuner, "_precompile_config", _compiled_in_this_process
         ):
@@ -178,7 +185,8 @@ class TestModuleLevelKernels(TestCase):
         kernels = re.findall(r"^def (triton_\w+)\(", code, re.MULTILINE)
         self.assertEqual(counters["inductor"]["async_compile_cache_hit"], len(kernels))
 
-        (loaded,) = [m for m in PyCodeCache.modules if hasattr(m, kernels[0])]
+        mods = PyCodeCache.modules
+        (loaded,) = [m for m in mods if hasattr(m, kernels[0]) and hasattr(m, "call")]
         pooled = {k: getattr(loaded, k).kernel_hash for k in kernels}
         self.assertEqual(len(set(pooled.values())), len(kernels), pooled)
 
@@ -197,6 +205,27 @@ class TestModuleLevelKernels(TestCase):
             self.assertTrue(ns[k].launchers, k)
             self.assertEqual(ns[k].kernel_hash, pooled[k])
         self.assertEqual(ns["call"]([x])[0], result)
+
+    @requires_cuda_and_triton
+    @parametrize("case", ["interpreter", "one_thread"])
+    def test_copied_module_kernels_stay_lazy(self, case):
+        # async_compile.wait leaves the defs' kernels uncompiled with compile_threads=1,
+        # and under the interpreter, which returns even string-form kernels uncompiled.
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(_softmax, x)
+        kernels = re.findall(r"^def (triton_\w+)\(", code, re.MULTILINE)
+        threads = 1 if case == "one_thread" else 2
+        env = {"TRITON_INTERPRET": "1"} if case == "interpreter" else {}
+        with config.patch(compile_threads=threads), mock.patch.dict(os.environ, env):
+            with tempfile.TemporaryDirectory() as d:
+                path = os.path.join(d, "module.py")
+                with open(path, "w") as f:
+                    f.write(code)
+                ns = {"__file__": path, "__name__": "_module_level_kernels"}
+                exec(compile(code, path, "exec"), ns)
+        self.assertTrue(kernels)
+        for k in kernels:
+            self.assertFalse(ns[k].launchers, k)
 
     @requires_cuda_and_triton
     @config.patch(compile_threads=2)
@@ -265,6 +294,25 @@ class TestModuleLevelKernels(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     @requires_cuda_and_triton
+    @config.patch(fx_graph_cache=False)
+    def test_hand_edit_to_a_cached_module_survives_a_recompile(self):
+        x = torch.ones(4, device="cuda")
+        # A fresh AOT counter makes the recompile emit the same module, at the same path.
+        counter = mock.patch(
+            "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
+        )
+        with counter:
+            _, code = _code_for(_double, x)
+        _, path = PyCodeCache.write(code)
+        self.assertIn("2.0, tl.float32", code)
+        with open(path, "w") as f:
+            f.write(code.replace("2.0, tl.float32", "8.0, tl.float32"))
+        PyCodeCache.cache_clear()
+        with counter:
+            result, _ = _code_for(_double, x)
+        self.assertEqual(result, x * 8)
+
+    @requires_cuda_and_triton
     @config.patch({"compile_threads": 2, "triton.unique_kernel_names": False})
     def test_kernels_without_unique_names(self):
         self.assertTrue(AsyncCompile.wait_process_pool_ready())
@@ -274,6 +322,8 @@ class TestModuleLevelKernels(TestCase):
         ):
             result, code = _code_for(_cond_softmax, x)
         self.assertEqual(result, _cond_softmax(x))
+        # The pool built the pre-rename sources; this compiles the renamed defs.
+        self.assertEqual(_run_from_file(code, [x])[0], result)
         self.assertNotIn("def triton_(", code)
         kernels = re.findall(r"^def (triton_\w+)\(", code, re.MULTILINE)
         self.assertGreater(len(kernels), 1, code)
@@ -312,8 +362,12 @@ class TestModuleLevelKernels(TestCase):
             cmd = [sys.executable, path, "-kc"]
             out = subprocess.check_output(cmd, env=env, stderr=subprocess.STDOUT)
         defs = re.findall(r"^def triton_\w+\(", code, re.MULTILINE)
-        # -c prints a line per config, which needs each kernel precompiled.
-        self.assertGreaterEqual(out.decode().count("GB/s"), len(defs), out.decode())
+        keys = ast.literal_eval(re.search(r"kernel_modules=(\[.*?\])", code).group(1))
+        self.assertEqual(len(keys), len(defs), keys)
+        # -c prints each kernel's key, then a line per config, which needs the kernel
+        # precompiled.
+        for key in keys:
+            self.assertRegex(out.decode(), rf"{key[:10]}\n  .*GB/s")
 
     @requires_cuda_and_triton
     @parametrize("wrapper", ["cpp_wrapper", "fx_wrapper"])
