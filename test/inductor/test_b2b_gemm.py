@@ -209,6 +209,10 @@ class B2BGEMMTest(TestCase):
 
         for is_left_assoc in (True, False):
             with self.subTest(associativity="left" if is_left_assoc else "right"):
+                if torch.version.hip and not is_left_assoc:
+                    self.skipTest(
+                        "right-associative B2B GEMM Triton choice is unavailable on ROCm"
+                    )
 
                 def f(
                     m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor
