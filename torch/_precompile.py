@@ -1449,12 +1449,10 @@ _GENERATED_HEADER = """\
 # companion cache. You provide the model(s) at runtime, exactly as the original fn
 # took them, e.g.:
 #
-#     path = "this_file.py"
-#     ns = {"__file__": path}
-#     exec(compile(open(path).read(), path, "exec"), ns)
+#     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
-# Compile with the real path rather than exec'ing the string: the Triton kernels are
+# Run it from its file rather than exec'ing the string: the Triton kernels are
 # defined at module level and @triton.jit looks up its own source by filename, so a
 # bare exec(open(...).read()) cannot load this artifact.
 #
@@ -1715,12 +1713,10 @@ _EAGER_GENERATED_HEADER = """\
 # the human-readable rendering and the executable code) and runs on its own. Provide
 # the model(s) at runtime, exactly as the original fn took them:
 #
-#     path = "this_file.py"
-#     ns = {"__file__": path}
-#     exec(compile(open(path).read(), path, "exec"), ns)
+#     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
-# Compile with the real path rather than exec'ing the string: the Triton kernels are
+# Run it from its file rather than exec'ing the string: the Triton kernels are
 # defined at module level and @triton.jit looks up its own source by filename, so a
 # bare exec(open(...).read()) cannot load this artifact.
 #
@@ -1819,8 +1815,7 @@ _MULTIGRAPH_GENERATED_HEADER = """\
 # frame Dynamo compiled -- the entry frame plus each continuation -- with one guard tree
 # per captured variant, and dispatches among them at call time:
 #
-#     ns = {}
-#     exec(open("this_file.py").read(), ns)
+#     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the captured callable
 #
 # Sections below are labelled. What is OPAQUE is base64 of pickled Dynamo state --
@@ -2231,19 +2226,17 @@ class PrecompiledModule(PrecompiledRunnable):
         # pin and not a sixth stamp on purpose: a stamp is droppable by hand-edit and a
         # dropped stamp degrades to warn-and-continue, which here would silently restore
         # a memory-safety bug rather than a wrong number.
-        # readable_wrapper is what makes the emitted kernels module-level code the
-        # reader can edit, instead of source strings handed to AsyncCompile. It also
-        # trims the preamble to the bindings this graph actually uses.
+        # triton.autotune_at_compile_time tunes each kernel while capturing and pins the
+        # chosen config in the module's KERNEL_CONFIGS, so a load does not benchmark.
         # autotune_local_cache off: with it on, loading the artifact drops a
         # <hash>.best_config next to it -- into the directory the artifact is meant to be
         # committed from -- and that sidecar is keyed on basename(__file__), so two
         # unrelated artifacts both named artifact.py share one entry and can pick up each
-        # other's launch config. The kernels launch with the configs fixed at capture
-        # (the module's KERNEL_CONFIGS), so the cache has nothing to add.
+        # other's launch config.
         options: dict[str, object] = {
             "size_asserts": True,
             "cpp.dynamic_threads": True,
-            "readable_wrapper": True,
+            "triton.autotune_at_compile_time": True,
             "autotune_local_cache": False,
         }
         if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
