@@ -169,7 +169,7 @@ class TestAttentionFusionDeviceHooks(TestCase):
             matmul.fp32_precision = "ieee"
             with (
                 mock.patch.object(torch.cuda, "is_available", lambda: True),
-                mock.patch.object(torch.cuda, "get_device_capability", lambda: (8, 0)),
+                mock.patch.object(torch.cuda, "is_tf32_supported", lambda: True),
             ):
                 self.assertTrue(CudaInterface.should_warn_tf32_disabled())
             with mock.patch.object(torch.cuda, "is_available", lambda: False):
