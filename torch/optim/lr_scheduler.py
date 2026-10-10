@@ -844,6 +844,13 @@ class ConstantLR(LRScheduler):
         """
         _warn_get_lr_called_within_step(self)
 
+        if self.total_iters <= 0:
+            # The milestone is already behind us at epoch 0, so the factor applies
+            # over no iterations at all. Without this the scaling branch below runs
+            # at epoch 0 and the restoring branch is then unreachable, which pins
+            # the lr at factor * base_lr for the whole run.
+            return _param_groups_val_list(self.optimizer, "lr")
+
         if self.last_epoch == 0:
             return [group["lr"] * self.factor for group in self.optimizer.param_groups]
 
