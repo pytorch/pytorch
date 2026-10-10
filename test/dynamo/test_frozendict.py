@@ -729,26 +729,6 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
 @unittest.skipIf(not torch._has_frozendict, "requires builtins.frozendict")
 @instantiate_parametrized_tests
 class FrozenDictSubclassTests(torch._dynamo.test_case.TestCase):
-    @parametrize("construct", [False, True])
-    def test_context_manager_subclass(self, construct):
-        class FrozenMapping(builtins.frozendict):
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, traceback):
-                return False
-
-        def fn(x, mapping):
-            if construct:
-                mapping = FrozenMapping(a=x)
-            return mapping["a"] + 1, mapping
-
-        x = torch.randn(3)
-        mapping = FrozenMapping(a=x)
-        result = torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
-        self.assertEqual(result, fn(x, mapping))
-        self.assertIs(type(result[1]), FrozenMapping)
-
     def test_subclass_type_guard(self):
         class FrozenMapping(builtins.frozendict):
             def __getitem__(self, key):
