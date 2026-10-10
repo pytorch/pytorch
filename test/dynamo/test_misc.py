@@ -5427,6 +5427,218 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNot(d.b, p.b)  # deep copy clones the list
         self.assertIs(type(d), Plain)
 
+    def test_copy_reduce_override(self):
+        # object.__reduce_ex__ must defer to a type's overridden __reduce__
+        # rather than the copyreg __newobj__ path. Exercise both a plain custom
+        # class and the pure-Python functools.partial (which returns func plus a
+        # 4-tuple state consumed by __setstate__).
+        from test.support.import_helper import import_fresh_module
+
+        class Custom:
+            def __init__(self, a, b=None):
+                self.a = a
+                self.b = b
+
+            def __reduce__(self):
+                return (type(self), (self.a,), {"b": self.b})
+
+            def __setstate__(self, state):
+                self.b = state["b"]
+
+        def fn(o):
+            return copy.copy(o), copy.deepcopy(o)
+
+        # graph break on equality comparison for py_functools.args tuples
+        cfn = torch.compile(fn, fullgraph=False, backend="eager")
+
+        obj = Custom(1, [10, 20])
+        c, d = cfn(obj)
+        self.assertEqual(c.a, 1)
+        self.assertIs(c.b, obj.b)  # shallow copy shares the list from state
+        self.assertEqual(d.a, 1)
+        self.assertIsNot(d.b, obj.b)  # deep copy clones the list
+        self.assertEqual(d.b, obj.b)
+
+        py_functools = import_fresh_module("functools", blocked=["_functools"])
+        p = py_functools.partial(sorted, ["asdf"], key=lambda t: t[0])
+        p.attr = [1, 2]
+        c, d = cfn(p)
+
+        self.assertIs(c.func, p.func)
+        self.assertIs(c.args, p.args)
+        self.assertIs(c.keywords, p.keywords)
+        self.assertIs(c.attr, p.attr)  # shallow copy shares __dict__ attr
+
+        self.assertEqual(d.args, p.args)
+        self.assertEqual(list(d.keywords), list(p.keywords))
+        self.assertIsNot(d.attr, p.attr)  # deep copy clones __dict__ attr
+        self.assertEqual(d.attr, p.attr)
+
+    def test_copy_exact_container_methods(self):
+        # copy.copy dispatches exact list/dict/set through copy._copy_dispatch,
+        # whose entries are the unbound C method descriptors list.copy,
+        # dict.copy and set.copy.
+        def fn(x, src):
+            lst = copy.copy(src)
+            lst.append(4)
+            return x + len(lst)
+
+        x = torch.randn(4)
+        src = [1, 2, 3]
+        correct = fn(x, src)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(x, src)
+        self.assertEqual(result, correct)
+        # the copy is a new list: mutating it leaves the source alone
+        self.assertEqual(src, [1, 2, 3])
+
+        def fn_literal(x):
+            lst = copy.copy([1, 2, 3])
+            lst.append(4)
+            dct = copy.copy({1: 2})
+            dct[3] = 4
+            st = copy.copy({1, 2})
+            st.add(3)
+            return x + len(lst) + len(dct) + len(st)
+
+        correct = fn_literal(x)
+        result = torch.compile(fn_literal, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+    def test_unbound_container_copy_methods(self):
+        class OverridingList(list):
+            # list.copy runs list's C slot, not this override
+            def copy(self):
+                return "overridden"
+
+        class OverridingDict(dict):
+            def copy(self):
+                return "overridden"
+
+        class OverridingSet(set):
+            def copy(self):
+                return "overridden"
+
+        def fn(x):
+            lst = list.copy([1, 2, 3])
+            dct = dict.copy({1: 2})
+            st = set.copy({1, 2})
+            sub = list.copy(OverridingList([1, 2]))
+            dsub = dict.copy(OverridingDict({1: 2}))
+            ssub = set.copy(OverridingSet({1, 2}))
+            return x + len(lst) + len(dct) + len(st) + len(sub) + len(dsub) + len(ssub)
+
+        x = torch.randn(4)
+        correct = fn(x)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+    def test_unbound_list_methods(self):
+        # list.<method>(lst, ...) is the same call as lst.<method>(...): the
+        # whole method table is dispatched on the explicit receiver.
+        def fn(x):
+            lst = [3, 1, 2]
+            list.sort(lst)
+            list.append(lst, 4)
+            list.extend(lst, [5])
+            list.insert(lst, 0, 0)
+            list.remove(lst, 0)
+            list.reverse(lst)
+            popped = list.pop(lst)
+            return x + len(lst) + list.count(lst, 4) + list.index(lst, 3) + popped
+
+        x = torch.randn(4)
+        correct = fn(x)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+        class OverridingList(list):
+            # list.append runs list's C slot, not this override
+            def append(self, value):
+                return "overridden"
+
+        def overridden(x):
+            lst = OverridingList([1, 2])
+            list.append(lst, 3)
+            return x + len(lst)
+
+        correct = overridden(x)
+        result = torch.compile(overridden, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+    def test_unbound_methods_other_builtin_types(self):
+        # The unbound dispatch is not per type: any builtin type runs its own
+        # method on an explicit receiver, not only list/dict/set.
+        def fn(x):
+            r = range(3)
+            return x + range.count(r, 1) + range.index(r, 2) + len(bytes.decode(b"ab"))
+
+        x = torch.randn(4)
+        correct = fn(x)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+        # A receiver of the wrong type raises the TypeError the descriptor
+        # raises, instead of running that type's same-named method.
+        def wrong_receiver(x):
+            try:
+                set.copy({1: 2})
+            except TypeError:
+                return x + 1
+            return x + 100
+
+        correct = wrong_receiver(x)
+        result = torch.compile(wrong_receiver, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+    def test_unbound_method_descriptor_value(self):
+        # A method descriptor of a builtin type works as a plain value, not
+        # just the ones copy._copy_dispatch happens to hold.  The locals keep
+        # them sourced values; `dict.get` written inside fn would be an
+        # attribute lookup on the type instead and never reach the builder.
+        getter = dict.get
+        joiner = str.join
+
+        def fn(x):
+            d = {1: 2}
+            return x + getter(d, 1) + len(joiner("-", ["a", "b"]))
+
+        x = torch.randn(4)
+        correct = fn(x)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+        # methoddescr_call checks the receiver against __objclass__ and raises
+        # the same TypeError eager raises, observed while tracing rather than
+        # graph breaking
+        copier = list.copy
+
+        def wrong_receiver(x):
+            try:
+                copier({1: 2})
+            except TypeError:
+                return x + 1
+            return x + 100
+
+        result = torch.compile(wrong_receiver, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, wrong_receiver(x))
+
+    def test_unbound_method_descriptor_guard(self):
+        # The descriptor identity is guarded, so rebinding the source recompiles
+        # instead of reusing the semantics traced from the old value.
+        dispatch = {dict: dict.get}
+
+        def call(d):
+            return dispatch[dict](d, 1)
+
+        cf = torch.compile(call, backend="eager", fullgraph=True)
+        self.assertEqual(cf({1: 2}), 2)
+
+        def forty_two(d, k):
+            return 42
+
+        dispatch[dict] = forty_two
+        self.assertEqual(cf({1: 2}), 42)
+
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
 
@@ -18863,7 +19075,6 @@ fn
         self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
         self.assertEqual(res[10], "0x1.8000000000000p+0")
 
-    @unittest.expectedFailure
     def test_builtin_numeric_unbound_method_constant_fold(self):
         def fn():
             out = [
