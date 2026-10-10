@@ -3486,6 +3486,36 @@ class TestPrecompile(TestCase):
             )
         self.assertEqual(torch.random.get_rng_state(), before)
 
+    @unittest.skipUnless(TEST_CUDA, "needs CUDA")
+    def test_capture_drawing_from_a_cuda_generator_restores_only_the_default(self):
+        x = torch.empty(4, device="cuda")
+        torch.manual_seed(0)
+        before = torch.cuda.get_rng_state(0)
+        default = torch.cuda.default_generators[0]
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(
+                lambda a: a + torch.rand(4, device="cuda", generator=default),
+                x,
+                backend="eager",
+            )
+        self.assertEqual(torch.cuda.get_rng_state(0), before)
+
+        # torch.Generator("cuda") has no device index; a reseed of the default made
+        # during capture must stand.
+        gen = torch.Generator("cuda").manual_seed(0)
+        gen_before = gen.get_state()
+
+        def reseed_then_draw(a):
+            default.manual_seed(7)
+            return a + torch.rand(4, device="cuda", generator=gen)
+
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            _precompile_pair(reseed_then_draw, x, backend="eager")
+        self.assertTrue(any("explicit torch.Generator" in m for m in cm.output))
+        reseeded = torch.Generator("cuda").manual_seed(7).get_state()
+        self.assertEqual(torch.cuda.get_rng_state(0), reseeded)
+        self.assertNotEqual(gen.get_state(), gen_before)
+
     def test_capture_drawing_from_explicit_and_default_generators(self):
         gen = torch.Generator().manual_seed(0)
         gen_before = gen.get_state()
