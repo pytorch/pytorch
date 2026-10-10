@@ -734,8 +734,10 @@ def _build_installed_forward():
     own frame evaluator: this installs the captured package's guarded entries
     onto the live code objects of the captured modules, the way a warm
     torch.compile cache load does, and calls the entry through it. The entry's
-    callback is fail_on_recompile's, so, as for a standalone artifact, a call no
-    captured variant covers raises instead of compiling.
+    callback is a _RefuseRecompileCallback bound at load, which
+    _callback_from_stance keeps even under stances that would compile, so, as
+    for a standalone artifact, a call no captured variant covers raises instead
+    of compiling.
     """
     import base64
     import importlib
