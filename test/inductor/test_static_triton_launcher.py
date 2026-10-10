@@ -670,6 +670,29 @@ class TestStaticTritonLauncher(TestCase):
         self.assertEqual(new_arg0, arg0)
 
     @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_n_spills_reported_per_lane(self):
+        # Inductor's spill thresholds are calibrated on the CUDA/HIP unit,
+        # dword-equivalents per lane, while Level Zero reports spill memory in
+        # bytes per hardware thread. The static launcher normalizes the same way
+        # the triton driver does (intel/intel-xpu-backend-for-triton#7950), so
+        # the two must report the same number for the same binary.
+        @triton.jit
+        def spilling_kernel(z, BLOCK: tl.constexpr):
+            off = tl.arange(0, BLOCK)
+            a = tl.load(z + off)
+            result = tl.sum(a, axis=0, keep_dims=True)
+            tl.store(z + off, a + result)
+
+        BLOCK = 1024 * 8
+        z = torch.empty(BLOCK, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = spilling_kernel[(1,)](z, BLOCK=BLOCK, num_warps=2)
+        launcher = self._make_launcher(compiled_kernel)
+
+        if compiled_kernel.n_spills == 0:
+            raise unittest.SkipTest("fixture no longer spills on this IGC version")
+        self.assertEqual(launcher.n_spills, compiled_kernel.n_spills)
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
     def test_xpu_kernel_arg_count_mismatch(self):
         @triton.jit
         def simple_kernel(arg0):
@@ -1339,33 +1362,34 @@ class TestFastCudaLauncherCompileResult(TestCase):
             )
             return out
 
-        from triton.runtime._allocation import _allocator
-
-        previous_allocator = _allocator.get()
         patcher, results = self._patch_build_fast_launcher()
         alloc_fn = mock.Mock(
             side_effect=lambda size, _alignment, _stream: torch.empty(
                 size, dtype=torch.uint8, device="cuda"
             )
         )
-        triton.set_allocator(alloc_fn)
-        try:
-            with patcher:
-                for _ in range(3):
-                    a = torch.randn((M, K), device="cuda", dtype=torch.bfloat16)
-                    b = torch.randn((N, K), device="cuda", dtype=torch.bfloat16)
-                    self.assertEqual(gemm(a, b), a @ b.T, atol=1e-2, rtol=1e-2)
-        finally:
-            triton.set_allocator(previous_allocator)
+        allocator_var = SimpleNamespace(get=lambda: alloc_fn)
 
-        self.assertGreater(alloc_fn.call_count, 0)
-        for call in alloc_fn.call_args_list:
-            self.assertGreater(call.args[0], 0)
+        with (
+            patcher,
+            mock.patch(
+                "torch._inductor.runtime.static_triton_launcher._triton_allocator_var",
+                return_value=allocator_var,
+            ),
+        ):
+            for _ in range(3):
+                a = torch.randn((M, K), device="cuda", dtype=torch.bfloat16)
+                b = torch.randn((N, K), device="cuda", dtype=torch.bfloat16)
+                self.assertEqual(gemm(a, b), a @ b.T, atol=1e-2, rtol=1e-2)
+
         self.assertTrue(results, "_build_fast_launcher was not reached")
         self.assertFalse(
             any(results),
             "global-scratch kernels must use the regular static launcher",
         )
+        self.assertGreater(alloc_fn.call_count, 0)
+        for call in alloc_fn.call_args_list:
+            self.assertGreater(call.args[0], 0)
 
 
 if __name__ == "__main__":
