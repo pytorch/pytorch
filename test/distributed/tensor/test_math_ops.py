@@ -2070,18 +2070,32 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                     device_mesh,
                     [Shard(0)],
                 )
-                ref_weight = weight.detach().clone().requires_grad_(True) if use_weight else None
-                ref_bias = bias.detach().clone().requires_grad_(True) if use_bias else None
+                ref_weight = (
+                    weight.detach().clone().requires_grad_(True) if use_weight else None
+                )
+                ref_bias = (
+                    bias.detach().clone().requires_grad_(True) if use_bias else None
+                )
                 dt_weight_bwd = (
-                    distribute_tensor(ref_weight.detach().clone().requires_grad_(True), device_mesh, replicate)
+                    distribute_tensor(
+                        ref_weight.detach().clone().requires_grad_(True),
+                        device_mesh,
+                        replicate,
+                    )
                     if use_weight else None
                 )
                 dt_bias_bwd = (
-                    distribute_tensor(ref_bias.detach().clone().requires_grad_(True), device_mesh, replicate)
+                    distribute_tensor(
+                        ref_bias.detach().clone().requires_grad_(True),
+                        device_mesh,
+                        replicate,
+                    )
                     if use_bias else None
                 )
                 ref_output = F.group_norm(ref_input, num_groups, ref_weight, ref_bias)
-                dt_output = F.group_norm(dt_input, num_groups, dt_weight_bwd, dt_bias_bwd)
+                dt_output = F.group_norm(
+                    dt_input, num_groups, dt_weight_bwd, dt_bias_bwd
+                )
                 self.assertEqual(dt_output.full_tensor(), ref_output)
                 ref_output.sum().backward()
                 dt_output.sum().backward()
