@@ -3127,7 +3127,12 @@ class GraphLowering(torch.fx.Interpreter):
                 + self.wrapper_code.kernel_autotune_calls.getvalue()
                 + '"""\n'
             )
-            wrapper_code.value = tuning_code + wrapper_code.value
+            if self.wrapper_code.defines_triton_kernels_as_code():
+                # A record of what ran at compile time, which repeats every kernel. The
+                # module defines the kernels itself, so keep the record in the log only.
+                output_code_log.debug("%s", tuning_code)
+            else:
+                wrapper_code.value = tuning_code + wrapper_code.value
         if GraphLowering.save_output_code is not None:
             GraphLowering.save_output_code(wrapper_code.value)
         output_code_log.debug("Output code: \n%s", wrapper_code.value)

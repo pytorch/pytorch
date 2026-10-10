@@ -131,10 +131,10 @@ class TestModuleLevelKernels(TestCase):
         cfg = {"triton.autotune_at_compile_time": autotune_at_compile_time}
         result, code = _code_for(_softmax, x, **cfg)
         self.assertEqual(result, _softmax(x))
-        # Only the compile-time autotune block, which execs its kernels, keeps the
-        # string form.
-        expected_strings = 1 if autotune_at_compile_time else 0
-        self.assertEqual(code.count("= async_compile.triton("), expected_strings)
+        # The compile-time autotune block execs its kernels in the string form, and is
+        # left out of the module.
+        self.assertNotIn("async_compile.triton(", code)
+        self.assertNotIn("Compile-time auto-tuning block", code)
         self.assertEqual(_run_from_file(code, [x])[0], result)
 
     @requires_cuda_and_triton

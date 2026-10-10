@@ -6560,27 +6560,14 @@ if HAS_CUDA_AND_TRITON:
                 compiled_out, code = run_and_get_code(compiled_foo, x)
                 self.assertEqual(eager_out, compiled_out)
 
-                if autotune_at_compile_time:
-                    # auto-tuning block should only appear once. We generate auto-tuning code
-                    # for all the kernels no matter if they are defined in the main graph or
-                    # subgraph, to avoid the overhead of executing multiple auto-tuning code blocks.
-                    FileCheck().check_count(
-                        "Compile-time auto-tuning block", 1, exactly=True
-                    ).run(code[0])
-                    # triton_poi_fused_add_ should appear twice, first in the auto-tuning block,
-                    # and then in the main code block
-                    FileCheck().check_count(
-                        "def triton_poi_fused_add_", 2, exactly=True
-                    ).run(code[0])
-                    # cpu kernel definition should only appence once, not in the auto-tuning block
-                    FileCheck().check_count(
-                        "cpp_fused__to_copy_add_1 = ", 1, exactly=True
-                    ).run(code[0])
-                else:
-                    # triton_poi_fused_add_ should appear once, because of kernel reuse
-                    FileCheck().check_count(
-                        "def triton_poi_fused_add_", 1, exactly=True
-                    ).run(code[0])
+                # The python wrapper keeps the compile-time auto-tuning block out of
+                # the module, and partition 2 reuses partition 1's fused triton kernel.
+                FileCheck().check_count(
+                    "Compile-time auto-tuning block", 0, exactly=True
+                ).run(code[0])
+                FileCheck().check_count(
+                    "def triton_poi_fused_add_", 1, exactly=True
+                ).run(code[0])
 
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
