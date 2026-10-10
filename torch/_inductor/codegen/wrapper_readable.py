@@ -11,9 +11,9 @@ The tradeoff is deliberate and is the reason this is opt-in: run on its own, a
 kernel defined at module level compiles serially, in process, on its first launch,
 instead of fanning out to the compile worker pool.
 
-Only Triton kernels inductor generates are hoisted. A user-defined ``@triton.jit`` kernel
-is still emitted as a source string passed to ``async_compile.triton``, and so are the
-kernels of other backends (C++, MPS, Halide, Pallas).
+Only Triton kernels, inductor's and user-defined ``@triton.jit`` ones, are hoisted. The
+kernels of other backends (C++, MPS, Halide, Pallas) are still emitted as source strings
+passed to ``AsyncCompile``.
 """
 
 import re

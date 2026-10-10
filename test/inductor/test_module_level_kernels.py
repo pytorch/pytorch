@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import importlib
 import os
 import re
 import subprocess
@@ -38,6 +39,56 @@ def _cond_softmax(x):
     return torch.cond(
         x.sum() > 0, lambda t: torch.softmax(t * 2, dim=-1), lambda t: t.cos(), (x,)
     )
+
+
+# Two user kernels from different modules that bind the same top-level names to
+# different values. The kernel's SCALE parameter (its numel) shadows the global SCALE,
+# which only the helper reads.
+_SCALE_MODULE = """
+import triton
+import triton.language as tl
+from triton.language import {op} as op
+
+SCALE = tl.constexpr({scale})
+
+
+@triton.jit
+def scale(x):
+    return op(x) * SCALE
+
+
+@triton.jit
+def scale_kernel(in_ptr, out_ptr, SCALE, BLOCK: tl.constexpr):
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < SCALE
+    tl.store(out_ptr + offs, scale(tl.load(in_ptr + offs, mask=mask)), mask=mask)
+"""
+
+# A kernel with no helpers or globals of its own, only an imported alias. The kernels
+# are named apart: Triton keys its cache on the source, which does not cover `op`.
+_OP_MODULE = """
+import triton
+import triton.language as tl
+from triton.language import {op} as op
+
+
+@triton.jit
+def {op}_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n
+    tl.store(out_ptr + offs, op(tl.load(in_ptr + offs, mask=mask)), mask=mask)
+"""
+
+
+def _import_kernels(d, template, kernels):
+    for name, fields in kernels.items():
+        with open(os.path.join(d, f"{name}.py"), "w") as f:
+            f.write(template.format(**fields))
+    sys.path.insert(0, d)
+    try:
+        return [importlib.import_module(name) for name in kernels]
+    finally:
+        sys.path.remove(d)
 
 
 def _compiled_in_this_process(*args, **kwargs):
@@ -214,6 +265,62 @@ class TestModuleLevelKernels(TestCase):
                 loaded = CompiledArtifact.load(path=d, format="unpacked")
                 self.assertEqual(loaded(x)[0], x * 8)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @requires_cuda_and_triton
+    def test_user_defined_kernels(self):
+        with tempfile.TemporaryDirectory() as d:
+            modules = {
+                "_kd_scale_a": {"op": "abs", "scale": 2.0},
+                "_kd_scale_b": {"op": "floor", "scale": 3.0},
+            }
+            mod_a, mod_b = _import_kernels(d, _SCALE_MODULE, modules)
+            kernel_a, kernel_b = mod_a.scale_kernel, mod_b.scale_kernel
+
+            def fn(x):
+                a, b = torch.empty_like(x), torch.empty_like(x)
+                kernel_a[(4,)](x, a, x.numel(), BLOCK=64)
+                kernel_b[(4,)](x, b, x.numel(), BLOCK=64)
+                return a + 1, b + 1
+
+            x = torch.randn(256, device="cuda")
+            expected = (x.abs() * 2 + 1, x.floor() * 3 + 1)
+            result, code = _code_for(fn, x, **{"triton.module_level_kernels": True})
+            self.assertEqual(result, expected)
+            self.assertNotIn("async_compile.triton", code)
+            kernels = re.findall(r"^def scale_kernel_\d\(", code, re.MULTILINE)
+            self.assertEqual(len(kernels), 2, code)
+            # The pool compiles each kernel from its own module; only a standalone run
+            # of the wrapper resolves the kernels' globals in the one shared namespace.
+            path = os.path.join(d, "module.py")
+            with open(path, "w") as f:
+                f.write(code)
+            ns = {"__file__": path, "__name__": "_module_level_kernels"}
+            exec(compile(code, path, "exec"), ns)
+            self.assertEqual(tuple(ns["call"]([x])), expected)
+
+    @requires_cuda_and_triton
+    def test_user_defined_kernels_that_import_the_same_alias(self):
+        with tempfile.TemporaryDirectory() as d:
+            modules = {"_kd_op_a": {"op": "abs"}, "_kd_op_b": {"op": "floor"}}
+            mod_a, mod_b = _import_kernels(d, _OP_MODULE, modules)
+            kernel_a, kernel_b = mod_a.abs_kernel, mod_b.floor_kernel
+
+            def fn(x):
+                a, b = torch.empty_like(x), torch.empty_like(x)
+                kernel_a[(4,)](x, a, x.numel(), BLOCK=64)
+                kernel_b[(4,)](x, b, x.numel(), BLOCK=64)
+                return a + 1, b + 1
+
+            x = torch.randn(256, device="cuda")
+            expected = (x.abs() + 1, x.floor() + 1)
+            result, code = _code_for(fn, x, **{"triton.module_level_kernels": True})
+            self.assertEqual(result, expected)
+            path = os.path.join(d, "module.py")
+            with open(path, "w") as f:
+                f.write(code)
+            ns = {"__file__": path, "__name__": "_module_level_kernels"}
+            exec(compile(code, path, "exec"), ns)
+            self.assertEqual(tuple(ns["call"]([x])), expected)
 
     @requires_cuda_and_triton
     @parametrize("wrapper", ["cpp_wrapper", "fx_wrapper"])
