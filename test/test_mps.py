@@ -7649,6 +7649,17 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(torch.div(mps_a, mps_b, rounding_mode="floor"),
                              torch.div(cpu_a, cpu_b, rounding_mode="floor"))
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_remainder_extremal(self, dtype):
+        vals = [float("nan"), float("inf"), -float("inf"), 0.0, -0.0,
+                1.0, -1.0, 2.0, -2.0, 3.5, -3.5, 7.0, -7.0,
+                1e10, -1e10, 1e30, -1e30]
+        n = len(vals)
+        cpu_a = torch.tensor(vals, dtype=dtype).repeat_interleave(n)
+        cpu_b = torch.tensor(vals, dtype=dtype).repeat(n)
+        self.assertEqual(torch.remainder(cpu_a.to("mps"), cpu_b.to("mps")),
+                         torch.remainder(cpu_a, cpu_b))
+
     def test_remainder(self):
         res_cpu = torch.remainder(
             torch.tensor([-3, -2, -1, 1, 2, 3], dtype=torch.int32, device="cpu"), torch.tensor(2, device="cpu", dtype=torch.int32))
