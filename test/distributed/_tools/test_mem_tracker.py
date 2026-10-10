@@ -1,20 +1,21 @@
 # Owner(s): ["oncall: distributed"]
 import gc
-import unittest
 
 import torch
 import torch.nn as nn
 from torch.distributed._tools.mem_tracker import MemTracker
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
-    TEST_CUDA,
-    TEST_XPU,
     TestCase,
 )
 from torch.utils.checkpoint import checkpoint
 
 
-class TestMemTracker(TestCase):
+class TestMemTrackerDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _init_cublas_workspace(self, dev: torch.device):
         lin = torch.nn.Linear(768, 768, device=dev)
         inp = torch.randn(1, 768, device=dev)
@@ -28,16 +29,11 @@ class TestMemTracker(TestCase):
         mod.reset_accumulated_memory_stats(dev)
         mod.reset_peak_memory_stats(dev)
 
-    @unittest.skipIf(
-        not TEST_CUDA and not TEST_XPU, "Neither CUDA or XPU is not available"
-    )
-    def test_accelerator_tracker_equivalence(
-        self,
-    ):
+    def test_accelerator_tracker_equivalence(self, device):
         """
         Tests that the tracker correctly calculates the peak memory.
         """
-        dev = torch.device(torch.accelerator.current_device_index())
+        dev = torch.device(device)
         self._init_cublas_workspace(dev)
         gc.collect(1)
         self._reset_mem_stats(dev)
@@ -84,16 +80,11 @@ class TestMemTracker(TestCase):
         accuracy = tracker_max / acc_max
         self.assertAlmostEqual(accuracy, 1.0, delta=0.1)
 
-    @unittest.skipIf(
-        not TEST_CUDA and not TEST_XPU, "Neither CUDA or XPU is not available"
-    )
-    def test_tracker_with_activation_checkpointing(
-        self,
-    ):
+    def test_tracker_with_activation_checkpointing(self, device):
         """
         Tests that the tracker correctly computes the peak memory during activation checkpointing.
         """
-        dev = torch.device(torch.accelerator.current_device_index())
+        dev = torch.device(device)
         self._init_cublas_workspace(dev)
         gc.collect(1)
         self._reset_mem_stats(dev)
@@ -156,11 +147,11 @@ class TestMemTracker(TestCase):
         accuracy = tracker_max / acc_max
         self.assertAlmostEqual(accuracy, 1.0, delta=0.1)
 
-    def test_tracker_attribution(self):
+    def test_tracker_attribution(self, device):
         """
         Tests that the tracker correctly categorizes params, gradients, and optimizer states.
         """
-        dev = torch.device(torch.get_default_device())
+        dev = torch.device(device)
         gc.collect(1)
         bsz, n_layers, dim, dtype = 16, 3, 128, torch.float32
 
@@ -241,6 +232,11 @@ class TestMemTracker(TestCase):
             optim.zero_grad()
             # After zero_grad: Gradients are deallocated
             test_attribution_equivalence(mt, model, optim)
+
+
+instantiate_device_type_tests(
+    TestMemTrackerDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
