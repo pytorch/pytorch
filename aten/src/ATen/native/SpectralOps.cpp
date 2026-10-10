@@ -729,7 +729,11 @@ Tensor& fft_fftfreq_out(int64_t n, double d, Tensor& out) {
               "fftfreq requires a floating point or complex dtype");
   // TODO: arange doesn't have complex support
   at::arange_out(out, n);
-  auto right_slice = out.slice(0, (n + 1) / 2, 0);
+  // No end argument: the negative frequencies run to the end of out. Passing
+  // 0 made this slice empty, so the arange below resized it into a fresh
+  // contiguous run, which for a non-contiguous out both misplaces the values
+  // and writes into storage that is not part of out.
+  auto right_slice = out.slice(0, (n + 1) / 2);
   at::arange_out(right_slice, -(n/2), 0, 1);
   return out.mul_(1.0 / (n * d));  // Slightly faster than div_(n*d)
 }
