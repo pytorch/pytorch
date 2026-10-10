@@ -254,6 +254,26 @@ inductor_skips["xpu"] = {
 inductor_skips["xpu"]["nn.functional.linear"] = {f16}
 inductor_skips["xpu"]["masked.cumprod"] = {f16}
 
+# Ascend NPU (PrivateUse1): aclnn eager kernels reject these dtype combos.
+inductor_skips["npu"] = {
+    # https://gitcode.com/Ascend/pytorch/issues/4938
+    "nn.functional.pad.reflect": {i32, i64, f32},
+    "nn.functional.prelu": {f16, f32},
+    "unfold": {f16, f32},
+    # aclnn MultilabelMarginLossForward eager rejection
+    # https://gitcode.com/Ascend/pytorch/issues/5217
+    "nn.functional.multilabel_margin_loss": {f32},
+    # https://gitcode.com/Ascend/pytorch/issues/4599
+    # (masked_fill_ in native aclnn fallback path rejects DT_DOUBLE;
+    # residuals of https://gitcode.com/Ascend/pytorch/issues/4934)
+    "nn.functional.interpolate.nearest": {f64},
+    "nn.functional.upsample_nearest": {f64},
+    # https://gitcode.com/Ascend/pytorch/issues/5237
+    # (aclnnSoftmaxBackward rejects DT_DOUBLE gradOutput on with_dtype variants)
+    "softmax.with_dtype": {f16, f32},
+    "nn.functional.softmin.with_dtype": {f16, f32},
+}
+
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
@@ -776,6 +796,19 @@ inductor_override_kwargs["xpu"] = {
         "grad_atol": 2e-3,
         "grad_rtol": 1e-3,
     },
+}
+
+# Ascend NPU (PrivateUse1): the return value of empty is undefined. Mirror
+# the existing cpu/cuda/xpu assert_equal exemptions: the NPU variants are
+# derived via hw_classification, but this table was never keyed for "npu".
+# https://gitcode.com/Ascend/pytorch/issues/4940
+inductor_override_kwargs["npu"] = {
+    "empty": {"assert_equal": False},
+    "empty_permuted": {"assert_equal": False},
+    "empty_like": {"assert_equal": False},
+    "new_empty": {"assert_equal": False},
+    "empty_strided": {"assert_equal": False},
+    "new_empty_strided": {"assert_equal": False},
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
