@@ -428,8 +428,8 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
           const int64_t &mat2_size0 = mat2_shape[0];
           const int64_t &mat2_size1 = mat2_shape[1];
           gemm_sizes.emplace_back(self_size0, mat2_size1, self_size1);
-          aptr[i] = self_buffer.mutable_data_ptr<scalar_t>() + get_offset_for_index(self, i);
-          bptr[i] = mat2_buffer.mutable_data_ptr<scalar_t>() + get_offset_for_index(mat2, i);
+          aptr[i] = self_buffer.data_ptr<scalar_t>() + get_offset_for_index(self, i);
+          bptr[i] = mat2_buffer.data_ptr<scalar_t>() + get_offset_for_index(mat2, i);
           dptr[i] = out_buffer.mutable_data_ptr<scalar_t>() + out_offsets_ptr[i];
           auto self_stride = get_stride_for_index(self, i);
           auto mat2_stride = get_stride_for_index(mat2, i);
