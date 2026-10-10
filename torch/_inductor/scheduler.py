@@ -3827,6 +3827,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         if (
             torch._inductor.config.triton.cudagraph_kernel_annotations
             and not V.graph.cpp_wrapper
+            and not V.graph.fx_wrapper
         ):
             from torch._inductor.codegen.wrapper import AnnotatedExternKernelBlock
 
