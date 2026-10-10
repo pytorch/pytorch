@@ -3634,6 +3634,14 @@ compiled_kernels_for_load: contextvars.ContextVar[
 ] = contextvars.ContextVar("compiled_kernels_for_load", default=None)
 
 
+_RETUNING_META = (
+    "pinned_config",
+    "coordinate_descent_tuning",
+    "combo_tuning_groups",
+    "incremental_autotune",
+)
+
+
 def cached_autotune(
     size_hints: list[int] | None,
     configs: list[Config],
@@ -3657,6 +3665,11 @@ def cached_autotune(
     if compiled is not None and (thunk := compiled.pop(name, None)) is not None:
         kernel = thunk()
         return lambda fn: kernel
+    # The config compile-time autotuning chose (KERNEL_CONFIGS in the wrapper), which the
+    # kernel launches with instead of tuning again.
+    if (pinned := inductor_meta.get("pinned_config")) is not None:
+        meta = {k: v for k, v in inductor_meta.items() if k not in _RETUNING_META}
+        return fixed_config(pinned, filename, triton_meta, meta)
     if size_hints is not None and heuristic_type in (
         HeuristicType.REDUCTION,
         HeuristicType.PERSISTENT_REDUCTION,

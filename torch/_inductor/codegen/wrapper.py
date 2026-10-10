@@ -621,6 +621,35 @@ class _OmittedFromScan(DeferredLineBase):
         return _OmittedFromScan(line, self.wrapper)
 
 
+class _KernelConfigs(DeferredLineBase):
+    """``KERNEL_CONFIGS``: the config compile-time autotuning chose for each module-level
+    kernel, which the kernel launches with (see cached_autotune's pinned_config).
+
+    It is written ahead of the kernels, which read it when they are defined, but is only
+    known once the autotune block has run, after every kernel, subgraphs' included, has
+    been emitted.
+    """
+
+    def __init__(self, wrapper: PythonWrapperCodegen) -> None:
+        super().__init__("")
+        self.wrapper = wrapper
+
+    def __call__(self) -> str | None:
+        configs = self.wrapper.kernel_configs
+        if self.wrapper.scanning_for_uses or not configs:
+            return None
+        pinned = {name: cfg for name, cfg in configs.items() if cfg is not None}
+        rows = "".join(f"    {name!r}: {cfg!r},\n" for name, cfg in pinned.items())
+        return (
+            "# The config each kernel below launches with, chosen by autotuning at compile\n"
+            "# time. A kernel missing here autotunes on its first launch.\n"
+            f"KERNEL_CONFIGS = {{\n{rows}}}"
+        )
+
+    def _new_line(self, line: str) -> _KernelConfigs:
+        return _KernelConfigs(self.wrapper)
+
+
 @dataclasses.dataclass
 class SymbolicCallArg:
     inner: sympy.Symbol
@@ -1822,6 +1851,9 @@ class PythonWrapperCodegen(CodeGen):
         # The names used by code the scan leaves out, such as each subgraph's, which
         # the subgraph scans itself.
         self.names_used_unscanned: OrderedSet[str] = OrderedSet()
+        # Each module-level kernel that reads its launch config from KERNEL_CONFIGS, and
+        # that config, which generate_and_run_autotune_block fills in.
+        self.kernel_configs: dict[str, dict[str, Any] | None] = {}
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Map key is the kernel argument name; value is a tuple of the resulting example
         # tensor name with the kernel where that tensor was most recently used.
@@ -2110,6 +2142,7 @@ class PythonWrapperCodegen(CodeGen):
                 "atexit.register(_proton_finalize_and_postprocess)"
             )
             self.header.writeline('pl.enable_semantic("triton")')
+        self.header.writeline(_KernelConfigs(self))
 
     def include_extra_header(self, header: str):
         pass
@@ -3079,6 +3112,8 @@ class PythonWrapperCodegen(CodeGen):
         Compose self.kernel_autotune_defs and self.kernel_autotune_calls into a single block of
         code and execute it to trigger Triton kernel compilation and auto-tuning
         """
+        from ..runtime.triton_heuristics import CachingAutotuner, config_to_dict
+
         self.kernel_autotune_defs.splice(
             """
             async_compile.wait(globals())
@@ -3121,6 +3156,10 @@ class PythonWrapperCodegen(CodeGen):
             exec(tuning_code, scope)
         except Exception as e:
             raise RuntimeError(f"Failed to run autotuning code block: {e}") from e
+        for name in self.kernel_configs:
+            kernel = scope.get(name)
+            if isinstance(kernel, CachingAutotuner) and len(kernel.launchers) == 1:
+                self.kernel_configs[name] = config_to_dict(kernel.launchers[0].config)
 
     def memory_plan(self):
         from .memory_planning import MemoryPlanner
@@ -4000,6 +4039,17 @@ class PythonWrapperCodegen(CodeGen):
             src_code = src_code.replace("filename=__file__", f"filename={path}")
             src_code = f"import os\n{src_code}"
         src_code = _rename_kernel_module_globals(src_code, kernel_name, subs_name)
+        if (
+            config.triton.autotune_at_compile_time
+            and "@triton_heuristics.template(" not in src_code
+            and src_code.count("inductor_meta={") == 1
+        ):
+            # The autotune block below chooses this kernel's config, and the module
+            # launches it with that one rather than tuning again on first launch. A
+            # template is built with its one config already.
+            pin = f"'pinned_config': KERNEL_CONFIGS.get({kernel_name!r}), "
+            src_code = src_code.replace("inductor_meta={", f"inductor_meta={{{pin}")
+            self.kernel_configs[kernel_name] = None
         self.define_kernel(
             kernel_name,
             src_code,
@@ -5707,6 +5757,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.kernel_sources = root.kernel_sources
         # Its code goes into the root unscanned, so it reports its own uses.
         self.names_used_unscanned = root.names_used_unscanned
+        self.kernel_configs = root.kernel_configs
         self.has_conditional_preamble = True
 
     def set_launcher_fn_name(self) -> None:
