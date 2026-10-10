@@ -80,6 +80,8 @@ class TestExtendedCUDAIsAvail(TestCase):
     def test_cuda_is_available(self, avoid_init, nvml_avail):
         if IS_JETSON and nvml_avail and avoid_init == "1":
             self.skipTest("Not working for Jetson")
+        if torch.version.hip is not None and nvml_avail and avoid_init == "1":
+            self.skipTest("Skipped on ROCm")
         patch_env = {"PYTORCH_NVML_BASED_CUDA_CHECK": avoid_init} if avoid_init else {}
         with patch.dict(os.environ, **patch_env):
             if nvml_avail:
