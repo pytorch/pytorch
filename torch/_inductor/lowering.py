@@ -1811,12 +1811,14 @@ def as_strided(
     )
     storage_data = storage.data if isinstance(storage, ir.StorageBox) else storage
     if explicit_storage_offset and isinstance(storage_data, ir.InputBuffer):
-        # Runtime graph input pointers already include the input tensor's
-        # storage_offset(), but explicit as_strided offsets are storage-relative.
-        storage_offset = sympy.expand(
-            storage_offset
-            - V.graph.graph_input_storage_offsets.get(storage_data.get_name(), 0)
-        )
+        # Input and constant buffer pointers already include their storage_offset(),
+        # but explicit as_strided offsets are storage-relative.
+        name = storage_data.get_name()
+        if isinstance(storage_data, ir.ConstantBuffer):
+            base_offset = V.graph.constants[name].storage_offset()
+        else:
+            base_offset = V.graph.graph_input_storage_offsets.get(name, 0)
+        storage_offset = sympy.expand(storage_offset - base_offset)
     new_layout = ir.FixedLayout(
         new_device if new_device else old_layout.device,
         new_dtype if new_dtype else old_layout.dtype,

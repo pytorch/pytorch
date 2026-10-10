@@ -15,6 +15,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import parametrize, subtest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.utils._ordered_set import OrderedSet
 
 
 aten = torch.ops.aten
@@ -34,19 +35,23 @@ class TestAsStrided(TestCase):
         x = torch.arange(12, device=device, dtype=torch.float32).reshape(3, 4)
         gm = make_fx(fn, tracing_mode="fake")(x)
         expected = gm(x)
+        bases = OrderedSet()
         with patch.object(
             gm.graph,
             "materialize_symints",
             side_effect=AssertionError("Static parameters must not scan for symbols"),
         ):
-            self.assertEqual(canonicalize_as_strided(gm), 1)
+            self.assertEqual(canonicalize_as_strided(gm, storage_bases=bases), 1)
         node = gm.graph.find_nodes(op="call_function", target=op)[0]
         self.assertEqual(node.args[0].target, aten.add.Tensor)
+        self.assertEqual(bases, {node.args[0]})
         self.assertEqual(node.args[3], 1 if offset is None else offset)
         actual = gm(x)
         self.assertEqual(actual, expected)
         self.assertEqual(torch._C._is_alias_of(actual[0], actual[1]), not copy)
-        self.assertEqual(canonicalize_as_strided(gm), 0)
+        bases.clear()
+        self.assertEqual(canonicalize_as_strided(gm, storage_bases=bases), 0)
+        self.assertEqual(bases, {node.args[0]})
 
     @parametrize("count", [1, 8])
     def test_symbolic_offset(self, device, count):
@@ -109,25 +114,27 @@ class TestAsStrided(TestCase):
         self.assertEqual(gm(x), expected)
 
     @parametrize("kind", ["conj", "neg"])
-    def test_special_view_boundary(self, device, kind):
+    @parametrize("slice_view", [False, True])
+    def test_special_view_boundary(self, device, kind, slice_view):
         def fn(x):
             if kind == "conj":
                 view = x.conj()
             else:
                 view = torch._neg_view(x)
+            if slice_view:
+                view = view[::2]
             return view.as_strided((2,), (1,))
 
         x = torch.ones(4, device=device, dtype=torch.complex64)
         gm = make_fx(fn, tracing_mode="fake")(x)
-        canonicalize_as_strided(gm)
         node = gm.graph.find_nodes(op="call_function", target=aten.as_strided.default)[
             0
         ]
-        targets = {
-            "conj": aten._conj.default,
-            "neg": aten._neg_view.default,
-        }
-        self.assertEqual(node.args[0].target, targets[kind])
+        args = node.args
+        bases = OrderedSet()
+        self.assertEqual(canonicalize_as_strided(gm, storage_bases=bases), 0)
+        self.assertEqual(bases, set())
+        self.assertEqual(node.args, args)
         self.assertEqual(gm(x), fn(x))
 
     def test_reads_around_mutation(self, device):
@@ -385,7 +392,9 @@ class TestAsStrided(TestCase):
         out = gm.graph.find_nodes(op="call_function", target=aten.as_strided.default)[0]
         out_args = out.args
         nodes = list(gm.graph.nodes)
-        self.assertEqual(canonicalize_as_strided(gm), 0)
+        bases = OrderedSet()
+        self.assertEqual(canonicalize_as_strided(gm, storage_bases=bases), 0)
+        self.assertEqual(bases, set())
         self.assertEqual(out.args, out_args)
         self.assertEqual(list(gm.graph.nodes), nodes)
         for width in (8, 12) if tracing_mode == "symbolic" else (8,):
@@ -413,6 +422,30 @@ class TestAsStrided(TestCase):
             with self.subTest(offset=offset):
                 x = base[offset:]
                 self.assertEqual(compiled(x), fn(x))
+
+    @parametrize("copy", [False, True])
+    @parametrize("offset", [None, 0, 12])
+    def test_compile_frozen_view_offset(self, device, copy, offset):
+        op = torch.as_strided_copy if copy else torch.as_strided
+
+        class Model(torch.nn.Module):
+            def __init__(self, buffer):
+                super().__init__()
+                self.register_buffer("b", buffer)
+
+            def forward(self, x):
+                # Keep the view chain from being constant-folded during freezing.
+                view = self.b[x.shape[0] :]
+                return op(view, (3,), (1,), offset) + x[:3]
+
+        buffer = torch.arange(64, dtype=torch.float32, device=device)[10:]
+        model = Model(buffer).eval()
+        with torch.no_grad(), config.patch(freezing=True):
+            compiled = torch.compile(model, fullgraph=True, dynamic=True)
+            for size in (6, 8):
+                with self.subTest(size=size):
+                    x = torch.ones(size, device=device)
+                    self.assertEqual(compiled(x), model(x))
 
     @parametrize("dtypes", [(torch.int32, torch.int16), (torch.int16, torch.int32)])
     @parametrize("default_offset", [False, True])
@@ -525,7 +558,21 @@ class TestAsStrided(TestCase):
             self.assertNotIn("empty_strided_cpu((1, 3, 8, 8)", code)
 
     @onlyCPU
-    def test_compile_shared_mkldnn_input(self, device):
+    def test_compile_neg_view_materialization(self, device):
+        def fn(x):
+            view = torch._neg_view(x)[:, ::2]
+            return view.as_strided((1,), (1,), 0) + 1
+
+        x = torch.arange(96, dtype=torch.float32, device=device).reshape(8, 12)
+        actual, codes = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(actual, fn(x))
+        code = "\n".join(codes)
+        self.assertIn("empty_strided_cpu((8, 6), (6, 1), torch.float32)", code)
+        self.assertNotIn("empty_strided_cpu((8, 12)", code)
+
+    @onlyCPU
+    @parametrize("slice_view", [False, True])
+    def test_compile_shared_mkldnn_input(self, device, slice_view):
         if not torch.backends.mkldnn.is_available():
             self.skipTest("MKLDNN is required")
 
@@ -534,8 +581,8 @@ class TestAsStrided(TestCase):
             conv = torch.ops.mkldnn._convolution_pointwise.default(
                 base, weight, None, [1, 1], [1, 1], [1, 1], 1, "none", [], None
             )
-            view = base[:, :, ::2, :].as_strided((16,), (1,), 0)
-            return conv, view
+            view = base[:, :, ::2, :] if slice_view else base
+            return conv, view.as_strided((16,), (1,), 0)
 
         x = torch.randn(2, 3, 8, 8, device=device)
         weight = torch.randn(4, 3, 3, 3, device=device)

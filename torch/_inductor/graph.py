@@ -425,7 +425,8 @@ class GraphLowering(torch.fx.Interpreter):
         from .fx_passes.as_strided import canonicalize_as_strided
 
         # Interpreter caches last uses, so finish changing edges before initialization.
-        canonicalize_as_strided(gm)
+        self.as_strided_storage_bases: OrderedSet[torch.fx.Node] = OrderedSet()
+        canonicalize_as_strided(gm, storage_bases=self.as_strided_storage_bases)
         super().__init__(gm)
         self.get_decomp_fn = get_decomp_fn
         self.example_inputs = example_inputs
@@ -2104,13 +2105,8 @@ class GraphLowering(torch.fx.Interpreter):
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
-            # Keep dtype reinterpretations on their existing layout handling path.
             preserve_storage_layout = (
-                n.target is not aten.view.dtype
-                and any(
-                    u.target in (aten.as_strided.default, aten.as_strided_copy.default)
-                    for u in n.users
-                )
+                n in self.as_strided_storage_bases
                 and isinstance(n.meta.get("val"), torch.Tensor)
                 and not free_unbacked_symbols(n.meta["val"].stride())
             )
