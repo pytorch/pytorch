@@ -684,8 +684,12 @@ def load_from_python(
     """
     if cache is not None:
         torch.compiler.load_cache_artifacts(cache)
-    namespace: dict[str, Any] = {"__name__": "__compile_to_python__"}
-    exec(compile(python_code, "<compile_to_python>", "exec"), namespace)
+    from torch._inductor.codecache import PyCodeCache
+
+    # A module-level Triton kernel reads its source back from the module's file.
+    _, path = PyCodeCache.write(python_code)
+    namespace: dict[str, Any] = {"__name__": "__compile_to_python__", "__file__": path}
+    exec(compile(python_code, path, "exec"), namespace)
     call = namespace.get("call")
     if not callable(call):
         raise RuntimeError(
@@ -744,12 +748,13 @@ def compile_to_python(
     over a conflicting user option, since the source-capture contract depends on
     them and a caller cannot be allowed to break the emitted module.
 
-    ``inner_python`` is self-contained: exec'ing it JIT-compiles the inlined kernels on
-    first use, so it runs with no cache. ``cache`` is a PURE ACCELERATOR -- the opaque
-    ``save_cache_artifacts()`` bundle; passing it to ``load_from_python`` warms the kernel
-    caches so exec loads the precompiled binaries instead of recompiling. It is ``None``
-    when the graph produced no cacheable module (no compute) or caches are disabled
-    (``force_disable_caches`` or ``fx_graph_cache=False``); ``inner_python`` still runs.
+    ``inner_python`` is self-contained: loading it (``load_from_python``, or importing it
+    from a file) JIT-compiles the inlined kernels on first use, so it runs with no cache.
+    ``cache`` is a PURE ACCELERATOR -- the opaque ``save_cache_artifacts()`` bundle;
+    passing it to ``load_from_python`` warms the kernel caches so the load uses the
+    precompiled binaries instead of recompiling. It is ``None`` when the graph produced
+    no cacheable module (no compute) or caches are disabled (``force_disable_caches`` or
+    ``fx_graph_cache=False``); ``inner_python`` still runs.
 
     ``inner_python`` is read off the ``CompiledFxGraph`` that ``compile_fx_inner``
     returns -- Inductor stashes the wrapper-module source on it as ``source_code`` -- so
