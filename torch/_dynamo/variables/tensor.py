@@ -20,7 +20,7 @@ import logging
 import operator
 import textwrap
 import types
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import nullcontext
 from itertools import chain
 from types import NoneType
@@ -78,6 +78,7 @@ from ..utils import (
     proxy_args_kwargs,
     set_example_value,
     tensortype_to_dtype,
+    unpack_iterable,
 )
 from .base import (
     _check_method_arity,
@@ -1726,10 +1727,23 @@ class TensorVariable(VariableTracker):
                 # are no leaves requiring grad.
                 return ConstantVariable.create(None)
         else:
-            if isinstance(inputs, variables.BaseListVariable):
+            if isinstance(inputs, variables.MappingProxyVariable) and inputs.source:
+                unimplemented(
+                    gb_type="autograd inputs from an external mapping proxy",
+                    context="",
+                    explanation="Dynamo cannot identify the underlying mapping or its items/values overrides.",
+                    hints=["Construct the mapping proxy inside the compiled region."],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
+            if issubclass(inputs.python_type(), Mapping):
+                values = inputs.call_method(tx, "values", [], {})
+                iterator = variables.IterBuiltinVariable().call_function(
+                    tx, [values], {}
+                )
+                provided_vars = unpack_iterable(tx, iterator)
+            elif isinstance(inputs, variables.BaseListVariable):
                 provided_vars = inputs.items
-            elif isinstance(inputs, variables.ConstDictVariable):
-                provided_vars = list(inputs.items.values())
             else:
                 provided_vars = [inputs]
             input_vars = self._collect_backward_inputs(
