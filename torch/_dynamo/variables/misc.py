@@ -88,7 +88,12 @@ from .functions import (
     UserMethodVariable,
 )
 from .object_protocol import mro_attr_source
-from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
+from .user_defined import (
+    call_random_fn,
+    is_standard_setattr,
+    RandomCallOnSource,
+    UserDefinedObjectVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -262,6 +267,18 @@ class SuperVariable(VariableTracker):
         # about here (e.g., note the staticmethod, classmethod cases).
         if inner_fn is object.__init__:
             return LambdaVariable(identity)
+        elif (
+            isinstance(inner_fn, types.WrapperDescriptorType)
+            and inner_fn.__name__ == "__init__"
+            and issubclass(inner_fn.__objclass__, BaseException)
+            and inner_fn.__objclass__.__basicsize__ == BaseException.__basicsize__
+            and isinstance(self.objvar, variables.UserDefinedExceptionObjectVariable)
+            and not kwargs
+        ):
+            # BaseException_init stores the positional args on the instance.
+            # https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L84
+            self.objvar.args = list(args)
+            return variables.ConstantVariable.create(None)
         elif inner_fn is types.SimpleNamespace.__init__ and isinstance(
             self.objvar, variables.SimpleNamespaceVariable
         ):
@@ -681,23 +698,66 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
 
 
 class AutogradFunctionVariable(VariableTracker):
-    """represents a torch.autograd.Function subclass"""
+    """represents a torch.autograd.Function subclass or constructed instance"""
 
     _nonvar_fields = {
         "fn_cls",
         "fn_cls_source",
+        "represents_instance",
         *VariableTracker._nonvar_fields,
     }
 
     def __init__(
-        self, fn_cls: Any, fn_cls_source: Source | None = None, **kwargs: Any
+        self,
+        fn_cls: Any,
+        fn_cls_source: Source | None = None,
+        represents_instance: bool = False,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.fn_cls = fn_cls
         self.fn_cls_source = fn_cls_source if fn_cls_source is not None else self.source
+        self.represents_instance = represents_instance
 
     def python_type(self) -> type:
         return type
+
+    def get_real_python_backed_value(self) -> Any:
+        if self.represents_instance:
+            return NO_SUCH_SUBOBJ
+        return self.fn_cls
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        if self.represents_instance:
+            if inspect.getattr_static(self.fn_cls, "__hash__") is not object.__hash__:
+                self._unsupported_method("__hash__")
+            try:
+                hash_source = self._get_raw_attribute_source(tx, "__hash__")
+                if hash_source is None:
+                    self._unsupported_method("__hash__")
+                install_guard(hash_source.make_guard(GuardBuilder.BUILTIN_MATCH))
+            except NotImplementedError:
+                self._unsupported_method("__hash__")
+            return super().hash_impl(tx)
+        if self.fn_cls_source is not None:
+            try:
+                install_guard(self.fn_cls_source.make_guard(GuardBuilder.CLASS_MATCH))
+                return hash(self.fn_cls), False
+            except NotImplementedError:
+                pass
+        return hash(self.fn_cls), True
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "ConstantVariable":
+        if self.fn_cls_source is None:
+            return super().call_obj_hasattr(tx, name)
+        install_guard(
+            self.fn_cls_source.make_guard(
+                functools.partial(GuardBuilder.HASATTR, attr=name)
+            )
+        )
+        return variables.ConstantVariable.create(hasattr(self.fn_cls, name))
 
     def _resolve_kwargs(
         self,
@@ -759,6 +819,31 @@ class AutogradFunctionVariable(VariableTracker):
 
         setup_context = self.fn_cls.setup_context
         is_setup_ctx_defined = setup_context is not _SingleLevelFunction.setup_context
+
+        if torch._C._are_functorch_transforms_active():
+            from torch._C._functorch import TransformType
+            from torch._functorch.autograd_function import has_overridden_vmap_rule
+            from torch._functorch.pyfunctorch import (
+                retrieve_current_functorch_interpreter,
+            )
+
+            # Under vmap, Function.apply goes through custom_function_call_vmap.
+            # Inlining forward matches it only for generate_vmap_rule=True; a
+            # vmap staticmethod (and its output checks) is not traced.
+            interpreter = retrieve_current_functorch_interpreter()
+            if interpreter.key() == TransformType.Vmap and (
+                not self.fn_cls.generate_vmap_rule
+                or has_overridden_vmap_rule(self.fn_cls)
+            ):
+                unimplemented(
+                    gb_type="autograd.Function without a generated vmap rule under vmap",
+                    context=f"call_apply {self}",
+                    explanation=f"vmap over {self.fn_cls.__name__} runs custom_function_call_vmap, which Dynamo only models for generate_vmap_rule=True without a vmap staticmethod.",
+                    hints=[
+                        "Use generate_vmap_rule=True if the generated rule is enough.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
 
         if kwargs:
             resolved = self._resolve_kwargs(args, kwargs, is_setup_ctx_defined)
@@ -953,6 +1038,7 @@ class AutogradFunctionVariable(VariableTracker):
         return AutogradFunctionVariable(
             self.fn_cls,
             fn_cls_source=self.fn_cls_source,
+            represents_instance=True,
         )
 
     def _resolve_staticmethod(
@@ -1938,6 +2024,7 @@ class StringFormatVariable(VariableTracker):
     @classmethod
     def create(
         cls,
+        tx: "InstructionTranslatorBase",
         format_string: str,
         sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
@@ -1946,12 +2033,14 @@ class StringFormatVariable(VariableTracker):
             x.is_python_constant()
             for x in itertools.chain(sym_args, sym_kwargs.values())
         ):
-            return variables.ConstantVariable.create(
-                format_string.format(
+            try:
+                result = format_string.format(
                     *[v.as_python_constant() for v in sym_args],
                     **{k: v.as_python_constant() for k, v in sym_kwargs.items()},
                 )
-            )
+            except (ValueError, TypeError, IndexError, KeyError, AttributeError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            return variables.ConstantVariable.create(result)
         return cls(format_string, list(sym_args), dict(sym_kwargs))
 
     def __init__(
@@ -2277,7 +2366,15 @@ class ConstantLikeVariable(VariableTracker):
                 ],
             )
 
-        result = getattr(self.value, name)(*cargs, **ckwargs)
+        fn = getattr(self.value, name)
+        try:
+            result = fn(*cargs, **ckwargs)
+        except (TypeError, ValueError) as e:
+            raise_observed_exception(
+                type(e),
+                tx,
+                args=list(e.args),
+            )
 
         if variables.ConstantVariable.is_literal(result):
             return VariableTracker.build(tx, result)
@@ -2660,7 +2757,18 @@ class RandomVariable(VariableTracker):
         )
 
     def _call_random(self, tx, name, args, kwargs):
-        tx.output.side_effects.mutation(self)
+        side_effects = tx.output.side_effects
+        if self.source is not None and not side_effects.is_modified(self):
+            # A draw alone advances the runtime object without scheduling a
+            # setstate write-back. Later seed/setstate/shuffle/sample calls can
+            # still mark it modified and write back the trace-time state;
+            # unseeded state operations retain their existing limitations.
+            side_effects.check_allowed_side_effect(self)
+            # The incoming state is unknown at trace time, so replay the draw
+            # on the runtime object using the shadow only for an example value.
+            replay = RandomCallOnSource(self.source, name)
+            return call_random_fn(tx, getattr(self.random, name), args, kwargs, replay)
+        side_effects.mutation(self)
         state = self.random.getstate()
 
         def call_random_meth(*args: Any, **kwargs: Any) -> Any:
