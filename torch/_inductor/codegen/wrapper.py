@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import collections
 import contextlib
 import dataclasses
@@ -52,7 +53,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, debug as inductor_debug, ir
-from ..codecache import output_code_log
+from ..codecache import get_hash, output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
@@ -491,6 +492,78 @@ def user_defined_triton_kernel_transitive_closure_source_code(
 
     traverse(kernel)
     return compile_wrapper.getvalue()
+
+
+# benchmark_kernel and benchmark_combo_kernel append it to every kernel's source, last.
+_KERNEL_BENCHMARK_HARNESS = re.compile(r"^def get_args\(\):$", re.MULTILINE)
+
+
+def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) -> str:
+    """Make what a kernel's source binds at its top level unique to the kernel.
+
+    The def named subs_name becomes kernel_name, and every other def and assignment
+    (helpers, and globals like ``BLOCK = tl.constexpr(64)`` from a user kernel's
+    closure) gets a ``_<kernel_name>`` suffix, as does every import after the first
+    def, which a user kernel's closure emits (``from triton.language import exp as
+    op``). The imports above it are the common kernel header, the same in every
+    kernel. A name is renamed only where it refers to the global, so a parameter or
+    local that shares it keeps its name: autotune configs and launches pass parameters
+    by name.
+    """
+    defs = re.findall(r"^def (\w+)\(", src, re.MULTILINE)
+    assigns = re.search(r"^\w+\s*(:[^=\n]*)?=", src, re.MULTILINE)
+    body = src[src.find("\ndef ") :]
+    imports = re.search(r"^(from|import) ", body, re.MULTILINE)
+    if defs == [subs_name] and not assigns and not imports:
+        # Nearly every kernel inductor generates: one def, after its imports.
+        return src.replace(f"\ndef {subs_name}(", f"\ndef {kernel_name}(", 1)
+    tree = ast.parse(src)
+    renames: dict[str, str] = {}
+    aliases: list[ast.alias] = []
+    for stmt in tree.body:
+        if isinstance(stmt, ast.FunctionDef):
+            renames[stmt.name] = ""
+        elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+            renames.update((t.id, "") for t in targets if isinstance(t, ast.Name))
+        elif isinstance(stmt, (ast.Import, ast.ImportFrom)) and renames:
+            # `import a.b` binds `a`, which cannot be renamed in place; the closure
+            # only emits `from ... import ... as ...`.
+            bound = [a for a in stmt.names if a.asname or "." not in a.name]
+            aliases += bound
+            renames.update((a.asname or a.name, "") for a in bound)
+    for name in renames:
+        renames[name] = kernel_name if name == subs_name else f"{name}_{kernel_name}"
+    # ast column offsets are in UTF-8 bytes, so edit the lines as bytes.
+    lines = [line.encode() for line in src.splitlines(keepends=True)]
+    spans: list[tuple[int, int, str, str]] = []  # (line, start, old, new)
+    for a in aliases:
+        line, start = a.lineno - 1, a.col_offset
+        old = lines[line][start : a.end_col_offset].decode()
+        spans.append((line, start, old, f"{a.name} as {renames[a.asname or a.name]}"))
+    for stmt in tree.body:
+        local: OrderedSet[str] = OrderedSet()
+        if isinstance(stmt, ast.FunctionDef):
+            args = stmt.args
+            params = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+            params += [a for a in (args.vararg, args.kwarg) if a is not None]
+            local.update(a.arg for a in params)
+            for node in ast.walk(stmt):
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                    local.add(node.id)
+            line = stmt.lineno - 1
+            start = lines[line].index(f"def {stmt.name}(".encode()) + len("def ")
+            spans.append((line, start, stmt.name, renames[stmt.name]))
+        globals_here = renames.keys() - local
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Name) and node.id in globals_here:
+                spans.append(
+                    (node.lineno - 1, node.col_offset, node.id, renames[node.id])
+                )
+    for line, start, old, new in sorted(spans, reverse=True):
+        end = start + len(old.encode())
+        lines[line] = lines[line][:start] + new.encode() + lines[line][end:]
+    return b"".join(lines).decode()
 
 
 def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
@@ -949,6 +1022,8 @@ class KernelDefinitionLine(WrapperLine):
     metadata: str | None = None
     gpu: bool = True
     cpp_definition: str | None = None
+    standalone: bool = False
+    autotune_body: str | None = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._define_kernel_helper(
@@ -957,6 +1032,8 @@ class KernelDefinitionLine(WrapperLine):
             metadata=self.metadata,
             gpu=self.gpu,
             cpp_definition=self.cpp_definition,
+            standalone=self.standalone,
+            autotune_body=self.autotune_body,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1690,6 +1767,9 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
+        # Each module-level Triton kernel's (name in source, source), which
+        # AsyncCompile compiles it from; see PyCodeCache.load_by_key_path.
+        self.kernel_sources: dict[str, tuple[str, str]] = {}
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Map key is the kernel argument name; value is a tuple of the resulting example
         # tensor name with the kernel where that tensor was most recently used.
@@ -1811,6 +1891,42 @@ class PythonWrapperCodegen(CodeGen):
     def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")
 
+    def _preamble_imports(self) -> tuple[str, ...]:
+        return (
+            "from ctypes import c_void_p, c_long, c_int",
+            "import torch",
+            "import math",
+            "import random",
+            "import os",
+            "import tempfile",
+            "from math import inf, nan",
+            "from cmath import nanj",
+            "from torch._inductor.hooks import run_intermediate_hooks",
+            "from torch._inductor.utils import maybe_profile",
+            "from torch._inductor.codegen.memory_planning import _align as align",
+            "from torch import device, empty_strided",
+            "from torch._inductor.select_algorithm import extern_kernels",
+        )
+
+    def _preamble_bindings(self) -> tuple[str, ...]:
+        guards = "torch._C._dynamo.guards"
+        return (
+            "aten = torch.ops.aten",
+            "inductor_ops = torch.ops.inductor",
+            "_quantized = torch.ops._quantized",
+            f"assert_size_stride = {guards}.assert_size_stride",
+            f"assert_size_stride_grouped = {guards}.assert_size_stride_grouped",
+            f"assert_alignment = {guards}.assert_alignment",
+            f"empty_strided_cpu = {guards}._empty_strided_cpu",
+            f"empty_strided_cpu_pinned = {guards}._empty_strided_cpu_pinned",
+            f"empty_strided_cuda = {guards}._empty_strided_cuda",
+            f"empty_strided_xpu = {guards}._empty_strided_xpu",
+            f"empty_strided_mtia = {guards}._empty_strided_mtia",
+            f"reinterpret_tensor = {guards}._reinterpret_tensor",
+            "alloc_from_pool = torch.ops.inductor._alloc_from_pool",
+            "async_compile = AsyncCompile()",
+        )
+
     def write_header(self) -> None:
         """Write the header section of the generated Python wrapper code."""
         context = torch._guards.TracingContext.try_get()
@@ -1823,46 +1939,13 @@ class PythonWrapperCodegen(CodeGen):
         elif torch._inductor.config.test_configs.track_memory_lifecycle:
             inductor_debug_utils = "from torch._inductor.runtime.debug_utils import tracked_empty_strided\n"
 
-        self.imports.splice(
-            f"""
-                {aot_config_comment}
-                from ctypes import c_void_p, c_long, c_int
-                import torch
-                import math
-                import random
-                import os
-                import tempfile
-                from math import inf, nan
-                from cmath import nanj
-                from torch._inductor.hooks import run_intermediate_hooks
-                from torch._inductor.utils import maybe_profile
-                from torch._inductor.codegen.memory_planning import _align as align
-                from torch import device, empty_strided
-                from {async_compile.__name__} import AsyncCompile
-                from torch._inductor.select_algorithm import extern_kernels
-                {inductor_debug_utils}
-            """,
-            strip=True,
-        )
-        self.header.splice(
-            """
-                aten = torch.ops.aten
-                inductor_ops = torch.ops.inductor
-                _quantized = torch.ops._quantized
-                assert_size_stride = torch._C._dynamo.guards.assert_size_stride
-                assert_size_stride_grouped = torch._C._dynamo.guards.assert_size_stride_grouped
-                assert_alignment = torch._C._dynamo.guards.assert_alignment
-                empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
-                empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
-                empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
-                empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
-                empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
-                reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
-                alloc_from_pool = torch.ops.inductor._alloc_from_pool
-                async_compile = AsyncCompile()
-            """,
-            strip=True,
-        )
+        if aot_config_comment:
+            self.imports.writeline(aot_config_comment)
+        self.imports.writelines(self._preamble_imports())
+        self.imports.writeline(f"from {async_compile.__name__} import AsyncCompile")
+        if inductor_debug_utils:
+            self.imports.splice(inductor_debug_utils, strip=True)
+        self.header.writelines(self._preamble_bindings())
         try:
             # Only add empty_strided_p2p() if distributed and SymmetricMemory
             # is available
@@ -3648,6 +3731,14 @@ class PythonWrapperCodegen(CodeGen):
             return
 
         self.benchmark_compiled_module(output)
+        # A module-level kernel's harness stays in its own module, which a run of this
+        # one as a script does not otherwise load (see emit_triton_kernel_definition).
+        kernel_modules = [
+            get_hash(src.strip())
+            for _, src in self.kernel_sources.values()
+            if _KERNEL_BENCHMARK_HARNESS.search(src)
+        ]
+        modules_arg = f", kernel_modules={kernel_modules!r}" if kernel_modules else ""
 
         output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
@@ -3657,7 +3748,8 @@ class PythonWrapperCodegen(CodeGen):
                     "args = get_args()",
                     (
                         f"compiled_module_main('{get_benchmark_name()}', "
-                        "lambda times, repeat: benchmark_compiled_module(args, times=times, repeat=repeat))"
+                        "lambda times, repeat: benchmark_compiled_module(args, times=times, repeat=repeat)"
+                        f"{modules_arg})"
                     ),
                 ]
             )
@@ -3669,6 +3761,8 @@ class PythonWrapperCodegen(CodeGen):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         self.writeline(
             KernelDefinitionLine(
@@ -3678,18 +3772,27 @@ class PythonWrapperCodegen(CodeGen):
                 metadata=metadata,
                 gpu=gpu,
                 cpp_definition=cpp_definition,
+                standalone=standalone,
+                autotune_body=autotune_body,
             )
         )
 
     @staticmethod
     def _format_kernel_definition(
-        kernel_name: str, kernel_body: str, metadata: str | None = None
+        kernel_name: str,
+        kernel_body: str,
+        metadata: str | None = None,
+        standalone: bool = False,
     ):
         if config.triton.autotune_at_compile_time and metadata:
             # Generating autotune block
             # Need to replace C++ comment starter with Python comment starter
             metadata = re.sub(r"^// ", "# ", metadata, flags=re.MULTILINE)
         metadata_comment = f"{metadata}\n" if metadata else ""
+        # A standalone body already binds kernel_name itself (it is a decorated def, not
+        # an expression), so assigning it would be a syntax error rather than a rebind.
+        if standalone:
+            return f"\n\n{metadata_comment}{kernel_body}"
         body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
         return body
 
@@ -3700,10 +3803,18 @@ class PythonWrapperCodegen(CodeGen):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         if config.triton.autotune_at_compile_time and gpu:
+            # The autotune block is exec'd rather than emitted, so it wants whichever
+            # form runs there, not the one meant to be read: a standalone kernel carries
+            # filename=__file__, which is undefined in that exec.
             body = self._format_kernel_definition(
-                kernel_name, kernel_body, metadata=metadata
+                kernel_name,
+                autotune_body if autotune_body is not None else kernel_body,
+                metadata=metadata,
+                standalone=standalone and autotune_body is None,
             )
             self.kernel_autotune_defs.splice(body)
             if V.graph.cpp_wrapper:
@@ -3711,9 +3822,100 @@ class PythonWrapperCodegen(CodeGen):
                 return
 
         body = self._format_kernel_definition(
-            kernel_name, kernel_body, metadata=metadata
+            kernel_name, kernel_body, metadata=metadata, standalone=standalone
         )
         self.header.splice(body)
+
+    def emit_triton_kernel_definition(
+        self,
+        kernel_name: str,
+        subs_name: str,
+        src_code: str,
+        device_type: str,
+        metadata: str | None = None,
+    ) -> None:
+        """Bind ``kernel_name`` to a launchable Triton kernel at module scope.
+
+        The python wrapper defines the kernel as code. Wrappers that consume a kernel's
+        ``async_compile.triton(...)`` source themselves get that string form instead.
+        """
+        if not self.defines_triton_kernels_as_code():
+            self.define_kernel(
+                kernel_name,
+                self.async_compile_triton_body(subs_name, src_code, device_type),
+                metadata,
+            )
+            return
+        if "\\" in src_code:
+            # The string form compiles what its ''' literal decodes to, and codegen
+            # escapes for that (inline asm doubles its backslashes), so decode it here.
+            src_code = ast.literal_eval(f"'''{src_code}'''")
+        # When inductor loads this module, the def binds the kernel AsyncCompile built
+        # from this source rather than compiling itself in process, so the worker pool
+        # can start on it now, as it does for a string kernel. It gets the source the
+        # string form would have compiled, so both forms share every compile cache.
+        self.kernel_sources[kernel_name] = (subs_name, src_code)
+        kernel_file = f"{get_hash(src_code.strip())}.py"
+        if async_compile.AsyncCompile.use_process_pool():
+            async_compile.AsyncCompile().triton(subs_name, src_code)
+        autotune_body = (
+            self.async_compile_triton_body(
+                subs_name,
+                _escape_triton_kernel_source_for_wrapper(src_code),
+                device_type,
+            )
+            if config.triton.autotune_at_compile_time
+            else None
+        )
+        # src_code is already a complete module: the triton imports, the
+        # @triton_heuristics.* decorator that builds the CachingAutotuner, and the
+        # @triton.jit def. Spliced at module level it binds kernel_name to the same
+        # object async_compile.triton would have returned, so the launch site
+        # (KERNEL.run(...)) is unchanged. Its def is named subs_name, which is `triton_`
+        # for every kernel without unique_kernel_names, and kernels bind other top-level
+        # names that are only unique per kernel: @triton.jit helpers (scan combine_fns,
+        # flex attention's forward_inner, ...) and, from a user kernel's closure, helper
+        # defs and constants. In one shared namespace the later binding would win for
+        # all of them, so _rename_kernel_module_globals makes each kernel-unique.
+        # benchmark_kernel and benchmark_combo_kernel append a get_args()/call()/__main__
+        # harness to every kernel. It stays in the per-kernel modules the pool builds,
+        # which is where benchmark_all_kernels looks for it, but at module level each
+        # kernel's __main__ block would run whenever the wrapper does.
+        if harness := _KERNEL_BENCHMARK_HARNESS.search(src_code):
+            src_code = src_code[: harness.start()]
+        # The string form passes filename=__file__ from its own module, which is named by
+        # the hash of this source, and the autotune cache keys on that basename. Here
+        # __file__ is the wrapper, which every kernel shares, so name the module the
+        # string form would have used, in the wrapper's directory.
+        if "filename=__file__" in src_code:
+            path = f"os.path.join(os.path.dirname(__file__), {kernel_file!r})"
+            src_code = src_code.replace("filename=__file__", f"filename={path}")
+            src_code = f"import os\n{src_code}"
+        src_code = _rename_kernel_module_globals(src_code, kernel_name, subs_name)
+        self.define_kernel(
+            kernel_name,
+            src_code,
+            metadata,
+            standalone=True,
+            # The compile-time autotune block execs its kernels instead of emitting
+            # them, and a module-level kernel there has no __file__ to name itself by,
+            # so that block keeps the AsyncCompile form. It runs at compile time only
+            # and is not carried in the emitted module.
+            autotune_body=autotune_body,
+        )
+
+    def defines_triton_kernels_as_code(self) -> bool:
+        return True
+
+    @staticmethod
+    def async_compile_triton_body(
+        subs_name: str, src_code: str, device_type: str
+    ) -> str:
+        compile_wrapper = IndentedBuffer()
+        compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
+        compile_wrapper.splice(src_code, strip=True)
+        compile_wrapper.writeline(f"''', device_str='{device_type}')")
+        return compile_wrapper.getvalue()
 
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
         self.subgraph_definitions.splice(subgraph_code.value)
@@ -3741,7 +3943,8 @@ class PythonWrapperCodegen(CodeGen):
     ):
         """Codegen a user-defined Triton kernel and return its cache entry.
 
-        Emits the ``async_compile.triton(...)`` wrapper, assigns a graph-unique
+        Emits the kernel's definition (see ``emit_triton_kernel_definition``, or an
+        ``async_compile.triton(...)`` source string), assigns a graph-unique
         name (with a leading dunder stripped to avoid Python class-based name
         mangling at the call site), and records the kernel in
         ``user_defined_kernel_cache``. Returns ``(name, triton_meta,
@@ -4021,16 +4224,15 @@ class PythonWrapperCodegen(CodeGen):
         if name.startswith("__") and not name.endswith("__"):
             name = name[1:]
 
-        compile_wrapper = IndentedBuffer()
-        if config.triton.unique_user_kernel_names:
-            compile_wrapper.writeline(f"async_compile.triton({name!r}, '''")
-        else:
-            compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
-
+        subs_name = name if config.triton.unique_user_kernel_names else original_name
         inductor_meta["kernel_name"] = name
         triton_info_kernel_cls = self._get_triton_info_kernel_cls()
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
+        as_code = self.defines_triton_kernels_as_code()
+        compile_wrapper = IndentedBuffer()
+        if not as_code:
+            compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
         for type_spec in get_importable_constexpr_types(
             triton_meta.get("constants", {}).values()
@@ -4062,19 +4264,21 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
-        kernel_src = _escape_triton_kernel_source_for_wrapper(kernel_src)
-        compile_wrapper.splice(kernel_src)
 
-        current_device = V.graph.get_current_device_or_throw()
-        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
+        device_type = V.graph.get_current_device_or_throw().type
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
         metadata = f"# Original path: {srcfile}:{lineno}"
-        self.define_kernel(
-            name,
-            compile_wrapper.getvalue(),
-            metadata,
-        )
+        # emit_triton_kernel_definition decodes a module-level kernel from the source
+        # the string form would splice, so both forms take it escaped.
+        compile_wrapper.splice(_escape_triton_kernel_source_for_wrapper(kernel_src))
+        if as_code:
+            self.emit_triton_kernel_definition(
+                name, subs_name, compile_wrapper.getvalue(), device_type, metadata
+            )
+        else:
+            compile_wrapper.writeline(f"''', device_str='{device_type}')")
+            self.define_kernel(name, compile_wrapper.getvalue(), metadata)
         # Add to the cache for the next use
         self.user_defined_kernel_cache[cache_key] = (name, triton_meta, inductor_meta)
         return name, triton_meta, inductor_meta, extra_launcher_call_args
@@ -5391,6 +5595,8 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.src_to_kernel = root.src_to_kernel
         # Same here, only define user-defined Triton kernels in the main graph
         self.user_defined_kernel_cache = root.user_defined_kernel_cache
+        # This subgraph's kernels are spliced into the root module.
+        self.kernel_sources = root.kernel_sources
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
