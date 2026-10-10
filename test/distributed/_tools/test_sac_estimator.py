@@ -1,11 +1,13 @@
 # Owner(s): ["oncall: distributed"]
-import unittest
-
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.sac_estimator import SACEstimator
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -18,6 +20,8 @@ device_type = (
 
 
 class TestSACEstimator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _sac_estimation(
         self,
         estimate_mode: str,
@@ -30,10 +34,9 @@ class TestSACEstimator(TestCase):
         loss.backward()
         sace.pwlf_sac_tradeoff_curve(n_segments=2, save_tradeoff_graphs=False)
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
-    def test_transformer_sac_estimation(self):
+    def test_transformer_sac_estimation(self, device):
         """Runs a basic GPT-2 model"""
-        dev = torch.accelerator.current_device_index()
+        dev = torch.device(device)
         vocab_size = 8192
         bsz, seq_len = 8, 1024
         model_args = ModelArgs(
@@ -54,8 +57,7 @@ class TestSACEstimator(TestCase):
             self._sac_estimation("operator-level-benchmark", model, inp)
             self._sac_estimation("operator-level-cost-model", model, inp)
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
-    def test_simple_model_sac_estimation(self):
+    def test_simple_model_sac_estimation(self, device):
         """This test checks the correctness of view_ops, random_ops and inplace_ops"""
 
         class Foo(torch.nn.Module):
@@ -71,7 +73,7 @@ class TestSACEstimator(TestCase):
                 x = torch.sin_(x)
                 return x
 
-        dev = torch.accelerator.current_device_index()
+        dev = torch.device(device)
         with FakeTensorMode():
             with torch.device(dev):
                 model = Foo()
@@ -87,6 +89,9 @@ class TestSACEstimator(TestCase):
             self.assertEqual(
                 sac_estimator.sac_mod_stats["Foo"].inplace_ops, [(2, 1), (3, 1), (4, 1)]
             )
+
+
+instantiate_device_type_tests(TestSACEstimator, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
