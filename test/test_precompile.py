@@ -8,6 +8,7 @@ import io
 import os
 import pickle
 import re
+import runpy
 import shutil
 import stat
 import subprocess
@@ -1011,6 +1012,22 @@ class TestPrecompile(TestCase):
         ns = {"__name__": "_artifact"}
         exec(compile(code, "<artifact>", "exec"), ns)
         self.assertEqual(ns["forward"](m, x), m(x))
+
+    @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA + Triton")
+    def test_artifact_with_module_level_kernels_runs_from_its_file(self):
+        # A module-level Triton kernel reads its source back from the module's file,
+        # which both the header's runpy.run_path recipe and the inlined load provide.
+        m = torch.nn.Sequential(torch.nn.Linear(8, 4), torch.nn.ReLU()).eval().cuda()
+        x = torch.randn(3, 8, device="cuda")
+        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
+        self.assertRegex(code, r"(?m)^def triton_\w+\(")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "artifact.py")
+            with open(path, "w") as f:
+                f.write(code)
+            self.assertEqual(runpy.run_path(path)["forward"](m, x), m(x))
+        for _, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
+            self.assertEqual(f_c(m, x), m(x))
 
     @unittest.skipUnless(
         torch.cuda.is_available(), "needs CUDA + Triton for the kernel cache"

@@ -1042,6 +1042,7 @@ class AsyncCompile:
                 waitcounter_name_override="compile_triton",
             ):
                 self._wait_futures(scope)
+                self._precompile_module_level_kernels(scope)
 
         if self._metal_sources:
             from torch._inductor.runtime.runtime_utils import compile_mps_shaders
@@ -1050,6 +1051,23 @@ class AsyncCompile:
             self._metal_sources.clear()
 
         _compile_end()
+
+    def _precompile_module_level_kernels(self, scope: dict[str, Any]) -> None:
+        # A module-level kernel def builds an uncompiled CachingAutotuner when the wrapper
+        # runs outside the compile that produced it (e.g. `python wrapper.py`); compile
+        # those here, concurrently, rather than serially at each kernel's first launch.
+        # The interpreter leaves even string-form kernels uncompiled; keep it that way.
+        if os.environ.get("TRITON_INTERPRET", "0") == "1":
+            return
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        pending = [
+            value
+            for value in scope.values()
+            if isinstance(value, CachingAutotuner) and not value.launchers
+        ]
+        for future in [self.pool().submit(kernel.precompile) for kernel in pending]:
+            future.result()
 
     def _wait_futures(self, scope: dict[str, Any]) -> None:
         kernels = {
