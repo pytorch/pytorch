@@ -3399,6 +3399,15 @@ class TestPrecompile(TestCase):
             )
         self.assertTrue(any("was not saved" in m for m in cm.output), cm.output)
 
+    def test_capture_drawing_on_meta_does_not_warn(self):
+        # A meta "draw" consumes no generator, so there is nothing unsaved to report.
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(
+                lambda a: torch.rand_like(a),
+                torch.empty(4, device="meta"),
+                backend="eager",
+            )
+
     def test_capture_rejected_after_tracing_still_restores_rng(self):
         # These rejections all fire with a complete graph in hand, so they know what
         # the capture drew and must not leave the caller's stream advanced.
@@ -3448,6 +3457,17 @@ class TestPrecompile(TestCase):
             _precompile_pair(op, torch.empty(4), backend="eager")
         self.assertEqual(torch.random.get_rng_state(), before)
 
+    def test_capture_through_a_prims_op_restores_nothing(self):
+        # prims ops are as transparent as aten ones (decomposition tables emit them), so
+        # one in a graph that does not draw must not undo a reseed made during capture.
+        def reseed_then_convert(a):
+            torch.random.default_generator.manual_seed(7)
+            return torch.ops.prims.convert_element_type(a, torch.float64)
+
+        torch.manual_seed(0)
+        _precompile_pair(reseed_then_convert, torch.empty(4), backend="eager")
+        self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
+
     def test_capture_drawing_from_an_explicit_generator_rewinds_no_default(self):
         # The named generator cannot be saved before capture names it, and rewinding
         # its device's default generator instead would replay unrelated draws.
@@ -3465,8 +3485,20 @@ class TestPrecompile(TestCase):
         self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
         self.assertNotEqual(gen.get_state(), gen_before)
 
+    def test_capture_drawing_from_a_default_generator_by_name_restores_it(self):
+        torch.manual_seed(0)
+        before = torch.random.get_rng_state()
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(
+                lambda a: a + torch.rand(4, generator=torch.default_generator),
+                torch.empty(4),
+                backend="eager",
+            )
+        self.assertEqual(torch.random.get_rng_state(), before)
+
     def test_capture_drawing_from_explicit_and_default_generators(self):
         gen = torch.Generator().manual_seed(0)
+        gen_before = gen.get_state()
         torch.manual_seed(0)
         before = torch.random.get_rng_state()
         with self.assertLogs("torch._precompile", level="WARNING") as cm:
@@ -3477,6 +3509,7 @@ class TestPrecompile(TestCase):
             )
         self.assertTrue(any("explicit torch.Generator" in m for m in cm.output))
         self.assertEqual(torch.random.get_rng_state(), before)
+        self.assertNotEqual(gen.get_state(), gen_before)
         with self.assertNoLogs("torch._precompile", level="WARNING"):
             _precompile_pair(
                 lambda a: torch.rand_like(a), torch.empty(4), backend="eager"
@@ -3538,7 +3571,9 @@ class TestPrecompile(TestCase):
             return op is not None and torch.Tag.nondeterministic_seeded in op.tags
 
         gates = ("dropout_p", "train", "training")
-        discovered, never = {}, set()
+        # Every overload's gate, so overloads that disagree (or one lacking the gate)
+        # fail rather than the first one seen winning.
+        discovered = {}
         for schema in torch._C._jit_get_all_schemas():
             if not schema.name.startswith("aten::"):
                 continue
@@ -3546,12 +3581,10 @@ class TestPrecompile(TestCase):
                 continue
             args = [a.name for a in schema.arguments]
             gate = next((g for g in gates if g in args), None)
-            if gate is None:
-                never.add(schema.name)
-            else:
-                discovered.setdefault(schema.name, gate)
-        gated = {k: v for k, v in _RNG_GATED_BY_ARG.items() if v is not None}
-        self.assertEqual(discovered, gated)
+            discovered.setdefault(schema.name, set()).add(gate)
+        never = {k for k, v in discovered.items() if v == {None}}
+        gated = {k: {v} for k, v in _RNG_GATED_BY_ARG.items() if v is not None}
+        self.assertEqual({k: v for k, v in discovered.items() if v != {None}}, gated)
         # Never-drawing entries are tagged ops without a gate argument.
         self.assertLessEqual(set(_RNG_GATED_BY_ARG) - set(gated), never)
 
@@ -3737,6 +3770,24 @@ class TestPrecompile(TestCase):
                 frames = traceback.extract_tb(e.__traceback__)
         self.assertTrue(any(fr.filename == artifact for fr in frames), frames)
 
+    def test_load_of_an_edited_artifact_says_to_run_it_directly(self):
+        with tempfile.TemporaryDirectory() as d:
+            artifact, cache = os.path.join(d, "a.py"), os.path.join(d, "a.cache")
+            with capture(
+                lambda a: a + 1,
+                artifact_path=artifact,
+                cache_path=cache,
+                tracer=MakeFxTracer(),
+                backend="eager",
+            ) as cap:
+                cap(torch.ones(2))
+            with open(artifact, "a") as f:
+                f.write("# a hand edit\n")
+            with self.assertRaisesRegex(PrecompileError, "edited after capture"):
+                load(artifact, cache)
+            ns = runpy.run_path(artifact)
+            self.assertEqual(ns["forward"](torch.ones(2)), torch.ones(2) + 1)
+
     def test_generated_source_says_it_may_be_edited(self):
         # The artifact's own header is the only documentation most readers will see. It
         # used to carry a generated-code "do not edit" banner, which is exactly backwards
@@ -3747,19 +3798,45 @@ class TestPrecompile(TestCase):
             )
             self.assertIn("Editing it is supported", code)
 
+    def test_inductor_cpu_reduction_sizes_its_accumulator_at_run_time(self):
+        # The cpp.dynamic_threads pin: an accumulator array sized at the capture's thread
+        # count overflows when the artifact runs under a larger OMP team. Inductor bakes
+        # one only when the thread count equals os.cpu_count().
+        prev = torch.get_num_threads()
+        torch.set_num_threads(os.cpu_count())
+        try:
+            code, _cache = _precompile_pair(lambda a: a.sum(), torch.randn(1 << 20))
+        finally:
+            torch.set_num_threads(prev)
+        self.assertNotRegex(code, r"_arr\[\d+\]")
+        self.assertIn("_arr[max_threads]", code)
+
     @unittest.skipIf(not TEST_CUDA, "needs CUDA")
-    def test_load_from_a_code_string_gives_triton_a_file(self):
-        # Kernels are module-level code, and @triton.jit reads its own source off disk:
-        # it refuses a function whose module has no file. A caller loading from a string
-        # has no path to offer, so load parks a copy where triton can find it rather
-        # than failing on every CUDA artifact.
-        code, cache = _precompile_pair(
+    def test_inductor_artifact_turns_off_the_local_autotune_cache(self):
+        # The local autotune cache writes a <hash>.best_config next to __file__, which
+        # is the artifact once load() runs it from its path.
+        code, _cache = _precompile_pair(
             lambda a: (a * 2).relu(), torch.ones(64, device="cuda")
         )
-        self.assertIn("@triton.jit", code)
-        loaded = _load_pair(code, cache)
-        x = torch.randn(64, device="cuda")
-        self.assertEqual(loaded(x), (x * 2).relu())
+        self.assertIn("'autotune_local_cache': False", code)
+
+    @unittest.skipIf(not TEST_CUDA, "needs CUDA")
+    def test_load_runs_triton_kernels_from_the_artifact_file(self):
+        # @triton.jit reads a module-level kernel's source by filename, and load() hands
+        # it the artifact itself rather than a copy in the inductor cache dir.
+        def fn(a):
+            return (a * 2).relu()
+
+        with tempfile.TemporaryDirectory() as d:
+            artifact, cache = os.path.join(d, "a.py"), os.path.join(d, "a.cache")
+            with capture(
+                fn, artifact_path=artifact, cache_path=cache, tracer=MakeFxTracer()
+            ) as cap:
+                cap(torch.ones(64, device="cuda"))
+            loaded = load(artifact, cache)
+            self.assertEqual(loaded._loaded_forward.__code__.co_filename, artifact)
+            x = torch.randn(64, device="cuda")
+            self.assertEqual(loaded(x), fn(x))
 
 
 class _FilesModel(torch.nn.Module):
@@ -5525,8 +5602,8 @@ class TestPrecompileDynamoCapture(TestCase):
 class TestExportPython(TestCase):
     # torch.compiler.export_python is the disk-cached decorator over
     # torch.compiler.precompile: first call writes the emitted, self-contained python,
-    # later calls read and exec it directly. Run device-generically so the inductor
-    # path is exercised on CUDA too.
+    # later calls read and exec it directly. Run device-generically so every test
+    # covers CUDA too.
 
     def _tmp_path(self, name="artifact.py"):
         d = tempfile.mkdtemp()
