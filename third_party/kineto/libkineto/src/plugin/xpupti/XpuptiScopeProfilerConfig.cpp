@@ -65,7 +65,7 @@ bool XpuptiScopeProfilerConfig::handleOption(
 }
 
 void XpuptiScopeProfilerConfig::setDefaults() {
-  if (activitiesXpuptiMetrics_.size() > 0 && xpuptiProfilerMaxScopes_ == 0) {
+  if (!activitiesXpuptiMetrics_.empty() && xpuptiProfilerMaxScopes_ == 0) {
     xpuptiProfilerMaxScopes_ =
         xpuptiProfilerPerKernel_ ? KMaxAutoScopes : KMaxUserScopes;
   }
@@ -73,7 +73,7 @@ void XpuptiScopeProfilerConfig::setDefaults() {
 
 void XpuptiScopeProfilerConfig::printActivityProfilerConfig(
     std::ostream& s) const {
-  if (activitiesXpuptiMetrics_.size() > 0) {
+  if (!activitiesXpuptiMetrics_.empty()) {
     fmt::print(
         s,
         "Xpupti Profiler metrics : {}\n"

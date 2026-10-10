@@ -15,6 +15,7 @@
 // Emitted when a trace request is cancelled: rejected before it runs
 // (busy/pending/can't-start) or an in-flight trace preempted by a
 // higher-priority request.
+// NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr char kCancellationStage[] = "Cancellation";
 constexpr char kWarmUpStage[] = "Warm Up";
 constexpr char kCollectionStage[] = "Collection";
@@ -23,6 +24,7 @@ constexpr char kPostProcessingStage[] = "Post Processing";
 // Special string in UST for determining if traces are empty
 constexpr char kEmptyTrace[] =
     "No Valid Trace Events (CPU/GPU) found. Outputting empty trace.";
+// NOLINTEND(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 
 #if !USE_GOOGLE_LOG
 

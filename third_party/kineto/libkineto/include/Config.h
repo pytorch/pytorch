@@ -365,9 +365,9 @@ class Config : public AbstractConfig {
   // Only profile nets that includes this in the name
   std::vector<std::string> activitiesExternalAPIFilter_;
   // Only profile nets with at least this many operators
-  int activitiesExternalAPINetSizeThreshold_;
+  int activitiesExternalAPINetSizeThreshold_{};
   // Only profile nets with at least this many GPU operators
-  int activitiesExternalAPIGpuOpCountThreshold_;
+  int activitiesExternalAPIGpuOpCountThreshold_{};
   // Last activity profiler request
   std::chrono::time_point<std::chrono::system_clock>
       activitiesOnDemandTimestamp_;
@@ -413,6 +413,7 @@ class Config : public AbstractConfig {
   uint32_t maxEvents_{5000000};
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr char kUseDaemonEnvVar[] = "KINETO_USE_DAEMON";
 
 bool isDaemonEnvVarSet();

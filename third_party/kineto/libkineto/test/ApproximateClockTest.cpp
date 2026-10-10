@@ -40,7 +40,7 @@ TEST(ApproximateClockTest, AdvancesOverTime) {
   // several clock cycles before approximate time actually increases.
   auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
-  approx_time_t t1;
+  approx_time_t t1 = 0;
   do {
     t1 = getApproximateTime();
   } while (t1 == t0 && std::chrono::steady_clock::now() < deadline);
@@ -77,7 +77,7 @@ TEST(ApproximateClockTest, ConverterPreservesOrdering) {
   approx_time_t t0 = getApproximateTime();
   auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
-  approx_time_t t1;
+  approx_time_t t1 = 0;
   do {
     t1 = getApproximateTime();
   } while (t1 == t0 && std::chrono::steady_clock::now() < deadline);
@@ -92,7 +92,7 @@ TEST(ApproximateClockTest, GetTimeIsPositiveAndAdvances) {
   EXPECT_GT(t0, 0);
   auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
-  libkineto::time_t t1;
+  libkineto::time_t t1 = 0;
   do {
     t1 = getTime();
   } while (t1 == t0 && std::chrono::steady_clock::now() < deadline);

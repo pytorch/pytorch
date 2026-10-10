@@ -20,7 +20,9 @@ _Pragma("GCC diagnostic pop");
 #endif
 #endif // _MSC_VER
 
+#include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 
 namespace KINETO_NAMESPACE {
@@ -39,14 +41,12 @@ std::string demangle(const char* name) {
 
   int status = 0;
   size_t len = 0;
-  char* demangled = abi::__cxa_demangle(name, nullptr, &len, &status);
+  std::unique_ptr<char, decltype(&std::free)> demangled{
+      abi::__cxa_demangle(name, nullptr, &len, &status), &std::free};
   if (status != 0) {
     return name;
   }
-  std::string res(demangled);
-  // The returned buffer must be freed!
-  free(demangled);
-  return res;
+  return demangled.get();
 #else
   // TODO: demangling on Windows
   if (!name) {

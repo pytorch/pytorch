@@ -19,6 +19,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace KINETO_NAMESPACE {
 namespace {
@@ -102,6 +103,12 @@ TEST(ConfigLoaderPollThreadExceptionTest, ConfigUpdateExceptionDoesNotCrash) {
   // the freed stack handler. Declared after `handler` so it runs before
   // handler's destructor.
   struct ThreadStopper {
+    explicit ThreadStopper(ConfigLoader::ConfigHandler* handler)
+        : handler(handler) {}
+    ThreadStopper(const ThreadStopper&) = delete;
+    ThreadStopper& operator=(const ThreadStopper&) = delete;
+    ThreadStopper(ThreadStopper&&) = delete;
+    ThreadStopper& operator=(ThreadStopper&&) = delete;
     ConfigLoader::ConfigHandler* handler;
     ~ThreadStopper() {
       ConfigLoader::instance().stopUpdateThread();

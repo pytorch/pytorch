@@ -195,7 +195,7 @@ void CuptiPMSamplingController::drain(
   // This relies on CUPTI eventually reporting that the hardware buffer is
   // drained. If CUPTI enters a bad state, this loop can block indefinitely,
   // including when called during destruction.
-  bool isBufferDrained;
+  bool isBufferDrained = false;
   do {
     isBufferDrained = decodeBatch(decodedSamples);
   } while (!isBufferDrained);

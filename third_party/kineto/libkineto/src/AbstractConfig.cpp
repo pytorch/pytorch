@@ -23,6 +23,7 @@ using std::vector;
 
 namespace KINETO_NAMESPACE {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr char kWhitespace[] = "\t\n ";
 
 static bool isWhitespace(string& s) {
@@ -73,6 +74,7 @@ static inline string stripComment(const string& s) {
 
 string AbstractConfig::toLower(string& s) const {
   string res = s;
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < res.size(); i++) {
     if (res[i] >= 'A' && res[i] <= 'Z') {
       res[i] += ('a' - 'A');

@@ -76,6 +76,7 @@ struct CuptiActivity : public ITraceActivity {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const T& activity_;
   const ITraceActivity* linked_{nullptr};
 };
@@ -108,6 +109,7 @@ struct RuntimeActivity : public CuptiActivity<CUpti_ActivityAPI> {
   void visitTypedMetadata(ITypedMetadataVisitor& visitor) const override;
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int32_t threadId_;
 };
 
@@ -137,6 +139,7 @@ struct DriverActivity : public CuptiActivity<CUpti_ActivityAPI> {
   void visitTypedMetadata(ITypedMetadataVisitor& visitor) const override;
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int32_t threadId_;
 };
 
@@ -175,6 +178,7 @@ struct OverheadActivity : public CuptiActivity<CUpti_ActivityOverhead> {
   void visitTypedMetadata(ITypedMetadataVisitor& visitor) const override;
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int32_t threadId_;
 };
 
@@ -183,8 +187,8 @@ struct CudaSyncActivity : public CuptiActivity<CUpti_ActivitySynchronization> {
   explicit CudaSyncActivity(
       const CUpti_ActivitySynchronization* activity,
       const ITraceActivity* linked,
-      int32_t srcStream,
-      int32_t srcCorrId)
+      int64_t srcStream,
+      int64_t srcCorrId)
       : CuptiActivity(activity, linked),
         srcStream_(srcStream),
         srcCorrId_(srcCorrId) {}
@@ -208,8 +212,10 @@ struct CudaSyncActivity : public CuptiActivity<CUpti_ActivitySynchronization> {
   }
 
  private:
-  const int32_t srcStream_;
-  const int32_t srcCorrId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+  const int64_t srcStream_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+  const int64_t srcCorrId_;
 };
 
 // Use CUpti_ActivityCudaEvent2 in CUDA 12.8+ for enhanced event tracking
@@ -317,6 +323,7 @@ inline bool isEventSync(CUpti_ActivitySynchronizationType type) {
 inline int32_t streamIdForTrace(uint32_t streamId) {
   // CUPTI uses all bits set when no stream applies. Preserve the legacy trace
   // representation where that sentinel appears as -1 instead of 4294967295.
+  // NOLINTNEXTLINE(readability-redundant-casting)
   if (streamId == static_cast<uint32_t>(CUPTI_SYNCHRONIZATION_INVALID_VALUE)) {
     return -1;
   }
@@ -352,11 +359,9 @@ inline void CudaSyncActivity::visitTypedMetadata(
       CudaMetadataFields::kCudaSyncKind,
       std::string{syncTypeString(sync.type)});
   if (isEventSync(sync.type)) {
+    visitor.visit(CudaMetadataFields::kWaitOnStream, srcStream_);
     visitor.visit(
-        CudaMetadataFields::kWaitOnStream, static_cast<int64_t>(srcStream_));
-    visitor.visit(
-        CudaMetadataFields::kWaitOnCudaEventRecordCorrId,
-        static_cast<int64_t>(srcCorrId_));
+        CudaMetadataFields::kWaitOnCudaEventRecordCorrId, srcCorrId_);
     visitor.visit(
         CudaMetadataFields::kWaitOnCudaEventId,
         static_cast<uint64_t>(sync.cudaEventId));
@@ -477,6 +482,7 @@ inline std::string limitingFactorsToString(unsigned int factors) {
   if (factors == 0) {
     return "none";
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   constexpr std::pair<unsigned int, const char*> kFactors[] = {
       {OCC_LIMIT_WARPS, "WARPS"},
       {OCC_LIMIT_REGISTERS, "REGS"},

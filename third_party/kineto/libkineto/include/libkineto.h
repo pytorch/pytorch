@@ -151,6 +151,7 @@ class LibkinetoApi {
   // Client is initialized once both it and libkineto has registered
   void initClientIfRegistered();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   ConfigLoader& configLoader_;
   std::unique_ptr<ActivityProfilerInterface> activityProfiler_;
   ClientInterface* client_{};

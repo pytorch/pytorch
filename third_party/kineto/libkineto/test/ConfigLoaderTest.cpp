@@ -14,6 +14,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -22,6 +23,8 @@
 #include "src/DaemonConfigLoader.h"
 
 using namespace KINETO_NAMESPACE;
+
+static_assert(std::is_array_v<decltype(kUseDaemonEnvVar)>);
 
 namespace {
 
@@ -108,6 +111,7 @@ class FakeDaemonConfigLoader : public IDaemonConfigLoader {
   void setCommunicationFabric(bool /*enabled*/) override {}
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   DaemonPollProbe& probe_;
 };
 

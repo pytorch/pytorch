@@ -23,12 +23,14 @@ using namespace std::chrono;
 
 namespace KINETO_NAMESPACE {
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr char kConfigFileEnvVar[] = "KINETO_CONFIG";
 #ifdef __linux__
 constexpr char kConfigFile[] = "/etc/libkineto.conf";
 #else
 constexpr char kConfigFile[] = "libkineto.conf";
 #endif
+// NOLINTEND(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 
 constexpr std::chrono::seconds kConfigUpdateIntervalSecs(300);
 

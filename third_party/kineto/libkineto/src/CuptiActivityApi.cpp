@@ -24,18 +24,18 @@ namespace KINETO_NAMESPACE {
 // 1MB to 10MB.
 // Given the kDefaultActivitiesMaxGpuBufferSize is around 128MB, in the worst
 // case, there will be 32 buffers contending for the mutex.
-constexpr size_t kBufSize(4 * 1024 * 1024);
+constexpr size_t kBufSize(static_cast<size_t>(4) * 1024 * 1024);
 constexpr uint32_t kCuptiBufferRejectionMinVersion = 27;
 
-inline bool cuptiTearDown_() {
+static inline bool cuptiTearDown_() {
   return isEnvVarSetToOne("TEARDOWN_CUPTI");
 }
 
-inline bool cuptiLazyInit_() {
+static inline bool cuptiLazyInit_() {
   return cuptiTearDown_() && !isEnvVarSetToOne("DISABLE_CUPTI_LAZY_REINIT");
 }
 
-inline void reenableCuptiCallbacks_(CuptiCallbackApi& cbapi) {
+static inline void reenableCuptiCallbacks_(CuptiCallbackApi& cbapi) {
   // Re-enable callbacks from the past if they exist.
   LOG(INFO) << "Re-enable previous CUPTI callbacks - Starting";
   VLOG(1) << "  CUPTI subscriber before reinit:" << cbapi.getCuptiSubscriber();
@@ -114,7 +114,7 @@ static bool nextActivityRecord(
 }
 
 void CuptiActivityApi::setMaxBufferSize(int64_t size) {
-  maxGpuBufferCount_ = 1 + size / kBufSize;
+  maxGpuBufferCount_ = 1 + size / static_cast<int64_t>(kBufSize);
 }
 
 void CuptiActivityApi::setDeviceBufferSize(size_t size) {

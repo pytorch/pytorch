@@ -38,13 +38,13 @@ using std::string;
 namespace KINETO_NAMESPACE {
 
 // TODO: Move config elsewhere. Sync with @sraikund16 on details.
-ConfigDerivedState::ConfigDerivedState(const Config& config) {
-  profileActivityTypes_ = config.selectedActivityTypes();
-  profileStartTime_ = config.requestTimestamp();
-  profileDuration_ = config.activitiesDuration();
-  profileWarmupDuration_ = config.activitiesWarmupDuration();
-  profilingByIter_ = config.hasProfileStartIteration();
-  perThreadBufferEnabled_ = config.perThreadBufferEnabled();
+ConfigDerivedState::ConfigDerivedState(const Config& config)
+    : profileActivityTypes_(config.selectedActivityTypes()),
+      profileStartTime_(config.requestTimestamp()),
+      profileDuration_(config.activitiesDuration()),
+      profileWarmupDuration_(config.activitiesWarmupDuration()),
+      profilingByIter_(config.hasProfileStartIteration()),
+      perThreadBufferEnabled_(config.perThreadBufferEnabled()) {
   if (profilingByIter_) {
     profileStartIter_ = config.profileStartIteration();
     profileEndIter_ = profileStartIter_ + config.activitiesRunIterations();
@@ -103,7 +103,7 @@ std::ostream& operator<<(
 
 GenericActivityProfiler::GenericActivityProfiler(bool cpuOnly)
     : flushOverhead_{0, 0}, setupOverhead_{0, 0}, cpuOnly_{cpuOnly} {}
-GenericActivityProfiler::~GenericActivityProfiler() {}
+GenericActivityProfiler::~GenericActivityProfiler() = default;
 
 void GenericActivityProfiler::transferCpuTrace(
     std::unique_ptr<libkineto::CpuTraceBuffer> cpuTrace) {
@@ -269,7 +269,10 @@ void GenericActivityProfiler::processCpuTrace(
       act->setDevice(processId());
       warn_once = true;
     }
-    recordThreadInfo(act->resourceId(), act->getThreadId(), act->deviceId());
+    recordThreadInfo(
+        static_cast<int32_t>(act->resourceId()),
+        act->getThreadId(),
+        static_cast<int32_t>(act->deviceId()));
   }
   logger.handleTraceSpan(cpu_span);
 }
@@ -282,10 +285,10 @@ static GenericTraceActivity createUserGpuSpan(
       ActivityType::GPU_USER_ANNOTATION,
       cpuTraceActivity.name());
   res.startTime = gpuTraceActivity.timestamp();
-  res.device = gpuTraceActivity.deviceId();
+  res.device = static_cast<int32_t>(gpuTraceActivity.deviceId());
   res.resource = gpuTraceActivity.resourceId();
   res.endTime = gpuTraceActivity.timestamp() + gpuTraceActivity.duration();
-  res.id = cpuTraceActivity.correlationId();
+  res.id = static_cast<int32_t>(cpuTraceActivity.correlationId());
   return res;
 }
 
@@ -395,7 +398,7 @@ void GenericActivityProfiler::checkTimestampOrder(const ITraceActivity* act1) {
 }
 
 const ITraceActivity* GenericActivityProfiler::linkedActivity(
-    int32_t correlationId,
+    int64_t correlationId,
     const std::unordered_map<int64_t, int64_t>& correlationMap) {
   const auto& it = correlationMap.find(correlationId);
   if (it != correlationMap.end()) {

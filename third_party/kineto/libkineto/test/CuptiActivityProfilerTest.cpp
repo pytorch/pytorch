@@ -11,14 +11,16 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
-#include <stdlib.h> // NOLINT(modernize-deprecated-headers) required for malloc free
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <optional>
+#include <utility>
 #include <variant>
 
 #include "include/Config.h"
@@ -136,6 +138,12 @@ class RecordingTypedMetadataVisitor final : public ITypedMetadataVisitor {
 
 // Provides ability to easily create a few test CUPTI ops
 struct MockCuptiActivityBuffer {
+  MockCuptiActivityBuffer() = default;
+  MockCuptiActivityBuffer(const MockCuptiActivityBuffer&) = delete;
+  MockCuptiActivityBuffer& operator=(const MockCuptiActivityBuffer&) = delete;
+  MockCuptiActivityBuffer(MockCuptiActivityBuffer&&) = delete;
+  MockCuptiActivityBuffer& operator=(MockCuptiActivityBuffer&&) = delete;
+
   void addCorrelationActivity(
       int64_t correlation,
       CUpti_ExternalCorrelationKind externalKind,
@@ -260,7 +268,8 @@ struct MockCuptiActivityBuffer {
 
   template <class T>
   T& createActivity(int64_t start_ns, int64_t end_ns, int64_t correlation) {
-    T& act = *static_cast<T*>(malloc(sizeof(T)));
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    T& act = *static_cast<T*>(std::malloc(sizeof(T)));
     std::memset(&act, 0, sizeof(act));
     act.start = start_ns;
     act.end = end_ns;
@@ -270,7 +279,8 @@ struct MockCuptiActivityBuffer {
 
   template <class T>
   T& createActivity(int64_t correlation) {
-    T& act = *static_cast<T*>(malloc(sizeof(T)));
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    T& act = *static_cast<T*>(std::malloc(sizeof(T)));
     std::memset(&act, 0, sizeof(act));
     act.correlationId = correlation;
     return act;
@@ -278,7 +288,8 @@ struct MockCuptiActivityBuffer {
 
   ~MockCuptiActivityBuffer() {
     for (CUpti_Activity* act : activities) {
-      free(act);
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+      std::free(act);
     }
   }
 
@@ -662,22 +673,30 @@ TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
 
   profiler.recordThreadInfo();
 
-  auto cpuOps = std::make_unique<MockCpuActivityBuffer>(
-      start_time_ns, start_time_ns + duration_ns);
-  cpuOps->addOp("op1", start_time_ns + 10, start_time_ns + 50, 1);
-  cpuOps->addOp("op_record", start_time_ns + 60, start_time_ns + 80, 100);
-  cpuOps->addOp("op_wait", start_time_ns + 90, start_time_ns + 110, 200);
-  cpuOps->addOp("op_evt_sync", start_time_ns + 120, start_time_ns + 140, 300);
-  profiler.transferCpuTrace(std::move(cpuOps));
-
   constexpr uint32_t kEventId = 7777;
   constexpr uint32_t kContextId = 7;
   constexpr uint32_t kDeviceId = 3;
-  constexpr uint32_t kRecordCorrId = 100;
-  constexpr uint32_t kWaitCorrId = 200;
-  constexpr uint32_t kEvtSyncCorrId = 300;
-  constexpr uint32_t kEventStreamId = 11;
+  constexpr uint32_t kRecordCorrId = uint32_t{1} << 31;
+  constexpr uint32_t kWaitCorrId = kRecordCorrId + 1;
+  constexpr uint32_t kEvtSyncCorrId = kRecordCorrId + 2;
+  constexpr uint32_t kEventStreamId =
+      static_cast<uint32_t>(CUPTI_SYNCHRONIZATION_INVALID_VALUE);
+  constexpr int32_t kEventTraceStreamId = -1;
   constexpr uint32_t kWaitStreamId = 13;
+
+  auto cpuOps = std::make_unique<MockCpuActivityBuffer>(
+      start_time_ns, start_time_ns + duration_ns);
+  cpuOps->addOp("op1", start_time_ns + 10, start_time_ns + 50, 1);
+  cpuOps->addOp(
+      "op_record", start_time_ns + 60, start_time_ns + 80, kRecordCorrId);
+  cpuOps->addOp(
+      "op_wait", start_time_ns + 90, start_time_ns + 110, kWaitCorrId);
+  cpuOps->addOp(
+      "op_evt_sync",
+      start_time_ns + 120,
+      start_time_ns + 140,
+      kEvtSyncCorrId);
+  profiler.transferCpuTrace(std::move(cpuOps));
 
   // Wait events and synchronization records are added
   // before the CUDA_EVENT and kernel they reference, as CUPTI
@@ -729,7 +748,7 @@ TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
           << "Stream Wait Event should reference the correct event ID";
       EXPECT_EQ(json["wait_on_cuda_event_record_corr_id"], kRecordCorrId)
           << "Stream Wait Event corr_id should be populated despite out-of-order records";
-      EXPECT_EQ(json["wait_on_stream"], kEventStreamId)
+      EXPECT_EQ(json["wait_on_stream"], kEventTraceStreamId)
           << "Stream Wait Event should reference stream the event was recorded on";
       RecordingTypedMetadataVisitor typedMetadata;
       activity->visitTypedMetadata(typedMetadata);
@@ -741,7 +760,7 @@ TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
           static_cast<int64_t>(kRecordCorrId));
       EXPECT_EQ(
           typedMetadata.get(CudaMetadataFields::kWaitOnStream),
-          static_cast<int64_t>(kEventStreamId));
+          static_cast<int64_t>(kEventTraceStreamId));
       streamWaitFound++;
     }
     if (metadata.find("Event Sync") != std::string::npos) {
@@ -750,7 +769,7 @@ TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
           << "Event Sync should reference the correct event ID";
       EXPECT_EQ(json["wait_on_cuda_event_record_corr_id"], kRecordCorrId)
           << "Event Sync corr_id should be populated despite out-of-order records";
-      EXPECT_EQ(json["wait_on_stream"], kEventStreamId)
+      EXPECT_EQ(json["wait_on_stream"], kEventTraceStreamId)
           << "Event Sync should reference stream the event was recorded on";
       RecordingTypedMetadataVisitor typedMetadata;
       activity->visitTypedMetadata(typedMetadata);
@@ -762,7 +781,7 @@ TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
           static_cast<int64_t>(kRecordCorrId));
       EXPECT_EQ(
           typedMetadata.get(CudaMetadataFields::kWaitOnStream),
-          static_cast<int64_t>(kEventStreamId));
+          static_cast<int64_t>(kEventTraceStreamId));
       eventSyncFound++;
     }
   }
@@ -840,7 +859,6 @@ TEST_F(CuptiActivityProfilerTest, GpuNCCLCollectiveTest) {
   }
 
   std::vector<int64_t> groupRanks(64, 0);
-  std::string groupRanksStr;
   if (!groupRanks.empty() && groupRanks.size() <= kTruncatLength) {
     metadataMap.emplace(
         kGroupRanks, fmt::format("\"[{}]\"", fmt::join(groupRanks, ", ")));
@@ -870,12 +888,17 @@ TEST_F(CuptiActivityProfilerTest, GpuNCCLCollectiveTest) {
   // Set up GPU events with two collectives: one after its correlation
   // record (in-order) and one before (out-of-order), to verify metadata
   // propagation works regardless of CUPTI buffer ordering.
+  constexpr uint32_t kFirstCorrelationId = uint32_t{1} << 31;
+  constexpr uint32_t kSecondCorrelationId = kFirstCorrelationId + 1;
   auto gpuOps = std::make_unique<MockCuptiActivityBuffer>();
-  gpuOps->addCorrelationActivity(1, CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, 1);
-  gpuOps->addCollectiveActivity(kernelLaunchTime + 5, kernelLaunchTime + 10, 1);
+  gpuOps->addCorrelationActivity(
+      kFirstCorrelationId, CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, 1);
   gpuOps->addCollectiveActivity(
-      kernelLaunchTime + 15, kernelLaunchTime + 20, 2);
-  gpuOps->addCorrelationActivity(2, CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, 1);
+      kernelLaunchTime + 5, kernelLaunchTime + 10, kFirstCorrelationId);
+  gpuOps->addCollectiveActivity(
+      kernelLaunchTime + 15, kernelLaunchTime + 20, kSecondCorrelationId);
+  gpuOps->addCorrelationActivity(
+      kSecondCorrelationId, CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, 1);
   cuptiActivities_.activityBuffer = std::move(gpuOps);
 
   // Process trace

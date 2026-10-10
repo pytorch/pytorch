@@ -21,7 +21,7 @@
 namespace KINETO_NAMESPACE {
 
 namespace uuid {
-std::string generate_uuid_v4() {
+static std::string generate_uuid_v4() {
   static std::random_device rd;
   static std::mt19937 gen(rd());
   static std::uniform_int_distribution<> dis(0, 15);
@@ -157,11 +157,11 @@ std::string IpcFabricConfigClient::getLibkinetoOndemandConfig(int32_t type) {
     return "";
   }
 
-  int size = pids_.size();
-  ::dynolog::ipcfabric::LibkinetoRequest* req =
-      (::dynolog::ipcfabric::LibkinetoRequest*)malloc(
-          sizeof(::dynolog::ipcfabric::LibkinetoRequest) +
-          sizeof(int32_t) * size);
+  const int size = static_cast<int>(pids_.size());
+  using Request = ::dynolog::ipcfabric::LibkinetoRequest;
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+  auto* req = static_cast<Request*>(
+      std::malloc(sizeof(Request) + sizeof(int32_t) * size));
   req->type = type;
   req->n = size;
   req->jobid = jobId_;
@@ -177,11 +177,13 @@ std::string IpcFabricConfigClient::getLibkinetoOndemandConfig(int32_t type) {
     if (!fabricManager_->sync_send(*msg, std::string(kDynoIpcName))) {
       LOG(ERROR) << "Failed to send config type=" << type
                  << " to dyno: IPC sync_send fail";
-      free(req);
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+      std::free(req);
       req = nullptr;
       return "";
     }
-    free(req);
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    std::free(req);
     msg = fabricManager_->poll_recv(maxIpcRetries, kSleepUs);
     if (!msg) {
       // LOG(ERROR) << "Failed to receive ondemand config type=" << type
@@ -191,7 +193,8 @@ std::string IpcFabricConfigClient::getLibkinetoOndemandConfig(int32_t type) {
   } catch (const std::runtime_error& ex) {
     LOG(ERROR) << "Failed to recv ondemand config over ipc fabric: "
                << ex.what();
-    free(req);
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    std::free(req);
     return "";
   }
 

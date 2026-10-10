@@ -37,6 +37,20 @@ class TestableChromeTraceLogger : public ChromeTraceLogger {
   using ChromeTraceLogger::finalizeTrace;
 };
 
+class LargeCorrelationActivity final : public GenericTraceActivity {
+ public:
+  LargeCorrelationActivity(const TraceSpan& span, int64_t correlation)
+      : GenericTraceActivity(span, ActivityType::CPU_OP, "linked"),
+        correlation_(correlation) {}
+
+  int64_t correlationId() const override {
+    return correlation_;
+  }
+
+ private:
+  int64_t correlation_;
+};
+
 std::string readFile(const std::string& path) {
   std::ifstream f(path);
   return std::string(
@@ -151,6 +165,33 @@ TEST(OutputJsonTest, EventNameWithQuotesProducesValidJson) {
 
 TEST(OutputJsonTest, PlainEventNameIsUnchanged) {
   expectEventNameRoundTrips("aten::addmm");
+}
+
+TEST(OutputJsonTest, ExternalIdPreservesInt64) {
+  constexpr int64_t kExternalId = int64_t{1} << 40;
+  const auto traceFile =
+      libkineto::test::createTempTraceFile("OutputJsonTest.", ".json");
+  TraceSpan span(0, 0, "test_span");
+  LargeCorrelationActivity linked(span, kExternalId);
+  GenericTraceActivity kernel(
+      span, ActivityType::CONCURRENT_KERNEL, "test_kernel");
+  kernel.startTime = 100;
+  kernel.endTime = 200;
+  kernel.linked = &linked;
+
+  TestableChromeTraceLogger logger(traceFile.path());
+  logger.handleTraceStart({}, "");
+  logger.handleActivity(kernel);
+  logger.finalizeTrace(/*endTime=*/300);
+
+  const auto trace = nlohmann::json::parse(readFile(traceFile.path()));
+  for (const auto& event : trace["traceEvents"]) {
+    if (event.value("name", "") == "test_kernel") {
+      EXPECT_EQ(event["args"]["External id"], kExternalId);
+      return;
+    }
+  }
+  FAIL() << "test kernel was not written to the trace";
 }
 
 TEST(OutputJsonTest, InstructionFlowIsAttachedToDurationSlices) {

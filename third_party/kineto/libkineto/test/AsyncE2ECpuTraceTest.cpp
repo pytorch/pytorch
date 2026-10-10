@@ -15,6 +15,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
@@ -80,6 +81,11 @@ TEST(AsyncE2ECpuTraceTest, OnDemandConfigCollectsCpuOpIntoTraceFile) {
   // The produced file has the pid inserted before .json, a name TempTraceFile
   // does not own, so remove it ourselves when the test ends.
   struct FileRemover {
+    explicit FileRemover(std::string path) : path(std::move(path)) {}
+    FileRemover(const FileRemover&) = delete;
+    FileRemover& operator=(const FileRemover&) = delete;
+    FileRemover(FileRemover&&) = delete;
+    FileRemover& operator=(FileRemover&&) = delete;
     std::string path;
     ~FileRemover() {
       if (!path.empty()) {

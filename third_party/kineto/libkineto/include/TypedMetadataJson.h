@@ -158,12 +158,14 @@ class JsonTypedMetadataVisitor final : public ITypedMetadataVisitor {
   }
 
   static void appendIntValue(std::string& json, int64_t value) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     char buf[kMaxInt64Chars];
     const auto result = std::to_chars(buf, buf + sizeof(buf), value);
     json.append(buf, static_cast<size_t>(result.ptr - buf));
   }
 
   static void appendUIntValue(std::string& json, uint64_t value) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     char buf[kMaxInt64Chars];
     const auto result = std::to_chars(buf, buf + sizeof(buf), value);
     json.append(buf, static_cast<size_t>(result.ptr - buf));

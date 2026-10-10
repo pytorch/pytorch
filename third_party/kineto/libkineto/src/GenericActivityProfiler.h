@@ -95,8 +95,8 @@ struct ConfigDerivedState final {
   // Start and end time used for triggering and stopping profiling
   std::chrono::time_point<std::chrono::system_clock> profileStartTime_;
   std::chrono::time_point<std::chrono::system_clock> profileEndTime_;
-  std::chrono::milliseconds profileDuration_;
-  std::chrono::seconds profileWarmupDuration_;
+  std::chrono::milliseconds profileDuration_{};
+  std::chrono::seconds profileWarmupDuration_{};
   int64_t profileStartIter_{-1};
   int64_t profileEndIter_{-1};
   bool profilingByIter_{false};
@@ -117,6 +117,8 @@ class GenericActivityProfiler {
   GenericActivityProfiler(bool cpuOnly);
   GenericActivityProfiler(const GenericActivityProfiler&) = delete;
   GenericActivityProfiler& operator=(const GenericActivityProfiler&) = delete;
+  GenericActivityProfiler(GenericActivityProfiler&&) = delete;
+  GenericActivityProfiler& operator=(GenericActivityProfiler&&) = delete;
   virtual ~GenericActivityProfiler();
 
   bool isStopped() const {
@@ -182,7 +184,9 @@ class GenericActivityProfiler {
   }
 
   int activitiesMaxGpuBufferSizeMB() const {
-    return config_ ? config_->activitiesMaxGpuBufferSize() / 1024 / 1024 : 0;
+    return config_
+        ? static_cast<int>(config_->activitiesMaxGpuBufferSize() / 1024 / 1024)
+        : 0;
   }
 
   void startTrace(
@@ -400,7 +404,7 @@ class GenericActivityProfiler {
   }
 
   // Create resource names overall for device, id = -1
-  inline void recordDevice(int device) {
+  inline void recordDevice(int64_t device) {
     constexpr int id = -1;
     if (!hasDeviceResource(device, id)) {
       resourceInfo_.emplace(
@@ -425,7 +429,7 @@ class GenericActivityProfiler {
   int netId(const std::string& netName);
 
   const ITraceActivity* linkedActivity(
-      int32_t correlationId,
+      int64_t correlationId,
       const std::unordered_map<int64_t, int64_t>& correlationMap);
 
   const ITraceActivity* cpuActivity(int32_t correlationId);
@@ -457,7 +461,7 @@ class GenericActivityProfiler {
   std::unique_ptr<ConfigDerivedState> derivedConfig_;
 
   // Logger used during trace processing
-  ActivityLogger* logger_;
+  ActivityLogger* logger_{};
 
   // All recorded trace spans, both CPU and GPU
   // Trace Id -> list of iterations.
@@ -557,7 +561,7 @@ class GenericActivityProfiler {
   std::vector<std::unique_ptr<IActivityProfilerSession>> sessions_;
 
   // Number of memory overhead events encountered during the session
-  uint32_t resourceOverheadCount_;
+  uint32_t resourceOverheadCount_{};
 
   ErrorCounts ecs_;
 };

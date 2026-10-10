@@ -19,9 +19,9 @@ using namespace libkineto;
 
 const size_t some_data = 42;
 
-std::atomic<int> simple_cb_calls = 0;
+static std::atomic<int> simple_cb_calls = 0;
 
-void simple_cudaLaunchKernel_cb(
+static void simple_cudaLaunchKernel_cb(
     CUpti_CallbackDomain domain,
     CUpti_CallbackId cbid,
     const CUpti_CallbackData* cbInfo) {
@@ -35,7 +35,7 @@ void simple_cudaLaunchKernel_cb(
   simple_cb_calls++;
 }
 
-void simple_cudaLaunchKernelExC_cb(
+static void simple_cudaLaunchKernelExC_cb(
     CUpti_CallbackDomain domain,
     CUpti_CallbackId cbid,
     const CUpti_CallbackData* cbInfo) {
@@ -49,7 +49,7 @@ void simple_cudaLaunchKernelExC_cb(
   simple_cb_calls++;
 }
 
-void atomic_cb(
+static void atomic_cb(
     [[maybe_unused]] CUpti_CallbackDomain domain,
     [[maybe_unused]] CUpti_CallbackId cbid,
     [[maybe_unused]] const CUpti_CallbackData* cbInfo) {
@@ -60,7 +60,7 @@ void atomic_cb(
   }
 }
 
-void empty_cb(
+static void empty_cb(
     [[maybe_unused]] CUpti_CallbackDomain domain,
     [[maybe_unused]] CUpti_CallbackId cbid,
     [[maybe_unused]] const CUpti_CallbackData* cbInfo) {}
@@ -217,6 +217,7 @@ TEST(CuptiCallbackApiTest, ContentionTest) {
   };
 
   std::vector<std::thread> read_ths;
+  read_ths.reserve(num_readers);
   for (int i = 0; i < num_readers; i++) {
     read_ths.emplace_back(read_fn, i);
   }
@@ -282,6 +283,6 @@ TEST(CuptiCallbackApiTest, Benchmark) {
 
   LOG(INFO) << "Callback runtime per iteration = "
             << (delta_callback_ns.count() - delta_baseline_ns.count()) /
-          (double)iters
+          static_cast<double>(iters)
             << " ns";
 }
