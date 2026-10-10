@@ -2054,6 +2054,14 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         self.assertEqual(result_no_affine.full_tensor(), expected_no_affine)
         self.assertTrue(result_no_affine.placements[0].is_shard(0))
 
+    @with_comms
+    def test_foreach_norm_dtype(self):
+        device_mesh = self.build_device_mesh()
+        x = torch.arange(1, 6, dtype=torch.float32, device=self.device_type)
+        dist_x = distribute_tensor(x, device_mesh, [Shard(0)])
+        norms = torch._foreach_norm([dist_x], 2.0, dtype=torch.float64)
+        self.assertEqual(norms[0].full_tensor(), torch.norm(x, 2.0, dtype=torch.float64))
+
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMathOpsTest, base_class=LocalDTensorContinuousTestBase

@@ -960,6 +960,8 @@ def vector_norm_single_dim_strategy(
     TODO: remove this comment when _NormPartial is deprecated.
     """
     input_meta = args_schema[0]
+    if isinstance(input_meta, (list, tuple)):
+        input_meta = input_meta[0]
     if not isinstance(input_meta, TensorMeta):
         raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
     ndim = len(input_meta.shape)
