@@ -264,11 +264,26 @@ inline sycl::kernel* _createKernel(
   kernelDescription.pKernelName = kernelName;
   ZE_CHECK(ze().zeKernelCreate(module, &kernelDescription, &kernel));
   if (nSpillsPtr) {
-    ze_kernel_properties_t props;
+    ze_kernel_properties_t props{};
     props.stype = ZE_STRUCTURE_TYPE_KERNEL_PROPERTIES;
     props.pNext = nullptr;
     ZE_CHECK(ze().zeKernelGetProperties(kernel, &props));
-    *nSpillsPtr = props.spillMemSize;
+    // Level Zero reports spillMemSize in bytes per hardware thread, while
+    // CUDA/HIP report n_spills as LOCAL_SIZE_BYTES / 4, i.e. dword-equivalents
+    // per lane. Inductor's spill thresholds are calibrated on the latter, so
+    // normalize the same way the Intel triton driver does; otherwise the
+    // statically launched kernel reports a value 4 * SIMD width too large.
+    // requiredSubgroupSize comes from the intel_reqd_sub_group_size attribute
+    // triton always emits; maxSubgroupSize is the compiled SIMD width when
+    // that attribute is absent.
+    const uint32_t subgroupSize = props.requiredSubgroupSize != 0
+        ? props.requiredSubgroupSize
+        : props.maxSubgroupSize;
+    // Truncating division matches CUDA/HIP, so a scratch allocation below one
+    // dword per lane reports 0. With an unknown SIMD width, report the raw
+    // bytes: over-reporting beats hiding an allocation.
+    *nSpillsPtr = subgroupSize != 0 ? props.spillMemSize / (4 * subgroupSize)
+                                    : props.spillMemSize;
   }
   auto& syclContext = c10::xpu::get_device_context();
   auto mod = sycl::make_kernel_bundle<
