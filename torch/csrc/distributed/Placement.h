@@ -21,7 +21,7 @@ class Placement {
   Placement(Placement&&) noexcept = default;
   Placement& operator=(Placement&&) noexcept = default;
 
-  virtual bool is_shard(std::optional<std::int64_t> dim) const {
+  virtual bool is_shard(std::optional<std::int64_t> /*dim*/) const {
     return false;
   }
 
@@ -30,7 +30,7 @@ class Placement {
   }
 
   virtual bool is_partial(
-      std::optional<std::string_view> reduce_op = std::nullopt) const {
+      std::optional<std::string_view> /*reduce_op*/ = std::nullopt) const {
     return false;
   }
 };
@@ -78,11 +78,11 @@ class Replicate : public Placement {
     return true;
   }
 
-  bool operator==(const Replicate& rhs) const {
+  bool operator==(const Replicate& /*rhs*/) const {
     return true;
   }
 
-  bool operator!=(const Replicate& rhs) const {
+  bool operator!=(const Replicate& /*rhs*/) const {
     return false;
   }
 };
