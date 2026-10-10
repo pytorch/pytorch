@@ -1097,14 +1097,10 @@ def export_python(
     committed and shipped: what runs in production is source you can open, review and
     diff, not a cache entry reconstructed at startup.
 
-    That is what makes it **hill-climbable**. Most generated kernels are fine as
-    generated and never touched. When one starts to matter, retune it in place -- a
-    block size, a schedule, or the whole kernel by hand -- and the tuned version is
-    reviewed, committed and deployed like any other source. There is no recapture and no
-    cache to defeat, so the edit is simply what runs from then on; you never have to
-    choose up front between generated and hand-written code. The artifact is read and
-    exec'd once per decorated object per process, so an edit takes effect on the next run
-    of the process, not in one already running.
+    A hand edit to ``path`` is what runs from then on: there is no recapture and no
+    cache to defeat. The artifact is read and exec'd once per decorated object per
+    process, so an edit takes effect on the next run of the process, not in one already
+    running.
 
     **``path`` is the whole cache key**: nothing hashes ``fn``'s body, the ambient
     config, or the machine. In production that is the property you want -- the artifact
@@ -1133,87 +1129,77 @@ def export_python(
         regenerate (delete ``path``) when that changes; nothing detects the change for
         you.
 
-    ``export_python`` is a decorator over ``torch.compiler.precompile``'s make_fx capture.
-    On the first run in an environment it precompiles the decorated function (make_fx
-    capture plus backend lowering) and writes the emitted, self-contained Python
-    source to ``path``. On any later run the ``.py`` is already present, so
-    precompilation is skipped: the source is read back from disk and executed
-    directly. There is no acceleration cache -- the emitted source is self-contained
-    and always exec'd as written.
-
     Keyword call arguments and positional defaults are normalized onto ``fn``'s full
     positional signature (so ``rope(q=..., k=...)`` works and omitted defaults do not
-    change the artifact arity). Runtime arguments must be ``Tensor`` pytrees or direct
-    ``nn.Module`` arguments. Python scalar/config arguments are rejected because
-    ``make_fx`` specializes their values without emitting runtime guards; close such
-    constants over in ``fn`` instead. A ``None`` argument, including a ``None``
-    default the caller never passes, is rejected the same way. A ``fn`` that
-    declares keyword-only parameters is rejected, since they are not expressible in
-    the artifact's positional convention. Four things that ``make_fx`` or the code
-    generator resolves without emitting a guard are recorded as comment stamps and
-    checked on every call: each ``nn.Module`` argument's per-submodule ``training``
-    state, which input tensors shared memory at capture (aliasing decides what an
-    in-place mutation means), which input positions held the *same* tensor object
-    (AOTAutograd folds those into a single graph slot, which byte overlap alone cannot
-    distinguish from two views that merely intersect), and the ambient
-    ``torch.autocast`` state (which picks the dtypes the kernels were built for, for
-    every device type the artifact's own source names, not only the ones its inputs
-    live on; any difference raises, even for a graph with no op autocast would cast).
-    What is *not* guarded is a change in *how* two aliased inputs overlap: when
-    capture and the call both pass intersecting views, the artifact runs with
+    change the artifact arity). Runtime arguments must be ``Tensor`` pytrees or
+    ``nn.Module`` arguments passed directly; a module inside a container is rejected.
+    Python scalar/config arguments are rejected because ``make_fx`` specializes their
+    values without emitting runtime guards; close such constants over in ``fn``
+    instead. A ``None`` argument, including a ``None`` default the caller never
+    passes, is rejected the same way. A ``fn`` that declares keyword-only parameters,
+    or a call that passes extra keyword arguments to ``fn``'s ``**kwargs``, is
+    rejected, since neither is expressible in the artifact's positional convention.
+
+    Four things that ``make_fx`` or the code generator resolves without emitting a guard
+    are recorded as comment stamps and checked on every call: each ``nn.Module``
+    argument's per-submodule ``training`` state, which input tensors shared memory at
+    capture (aliasing decides what an in-place mutation means), which input positions
+    held the *same* tensor object (AOTAutograd folds those into a single graph slot,
+    which byte overlap alone cannot distinguish from two views that merely intersect),
+    and the ambient ``torch.autocast`` state (which picks the dtypes the kernels were
+    built for, for every device type the artifact's own source names, not only the ones
+    its inputs live on; any difference raises, even for a graph with no op autocast
+    would cast). What is *not* guarded is a change in *how* two aliased inputs overlap:
+    when capture and the call both pass intersecting views, the artifact runs with
     capture's relative offsets baked in and may compute the wrong thing.
-    ``torch.compile`` has the same hole *there*, but this list is not a complete
-    account of what the artifact bakes: a tensor subclass's inner shapes and a
-    DTensor's placements are unrecorded, and so is a CUDA artifact's compute
-    capability (see the machine-type warning above). Where ``torch.compile`` would
-    recompile, an artifact cannot, so treat any ambient change between capture and
-    call as needing a fresh capture unless a stamp covers it. A hand-edit that drops a
-    stamp turns that one check off: a checked stamp then warns on every call, while a
-    dropped version stamp just silences the version warning. All stamps must stay in
-    the artifact's leading comment block: the reader stops at the first non-comment
-    line, so inserting code above them turns every check off. Other Python attributes
-    and Python control flow are specialized at capture and must remain compatible with
-    the example. That includes ``torch.is_grad_enabled()``: capture traces with grad
-    enabled so a backward inside ``fn`` is built as graph ops, so a ``fn`` that
-    branches on it always captures the grad-enabled branch, whatever the grad mode of
-    the call that triggered capture. Calling the artifact under ``torch.no_grad()`` is
-    unaffected and is the ordinary inference path.
+    ``torch.compile`` has the same hole *there*, but this list is not a complete account
+    of what the artifact bakes: a tensor subclass's inner shapes and a DTensor's
+    placements are unrecorded, and so is a CUDA artifact's compute capability (see the
+    machine-type warning above). Where ``torch.compile`` would recompile, an artifact
+    cannot, so treat any ambient change between capture and call as needing a fresh
+    capture unless a stamp covers it. A hand-edit that drops a stamp turns that one
+    check off: a checked stamp then warns on every call, while a dropped version stamp
+    just silences the version warning. All stamps must stay in the artifact's leading
+    comment block: the reader stops at the first non-comment line, so inserting code
+    above them turns every check off. Other Python attributes and Python control flow
+    are specialized at capture and must remain compatible with the example. That
+    includes ``torch.is_grad_enabled()``: capture traces with grad enabled so a backward
+    inside ``fn`` is built as graph ops, so a ``fn`` that branches on it always captures
+    the grad-enabled branch, whatever the grad mode of the call that triggered capture.
+    Calling the artifact under ``torch.no_grad()`` is unaffected and is the ordinary
+    inference path.
 
     Capturing does not advance the default generators the first call is about to draw
     from: capture restores the generator state it consumed, within the limits
     ``torch.compiler.precompile.MakeFxTracer`` documents. A draw from an explicit
-    ``torch.Generator`` leaves it advanced and logs a warning, and the restore is
-    process-global, so a concurrent thread's draws during capture are rewound too. This
-    is about generator position, not value parity with eager: ``backend="inductor"``
+    ``torch.Generator`` leaves it advanced and logs a warning. When capture restores a
+    generator, it also rewinds any draw a concurrent thread made from that generator
+    during capture. This is about generator position, not value parity with eager:
+    ``backend="inductor"``
     lowers random ops to its own philox and produces different values than eager at the
     same seed.
 
     Args:
         path: Filesystem path for the emitted Python source. Parent directories are
             created as needed. Its presence is the sole signal used to decide whether
-            to precompile or to load. Nothing about ``fn`` is hashed, so changing the
-            body of ``fn`` itself -- or pointing a different function at the same
-            ``path`` -- does NOT invalidate a previously written artifact, and neither
-            does changing ``backend``, ``tracer``, ``decompositions``, or
-            ``example_inputs``: an existing ``path`` is loaded as-is. A stale artifact
-            after a source edit is the expected failure mode; delete ``path`` to force
-            a re-precompile. The artifact records the producing torch version in
-            its first line; loading it under a different torch logs a warning
-            (it still runs) so a committed artifact gone stale across a torch
-            upgrade is visible. A hand-edit that drops that line disables the
-            version warning. Loading any existing artifact also warns before
-            executing it because ``path`` is trusted executable Python and may
-            have been edited or replaced. A CUDA artifact additionally embeds
-            inductor's kernel-cache paths, so it is not byte-stable across
-            machines or users even when the numerics are. A Triton kernel listed
-            in the artifact's ``KERNEL_CONFIGS`` launches with the config
-            autotuning chose at capture, so a cold start does not retune it; a
-            kernel missing there autotunes on its first launch. Concurrent first
-            writers use first-publisher-wins semantics: every loser loads the
-            complete artifact that won instead of executing different generated
-            source. (On a filesystem without hard links this degrades to
-            last-writer-wins; the file is never partial either way.) New files
-            use the permissions selected by the process umask.
+            to precompile or to load: an existing ``path`` is loaded as-is, even by a
+            different ``fn`` or with a different ``backend``, ``tracer``,
+            ``decompositions`` or ``example_inputs``. The artifact records the producing
+            torch version in its first line; loading it under a different torch logs a
+            warning (it still runs) so a committed artifact gone stale across a torch
+            upgrade is visible. A hand-edit that drops that line disables the version
+            warning. Loading any existing artifact also warns before executing it
+            because ``path`` is trusted executable Python and may have been edited or
+            replaced. A CUDA artifact additionally embeds inductor's kernel-cache paths,
+            so it is not byte-stable across machines or users even when the numerics
+            are. A Triton kernel listed in the artifact's ``KERNEL_CONFIGS`` launches
+            with the config autotuning chose at capture, so a cold start does not retune
+            it; a kernel missing there autotunes on its first launch. Concurrent first
+            writers use first-publisher-wins semantics: every loser loads the complete
+            artifact that won instead of executing different generated source. (On a
+            filesystem without hard links this degrades to last-writer-wins; the file is
+            never partial either way.) New files use the permissions selected by the
+            process umask.
         backend: How the captured graph is realized: ``"inductor"`` (default) or
             ``"eager"``. Forwarded to the capture.
         tracer: Capture front-end; ``"make_fx"`` (default) is the only one
@@ -1223,17 +1209,13 @@ def export_python(
         example_inputs: Positional inputs used to drive precompilation, matching
             ``fn``'s own positional signature (``nn.Module`` arguments stay at their
             original positions; the rest are the runtime inputs). If None, the first
-            call's own arguments are used, deep-copied for capture so a mutating
-            ``fn`` is applied exactly once. Pass ``example_inputs`` explicitly when
-            the first-call arguments are not deep-copyable (e.g. non-leaf tensors or
-            ``weight_norm`` modules). Explicit ``example_inputs`` are consumed by
-            capture, which runs ``fn`` once and mutates them (e.g. module buffers), so
-            they must NOT be objects that also appear in the runtime call args --
-            otherwise the mutation is applied twice (once at capture, once by the
-            artifact). The None path avoids this by deep-copying the first call's args
-            for capture. Note that this deep copy includes the full weights of any
-            ``nn.Module`` argument, so it transiently doubles that memory. Pass
-            ``example_inputs`` explicitly for large modules to avoid the clone.
+            call's own arguments are deep-copied for capture so a mutating ``fn`` is
+            applied exactly once; the copy transiently doubles the memory of any
+            ``nn.Module`` argument. Pass ``example_inputs`` explicitly when the
+            first-call arguments are not deep-copyable (e.g. non-leaf tensors or
+            ``weight_norm`` modules) or too large to clone. Capture runs ``fn`` once on
+            them and may mutate them (e.g. module buffers), so they must not be objects
+            that also appear in the runtime call args.
     """
     from torch.compiler._export_python import export_python as _export_python
 
