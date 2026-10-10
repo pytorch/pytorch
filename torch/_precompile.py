@@ -321,7 +321,8 @@ def _capture_rng_devices(args: tuple[object, ...]) -> list[torch.device]:
     # The accelerator generators worth saving, found the way torch.random.fork_rng
     # finds them: devices of the current accelerator reachable from the arguments (at
     # any pytree depth, modules included) plus its current device if already
-    # initialized. Probing an uninitialized one would initialize it.
+    # initialized. Probing an uninitialized one would initialize it; a backend with
+    # no is_initialized (MPS) is treated as initialized and probed.
     accelerator = torch.accelerator.current_accelerator()
     if accelerator is None:
         return []
@@ -602,8 +603,8 @@ class MakeFxTracer:
     generator. A trace that raises restores nothing, including one rejected after
     tracing. The CPU generator is always saved; of the current accelerator (CUDA,
     XPU, MPS, ...) only an already-initialized current device and the devices
-    reachable from the arguments are, and a draw on any other device warns and is
-    left as-is.
+    reachable from the arguments are. A draw the graph shows on any other device
+    warns and is left as-is; one made inside an opaque op goes unnoticed.
     """
 
     decompositions: dict | None = None
