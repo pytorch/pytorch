@@ -192,6 +192,41 @@ class TestModuleLevelKernels(TestCase):
 
     @requires_cuda_and_triton
     @config.patch(compile_threads=2)
+    @parametrize("case", ["template", "foreach", "combo"])
+    def test_template_and_combo_kernels_compile_on_the_worker_pool(self, case):
+        # Their decorators must key inductor_meta["kernel_name"] on the def's name too.
+        self.assertTrue(AsyncCompile.wait_process_pool_ready())
+        if case == "template":
+
+            def fn(x):
+                return flex_attention(x, x, x, score_mod=lambda s, b, h, m, n: s * 2)
+
+            args = [torch.randn(1, 2, 128, 64, device="cuda")]
+        elif case == "foreach":
+
+            def fn(x, y):
+                return torch._foreach_add([x, y], [y, x])
+
+            args = [torch.randn(128, device="cuda"), torch.randn(128, device="cuda")]
+        else:
+
+            def fn(x, y):
+                return x.sin(), y.cos()
+
+            args = [torch.randn(128, device="cuda"), torch.randn(96, device="cuda")]
+        counters.clear()
+        with mock.patch.object(
+            CachingAutotuner, "_precompile_config", _compiled_in_this_process
+        ):
+            result, code = _code_for(fn, *args, combo_kernels=case == "combo")
+        self.assertEqual(result, fn(*args), atol=2e-2, rtol=2e-2)
+        marker = {"template": "def triton_tem_", "foreach": "def triton_for_"}
+        self.assertIn(marker.get(case, "pid_offset"), code)
+        kernels = re.findall(r"^def (triton_\w+)\(", code, re.MULTILINE)
+        self.assertEqual(counters["inductor"]["async_compile_cache_hit"], len(kernels))
+
+    @requires_cuda_and_triton
+    @config.patch(compile_threads=2)
     def test_kernels_reloaded_from_their_source_while_the_wrapper_loads(self):
         # dynamic_scale_rblock and coordesc tuning reload a pool-compiled kernel from
         # its own module in this process, which runs while the wrapper module loads.
