@@ -6,14 +6,6 @@ self-contained, human-readable Python source artifact (see
 decorator keyed off a file on disk: the first run writes the emitted
 ``python_code`` to ``path``; every later run reads the ``.py`` back and executes
 it directly instead of recompiling.
-
-Because the artifact is self-contained, re-executable Python, ``path`` is meant to be
-committed and shipped -- and, when a kernel starts to matter, hand-edited in place by
-an engineer or an agent. This is ejectable compilation: the emitted source is the
-source of truth and is always exec'd, so an edit is simply what runs from then on, in
-production as much as in development. There is no acceleration cache and no
-``precompile.load`` round-trip, so keeping the edited source correct is the caller's
-responsibility.
 """
 
 import ast
@@ -21,6 +13,7 @@ import copy
 import errno
 import functools
 import inspect
+import itertools
 import logging
 import os
 import re
@@ -109,10 +102,7 @@ def _atomic_publish(path: str, data: bytes) -> bool:
     # or a permissions problem must surface rather than silently weaken the guarantee.
     dir_name = os.path.dirname(path) or "."
     base = os.path.basename(path)
-    tmp = os.path.join(
-        dir_name,
-        f".{base}.{os.getpid()}.{threading.get_ident()}.{secrets.token_hex(8)}.tmp",
-    )
+    tmp = os.path.join(dir_name, f".{base}.{secrets.token_hex(8)}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
     try:
         with os.fdopen(fd, "wb") as f:
@@ -178,7 +168,10 @@ def _check_tolerances(dtype: torch.dtype) -> tuple[float, float, float | None]:
         torch.float16: (6e-3, 1e-3, 8e-3),
         torch.bfloat16: (2e-2, 5e-3, 5e-3),
     }
-    rtol, atol, atol_frac = per_dtype.get(dtype, (1e-3, 1e-4, 1e-4))
+    real = dtype.to_real()
+    # Off the table (float8): one rounding flip is a whole ulp, which is eps relative.
+    eps = torch.finfo(real).eps
+    rtol, atol, atol_frac = per_dtype.get(real, (eps, eps, eps))
     overrides: list[float | None] = []
     for suffix in ("RTOL", "ATOL"):
         name = f"{_CHECK_ENV}_{suffix}"
@@ -212,12 +205,49 @@ def _set_rng_state(state: _RngState) -> None:
         torch.cuda.set_rng_state_all(cuda)
 
 
+def _compared(
+    result: Any, args: tuple[Any, ...], path: str
+) -> list[tuple[str, torch.Tensor]]:
+    """The tensors the eager check compares: fn's result, then each input it can mutate.
+
+    pytree treats an nn.Module as one opaque leaf, so a module argument contributes its
+    parameters and buffers instead; a train-mode BatchNorm writes its running stats.
+    """
+    leaves = [t for t in pytree.tree_leaves(result) if isinstance(t, torch.Tensor)]
+    found = [(f"output {i} of the artifact at {path}", t) for i, t in enumerate(leaves)]
+    left = f"as the artifact at {path} left it"
+    for j, leaf in enumerate(pytree.tree_leaves(args)):
+        if isinstance(leaf, torch.nn.Module):
+            state = itertools.chain(leaf.named_parameters(), leaf.named_buffers())
+            found += [(f"input {j}.{n} {left}", t) for n, t in state]
+        elif isinstance(leaf, torch.Tensor):
+            found.append((f"input {j} {left}", leaf))
+    return found
+
+
+def _magnitude(t: torch.Tensor) -> float:
+    """Largest finite |t|, widened so a complex tensor keeps its imaginary part."""
+    finite = _finite_mask(t)
+    values = t[finite] if finite is not None else t.flatten()
+    wide = torch.complex128 if t.is_complex() else torch.float64
+    return values.to(wide).abs().max().item() if values.numel() else 0.0
+
+
+def _tolerances_for(reference: torch.Tensor) -> tuple[float, float]:
+    """``(rtol, atol)`` against reference, with atol capped at its magnitude."""
+    rtol, atol, atol_frac = _check_tolerances(reference.dtype)
+    if atol_frac is not None:
+        atol = min(atol, atol_frac * _magnitude(reference))
+    return rtol, atol
+
+
 def _eager_draws(
     fn: Callable[..., Any],
     args: tuple[Any, ...],
     rng: _RngState,
-) -> bool:
-    """Whether fn's result or the inputs it mutates depend on the generator.
+    path: str,
+) -> set[int]:
+    """Positions in ``_compared``'s list whose value depends on the generator.
 
     Only consulted after a mismatch, to tell "the edit broke it" apart from "this
     function draws". Drawing has to be detected by running from two DIFFERENT generator
@@ -230,39 +260,24 @@ def _eager_draws(
     try:
         _set_rng_state(rng)
         first_args = copy.deepcopy(args)
-        first = pytree.tree_leaves((fn(*first_args), first_args))
+        first = _compared(fn(*first_args), first_args, path)
         seed = int(torch.random.initial_seed()) + 1
         torch.random.default_generator.manual_seed(seed)
         if torch.cuda.is_initialized():
             torch.cuda.manual_seed_all(seed)
         second_args = copy.deepcopy(args)
-        second = pytree.tree_leaves((fn(*second_args), second_args))
+        second = _compared(fn(*second_args), second_args, path)
     except Exception:
-        return False
+        return set()
     finally:
         # This runs only to answer a question; the caller's streams must not move.
         _set_rng_state(saved)
-    pairs = [
-        (a, b)
-        for a, b in zip(first, second)
-        if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor)
-    ]
-    for a, b in pairs:
-        if a.shape != b.shape or a.dtype != b.dtype:
-            return True
-        rtol, atol, atol_frac = _check_tolerances(a.dtype)
-        # Cap it exactly as the real comparison does. Using the raw absolute tolerance
-        # here made a small-magnitude random fn look deterministic to this function while
-        # looking wrong to the caller, so it was reported as a bad hand-edit instead of
-        # being skipped.
-        if atol_frac is not None:
-            finite = _finite_mask(a)
-            values = a[finite] if finite is not None else a.flatten()
-            if values.numel():
-                atol = min(atol, atol_frac * values.double().abs().max().item())
-        if not _allclose(a, b, rtol, atol):
-            return True
-    return False
+    return {
+        k
+        for k, ((_, a), (_, b)) in enumerate(zip(first, second))
+        if (a.shape, a.dtype) != (b.shape, b.dtype)
+        or not _allclose(a, b, *_tolerances_for(a))
+    }
 
 
 def _allclose(a: torch.Tensor, b: torch.Tensor, rtol: float, atol: float) -> bool:
@@ -286,7 +301,7 @@ def _finite_mask(t: torch.Tensor) -> torch.Tensor | None:
     float8 is is_floating_point() but has no isfinite kernel, so asking crashes the
     check on an artifact that is perfectly honest.
     """
-    if not t.is_floating_point():
+    if not (t.is_floating_point() or t.is_complex()):
         return None
     try:
         return torch.isfinite(t)
@@ -308,6 +323,7 @@ def _verify_against_eager(
     the point of it -- so the way to know an edit is still correct is to ask the original
     function. Under COMPILER_EXPORT_PYTHON_CHECK every call does exactly that.
     """
+    # Under the ambient grad mode, not no_grad: fn may run a backward of its own.
     expected = fn(*reference_args)
     name = getattr(fn, "__name__", "fn")
     got_flat, got_spec = pytree.tree_flatten(produced)
@@ -317,6 +333,8 @@ def _verify_against_eager(
             f"{_CHECK_ENV}: the artifact at {path} returns {got_spec} but {name} "
             f"returns {want_spec}."
         )
+    # Non-tensor leaves compare exactly: they are ints, bools and None (inductor cannot
+    # lower a float output) or, under backend="eager", constants baked at capture.
     for got, want in zip(got_flat, want_flat):
         is_tensor = isinstance(want, torch.Tensor)
         same_kind = isinstance(got, torch.Tensor) == is_tensor
@@ -326,23 +344,16 @@ def _verify_against_eager(
                 f"returns {want!r}. If you have hand-edited the artifact, the edit changed "
                 f"its result; otherwise delete {path} to recapture."
             )
-    got_leaves = [t for t in got_flat if isinstance(t, torch.Tensor)]
-    want_leaves = [t for t in want_flat if isinstance(t, torch.Tensor)]
     # Outputs AND inputs: a graph is free to mutate what it was handed, and a fn whose
     # whole job is an in-place write returns nothing else to compare.
     compared = [
-        (f"output {i} of the artifact at {path}", got, want)
-        for i, (got, want) in enumerate(zip(got_leaves, want_leaves))
-    ]
-    compared += [
-        (f"input {j} as the artifact at {path} left it", got, want)
-        for j, (got, want) in enumerate(
-            zip(pytree.tree_leaves(args), pytree.tree_leaves(reference_args))
+        (label, got, want)
+        for (label, got), (_, want) in zip(
+            _compared(produced, args, path), _compared(expected, reference_args, path)
         )
-        if isinstance(got, torch.Tensor)
     ]
-    for label, got, want in compared:
-        rtol, atol, atol_frac = _check_tolerances(got.dtype)
+    draws: set[int] | None = None
+    for k, (label, got, want) in enumerate(compared):
         if (got.shape, got.dtype, got.device) != (want.shape, want.dtype, want.device):
             raise _precompile_error(
                 f"{_CHECK_ENV}: {label} is "
@@ -366,17 +377,25 @@ def _verify_against_eager(
                 "this. If you have hand-edited the artifact, check the store and its "
                 f"bounds; otherwise delete {path} to recapture."
             )
-        # Cap the absolute tolerance at a fraction of how big the reference actually is,
-        # so a tensor whose every element is smaller than atol is still checked.
         wide = torch.complex128 if want.is_complex() else torch.float64
+        if finite_want is not None:
+            # Agreeing on where is not enough: inf, -inf and nan must match too.
+            g, w = got[~finite_want].to(wide), want[~finite_want].to(wide)
+            same_nan = torch.equal(g.isnan(), w.isnan())
+            if not same_nan or not torch.equal(g.nan_to_num(), w.nan_to_num()):
+                raise _precompile_error(
+                    f"{_CHECK_ENV}: {label} disagrees with {name} about which "
+                    "non-finite value (inf, -inf or nan) it holds. "
+                    "If you have hand-edited the artifact, the edit changed its result; "
+                    f"otherwise delete {path} to recapture."
+                )
+        rtol, atol = _tolerances_for(want)
+        if _allclose(got, want, rtol, atol):
+            continue
         flat_got = got[finite_want] if finite_want is not None else got.flatten()
         flat_want = want[finite_want] if finite_want is not None else want.flatten()
         values = flat_want.to(wide)
-        magnitude = values.abs().max().item() if values.numel() else 0.0
-        if atol_frac is not None:
-            atol = min(atol, atol_frac * magnitude)
-        if _allclose(got, want, rtol, atol):
-            continue
+        magnitude = _magnitude(want)
         # Finite positions only: inf/nan positions already agreed, and inf - inf is nan.
         diff = (flat_got.to(wide) - values).abs()
         max_abs = diff.max().item() if diff.numel() else 0.0
@@ -389,16 +408,21 @@ def _verify_against_eager(
             rel = f"{(diff[significant] / reference[significant]).max().item():.3e}"
         else:
             rel = "n/a (reference is all near-zero)"
-        if _eager_draws(fn, reference_args, rng):
-            log.warning(
-                "%s: %s draws from the generator, and inductor lowers random ops to its "
-                "own philox, which differs from eager at the same seed by design -- so "
-                "comparing the two says nothing. Skipping the check for %s.",
-                _CHECK_ENV,
-                name,
-                path,
-            )
-            return
+        if draws is None:
+            draws = _eager_draws(fn, reference_args, rng, path)
+            if draws:
+                log.warning(
+                    "%s: %s draws from the generator, and inductor lowers random ops "
+                    "to its own philox, which differs from eager at the same seed by "
+                    "design -- so comparing the two says nothing. Skipping the check "
+                    "for the %d tensor(s) of %s that depend on it.",
+                    _CHECK_ENV,
+                    name,
+                    len(draws),
+                    path,
+                )
+        if k in draws:
+            continue
         raise _precompile_error(
             f"{_CHECK_ENV}: {label} does not match "
             f"{name} run eagerly on the same inputs "
@@ -516,8 +540,10 @@ def _shares_memory(a: torch.Tensor, b: torch.Tensor) -> bool:
     a_leaves, b_leaves = _dense_leaves(a), _dense_leaves(b)
     if a_leaves is None or b_leaves is None:
         # Bytes unknown (sparse, nested, an undecomposable wrapper): assume it aliases
-        # anything of the same OUTER device type, the only evidence left without leaves.
-        return a.device.type == b.device.type
+        # anything of the same device type, read off the leaves where there are any.
+        a_types = {x.device.type for x in ([a] if a_leaves is None else a_leaves)}
+        b_types = {x.device.type for x in ([b] if b_leaves is None else b_leaves)}
+        return not a_types.isdisjoint(b_types)
     if is_traceable_wrapper_subclass(a) or is_traceable_wrapper_subclass(b):
         return any(_shares_memory(x, y) for x in a_leaves for y in b_leaves)
     if a.device != b.device:
@@ -673,12 +699,11 @@ def _autocast_state(
 ) -> list[list[Any]]:
     """Ambient autocast for every device type this artifact can compute on.
 
-    The input devices alone are not enough: a graph whose inputs are all on CPU can still
-    run its matmuls on an accelerator, and keying only on inputs recorded [] for it in
-    both processes, so the check passed while the kernels had been built for autocast
-    dtypes. Widened with the device types the emitted code names. Still not every device
-    type in the process: a CPU helper first called inside a `with torch.autocast("cuda")`
-    training region must not be locked to that region, and its graph never names cuda.
+    The input devices alone miss a graph whose inputs are all on CPU but whose matmuls run
+    on an accelerator, so they are widened with the device types the emitted code names.
+    Still not every device type in the process: a CPU helper first called inside a
+    `with torch.autocast("cuda")` training region must not be locked to that region, and
+    its graph never names cuda.
     """
     if tensors is None:
         tensors = _input_tensors(args)
@@ -709,11 +734,12 @@ def _cpu_vec_isa(code: str) -> str | None:
 def _global_state() -> list[list[str]]:
     """Ambient globals the emitted code resolves against, as [key, value] pairs.
 
-    Recorded as strings so the stamp round-trips through ast.literal_eval. All three are
+    Recorded as strings so the stamp round-trips through ast.literal_eval. All four are
     read at CAPTURE and baked: a factory op with no dtype= or device= takes the defaults
-    then, and inductor (or a decomposition) picks a deterministic or an atomic-add
-    lowering from the determinism flag. The artifact never re-consults them, so a process
-    that changes one and replays gets capture's answer with no error.
+    then, inductor (or a decomposition) picks a deterministic or an atomic-add lowering
+    from the determinism flag, and under determinism inductor's empty_strided lowering
+    bakes the fill_uninitialized_memory value. The artifact never re-consults them, so a
+    process that changes one and replays gets capture's answer with no error.
 
     float32_matmul_precision is deliberately NOT here. torch.get_float32_matmul_precision
     raises outright in a process that has used the per-backend fp32_precision API, so
@@ -722,10 +748,13 @@ def _global_state() -> list[list[str]]:
     calls the artifact serves correctly. Only a max_autotune Triton GEMM template bakes it
     as a tl.constexpr.
     """
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    fill = deterministic and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
     return [
         ["default_dtype", str(torch.get_default_dtype())],
         ["default_device", str(torch.get_default_device())],
-        ["deterministic", str(torch.are_deterministic_algorithms_enabled())],
+        ["deterministic", str(deterministic)],
+        ["fill_uninitialized_memory", str(fill)],
     ]
 
 
@@ -761,8 +790,6 @@ class ExportedPythonArtifact:
         self._input_overlaps: list[list[int]] | None = None
         self._input_duplicates: list[list[int]] | None = None
         self._global_state: dict[str, str] | None = None
-        self._cpu_isa: str | None = None
-        self._cpu_isa_stamped = False
         self._code_devices: set[str] = set()
         self._autocast: list[list[Any]] | None = None
         self._loaded: Callable[..., Any] | None = None
@@ -789,21 +816,28 @@ class ExportedPythonArtifact:
                     "non-leaf tensor or a weight_norm module). Pass explicit "
                     "example_inputs=... to precompile against dedicated inputs."
                 ) from e
-            if _input_overlaps(example) != _input_overlaps(args):
-                from torch._precompile import PrecompileError
-
-                raise PrecompileError(
-                    "torch.compiler.export_python: deep-copying the first-call "
-                    "arguments did not preserve how their tensors share memory, so "
-                    "capturing from the copy would bake in aliasing the real arguments "
-                    "do not have. nn.Parameter.__deepcopy__ clones, so two Parameters "
-                    "backed by one storage become independent in the copy. Pass "
-                    "example_inputs=... built with the same sharing as the real "
-                    "arguments to capture against those instead."
-                )
         else:
             example = self._bind_positional(example, {}, "example_inputs=")
             self._check_supported_args(example)
+        # Before capture: fn may call train()/eval() itself, and the per-call check reads
+        # the caller's modules before the call runs.
+        module_training = _module_training_state(example)
+        # Taken before _compile, which runs fn on example and can change its aliasing
+        # (set_ on an input).
+        example_tensors = _input_tensors(example)
+        example_overlaps = _input_overlaps(example, example_tensors)
+        if self._example_inputs is None and example_overlaps != _input_overlaps(args):
+            from torch._precompile import PrecompileError
+
+            raise PrecompileError(
+                "torch.compiler.export_python: deep-copying the first-call "
+                "arguments did not preserve how their tensors share memory, so "
+                "capturing from the copy would bake in aliasing the real arguments "
+                "do not have. nn.Parameter.__deepcopy__ clones, so two Parameters "
+                "backed by one storage become independent in the copy. Pass "
+                "example_inputs=... built with the same sharing as the real "
+                "arguments to capture against those instead."
+            )
         # Only the python_code is written: the emitted source is self-contained and
         # always exec'd, so export_python never builds precompile's acceleration cache.
         from torch._precompile import PrecompiledModule
@@ -822,11 +856,10 @@ class ExportedPythonArtifact:
         # The stamps lead the artifact as exec-inert comments, each guarding one thing
         # make_fx specialized without a runtime guard. A hand-edit may drop any of them;
         # each just turns its own check off.
-        example_tensors = _input_tensors(example)
         code = (
             f"{_VERSION_TAG}{torch.__version__}\n"
-            f"{_MODULE_TRAINING_TAG}{_module_training_state(example)!r}\n"
-            f"{_INPUT_OVERLAP_TAG}{_input_overlaps(example, example_tensors)!r}\n"
+            f"{_MODULE_TRAINING_TAG}{module_training!r}\n"
+            f"{_INPUT_OVERLAP_TAG}{example_overlaps!r}\n"
             f"{_INPUT_DUPLICATE_TAG}{_input_duplicates(example, example_tensors)!r}\n"
             f"{_AUTOCAST_TAG}"
             f"{_autocast_state(example, example_tensors, _code_devices(code))!r}\n"
@@ -835,16 +868,14 @@ class ExportedPythonArtifact:
         )
         # os.link does not follow a symlink at its destination, so resolve one first: a
         # dangling symlink at path would otherwise read as a lost race forever.
-        if _atomic_publish(os.path.realpath(self._path), code.encode("utf-8")):
-            return code, False
-        # Lost the publish race; the winner's file is complete and already linked.
-        winner = self._load_from_disk()
-        if winner is None:
-            raise _precompile_error(
-                f"torch.compiler.export_python: another writer published {self._path} "
-                "and it was deleted before this call could load it. Retry."
-            )
-        return winner, True
+        target, data = os.path.realpath(self._path), code.encode("utf-8")
+        while not _atomic_publish(target, data):
+            # Lost the publish race. If the winner's file is already gone (a peer
+            # deleting it to force a regenerate), publish again rather than fail.
+            winner = self._load_from_disk()
+            if winner is not None:
+                return winner, True
+        return code, False
 
     def _load_from_disk(self) -> str | None:
         # None means "not there after all" -- the presence gate raced a peer deleting
@@ -856,9 +887,7 @@ class ExportedPythonArtifact:
         except FileNotFoundError:
             return None
         except (OSError, UnicodeDecodeError) as e:
-            hint = (
-                " rather than a directory" if isinstance(e, IsADirectoryError) else ""
-            )
+            hint = " rather than a directory" if os.path.isdir(self._path) else ""
             raise _precompile_error(
                 f"torch.compiler.export_python: could not read the artifact at "
                 f"{self._path} ({e}). Check that the path names a readable UTF-8 "
@@ -961,10 +990,11 @@ class ExportedPythonArtifact:
                 live = actual_state[key]
                 if live == captured:
                     continue
-                # Determinism is one-sided: capture with it OFF and replay with it ON
-                # means the artifact keeps a lowering the caller has asked not to run.
-                # ON at capture and OFF at replay is conservative, so it is not an error.
-                if key == "deterministic" and captured == "True":
+                # Determinism and its fill are one-sided: capture with one OFF and replay
+                # with it ON means the artifact keeps a lowering the caller has asked not to
+                # run. ON at capture and OFF at replay is conservative, so it is not an error.
+                one_way = key in ("deterministic", "fill_uninitialized_memory")
+                if one_way and captured == "True":
                     continue
                 raise _precompile_error(
                     f"torch.compiler.export_python: {key} is {live} but the artifact "
@@ -990,29 +1020,37 @@ class ExportedPythonArtifact:
                     "Autocast dtypes are baked into the artifact; capture under the "
                     "same autocast context you call it in."
                 )
-        if not self._cpu_isa_stamped:
-            log.warning(
-                "torch.compiler.export_python: the artifact at %s carries no recorded "
-                "cpu-vec-isa stamp, so running a C++ kernel built for a different "
-                "vector width than this host's is unchecked, and that failure is "
-                "silent. Delete %s to regenerate it.",
-                self._path,
-                self._path,
-            )
-        elif self._cpu_isa is not None:
-            from torch._inductor.cpu_vec_isa import pick_vec_isa
 
-            live_isa = str(pick_vec_isa())
-            if live_isa != self._cpu_isa:
-                raise _precompile_error(
-                    "torch.compiler.export_python: this machine's CPU vector ISA is "
-                    f"{live_isa!r} but the artifact's C++ kernels were generated for "
-                    f"{self._cpu_isa!r}. The vector width is baked into their loop "
-                    "strides while the ISA is re-picked at compile time, so running "
-                    "them here would write past the end of an output or leave part of "
-                    f"it uninitialized. Delete {self._path} to regenerate on this "
-                    "machine, or run where the captured ISA is available."
+    def _check_cpu_isa(self, code: str) -> None:
+        # Checked once, before _load compiles the C++ kernel: the ISA that kernel is
+        # built under is pick_vec_isa() at that moment, and later calls cannot change it.
+        captured = self._read_stamp(code, _CPU_ISA_TAG)
+        if captured is None:
+            # A recorded None (no C++ kernel) is a stamp; a dropped or unparsable line
+            # is not.
+            if self._read_raw_stamp(code, _CPU_ISA_TAG) != "None":
+                log.warning(
+                    "torch.compiler.export_python: the artifact at %s carries no "
+                    "recorded cpu-vec-isa stamp, so running a C++ kernel built for a "
+                    "different vector width than this host's is unchecked, and that "
+                    "failure is silent. Delete %s to regenerate it.",
+                    self._path,
+                    self._path,
                 )
+            return
+        from torch._inductor.cpu_vec_isa import pick_vec_isa
+
+        live_isa = str(pick_vec_isa())
+        if live_isa != captured:
+            raise _precompile_error(
+                "torch.compiler.export_python: this machine's CPU vector ISA is "
+                f"{live_isa!r} but the artifact's C++ kernels were generated for "
+                f"{captured!r}. The vector width is baked into their loop strides "
+                "while the ISA is re-picked at compile time, so running them here "
+                "would write past the end of an output or leave part of it "
+                f"uninitialized. Delete {self._path} to regenerate on this machine, "
+                "or run where the captured ISA is available."
+            )
 
     def _check_module_training(self, args: tuple[Any, ...]) -> None:
         actual = _module_training_state(args)
@@ -1031,10 +1069,31 @@ class ExportedPythonArtifact:
             )
             return
         if actual != self._module_training:
+            # Name the first flip only: a per-submodule dump of a real model runs to
+            # thousands of characters.
+            try:
+                was = {(p, n): t for p, mods in self._module_training for n, t in mods}
+            except (TypeError, ValueError):
+                was = {}
+            flips = [
+                (p, n, t)
+                for p, mods in actual
+                for n, t in mods
+                if was.get((p, n), t) != t
+            ]
+            if flips:
+                p, n, t = flips[0]
+                more = f" and {len(flips) - 1} more" if len(flips) > 1 else ""
+                detail = (
+                    f"argument {p} submodule {n or '<root>'!r} was training={not t} at "
+                    f"capture, is training={t} now{more}"
+                )
+            else:
+                detail = "the nn.Module arguments' submodules differ from capture"
             raise _precompile_error(
                 "torch.compiler.export_python: the runtime module training state does "
-                f"not match capture (expected {self._module_training!r}, got {actual!r}). "
-                "Restore train()/eval() state or regenerate the artifact."
+                f"not match capture ({detail}). Restore train()/eval() state or "
+                "regenerate the artifact."
             )
 
     def _warn_on_version_skew(self, code: str) -> None:
@@ -1080,6 +1139,14 @@ class ExportedPythonArtifact:
         except PrecompileError:
             raise
         except SyntaxError as e:
+            if e.filename != self._path:
+                # Raised by code the artifact runs (an import, a nested exec); the
+                # line belongs to that file, so report it like any other failure.
+                raise PrecompileError(
+                    "torch.compiler.export_python: an unexpected error occurred running "
+                    f"the artifact at {self._path} ({type(e).__name__}: {e}). Fix it "
+                    "there, or delete it to regenerate."
+                ) from e
             # Kernels are hoisted to module level, so Python reports a typo in one
             # against this file at the right line. Say so: telling someone to delete an
             # artifact they are midway through tuning is the wrong advice.
@@ -1092,9 +1159,9 @@ class ExportedPythonArtifact:
         except ImportError as e:
             raise PrecompileError(
                 f"torch.compiler.export_python: the artifact at {self._path} failed "
-                "to import a dependency; it was likely produced by a different torch "
-                f"version or environment. Delete {self._path} to regenerate against "
-                "the current torch."
+                f"to import a dependency ({e}); it was edited, or produced by a "
+                "different torch version or environment. Fix it there, or delete it "
+                "to regenerate against the current torch."
             ) from e
         except Exception as e:
             raise PrecompileError(
@@ -1120,11 +1187,8 @@ class ExportedPythonArtifact:
         except (TypeError, ValueError):
             # Not [key, value] pairs: a hand-edit, treated like a dropped stamp.
             self._global_state = None
-        self._cpu_isa = self._read_stamp(code, _CPU_ISA_TAG)
-        # A recorded None (no C++ kernel) is a stamp; a dropped or unparsable line is not.
-        raw_isa = self._read_raw_stamp(code, _CPU_ISA_TAG)
-        self._cpu_isa_stamped = self._cpu_isa is not None or raw_isa == "None"
         self._code_devices = _code_devices(code)
+        self._check_cpu_isa(code)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None
         self._decompositions = None
@@ -1213,7 +1277,13 @@ class ExportedPythonArtifact:
         return bound.args
 
     def _check_supported_args(self, args: tuple[Any, ...]) -> None:
-        params = list(self._call_signature.parameters)
+        # args is the bound positional layout: the named positional parameters in
+        # order, then any *args values.
+        P = inspect.Parameter
+        params = self._call_signature.parameters.values()
+        positional = (P.POSITIONAL_ONLY, P.POSITIONAL_OR_KEYWORD)
+        names = [p.name for p in params if p.kind in positional]
+        var = next((p.name for p in params if p.kind == P.VAR_POSITIONAL), None)
         for pos, arg in enumerate(args):
             if isinstance(arg, torch.nn.Module):
                 continue
@@ -1224,7 +1294,7 @@ class ExportedPythonArtifact:
             ]
             if not unsupported:
                 continue
-            name = params[pos] if pos < len(params) else f"argument {pos}"
+            name = names[pos] if pos < len(names) else f"{var}[{pos - len(names)}]"
             # These two land often enough that the generic "close the constant over"
             # advice is actively wrong for them: a module must stay an argument, and an
             # optional parameter has no constant to close over in the first place.
