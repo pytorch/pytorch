@@ -511,6 +511,7 @@ class BackendFeature(Enum):
     TRITON_TEMPLATES = auto()
     GLUON_TEMPLATES = auto()
     REDUCE_TO_SINGLE_ELEMENT = auto()
+    INDIRECT_INDEXING = auto()
 
 
 def get_backend_features(

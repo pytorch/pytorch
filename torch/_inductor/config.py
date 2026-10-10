@@ -582,6 +582,11 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 incremental_autotune: bool | None = get_tristate_env(
     "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
 )
+# Per-state dispatch budget for incremental autotuning; 0 disables the cap.
+# A torch.compile option overrides this default for every generated kernel.
+incremental_autotune_max_dispatches = int(
+    os.getenv("TORCHINDUCTOR_INCREMENTAL_AUTOTUNE_MAX_DISPATCHES", 200)
+)
 
 inductor_default_autotune_warmup = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_WARMUP", 25)
@@ -822,6 +827,8 @@ cutedsl_enable_autotuning: bool = (
     os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
 )
 
+# Search every tile the vendored FlyDSL kernels implement instead of taking
+# the kernel's own analytic pick.
 flydsl_enable_autotuning: bool = os.environ.get("FLYDSL_ENABLE_AUTOTUNING", "0") == "1"
 
 # Emit Proton instrumentation scopes in generated Gluon kernels, for

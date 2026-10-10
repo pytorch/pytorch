@@ -15,7 +15,11 @@ from pathlib import Path
 from triton import runtime
 
 import torch
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import (
+    ensure_cute_available,
+    ensure_nv_universal_gemm_available,
+    run_and_get_code,
+)
 
 
 def is_blackwell():
@@ -247,7 +251,33 @@ def _maybe_wrap_cuda_graph(fn, label, use_cuda_graphs):
         return fn
 
 
-BACKEND_CHOICES = ["aten", "triton", "cutedsl", "gluon"]
+BACKEND_CHOICES = ["aten", "triton", "cutedsl", "nvgemm", "gluon"]
+
+
+def _has_gluon():
+    try:
+        from triton.experimental import gluon  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _available_backends(backends):
+    missing = {
+        "cutedsl": (ensure_cute_available, "CuTeDSL (cutlass) not installed"),
+        "nvgemm": (
+            ensure_nv_universal_gemm_available,
+            "cutlass.operators not installed",
+        ),
+        "gluon": (_has_gluon, "Triton has no Gluon support"),
+    }
+    available = []
+    for b in backends:
+        if b in missing and not missing[b][0]():
+            print(f"Skipping {b}: {missing[b][1]}")
+        else:
+            available.append(b)
+    return available
 
 
 def _autotune_winning_config(A, B, offs):
@@ -475,7 +505,7 @@ def _print_results(results):
         f"A: {first['A dim']}d {first['A layout']}, B: {first['B dim']}d {first['B layout']}"
         " | us = median time, x = speedup over ATen"
     )
-    names = ("ATen", "Triton", "CuTeDSL", "Gluon")
+    names = ("ATen", "Triton", "CuTeDSL", "NVGEMM", "Gluon")
     shape = {k: [r[k] for r in results] for k in ("G", "M", "N", "K")}
     nan = float("nan")
 
@@ -527,8 +557,7 @@ def benchmark_grouped_mm(
 
         AsyncCompile.warm_pool()
         AsyncCompile.wait_pool_ready()
-    if backends is None:
-        backends = BACKEND_CHOICES
+    backends = _available_backends(backends or BACKEND_CHOICES)
 
     device = "cuda"
     if dtype is None:
@@ -725,6 +754,58 @@ def benchmark_grouped_mm(
                 done.append("cutedsl")
                 _save_progress(result_file, done, result)
 
+            nvgemm_layout = a_dim == 2 and b_dim == 3 and a_k_major and b_k_major
+            if nvgemm_layout and "nvgemm" in backends:
+                try:
+                    torch._dynamo.reset()
+                    compile_start = time.perf_counter()
+                    compiled_nvgemm = torch.compile(
+                        torch._grouped_mm,
+                        options={
+                            "max_autotune": True,
+                            "max_autotune_gemm_backends": "NVGEMM",
+                        },
+                        dynamic=False,
+                    )
+                    fn_nvgemm = lambda: compiled_nvgemm(  # noqa: E731
+                        A, B.transpose(-2, -1), offs
+                    )
+                    if timing_details:
+                        result["NVGEMM compile (s)"] = _first_call_seconds(
+                            fn_nvgemm, compile_start
+                        )
+                    bench_nvgemm = _do_bench_cuda(
+                        _maybe_wrap_cuda_graph(fn_nvgemm, "nvgemm", use_cuda_graphs),
+                        warmup=warmup,
+                        rep=rep,
+                        cooldown_seconds=cooldown_seconds,
+                    )
+                    us_nvgemm = bench_nvgemm["median_us"]
+                    tflops_nvgemm = flops * 1e-12 / (us_nvgemm * 1e-6)
+                    print(
+                        f"  NVGEMM: {us_nvgemm:.2f} us ({tflops_nvgemm:.2f} TFLOPS; "
+                        f"min={bench_nvgemm['min_us']:.2f}, "
+                        f"max={bench_nvgemm['max_us']:.2f})"
+                    )
+                    result["NVGEMM (us)"] = us_nvgemm
+                    if us_aten is not None:
+                        result["NVGEMM speedup"] = us_aten / us_nvgemm
+
+                    try:
+                        C_nvgemm = compiled_nvgemm(A, B.transpose(-2, -1), offs)
+                        torch.testing.assert_close(
+                            C_nvgemm, C_ref, rtol=rtol, atol=atol
+                        )
+                        print("  ✓ NVGEMM correctness check passed")
+                    except AssertionError:
+                        print("  ✗ NVGEMM correctness check FAILED")
+                except Exception as e:
+                    print(f"  NVGEMM: Failed ({e})")
+                gc.collect()
+                torch.cuda.empty_cache()
+                done.append("nvgemm")
+                _save_progress(result_file, done, result)
+
             if "gluon" in backends:
                 try:
                     torch._dynamo.reset()
@@ -826,7 +907,7 @@ def _benchmark_isolated(gmnk, backends, child_args, layout):
                         f"  {remaining.pop(0)}: crashed the benchmark process (exit {rc}), skipped\n",
                         flush=True,
                     )
-            for b in ("Triton", "CuTeDSL", "Gluon"):
+            for b in ("Triton", "CuTeDSL", "NVGEMM", "Gluon"):
                 if "ATen (us)" in merged and f"{b} (us)" in merged:
                     merged[f"{b} speedup"] = merged["ATen (us)"] / merged[f"{b} (us)"]
             results.append(merged)
@@ -1055,7 +1136,10 @@ if __name__ == "__main__":
             "B layout": _major_label(b_k_major, "n"),
         }
         _benchmark_isolated(
-            gmnk or _default_gmnk(a_dim, b_dim), args.backends, child_args, layout
+            gmnk or _default_gmnk(a_dim, b_dim),
+            _available_backends(args.backends),
+            child_args,
+            layout,
         )
         sys.exit(0)
     benchmark_grouped_mm(
