@@ -221,6 +221,17 @@ cpp_wrapper_build_separate: bool = (
 
 fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
 
+# Emit a python wrapper meant to be READ and hand-edited rather than only executed:
+# Triton kernels are defined at module level as ordinary code instead of as source
+# strings handed to AsyncCompile. This trades compile throughput for legibility --
+# hoisted kernels compile serially, in process, on first launch instead of fanning out
+# to the worker pool -- so it is for artifacts a person tunes
+# (torch.compiler.export_python), not for a normal compile. Hoisted kernels also all
+# carry the wrapper's __file__ as their filename, so they share one autotune-cache key
+# and that cache is effectively off in this mode (its configs_hash check keeps a wrong
+# config from being applied). User-defined @triton.jit kernels stay source strings.
+readable_wrapper: bool = os.environ.get("TORCHINDUCTOR_READABLE_WRAPPER", "0") == "1"
+
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
@@ -2264,6 +2275,12 @@ class triton:
     # whether they should be unique.
     unique_kernel_names = (
         os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES", "1") == "1"
+    )
+
+    # Define each Triton kernel, generated or user-defined, as module-level code in the
+    # python wrapper instead of as a source string passed to async_compile.triton.
+    module_level_kernels: bool = (
+        os.environ.get("TORCHINDUCTOR_MODULE_LEVEL_KERNELS", "1") == "1"
     )
 
     # similar to the option above, but this is specific to user defined kernels,
