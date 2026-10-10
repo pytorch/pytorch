@@ -1448,6 +1448,7 @@ _GENERATED_HEADER = """\
 # companion cache. You provide the model(s) at runtime, exactly as the original fn
 # took them, e.g.:
 #
+#     import runpy
 #     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
@@ -1707,6 +1708,7 @@ _EAGER_GENERATED_HEADER = """\
 # the human-readable rendering and the executable code) and runs on its own. Provide
 # the model(s) at runtime, exactly as the original fn took them:
 #
+#     import runpy
 #     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
@@ -1805,6 +1807,7 @@ _MULTIGRAPH_GENERATED_HEADER = """\
 # frame Dynamo compiled -- the entry frame plus each continuation -- with one guard tree
 # per captured variant, and dispatches among them at call time:
 #
+#     import runpy
 #     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the captured callable
 #
@@ -2334,15 +2337,9 @@ def _make_inlined_forward(
             "exec python_code you produced or otherwise trust (Note [precompile "
             "programming model], invariant 7)."
         )
-    from torch._inductor.codecache import PyCodeCache
+    from torch._inductor.codecache import exec_from_cache_file
 
-    # A module-level Triton kernel reads its source back from the module's file.
-    _, path = PyCodeCache.write(python_code)
-    module_ns: dict[str, object] = {
-        "__name__": "_precompiled_artifact",
-        "__file__": path,
-    }
-    exec(compile(python_code, path, "exec"), module_ns)
+    module_ns = exec_from_cache_file(python_code, "_precompiled_artifact")
     return cast("Callable[..., object]", module_ns["forward"])
 
 

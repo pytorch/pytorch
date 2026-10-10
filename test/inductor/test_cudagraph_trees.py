@@ -6560,13 +6560,16 @@ if HAS_CUDA_AND_TRITON:
                 compiled_out, code = run_and_get_code(compiled_foo, x)
                 self.assertEqual(eager_out, compiled_out)
 
-                # The python wrapper keeps the compile-time auto-tuning block out of
-                # the module, and partition 2 reuses partition 1's fused triton kernel.
+                # Each kernel is defined once: partition 2 reuses partition 1's
+                # triton kernel, and the module has no compile-time autotune block.
                 FileCheck().check_count(
                     "Compile-time auto-tuning block", 0, exactly=True
                 ).run(code[0])
                 FileCheck().check_count(
                     "def triton_poi_fused_add_", 1, exactly=True
+                ).run(code[0])
+                FileCheck().check_count(
+                    "cpp_fused__to_copy_add_1 = ", 1, exactly=True
                 ).run(code[0])
 
         @unittest.skipUnless(
