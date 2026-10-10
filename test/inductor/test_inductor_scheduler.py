@@ -921,31 +921,26 @@ class TestScheduler(TestCase):
             ]
         )
         cases = [
-            (None, [row], False, False),
+            (None, [row], False),
             # Across epilogue subtiles.
-            ((128, 32, 2), [row], False, True),
-            # Meta automatic warp specialization rejects subtiled reductions.
-            ((128, 32, 2), [row], True, False),
+            ((128, 32, 2), [row], True),
             # A row result is only complete after the last subtile.
-            ((128, 32, 2), [row, reader], False, False),
-            ((128, N, 1), [row, reader], False, True),
+            ((128, 32, 2), [row, reader], False),
+            ((128, N, 1), [row, reader], True),
             # Across column tiles, only reductions that finish from partials fit.
-            ((128, 32, 1), [row], False, False),
+            ((128, 32, 1), [row], False),
             # A column read: (M, N) matches (N, M), but the read isn't row-major.
-            ((128, N, 1), [reduction(x + N * r)], False, False),
-            ((128, N, 1), [reduction(N * x + r, group=(M * N, 1))], False, False),
-            ((128, N, 1), [row], False, True),
+            ((128, N, 1), [reduction(x + N * r)], False),
+            ((128, N, 1), [reduction(N * x + r, group=(M * N, 1))], False),
+            ((128, N, 1), [row], True),
         ]
         with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
-            for tile, nodes, meta_ws, expected in cases:
-                with patch(
-                    "torch._inductor.codegen.simd.meta_ws_enabled", return_value=meta_ws
-                ):
-                    self.assertEqual(
-                        tile_fits_reduction_epilogue(tile, template, nodes),
-                        expected,
-                        (tile, [node.read_writes.reads for node in nodes], meta_ws),
-                    )
+            for tile, nodes, expected in cases:
+                self.assertEqual(
+                    tile_fits_reduction_epilogue(tile, template, nodes),
+                    expected,
+                    (tile, [node.read_writes.reads for node in nodes]),
+                )
 
     def _mock_reduction_epilogue_snode(self, name, reads, group, reduction=False):
         node = Mock(spec=SchedulerNode)
@@ -1262,13 +1257,15 @@ class TestScheduler(TestCase):
             template_removed=False,
             columns=False,
             reads_tile=False,
+            tma_load=False,
+            readers=1,
         ):
             kernel = Mock(
                 meta={"BLOCK_M": 128, "BLOCK_N": 128},
                 input_nodes=[Mock(), Mock()],
                 prefix_args=0,
                 suffix_args=0,
-                tma_load_for_template_epilogue=False,
+                tma_load_for_template_epilogue=tma_load,
             )
             kernel._staged_tile_elems.return_value = 128 * 128
             kernel._full_tile_epilogue_outputs.return_value = (outputs, plain)
@@ -1287,6 +1284,15 @@ class TestScheduler(TestCase):
             read.name = "e"
             read.get_numel.return_value = 128 * (128 if reads_tile else 1)
             reduction.read_writes.reads = [read]
+            # More epilogue nodes reading the same buffer.
+            others = [
+                Mock(
+                    is_reduction=Mock(return_value=False),
+                    get_buffer_names=Mock(return_value=[f"p{i}"]),
+                    read_writes=Mock(reads=[read]),
+                )
+                for i in range(readers - 1)
+            ]
             template_node = Mock()
             template_node.node.get_size.return_value = [128, 128]
             graph.try_get_buffer.return_value = Mock(
@@ -1307,7 +1313,7 @@ class TestScheduler(TestCase):
             ):
                 return list(
                     TritonTemplateKernel._tma_store_epilogue_outputs(
-                        kernel, template_node, [reduction]
+                        kernel, template_node, [reduction, *others]
                     )
                 )
 
@@ -1322,6 +1328,23 @@ class TestScheduler(TestCase):
         # So does reading a full-tile input in the epilogue.
         self.assertEqual(kept([("a", fp32)], [], 81919, reads_tile=True), [])
         self.assertEqual(kept([("a", fp32)], [], 81920, reads_tile=True), ["a"])
+        # A TMA-loaded input stages one bf16 tile, however many nodes read it.
+        for readers in (1, 2):
+            self.assertEqual(
+                kept(
+                    [("a", fp32)],
+                    [],
+                    114688,
+                    reads_tile=True,
+                    tma_load=True,
+                    readers=readers,
+                ),
+                ["a"],
+            )
+        self.assertEqual(
+            kept([("a", fp32)], [], 114687, reads_tile=True, tma_load=True, readers=2),
+            [],
+        )
         # A removed template output frees its staging, unless a column pass
         # keeps it, and the column pass stages a transposed subtile.
         self.assertEqual(kept([("a", fp32)], [], 40000, template_removed=True), ["a"])
