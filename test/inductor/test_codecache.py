@@ -100,7 +100,6 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     parametrize,
     skipIfCppFakeTensor,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
