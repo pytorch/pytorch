@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -49,6 +50,10 @@ class TestHwClassificationLinter(unittest.TestCase):
             msgs = self._run(src)
         self.assertEqual(msgs, [])
         self.assertTrue(any("Failed to parse" in m for m in captured.output))
+
+    def test_unreadable_file_raises(self) -> None:
+        with self.assertRaises(OSError):
+            check_file(str(REPO_ROOT / "test" / "test_does_not_exist.py"))
 
     def test_error_msg_defaults(self) -> None:
         """Pin error_msg defaults so tests don't silently inherit a wrong severity/code."""
@@ -296,38 +301,39 @@ class TestHwClassificationLinter(unittest.TestCase):
             ),
         )
 
-    def test_generic_forbidden_accelerator_availability(self) -> None:
-        """GENERIC classes must not branch on accelerator availability."""
+    def test_generic_forbidden_accelerator_api(self) -> None:
         for check in (
             "torch.cuda.is_available()",
             "torch.backends.mps.is_available()",
+            "torch.cuda.synchronize()",
+            "torch.cuda.device_count()",
+            "torch.xpu.empty_cache()",
         ):
             src = f"""\
                 from torch.testing._internal.common_utils import HardwareClassification, TestCase
                 class TestFoo(TestCase):
                     hw_classification = HardwareClassification.GENERIC
                     def test_x(self):
-                        if not {check}:
-                            self.skipTest("no accelerator")
+                        {check}
             """
             msgs = self._run(src)
             self.assertEqual(len(msgs), 1, f"failed for {check}")
             self.assertEqual(
                 msgs[0],
                 error_msg(
-                    name="[accelerator_availability]",
+                    name="[accelerator_api]",
                     path=msgs[0].path,
                     line=5,
                     description=(
-                        f"Test class 'TestFoo' ({HC.GENERIC.value}): must not check "
-                        f"accelerator availability in 'TestFoo.test_x': '{check}'."
-                        f"\nSee the 'accelerator_availability' rule summary in "
+                        f"Test class 'TestFoo' ({HC.GENERIC.value}): must not use "
+                        f"accelerator API '{check}' in 'TestFoo.test_x'."
+                        f"\nSee the 'accelerator_api' rule summary in "
                         f"tools/linter/adapters/test_linter.py for details."
                     ),
                 ),
             )
 
-    def test_generic_accelerator_availability_in_setup(self) -> None:
+    def test_generic_accelerator_api_in_setup(self) -> None:
         """The whole class body is scanned, and non-test methods are named."""
         src = """\
             from torch.testing._internal.common_utils import HardwareClassification, TestCase
@@ -343,14 +349,40 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(
             msgs[0],
             error_msg(
-                name="[accelerator_availability]",
+                name="[accelerator_api]",
                 path=msgs[0].path,
                 line=5,
                 description=(
-                    f"Test class 'TestFoo' ({HC.GENERIC.value}): must not check "
-                    f"accelerator availability in 'TestFoo.setUp': "
-                    f"'torch.cuda.is_available()'."
-                    f"\nSee the 'accelerator_availability' rule summary in "
+                    f"Test class 'TestFoo' ({HC.GENERIC.value}): must not use "
+                    f"accelerator API 'torch.cuda.is_available()' in 'TestFoo.setUp'."
+                    f"\nSee the 'accelerator_api' rule summary in "
+                    f"tools/linter/adapters/test_linter.py for details."
+                ),
+            ),
+        )
+
+    def test_generic_accelerator_api_in_class_decorator(self) -> None:
+        """Class-level decorators are scanned too, not just the class body."""
+        src = """\
+            from torch.testing._internal.common_utils import HardwareClassification, TestCase
+            import unittest
+            @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+            class TestFoo(TestCase):
+                hw_classification = HardwareClassification.GENERIC
+                def test_x(self): pass
+        """
+        msgs = self._run(src)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(
+            msgs[0],
+            error_msg(
+                name="[accelerator_api]",
+                path=msgs[0].path,
+                line=3,
+                description=(
+                    f"Test class 'TestFoo' ({HC.GENERIC.value}): must not use "
+                    f"accelerator API 'torch.cuda.is_available()' in 'TestFoo'."
+                    f"\nSee the 'accelerator_api' rule summary in "
                     f"tools/linter/adapters/test_linter.py for details."
                 ),
             ),
@@ -587,7 +619,7 @@ class TestHwClassificationLinter(unittest.TestCase):
                 "hw_classification",
                 "device_param",
                 "instantiation",
-                "accelerator_availability",
+                "accelerator_api",
                 "decorator",
                 "only_for",
             },
@@ -614,8 +646,67 @@ class TestHwClassificationLinter(unittest.TestCase):
             "tools/test/test_test_linter.py",
             "test/cpython/test_foo.py",
             "test/cpp_extensions/open_registration_extension/test_foo.py",
+            "test/package/test_trace_dep/__init__.py",
         ):
             self.assertFalse(test_linter._is_test_file(path_in_repo(name)), name)
+
+    def test_is_test_file_agrees_with_discovery(self) -> None:
+        """Every file _discover_files() returns must satisfy _is_test_file().
+
+        Otherwise a file is linted in normal runs but invisible to
+        --regenerate, so it can neither be allowlisted nor kept out of it.
+        """
+        discovered = {
+            path.relative_to(REPO_ROOT).as_posix()
+            for path in test_linter._discover_files()
+        }
+        self.assertNotIn("test/package/test_trace_dep/__init__.py", discovered)
+        for rel_path in discovered:
+            self.assertTrue(
+                test_linter._is_test_file(str(REPO_ROOT / rel_path)), rel_path
+            )
+
+    def test_regenerate_writes_only_failing_files(self) -> None:
+        """_regenerate_allowlist rebuilds the file from actual lint results.
+
+        It clears the module-global _allowlist and writes ALLOWLIST_PATH, so
+        both are patched: otherwise the real allowlist file gets overwritten
+        and the global stays empty for the rest of the run.
+        """
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "test")) as td:
+            root = Path(td)
+            passing = root / "test_regenerate_passing.py"
+            failing = root / "test_regenerate_failing.py"
+            # Only the AST is inspected, so the source needs no imports.
+            _write(
+                passing,
+                textwrap.dedent(
+                    """\
+                    class TestPassing:
+                        hw_classification = HardwareClassification.GENERIC
+                        def test_x(self): pass
+                    """
+                ),
+            )
+            _write(failing, "class TestFailing:\n    def test_x(self): pass\n")
+
+            allowlist_path = root / "allowlist.json"
+            with (
+                mock.patch.object(test_linter, "ALLOWLIST_PATH", allowlist_path),
+                mock.patch.object(
+                    test_linter, "_discover_files", return_value=[passing, failing]
+                ),
+                mock.patch.object(test_linter, "_allowlist", {"test/stale.py"}),
+                mock.patch("builtins.print"),
+            ):
+                test_linter._regenerate_allowlist()
+
+            # The passing file is excluded, the failing one is listed, and the
+            # pre-existing stale entry is not carried over.
+            self.assertEqual(
+                json.loads(allowlist_path.read_text(encoding="utf-8")),
+                [failing.relative_to(REPO_ROOT).as_posix()],
+            )
 
     def test_regenerate_rejects_filenames(self) -> None:
         """--regenerate discovers test files itself, so filenames are rejected."""
