@@ -1804,12 +1804,33 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(compiled, eager)
         self.assertEqual(cnt.frame_count, 1)
 
-    def _assert_requires_grad_leak_graph_break(self):
+    def _compile_with_requires_grad_leak_graph_break(
+        self, fn, *args, ctx=contextlib.nullcontext
+    ):
+        """Assert fn is refused under fullgraph, then compile it without
+        fullgraph, check it graph-breaks once at requires_grad_(), and return
+        its result."""
+        with (
+            ctx(),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "returning intermediate with requires_grad_\\(\\)",
+            ),
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(*args)
+
+        torch._dynamo.reset()
+        counters.clear()
+        cnt = CompileCounterWithBackend("aot_eager")
+        with ctx():
+            result = torch.compile(fn, backend=cnt)(*args)
+        self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertIn(
             "requires_grad_() intermediate leaked as output",
             next(iter(counters["graph_break"])),
         )
+        return result
 
     @parametrize("via", ("setattr", "method"))
     def test_requires_grad_output_differentiable_wrt_params_single_graph(self, via):
@@ -1954,7 +1975,7 @@ class GraphModule(torch.nn.Module):
         eager_grads = {name: p.grad.clone() for name, p in mod.named_parameters()}
 
         mod.zero_grad()
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = CompileCounterWithBackend("aot_eager")
         energy, force = torch.compile(energy_and_force, backend=cnt, fullgraph=True)(x)
         self.assertTrue(force.requires_grad)
         force.pow(2).sum().backward()
@@ -1978,7 +1999,7 @@ class GraphModule(torch.nn.Module):
         eager_grad = w0.grad
 
         w0.grad = None
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = CompileCounterWithBackend("aot_eager")
         torch.compile(fn, backend=cnt, fullgraph=True)(x, w0 * 2).backward()
         self.assertEqual(w0.grad, eager_grad)
         self.assertEqual(cnt.frame_count, 1)
@@ -2013,21 +2034,12 @@ class GraphModule(torch.nn.Module):
             return h.sum(), y * 2
 
         x = torch.randn(2, 4)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "returning intermediate with requires_grad_\\(\\)",
-        ):
-            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
-
-        torch._dynamo.reset()
-        counters.clear()
         eager_loss, eager_leaked = fn(x)
         eager_loss.backward()
         eager_grads = {name: p.grad.clone() for name, p in mod.named_parameters()}
 
         mod.zero_grad()
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        loss, leaked = torch.compile(fn, backend=cnt)(x)
+        loss, leaked = self._compile_with_requires_grad_leak_graph_break(fn, x)
         self.assertTrue(leaked.requires_grad)
         loss.backward()
 
@@ -2035,8 +2047,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(leaked, eager_leaked)
         for name, p in mod.named_parameters():
             self.assertEqual(eager_grads[name], p.grad)
-        self.assertEqual(cnt.frame_count, 2)
-        self._assert_requires_grad_leak_graph_break()
 
     @parametrize("via", ("setattr", "method"))
     def test_requires_grad_intermediate_leaked_output_unrelated_input_graph_breaks(
@@ -2054,28 +2064,17 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(4)
         w = torch.randn(4, requires_grad=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "returning intermediate with requires_grad_\\(\\)",
-        ):
-            torch.compile(fn, backend="aot_eager", fullgraph=True)(x, w)
-
-        torch._dynamo.reset()
-        counters.clear()
         eager_leaked, eager_loss = fn(x, w)
         eager_loss.backward()
         eager_grad = w.grad
 
         w.grad = None
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        leaked, loss = torch.compile(fn, backend=cnt)(x, w)
+        leaked, loss = self._compile_with_requires_grad_leak_graph_break(fn, x, w)
         self.assertTrue(leaked.requires_grad)
         loss.backward()
 
         self.assertEqual(leaked, eager_leaked)
         self.assertEqual(w.grad, eager_grad)
-        self.assertEqual(cnt.frame_count, 2)
-        self._assert_requires_grad_leak_graph_break()
 
     @parametrize("compiled_autograd", (False, True))
     def test_requires_grad_intermediate_hook_graph_breaks(self, compiled_autograd):
@@ -2095,40 +2094,30 @@ class GraphModule(torch.nn.Module):
             y.register_hook(hook)
             return mod(y).sum()
 
-        def compiled_autograd_ctx():
+        x = torch.randn(2, 4)
+        fn(x).backward()
+        eager_hook_grads = list(hook_grads)
+        eager_grads = {name: p.grad.clone() for name, p in mod.named_parameters()}
+
+        hook_grads.clear()
+        mod.zero_grad()
+
+        def ctx():
             if not compiled_autograd:
                 return contextlib.nullcontext()
             return torch._dynamo.compiled_autograd._enable(
                 torch.compile(backend="aot_eager")
             )
 
-        x = torch.randn(2, 4)
-        fn(x).backward()
-        eager_hook_grads = list(hook_grads)
-        eager_grads = {name: p.grad.clone() for name, p in mod.named_parameters()}
-
-        with compiled_autograd_ctx():
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported,
-                "returning intermediate with requires_grad_\\(\\)",
-            ):
-                torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
-
-        torch._dynamo.reset()
-        counters.clear()
-        hook_grads.clear()
-        mod.zero_grad()
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        with compiled_autograd_ctx():
-            torch.compile(fn, backend=cnt)(x).backward()
+        out = self._compile_with_requires_grad_leak_graph_break(fn, x, ctx=ctx)
+        with ctx():
+            out.backward()
 
         if compiled_autograd:
             self.assertEqual(len(eager_hook_grads), 1)
             self.assertEqual(hook_grads, eager_hook_grads)
         for name, p in mod.named_parameters():
             self.assertEqual(eager_grads[name], p.grad)
-        self.assertEqual(cnt.frame_count, 2)
-        self._assert_requires_grad_leak_graph_break()
 
     def test_requires_grad_intermediate_leaf_grad_assigned_graph_breaks(self):
         # g is assigned as the leaf's .grad. In eager a later backward of the
@@ -2145,20 +2134,8 @@ class GraphModule(torch.nn.Module):
         fn(x, eager_g).backward()
 
         g = torch.zeros(1, 4)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "returning intermediate with requires_grad_\\(\\)",
-        ):
-            torch.compile(fn, backend="aot_eager", fullgraph=True)(x, g)
-
-        torch._dynamo.reset()
-        counters.clear()
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        torch.compile(fn, backend=cnt)(x, g).backward()
-
+        self._compile_with_requires_grad_leak_graph_break(fn, x, g).backward()
         self.assertEqual(g, eager_g)
-        self.assertEqual(cnt.frame_count, 2)
-        self._assert_requires_grad_leak_graph_break()
 
     def test_requires_grad_intermediate_leaf_grad_escapes_graph_breaks(self):
         # y.grad, accumulated by an in-graph backward(), escapes. In eager a
@@ -2174,21 +2151,9 @@ class GraphModule(torch.nn.Module):
         eager_out, eager_grad = fn(x)
         eager_out.backward()
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "returning intermediate with requires_grad_\\(\\)",
-        ):
-            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
-
-        torch._dynamo.reset()
-        counters.clear()
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        out, grad = torch.compile(fn, backend=cnt)(x)
+        out, grad = self._compile_with_requires_grad_leak_graph_break(fn, x)
         out.backward()
-
         self.assertEqual(grad, eager_grad)
-        self.assertEqual(cnt.frame_count, 2)
-        self._assert_requires_grad_leak_graph_break()
 
     def test_requires_grad_setattr_graph_input_graph_breaks(self):
         def fn(x):
