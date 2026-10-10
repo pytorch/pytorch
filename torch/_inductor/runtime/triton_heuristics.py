@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import builtins
+import contextlib
 import copy
 import dataclasses
 import enum
@@ -43,10 +44,10 @@ from torch.utils._triton import get_triton_version, has_triton_stable_tma_api
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
+    forwarded_cuda_compile_options,
     get_importable_constexpr_types,
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
-    tlx_only_cuda_options,
     tlx_only_hip_options,
     TMA_ALIGNMENT,
     triton_version_uses_attrs_dict,
@@ -142,7 +143,7 @@ def _should_enable_triton_debug_asserts(inductor_meta: InductorMeta) -> bool:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Container, Hashable
+    from collections.abc import Callable, Container, Generator, Hashable
 
     from torch._C._profiler import _RecordFunctionFast
     from torch._guards import CompileId
@@ -475,6 +476,32 @@ def check_autotune_cache(
 DEFER: Final[object] = object()
 
 
+# Thread-local opt-out for plugins; see ``disable_caching_autotuner_plugins``.
+_plugin_suppression = threading.local()
+
+
+def caching_autotuner_plugins_suppressed() -> bool:
+    return getattr(_plugin_suppression, "value", False)
+
+
+@contextlib.contextmanager
+def disable_caching_autotuner_plugins() -> Generator[None, None, None]:
+    """Bypass ``CachingAutotuner`` plugins on the current thread.
+
+    Compile-time benchmarking needs exactly one launcher to time, but a plugin
+    such as incremental autotuning takes ownership of ``launchers`` until many
+    real invocations have run. Checked where plugins are consulted, not at
+    construction, because ``PyCodeCache.load`` can return an autotuner built
+    outside this context.
+    """
+    prev = caching_autotuner_plugins_suppressed()
+    _plugin_suppression.value = True
+    try:
+        yield
+    finally:
+        _plugin_suppression.value = prev
+
+
 class CachingAutotunerPlugin:
     """Base class for ``CachingAutotuner`` plugins.
 
@@ -803,6 +830,11 @@ class CachingAutotuner(KernelInterface):
         self.compile_id = compile_id
         self.is_backward = is_backward
 
+    def _active_plugins(self) -> list[CachingAutotunerPlugin]:
+        if caching_autotuner_plugins_suppressed():
+            return []
+        return self._plugins
+
     def precompile(
         self,
         warm_cache_only=False,
@@ -824,7 +856,7 @@ class CachingAutotuner(KernelInterface):
             # creation entirely. We return without running
             # ``_precompile_worker`` / ``_make_launchers`` /
             # ``_dynamic_scale_rblock``.
-            for plugin in self._plugins:
+            for plugin in self._active_plugins():
                 if plugin.pre_compile(self) is not DEFER:
                     return
             self._precompile_worker()
@@ -847,16 +879,14 @@ class CachingAutotuner(KernelInterface):
             raise NoTritonConfigsError("No triton configs are available")
 
         compile_results = []
-        exc = None
+        exc_msg = ""
         for c in self.configs:
             try:
                 compile_results.append(self._precompile_config(c))
             except (OutOfResources, PTXASError, IntelGPUError) as e:
-                exc = e
+                exc_msg = f"{type(e).__name__}: {e}"
         if len(compile_results) == 0:
-            raise NoTritonConfigsError(
-                f"No valid triton configs. {type(exc).__name__}: {exc}"
-            )
+            raise NoTritonConfigsError(f"No valid triton configs. {exc_msg}")
         self.compile_results = compile_results
         self.configs = None
 
@@ -1113,6 +1143,7 @@ class CachingAutotuner(KernelInterface):
                         )
                         and self.inductor_meta.get("dynamic_disable_pipelining", True)
                     ):
+                        log.debug("Retrying with num_stages=1 after: %s", exc)
                         self.launchers = [self.compile_by_disabling_pipelining(config)]
                         return
                     raise RuntimeError(
@@ -1337,7 +1368,7 @@ class CachingAutotuner(KernelInterface):
         compile_meta["device_type"] = self.device_props.type
         compile_meta["cc"] = self.device_props.cc
 
-        for k in tlx_only_cuda_options():
+        for k in forwarded_cuda_compile_options():
             if v := getattr(cfg, k, None):
                 compile_meta[k] = v
 
@@ -1356,6 +1387,9 @@ class CachingAutotuner(KernelInterface):
             "debug": compile_meta["debug"],
             "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
         }
+        # Backends without a maxnreg option drop it in parse_options.
+        if (maxnreg := getattr(cfg, "maxnreg", None)) is not None:
+            options["maxnreg"] = maxnreg
         if "enable_fp_fusion" in compile_meta:
             options["enable_fp_fusion"] = compile_meta["enable_fp_fusion"]
         if HAS_WARP_SPEC:
@@ -1378,7 +1412,7 @@ class CachingAutotuner(KernelInterface):
             )
             if compile_meta.get("disable_ftz", False):
                 options["enable_reflect_ftz"] = False
-            for k in tlx_only_cuda_options():
+            for k in forwarded_cuda_compile_options():
                 if v := getattr(cfg, k, None):
                     options[k] = v
         # Backend options are consumed by Triton out-of-band from the kernel
@@ -2528,7 +2562,7 @@ class CachingAutotuner(KernelInterface):
                 **self.configs[0].kwargs,
             )
 
-        for plugin in self._plugins:
+        for plugin in self._active_plugins():
             if (
                 result := plugin.pre_dispatch(self, *args, stream=stream, **kwargs)
             ) is not DEFER:
@@ -2540,7 +2574,7 @@ class CachingAutotuner(KernelInterface):
                 self.precompile()
                 self.precompile_time_taken_ns = time.time_ns() - start_time
             if len(self.launchers) > 1:
-                for plugin in self._plugins:
+                for plugin in self._active_plugins():
                     if (
                         result := plugin.pre_autotune(
                             self, *args, stream=stream, **kwargs
@@ -2609,6 +2643,10 @@ class CachingAutotuner(KernelInterface):
             and not debug_mode
             and not autograd_profiler._is_profiler_enabled
             and len(self.launchers) == 1
+            # The fast path skips save_gpu_kernel. A later AOTI compile that reuses
+            # this kernel must save its params again, because CudaKernelParamCache
+            # is keyed by kernel name and shared by every compile in the process.
+            and not launcher.store_cubin
         ):
             self._cached_launcher = self._build_fast_launcher(launcher) or launcher
         return result
@@ -3847,9 +3885,10 @@ def _enforce_reduction_config_block_minimums(
         return configs
 
     for cfg in configs:
-        if frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys():
+        if frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK", "R2_BLOCK")) & cfg.kwargs.keys():
             raise AssertionError(
-                f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
+                "min_xblock/min_rblock do not support YBLOCK, ZBLOCK, "
+                f"R1_BLOCK, or R2_BLOCK configs: {cfg}"
             )
         has_xblock = "XBLOCK" in cfg.kwargs
         has_rblock = "R0_BLOCK" in cfg.kwargs
@@ -5146,7 +5185,7 @@ def template(
             if k in triton_meta:
                 config_kwargs[k] = triton_meta[k]
 
-    for k in tlx_only_cuda_options():
+    for k in forwarded_cuda_compile_options():
         if v := triton_meta.get(k, None):
             config_args[k] = v
 
@@ -5183,6 +5222,10 @@ def config_to_dict(config: Config) -> dict[str, Any]:
         "num_warps": config.num_warps,
         "num_stages": config.num_stages,
     }
+    # config_from_dict pops maxnreg back out (_pop_config_kwargs), so it must
+    # survive the round trip or a user config's register cap silently vanishes.
+    if getattr(config, "maxnreg", None) is not None:
+        config_dict["maxnreg"] = config.maxnreg
     if HAS_WARP_SPEC:
         config_dict.update(
             {

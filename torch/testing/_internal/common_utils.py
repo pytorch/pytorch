@@ -184,6 +184,7 @@ SLOW_TESTS_FILE = ""
 TEST_BAILOUTS = False
 TEST_DISCOVER = False
 TEST_IN_SUBPROCESS = False
+TEST_SAVE_TORCHCI_REPORTS = ""
 TEST_SAVE_XML = ""
 UNITTEST_ARGS : list[str] = []
 USE_PYTEST = False
@@ -270,6 +271,10 @@ class TestEnvironment:
     # Specifically, this includes env vars that are set to non-default values and
     # are not implied. Maps from env var name -> value (int)
     repro_env_vars: dict = {}
+    # Every include_in_repro env var's value as set, unparsed ("" if unset); an unset
+    # flag that's on anyway (by default or implication) is "1". Read by
+    # torchci/environment.py.
+    env_var_values: dict = {}
 
     # Defines a flag usable throughout the test suite, determining its value by querying
     # the specified environment variable.
@@ -285,7 +290,8 @@ class TestEnvironment:
     #         variable and unimplied. Default: False
     #     include_in_repro (bool): Indicates whether this flag should be included in the
     #         repro command that is output on test failure (i.e. whether it is possibly
-    #         relevant to reproducing the test failure). Default: True
+    #         relevant to reproducing the test failure), and in env_var_values, which test
+    #         run reports record as their flags. Default: True
     #     enabled_fn (Callable): Callable returning whether the flag should be enabled
     #         given the environment variable value and the default value. Default: Lambda
     #         requiring "0" to disable if on by default OR "1" to enable if off by default.
@@ -314,8 +320,10 @@ class TestEnvironment:
         if env_var_val is None:
             implied = implied_by_fn()
             enabled = enabled or implied
-        if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
-            TestEnvironment.repro_env_vars[env_var] = env_var_val
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = env_var_val or ("1" if enabled else "")
+            if (enabled != default) and not implied:
+                TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
         if name in globals():
@@ -337,7 +345,8 @@ class TestEnvironment:
     #         variable. Default: None
     #     include_in_repro (bool): Indicates whether this setting should be included in the
     #         repro command that is output on test failure (i.e. whether it is possibly
-    #         relevant to reproducing the test failure). Default: True
+    #         relevant to reproducing the test failure), and in env_var_values, which test
+    #         run reports record as their flags. Default: True
     #     parse_fn (Callable): Callable parsing the env var string. Default value just uses
     #         the string itself.
     @staticmethod
@@ -350,6 +359,8 @@ class TestEnvironment:
     ):
         value = default if env_var is None else os.getenv(env_var)
         value = parse_fn(value)
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = os.getenv(env_var) or ""
         if include_in_repro and (value != default):
             TestEnvironment.repro_env_vars[env_var] = value
 
@@ -409,6 +420,14 @@ IS_FBCODE: bool = TestEnvironment.def_flag(
 IS_REMOTE_GPU: bool = TestEnvironment.def_flag(
     "IS_REMOTE_GPU",
     env_var="PYTORCH_TEST_REMOTE_GPU",
+    include_in_repro=False,
+)
+# Drop tests that are already marked skipped when their class is defined, so
+# they are never collected. Only correct when tests are listed on the same kind
+# of machine that runs them, since skip conditions are often hardware checks.
+OMIT_SKIPPED_TESTS: bool = TestEnvironment.def_flag(
+    "OMIT_SKIPPED_TESTS",
+    env_var="PYTORCH_TEST_OMIT_SKIPPED",
     include_in_repro=False,
 )
 
@@ -767,7 +786,16 @@ def instantiate_parametrized_tests(generic_cls):
                 test = decorator(test)
 
             instantiate_test_helper(cls=generic_cls, name=full_name, test=test, param_kwargs=param_kwargs)
+    _omit_skipped_tests(generic_cls)
     return generic_cls
+
+
+def _omit_skipped_tests(cls) -> None:
+    if not OMIT_SKIPPED_TESTS:
+        return
+    for name, attr in list(vars(cls).items()):
+        if name.startswith("test") and getattr(attr, "__unittest_skip__", False):
+            delattr(cls, name)
 
 
 class subtest:
@@ -1140,6 +1168,7 @@ def parse_cmd_line_args():
     global TEST_BAILOUTS
     global TEST_DISCOVER
     global TEST_IN_SUBPROCESS
+    global TEST_SAVE_TORCHCI_REPORTS
     global TEST_SAVE_XML
     global UNITTEST_ARGS
     global USE_PYTEST
@@ -1157,6 +1186,7 @@ def parse_cmd_line_args():
     parser.add_argument('--save-xml', nargs='?', type=str,
                         const=_get_test_report_path(),
                         default=_get_test_report_path() if IS_CI else None)
+    parser.add_argument('--save-torchci-reports', type=str)
     parser.add_argument('--discover-tests', action='store_true')
     parser.add_argument('--log-suffix', type=str, default="")
     parser.add_argument('--run-parallel', type=int, default=1)
@@ -1198,6 +1228,7 @@ def parse_cmd_line_args():
     PYTEST_SINGLE_TEST = args.pytest_single_test
     TEST_DISCOVER = args.discover_tests
     TEST_IN_SUBPROCESS = args.subprocess
+    TEST_SAVE_TORCHCI_REPORTS = args.save_torchci_reports
     TEST_SAVE_XML = args.save_xml
     REPEAT_COUNT = args.repeat
     SHOWLOCALS = args.showlocals
@@ -1527,6 +1558,8 @@ def run_tests(argv=None):
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
             other_args += ['--save-xml', TEST_SAVE_XML]
+        if TEST_SAVE_TORCHCI_REPORTS:
+            other_args.append(f'--save-torchci-reports={TEST_SAVE_TORCHCI_REPORTS}')
         if HW_CLASSIFICATION is not None:
             other_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
 
@@ -1592,6 +1625,9 @@ def run_tests(argv=None):
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
             pytest_args.append(f'--junit-xml-reruns={test_report_path}')
+        if TEST_SAVE_TORCHCI_REPORTS:
+            prefix = os.path.join(TEST_SAVE_TORCHCI_REPORTS, sanitize_test_filename(argv[0]))
+            pytest_args += ['-p', 'torch.testing._internal.torchci.plugin', f'--torchci-report-prefix={prefix}']
         if PYTEST_SINGLE_TEST:
             pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]
 
@@ -2680,6 +2716,21 @@ def requires_cuda_p2p_access():
         "cuda p2p access is not available",
     )
 
+def requires_accelerator_p2p_access():
+    acc = torch.accelerator.current_accelerator(True)
+    if acc is not None and acc.type == "cuda":
+        return requires_cuda_p2p_access()
+    device_module = torch.get_device_module(acc) if acc is not None else None
+    can_access_peer = getattr(device_module, "can_device_access_peer", None)
+    num_devices = torch.accelerator.device_count()
+    p2p_access_available = can_access_peer is not None and num_devices >= 2 and all(
+        can_access_peer(i, j) for i in range(num_devices) for j in range(i + 1, num_devices)
+    )
+    return skip_but_pass_in_sandcastle_if(
+        not p2p_access_available,
+        "accelerator p2p access is not available",
+    )
+
 # Reverts the linalg backend back to default to make sure potential failures in one
 # test do not affect other tests
 def setLinalgBackendsToDefaultFinally(fn):
@@ -2890,6 +2941,23 @@ def skipIfNoXNNPACK(fn):
 def skipIfNoLapack(fn):
     return lazy_skip_if(lambda: not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
 
+def skipIfNoNativeAot(op, *, device="cuda"):
+    """Skip unless this op has native-AOT kernels embedded for the given device."""
+    def unavailable():
+        from torch._native.aot_manifest import get_coverage
+
+        coverage = get_coverage(op, "CUDA")
+        return (
+            coverage is None
+            or not torch.cuda.is_available()
+            or not coverage.is_available(torch.device(device))
+        )
+
+    return lazy_skip_if(
+        unavailable,
+        f"AOT kernels for {op} not embedded for {device}",
+    )
+
 def skipIfNotRegistered(op_name, message):
     """Wraps the decorator to hide the import of the `core`.
 
@@ -2937,8 +3005,8 @@ def requires_multigpu(fn):
     run under an internal test runner that has no pytest, where the skip alone
     is the whole behaviour.
     """
-    reason = "requires >= 2 GPUs"
-    skip = torch.cuda.device_count() < 2
+    reason = "requires >= 2 accelerators"
+    skip = torch.accelerator.device_count() < 2
 
     if isinstance(fn, type):
         if has_pytest:
@@ -3037,8 +3105,9 @@ def to_gpu(obj, type_map=None):
         if not obj.is_leaf:
             raise AssertionError("expected obj to be a leaf tensor")
         t = type_map.get(obj.dtype, obj.dtype)
+        device_type = torch.accelerator.current_accelerator(check_available=True).type
         with torch.no_grad():
-            res = obj.to(dtype=t, device="cuda", copy=True)
+            res = obj.to(dtype=t, device=device_type, copy=True)
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
@@ -3744,6 +3813,12 @@ class TestCase(expecttest.TestCase):
     # Undocumented feature in unittest
     _diffThreshold = sys.maxsize
     maxDiff = None
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Runs before class decorators, so a skipped parametrized template is
+        # removed before instantiate_parametrized_tests expands it.
+        _omit_skipped_tests(cls)
 
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
