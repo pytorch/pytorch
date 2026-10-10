@@ -2928,7 +2928,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
         return False
 
     # Custom fallback lowering
-    if node.target is aten.view_as_complex.default:
+    if node.target in (aten.view_as_complex.default, aten.view_as_complex_copy.default):
         return False
 
     if node.op == "placeholder":
@@ -3949,6 +3949,7 @@ make_fallback(aten.masked_scatter_backward)
 
 # Complex number support
 make_fallback(aten.view_as_complex, require_contiguous)
+make_fallback(aten.view_as_complex_copy, require_contiguous)
 make_fallback(aten.angle)  # needs complex
 
 # Needs Sparse
