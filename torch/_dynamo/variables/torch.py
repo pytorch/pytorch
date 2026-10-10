@@ -1917,6 +1917,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
+            trace_requires_grad = self._should_trace_factory_requires_grad(kwargs)
+            # Eager rejects a fill value that requires grad; `fill_` would instead
+            # tie the result to it. Let the generic path's fake call raise.
+            if trace_requires_grad and getattr(fill_value, "requires_grad", False):
+                return None
             if fill_value.is_tensor() and not issubclass(
                 fill_value.python_type(), torch.nn.Parameter
             ):
@@ -1931,11 +1936,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # `fill_` is in-place, so `requires_grad` can only go on after it.
                 if "requires_grad" in kwargs:
                     self._apply_factory_requires_grad(
-                        tx,
-                        result,
-                        [size, fill_value],
-                        kwargs,
-                        self._should_trace_factory_requires_grad(kwargs),
+                        tx, result, [size, fill_value], kwargs, trace_requires_grad
                     )
                 return result
             return None
@@ -3777,9 +3778,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             ):
                 fn_ = getattr(torch, torch_sym_op)
 
-        # TODO for the following check on `out=` variant torch ops, the original
-        # function could come from a user defined `@allow_in_graph` function as
-        # well, which doesn't have the same semantics as the torch ops.
+        # TODO for each of the following check on `out=` or `requires_grad=`
+        # variant torch ops, the original function could come from a user
+        # defined `@allow_in_graph` function as well, which doesn't have the
+        # same semantics as the torch ops.
 
         # Calling fake tensor propagation can mutate the out= tensor in
         # tx.output.tracked_fakes. tracked_fakes are used to apply

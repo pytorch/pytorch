@@ -1694,6 +1694,21 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(compiled, fn(v))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_full_fill_value_requiring_grad_is_an_eager_error(self):
+        def fn(v):
+            return torch.full((3,), v, requires_grad=True)
+
+        v = torch.tensor(1.5, requires_grad=True)
+        with self.assertRaisesRegex(TypeError, "must be Number, not Tensor"):
+            fn(v)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "TypeError when making fake tensor call"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(v)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(TypeError, "must be Number, not Tensor"):
+            torch.compile(fn, backend="eager")(v)
+
     def test_non_factory_keeps_kwarg(self):
         # Only tensor factories are rewritten: `requires_grad` reaches every
         # other callable untouched, so they behave exactly as in eager.
