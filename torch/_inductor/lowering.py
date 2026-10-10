@@ -2463,6 +2463,42 @@ def cat(inputs, dim=0):
     def additional_pointwise_ops(op: torch._ops.OpOverload):
         return op in (aten.cat.default, aten.constant_pad_nd.default)
 
+    def is_unrealized_pointwise(x):
+        if isinstance(x, (TensorBox, ir.StorageBox)):
+            return is_unrealized_pointwise(unwrap_tensor(x))
+        return isinstance(x, ir.Pointwise)
+
+    # Pointwise cat would recompute an unrealized input that has another
+    # pointwise consumer; ConcatKernel preserves that shared materialization.
+    def any_input_has_multi_consumers() -> bool:
+        current_node = V.current_node
+        if current_node is None:
+            return False
+        fx_args = current_node.args[0]
+        if isinstance(fx_args, (list, tuple)):
+            input_nodes = fx_args
+        elif isinstance(fx_args, torch.fx.Node):
+            input_nodes = [fx_args]
+        else:
+            return False
+
+        if any(skip_mask):
+            input_nodes = [n for n, skip in zip(input_nodes, skip_mask) if not skip]
+
+        for arg, ir_input in zip(input_nodes, inputs):
+            if not hasattr(arg, "users") or len(arg.users) <= 1:
+                continue
+            if any(is_pointwise_use(u) for u in arg.users if u is not current_node):
+                return True
+            if is_unrealized_pointwise(ir_input):
+                return True
+        return False
+
+    chunk_size = (
+        config.max_pointwise_cat_inputs
+        if config.pointwise_cat_chunk_size is None
+        else config.pointwise_cat_chunk_size
+    )
     if len(inputs) <= config.max_complex_pointwise_cat_inputs or (
         (len(inputs) <= config.max_pointwise_cat_inputs)
         and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
@@ -2480,44 +2516,6 @@ def cat(inputs, dim=0):
         # horizontal fuse in case all inputs will require a copy kernel anyway.
         # only horizontally fuse pointwise kernels
 
-        # Skip pointwise_cat when any cat input has a fusible (pointwise)
-        # multi-consumer — ConcatKernel + NonOwningLayout avoids redundant
-        # reads. Also skip when input is an unrealized Pointwise with
-        # multiple consumers to avoid recomputation (e.g. pad-as-cat).
-        def any_input_has_multi_consumers() -> bool:
-            current_node = V.current_node
-            if current_node is None:
-                return False
-            fx_args = current_node.args[0]
-            if isinstance(fx_args, (list, tuple)):
-                input_nodes = fx_args
-            elif isinstance(fx_args, torch.fx.Node):
-                input_nodes = [fx_args]
-            else:
-                return False
-
-            if any(skip_mask):
-                input_nodes = [n for n, skip in zip(input_nodes, skip_mask) if not skip]
-
-            def is_unrealized_pointwise(x):
-                if isinstance(x, (TensorBox, ir.StorageBox)):
-                    return is_unrealized_pointwise(unwrap_tensor(x))
-                return isinstance(x, ir.Pointwise)
-
-            for arg, ir_input in zip(input_nodes, inputs):
-                if not hasattr(arg, "users") or len(arg.users) <= 1:
-                    continue
-                # input will be computed multiple times because other consumers
-                # (eg. pointwise) will also inline it. So we should realize-in-place via ConcatKernel
-                if any(is_pointwise_use(u) for u in arg.users if u is not current_node):
-                    return True
-                # If input is an unrealized Pointwise with multiple consumers, pointwise_cat
-                # will inline input without realizing it to memory, causing separate
-                # realization cost for input. So we should realize-in-place via ConcatKernel
-                if is_unrealized_pointwise(ir_input):
-                    return True
-            return False
-
         has_multi_consumers = any_input_has_multi_consumers()
 
         horizontal_fuse_cat = (
@@ -2526,6 +2524,32 @@ def cat(inputs, dim=0):
 
         if not has_multi_consumers and (fuse_pointwise_use or horizontal_fuse_cat):
             return pointwise_cat(inputs, dim)
+
+    elif (
+        chunk_size > 1
+        and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
+        and not fusable_reduction
+        and not any_input_has_multi_consumers()
+    ):
+        # Only runs of unrealized pointwise inputs are grouped. Realized inputs
+        # stay direct ConcatKernel inputs, whose copies the scheduler already
+        # fuses horizontally into fewer launches than one pointwise cat per chunk.
+        runs = [
+            (fusable, list(group))
+            for fusable, group in itertools.groupby(inputs, is_unrealized_pointwise)
+        ]
+        if any(fusable and len(group) > 1 for fusable, group in runs):
+            grouped_inputs = []
+            for fusable, group in runs:
+                if not fusable:
+                    grouped_inputs.extend(group)
+                    continue
+                for start in range(0, len(group), chunk_size):
+                    chunk = group[start : start + chunk_size]
+                    grouped_inputs.append(
+                        pointwise_cat(chunk, dim) if len(chunk) > 1 else chunk[0]
+                    )
+            return TensorBox(ir.ConcatKernel.create(grouped_inputs, dim))
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
