@@ -2241,13 +2241,11 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
-        self.prefix.splice(
-            """
-
-            async_compile.wait(globals())
-            del async_compile
-            """
-        )
+        # Neither line is a use of async_compile: a module that compiles nothing has no
+        # need of either.
+        self.prefix.writelines(["", ""])
+        for line in ("async_compile.wait(globals())", "del async_compile"):
+            self.write_if_used(self.prefix, line, ("async_compile",))
 
     def write_args(self, input_names: list[str]):
         lhs = ", ".join(input_names)
@@ -3931,6 +3929,9 @@ class PythonWrapperCodegen(CodeGen):
         if not standalone:
             self.header.splice(body)
             return
+        # Run as a script, the module compiles its module-level kernels at
+        # async_compile.wait.
+        self.names_used_unscanned.add("async_compile")
         self.write_omitted_from_scan(self.header, body)
 
     def emit_triton_kernel_definition(
