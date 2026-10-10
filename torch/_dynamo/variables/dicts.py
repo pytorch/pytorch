@@ -57,7 +57,9 @@ from ..utils import (
     dict_items,
     dict_keys,
     dict_values,
+    get_fake_value,
     istype,
+    set_example_value,
     specialize_symnode,
     tracked_repr,
     unpack_iterable,
@@ -1171,7 +1173,19 @@ class FrozenDictVariable(VariableTracker):
         return self.python_type()(self.storage.as_python_constant())
 
     def as_proxy(self) -> Any:
-        return self.python_type()(self.storage.as_proxy())
+        from ..symbolic_convert import InstructionTranslator
+
+        self.check_reconstruction()
+        tx = InstructionTranslator.current_tx()
+        # FX cannot traverse frozendict aggregates; expose their dependencies as tuples.
+        items = tuple(
+            (key.vt.as_proxy(), value.as_proxy()) for key, value in self.items.items()
+        )
+        proxy = tx.output.create_proxy(
+            "call_function", self.python_type(), (items,), {}
+        )
+        set_example_value(proxy.node, get_fake_value(proxy.node, tx))
+        return proxy
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
