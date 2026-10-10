@@ -216,6 +216,16 @@ class TestModuleLevelKernels(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     @requires_cuda_and_triton
+    @parametrize("wrapper", ["cpp_wrapper", "fx_wrapper"])
+    def test_wrappers_that_keep_kernels_as_strings(self, wrapper):
+        # Both consume each kernel's async_compile.triton(...) source themselves.
+        x = torch.randn(64, 128, device="cuda")
+        torch._dynamo.reset()
+        with config.patch({wrapper: True, "triton.module_level_kernels": True}):
+            result = torch.compile(_softmax)(x)
+        self.assertEqual(result, _softmax(x))
+
+    @requires_cuda_and_triton
     @config.patch(compile_threads=1)
     def test_kernels_compile_serially_without_a_pool(self):
         x = torch.randn(64, 128, device="cuda")
