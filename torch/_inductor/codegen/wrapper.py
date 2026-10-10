@@ -4949,7 +4949,7 @@ class PythonWrapperCodegen(CodeGen):
             current_stream_idx=current_stream_idx,
         )
         module_fqn = V.graph._current_kernel_module_fqn
-        if module_fqn and config.triton.cudagraph_kernel_annotations and not V.graph.fx_wrapper:
+        if module_fqn and config.triton.cudagraph_kernel_annotations and not V.graph.cpp_wrapper and not V.graph.fx_wrapper:
             self.writeline(AnnotatedKernelCallLine(kernel_line, module_fqn))
         else:
             self.writeline(kernel_line)
