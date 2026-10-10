@@ -1125,9 +1125,9 @@ def export_python(
             to precompile or to load: an existing ``path`` is loaded as-is, even by a
             different ``fn`` or with a different ``backend``, ``tracer``,
             ``decompositions`` or ``example_inputs``. Loading any existing artifact
-            also warns before executing
-            it because ``path`` is trusted executable Python and may have been edited or
-            replaced. New files use the permissions selected by the process umask.
+            also warns before executing it because ``path`` is trusted executable
+            Python and may have been edited or replaced. New files use the
+            permissions selected by the process umask.
         backend: How the captured graph is realized: ``"inductor"`` (default) or
             ``"eager"``. Forwarded to the capture.
         tracer: Capture front-end; ``"make_fx"`` (default) is the only one
