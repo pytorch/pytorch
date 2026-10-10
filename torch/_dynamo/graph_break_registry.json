@@ -2095,6 +2095,36 @@
       ]
     }
   ],
+  "GB5716": [
+    {
+      "Gb_type": "Unsupported descriptor source",
+      "Context": "class __dict__ source",
+      "Explanation": "Dynamo cannot safely guard a method descriptor returned by a custom metaclass __dict__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4545": [
+    {
+      "Gb_type": "Hashing a newly bound builtin method",
+      "Context": "hash({self})",
+      "Explanation": "The method hash depends on runtime receiver and C-function identities.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB3051": [
+    {
+      "Gb_type": "builtin method comparison with undecidable identity",
+      "Context": "{self} {op} {other}",
+      "Explanation": "Dynamo cannot determine the C-function and receiver identities of these builtin methods.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
   "GB1472": [
     {
       "Gb_type": "classmethod of non-Python function",
@@ -4431,6 +4461,26 @@
       ]
     }
   ],
+  "GB9674": [
+    {
+      "Gb_type": "Bound builtin classmethod with custom metaclass",
+      "Context": "{descriptor.__qualname__} bound to a class with a custom metaclass",
+      "Explanation": "Dynamo cannot safely wrap the class receiver without invoking metaclass hooks.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1242": [
+    {
+      "Gb_type": "Unbound builtin method on unsupported subclass",
+      "Context": "{self.descriptor.__qualname__}({obj_type.__name__}, ...)",
+      "Explanation": "Dynamo cannot safely dispatch this C method descriptor through a modeled subclass.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0260": [
     {
       "Gb_type": "missing args to functools.partial",
@@ -4850,6 +4900,14 @@
     }
   ],
   "GB0279": [
+    {
+      "Gb_type": "torch.fx.traceback.annotate escaped from compiled region",
+      "Context": "str(self)",
+      "Explanation": "Dynamo can only resume torch.fx.traceback.annotate after a graph break when every annotation value is a constant it can embed in bytecode.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "torch.fx.traceback.annotate escaped from compiled region",
       "Context": "str(self)",
@@ -6792,6 +6850,17 @@
       "Explanation": "Dynamo does not support accessing `{name}` on `{vt.python_type_name()}` objects.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8504": [
+    {
+      "Gb_type": "Encountered mutation of an aliased input during higher order op tracing",
+      "Context": "context",
+      "Explanation": "Higher order ops do not support mutating an input that shares storage with another input. Found in {name}",
+      "Hints": [
+        "Clone one of the aliased inputs before the call, or stop mutating it.",
+        "Please open an issue."
       ]
     }
   ]

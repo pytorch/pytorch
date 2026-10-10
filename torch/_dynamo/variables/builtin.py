@@ -57,11 +57,13 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    DictGetItemSource,
     GetItemSource,
     GlobalSource,
     is_constant_source,
     LocalSource,
     Source,
+    TypeDictSource,
     TypeSource,
 )
 from ..utils import (
@@ -507,9 +509,19 @@ class BaseBuiltinVariable(VariableTracker):
         except AttributeError as e:
             raise_observed_exception(AttributeError, tx, args=list(e.args))
         if name == "__dict__":
-            # A type's __dict__ is a mappingproxy, not an instance dict; build it
-            # as UserDefinedClassVariable.resolve_meta_data_descriptor does.
-            return VariableTracker.build(tx, attr, source)
+            # Each access allocates a fresh mappingproxy. Keep sources on its
+            # immutable builtin-type entries, not on the allocation itself.
+            dict_source = self.source and TypeDictSource(self.source)
+            items: dict[VariableTracker, VariableTracker] = {}
+            for key, value in attr.items():
+                value_source = dict_source and DictGetItemSource(dict_source, key)
+                value_vt = (
+                    variables.LazyVariableTracker.create(value, value_source, tx=tx)
+                    if value_source
+                    else VariableTracker.build(tx, value)
+                )
+                items[ConstantVariable.create(key)] = value_vt
+            return variables.MappingProxyVariable(variables.ConstDictVariable(items))
         if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
             # Unbound C method read off a builtin type, e.g. list.count. Torch
             # types keep their trace-rule path through GetAttrVariable.
