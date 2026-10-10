@@ -1080,7 +1080,9 @@ class AsyncCompile:
         _set_triton_libdevice_path()
         pool = self.thread_pool()
         warm = partial(CachingAutotuner.precompile, warm_cache_only=True)
-        futures = {k: pool.submit(warm, v) for k, v in pending.items()}
+        futures: dict[str, Future[Any] | CodeCacheFuture] = {
+            k: pool.submit(warm, v) for k, v in pending.items()
+        }
         for key, _ in self._results(futures):
             pending[key].precompile()
 
