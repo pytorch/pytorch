@@ -255,6 +255,15 @@ class _TupleOwner:
         x: int
 
 
+class _MetaOwner:
+    class Meta(type):
+        pass
+
+
+class _WithNestedMeta(metaclass=_MetaOwner.Meta):
+    pass
+
+
 class _EnumOwner:
     class Level(enum.Enum):
         LOW = 1
@@ -1551,6 +1560,18 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertFalse(is_portable_identity_guard("ID_MATCH", (), member))
             GuardsStatePickler({}, {}, {}, {}, buf).dump({"perms": member})
         self.assertIs(load_guards_state(buf.getvalue())["perms"], member)
+
+    def test_a_main_class_resolves_against_the_loading_main(self):
+        main = sys.modules["__main__"]
+        cls = type("_MainOnly", (), {"__module__": "__main__"})
+        buf = io.BytesIO()
+        with mock.patch.object(main, "_MainOnly", cls, create=True):
+            self.assertTrue(is_portable_identity_guard("CLASS_MATCH", (), cls))
+            GuardsStatePickler({}, {}, {}, {}, buf).dump({"cls": cls})
+            self.assertIs(load_guards_state(buf.getvalue())["cls"], cls)
+        # A loading process whose __main__ does not define it fails the load.
+        with self.assertRaisesRegex(AttributeError, "_MainOnly"):
+            load_guards_state(buf.getvalue())
 
     def test_an_unguarded_grad_loads_as_none(self):
         # The .grad of a guarded leaf is a tensor the guard tree may not reach;
@@ -3753,6 +3774,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             # Its __qualname__ leads to _wrapped_target instead.
             (_wraps_wrapper, False),
             (_TupleOwner.Point, False),
+            # The guard-state pickler refuses a class with a nested metaclass.
+            (_WithNestedMeta, False),
             # Bound to the module's Random instance, with no __module__.
             (random.random, False),
             # pybind11: bound to an instance, so its __qualname__ names the
@@ -3951,6 +3974,26 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # a.shared is unguarded through a but guarded through b.
         ref, loaded = self._test_serialization(
             "CONSTANT_MATCH", fn, x, args["a"], args["b"]
+        )
+        self._test_check_fn(ref, loaded, inputs(3), True)
+        self._test_check_fn(ref, loaded, inputs(4), False)
+
+    def test_attribute_shared_with_an_object_pickled_whole_is_kept(self):
+        def fn(x, holder, wrapper):
+            return x * holder.scale + wrapper.scale
+
+        def inputs(scale):
+            wrapper = ReducedHolder(scale, {"mode": "eval"})
+            holder = LockHolder(2)
+            holder.cfg = wrapper.cfg
+            return {"x": x, "holder": holder, "wrapper": wrapper}
+
+        x = torch.randn(3)
+
+        # holder is pickled first and no guard reads holder.cfg, the very dict
+        # wrapper's __reduce__ passes to __init__ at load.
+        ref, loaded = self._test_serialization(
+            "CONSTANT_MATCH", fn, *inputs(3).values()
         )
         self._test_check_fn(ref, loaded, inputs(3), True)
         self._test_check_fn(ref, loaded, inputs(4), False)
