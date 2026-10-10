@@ -106,6 +106,7 @@ runner_mapping:
   linux.rocm.gpu.mi210.1: linux.rocm.gpu.mi210.1
   linux.rocm.gpu.mi210.2: linux.rocm.gpu.mi210.2
   linux.rocm.gpu.mi300.1: linux.rocm.gpu.mi300.1
+  linux.rocm.gpu.mi300.2: linux.rocm.gpu.mi300.2
   linux.rocm.gpu.mi300.4: linux.rocm.gpu.mi300.4
   linux.rocm.gpu.gfx950.1: linux.rocm.gpu.gfx950.1
   linux.rocm.gpu.gfx950.2: linux.rocm.gpu.gfx950.2
