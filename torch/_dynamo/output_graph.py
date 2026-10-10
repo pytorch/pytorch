@@ -763,9 +763,10 @@ class OutputGraph(OutputGraphCommon):
         # (e.g., nn.Parameter via tracable_create_parameter). These need to be
         # tracked separately from input_source_to_var for backward() auto-detection.
         self.leaf_var_creation_order: list[VariableTracker] = []
-        # Whether .grad was accumulated in-graph into a source-less leaf. Its
-        # .grad side effect may be pruned as dead, but the .grad can escape.
-        self.sourceless_leaf_grad_accumulated = False
+        # Whether a source-less leaf has a non-None .grad (from backward() or a
+        # direct assignment). Recorded before its .grad store is pruned as dead,
+        # since the .grad tensor itself can still escape.
+        self.sourceless_leaf_has_grad = False
         self.export = export
         self.export_constraints = export_constraints  # type: ignore[assignment]
         self.frame_state = frame_state
@@ -2132,6 +2133,14 @@ class OutputGraph(OutputGraphCommon):
 
             cur_tx = cur_tx.parent
 
+        self.sourceless_leaf_has_grad = any(
+            not v.source
+            and self.side_effects.has_pending_mutation_of_attr(v, "grad")
+            and not self.side_effects.load_attr(
+                v, "grad", deleted_ok=True
+            ).is_constant_none()
+            for v in self.leaf_var_creation_order
+        )
         # "Garbage collect the heap".
         self.side_effects.prune_dead_object_new(tx)
 
@@ -2807,12 +2816,13 @@ class OutputGraph(OutputGraphCommon):
         """Whether dropping the gradient edge into a source-less leaf is observable.
 
         A hook on a tainted tensor never fires if its gradient is only on the
-        dropped path. A .grad accumulated in-graph (e.g. by backward()) can
-        escape, and in eager a later backward would accumulate into it in place.
+        dropped path. A .grad set on the leaf in-graph (by backward() or a direct
+        assignment) can escape, and in eager a later backward would accumulate
+        into it in place.
         """
         from torch._higher_order_ops.register_hook import register_hook_op
 
-        return self.sourceless_leaf_grad_accumulated or any(
+        return self.sourceless_leaf_has_grad or any(
             n.meta.get("has_backward_hook") or n.target is register_hook_op
             for n in tainted_nodes
         )
@@ -2835,7 +2845,7 @@ class OutputGraph(OutputGraphCommon):
         stays differentiable and its backward into every graph input matches
         eager. The only edge dropped is the one into the source-less leaf, which
         is unobservable since the leaf itself is never let out (as an output it
-        reaches no graph input). Hooks and in-graph .grad accumulation can
+        reaches no graph input). Hooks and a .grad set on the leaf can
         observe it, so they keep the graph break (see _leaf_grad_edge_observable).
         This is the ``energy -> autograd.grad(create_graph=True) -> force`` pattern of
         force-supervised training, where the force is returned so that a loss
@@ -3745,7 +3755,7 @@ class OutputGraph(OutputGraphCommon):
         self.tracing_context.clear()
         self.input_source_to_var.clear()
         self.leaf_var_creation_order.clear()
-        self.sourceless_leaf_grad_accumulated = False
+        self.sourceless_leaf_has_grad = False
         self.unspec_variable_map.clear()
         self.backward_state.clear()
 

@@ -2130,6 +2130,36 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 2)
         self._assert_requires_grad_leak_graph_break()
 
+    def test_requires_grad_intermediate_leaf_grad_assigned_graph_breaks(self):
+        # g is assigned as the leaf's .grad. In eager a later backward of the
+        # output accumulates into g in place.
+        mod = torch.nn.Linear(4, 1)
+
+        def fn(x, g):
+            y = x.detach().requires_grad_()
+            y.grad = g
+            return mod(y).sum()
+
+        x = torch.randn(1, 4)
+        eager_g = torch.zeros(1, 4)
+        fn(x, eager_g).backward()
+
+        g = torch.zeros(1, 4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "returning intermediate with requires_grad_\\(\\)",
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x, g)
+
+        torch._dynamo.reset()
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        torch.compile(fn, backend=cnt)(x, g).backward()
+
+        self.assertEqual(g, eager_g)
+        self.assertEqual(cnt.frame_count, 2)
+        self._assert_requires_grad_leak_graph_break()
+
     def test_requires_grad_intermediate_leaf_grad_escapes_graph_breaks(self):
         # y.grad, accumulated by an in-graph backward(), escapes. In eager a
         # later backward of the first output accumulates into it in place.
