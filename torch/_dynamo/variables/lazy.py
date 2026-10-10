@@ -57,7 +57,7 @@ class LazyCache:
             self.vt.set_name_hint(self.name_hint)
 
         if self.source_location is not None and self.vt.source_location is None:
-            self.vt.set_source_location(self.source_location)
+            self.vt = self.vt.with_source_location(self.source_location)
 
         del self.value
         del self.source
@@ -119,7 +119,7 @@ class ComputedLazyCache:
         if self.name_hint is not None:
             self.vt.set_name_hint(self.name_hint)
         if self.source_location is not None and self.vt.source_location is None:
-            self.vt.set_source_location(self.source_location)
+            self.vt = self.vt.with_source_location(self.source_location)
 
 
 class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
@@ -223,12 +223,13 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         else:
             self._cache.name_hint = name
 
-    def set_source_location(self, source_location: SourceLocation) -> None:
+    def with_source_location(self, source_location: SourceLocation) -> VariableTracker:
         self.source_location = source_location
         if self.is_realized():
-            self._cache.vt.set_source_location(source_location)  # type: ignore[union-attr]
+            self._cache.vt = self._cache.vt.with_source_location(source_location)  # type: ignore[union-attr]
         else:
             self._cache.source_location = source_location
+        return self
 
     def __str__(self) -> str:
         variable_info = "LazyVariableTracker("
