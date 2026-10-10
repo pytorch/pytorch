@@ -1145,8 +1145,9 @@ def export_python(
         ``torch._inductor.config.cpp.simdlen`` and ``ATEN_CPU_CAPABILITY`` change
         the ISA on one machine, so they count as part of the machine type, and an
         artifact containing a C++ kernel records the ISA it was generated against
-        and refuses to load under any other. Running a CUDA artifact on a different
-        architecture fails with a kernel-image error. Commit an artifact only
+        and refuses to load under a different vector width or an ISA lacking one of
+        its features. Running a CUDA artifact on a different architecture fails
+        with a kernel-image error. Commit an artifact only
         alongside the machine type it captured on, and regenerate (delete ``path``)
         when that changes; apart from the CPU ISA, nothing detects the change for
         you.
@@ -1171,20 +1172,23 @@ def export_python(
     and the ambient ``torch.autocast`` state (which picks the dtypes the kernels were
     built for, for every device type the artifact's own source names, not only the ones
     its inputs live on; any difference raises, even for a graph with no op autocast
-    would cast), and the ambient globals the generated code resolves against rather than
-    re-reads: the default dtype and device a factory op with no explicit argument takes,
-    and whether deterministic algorithms were enabled when inductor chose between a
-    deterministic and an atomic lowering (checked one-way -- capturing with determinism
-    on and calling with it off is safe, the reverse is not), and, for an artifact
-    containing a C++ kernel, the CPU vector ISA it was generated against (the vector
-    width is baked into the loop strides while the ISA is re-picked at compile time, so
-    a narrower host would leave part of the output uninitialized with no error at all --
-    this one is checked once at load, before the kernel compiles, and refuses to load
-    rather than warning). What is *not* guarded is a change in *how* two aliased inputs
-    overlap: when capture and the call both pass intersecting views, the artifact runs
-    with capture's relative offsets baked in and may compute the wrong thing.
-    ``torch.compile`` has the same hole *there*, but this list is not a complete account
-    of what the artifact bakes: a tensor subclass's inner shapes and a DTensor's
+    would cast). The fifth is the ambient globals the generated code resolves against
+    rather than re-reads: the default dtype and device a factory op with no explicit
+    argument takes, whether deterministic algorithms were enabled when inductor or a
+    decomposition (so under any ``backend``) chose between a deterministic and an atomic
+    lowering, and, under determinism, the
+    ``torch.utils.deterministic.fill_uninitialized_memory`` value inductor's
+    ``empty_strided`` lowering bakes. Those last two are checked one-way: capturing with
+    one on and calling with it off is safe, the reverse is not. The sixth, for an
+    artifact containing a C++ kernel, is the CPU vector ISA it was generated against
+    (the vector width is baked into the loop strides while the ISA is re-picked at
+    compile time, so a narrower host would leave part of the output uninitialized with
+    no error at all -- this one is checked once at load, before the kernel compiles, and
+    refuses to load rather than warning). What is *not* guarded is a change in *how* two
+    aliased inputs overlap: when capture and the call both pass intersecting views, the
+    artifact runs with capture's relative offsets baked in and may compute the wrong
+    thing. ``torch.compile`` has the same hole *there*, but this list is not a complete
+    account of what the artifact bakes: a tensor subclass's inner shapes and a DTensor's
     placements are unrecorded, and so is a CUDA artifact's compute capability (see the
     machine-type warning above). Where ``torch.compile`` would recompile, an artifact
     cannot, so treat any ambient change between capture and call as needing a fresh
@@ -1203,13 +1207,12 @@ def export_python(
 
     Capturing does not advance the default generators the first call is about to draw
     from: capture restores the generator state it consumed, within the limits
-    ``torch.compiler.precompile.MakeFxTracer`` documents. A draw from an explicit
+    :class:`torch.compiler.precompile.MakeFxTracer` documents. A draw from an explicit
     ``torch.Generator`` leaves it advanced and logs a warning. When capture restores a
     generator, it also rewinds any draw a concurrent thread made from that generator
     during capture. This is about generator position, not value parity with eager:
-    ``backend="inductor"``
-    lowers random ops to its own philox and produces different values than eager at the
-    same seed.
+    ``backend="inductor"`` lowers random ops to its own philox and produces different
+    values than eager at the same seed.
 
     Args:
         path: Filesystem path for the emitted Python source. Parent directories are
