@@ -131,6 +131,10 @@ class SuperVariable(VariableTracker):
         # cls for a classmethod)
         self.objvar = objvar
 
+    @staticmethod
+    def create(typevar: VariableTracker, objvar: VariableTracker) -> "SuperVariable":
+        return SuperVariable(typevar, objvar)
+
     def python_type(self) -> type:
         return builtins.super
 
@@ -258,6 +262,8 @@ class SuperVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         inner_fn, source = self._resolved_getattr_and_source(tx, name)
         if self.objvar is None:
             raise AssertionError("super() requires objvar to be set for method calls")
@@ -384,7 +390,7 @@ class SuperVariable(VariableTracker):
             return fn_vt.call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
-                variables.UserFunctionVariable(
+                VariableBuilder.create_internal_user_function(
                     inner_fn.__func__,
                     source=source and AttrSource(source, "__func__"),
                 ),
@@ -504,13 +510,13 @@ class SuperVariable(VariableTracker):
         )
 
 
-class UnknownVariable(VariableTracker):
+class UnknownVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
     """
     It could be anything!
     """
 
 
-class DelayGraphBreakVariable(UnknownVariable):
+class DelayGraphBreakVariable(UnknownVariable):  # noqa: RAW_VT_CONSTRUCTION
     """
     Used to insert a dummy variable in the stack to do the graph break at CALL_FUNCTION.
     """
@@ -614,7 +620,7 @@ class ComptimeVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
 
-class CellVariable(VariableTracker):
+class CellVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
     # PyCell_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/cellobject.c#L151
     _cpython_type = types.CellType
 
@@ -811,6 +817,8 @@ class AutogradFunctionVariable(VariableTracker):
     ) -> VariableTracker:
         from torch.autograd.function import _SingleLevelFunction
 
+        from .builder import VariableBuilder
+
         setup_ctx_src = (
             AttrSource(self.fn_cls_source, "setup_context")
             if self.fn_cls_source is not None
@@ -931,7 +939,7 @@ class AutogradFunctionVariable(VariableTracker):
                     tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
                 )
             apply_source = source and AttrSource(source, member="apply")
-            val = AutogradFunctionApplyVariable(
+            val = AutogradFunctionApplyVariable(  # noqa: RAW_VT_CONSTRUCTION
                 forward_fn,
                 self.fn_cls.backward,
                 source,
@@ -959,7 +967,7 @@ class AutogradFunctionVariable(VariableTracker):
             return fn_vt.call_function(tx, args, kwargs)
         elif isinstance(fn, types.MethodType):
             return variables.UserMethodVariable(
-                variables.UserFunctionVariable(
+                VariableBuilder.create_internal_user_function(
                     fn.__func__, source=source and AttrSource(source, "__func__")
                 ),
                 VariableTracker.build(tx, self.fn_cls),
@@ -1039,10 +1047,15 @@ class AutogradFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "AutogradFunctionVariable":
-        return AutogradFunctionVariable(
-            self.fn_cls,
-            fn_cls_source=self.fn_cls_source,
-            represents_instance=True,
+        return cast(
+            AutogradFunctionVariable,
+            self.clone(
+                source=None,
+                source_location=None,
+                mutation_type=None,
+                dict_vt=None,
+                represents_instance=True,
+            ),
         )
 
     def _resolve_staticmethod(
@@ -1166,9 +1179,10 @@ class AutogradFunctionVariable(VariableTracker):
             if descriptor_source is not None:
                 func_source = AttrSource(descriptor_source, "__func__")
                 install_guard(func_source.make_guard(GuardBuilder.ID_MATCH))
-                install_guard(func_source.make_guard(GuardBuilder.CLOSURE_MATCH))
                 return variables.UserMethodVariable(
-                    variables.UserFunctionVariable(obj.__func__, source=func_source),
+                    variables.UserFunctionVariable.create_with_source(
+                        obj.__func__, func_source
+                    ),
                     self,
                     source=source,
                 ).call_function(tx, args, kwargs)
@@ -1382,7 +1396,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     tp_methods = {"queue_callback": Method(queue_callback)}
 
 
-class LambdaVariable(VariableTracker):
+class LambdaVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
     # TODO: change to Ts = TypeVarTuple("Ts") for py 3.11+
     def __init__(self, fn: Callable[..., VariableTracker], **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -1400,7 +1414,7 @@ class LambdaVariable(VariableTracker):
         return self.fn(*args, **kwargs)
 
 
-class GetAttrVariable(VariableTracker):
+class GetAttrVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
     _nonvar_fields = {
         "name",
         "py_type",
@@ -1519,7 +1533,7 @@ class GetAttrVariable(VariableTracker):
         return super().mp_subscript_impl(tx, key)
 
 
-class CallMethodVariable(VariableTracker):
+class CallMethodVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
     """A method bound to a VT instance.
 
     Returned by object_generic_getattr when the MRO walk finds a method
@@ -1986,7 +2000,7 @@ class NumpyVariable(VariableTracker):
 
 
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
-class NullVariable(VariableTracker):
+class NullVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
@@ -2010,7 +2024,7 @@ class NullVariable(VariableTracker):
         return "None"
 
 
-class DeletedVariable(VariableTracker):
+class DeletedVariable(VariableTracker):  # noqa: RAW_VT_CONSTRUCTION
     """Marker used to implement delattr()"""
 
 
@@ -2153,6 +2167,10 @@ class DebuggingVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
+    @classmethod
+    def create_reorderable(cls, value: object, source: Source) -> "DebuggingVariable":
+        return cls(value, source=source)
+
     def python_type(self) -> type:
         return type(self.value)
 
@@ -2284,7 +2302,9 @@ class LoggingLoggerVariable(VariableTracker):
 
         reorderable = torch._dynamo.config.reorderable_logging_functions
         if self.source and (method in reorderable or function in reorderable):
-            fn_var = DebuggingVariable(method, source=AttrSource(self.source, name))
+            fn_var = DebuggingVariable.create_reorderable(
+                method, AttrSource(self.source, name)
+            )
             return fn_var.call_function(tx, args, kwargs)
 
         logger_cls = type(self.value)
@@ -2569,9 +2589,7 @@ class RandomClassVariable(VariableTracker):
                 ],
             )
         seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
-        return RandomVariable(
-            seed=seed, mutation_type=variables.base.ValueMutationNew()
-        )
+        return RandomVariable.create_from_seed(seed)
 
 
 class RandomVariable(VariableTracker):
@@ -2613,6 +2631,10 @@ class RandomVariable(VariableTracker):
         else:
             seed = seed.as_python_constant() if seed is not None else None
             self.random = random.Random(seed)
+
+    @classmethod
+    def create_from_seed(cls, seed: VariableTracker) -> "RandomVariable":
+        return cls(seed=seed, mutation_type=variables.base.ValueMutationNew())
 
     def python_type(self) -> type[random.Random]:
         return random.Random
@@ -2847,6 +2869,12 @@ class RandomVariable(VariableTracker):
 
 
 class WeakRefVariable(VariableTracker):
+    @staticmethod
+    def create(
+        referent_vt: VariableTracker, callback_vt: VariableTracker, **options: Any
+    ) -> "WeakRefVariable":
+        return WeakRefVariable(referent_vt, callback_vt, **options)
+
     def python_type(self) -> type:
         return weakref.ref
 
@@ -2867,7 +2895,7 @@ class WeakRefVariable(VariableTracker):
         source = source and WeakRefCallSource(source)
         referent_vt = VariableTracker.build(tx, referent, source)
         options["source"] = source
-        return WeakRefVariable(referent_vt, callback_vt, **options)
+        return WeakRefVariable.create(referent_vt, callback_vt, **options)
 
     def __init__(
         self, referent_vt: VariableTracker, callback_vt: VariableTracker, **options: Any
