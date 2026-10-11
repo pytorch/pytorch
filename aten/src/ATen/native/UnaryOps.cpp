@@ -43,6 +43,7 @@
 #include <ATen/ops/atan_native.h>
 #include <ATen/ops/atanh.h>
 #include <ATen/ops/atanh_native.h>
+#include <ATen/ops/bitwise_count_native.h>
 #include <ATen/ops/bitwise_not_native.h>
 #include <ATen/ops/can_cast.h>
 #include <ATen/ops/ceil_native.h>
@@ -272,6 +273,21 @@ TORCH_META_FUNC(sign) (const Tensor& self) {
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
+// bitwise_count (population count) always produces uint8, like np.bitwise_count
+TORCH_META_FUNC(bitwise_count) (const Tensor& self) {
+  TORCH_CHECK(at::isIntegralType(self.scalar_type(), /*includeBool=*/true),
+              "bitwise_count only supports integral and boolean inputs, but got ", self.scalar_type());
+  TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kByte : true,
+              "bitwise_count does not support non-uint8 outputs.");
+  build(TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .check_all_same_dtype(false)
+      .declare_static_dtype(at::kByte)
+      .declare_static_device(self.device())
+      .add_output(maybe_get_output())
+      .add_const_input(self));
+}
+
 TORCH_META_FUNC(signbit) (const Tensor& self) {
   TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(), "signbit is not implemented for complex tensors.");
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
@@ -321,6 +337,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(asinh_out, asinh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(atan_out, atan_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(atanh_out, atanh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(bitwise_not_out, bitwise_not_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(bitwise_count_out, bitwise_count_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(cos_out, cos_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(cosh_out, cosh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(digamma_out, digamma_stub)
@@ -978,6 +995,7 @@ DEFINE_DISPATCH(atanh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-
 DEFINE_DISPATCH(asin_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(atan_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bitwise_not_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(bitwise_count_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(ceil_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
