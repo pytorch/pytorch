@@ -424,7 +424,7 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker:
         key = self._lookup_key(tx, arg)
         value = self.items.get(key)
-        if value is None:
+        if value is None or isinstance(value, variables.DeletedVariable):
             raise_observed_exception(KeyError, tx, args=[arg])
         return value
 
@@ -958,6 +958,9 @@ class ConstDictVariable(VariableTracker):
                 mapping.install_dict_keys_match_guard()
         if len(self.items) != len(other.items):
             return ConstantVariable.create(op == "__ne__")
+        if isinstance(self, ConstDictVariable) and self.source:
+            # Value comparisons can have order-dependent side effects.
+            tx.output.guard_on_key_order.add(self.source)
         try:
             for key, value in self.items.items():
                 # Native equality reuses each key's insertion-time hash.
