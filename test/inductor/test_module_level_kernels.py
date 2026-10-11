@@ -15,7 +15,7 @@ import torch
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
-from torch._inductor import CompiledArtifact, config
+from torch._inductor import CompiledArtifact, config, load_from_python
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.codegen.wrapper import (
@@ -63,6 +63,11 @@ def _softmax(x):
 
 def _double(x):
     return x * 2
+
+
+def _row_sum(x):
+    # Long enough rows that the reduction autotunes between several configs.
+    return x.sum(1)
 
 
 def _cond_softmax(x):
@@ -343,6 +348,7 @@ class TestModuleLevelKernels(TestCase):
             self.assertEqual(ns[k].fn.fn.__code__.co_filename, path)
             self.assertTrue(ns[k].launchers, k)
             self.assertEqual(ns[k].kernel_hash, pooled[k])
+            self.assertEqual(ns[k].filename, getattr(loaded, k).filename)
         # Only the Triton compile runs on the pool's threads.
         self.assertEqual(set(loaded_on), {threading.main_thread()})
         self.assertEqual(ns["call"]([x])[0], result)
@@ -674,6 +680,45 @@ class TestModuleLevelKernels(TestCase):
         self.assertEqual(result, (x >= y).int())
         # The def holds the asm as the string form's literal decodes it.
         self.assertIn(r"{\n.reg .pred p;\n", code)
+
+    @requires_cuda_and_triton
+    def test_load_from_python(self):
+        # It loads source it is handed, and a module-level kernel needs it in a file.
+        x = torch.randn(64, 128, device="cuda")
+        result, code = _code_for(_softmax, x)
+        self.assertEqual(load_from_python(code)([x])[0], result)
+
+    @requires_cuda_and_triton
+    def test_load_from_python_reads_the_autotune_configs_of_a_bundle(self):
+        # The bundle restores each kernel's .best_config beside its string-form file,
+        # not beside the wrapper, so the loaded kernels must name that file too.
+        x = torch.randn(64, 2**18, device="cuda")
+        with fresh_cache():
+            result, code = _code_for(_row_sum, x)
+            cache, info = torch.compiler.save_cache_artifacts()
+        self.assertTrue(info.autotune_artifacts)
+        with (
+            fresh_cache(),
+            mock.patch.object(
+                CachingAutotuner,
+                "benchmark_all_configs",
+                autospec=True,
+                side_effect=CachingAutotuner.benchmark_all_configs,
+            ) as benchmark,
+        ):
+            self.assertEqual(load_from_python(code, cache)([x])[0], result)
+        self.assertEqual(benchmark.call_count, 0)
+
+    @requires_cuda_and_triton
+    def test_load_from_python_after_a_whitespace_only_edit(self):
+        # Both texts strip to the same thing, which PyCodeCache.write keys its path on.
+        # Shifted past the end of the unshifted file, the kernel's def lines are only
+        # found in a file that holds the shifted text.
+        x = torch.randn(64, 128, device="cuda")
+        result, code = _code_for(_softmax, x)
+        self.assertEqual(load_from_python(code)([x])[0], result)
+        shifted = "\n" * code.count("\n") + code
+        self.assertEqual(load_from_python(shifted)([x])[0], result)
 
 
 class TestDefaultWrapper(TestCase):
