@@ -2178,10 +2178,13 @@ def functionalize_rng_ops(
         fake_mode = detect_fake_mode()
         if fake_mode is None:
             raise AssertionError("fake_mode must not be None")
+        # The RNG state has a fixed size; a symbolic size could alias an input dim.
         with fake_mode:
             if device is not None and supports_graphsafe_rng(device):
-                return fake_mode.from_tensor(get_device_rng_state(device))
-            return fake_mode.from_tensor(torch.get_rng_state())
+                return fake_mode.from_tensor(
+                    get_device_rng_state(device), static_shapes=True
+                )
+            return fake_mode.from_tensor(torch.get_rng_state(), static_shapes=True)
 
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
     joint_graph_rng_ops = get_rng_ops(joint_module)

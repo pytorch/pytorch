@@ -1739,6 +1739,40 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
     @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_compile_checkpoint_random_op_input_dim_matches_rng_state(self, device):
+        def gn(x):
+            return F.dropout(x, p=0.1, training=True).square()
+
+        def context_fn():
+            return create_selective_checkpoint_contexts(
+                _get_custom_policy(
+                    must_recompute_list=[torch.ops.aten.native_dropout.default]
+                )
+            )
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, use_reentrant=False, context_fn=context_fn
+            )
+
+        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        # An input dim equal to the RNG state size must not share its symbol.
+        rng_state_size = torch.get_device_module(device).get_rng_state().numel()
+        for size in (rng_state_size, rng_state_size + 12):
+            x = torch.randn(size, 32, device=device, requires_grad=True)
+            x_ref = x.detach().clone().requires_grad_()
+            torch.manual_seed(5678)
+            ref = fn(x_ref)
+            ref.sum().backward()
+            torch.manual_seed(5678)
+            out = compiled_fn(x)
+            out.sum().backward()
+            self.assertEqual(out, ref)
+            self.assertEqual(x.grad, x_ref.grad)
+
+    @requires_gpu_and_triton
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
         [
