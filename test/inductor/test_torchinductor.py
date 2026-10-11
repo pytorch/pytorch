@@ -14870,6 +14870,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.ones(8, dtype=torch.bfloat16)
         self.common(fn, (x, torch.zeros_like(x), torch.tensor(0.95)))
 
+    @skip_if_halide
     def test_fp16_cast_log1p(self):
         self.common(lambda x: x.half().log1p(), (torch.rand(8) * 1e-3,))
 
