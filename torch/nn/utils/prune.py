@@ -8,6 +8,19 @@ from collections.abc import Iterable
 import torch
 
 
+def _move_parameter(module, name, index):
+    """Put ``name`` at ``index`` in ``module._parameters``.
+
+    ``register_parameter`` / ``setattr`` append, which reorders ``state_dict()``
+    keys. Keep those APIs (RNN modules listen to ``setattr``) and rotate in
+    place so existing references to ``_parameters`` stay valid.
+    """
+    params = module._parameters
+    for key in list(params)[index:]:
+        if key != name:
+            params[key] = params.pop(key)
+
+
 class BasePruningMethod(ABC):
     r"""Abstract base class for creation of new pruning techniques.
 
@@ -168,10 +181,13 @@ class BasePruningMethod(ABC):
         # the original tensor to a new parameter called name + '_orig'
         # and deleting the original parameter
         if not isinstance(method, PruningContainer):
+            param_index = list(module._parameters).index(name)
             # copy `module[name]` to `module[name + '_orig']`
             module.register_parameter(name + "_orig", orig)
             # temporarily delete `module[name]`
             del module._parameters[name]
+            # `_orig` occupies the slot `name` had; remove() restores from that slot.
+            _move_parameter(module, name + "_orig", param_index)
             default_mask = torch.ones_like(orig)  # temp
         # If this is not the first time pruning is applied, all of the above
         # has been done before in a previous pruning iteration, so we're good
@@ -199,8 +215,10 @@ class BasePruningMethod(ABC):
         except Exception as e:
             if not isinstance(method, PruningContainer):
                 orig = getattr(module, name + "_orig")
+                orig_index = list(module._parameters).index(name + "_orig")
                 module.register_parameter(name, orig)
                 del module._parameters[name + "_orig"]
+                _move_parameter(module, name, orig_index)
             raise e
 
         return method
@@ -257,13 +275,17 @@ class BasePruningMethod(ABC):
         weight = self.apply_mask(module)  # masked weights
 
         # delete and reset
+        orig_key = self._tensor_name + "_orig"
         if hasattr(module, self._tensor_name):
             delattr(module, self._tensor_name)
-        orig = module._parameters[self._tensor_name + "_orig"]
+        orig = module._parameters[orig_key]
         orig.data = weight.data
-        del module._parameters[self._tensor_name + "_orig"]
+        # `_orig` is in the slot `name` had (see apply); reclaim that slot after delete.
+        param_index = list(module._parameters).index(orig_key)
+        del module._parameters[orig_key]
         del module._buffers[self._tensor_name + "_mask"]
         setattr(module, self._tensor_name, orig)
+        _move_parameter(module, self._tensor_name, param_index)
 
 
 class PruningContainer(BasePruningMethod):
