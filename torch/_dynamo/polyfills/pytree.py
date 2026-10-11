@@ -6,7 +6,7 @@ Python polyfills for torch.utils.pytree
 
 from __future__ import annotations
 
-from collections import deque
+from collections import defaultdict, deque, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING, TypeVar
 
@@ -24,9 +24,9 @@ from optree import (
     structseq_fields,
 )
 
+import torch
 import torch.utils._cxx_pytree as cxx_pytree  # noqa: F401  # load the C++ extension module
 import torch.utils._pytree as python_pytree
-from torch.utils._pytree import BUILTIN_TYPES, STANDARD_DICT_TYPES
 
 from ..decorators import substitute_in_graph
 
@@ -34,7 +34,7 @@ from ..decorators import substitute_in_graph
 if TYPE_CHECKING:
     import builtins
     from collections.abc import Callable, Iterable, Mapping
-    from typing_extensions import Self, TypeIs
+    from typing_extensions import TypeIs
 
     from torch.utils._cxx_pytree import PyTree
 
@@ -64,6 +64,20 @@ __all__ = [
 _T = TypeVar("_T")
 _KT = TypeVar("_KT")
 _VT = TypeVar("_VT")
+
+
+if not torch._has_frozendict:
+    BUILTIN_TYPES = frozenset(
+        {tuple, list, dict, namedtuple, OrderedDict, defaultdict, deque}
+    )
+else:
+    BUILTIN_TYPES = frozenset(
+        node_type
+        for node_type in python_pytree.BUILTIN_TYPES
+        if (handler := optree.register_pytree_node.get(node_type)) is not None
+        and handler.kind != optree.PyTreeKind.CUSTOM
+    )
+STANDARD_DICT_TYPES = python_pytree.STANDARD_DICT_TYPES & BUILTIN_TYPES
 
 
 @substitute_in_graph(
@@ -163,18 +177,14 @@ def tree_leaves(
     )
 
 
-class _Asterisk(str):
+class _ReprNoQuotes(str):
     __slots__ = ()
 
-    def __new__(cls) -> Self:
-        return super().__new__(cls, "*")
-
     def __repr__(self) -> str:
-        return "*"  # no quotes
+        return str(self)  # no quotes inside containers
 
 
-_asterisk = _Asterisk()
-del _Asterisk
+_asterisk = _ReprNoQuotes("*")
 
 
 @dataclass(frozen=True, repr=False, eq=False, unsafe_hash=False, slots=True)
@@ -223,7 +233,7 @@ class PyTreeSpec:
         object.__setattr__(self, "num_children", num_children)
 
     def __repr__(self, /) -> str:
-        def helper(treespec: PyTreeSpec) -> str:
+        def helper(treespec: PyTreeSpec) -> _ReprNoQuotes:
             if treespec.is_leaf():
                 if treespec.type is not None:
                     raise AssertionError("Leaf treespec must have type None")
@@ -231,7 +241,8 @@ class PyTreeSpec:
 
             if treespec.type is None:
                 raise AssertionError("Non-leaf treespec must have a type")
-            if not callable(treespec._unflatten_func):
+            unflatten_func = treespec._unflatten_func
+            if not callable(unflatten_func):
                 raise AssertionError(
                     "Non-leaf treespec must have a callable unflatten_func"
                 )
@@ -244,17 +255,16 @@ class PyTreeSpec:
                 or optree.is_namedtuple_class(treespec.type)
                 or optree.is_structseq_class(treespec.type)
             ):
-                return treespec._unflatten_func(
-                    treespec._metadata,
-                    children_representations,
+                return _ReprNoQuotes(
+                    repr(unflatten_func(treespec._metadata, children_representations))
                 )
-            return (
+            return _ReprNoQuotes(
                 f"CustomTreeNode({treespec.type.__name__}[{treespec._metadata!r}], "
                 f"[{', '.join(children_representations)}])"
             )
 
         inner = [
-            str(helper(self)),
+            helper(self),
             *(["NoneIsLeaf"] if self.none_is_leaf else []),
             f"namespace={self.namespace!r}",
         ]
