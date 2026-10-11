@@ -24,7 +24,7 @@ import sys
 import types
 import weakref
 from collections.abc import Callable, Iterator
-from typing import Any, cast, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 from torch.utils._pytree import MappingKey
@@ -80,6 +80,7 @@ from .object_protocol import (
     generic_getitem,
     generic_is_true,
     generic_richcompare_bool,
+    generic_str,
     mro_lookup,
 )
 
@@ -105,6 +106,26 @@ def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
 
 def pydict_checkexact(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
     return obj.python_type() is dict
+
+
+_T = TypeVar("_T")
+
+
+def _iter_detecting_mutation(iterator: Iterator[_T]) -> Iterator[_T]:
+    while True:
+        try:
+            item = next(iterator)
+        except StopIteration:
+            return
+        except RuntimeError as error:
+            unimplemented(
+                gb_type="Dictionary mutated during comparison",
+                context=str(error),
+                explanation="Dynamo cannot trace dictionary comparison that changes its keys.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        # Keep user comparisons outside the handler so their exceptions propagate.
+        yield item
 
 
 def _is_set_or_dictview(obj: VariableTracker) -> bool:
@@ -491,11 +512,7 @@ class ConstDictVariable(VariableTracker):
         self,
         tx: "InstructionTranslatorBase",
         key: VariableTracker,
-        *,
-        container_name: str | None = None,
     ) -> HashableTracker:
-        from .object_protocol import generic_str
-
         try:
             return HashableTracker(key)
         except ObservedTypeError:
@@ -504,12 +521,9 @@ class ConstDictVariable(VariableTracker):
             error = tx.exn_vt_stack.get_raised_exception()
             message = generic_str(tx, error).as_python_constant()
             handle_observed_exception(tx)
-            if container_name is None:
-                container_name = "dict"
             raise_type_error(
                 tx,
-                f"cannot use '{key.python_qualified_name()}' "
-                f"as a {container_name} key ({message})",
+                f"cannot use '{key.python_qualified_name()}' as a dict key ({message})",
             )
 
     def mp_subscript_impl(
@@ -930,36 +944,20 @@ class ConstDictVariable(VariableTracker):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         for mapping in (self, other):
-            if isinstance(mapping, ConstDictVariable):
-                mapping.install_dict_keys_match_guard()
+            mapping.install_dict_keys_match_guard()
         if len(self.items) != len(other.items):
             return ConstantVariable.create(op == "__ne__")
-        if isinstance(self, ConstDictVariable) and self.source:
+        if self.source:
             # Value comparisons can have order-dependent side effects.
             tx.output.guard_on_key_order.add(self.source)
-        items = iter(self.items.items())
-        while True:
-            # Only iterator advancement detects storage mutation; user comparisons
-            # run outside this handler and retain their own exception behavior.
-            try:
-                key, value = next(items)
-            except StopIteration:
-                break
-            except RuntimeError as error:
-                unimplemented(
-                    gb_type="Dictionary mutated during comparison",
-                    context=str(error),
-                    explanation="Dynamo cannot trace dictionary comparison that changes its keys.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
+        for key, value in _iter_detecting_mutation(iter(self.items.items())):
             # Native equality reuses each key's insertion-time hash.
             other_value = other.items.get(key)
             if other_value is None or isinstance(
                 other_value, variables.DeletedVariable
             ):
-                if isinstance(other, ConstDictVariable):
-                    # Keep the missing-key hint in recompile diagnostics.
-                    other.install_dict_contains_guard(tx, key)
+                # Keep the missing-key hint in recompile diagnostics.
+                other.install_dict_contains_guard(tx, key)
                 return ConstantVariable.create(op == "__ne__")
             equal = generic_richcompare_bool(tx, value, other_value, "__eq__")
             if not specialize_symnode(generic_is_true(tx, equal)).as_python_constant():
@@ -985,7 +983,7 @@ class OrderedDictVariable(ConstDictVariable):
     items: "collections.OrderedDict[HashableTracker, VariableTracker]"  # pyrefly: ignore[bad-override]
 
     def tp_init_impl(
-        self,
+        self: ConstDictVariable,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1006,19 +1004,7 @@ class OrderedDictVariable(ConstDictVariable):
         for mapping in (self, other):
             if mapping.source:
                 install_guard(mapping.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
-        keys = zip(self.items, other.items)
-        while True:
-            try:
-                left, right = next(keys)
-            except StopIteration:
-                break
-            except RuntimeError as error:
-                unimplemented(
-                    gb_type="Dictionary mutated during comparison",
-                    context=str(error),
-                    explanation="Dynamo cannot trace dictionary comparison that changes its keys.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
+        for left, right in _iter_detecting_mutation(zip(self.items, other.items)):
             equal = generic_richcompare_bool(tx, left.vt, right.vt, "__eq__")
             if not specialize_symnode(generic_is_true(tx, equal)).as_python_constant():
                 return ConstantVariable.create(op == "__ne__")
