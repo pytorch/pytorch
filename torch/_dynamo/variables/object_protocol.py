@@ -168,11 +168,19 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 
 # Flag Include/object.h
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
+Py_TPFLAGS_HEAPTYPE = 1 << 9
 
 
 def type_disallows_instantiation(obj_type: type) -> bool:
     """Check whether obj_type's tp_new is NULL (see CPython's type_call)."""
     return bool(obj_type.__flags__ & Py_TPFLAGS_DISALLOW_INSTANTIATION)
+
+
+def type_static_base(obj_type: type) -> type:
+    """Walk tp_base to the first non-heap type; its __new__ is safe to call on obj_type."""
+    while obj_type.__flags__ & Py_TPFLAGS_HEAPTYPE and obj_type.__base__:
+        obj_type = obj_type.__base__
+    return obj_type
 
 
 # PySequenceSlots

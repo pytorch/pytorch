@@ -134,6 +134,7 @@ from .object_protocol import (
     type_disallows_instantiation,
     type_implements_nb_slot,
     type_implements_sq_inplace_concat,
+    type_static_base,
 )
 from .sets import FrozensetVariable, SetVariable
 
@@ -1983,7 +1984,7 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
             # NB: If source is added via side effects, create the exception
             # object through side_effects as well. See FrozenDataClass creation
             var = tx.output.side_effects.track_new_user_defined_object(
-                SourcelessBuilder.create(tx, BaseException),
+                SourcelessBuilder.create(tx, type_static_base(self.value)),
                 self,
                 list(args),
                 tx=tx,
