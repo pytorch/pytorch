@@ -273,6 +273,7 @@ class TestModuleLevelKernels(TestCase):
             _code_for(_softmax, torch.randn(64, 128, device="cuda"))
         self.assertTrue(kernels)
         self.assertTrue(all("tl.store" in k for k in kernels), kernels)
+        self.assertFalse(any("async_compile.triton(" in k for k in kernels), kernels)
 
     @requires_cuda_and_triton
     @parametrize("case", ["scan", "flex_attention"])
