@@ -44,6 +44,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     is_iterable_of_tensors,
     IS_S390X,
     noncontiguous_like,
@@ -359,6 +360,38 @@ vjp_fail = {
     decorate("nn.functional.scaled_dot_product_attention", decorator=skipIfRocm),
 }
 
+# These segfault under functorch transforms, so they take the whole worker down
+# rather than failing the single test.
+# https://github.com/intel/torch-xpu-ops/issues/4953
+xpu_fft_stft_crash = {
+    skip("fft.fft", device_type="xpu"),
+    skip("fft.fft2", device_type="xpu"),
+    skip("fft.fftn", device_type="xpu"),
+    skip("fft.ifft", device_type="xpu"),
+    skip("fft.ifft2", device_type="xpu"),
+    skip("fft.ifftn", device_type="xpu"),
+    skip("fft.rfft", device_type="xpu"),
+    skip("fft.rfft2", device_type="xpu"),
+    skip("fft.rfftn", device_type="xpu"),
+    skip("fft.irfft", device_type="xpu"),
+    skip("fft.irfft2", device_type="xpu"),
+    skip("fft.irfftn", device_type="xpu"),
+    skip("fft.hfft", device_type="xpu"),
+    skip("fft.hfft2", device_type="xpu"),
+    skip("fft.hfftn", device_type="xpu"),
+    skip("fft.ihfft", device_type="xpu"),
+    skip("fft.ihfft2", device_type="xpu"),
+    skip("fft.ihfftn", device_type="xpu"),
+    skip("stft", device_type="xpu"),
+}
+
+# torch-xpu-ops does not implement 5-D bicubic grid_sample yet. The xfail is op-wide,
+# so every mode and rank is expected to fail and XPU has no grid_sample coverage here.
+# https://github.com/intel/torch-xpu-ops/issues/5542
+xpu_grid_sample_bicubic_5d = {xfail("nn.functional.grid_sample", device_type="xpu")}
+
+xpu_unsupported = xpu_fft_stft_crash | xpu_grid_sample_bicubic_5d
+
 aliasing_ops = {
     "T",
     "broadcast_to",
@@ -441,11 +474,13 @@ complex_ordered_op_db = tuple(
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 @unMarkDynamoStrictTest
-class TestOperators(TestCase):
+class TestOperatorsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_unsupported).union(
             {
                 xfail(
                     "chalf", "", device_type="cpu"
@@ -470,14 +505,15 @@ class TestOperators(TestCase):
                 decorate(
                     "nn.functional.scaled_dot_product_attention",
                     decorator=expectedFailureIf(not TEST_WITH_ROCM),
-                ),  # Works on ROCm
+                    device_type=("cpu", "cuda"),
+                ),  # Works on ROCm and XPU
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
             }
         ),
     )
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_grad",
         (
             tol1(
@@ -503,12 +539,17 @@ class TestOperators(TestCase):
             tol1(
                 "__rmatmul__",
                 {torch.float32: tol(atol=3e-04, rtol=3e-04)},
-                device_type="cuda",
+                device_type=("cuda", "xpu"),
             ),
             tol1(
                 "matmul",
                 {torch.float32: tol(atol=3e-04, rtol=3e-04)},
-                device_type="cuda",
+                device_type=("cuda", "xpu"),
+            ),
+            tol1(
+                "nn.functional.conv_transpose3d",
+                {torch.float32: tol(atol=5e-05, rtol=9e-05)},
+                device_type="xpu",
             ),
             tol1(
                 "pca_lowrank",
@@ -599,10 +640,6 @@ class TestOperators(TestCase):
                     "nn.functional.max_unpool2d"
                 ),  # fails everywhere except on windows
                 skip("nn.functional.max_unpool3d"),  # fails everywhere except on mac
-                # Tensor-likes are not close
-                xfail("native_batch_norm", device_type="cpu"),
-                # Tensor-likes are not close
-                xfail("_native_batch_norm_legit", device_type="cpu"),
                 xfail("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
@@ -623,10 +660,10 @@ class TestOperators(TestCase):
                 xfail("as_strided", "partial_views"),
                 xfail("as_strided_scatter"),
             }
-        ),
+        ).union(xpu_unsupported),
     )
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_jvp",
         (
             tol1(
@@ -652,6 +689,21 @@ class TestOperators(TestCase):
                 "nn.functional.batch_norm", {torch.float32: tol(atol=4e-05, rtol=5e-05)}
             ),
             tol1("nn.functional.conv2d", {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+            tol1(
+                "addbmm",
+                {torch.float32: tol(atol=1e-04, rtol=1.3e-05)},
+                device_type="cpu",
+            ),
+            tol1(
+                "matmul",
+                {torch.float32: tol(atol=1e-04, rtol=1e-04)},
+                device_type="cpu",
+            ),
+            tol1(
+                "__rmatmul__",
+                {torch.float32: tol(atol=1e-04, rtol=1e-04)},
+                device_type="cpu",
+            ),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1(
@@ -757,7 +809,7 @@ class TestOperators(TestCase):
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_unsupported).union(
             {
                 xfail("sparse.sampled_addmm", ""),
                 xfail("sparse.mm", "reduce"),
@@ -770,7 +822,8 @@ class TestOperators(TestCase):
                 decorate(
                     "nn.functional.scaled_dot_product_attention",
                     decorator=expectedFailureIf(not TEST_WITH_ROCM),
-                ),  # Works on ROCm
+                    device_type=("cpu", "cuda"),
+                ),  # Works on ROCm and XPU
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
                 # BUG
@@ -782,13 +835,13 @@ class TestOperators(TestCase):
         ),
     )
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vjp",
         (
             tol1(
                 "nn.functional.conv_transpose3d",
                 {torch.float32: tol(atol=5e-05, rtol=9e-05)},
-                device_type="cuda",
+                device_type=("cuda", "xpu"),
             ),
             tol1(
                 "nn.functional.binary_cross_entropy_with_logits",
@@ -859,7 +912,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_unsupported).union(
             {
                 skip("nn.functional.max_unpool1d"),  # silent incorrectness; Flaky
                 skip("nn.functional.max_unpool2d"),  # silent incorrectness; Flaky
@@ -882,7 +935,7 @@ class TestOperators(TestCase):
         ),
     )
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vjpvjp",
         (
             tol1(
@@ -938,7 +991,7 @@ class TestOperators(TestCase):
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_unsupported).union(
             {
                 skip("atleast_1d"),  # Takes too long
                 skip("atleast_2d"),  # Takes too long
@@ -965,11 +1018,18 @@ class TestOperators(TestCase):
                 decorate(
                     "linalg.householder_product", decorator=runOnRocm
                 ),  # works on ROCm
-                xfail(
-                    # nans
-                    "masked.softmax",
-                    device_type="cpu",
-                ),
+                # nans
+                xfail("masked.softmax", device_type="cpu"),
+                # The 0-d sample's mask is one bool drawn from the device RNG;
+                # on CUDA, ROCm and XPU it is False, so the input is fully masked
+                # out, where the output is documented undefined (eager gives nan,
+                # vmap 0). https://github.com/pytorch/pytorch/issues/196289
+                xfail("masked.softmax", device_type=("cuda", "xpu")),
+                xfail("masked.softmin", device_type=("cuda", "xpu")),
+                # XPU convolution_backward misreads a contiguous grad_output
+                # whose strides look channels-last, which vmap produces here.
+                # https://github.com/intel/torch-xpu-ops/issues/5640
+                xfail("nn.functional.conv3d", device_type="xpu"),
                 xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
                 # got a batched tensor as input while the running_mean or running_var,
                 # which will be updated in place, were not batched.
@@ -1040,13 +1100,24 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vmapvjpvjp",
         (
             tol1("linalg.svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
             tol1("linalg.lu", {torch.float32: tol(atol=5e-04, rtol=7e-04)}),
             tol1("linalg.lu_factor", {torch.float32: tol(atol=2e-03, rtol=2e-02)}),
+            tol1(
+                "linalg.lu_factor_ex",
+                {torch.float32: tol(atol=2e-03, rtol=2e-02)},
+                device_type="cuda",
+            ),
             tol1("linalg.multi_dot", {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
+            tol2(
+                "linalg.pinv",
+                "hermitian",
+                {torch.float32: tol(atol=1e-03, rtol=1e-03)},
+                device_type="cuda",
+            ),
             tol1("svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
             tol1("matrix_exp", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
             tol1("masked.prod", {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
@@ -1168,13 +1239,13 @@ class TestOperators(TestCase):
             xfail("index_reduce", "prod"),  # .item() call
             # ---------------------------------------------------------------------
         }
-    )
+    ).union(xpu_unsupported)
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vmapvjp",
         (
             tol1(
@@ -1188,6 +1259,12 @@ class TestOperators(TestCase):
             tol1(
                 "linalg.householder_product",
                 {torch.float32: tol(atol=3e-04, rtol=9e-04)},
+                device_type=("cuda", "xpu"),
+            ),
+            tol1(
+                "linalg.householder_product",
+                {torch.float32: tol(atol=1e-03, rtol=5e-03)},
+                device_type="cpu",
             ),
             tol1(
                 "matrix_exp",
@@ -1212,6 +1289,10 @@ class TestOperators(TestCase):
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
+                # XPU convolution_backward misreads a contiguous grad_output
+                # whose strides look channels-last, which vmap produces here.
+                # https://github.com/intel/torch-xpu-ops/issues/5640
+                xfail("nn.functional.conv3d", device_type="xpu"),
             }
         ),
     )
@@ -1303,13 +1384,13 @@ class TestOperators(TestCase):
         # TODO: implement batching rule
         xfail("_batch_norm_with_update"),
         # ----------------------------------------------------------------------
-    }
+    }.union(xpu_unsupported)
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vmapjvpall",
         (
             tol1(
@@ -1558,7 +1639,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_unsupported).union(
             {
                 skip("bernoulli", ""),  # vjpvmap testing can't handle randomness
                 skip("normal", ""),  # vjpvmap testing can't handle randomness
@@ -1698,7 +1779,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_unsupported).union(
             {
                 xfail("to_sparse", ""),  # NYI
                 # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
@@ -1758,15 +1839,29 @@ class TestOperators(TestCase):
         ),
     )
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_jvpvjp",
         (
-            tol1("masked.prod", {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
+            tol1(
+                "nn.functional.conv_transpose3d",
+                {torch.float32: tol(atol=5e-05, rtol=9e-05)},
+                device_type="xpu",
+            ),
+            tol1(
+                "masked.prod",
+                {torch.float32: tol(atol=1e-04, rtol=1.3e-05)},
+                device_type="cuda",
+            ),
+            tol1(
+                "masked.prod",
+                {torch.float32: tol(atol=1e-04, rtol=5e-05)},
+                device_type="cpu",
+            ),
             tol1("masked.cumprod", {torch.float32: tol(atol=1e-04, rtol=5e-04)}),
             tol1(
                 "cumprod",
                 {torch.float32: tol(atol=1e-03, rtol=5e-04)},
-                device_type="cuda",
+                device_type=("cpu", "cuda"),
             ),
             tol1(
                 "linalg.det",
@@ -1776,7 +1871,7 @@ class TestOperators(TestCase):
             tol1(
                 "linalg.vander",
                 {torch.float32: tol(atol=1e-04, rtol=1.3e-05)},
-                device_type="cuda",
+                device_type=("cpu", "cuda"),
             ),
             tol1(
                 "nn.functional.group_norm", {torch.float32: tol(atol=1e-03, rtol=1e-03)}
@@ -1856,8 +1951,12 @@ class TestOperators(TestCase):
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_unsupported).union(
             {
+                # XPU convolution_backward misreads a contiguous grad_output
+                # whose strides look channels-last, which vmap produces here.
+                # https://github.com/intel/torch-xpu-ops/issues/5640
+                xfail("nn.functional.conv3d", device_type="xpu"),
                 # Following operators take too long, hence skipped
                 skip("atleast_1d"),
                 skip("atleast_2d"),
@@ -2008,13 +2107,24 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vmapjvpvjp",
         (
             tol1("linalg.svd", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1(
+                "corrcoef",
+                {torch.float32: tol(atol=1e-03, rtol=1e-03)},
+                device_type="cpu",
+            ),
+            tol1(
                 "linalg.householder_product",
                 {torch.float32: tol(atol=5e-03, rtol=5e-03)},
+                device_type=("cuda", "xpu"),
+            ),
+            tol1(
+                "linalg.householder_product",
+                {torch.float32: tol(atol=5e-03, rtol=1e-02)},
+                device_type="cpu",
             ),
             tol1("linalg.multi_dot", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol2(
@@ -2324,10 +2434,10 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
-        },
+        }.union(xpu_unsupported),
     )
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vmap_autograd_grad",
         (
             tol1(
@@ -2938,8 +3048,10 @@ class TestOperators(TestCase):
             )
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
+only_for = ("cpu", "cuda", "xpu")
+instantiate_device_type_tests(
+    TestOperatorsDevice, globals(), only_for=only_for, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
