@@ -414,6 +414,18 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_functools_partial(a, b):
         return clip01(a + b)
 
+    def test_functools_partial_missing_function(self):
+        def fn():
+            try:
+                functools.partial()
+            except TypeError:
+                return "caught TypeError"
+            return "no exception"
+
+        expected = fn()
+        self.assertEqual(expected, "caught TypeError")
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), expected)
+
     def test_functools_partial_from_unregistered_module(self):
         module_name = "test_dynamo_unregistered_module"
         self.assertNotIn(module_name, sys.modules)
