@@ -675,6 +675,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         all_gather_calls: list[tuple[list[int], list[int], int]] = []
         copy_in_numels: list[int] = []
         grad_refs: list[weakref.ReferenceType[torch.Tensor]] = []
+        num_alive_grads: list[int] = []
 
         def all_gather_output_fn(output, outputs, split_sizes, outer_sizes, ws):
             self.assertFalse(torch.is_grad_enabled())
@@ -682,10 +683,10 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
             _default_all_gather_output_fn(output, outputs, split_sizes, outer_sizes, ws)
 
         def reduce_scatter_input_fn(unsharded_grads, shard_dims, world_size):
-            copy_in = _default_reduce_scatter_input_fn(
-                unsharded_grads, shard_dims, world_size
-            )
-            grad_refs.extend(weakref.ref(grad) for grad in unsharded_grads)
+            # Copies that only the returned copy-in holds
+            grads = [grad.clone() for grad in unsharded_grads]
+            copy_in = _default_reduce_scatter_input_fn(grads, shard_dims, world_size)
+            grad_refs[:] = [weakref.ref(grad) for grad in grads]
 
             def recording_copy_in(reduce_scatter_input):
                 copy_in_numels.append(reduce_scatter_input.numel())
@@ -693,9 +694,17 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
 
             return recording_copy_in
 
+        class CountingReduceScatter(DefaultReduceScatter):
+            def __call__(self, output_tensor, input_tensor, group, op, async_op=False):
+                num_alive_grads.append(sum(ref() is not None for ref in grad_refs))
+                return super().__call__(
+                    output_tensor, input_tensor, group, op, async_op
+                )
+
         group = fully_shard.state(model)._fsdp_param_group
         group._all_gather_output_fn = all_gather_output_fn
-        group._reduce_scatter_input_fn = reduce_scatter_input_fn
+        group._prepare_reduce_scatter_inputs = reduce_scatter_input_fn
+        model.set_custom_reduce_scatter(CountingReduceScatter())
         inp = torch.randn((2, 8), device=device_type)
         model(inp).sum().backward()
         ref_model(inp).sum().backward()
@@ -706,26 +715,35 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         # The Shard(1) weights' padded sharded sizes are (8, 2) and (4, 2)
         self.assertEqual(all_gather_calls, [([16, 2, 8, 1], [8, 1, 4, 1], 4)])
         self.assertEqual(copy_in_numels, [27 * self.world_size])
-        # FSDP frees the gradients, including the copies that the fn reordered
-        self.assertEqual([ref() for ref in grad_refs], [None] * 4)
+        # FSDP frees the copy-in, and with it the gradient copies, before the
+        # reduce-scatter
+        self.assertEqual(num_alive_grads, [0])
 
     @skip_if_lt_x_gpu(1)
     def test_post_forward_shard_dim1_needs_divisible_dim0(self):
-        # Post-forward shards chunk dim 0, which 2 ranks cannot split for 3 rows
+        # Post-forward shards chunk dim 0, which 2 ranks cannot split for the
+        # second weight's 3 rows
         def init_model():
-            model = nn.Sequential(nn.Linear(8, 3, bias=False, device=device_type))
+            model = nn.Sequential(
+                nn.Linear(8, 4, bias=False, device=device_type),
+                nn.Linear(4, 3, bias=False, device=device_type),
+            )
             fully_shard(
-                model[0],
+                model,
                 reshard_after_forward=2,
                 shard_placement_fn=lambda param: Shard(1),
             )
-            fully_shard(model)
             return model
 
         inp = torch.randn((2, 8), device=device_type)
-        msg = "Resharding the Shard(1) parameter 0.weight to 2 ranks after forward requires dim 0 of its size (3, 8) to be divisible by 2"
+        model = init_model()
+        msg = "Resharding the Shard(1) parameter 1.weight to 2 ranks after forward requires dim 0 of its size (3, 4) to be divisible by 2"
         with self.assertRaisesRegex(NotImplementedError, re.escape(msg)):
-            init_model()(inp)
+            model(inp)
+        # FSDP checks every parameter before resharding any
+        fsdp_params = fully_shard.state(model)._fsdp_param_group.fsdp_params
+        sharded_states = [fsdp_param.sharded_state for fsdp_param in fsdp_params]
+        self.assertEqual(sharded_states, [ShardedState.UNSHARDED] * 2)
         # Configurations that never reshard to the post-forward mesh still work
         model = init_model()
         model.set_reshard_after_forward(True)
