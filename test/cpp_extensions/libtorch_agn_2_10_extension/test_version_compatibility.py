@@ -17,11 +17,17 @@ Run this script with VERSION_COMPAT_DEBUG=1 to see compilation errors.
 """
 
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 from torch.utils.cpp_extension import (
     CUDA_HOME,
     get_cxx_compiler,
@@ -30,14 +36,99 @@ from torch.utils.cpp_extension import (
 )
 
 
+TORCH_TARGET_VERSION_2_9 = "0x0209000000000000"
+
+# .cu sources are compiled with one of these toolkits, so the CUDA checks only
+# apply when one of them is set up.
 GPU_HOME = CUDA_HOME or ROCM_HOME
 
-# TODO: Fix this error in Windows:
-# numba.cuda.cudadrv.driver:driver.py:384 Call to cuInit results in CUDA_ERROR_NO_DEVICE
+
+def _extract_relevant_errors(error_msg: str) -> list[str]:
+    """Extract the most relevant error messages."""
+    error_lines = error_msg.strip().split("\n")
+    relevant_errors = []
+
+    for line in error_lines:
+        line_lower = line.lower()
+        if (
+            "error:" in line_lower
+            or "undefined" in line_lower
+            or "undeclared" in line_lower
+            or "no member named" in line_lower
+        ):
+            relevant_errors.append(line.strip())
+
+    return relevant_errors
+
+
+def _compile_cpp_file(source_file: Path, output_file: Path) -> tuple[bool, str]:
+    """
+    Compile a C++ file with TORCH_TARGET_VERSION=2.9.0.
+    Returns (success, error_message).
+    """
+    cmd = [
+        get_cxx_compiler(),
+        "-c",
+        "-std=c++20",
+        f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION_2_9}",
+        f"-I{source_file.parent}",  # For includes in same directory
+        *[f"-I{path}" for path in torch_include_paths(device_type="cpu")],
+        str(source_file),
+        "-o",
+        str(output_file),
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+    if result.returncode == 0:
+        return True, ""
+    else:
+        return False, result.stderr
+
+
+def _compile_cu_file(source_file: Path, output_file: Path) -> tuple[bool, str]:
+    """
+    Compile a CUDA file with TORCH_TARGET_VERSION=2.9.0.
+    Returns (success, error_message).
+    """
+    if not GPU_HOME:
+        return False, "one of CUDA_HOME and ROCM_HOME should be set but is not"
+
+    gpu_include_path = os.path.join(GPU_HOME, "include")
+    gpu_includes = [f"-I{gpu_include_path}"] if os.path.exists(gpu_include_path) else []
+
+    cmd = [
+        os.path.join(GPU_HOME, "bin", "nvcc" if CUDA_HOME else "hipcc"),
+        "-c",
+        "-std=c++20",
+        f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION_2_9}",
+        f"-I{source_file.parent}",  # For includes in same directory
+        *[f"-I{path}" for path in torch_include_paths(device_type="cpu")],
+        *gpu_includes,
+    ]
+
+    cmd.extend(["-DUSE_CUDA"])
+    if ROCM_HOME:
+        cmd.extend(["-DUSE_ROCM=1"])
+
+    cmd.extend([str(source_file), "-o", str(output_file)])
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+    if result.returncode == 0:
+        return True, ""
+    else:
+        return False, result.stderr
+
+
 if not IS_WINDOWS:
 
-    class FunctionVersionCompatibilityTest(TestCase):
-        """Test that all function files require PyTorch 2.10+."""
+    class _FunctionVersionCompatibilityBase(TestCase):
+        """Shared build harness for the version compatibility checks."""
+
+        csrc_dir: Path
+        csrc_dir_2_9: Path
+        build_dir: Path
 
         @classmethod
         def setUpClass(cls):
@@ -47,119 +138,18 @@ if not IS_WINDOWS:
             cls.csrc_dir_2_9 = ext_dir.parent / "libtorch_agn_2_9_extension" / "csrc"
             cls.build_dir = Path(tempfile.mkdtemp(prefix="version_check_"))
 
-            cls.pytorch_includes = [
-                f"-I{path}" for path in torch_include_paths(device_type="cpu")
-            ]
-            cls.cuda_includes = []
-            if GPU_HOME:
-                cuda_include_path = os.path.join(GPU_HOME, "include")
-                if os.path.exists(cuda_include_path):
-                    cls.cuda_includes = [f"-I{cuda_include_path}"]
-
-            cls.cuda_available = cls._check_cuda_available()
-
         @classmethod
         def tearDownClass(cls):
             """Clean up build directory."""
-            import shutil
-
             if cls.build_dir.exists():
                 shutil.rmtree(cls.build_dir)
 
-        @staticmethod
-        def _check_cuda_available() -> bool:
-            """Check if CUDA is available."""
-            try:
-                import torch
-
-                return torch.cuda.is_available()
-            except ImportError:
-                return False
-
-        def _compile_cpp_file(
-            self, source_file: Path, output_file: Path
-        ) -> tuple[bool, str]:
-            """
-            Compile a C++ file with TORCH_TARGET_VERSION=2.9.0.
-            Returns (success, error_message).
-            """
-            torch_version_2_9 = "0x0209000000000000"
-
-            cmd = [
-                get_cxx_compiler(),
-                "-c",
-                "-std=c++20",
-                f"-DTORCH_TARGET_VERSION={torch_version_2_9}",
-                f"-I{source_file.parent}",  # For includes in same directory
-                *self.pytorch_includes,
-            ]
-
-            # Add CUDA flags if available
-            if self.cuda_available:
-                cmd.extend(self.cuda_includes)
-
-            cmd.extend([str(source_file), "-o", str(output_file)])
-
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-            if result.returncode == 0:
-                return True, ""
-            else:
-                return False, result.stderr
-
-        def _compile_cu_file(
-            self, source_file: Path, output_file: Path
-        ) -> tuple[bool, str]:
-            """
-            Compile a CUDA file with TORCH_TARGET_VERSION=2.9.0.
-            Returns (success, error_message).
-            """
-            if not GPU_HOME:
-                return False, "one of CUDA_HOME and ROCM_HOME should be set but is not"
-
-            torch_version_2_9 = "0x0209000000000000"
-
-            cmd = [
-                os.path.join(GPU_HOME, "bin", "nvcc" if CUDA_HOME else "hipcc"),
-                "-c",
-                "-std=c++20",
-                f"-DTORCH_TARGET_VERSION={torch_version_2_9}",
-                f"-I{source_file.parent}",  # For includes in same directory
-                *self.pytorch_includes,
-                *self.cuda_includes,
-            ]
-
-            cmd.extend(["-DUSE_CUDA"])
-            if ROCM_HOME:
-                cmd.extend(["-DUSE_ROCM=1"])
-
-            cmd.extend([str(source_file), "-o", str(output_file)])
-
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-            if result.returncode == 0:
-                return True, ""
-            else:
-                return False, result.stderr
-
-        def _test_function_file(self, source_file: Path):
-            """Test that a function file fails to compile with TORCH_TARGET_VERSION=2.9.0."""
-            func_name = source_file.stem
-            obj_file = self.build_dir / f"{func_name}.o"
-
-            # Choose the appropriate compiler based on file extension
-            if source_file.suffix == ".cu":
-                if not self.cuda_available:
-                    self.skipTest(f"CUDA not available, skipping {source_file.name}")
-                success, error_msg = self._compile_cu_file(source_file, obj_file)
-            else:
-                success, error_msg = self._compile_cpp_file(source_file, obj_file)
-
-            obj_file.unlink(missing_ok=True)
-
-            # Print error details for debugging
+        def _assert_requires_2_10(
+            self, func_name: str, success: bool, error_msg: str
+        ) -> None:
+            """Assert that a source requiring 2.10+ failed to build with 2.9.0."""
             if not success:
-                relevant_errors = self._extract_relevant_errors(error_msg)
+                relevant_errors = _extract_relevant_errors(error_msg)
                 if relevant_errors:
                     print(f"\n  Compilation errors for {func_name} (requires 2.10+):")
                     for err in relevant_errors:
@@ -175,6 +165,26 @@ if not IS_WINDOWS:
                 "the appropriate version guards.",
             )
 
+    class FunctionVersionCompatibilityTestGeneric(_FunctionVersionCompatibilityBase):
+        """Test that all C++ function files require PyTorch 2.10+.
+
+        The .cpp sources are built with the host compiler against the CPU
+        headers, so these tests do not need an accelerator.
+        """
+
+        hw_classification = HardwareClassification.GENERIC
+
+        def _test_function_file(self, source_file: Path):
+            """Test that a function file fails to compile with TORCH_TARGET_VERSION=2.9.0."""
+            func_name = source_file.stem
+            obj_file = self.build_dir / f"{func_name}.o"
+
+            success, error_msg = _compile_cpp_file(source_file, obj_file)
+
+            obj_file.unlink(missing_ok=True)
+
+            self._assert_requires_2_10(func_name, success, error_msg)
+
         def test_kernel_works_with_2_9(self):
             """Test that the 2.9 extension's kernel.cpp compiles successfully with 2.9.0.
 
@@ -188,13 +198,13 @@ if not IS_WINDOWS:
             self.assertTrue(cpp_file.exists(), f"{cpp_file} does not exist")
 
             obj_file = self.build_dir / "kernel.o"
-            success, error_msg = self._compile_cpp_file(cpp_file, obj_file)
+            success, error_msg = _compile_cpp_file(cpp_file, obj_file)
 
             # Clean up
             obj_file.unlink(missing_ok=True)
 
             if not success:
-                relevant_errors = self._extract_relevant_errors(error_msg)
+                relevant_errors = _extract_relevant_errors(error_msg)
                 if relevant_errors:
                     print("\n  Unexpected compilation errors for kernel.cpp:")
                     for err in relevant_errors:
@@ -207,6 +217,31 @@ if not IS_WINDOWS:
                 f"Error: {error_msg}",
             )
 
+    class FunctionVersionCompatibilityTestCUDA(_FunctionVersionCompatibilityBase):
+        """Test that the CUDA function files require PyTorch 2.10+.
+
+        The .cu sources are built with nvcc or hipcc, so these tests are only
+        run when one of those toolkits is available.
+        """
+
+        hw_classification = HardwareClassification.CUDA
+
+        def _test_function_file(self, source_file: Path):
+            """Test that a function file fails to compile with TORCH_TARGET_VERSION=2.9.0."""
+            if not GPU_HOME:
+                self.skipTest(
+                    f"neither CUDA_HOME nor ROCM_HOME is set, skipping {source_file.name}"
+                )
+
+            func_name = source_file.stem
+            obj_file = self.build_dir / f"{func_name}.o"
+
+            success, error_msg = _compile_cu_file(source_file, obj_file)
+
+            obj_file.unlink(missing_ok=True)
+
+            self._assert_requires_2_10(func_name, success, error_msg)
+
         def test_cuda_kernel_works_with_2_9(self):
             """Test that cuda_kernel.cu compiles successfully with 2.9.0.
 
@@ -215,20 +250,22 @@ if not IS_WINDOWS:
             compiles CUDA files and distinguishes between files that require 2.10+ and those
             that don't.
             """
-            if not self.cuda_available:
-                self.skipTest("CUDA not available, skipping cuda_kernel.cu test")
+            if not GPU_HOME:
+                self.skipTest(
+                    "neither CUDA_HOME nor ROCM_HOME is set, skipping cuda_kernel.cu test"
+                )
 
             cu_file = self.csrc_dir_2_9 / "cuda_kernel.cu"
             self.assertTrue(cu_file.exists(), f"{cu_file} does not exist")
 
             obj_file = self.build_dir / "cuda_kernel.o"
-            success, error_msg = self._compile_cu_file(cu_file, obj_file)
+            success, error_msg = _compile_cu_file(cu_file, obj_file)
 
             # Clean up
             obj_file.unlink(missing_ok=True)
 
             if not success:
-                relevant_errors = self._extract_relevant_errors(error_msg)
+                relevant_errors = _extract_relevant_errors(error_msg)
                 if relevant_errors:
                     print("\n  Unexpected compilation errors for cuda_kernel.cu:")
                     for err in relevant_errors:
@@ -240,24 +277,6 @@ if not IS_WINDOWS:
                 f"This file is expected to work with 2.9.0 since it doesn't use 2.10+ features. "
                 f"Error: {error_msg}",
             )
-
-        @staticmethod
-        def _extract_relevant_errors(error_msg: str) -> list[str]:
-            """Extract the most relevant error messages."""
-            error_lines = error_msg.strip().split("\n")
-            relevant_errors = []
-
-            for line in error_lines:
-                line_lower = line.lower()
-                if (
-                    "error:" in line_lower
-                    or "undefined" in line_lower
-                    or "undeclared" in line_lower
-                    or "no member named" in line_lower
-                ):
-                    relevant_errors.append(line.strip())
-
-            return relevant_errors
 
     # Dynamically create test methods for each .cpp and .cu file
 
@@ -287,7 +306,13 @@ if not IS_WINDOWS:
 
     for _source_file in _source_files:
         _test_method = _create_test_method_for_file(_source_file)
-        setattr(FunctionVersionCompatibilityTest, _test_method.__name__, _test_method)
+        # .cu sources need a CUDA or ROCm toolkit, the .cpp sources do not.
+        _test_class = (
+            FunctionVersionCompatibilityTestCUDA
+            if _source_file.suffix == ".cu"
+            else FunctionVersionCompatibilityTestGeneric
+        )
+        setattr(_test_class, _test_method.__name__, _test_method)
 
     del (
         _create_test_method_for_file,
@@ -295,6 +320,7 @@ if not IS_WINDOWS:
         _source_files,
         _source_file,
         _test_method,
+        _test_class,
     )
 
 if __name__ == "__main__":
