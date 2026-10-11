@@ -23,6 +23,7 @@ from .heuristics.template.triton import (
     CUDAConfigHeuristic,
     IS_ROCM,
     MTIAConfigHeuristic,
+    NPUConfigHeuristic,
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
@@ -135,8 +136,10 @@ class InductorChoices:
     """
 
     def get_config_heuristics(
-        self, device_type: str | None = "cuda"
+        self, device_type: str | None = None
     ) -> BaseConfigHeuristic:
+        if device_type is None:
+            raise AssertionError("get_config_heuristics requires a valid device type")
         if device_type == "cuda":
             if torch.version.hip is None:
                 return CUDAConfigHeuristic()
@@ -148,17 +151,19 @@ class InductorChoices:
             return CPUConfigHeuristic()
         elif device_type == "mtia":
             return MTIAConfigHeuristic()
+        elif device_type == "npu":
+            return NPUConfigHeuristic()
         else:
             return BaseConfigHeuristic()
 
     # Conv configs
     def get_conv_configs(
-        self, device_type: str | None = "cuda"
+        self, device_type: str | None = None
     ) -> partial[Generator[TritonConfig, None, None]]:
         conv_heuristics = self.get_config_heuristics(device_type)
         return conv_heuristics.get_conv_configs()
 
-    def get_depthwise_conv_configs(self, device_type: str | None = "cuda") -> list[Any]:
+    def get_depthwise_conv_configs(self, device_type: str | None = None) -> list[Any]:
         heuristics = self.get_config_heuristics(device_type)
         return heuristics.get_depthwise_conv_configs()
 
@@ -169,19 +174,19 @@ class InductorChoices:
         head_dim: int,
         seq_len: sympy.Expr,
         dtype: torch.dtype,
-        device_type: str | None = "cuda",
+        device_type: str | None = None,
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_attn_fwd_configs(head_dim, seq_len, dtype)
 
     def get_flex_attention_bwd_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
+        self, head_dim: int, dtype: torch.dtype, device_type: str | None = None
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype)
 
     def get_flex_decode_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
+        self, head_dim: int, dtype: torch.dtype, device_type: str | None = None
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
