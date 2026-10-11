@@ -430,14 +430,14 @@ def transform_args(
         kwargs = {k: promote(v) for k, v in kwargs.items()}
 
     if broadcast:
-        broadcasted = broadcast_tensors(
-            *list(
-                itertools.chain(
-                    (args[i] for i in args_indices),
-                    (kwargs[k] for k in kwargs_indices),
-                )
+        tensors = list(
+            itertools.chain(
+                (args[i] for i in args_indices),
+                (kwargs[k] for k in kwargs_indices),
             )
         )
+        realize_broadcast_inputs_over_opcount(tensors)
+        broadcasted = broadcast_tensors(*tensors)
         size = list(broadcasted[0].get_size())
 
         for i, x in zip(args_indices, broadcasted[: len(args_indices)]):
@@ -1328,17 +1328,75 @@ def broadcast_tensors(*inputs):
     )
     outputs = []
     for x in inputs:
-        if (sizes := tuple(x.get_size())) == target:
-            pass
-
-        elif len(sizes) != len(target) or any(
-            V.graph.sizevars.is_size_one_or_false(a)
-            != V.graph.sizevars.is_size_one_or_false(b)
-            for a, b in zip(sizes, target)
-        ):
+        if needs_broadcast(x.get_size(), target):
             x = expand(x, target)
         outputs.append(x)
     return outputs
+
+
+def needs_broadcast(sizes: Sequence[sympy.Expr], target: Sequence[sympy.Expr]) -> bool:
+    sizes, target = tuple(sizes), tuple(target)
+    return sizes != target and (
+        len(sizes) != len(target)
+        or any(
+            V.graph.sizevars.is_size_one_or_false(a)
+            != V.graph.sizevars.is_size_one_or_false(b)
+            for a, b in zip(sizes, target)
+        )
+    )
+
+
+def realize_broadcast_inputs_over_opcount(inputs: Sequence[TensorBox]) -> None:
+    """
+    A pointwise op inlines its inputs' inner_fns, so its opcount is about the
+    sum of theirs. If that crosses realize_opcount_threshold, run_node realizes
+    the op's result at the full broadcast size. expand() already realizes a
+    broadcast input that is over the threshold on its own. This realizes
+    broadcast inputs that are only over it together with the other inputs,
+    which is much cheaper than realizing the result. For example, the M=1 mm
+    decomposition (x.unsqueeze(2) * w.unsqueeze(0)).sum(1) would otherwise
+    write its (1, K, N) product to memory and read it back.
+    """
+    if len(inputs) < 2:
+        return
+    target = functools.reduce(
+        broadcast_symbolic_shapes, (x.get_size() for x in inputs), ()
+    )
+
+    def unrealized_pointwise(x: TensorBox) -> Pointwise | None:
+        data = x.data
+        while isinstance(data, BaseView):
+            data = data.data
+        if isinstance(data, ir.StorageBox) and isinstance(data.data, Pointwise):
+            return data.data
+        return None
+
+    broadcast = [
+        (x, pw)
+        for x in inputs
+        if needs_broadcast(x.get_size(), target)
+        and (pw := unrealized_pointwise(x)) is not None
+    ]
+    if not broadcast:
+        return
+    threshold = broadcast[0][1].get_realize_opcount_threshold()
+    # +1 for the op that consumes the inputs, and a realized input costs one
+    # load. This can overcount when inputs share subexpressions.
+    total = 1 + sum(
+        pw.inner_fn_opcount().num_ops if (pw := unrealized_pointwise(x)) else 1
+        for x in inputs
+    )
+    if total <= threshold:
+        return
+    # Realize the heaviest broadcast inputs first, and only if that brings the
+    # op back under the threshold. Otherwise the result is realized anyway.
+    broadcast.sort(key=lambda c: c[1].inner_fn_opcount().num_ops, reverse=True)
+    for n, (_, pw) in enumerate(broadcast, 1):
+        total -= pw.inner_fn_opcount().num_ops - 1
+        if total <= threshold:
+            for x, _ in broadcast[:n]:
+                x.realize()
+            return
 
 
 @register_lowering([aten.alias, aten.detach, aten.detach_, aten.lift, prims.view_of])
