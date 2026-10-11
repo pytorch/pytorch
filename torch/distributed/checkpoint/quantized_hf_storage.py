@@ -7,7 +7,11 @@ from typing import Any
 
 import torch
 from torch.distributed.checkpoint._hf_utils import _metadata_fn
-from torch.distributed.checkpoint.metadata import TensorStorageMetadata
+from torch.distributed.checkpoint.metadata import (
+    ChunkStorageMetadata,
+    MetadataIndex,
+    TensorStorageMetadata,
+)
 from torch.distributed.checkpoint.planner import LoadPlanner, ReadItem
 
 from .hf_storage import HuggingFaceStorageReader
@@ -70,12 +74,28 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                     # Save the quantized tensor shapes for lookup when dequantization.
                     self._tensor_full_shapes[fqn + "_quantized"] = tensor_metadata.size
                     *prefix_shape, G, B = tensor_metadata.size
-                    dequantized_size = torch.Size([*prefix_shape, G * B * 2])
+                    values_per_group = B * 2
+                    dequantized_size = torch.Size([*prefix_shape, G * values_per_group])
 
                     # Update the metadata with the size after dequantization.
                     # Metadata used by planner to slice state dict.
                     tensor_metadata.size = dequantized_size
                     self._tensor_full_shapes[fqn] = dequantized_size
+
+                    # The planner intersects read requests with the chunks, so they
+                    # must use the dequantized layout too. storage_data is keyed by
+                    # chunk offset, so re-key it to match.
+                    storage_data = metadata.storage_data
+                    chunks = []
+                    for chunk in tensor_metadata.chunks:
+                        *prefix, group_offset, _ = chunk.offsets
+                        offsets = torch.Size([*prefix, group_offset * values_per_group])
+                        *prefix, num_groups, _ = chunk.sizes
+                        sizes = torch.Size([*prefix, num_groups * values_per_group])
+                        chunks.append(ChunkStorageMetadata(offsets, sizes))
+                        info = storage_data.pop(MetadataIndex(fqn, chunk.offsets))
+                        storage_data[MetadataIndex(fqn, offsets)] = info
+                    tensor_metadata.chunks = chunks
                 else:
                     self._tensor_full_shapes[fqn] = tensor_metadata.size
 
