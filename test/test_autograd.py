@@ -13374,6 +13374,130 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.float32, torch.float64)
+    def test_standard_gamma_forward_ad(self, device, dtype):
+        alpha = (
+            torch.tensor([0.1, 0.5, 1.0, 2.0, 10.0, 50.0], device=device, dtype=dtype)
+            .reshape(2, 3)
+            .t()
+        )
+        tangent = torch.arange(1, 7, device=device, dtype=dtype).reshape(2, 3).t()
+        self.assertFalse(alpha.is_contiguous())
+        self.assertFalse(tangent.is_contiguous())
+        generator = torch.Generator(device=device)
+        for seed in (0, 41):
+            with self.subTest(seed=seed):
+                generator.manual_seed(seed)
+                state = generator.get_state()
+                reference = alpha.detach().requires_grad_()
+                expected = torch._standard_gamma(reference, generator=generator)
+                state_after = generator.get_state()
+                expected_tangent = torch.autograd.grad(expected, reference, tangent)[0]
+                generator.set_state(state)
+                actual, actual_tangent = torch.func.jvp(
+                    lambda a: torch._standard_gamma(a, generator=generator),
+                    (alpha,),
+                    (tangent,),
+                )
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+                # Reuse the existing implicit reparameterization derivative,
+                # not the numerical derivative of the random sampling program.
+                self.assertEqual(actual_tangent, expected_tangent)
+                self.assertEqual(generator.get_state(), state_after)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("shape", [(), (0,), (2, 0)])
+    def test_standard_gamma_forward_ad_shapes(self, device, dtype, shape):
+        alpha = torch.full(shape, 0.5, device=device, dtype=dtype)
+        tangent = torch.full_like(alpha, 2.0)
+        generator = torch.Generator(device=device).manual_seed(1)
+        state = generator.get_state()
+        expected = torch._standard_gamma(alpha, generator=generator)
+        state_after = generator.get_state()
+        generator.set_state(state)
+        actual, actual_tangent = torch.func.jvp(
+            lambda a: torch._standard_gamma(a, generator=generator),
+            (alpha,),
+            (tangent,),
+        )
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertEqual(
+            actual_tangent, tangent * torch._standard_gamma_grad(alpha, actual)
+        )
+        self.assertEqual(actual_tangent.shape, shape)
+        self.assertEqual(generator.get_state(), state_after)
+
+    @dtypes(torch.float32, torch.float64)
+    def test_standard_gamma_forward_ad_zero_tensor(self, device, dtype):
+        alpha = torch.tensor([0.5, 1.0, 3.0], device=device, dtype=dtype)
+        tangent = torch._efficientzerotensor(alpha.shape, device=device, dtype=dtype)
+        with torch.autograd.forward_ad.dual_level():
+            dual = torch.autograd.forward_ad.make_dual(alpha, tangent)
+            output = torch._standard_gamma(dual)
+            self.assertEqual(
+                torch.autograd.forward_ad.unpack_dual(output).tangent,
+                torch.zeros_like(alpha),
+            )
+            self.assertTrue(tangent._is_zerotensor())
+            self.assertIsNone(
+                torch.autograd.forward_ad.unpack_dual(
+                    torch._standard_gamma(alpha)
+                ).tangent
+            )
+
+    @dtypes(torch.float32, torch.float64)
+    def test_standard_gamma_forward_ad_derivative_contract(self, device, dtype):
+        alpha = torch.tensor([0.5, 1.0, 3.0], device=device, dtype=dtype)
+        tangent = torch.ones_like(alpha, requires_grad=True)
+        actual, actual_tangent = torch.func.jvp(
+            torch._standard_gamma, (alpha,), (tangent,)
+        )
+        self.assertEqual(
+            torch.autograd.grad(actual_tangent.sum(), tangent)[0],
+            torch._standard_gamma_grad(alpha, actual),
+        )
+        with self.assertRaisesRegex(NotImplementedError, "_standard_gamma_grad"):
+            torch.func.jvp(
+                torch.func.grad(lambda a: torch._standard_gamma(a).sum()),
+                (alpha,),
+                (tangent,),
+            )
+
+    @dtypes(torch.float32, torch.float64)
+    def test_gamma_rsample_forward_ad(self, device, dtype):
+        alpha = torch.tensor([0.5, 1.0, 3.0], device=device, dtype=dtype)
+        rate = torch.tensor([0.2, 1.5, 4.0], device=device, dtype=dtype)
+        for sample_shape, argnums in product([(), (2, 3)], [(0,), (1,), (0, 1)]):
+            with self.subTest(sample_shape=sample_shape, argnums=argnums):
+                args = (alpha, rate)
+                primals = tuple(args[i] for i in argnums)
+                tangents = tuple(torch.full_like(a, 0.3) for a in primals)
+
+                def fn(*values):
+                    all_args = list(args)
+                    for i, value in zip(argnums, values):
+                        all_args[i] = value
+                    return torch.distributions.Gamma(*all_args).rsample(sample_shape)
+
+                device_type = torch.device(device).type
+                devices = [] if device_type == "cpu" else [torch.device(device)]
+                with torch.random.fork_rng(devices=devices, device_type=device_type):
+                    torch.manual_seed(4)
+                    references = tuple(a.detach().requires_grad_() for a in primals)
+                    expected = fn(*references)
+                    cotangent = torch.randn_like(expected)
+                    expected_vjp = torch.autograd.grad(expected, references, cotangent)
+                    torch.manual_seed(4)
+                    actual, actual_tangent = torch.func.jvp(fn, primals, tangents)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+                self.assertEqual(
+                    (actual_tangent * cotangent).sum(),
+                    sum(
+                        (grad * tangent).sum()
+                        for grad, tangent in zip(expected_vjp, tangents)
+                    ),
+                )
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
