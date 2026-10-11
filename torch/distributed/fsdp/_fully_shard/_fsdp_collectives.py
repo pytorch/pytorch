@@ -458,11 +458,12 @@ def _get_param_all_gather_inputs(
 # no_grad on the current stream and copies the flat rank-major all_gather_output
 # into outputs. Each rank's chunk has split_sizes[i] elements for outputs[i]:
 # viewed as (outer_sizes[i], -1), the ranks' chunks are concatenated along dim 1 of
-# outputs[i].view(outer_sizes[i], -1). Only chunks with outer_sizes[i] == 1 may be
-# smaller than outputs[i], and they fill its prefix. Mixed-dtype groups gather
-# bytes, so all_gather_output is uint8 and split_sizes count bytes, while outputs
-# keep their dtypes. fn may only write outputs and must not keep its arguments.
-# FSDPParamGroup skips it for a single rank.
+# outputs[i].view(outer_sizes[i], -1). Only outputs with outer_sizes[i] == 1 may
+# hold more than the gathered elements, which then fill their prefix. A uint8
+# all_gather_output, from payloads of mixed dtypes or byte views, has split_sizes
+# in bytes, while outputs keep their dtypes. fn may only write outputs, whose
+# version counters FSDP preserves, and must not keep its arguments. FSDP skips it
+# for a single rank and when nothing was gathered.
 def _default_all_gather_output_fn(
     all_gather_output: torch.Tensor,
     outputs: list[torch.Tensor],
@@ -472,11 +473,13 @@ def _default_all_gather_output_fn(
 ) -> None:
     """Copy outputs with outer_size > 1 via intermediate buffers, others directly."""
     byte_views = all_gather_output.dtype == torch.uint8
-    copy_outputs: list[torch.Tensor] = []
     split_outputs: list[torch.Tensor] = []
+    reassembled: list[tuple[torch.Tensor, torch.Tensor, int]] = []
     for output, split_size, outer_size in zip(outputs, split_sizes, outer_sizes):
-        copy_output = torch.empty_like(output) if outer_size > 1 else output
-        copy_outputs.append(copy_output)
+        copy_output = output
+        if outer_size > 1:
+            copy_output = torch.empty_like(output)
+            reassembled.append((copy_output, output, outer_size))
         split_output = copy_output.view(torch.uint8) if byte_views else copy_output
         if (numel := split_size * world_size) != split_output.numel():
             split_output = split_output.narrow(0, 0, numel)
@@ -484,10 +487,9 @@ def _default_all_gather_output_fn(
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs
     )
-    for copy_output, output, outer_size in zip(copy_outputs, outputs, outer_sizes):
-        if copy_output is not output:
-            chunks = copy_output.view(world_size, outer_size, -1).unbind(0)
-            torch.cat(chunks, dim=1, out=output.view(outer_size, -1))
+    for copy_output, output, outer_size in reassembled:
+        chunks = copy_output.view(world_size, outer_size, -1).unbind(0)
+        torch.cat(chunks, dim=1, out=output.view(outer_size, -1))
 
 
 def _wait_all_gather(all_gather_result: AllGatherResult) -> None:
@@ -535,12 +537,12 @@ def foreach_all_gather_copy_out(
         outputs.extend(fsdp_param.all_gather_outputs)
         for layout in fsdp_param.all_gather_output_layouts:
             outer_sizes.append(layout.outer_size)
-    # Nothing to copy, and fns could not view an empty buffer as (world_size, -1)
     if all_gather_output.numel() == 0:
-        return
+        return  # nothing was gathered
     non_inference_outputs = tuple(t for t in outputs if not t.is_inference())
-    # Views share their base's version counter. See Note [All-gather output fn].
+    # Views share their base's version counter
     with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
+        # See Note [All-gather output fn]
         all_gather_output_fn(
             all_gather_output,
             outputs,
