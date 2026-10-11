@@ -34,7 +34,6 @@ _bwd_grad_all = {
     skip("as_strided_copy"),
     skip("round", variant_name="decimals_3"),
     skip("round", variant_name="decimals_neg_3"),
-    skip("__rpow__"),
     skip("polygamma", variant_name="polygamma_n_1"),
     skip("polygamma", variant_name="polygamma_n_2"),
     skip("polygamma", variant_name="polygamma_n_3"),
@@ -56,7 +55,6 @@ class TestBwdGradients(TestGradients):
     @skipOps(
         _bwd_grad_all
         | {
-            xfail("cov"),
             xfail("istft"),
             skip("sparse.sampled_addmm"),
             skip("sparse.mm", variant_name="reduce"),
@@ -113,7 +111,6 @@ class TestBwdGradients(TestGradients):
     @skipOps(
         _bwd_grad_all
         | {
-            xfail("cov"),
             skip("sparse.sampled_addmm"),
             skip("sparse.mm", variant_name="reduce"),
             xfail("native_layer_norm"),

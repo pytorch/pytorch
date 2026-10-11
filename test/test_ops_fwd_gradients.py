@@ -5,6 +5,7 @@ from functools import partial
 from unittest import skipIf as skipif
 
 import torch
+from torch.autograd.gradcheck import GradcheckError
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     OpDTypes,
@@ -18,9 +19,16 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     run_tests,
     skipIfTorchInductor,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW_GRADCHECK,
     TestCase,
     TestGradients,
     unMarkDynamoStrictTest,
+)
+from torch.testing._internal.opinfo.core import (
+    sample_skips_and_xfails,
+    SkipRule,
+    XFailRule,
 )
 
 
@@ -42,7 +50,6 @@ _fwd_grad_all = {
     skip("as_strided_copy"),
     skip("round", variant_name="decimals_3"),
     skip("round", variant_name="decimals_neg_3"),
-    skip("__rpow__"),
     skip("polygamma", variant_name="polygamma_n_1"),
     skip("polygamma", variant_name="polygamma_n_2"),
     skip("polygamma", variant_name="polygamma_n_3"),
@@ -60,11 +67,333 @@ _fwd_grad_all = {
 
 @unMarkDynamoStrictTest
 class TestFwdGradients(TestGradients):
+    @_gradcheck_ops([op for op in op_db if op.supports_forward_ad])
+    @sample_skips_and_xfails(
+        [
+            XFailRule(
+                op_match_fn=lambda device, op: op.name == "cumprod",
+                sample_match_fn=lambda device, sample: bool((sample.input == 0).any()),
+                error_type=GradcheckError,
+                error_msg="Forward-over-forward AD: .*mismatch",
+                name="cumprod zero factors: #196701",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: op.name == "linalg.householder_product",
+                sample_match_fn=lambda device, sample: sample.input.numel() > 0
+                and sample.args[0].numel() > 0,
+                error_type=GradcheckError,
+                error_msg="Forward-over-forward AD: .*mismatch",
+                name="householder_product nested JVP: #196698",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: op.name
+                in ("native_batch_norm", "_native_batch_norm_legit"),
+                sample_match_fn=lambda device, sample: sample.input.numel() > 0
+                and sample.args[-3] is True,
+                error_type=GradcheckError,
+                error_msg="Forward-over-forward AD: .*mismatch",
+                name="batch_norm training nested JVP: #196699",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: op.name
+                in ("_batch_norm_with_update", "nn.functional.layer_norm"),
+                sample_match_fn=lambda device, sample: sample.input.numel() > 0,
+                error_type=GradcheckError,
+                error_msg="Forward-over-forward AD: .*mismatch",
+                name="normalization nested JVP: #196699, #196700",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: op.name == "nn.functional.batch_norm",
+                sample_match_fn=lambda device, sample: sample.input.numel() > 0
+                and sample.kwargs.get("training", False),
+                error_type=GradcheckError,
+                error_msg="Forward-over-forward AD: .*mismatch",
+                name="batch_norm training nested JVP: #196699",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: op.name == "nn.functional.instance_norm",
+                sample_match_fn=lambda device, sample: sample.input.numel() > 0
+                and sample.kwargs.get("use_input_stats", True),
+                error_type=GradcheckError,
+                error_msg="Forward-over-forward AD: .*mismatch",
+                name="instance_norm uses batch_norm: #196699",
+            ),
+            SkipRule(
+                op_match_fn=lambda device, op: op.name == "linalg.norm"
+                and op.variant_test_name == "subgradients_at_zero",
+                sample_match_fn=lambda device, sample: sample.input.numel() > 0
+                and sample.args[0] != 0
+                and bool((sample.input == 0).all()),
+                name="No classical second derivative at zero; numerical reference is inapplicable",
+            ),
+            SkipRule(
+                op_match_fn=lambda device, op: op.name
+                in (
+                    "nn.functional.max_unpool1d",
+                    "nn.functional.max_unpool2d",
+                    "nn.functional.max_unpool3d",
+                )
+                and not op.variant_test_name,
+                sample_match_fn=lambda device, sample: sample.args[0].numel() > 0
+                and bool(
+                    sample.args[0]
+                    .flatten(2)
+                    .sort(dim=-1)
+                    .values.diff(dim=-1)
+                    .eq(0)
+                    .any()
+                ),
+                name="Duplicate writes within an unpool plane have no deterministic numerical reference",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: device == "cuda"
+                and not TEST_WITH_ROCM
+                and (
+                    op.name in ("svd", "linalg.svd", "linalg.svdvals", "linalg.cond")
+                    or op.name == "norm"
+                    and op.variant_test_name == "nuc"
+                ),
+                sample_match_fn=lambda device, sample: sample.input.dtype
+                == torch.cdouble
+                and sample.input.numel() > 0,
+                error_type=RuntimeError,
+                error_msg="Expected the output of forward differentiable view operations to have the tangent have the same layout as primal",
+                name="CUDA complex SVD tangent layout",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: device == "cuda"
+                and not TEST_WITH_ROCM
+                and op.name in ("svd_lowrank", "pca_lowrank"),
+                sample_match_fn=lambda device, sample: sample.input.dtype
+                == torch.cdouble
+                and sample.input.numel() > 0
+                and sample.kwargs.get("q", 6) > 0,
+                error_type=RuntimeError,
+                error_msg="Expected the output of forward differentiable view operations to have the tangent have the same layout as primal",
+                name="CUDA complex low-rank SVD tangent layout",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: device == "cuda"
+                and not TEST_WITH_ROCM
+                and op.name == "linalg.matrix_norm",
+                sample_match_fn=lambda device, sample: sample.input.dtype
+                == torch.cdouble
+                and sample.input.numel() > 0
+                and (sample.args[0] if sample.args else sample.kwargs.get("ord"))
+                in ("nuc", 2, -2),
+                error_type=RuntimeError,
+                error_msg="Expected the output of forward differentiable view operations to have the tangent have the same layout as primal",
+                name="CUDA complex spectral matrix norm uses SVD",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: device == "cuda"
+                and not TEST_WITH_ROCM
+                and op.name == "linalg.norm",
+                sample_match_fn=lambda device, sample: sample.input.dtype
+                == torch.cdouble
+                and sample.input.numel() > 0
+                and sample.input.ndim == 2
+                and (sample.args[0] if sample.args else sample.kwargs.get("ord"))
+                in ("nuc", 2, -2),
+                error_type=RuntimeError,
+                error_msg="Expected the output of forward differentiable view operations to have the tangent have the same layout as primal",
+                name="CUDA complex spectral matrix norm uses SVD",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: op.name == "linalg.lu_solve",
+                sample_match_fn=lambda device, sample: (
+                    sample.input.dtype == torch.cdouble
+                    and not sample.kwargs["left"]
+                    and sample.input.ndim > 2
+                    and sample.input.numel() > 0
+                    and sample.args[1].numel() > 0
+                ),
+                error_type=RuntimeError,
+                error_msg="Expected the output of forward differentiable view operations to have the tangent have the same layout as primal",
+                name="Batched complex right-sided lu_solve tangent layout",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: op.name == "logcumsumexp",
+                sample_match_fn=lambda device, sample: (
+                    sample.input.dtype == torch.cdouble
+                    and sample.input.ndim > 0
+                    and sample.input.abs().max() > 1000
+                ),
+                error_type=GradcheckError,
+                error_msg="Forward-over-forward AD: .*mismatch",
+                name="Complex logcumsumexp underflow: #196705",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: (
+                    device == "cpu" or device == "cuda" and not TEST_WITH_ROCM
+                )
+                and op.name
+                in (
+                    "nn.functional.dropout",
+                    "nn.functional.dropout2d",
+                    "nn.functional.dropout3d",
+                ),
+                sample_match_fn=lambda device, sample: (
+                    sample.input.dtype == torch.cdouble
+                    and sample.kwargs.get("training", True)
+                    and 0 < sample.kwargs.get("p", 0.5) < 1
+                ),
+                error_type=NotImplementedError,
+                error_msg=r"(bernoulli_scalar_(cpu|cuda)_|fused_dropout).*ComplexDouble",
+                name="Bernoulli and fused dropout have no complex kernel",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: (
+                    device == "cpu" or device == "cuda" and not TEST_WITH_ROCM
+                )
+                and op.name
+                in (
+                    "nn.functional.alpha_dropout",
+                    "nn.functional.feature_alpha_dropout",
+                ),
+                sample_match_fn=lambda device, sample: (
+                    sample.input.dtype == torch.cdouble
+                    and sample.kwargs.get("training", False)
+                    and 0 < sample.kwargs.get("p", 0.5) < 1
+                ),
+                error_type=NotImplementedError,
+                error_msg=r"bernoulli_scalar_(cpu|cuda)_.*ComplexDouble",
+                name="Bernoulli has no complex kernel",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: op.name == "nn.functional.alpha_dropout",
+                sample_match_fn=lambda device, sample: (
+                    sample.input.dtype == torch.double
+                    and sample.input.ndim == 0
+                    and sample.kwargs.get("training", False)
+                    and 0 < sample.kwargs.get("p", 0.5) < 1
+                ),
+                error_type=RuntimeError,
+                error_msg="ZeroTensors are immutable",
+                name="Scalar alpha_dropout mutates a zero tangent",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: op.name == "tensor_split",
+                sample_match_fn=lambda device, sample: isinstance(
+                    sample.args[0], torch.Tensor
+                )
+                and sample.args[0].ndim > 0,
+                error_type=RuntimeError,
+                error_msg="Cannot access data pointer of Tensor that doesn't have storage",
+                name="Tensor split indices are storage-less under nested JVP",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: op.name
+                in (
+                    "nn.functional.glu",
+                    "nn.functional.hardsigmoid",
+                    "nn.functional.huber_loss",
+                    "nn.functional.soft_margin_loss",
+                ),
+                sample_match_fn=lambda device, sample: sample.input.numel() > 0,
+                error_type=NotImplementedError,
+                error_msg=r"Trying to use forward AD with (aten::glu_jvp|aten::hardsigmoid_backward|huber_loss_backward|soft_margin_loss_backward) that does not support it",
+                name="The first JVP calls an operator without a forward-AD rule",
+            ),
+        ]
+    )
+    def test_fn_fwgrad_fwgrad(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+        samples = op.sample_inputs(
+            device,
+            dtype,
+            requires_grad=True,
+            use_subtests=True,
+            small_inputs_only=TEST_WITH_SLOW_GRADCHECK,
+        )
+        for sample, subtest, expectation in samples:
+            with subtest(self), expectation(self):
+                self._check_helper(
+                    device, dtype, op, op.get_op(), "fwgrad_fwgrad", samples=(sample,)
+                )
+
+    @_gradcheck_ops([op for op in op_db if op.derivative_inputs_func is not None])
+    @sample_skips_and_xfails(
+        [
+            XFailRule(
+                op_match_fn=lambda device, op: op.name
+                in (
+                    "cholesky_inverse",
+                    "cholesky_solve",
+                    "logcumsumexp",
+                    "scatter_reduce",
+                ),
+                error_type=GradcheckError,
+                error_msg="Jacobian computed with forward mode mismatch",
+                name="Forward formulas: #196682, #196694, #196705, #196702",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: op.name == "triangular_solve",
+                sample_match_fn=lambda device, sample: sample.kwargs["unitriangular"]
+                or sample.kwargs["transpose"],
+                error_type=GradcheckError,
+                error_msg="Jacobian computed with forward mode mismatch",
+                name="triangular_solve flags: #196707, #198602",
+            ),
+        ]
+    )
+    def test_forward_mode_AD_boundary(self, device, dtype, op):
+        for sample, subtest, expectation in op.derivative_inputs(
+            device, dtype, requires_grad=True, use_subtests=True
+        ):
+            with subtest(self), expectation(self):
+                self._check_helper(
+                    device,
+                    dtype,
+                    op,
+                    op.get_op(),
+                    "gradcheck",
+                    samples=(sample,),
+                    check_forward_ad=True,
+                    check_backward_ad=False,
+                    check_batched_grad=False,
+                )
+
+    @_gradcheck_ops([op for op in op_db if op.derivative_inputs_func is not None])
+    @sample_skips_and_xfails(
+        [
+            XFailRule(
+                op_match_fn=lambda device, op: op.name
+                in ("cholesky_inverse", "cholesky_solve", "cumprod", "logaddexp"),
+                error_type=GradcheckError,
+                error_msg="Forward-over-forward AD: .*mismatch",
+                name="Nested formulas: #196682, #196694, #196701, #196704",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: op.name == "sinc",
+                sample_match_fn=lambda device, sample: sample.name == "zero",
+                error_type=GradcheckError,
+                error_msg="Forward-over-forward AD: .*mismatch",
+                name="sinc removable singularity: #196703",
+            ),
+            XFailRule(
+                op_match_fn=lambda device, op: op.name == "triangular_solve",
+                sample_match_fn=lambda device, sample: sample.kwargs["unitriangular"]
+                or sample.kwargs["transpose"],
+                error_type=GradcheckError,
+                error_msg="Forward-over-forward AD: .*mismatch",
+                name="triangular_solve flags: #196707, #198602",
+            ),
+        ]
+    )
+    def test_fn_fwgrad_fwgrad_boundary(self, device, dtype, op):
+        for sample, subtest, expectation in op.derivative_inputs(
+            device, dtype, requires_grad=True, use_subtests=True
+        ):
+            with subtest(self), expectation(self):
+                self._check_helper(
+                    device, dtype, op, op.get_op(), "fwgrad_fwgrad", samples=(sample,)
+                )
+
     # Test that forward-over-reverse gradgrad is computed correctly
     @skipOps(
         _fwd_grad_all
         | {
-            skip("cov"),
             skip("sparse.sampled_addmm"),
             skip("sparse.mm", variant_name="reduce"),
             xfail(
@@ -132,7 +461,7 @@ class TestFwdGradients(TestGradients):
     @skipOps(
         _fwd_grad_all
         | {
-            xfail("cov"),
+            xfail("cov", dtypes=(torch.cdouble,)),
             skip("sparse.sampled_addmm"),
             skip("sparse.mm", variant_name="reduce"),
             xfail("as_strided", variant_name="partial_views"),
