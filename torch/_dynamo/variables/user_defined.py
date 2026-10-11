@@ -4767,6 +4767,13 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
     def fn(self) -> Callable[..., object]:
         return self.value_type
 
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+        # A C-level __str__ inherited from a builtin exception (KeyError, SyntaxError, ...)
+        # is not in _base_methods, but ExceptionVariable models it.
+        if isinstance(type(self.value).__str__, types.WrapperDescriptorType):
+            return ExceptionVariable.tp_str_impl(self, tx)
+        return super().tp_str_impl(tx)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
