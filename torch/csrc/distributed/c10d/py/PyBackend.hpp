@@ -6,6 +6,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
 
+#include <optional>
+
 namespace c10d {
 
 // PyBackend is a pybind11 trampoline class to allow a Python
@@ -82,6 +84,13 @@ class PyBackend : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts = GatherOptions()) override {
     WORK_OVERRIDE(Backend, gather, outputTensors, inputTensors, opts);
+  }
+
+  c10::intrusive_ptr<Work> gather_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts = GatherOptions()) override {
+    WORK_OVERRIDE(Backend, gather_single, outputBuffer, inputBuffer, opts);
   }
 
   c10::intrusive_ptr<Work> scatter(
@@ -293,16 +302,8 @@ class PyBackend : public Backend {
 
   c10::intrusive_ptr<Options> getBackendOptions() override {
     pybind11::gil_scoped_acquire gil;
-    auto self = pybind11::cast(this);
-    auto cls = pybind11::type::of(self);
-    if (pybind11::hasattr(cls, "options")) {
-      auto attr = cls.attr("options");
-      if (PyObject_IsInstance(
-              attr.ptr(), reinterpret_cast<PyObject*>(&PyProperty_Type)) ||
-          !pybind11::isinstance<pybind11::cpp_function>(attr)) {
-        return pybind11::getattr(self, "options")
-            .cast<c10::intrusive_ptr<Options>>();
-      }
+    if (auto o = getPropertyOverride("options")) {
+      return o->cast<c10::intrusive_ptr<Options>>();
     }
     return Backend::getBackendOptions();
   }
@@ -344,7 +345,18 @@ class PyBackend : public Backend {
 
   at::Tensor allocateTensor(long size, at::TensorOptions options = {})
       override {
-    PYBIND11_OVERRIDE(at::Tensor, Backend, allocateTensor, size, options);
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function override = pybind11::get_override(
+        static_cast<const Backend*>(this), "allocate_tensor");
+    if (override) {
+      return override(
+                 size,
+                 pybind11::arg("dtype") =
+                     c10::typeMetaToScalarType(options.dtype()),
+                 pybind11::arg("device") = options.device())
+          .cast<at::Tensor>();
+    }
+    return Backend::allocateTensor(size, options);
   }
 
   std::unordered_map<std::string, uint64_t> getMemoryStats() override {
@@ -358,10 +370,7 @@ class PyBackend : public Backend {
   }
 
   // -- Bool properties --
-  // These are bound as def_property_readonly, so Python subclasses override
-  // them with @property. get_override won't find @property descriptors, so
-  // we use py::getattr to access them through normal Python attribute
-  // resolution, which handles both @property and regular methods.
+  // These are bound as def_property_readonly; see getPropertyOverride.
 
   bool supportsSplitting() const override {
     return getPropertyOverride(
@@ -392,6 +401,11 @@ class PyBackend : public Backend {
     return getPropertyOverride("supports_window", Backend::supportsWindow());
   }
 
+  bool supportsAbortHooks() const override {
+    return getPropertyOverride(
+        "supports_abort_hooks", Backend::supportsAbortHooks());
+  }
+
   bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override {
     pybind11::gil_scoped_acquire gil;
     pybind11::function override = pybind11::get_override(
@@ -413,6 +427,17 @@ class PyBackend : public Backend {
       return;
     }
     return Backend::setTimeout(timeout);
+  }
+
+  void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function override = pybind11::get_override(
+        static_cast<const Backend*>(this), "_add_ephemeral_timeout");
+    if (override) {
+      override(timeout);
+      return;
+    }
+    return Backend::addEphemeralTimeout(timeout);
   }
 
   void abort() override {
@@ -499,15 +524,21 @@ class PyBackend : public Backend {
   }
 
   void registerAbortHook(int64_t hook_id, AbortHook hook) override {
-    PYBIND11_OVERRIDE(void, Backend, registerAbortHook, hook_id, hook);
+    PYBIND11_OVERRIDE_NAME(
+        void, Backend, "register_abort_hook", registerAbortHook, hook_id, hook);
   }
 
   void unregisterAbortHook(int64_t hook_id) override {
-    PYBIND11_OVERRIDE(void, Backend, unregisterAbortHook, hook_id);
+    PYBIND11_OVERRIDE_NAME(
+        void, Backend, "unregister_abort_hook", unregisterAbortHook, hook_id);
   }
 
  private:
   static c10::intrusive_ptr<Backend> initSlotAndCast(py::object o) {
+    // None (e.g. split() on non-members) maps to nullptr.
+    if (o.is_none()) {
+      return nullptr;
+    }
     auto backend = o.cast<c10::intrusive_ptr<Backend>>();
     auto* pyobj = torch::utils::PyObjectPreservation::get_or_init(
         *backend, [&]() { return Py_NewRef(o.ptr()); });
@@ -515,15 +546,26 @@ class PyBackend : public Backend {
     return backend;
   }
 
+  // Returns the value of the Python subclass's override of the readonly
+  // property `name`, or std::nullopt if it doesn't override it. get_override
+  // can't see properties (or plain class attributes), so compare the attribute
+  // found on the subclass against the base Backend's. An override that calls
+  // super().<name> gets Backend's implementation without coming back here, see
+  // BACKEND_VIRTUAL_PROPERTY in init.cpp. Requires the GIL.
+  std::optional<pybind11::object> getPropertyOverride(const char* name) const {
+    auto self = pybind11::cast(static_cast<const Backend*>(this));
+    auto cls = pybind11::type::of(self);
+    auto base = pybind11::type::of<Backend>();
+    if (cls.attr(name).is(base.attr(name))) {
+      return std::nullopt;
+    }
+    return self.attr(name);
+  }
+
   bool getPropertyOverride(const char* name, bool defaultValue) const {
     pybind11::gil_scoped_acquire gil;
-    auto self = pybind11::cast(this);
-    auto cls = pybind11::type::of(self);
-    if (pybind11::hasattr(cls, name)) {
-      auto attr = cls.attr(name);
-      if (!pybind11::isinstance<pybind11::cpp_function>(attr)) {
-        return pybind11::getattr(self, name).cast<bool>();
-      }
+    if (auto o = getPropertyOverride(name)) {
+      return o->cast<bool>();
     }
     return defaultValue;
   }

@@ -13,9 +13,11 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import types
 import unittest
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any, cast
 from typing_extensions import override
@@ -29,7 +31,9 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+from torch._higher_order_ops.effects import _EffectType
 from torch._inductor import config, config_comms, metrics
+from torch._inductor.async_compile import CompiledTritonKernels
 from torch._inductor.cache_key import (
     AUTOTUNE_CACHE_KEY_STRATEGY,
     CacheKeyStrategy,
@@ -49,6 +53,7 @@ from torch._inductor.codecache import (
     FxGraphCachePickler,
     FxGraphHashDetails,
     PyCodeCache,
+    StaticAutotunerFuture,
     TensorMetadata,
     TensorMetadataAndValues,
     triton_key,
@@ -66,6 +71,11 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.triton_bundler import (
+    StaticallyLaunchedAutotuner,
+    TritonBundle,
+    TritonBundler,
+)
 from torch._inductor.utils import clear_caches, fresh_cache
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
@@ -1603,6 +1613,87 @@ class TestFxGraphCache(TestCase):
     def test_cache_hot_load_empty(self):
         self.assertIsNone(torch.compiler.save_cache_artifacts())
 
+    @config.patch(
+        bundle_triton_into_fx_graph_cache=True,
+        use_static_triton_launcher=True,
+    )
+    @parametrize("operation", ("clear", "remove", "replace"))
+    def test_cache_hot_load_during_kernel_finalization(self, operation):
+        kernel_src = "megacache_concurrent_kernel"
+        bundle = TritonBundle(
+            [],
+            [
+                StaticallyLaunchedAutotuner(
+                    CompiledTritonKernels.key(kernel_src),
+                    "concurrent_kernel",
+                    types.SimpleNamespace(compile_results=[]),
+                )
+            ],
+        )
+        content = pickle.dumps(types.SimpleNamespace(_triton_bundle=bundle))
+        graph_key = "f" + "0" * 51
+        CacheArtifactManager.record_artifact("inductor", graph_key, content)
+        artifacts = torch.compiler.save_cache_artifacts()
+        self.assertIsNotNone(artifacts)
+        artifact_bytes, _ = artifacts
+        CacheArtifactManager.clear()
+
+        finalizing = threading.Event()
+        loaded = threading.Event()
+        finalized = []
+
+        class FinalizedKernel:
+            def __del__(self):
+                # Kernel finalizers can release the GIL while the cache drops
+                # its last reference. Force megacache loading into that window.
+                finalizing.set()
+                finalized.append(loaded.wait(timeout=30))
+
+        def load_artifacts():
+            try:
+                self.assertTrue(finalizing.wait(timeout=30))
+                return torch.compiler.load_cache_artifacts(artifact_bytes)
+            finally:
+                loaded.set()
+
+        self.addCleanup(CompiledTritonKernels.cache_clear)
+        CompiledTritonKernels.save(kernel_src, FinalizedKernel())
+        self.assertIsInstance(CompiledTritonKernels.get(kernel_src), FinalizedKernel)
+        replacement = mock.sentinel.compiled_kernel
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            loading = executor.submit(load_artifacts)
+            if operation == "clear":
+                CompiledTritonKernels.cache_clear()
+            elif operation == "remove":
+                CompiledTritonKernels.remove_future(kernel_src)
+            else:
+                CompiledTritonKernels.save(kernel_src, replacement)
+            cache_info = loading.result(timeout=30)
+
+        self.assertEqual(finalized, [True])
+        self.assertIsNotNone(cache_info)
+        self.assertEqual(cache_info.inductor_artifacts, [graph_key])
+        expected = replacement if operation == "replace" else None
+        self.assertIs(CompiledTritonKernels.get(kernel_src), expected)
+        self.assertEqual(
+            counters["inductor"]["triton_bundler_load_static_autotuner"], 0
+        )
+
+        directory = FxGraphCache._get_tmp_dir_for_key(graph_key)
+        filenames = os.listdir(directory)
+        self.assertEqual(len(filenames), 1)
+        with open(os.path.join(directory, filenames[0]), "rb") as f:
+            restored = pickle.load(f)
+
+        # The bundle must still be loadable on the compile thread.
+        metadata = TritonBundler.read_and_emit(restored._triton_bundle)
+        self.assertEqual(
+            metadata.statically_launched_kernel_names, ["concurrent_kernel"]
+        )
+        self.assertIsInstance(
+            CompiledTritonKernels.get(kernel_src), StaticAutotunerFuture
+        )
+
     def test_cache_hot_load_generic(self):
         class CacheStub:
             def __init__(self):
@@ -2139,6 +2230,90 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": False})
+    @parametrize("requires_grad", (False, True))
+    def test_with_effects_custom_op_cache_hit(self, requires_grad):
+        """
+        with_effects wrapping a custom OpOverload is as cacheable as the op
+        itself, and the effectful op still runs in program order on a hit.
+        """
+        logged = []
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::log", "(Tensor x, str tag) -> ()", lib=lib)
+            lib.impl(
+                "log",
+                lambda x, tag: logged.append((tag, x.sum().item())),
+                "CompositeExplicitAutograd",
+            )
+            lib.impl("log", lambda x, tag: None, "Meta")
+            torch.library._register_effectful_op(
+                "mylib::log", _EffectType.ORDERED, lib=lib
+            )
+
+            class LogGrad(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x.clone()
+
+                @staticmethod
+                def backward(ctx, grad):
+                    torch.ops.mylib.log(grad, "grad")
+                    return grad
+
+            def fn(x):
+                if requires_grad:
+                    x = LogGrad.apply(x)
+                y = x.sin()
+                torch.ops.mylib.log(y, "a")
+                z = y.cos()
+                torch.ops.mylib.log(z, "b")
+                return z.sum()
+
+            def run():
+                logged.clear()
+                x = torch.arange(8.0, requires_grad=requires_grad)
+                out = torch.compile(fn)(x)
+                if requires_grad:
+                    out.backward()
+                return out.detach(), list(logged)
+
+            num_graphs = 2 if requires_grad else 1
+            out1, log1 = run()
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], num_graphs)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            counters.clear()
+            self.reset()
+            out2, log2 = run()
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], num_graphs)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            self.assertEqual(out1, out2)
+            self.assertEqual(log1, log2)
+            expected = ["a", "b", "grad"] if requires_grad else ["a", "b"]
+            self.assertEqual([tag for tag, _ in log2], expected)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_with_effects_noncacheable_hop_bypass(self):
+        """
+        with_effects wrapping a non-cacheable HOP still bypasses the cache.
+        """
+
+        def fn(x):
+            torch._higher_order_ops.print("x: {}", x)
+            return x.sin()
+
+        torch.compile(fn)(torch.randn(4))
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
     @requires_gpu()
     @requires_triton()

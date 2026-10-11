@@ -1798,8 +1798,16 @@ class FakeTensorTest(TestCase):
     def test_tolist(self):
         shape_env = ShapeEnv()
         with FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env):
-            x = torch.rand([10])
-            x.tolist()
+            # 1-D: flat list of (symbolic) scalars.
+            flat = torch.rand([10]).tolist()
+            self.assertEqual(len(flat), 10)
+            self.assertNotIsInstance(flat[0], list)
+            # Multi-dim exercises the recursive fake tolist path.
+            nested = torch.rand([2, 3]).tolist()
+            self.assertEqual(len(nested), 2)
+            self.assertTrue(all(len(row) == 3 for row in nested))
+            # 0-D returns a scalar, not a list.
+            self.assertNotIsInstance(torch.rand(()).tolist(), list)
 
     # Propagate real tensors doesn't work with fake-on-fake
     @expectedFailurePropagateRealTensors
@@ -3552,6 +3560,21 @@ class FakeTensorPropTest(TestCase):
         r = torch.ones(5).nonzero()
 
         self.assertEqual(fake_r.T.is_contiguous(), r.T.is_contiguous())
+
+    def test_nonzero_numpy_arity_matches_eager(self):
+        # Normal dispatch decomposes this CIA op before fake mode sees it; the
+        # fake rule is only used when export preserves the op, so call it directly.
+        from torch._subclasses.fake_impls import op_implementations_dict
+
+        op = torch.ops.aten.nonzero_numpy.default
+        rule = op_implementations_dict[op]
+        for shape in [(), (3,), (2, 3), (2, 0, 3)]:
+            x = torch.randn(shape)
+            expected = torch.nonzero(x, as_tuple=True)
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+            actual = rule(fake_mode, op, fake_mode.from_tensor(x))
+            self.assertEqual(len(actual), len(expected))
+            self.assertEqual([t.dim() for t in actual], [t.dim() for t in expected])
 
     def test_nan_to_num(self):
         shape_env = ShapeEnv()

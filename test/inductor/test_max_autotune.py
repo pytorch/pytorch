@@ -941,15 +941,16 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
-    def test_addmm_0d_bias_max_autotune(self):
+    @parametrize("beta", (0, 1))
+    def test_addmm_0d_bias_max_autotune(self, beta):
         torch._dynamo.reset()
         bias = torch.tensor(0.5)
         x = torch.randn(2, 2)
         y = torch.randn(2, 2)
 
-        eager_out = torch.addmm(bias, x, y)
+        eager_out = torch.addmm(bias, x, y, beta=beta)
         with config.patch({"max_autotune": True, "max_autotune_gemm": True}):
-            compiled_out = torch.compile(torch.addmm)(bias, x, y)
+            compiled_out = torch.compile(torch.addmm)(bias, x, y, beta=beta)
 
         self.assertEqual(compiled_out, eager_out)
 
@@ -1301,6 +1302,26 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(16, 8).to(GPU_TYPE)
         with config.patch({"max_autotune": True}):
             torch.compile(fn, dynamic=dynamic)(x, a, b)
+
+    @parametrize("op", [torch.addmm, torch.baddbmm])
+    def test_max_autotune_zero_beta_drops_nan_bias(self, op):
+        def fn(x, a, b):
+            return op(x, a, b, beta=0, alpha=0.5)
+
+        shape = (64, 64) if op is torch.addmm else (2, 64, 64)
+        x = torch.full((64,), float("nan"), device=GPU_TYPE)
+        a = torch.randn(shape, device=GPU_TYPE)
+        b = torch.randn(shape, device=GPU_TYPE)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.native_matmul": False,
+            }
+        ):
+            out = torch.compile(fn)(x, a, b)
+        self.assertFalse(out.isnan().any())
+        self.assertEqual(out, fn(x, a, b), atol=1e-2, rtol=1e-2, equal_nan=False)
 
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_autotune_conv1x1(self, search_space):
@@ -2258,6 +2279,26 @@ class TestMaxAutotune(TestCase):
 
             # Check that contiguous transform was used
             FileCheck().check("contiguous_addmm").run(code[0])
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @parametrize("beta", (0.0, 0.5))
+    @config.patch(max_autotune=True)
+    def test_max_autotune_contiguous_transform_addmm_scalars(self, beta):
+        def addmm_transpose(inp, a, b):
+            return torch.addmm(inp, a, b.transpose(0, 1), beta=beta, alpha=2.0)
+
+        inp = torch.randn(64, 128, device=GPU_TYPE)
+        a = torch.randn(64, 256, device=GPU_TYPE)
+        b = torch.randn(128, 256, device=GPU_TYPE)
+        with mock.patch(
+            "torch._inductor.heuristics.template.contiguous_mm.use_contiguous",
+            return_value=True,
+        ):
+            out, code = run_and_get_code(torch.compile(addmm_transpose), inp, a, b)
+
+        # contiguous_addmm calls addmm without alpha and beta.
+        FileCheck().check_not("contiguous_addmm").run(code[0])
+        self.assertEqual(out, addmm_transpose(inp, a, b), atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dynamic", (False, True))
@@ -5140,6 +5181,59 @@ class TestPrologueFusion(TestCase):
             FileCheck().check(get_func_call()).check_count(
                 "del", num_deallocs, exactly=True
             ).run(code_str)
+
+    @contextlib.contextmanager
+    def force_template_fusion_benchmark(self):
+        with (
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+        ):
+            yield
+
+    @fresh_cache()
+    @mock.patch("torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True)
+    @config.patch(enable_caching_generated_triton_templates=True)
+    @config.patch(
+        {
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_shared_prefix_and_input_prologue_fusion(self):
+        M = K = N = 64
+
+        def foo(x, b):
+            computed = x * 2.0
+            return torch.addmm(computed, computed, b)
+
+        x = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(foo), x, b)
+
+        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
+        # The bias use needs the materialized producer, so the pointwise kernel
+        # computes x * 2.0 and the template kernel must not recompute it before
+        # tl.dot (i.e. the producer is not fused into the template's A input).
+        (
+            FileCheck()
+            .check("def triton_poi")
+            .check("2.0")
+            .check("def triton_tem")
+            .check_not("2.0")
+            .check("tl.dot")
+            .run(code[0])
+        )
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
