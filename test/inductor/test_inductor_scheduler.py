@@ -1243,6 +1243,9 @@ class TestScheduler(TestCase):
                 _tma_dim_fits_int32=TritonTemplateKernel._tma_dim_fits_int32,
                 index_to_str=lambda sizes: str(list(sizes)),
             )
+            kernel._tile_tma_descriptor = lambda *args: (
+                TritonTemplateKernel._tile_tma_descriptor(kernel, *args)
+            )
             graph = Mock(sizevars=SizeVarAllocator())
             graph.get_buffer.return_value.get_layout.return_value = layout
             with V.set_graph_handler(graph):
@@ -1287,6 +1290,7 @@ class TestScheduler(TestCase):
             )
             kernel._staged_tile_elems.return_value = 128 * 128
             kernel._full_tile_epilogue_outputs.return_value = (outputs, plain)
+            kernel._full_tile_epilogue_inputs.return_value = []
             kernel._epilogue_tma_store_budget = lambda stored: budget + (
                 0 if stored else 32768
             )
@@ -1330,9 +1334,9 @@ class TestScheduler(TestCase):
                 ),
             ):
                 return list(
-                    TritonTemplateKernel._tma_store_epilogue_outputs(
+                    TritonTemplateKernel._tma_epilogue_accesses(
                         kernel, template_node, [reduction, *others]
-                    )
+                    )[0]
                 )
 
         fp32, bf16 = 65536, 32768
@@ -1397,6 +1401,9 @@ class TestScheduler(TestCase):
         }
         kernel = Mock(meta={"BLOCK_M": 32, "BLOCK_N": 32})
         kernel._staged_tile_elems = lambda: 32 * 32
+        kernel._is_full_tile_tma_layout = lambda *args: (
+            TritonTemplateKernel._is_full_tile_tma_layout(kernel, *args)
+        )
         kernel.output_node.get_size.return_value = [sympy.Integer(m), sympy.Integer(n)]
         epilogue = Mock(get_buffer_names=Mock(return_value=list(layouts)))
         epilogue.is_reduction.return_value = False
