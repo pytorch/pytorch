@@ -1,6 +1,7 @@
 #ifdef USE_C10D_NCCL
 
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <exception>
 #include <map>
 #include <memory>
@@ -1592,9 +1593,16 @@ void ProcessGroupNCCL::shutdown() {
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
   }
-  // Watchdog thread exiting, retire heartbeat monitoring thread now to avoid
-  // false alarm
-  heartbeatMonitor_->stop();
+  // The watchdog has exited, so normal heartbeat monitoring would report a
+  // false alarm. Keep only the default PG's peer dump-signal responder alive
+  // while communicators are destroyed. This lets a rank already in shutdown
+  // contribute its flight-recorder trace when another rank times out.
+  auto shutdownDumpSignalTimeout = options_->timeout +
+      std::chrono::milliseconds(heartbeatMonitor_->getDumpTimeout());
+  if (!heartbeatMonitor_->monitorDumpSignalsDuringShutdown(
+          shutdownDumpSignalTimeout)) {
+    heartbeatMonitor_->stop();
+  }
   // Destroy the communicator, reclaim resources
   LOG(INFO) << logPrefix() << "Watchdog joined, destroying NCCL communicators.";
   {
@@ -1605,6 +1613,7 @@ void ProcessGroupNCCL::shutdown() {
     }
   }
   LOG(INFO) << logPrefix() << "Destroy complete.";
+  heartbeatMonitor_->stop();
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
@@ -1681,7 +1690,8 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
 bool ProcessGroupNCCL::dumpDebuggingInfo(
     bool includeStackTrace /*=true*/,
-    bool onlyActive /*=false*/) {
+    bool onlyActive /*=false*/,
+    bool includeCommDump /*=true*/) {
   // This will log counter for how long dumpDebuggingInfo actually takes.
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__dumpDebuggingInfo);
 
@@ -1697,7 +1707,17 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
-    auto ncclTrace = dump_nccl_trace(true, includeStackTrace, onlyActive);
+    std::string ncclTrace;
+    if (includeCommDump) {
+      ncclTrace = dump_nccl_trace(true, includeStackTrace, onlyActive);
+    } else {
+      // Communicator destruction may be in progress. In particular, ROCm and
+      // NCCLX communicator dumps call into the communication library and must
+      // not race with destroy(). The flight-recorder data itself is independent
+      // of communicator state.
+      ncclTrace = FlightRecorderCUDA::get()->dump(
+          {}, true, includeStackTrace, onlyActive);
+    }
     // dump_nccl_trace will hang so we don't grab the global lock until we get
     // the trace.
     std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
@@ -1800,8 +1820,45 @@ ProcessGroupNCCL::HeartbeatMonitor::HeartbeatMonitor(ProcessGroupNCCL* pg) {
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::stop() {
-  terminateHeartbeatMonitorThread_.store(true);
+  {
+    std::lock_guard<std::mutex> lock(shutdownDumpSignalArmingMutex_);
+    terminateHeartbeatMonitorThread_.store(true);
+  }
   monitorWakeUpCV_.notify_one();
+  shutdownDumpSignalArmingCV_.notify_one();
+}
+
+bool ProcessGroupNCCL::HeartbeatMonitor::monitorDumpSignalsDuringShutdown(
+    std::chrono::milliseconds timeout) {
+  if (!ncclHeartbeatMonitorThread_.joinable() || !dumpOnTimeoutOrEx_ ||
+      pg_->getUid() != 0 || terminateHeartbeatMonitorThread_.load() ||
+      timeout <= std::chrono::milliseconds::zero()) {
+    return false;
+  }
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  shutdownDumpSignalDeadlineMillis_.store(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          deadline.time_since_epoch())
+          .count());
+  {
+    std::lock_guard<std::mutex> lock(shutdownDumpSignalArmingMutex_);
+    shutdownDumpSignalArmed_ = false;
+  }
+  shutdownDumpSignalMonitorEnabled_.store(true);
+  monitorWakeUpCV_.notify_one();
+  // A joinable monitor may have left the polling loop for its post-dump wait
+  // or exited entirely. Only the monitor itself can confirm that it entered
+  // shutdown-only polling. Keep this wait independent of monitorMutex_, which
+  // the monitor holds while checking the store.
+  constexpr auto kArmingWaitLimit = std::chrono::milliseconds(5000);
+  std::unique_lock<std::mutex> lock(shutdownDumpSignalArmingMutex_);
+  const bool acknowledged = shutdownDumpSignalArmingCV_.wait_for(
+      lock, std::min(timeout, kArmingWaitLimit), [&] {
+        return shutdownDumpSignalArmed_ ||
+            terminateHeartbeatMonitorThread_.load();
+      });
+  return acknowledged && shutdownDumpSignalArmed_ &&
+      !terminateHeartbeatMonitorThread_.load();
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::start() {
@@ -1846,19 +1903,75 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
         pg_->globalRank(), pg_->debugInfoPipeFile_, pg_->traceBufferSize_);
   }
   while (true) {
+    const bool shutdownDumpSignalOnly =
+        shutdownDumpSignalMonitorEnabled_.load();
+    const int currentPollInterval = shutdownDumpSignalOnly
+        ? coordCheckIntervalMilSec_
+        : monitorPollInterval;
     // This won't have any lock since this lock is only used here.
     // Please be aware that mutex `monitorMutex_` should not be used
     // somewhere else to avoid the deadlock.
     std::unique_lock<std::mutex> lock(monitorMutex_);
     if (monitorWakeUpCV_.wait_for(
-            lock, std::chrono::milliseconds(monitorPollInterval), [&] {
-              return terminateHeartbeatMonitorThread_.load();
+            lock, std::chrono::milliseconds(currentPollInterval), [&] {
+              return terminateHeartbeatMonitorThread_.load() ||
+                  (!shutdownDumpSignalOnly &&
+                   shutdownDumpSignalMonitorEnabled_.load());
             })) {
       // For the normal complete or user interception, monitorWakeUpCV_
       // will get notified, we early return and exit heartbeatMonitor.
-      return;
+      if (terminateHeartbeatMonitorThread_.load()) {
+        return;
+      }
     }
     auto currentTime = std::chrono::steady_clock::now();
+
+    if (shutdownDumpSignalMonitorEnabled_.load()) {
+      const auto currentTimeMillis =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              currentTime.time_since_epoch())
+              .count();
+      if (currentTimeMillis >= shutdownDumpSignalDeadlineMillis_.load()) {
+        LOG(INFO) << pg_->logPrefix()
+                  << "Shutdown dump-signal responder reached its deadline.";
+        return;
+      }
+
+      bool firstAcknowledgment = false;
+      {
+        std::lock_guard<std::mutex> armingLock(shutdownDumpSignalArmingMutex_);
+        if (!shutdownDumpSignalArmed_) {
+          shutdownDumpSignalArmed_ = true;
+          firstAcknowledgment = true;
+        }
+      }
+      if (firstAcknowledgment) {
+        shutdownDumpSignalArmingCV_.notify_one();
+      }
+
+      bool checkExceptionDump = false;
+      try {
+        checkExceptionDump =
+            pg_->globalStore()->check({std::string(kStoreDumpKey)});
+      } catch (const std::exception& e) {
+        LOG(INFO) << pg_->logPrefix()
+                  << "Shutdown dump-signal responder could not check "
+                  << "TCPStore: " << e.what();
+        return;
+      }
+      if (checkExceptionDump) {
+        LOG(ERROR)
+            << pg_->logPrefix()
+            << "Observed flight recorder dump signal during ProcessGroupNCCL shutdown.";
+        const bool onlyActive = getCvarBool(TORCH_INCLUDE_ONLY_ACTIVE, false);
+        // Symbolizing tracebacks may acquire the GIL. Keep the shutdown
+        // responder independent of Python threads, communicator state, and
+        // the normal post-dump termination path.
+        pg_->dumpDebuggingInfo(false, onlyActive, false);
+        return;
+      }
+      continue;
+    }
 
     // We put extra functionality in the thread for the default PG (aka,
     // local_id_=0) because the signal is same across different PGs. We only
