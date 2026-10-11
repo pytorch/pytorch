@@ -2784,6 +2784,10 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
         make_arg(()),
         0,
         torch.tensor(0, dtype=torch.int64, device=device))
+    yield SampleInput(
+        make_arg((S,)),
+        0,
+        torch.tensor(1, dtype=torch.int64, device=device))
 
 def _fill_indices(idx, dim, dim_size, elems_per_row, m, n, o):
     for i in range(1 if dim == 0 else m):

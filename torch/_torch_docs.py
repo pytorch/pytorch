@@ -4825,6 +4825,7 @@ For a 3-D tensor the output is specified by::
     out[i][j][k] = input[i][j][index[i][j][k]]  # if dim == 2
 
 :attr:`input` and :attr:`index` must have the same number of dimensions.
+As a special case, a 0-D tensor is treated as a 1-D tensor with one element.
 It is also required that ``index.size(d) <= input.size(d)`` for all
 dimensions ``d != dim``.  :attr:`out` will have the same shape as :attr:`index`.
 Note that ``input`` and ``index`` do not broadcast against each other.
