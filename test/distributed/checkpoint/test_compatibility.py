@@ -61,6 +61,7 @@ class TestDCPCompatbility(TestCase):
                 "The change may break the BC of distributed checkpoint."
             ) from e
 
+    @with_temp_dir
     def test_sharded_tensor_dependency(self) -> None:
         # Ensure that we can load the existing DCP checkpoints back even if the
         # metadata contain # _shard.sharded_tensor.metadata.
@@ -71,12 +72,12 @@ class TestDCPCompatbility(TestCase):
         with patch("torch.distributed.checkpoint.metadata.TensorProperties", stp):
             dcp.save(
                 {"a": torch.zeros(4, 4)},
-                dcp.FileSystemWriter("/tmp/dcp_testing"),
+                dcp.FileSystemWriter(self.temp_dir),
             )
 
         dcp.load(
             {"a": torch.zeros(4, 4)},
-            dcp.FileSystemReader("/tmp/dcp_testing"),
+            dcp.FileSystemReader(self.temp_dir),
         )
 
     @with_temp_dir

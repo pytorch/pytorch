@@ -1047,6 +1047,10 @@ class _FakeTritonKernel:
 
 
 class TestSubprocessEnv(TestCase):
+    current_inductor_cache_path: str = os.path.join(
+        tempfile.gettempdir(), "current-inductor-cache"
+    )
+
     def assert_path_in_dir(self, path, expected_dir):
         expected_dir = os.path.abspath(expected_dir)
         self.assertEqual(
@@ -1081,7 +1085,7 @@ class TestSubprocessEnv(TestCase):
         pool = FakePool()
 
         try:
-            os.environ["TORCHINDUCTOR_CACHE_DIR"] = "/tmp/current-inductor-cache"
+            os.environ["TORCHINDUCTOR_CACHE_DIR"] = self.current_inductor_cache_path
             os.environ.pop("TRITON_CACHE_DIR", None)
             os.environ.pop("TORCHINDUCTOR_CUTLASS_DIR", None)
 
@@ -1100,7 +1104,7 @@ class TestSubprocessEnv(TestCase):
                 self.assertEqual(
                     args[3],
                     {
-                        "TORCHINDUCTOR_CACHE_DIR": "/tmp/current-inductor-cache",
+                        "TORCHINDUCTOR_CACHE_DIR": self.current_inductor_cache_path,
                         "TRITON_CACHE_DIR": None,
                         "TORCHINDUCTOR_CUTLASS_DIR": None,
                     },
@@ -1192,7 +1196,7 @@ class TestSubprocessEnv(TestCase):
         pool = FakePool()
 
         try:
-            os.environ["TORCHINDUCTOR_CACHE_DIR"] = "/tmp/current-inductor-cache"
+            os.environ["TORCHINDUCTOR_CACHE_DIR"] = self.current_inductor_cache_path
             os.environ.pop("TRITON_CACHE_DIR", None)
             os.environ.pop("TORCHINDUCTOR_CUTLASS_DIR", None)
 
@@ -1214,7 +1218,7 @@ class TestSubprocessEnv(TestCase):
             self.assertEqual(
                 args[5],
                 {
-                    "TORCHINDUCTOR_CACHE_DIR": "/tmp/current-inductor-cache",
+                    "TORCHINDUCTOR_CACHE_DIR": self.current_inductor_cache_path,
                     "TRITON_CACHE_DIR": None,
                     "TORCHINDUCTOR_CUTLASS_DIR": None,
                 },
@@ -1312,7 +1316,7 @@ class TestSubprocessEnv(TestCase):
 
         old_env = os.environ.get("TRITON_LIBDEVICE_PATH")
         old_knob = knobs.nvidia.libdevice_path
-        stale_libdevice_path = "/tmp/stale-libdevice.bc"
+        stale_libdevice_path = os.path.join(tempfile.gettempdir(), "stale-libdevice.bc")
 
         try:
             kernel, _ = _worker_compile_triton(
