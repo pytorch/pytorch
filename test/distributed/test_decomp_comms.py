@@ -41,7 +41,9 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        cls.device = "cuda"
+        cls.device = (
+            acc.type if (acc := torch.accelerator.current_accelerator()) else "cuda"
+        )
 
     @classmethod
     def tearDownClass(cls):
