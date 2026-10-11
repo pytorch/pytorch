@@ -752,17 +752,23 @@ void svd_cusolver(const Tensor& A,
 
   // Default heuristic (driver=None). Explicit driver= still wins.
   // - m,n <= 32: gesvdjBatched is fastest (PR #88502)
-  // - batched with m or n > 32: per-matrix gesvdj loops and cliffs at n=32→33;
+  // - batched with m or n > 32: per-matrix gesvdj loops and cliffs at n=32->33;
   //   prefer gesvdaStridedBatched (see #200486, #175585)
+  // - except full_matrices && compute_uv && m != n: gesvda only writes the
+  //   rank leading singular vectors, so the remaining columns of the full
+  //   U/V would be left uninitialized; keep gesvdj there
   // - single matrix with m or n > 32: keep gesvdj
   // Convergence check + gesvd fallback below still apply when driver=None.
 #ifdef USE_ROCM
   const auto driver_v = std::string_view("gesvdj");
 #else
   std::string_view driver_v;
+  const bool gesvda_leaves_full_basis_uninit =
+      full_matrices && compute_uv && (m != n);
   if (driver.has_value()) {
     driver_v = *driver;
-  } else if ((m > 32 || n > 32) && batchCount(A) > 1) {
+  } else if (
+      (m > 32 || n > 32) && batchCount(A) > 1 && !gesvda_leaves_full_basis_uninit) {
     driver_v = "gesvda";
   } else {
     driver_v = "gesvdj";

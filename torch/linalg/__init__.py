@@ -1783,10 +1783,12 @@ The choice of a driver is a trade-off between accuracy and speed.
 - If :attr:`A` is not well-conditioned or precision is relevant: `'gesvd'` (QR based)
 
 By default (:attr:`driver`\ `= None`), CUDA selects `'gesvdj'` when both matrix
-dimensions are at most 32 or the input is a single matrix, and `'gesvda'` for
-batched inputs with a larger dimension (avoids a large per-matrix `gesvdj`
-performance cliff). If the selected method fails to converge, we fall back to
-`'gesvd'`.
+dimensions are at most 32, the input is a single matrix, or a batched
+non-square input is requested with :attr:`full_matrices`\ `= True` (because
+`'gesvda'` only fills the leading singular vectors). Otherwise, for batched
+inputs with a larger dimension it selects `'gesvda'` to avoid a large
+per-matrix `'gesvdj'` performance cliff. If the selected method fails to
+converge, we fall back to `'gesvd'`.
 
 Differences with `numpy.linalg.svd`:
 

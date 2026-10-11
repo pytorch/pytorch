@@ -3123,12 +3123,49 @@ class TestLinalg(TestCase):
     @dtypes(*floating_and_complex_types())
     def test_svd_default_driver_batched_above_32(self, device, dtype):
         # Batched SVD with n > 32 used to loop gesvdj per matrix (perf cliff at
-        # n=32→33). Default driver=None should still reconstruct A. See #200486.
+        # n=32->33). Default driver=None should stay correct. See #200486.
         make_arg = partial(make_tensor, dtype=dtype, device=device)
-        A = make_arg((8, 33, 33))
-        U, S, Vh = torch.linalg.svd(A, full_matrices=False)
-        self.assertEqual((U * S.to(dtype).unsqueeze(-2)) @ Vh, A)
-        self.assertEqual(torch.linalg.svdvals(A), S)
+        atol = 1e-5 if dtype in (torch.float32, torch.complex64) else 1e-12
+        rtol = 1e-4 if dtype in (torch.float32, torch.complex64) else 1e-7
+
+        def check_full_orthonormal(U, Vh):
+            eye_u = torch.eye(U.size(-1), dtype=dtype, device=device).expand(
+                *U.shape[:-2], U.size(-1), U.size(-1)
+            )
+            eye_v = torch.eye(Vh.size(-2), dtype=dtype, device=device).expand(
+                *Vh.shape[:-2], Vh.size(-2), Vh.size(-2)
+            )
+            self.assertEqual(U.mH @ U, eye_u, atol=atol, rtol=rtol)
+            self.assertEqual(Vh @ Vh.mH, eye_v, atol=atol, rtol=rtol)
+
+        # Square, well-conditioned, both sides of the 32 boundary, batch 1 and >1.
+        for batch, n in (((1,), 32), ((1,), 33), ((8,), 32), ((8,), 33)):
+            A = make_arg(batch + (n, n))
+            U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+            self.assertEqual((U * S.to(dtype).unsqueeze(-2)) @ Vh, A)
+            U_f, S_f, Vh_f = torch.linalg.svd(A, full_matrices=True)
+            self.assertEqual(S_f, S)
+            check_full_orthonormal(U_f, Vh_f)
+            self.assertEqual(torch.linalg.svdvals(A), S)
+
+        # Non-square full_matrices=True must not leave garbage in the full U/V
+        # basis when the default heuristic would otherwise pick gesvda.
+        for shape in ((4, 64, 40), (4, 40, 64)):
+            A = make_arg(shape)
+            k = min(shape[-2], shape[-1])
+            U_f, S_f, Vh_f = torch.linalg.svd(A, full_matrices=True)
+            check_full_orthonormal(U_f, Vh_f)
+            self.assertEqual(
+                (U_f[..., :k] * S_f.to(dtype).unsqueeze(-2)) @ Vh_f[..., :k, :], A
+            )
+
+        # Rank-deficient batch: default path should stay close to gesvd.
+        B = make_arg((6, 33, 8))
+        C = make_arg((6, 8, 33))
+        A = B @ C
+        S_default = torch.linalg.svdvals(A)
+        S_gesvd = torch.linalg.svdvals(A, driver="gesvd")
+        self.assertEqual(S_default, S_gesvd, atol=atol * 10, rtol=rtol * 10)
 
     @skipCPUIfNoLapack
     @skipCUDAIf(
