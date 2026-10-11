@@ -626,6 +626,16 @@ class CellVariable(VariableTracker):
     # root frame via this name (e.g., the name is in `co_cellvars/co_freevars`).
     local_name: str | None = None
 
+    # Set on both sides when a real cell had to be created for this cell before
+    # it was populated (see SideEffects.track_cell_alias). Stores to one are
+    # mirrored to the other.
+    linked_cell: VariableTracker | None = None
+
+    _nonvar_fields = {
+        "linked_cell",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(
         self, pre_existing_contents: VariableTracker | None = None, **kwargs: Any
     ) -> None:
