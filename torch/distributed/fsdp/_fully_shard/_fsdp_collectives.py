@@ -642,7 +642,7 @@ def foreach_reduce(
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
     *,
-    reduce_scatter_input_fn: Callable = _default_reduce_scatter_input_fn,
+    prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -680,7 +680,7 @@ def foreach_reduce(
         fsdp_param.padded_sharded_param_size.numel() for fsdp_param in fsdp_params
     ]
     # See Note [Reduce-scatter input fn]
-    copy_in = reduce_scatter_input_fn(unsharded_grads, shard_dims, world_size)
+    copy_in = prepare_reduce_scatter_inputs(unsharded_grads, shard_dims, world_size)
     reduce_scatter_output_numel = sum(padded_sharded_numels)
     reduce_scatter_input = reduce_scatter_comm.allocate(
         (reduce_scatter_output_numel * world_size,),

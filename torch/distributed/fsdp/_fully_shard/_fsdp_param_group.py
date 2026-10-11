@@ -267,7 +267,7 @@ class FSDPParamGroup:
         # chose them on the first unshard, freed on reshard
         self._all_gather_buffers: _PersistentBuffers | None = None
         # See Note [Reduce-scatter input fn]
-        self._reduce_scatter_input_fn: Callable = _default_reduce_scatter_input_fn
+        self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
         self._reduce_scatter_param_indices: list[int] = []
         self._fsdp_params_deferring_grad_upcast: list[FSDPParam] = []
         self._param_group_index: int = 0
@@ -839,7 +839,7 @@ class FSDPParamGroup:
                     partial_input,
                     self._all_reduce_hook,
                     self.force_sum_reduction_for_comms,
-                    reduce_scatter_input_fn=self._reduce_scatter_input_fn,
+                    prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
                 )
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event
@@ -1144,6 +1144,9 @@ class FSDPParamGroup:
 
     def _to_sharded_post_forward(self):
         if not self.is_sharded_post_forward:
+            # Check every parameter before resharding any
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.check_post_forward_reshard()
             # Parameters copy their post-forward shards out of shared buffers
             # before the group frees them
             for fsdp_param in self.fsdp_params:

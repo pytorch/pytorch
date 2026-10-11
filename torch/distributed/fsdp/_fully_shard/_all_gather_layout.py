@@ -67,9 +67,12 @@ def _default_all_gather_output_fn(
             copy_output = torch.empty_like(output)
             reassembled.append((copy_output, output, outer_size))
         split_output = copy_output.view(torch.uint8) if byte_views else copy_output
-        if (numel := split_size * world_size) != split_output.numel():
-            split_output = split_output.narrow(0, 0, numel)
-        split_outputs.append(split_output.view(world_size, -1))
+        try:
+            split_output = split_output.view(world_size, split_size)
+        except RuntimeError:  # the output of a smaller payload
+            split_output = split_output.narrow(0, 0, world_size * split_size)
+            split_output = split_output.view(world_size, split_size)
+        split_outputs.append(split_output)
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs
     )
@@ -297,7 +300,7 @@ class DefaultAllGatherLayout(AllGatherLayout):
         if all_gather_output.numel() == 0:
             return AllGatherOutputs(plan.outputs, buffers)  # nothing was gathered
         outputs = [output for param_outputs in plan.outputs for output in param_outputs]
-        non_inference_outputs = tuple(t for t in outputs if not t.is_inference())
+        non_inference_outputs = tuple([t for t in outputs if not t.is_inference()])
         # Views share their base's version counter
         with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
             # See Note [All-gather output fn]

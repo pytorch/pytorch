@@ -224,7 +224,7 @@ class FSDPParam:
     # allocates and frees
     _keep_all_gather_output_storage: bool = False
     _default_all_gather_output_layouts: tuple[_AllGatherOutputLayout, ...]
-    # All-gather extension attributes, set by each all_gather_inputs call
+    # All-gather extension attributes, describing the latest all_gather_inputs call
     _all_gather_metadata: Any | None
     _extension_all_gather_output_layouts: tuple[_AllGatherOutputLayout, ...] | None
     # Per input, the AllGatherInput dim (None for tensors), size and dtype that the
@@ -1003,11 +1003,31 @@ class FSDPParam:
             self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED
 
-    def to_sharded_post_forward(self) -> None:
+    def check_post_forward_reshard(self) -> None:
         if self.is_dtensor:
             raise NotImplementedError(
                 "Resharding to smaller mesh is not supported for DTensor parameters yet"
             )
+        if self.post_forward_mesh_info is None:
+            raise AssertionError("Expected post_forward_mesh_info to not be None")
+        shard_dim = self.fsdp_placement.dim
+        world_size = self.post_forward_mesh_info.shard_mesh_size
+        if (
+            shard_dim > 0
+            and self._orig_size.numel()
+            and self._orig_size[0] % world_size
+        ):
+            # Shard(i>0) parameters have no padding, so their post-forward shards,
+            # flat chunks of the unsharded data, match dim-0 chunks only if the
+            # world size divides dim 0
+            name = self._param_fqn or self._module_info.param_name
+            raise NotImplementedError(
+                f"Resharding the Shard({shard_dim}) parameter {name} to {world_size} "
+                f"ranks after forward requires dim 0 of its size "
+                f"{tuple(self._orig_size)} to be divisible by {world_size}"
+            )
+
+    def to_sharded_post_forward(self) -> None:
         self._assert_in_states(ShardedState.UNSHARDED)
         if self.post_forward_mesh_info is None:
             raise AssertionError("Expected post_forward_mesh_info to not be None")
@@ -1016,15 +1036,6 @@ class FSDPParam:
                 f"Expected 1 all_gather_output, got {len(self.all_gather_outputs)}"
             )
         shard_world_size = self.post_forward_mesh_info.shard_mesh_size
-        shard_dim = self.fsdp_placement.dim
-        if shard_dim > 0 and self._orig_size[0] % shard_world_size:
-            # Post-forward shards are flat chunks of the unsharded data, which
-            # match chunks of dim 0 only if the world size divides it
-            raise NotImplementedError(
-                f"Resharding the Shard({shard_dim}) parameter {self._param_fqn} to "
-                f"{shard_world_size} ranks after forward requires dim 0 of its size "
-                f"{tuple(self._orig_size)} to be divisible by {shard_world_size}"
-            )
         if (numel := self.all_gather_outputs[0].numel()) % shard_world_size != 0:
             _raise_assert_with_print(
                 f"All-gather output size ({numel}) must be divisible by the shard "
@@ -1168,8 +1179,9 @@ class FSDPParam:
                         self._module_info.module,
                         self.mp_policy,
                     )
-                # Only the 5-argument hook gets outer_size to pad with (#137005),
-                # so only its uneven inputs must have the padded sharded size
+                # Only the 5-argument hook gets outer_size to pad with (#137005), so
+                # only its Tensor inputs of unevenly sharded parameters need the
+                # padded sharded size
                 return self._get_extension_all_gather_inputs(
                     all_gather_inputs, check_padding=num_fn_params == 5
                 )
@@ -1192,11 +1204,12 @@ class FSDPParam:
     def _get_extension_all_gather_inputs(
         self, inputs: Sequence[torch.Tensor | AllGatherInput], check_padding: bool
     ) -> list[torch.Tensor]:
+        # Records and plain tensors get keys of different lengths
         key = tuple(
             [
                 (inp.dim, inp.tensor.size(), inp.tensor.dtype)
                 if isinstance(inp, AllGatherInput)
-                else (None, inp.size(), inp.dtype)
+                else (inp.size(), inp.dtype)
                 for inp in inputs
             ]
         )
@@ -1528,9 +1541,9 @@ def _get_all_gather_output_layouts(
         output = all_gather_outputs[i] if all_gather_outputs else None
         if is_record:
             ndim = max(len(size), 1)
-            if not -ndim <= inp.dim < ndim:
+            if not isinstance(inp.dim, int) or not -ndim <= inp.dim < ndim:
                 raise ValueError(
-                    f"AllGatherInput {i} of {param_name} has dim {inp.dim}, which "
+                    f"AllGatherInput {i} of {param_name} has dim {inp.dim!r}, which "
                     f"is invalid for size {tuple(size)}"
                 )
             layout = _get_all_gather_output_layout(size, inp.dim, shard_world_size)
