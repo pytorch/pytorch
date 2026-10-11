@@ -1098,6 +1098,19 @@ class TestFakeQuantizeOps(TestCase):
         ref_result = torch.Tensor([ref_result]).to(dtype).to(device)
         self.assertEqual(result, ref_result)
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_fake_quantize_per_tensor_affine_empty_qparams(self):
+        # https://github.com/pytorch/pytorch/issues/191570
+        devices = ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']
+        for device, empty_arg in itertools.product(devices, range(3)):
+            X = torch.randn(4, device=device)
+            qparams = [torch.tensor([0.1], device=device),
+                       torch.zeros(1, dtype=torch.int32, device=device),
+                       torch.ones(1, dtype=torch.long, device=device)]
+            qparams[empty_arg] = torch.empty(0, dtype=qparams[empty_arg].dtype, device=device)
+            with self.assertRaisesRegex(RuntimeError, "should each have exactly one element"):
+                torch._fake_quantize_per_tensor_affine_cachemask_tensor_qparams(X, *qparams, 0, 255)
+
 
 class TestFusedObsFakeQuant(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
