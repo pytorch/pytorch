@@ -13,14 +13,20 @@ from unittest import mock
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.debug_utils import InputReader
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.choices import InductorChoices
-from torch._inductor.codegen.triton import FixedTritonConfig
+from torch._inductor.codegen.triton import (
+    FixedTritonConfig,
+    TritonKernel,
+    TritonScheduling,
+)
 from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -2683,6 +2689,122 @@ class TritonHostSideTMAConfigTestCUDA(InductorTestCase):
             result, code_list = run_and_get_code(torch.compile(fn), x)
         self.assertTrue(torch.allclose(result, fn(x)))
         self.assertNotIn("host_tma_descriptor_args", "\n".join(code_list))
+
+
+@config.patch(
+    {
+        "triton.use_tensor_descriptor": True,
+        "triton.autotune_tensor_descriptor": "auto",
+        "max_autotune_pointwise": True,
+    }
+)
+class TensorDescriptorPoolGateTest(InductorTestCase):
+    def test_pool_pins(self):
+        pins = TritonScheduling.tensor_descriptor_variant_pins
+        self.assertEqual(
+            pins(),
+            [
+                {"override_tensor_descriptor": False},
+                {"override_tensor_descriptor": True, "override_host_side_tma": True},
+            ],
+        )
+        with config.patch({"triton.autotune_tensor_descriptor": "all"}):
+            self.assertEqual(len(pins()), 3)
+        for patches in (
+            {"triton.autotune_tensor_descriptor": "off"},
+            {"max_autotune_pointwise": False},
+            {"deterministic": True},
+            {"batch_invariant": True},
+            {"triton.multi_kernel": 2},
+            {"cpp_wrapper": True},
+        ):
+            with config.patch(patches):
+                self.assertEqual(pins(), [], msg=str(patches))
+
+
+@unittest.skipIf(
+    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
+    or torch.version.hip,
+    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
+)
+@config.patch(
+    {
+        "triton.use_tensor_descriptor": True,
+        "triton.autotune_tensor_descriptor": "auto",
+        "max_autotune_pointwise": True,
+        "assume_aligned_inputs": True,
+    }
+)
+class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
+    def test_pool_benchmarks_pointer_loads_against_host_side_tma(self):
+        def fn(x):
+            return torch.nn.functional.silu(x)
+
+        x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x), exact_device=True)
+        # Both choices are emitted, and only the TMA one is marked to skip the baseline's tuning.
+        FileCheck().check_count("@triton.jit", 2, exactly=True).run(code)
+        FileCheck().check_count("'tma_variant': True", 1, exactly=True).run(code)
+        FileCheck().check("async_compile.multi_kernel").run(code)
+
+    @config.patch(
+        {
+            "triton.autotune_tensor_descriptor": "all",
+            "bundle_triton_into_fx_graph_cache": True,
+            "use_static_triton_launcher": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    def test_tma_variants_out_of_shared_memory_are_dropped(self):
+        from torch._inductor.codecache import PyCodeCache
+
+        def fn(x):
+            return torch.softmax(x, dim=-1)
+
+        # 18432 wide, where no default reduction config of a TMA variant fits in shared memory.
+        x = torch.randn(256, 18432, dtype=torch.bfloat16, device=GPU_TYPE)
+        # The second compile loads the graph from the FX graph cache, with the dropped variants bundled.
+        for _ in range(2):
+            torch._dynamo.reset()
+            PyCodeCache.cache_clear(purge=True)
+            # Loose, since the TMA block floor can change the accumulation order.
+            self.assertEqual(torch.compile(fn)(x), fn(x), atol=1e-2, rtol=1.6e-2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertGreaterEqual(
+            counters["inductor"]["multi_kernel_sub_kernel_dropped"], 2
+        )
+
+    @config.patch({"assume_aligned_inputs": False})
+    def test_tma_variant_that_falls_back_to_tl_load_is_dropped(self):
+        def fn(x):
+            return torch.nn.functional.silu(x) * 2
+
+        x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x), exact_device=True)
+        # Without aligned inputs no access takes a descriptor, so the TMA choice repeats the baseline.
+        FileCheck().check_count("@triton.jit", 1, exactly=True).run(code)
+        FileCheck().check_not("async_compile.multi_kernel").run(code)
+
+    @config.patch({"force_disable_caches": True})
+    def test_tma_variant_whose_codegen_fails_is_dropped(self):
+        codegen_kernel = TritonKernel.codegen_kernel
+
+        def fail_for_optional(kernel, *args, **kwargs):
+            if kernel.optional:
+                raise RuntimeError("injected codegen failure")
+            return codegen_kernel(kernel, *args, **kwargs)
+
+        def fn(x):
+            return torch.nn.functional.silu(x) + 1
+
+        x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
+        # Only an Inductor bug fails codegen, so no input reaches this fallback.
+        with mock.patch.object(TritonKernel, "codegen_kernel", fail_for_optional):
+            result, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x), exact_device=True)
+        FileCheck().check_not("async_compile.multi_kernel").run(code)
 
 
 if __name__ == "__main__":

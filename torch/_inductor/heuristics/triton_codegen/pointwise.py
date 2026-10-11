@@ -63,6 +63,13 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
     def _configs_1d(
         self, size_hints, bs, hinted_configs, triton_config_fn, inductor_meta
     ):
+        if inductor_meta.get("tma_variant"):
+            from torch._inductor.runtime.triton_compat import Config
+
+            # Coordinate descent settles a TMA variant on 2048 elements and 2 warps on GB200 (#187175).
+            # Built directly, since triton_config raises a block of 128+ elements to 4 warps (#97950).
+            xblock = min(2 * bs, size_hints["x"])
+            return [Config({"XBLOCK": xblock}, num_warps=2, num_stages=1)]
         if not inductor_meta.get("autotune_pointwise", True) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")

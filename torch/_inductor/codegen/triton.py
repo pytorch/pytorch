@@ -3005,7 +3005,9 @@ class TMACompatibilityChecker:
         cached = self._gfx1250_cache
         if cached is not None and cached[0] == device:
             return cached[1]
-        capable = use_gfx1250_descriptor_codegen(device)
+        capable = self.kernel.tensor_descriptor_enabled and (
+            use_gfx1250_descriptor_codegen(device)
+        )
         self._gfx1250_cache = (device, capable)
         return capable
 
@@ -3020,7 +3022,7 @@ class TMACompatibilityChecker:
         device_type = device.type
         if device_type == "cpu":
             if not (
-                config.triton.use_tensor_descriptor
+                self.kernel.tensor_descriptor_enabled
                 and has_triton_cpu_backend()
                 and has_triton_stable_tma_api()
             ):
@@ -3053,7 +3055,7 @@ class TMACompatibilityChecker:
                 )
                 or device_type == "xpu"
             )
-            and config.triton.use_tensor_descriptor
+            and self.kernel.tensor_descriptor_enabled
             and has_triton_stable_tma_api()
         ):
             log.debug(
@@ -3498,6 +3500,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         hint_override: int | None = None,
         is_combo_kernel: bool = False,
         per_subkernel_blocks: bool = False,
+        override_tensor_descriptor: bool | None = None,
+        override_host_side_tma: bool | None = None,
         **kwargs,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
@@ -3508,6 +3512,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._in_multi_kernel = False
         self._nvgemm_pdl_enabled = False
         self.per_subkernel_blocks: bool = per_subkernel_blocks
+        # None follows the global config; a bool pins this kernel to one side of the TMA choice.
+        self.override_tensor_descriptor = override_tensor_descriptor
+        self.override_host_side_tma = override_host_side_tma
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         # Cache of values that can be reused for the prologue.
@@ -3576,6 +3583,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return any(
             not self._is_tma_buffer_removed(name) for name in self._device_tma_buffers
         )
+
+    @property
+    def tensor_descriptor_enabled(self) -> bool:
+        """Whether this kernel may emit tensor descriptors at all."""
+        if self.override_tensor_descriptor is not None:
+            return self.override_tensor_descriptor
+        return config.triton.use_tensor_descriptor
+
+    @property
+    def host_side_tma_enabled(self) -> bool:
+        """Whether this kernel prefers host-built descriptors over in-kernel ones."""
+        if self.override_host_side_tma is not None:
+            return self.override_host_side_tma
+        return config.triton.enable_host_side_tma
 
     def _is_tma_buffer_removed(self, name: str) -> bool:
         return any(
@@ -3866,7 +3887,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> bool:
         return (
             has_triton_stable_tma_api()
-            and config.triton.enable_host_side_tma
+            and self.host_side_tma_enabled
             and not indexing.can_lift
             and indexing.constant_offset == 0
             and var not in self._host_tma_non_materializable
@@ -3876,7 +3897,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def _prescan_host_tma_materializability(self) -> None:
         """Populate _host_tma_non_materializable_buffers with buffers that
         can't be expressed as a single host-side TMA descriptor."""
-        if not config.triton.use_tensor_descriptor:
+        if not self.tensor_descriptor_enabled:
             # Host TMA is off; mark as scanned (no bad buffers, won't change).
             self._host_tma_non_materializable_buffers = OrderedSet()
             return
@@ -3934,7 +3955,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         statically known to be a multiple of TMA_ALIGNMENT is treated as
         misaligned (conservative).
         """
-        if not config.triton.use_tensor_descriptor:
+        if not self.tensor_descriptor_enabled:
             return False
         if V.graph.get_current_device_or_throw().type != "cuda":
             return False
@@ -4671,7 +4692,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # non-materializable and fall through to device-side TMA below.
             elif (
                 has_triton_stable_tma_api()
-                and config.triton.enable_host_side_tma
+                and self.host_side_tma_enabled
                 and not indexing.can_lift
                 and indexing.constant_offset != 0
             ):
@@ -5255,13 +5276,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         dtype = V.graph.get_dtype(name)
         uses_uint8_storage = use_uint8_triton_storage_for_cuda_float8_e4m3fn(dtype, var)
 
-        if config.triton.enable_host_side_tma:
+        if self.host_side_tma_enabled:
             if self._host_tma_non_materializable_buffers is None:
                 self._prescan_host_tma_materializability()
             if name in (self._host_tma_non_materializable_buffers or ()):
                 self._host_tma_non_materializable.add(var)
 
-        skip_tma = config.triton.enable_host_side_tma and self._check_buffer_alignment(
+        skip_tma = self.host_side_tma_enabled and self._check_buffer_alignment(
             name, var, dtype
         )
         tma_checker = (
@@ -8171,6 +8192,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # TMA probing sets tma_min_block_sizes even when the access falls
             # back to tl.load; a stale constraint regresses non-TMA kernels.
             self.inductor_meta.pop("tma_min_block_sizes", None)
+        elif self.override_tensor_descriptor:
+            # Only the baseline gets max-autotune's search and coordinate descent; a pooled TMA variant is not tuned.
+            self.inductor_meta.update(
+                max_autotune=False,
+                max_autotune_pointwise=False,
+                coordinate_descent_tuning=False,
+                tma_variant=True,
+            )
 
         self._filter_pdl(self.body)
 
@@ -8995,17 +9024,21 @@ class TritonScheduling(SIMDScheduling):
         # exact string) hits at wrapper time instead of compiling the kernel twice
         # and overwriting the same cache file.
         src_code = "\n" + textwrap.dedent(src_code).strip() + "\n"
+        optional = isinstance(kernel, SIMDKernel) and kernel.optional
         if async_compile.use_process_pool():
             # The process pool is warm, we can shell out to workers right away. This
             # allows us to save the result in async_compile.CompiledTritonKernels,
             # so that the second time we call async_compile.triton, we do no work.
-            async_compile.triton(subs_name, src_code)
+            async_compile.triton(subs_name, src_code, optional=optional)
 
         compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
 
         compile_wrapper.splice(src_code, strip=True)
         current_device = V.graph.get_current_device_or_throw()
-        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
+        optional_arg = ", optional=True" if optional else ""
+        compile_wrapper.writeline(
+            f"''', device_str='{current_device.type}'{optional_arg})"
+        )
 
         # compile-on-one-rank: the artifact may be built on one machine and run on
         # another, so the wrapper must not embed an absolute cache path (it carries the
@@ -9195,6 +9228,8 @@ class TritonScheduling(SIMDScheduling):
         kernel_features: SIMDKernelFeatures,
         kernel_args: list[Any],
         kernel_kwargs: dict[str, Any],
+        *,
+        allow_tma_variants: bool = False,
     ) -> list[TritonKernel]:
         is_scan = kernel_features.contains_op("scan")
         is_split_scan = is_scan and any(
@@ -9216,7 +9251,53 @@ class TritonScheduling(SIMDScheduling):
             kernel_type, kernel_features, kernel_args, kernel_kwargs
         )
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
-        return self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
+        choices = self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
+        # A multi_kernel pool was asked for explicitly, and scans are out of scope for #187175.
+        if (
+            len(choices) > 1
+            or is_scan
+            or not allow_tma_variants
+            or not (pins := self.tensor_descriptor_variant_pins())
+        ):
+            return choices
+        # The pinned choices replace the unpinned kernel, which Kernel.__init__ already counted.
+        metrics.generated_kernel_count -= 1
+        choices = [
+            kernel_type(*kernel_args, **{**kernel_kwargs, **pin}) for pin in pins
+        ]
+        for choice in choices[1:]:
+            choice.optional = True
+            # Shared, not copied: it fills during codegen, and MultiKernel needs identical call args.
+            choice.must_keep_buffers = choices[0].must_keep_buffers
+        return choices
+
+    @staticmethod
+    def tensor_descriptor_variant_pins() -> list[dict[str, bool]]:
+        """TMA settings pinned on each choice of a pool, the non-TMA baseline first, or [] for no pool."""
+        pool = config.triton.autotune_tensor_descriptor
+        if (
+            pool not in ("auto", "all")
+            or not config.triton.use_tensor_descriptor
+            or not (config.max_autotune or config.max_autotune_pointwise)
+            # Picking by measured time is what these forbid.
+            or config.deterministic
+            or config.batch_invariant
+            # These force a sub-kernel by index into multi_kernel's own order.
+            or config.triton.multi_kernel in (2, 3)
+            # JIT cpp-wrapper codegens in one pass, so lookup_choice would find no pick.
+            or config.cpp_wrapper
+        ):
+            return []
+        # Device-side TMA is opt-in: #187175 and #188823 measure it behind the baseline everywhere.
+        pins = [
+            {"override_tensor_descriptor": False},
+            {"override_tensor_descriptor": True, "override_host_side_tma": True},
+        ]
+        if pool == "all":
+            pins.append(
+                {"override_tensor_descriptor": True, "override_host_side_tma": False}
+            )
+        return pins
 
     def add_multi_kernel_choices(
         self,
