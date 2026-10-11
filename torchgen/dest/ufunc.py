@@ -426,28 +426,14 @@ def compute_ufunc_cpu_dtype_body(
     # Setup scalar in scope
     body = []
     ctx = []
+    body.append("using opmath_t = at::opmath_type<scalar_t>;")
     for b in parent_ctx:
         if isinstance(b.argument, Argument) and b.argument.type != BaseType(
             BaseTy.Scalar
         ):
             continue
-        body.append(f"auto _s_{b.name} = {b.name}.to<scalar_t>();")
-        ctx.append(Expr(f"_s_{b.name}", NamedCType(b.nctype.name, BaseCType(scalar_t))))
-    if vec_loop is not None:
-        for b in parent_ctx:
-            if isinstance(b.argument, Argument) and b.argument.type != BaseType(
-                BaseTy.Scalar
-            ):
-                continue
-            body.append(
-                f"auto _v_{b.name} = at::vec::Vectorized<scalar_t>(_s_{b.name});"
-            )
-            ctx.append(
-                Expr(
-                    f"_v_{b.name}",
-                    NamedCType(b.nctype.name, VectorizedCType(BaseCType(scalar_t))),
-                )
-            )
+        body.append(f"auto _s_{b.name} = {b.name}.to<opmath_t>();")
+        ctx.append(Expr(f"_s_{b.name}", NamedCType(b.nctype.name, BaseCType(opmath_t))))
 
     # Setup lambda signature
     # NB: simplified version of ufunctor_arguments

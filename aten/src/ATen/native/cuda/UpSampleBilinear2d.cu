@@ -369,7 +369,7 @@ static void upsample_bilinear2d_out_cuda_template(
 
   const auto memory_format = input.suggest_memory_format();
 
-  if (input.sizes() == output.sizes()) {
+  if (input.sizes() == output.sizes() && (!scales_h.has_value() || scales_h.value() == 1.0) && (!scales_w.has_value() || scales_w.value() == 1.0)) {
     output.copy_(input);
     return;
   }
@@ -710,7 +710,7 @@ __global__ void upsample_gen2d_aa_backward_out_frame(
   }
 
   // special case: output just copy
-  if (input_height == output_height && input_width == output_width) {
+  if (input_height == output_height && input_width == output_width && height_scale == static_cast<accscalar_t>(1) && width_scale == static_cast<accscalar_t>(1)) {
     for (int i = blockIdx.z; i < batchsize * channels; i += gridDim.z) {
       int n = i / channels;
       int c = i % channels;

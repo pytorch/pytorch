@@ -2013,17 +2013,31 @@ class TestBinaryUfuncsDevice(TestCase):
                     for x, y, z in zip(a_.tolist(), b_.tolist(), c_.tolist()):
                         self.assertEqual(x ^ y, z)
 
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.float16, torch.bfloat16)
     def test_add_with_tail(self, device, dtype):
         # test tensor where there is a tail which is not a multiple
-        # of GPU warp size
+        # of GPU warp size or CPU vector size
         for tail_size in [1, 63, 67, 130]:
             size = 4096 + tail_size
-            a = torch.randn(size, device=device, dtype=dtype)
-            b = torch.randn(size, device=device, dtype=dtype)
-            c = a + b
-            for x, y, z in zip(a.tolist(), b.tolist(), c.tolist()):
-                self.assertEqual(x + y, z)
+            a = torch.randn(size, device=device, dtype=torch.float)
+            b = torch.randn(size, device=device, dtype=torch.float)
+            
+            # Fractional alpha to ensure we test opmath_t precision
+            alpha = 0.3
+            
+            a_dtype = a.to(dtype)
+            b_dtype = b.to(dtype)
+            
+            # The reference is computed in float32 and then cast back to dtype
+            # This verifies the single-rounding semantics of the ufunc kernel
+            c_ref = (a_dtype.float() + alpha * b_dtype.float()).to(dtype)
+            c = torch.add(a_dtype, b_dtype, alpha=alpha)
+            self.assertEqual(c, c_ref, exact_dtype=True)
+
+            # Test sub
+            c_sub_ref = (a_dtype.float() - alpha * b_dtype.float()).to(dtype)
+            c_sub = torch.sub(a_dtype, b_dtype, alpha=alpha)
+            self.assertEqual(c_sub, c_sub_ref, exact_dtype=True)
 
     # Tests that device tensors on different devices cannot be used in the same
     # binary operation, and that device "scalars" cannot be used in the same
