@@ -2255,6 +2255,7 @@ autodoc_default_options = {
 html_css_files = [
     "css/jit.css",
     "css/foreach.css",
+    "css/pydata-theme-fixes.css",
     "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
 
