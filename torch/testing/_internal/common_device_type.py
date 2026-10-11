@@ -350,6 +350,13 @@ class Capability:
         mem_efficient_attention = "attention.mem_efficient_attention"
 
 
+# The category inner classes of Capability (e.g. Capability.dtype), used to reject
+# unknown categories passed to DeviceTypeTestBase.get_capabilities().
+_CAPABILITY_CATEGORIES = frozenset(
+    value for value in vars(Capability).values() if isinstance(value, type)
+)
+
+
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
 
@@ -421,9 +428,20 @@ class DeviceTypeTestBase(TestCase):
     # Returns the capability map used by @requires_capabilities.
     # Subclasses (CPUTestBase, CUDATestBase, etc.) override _capabilities() to
     # declare supported capabilities. This method evaluates the support checks.
+    # Pass one of the Capability category classes (e.g. Capability.attention) to only
+    # evaluate and return the capabilities of that category. Only the inner classes
+    # of Capability are accepted; any other class raises ValueError.
     @classmethod
-    def get_capabilities(cls) -> dict[str, bool]:
-        return {k: bool(fn()) for k, fn in cls._capabilities().items()}
+    def get_capabilities(cls, category: type | None = None) -> dict[str, bool]:
+        if category is not None and category not in _CAPABILITY_CATEGORIES:
+            raise ValueError(f"Unknown capability category: {category}")
+
+        prefix = "" if category is None else f"{category.__name__}."
+        return {
+            k: bool(fn())
+            for k, fn in cls._capabilities().items()
+            if k.startswith(prefix)
+        }
 
     # Returns a capability map from capability identifier to a callable that
     # determines whether the current device supports it.
