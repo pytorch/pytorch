@@ -418,6 +418,17 @@ def can_use_triton_kernel(
         return offs is None
 
 
+def _create_balanced_grouped_mm_offsets(total, groups, alignment, dtype, device):
+    offsets = torch.arange(1, groups + 1, dtype=torch.int64, device=device)
+    offsets *= total
+    offsets += groups * alignment // 2
+    offsets //= groups * alignment
+    offsets *= alignment
+    offsets.clamp_max_(total // alignment * alignment)
+    offsets[-1] = total
+    return offsets.to(dtype=dtype)
+
+
 def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
     if m1_is_2d:
         if m2_is_2d:
@@ -430,14 +441,13 @@ def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
         else:
             return None
 
-    end_hint = V.graph.sizevars.optimization_hint(end)
-    noffs_hint = V.graph.sizevars.optimization_hint(offs_box.get_size()[0])
-    offs = torch.arange(1, noffs_hint + 1, dtype=torch.float32) * (
-        end_hint / noffs_hint
+    return _create_balanced_grouped_mm_offsets(
+        V.graph.sizevars.optimization_hint(end),
+        V.graph.sizevars.optimization_hint(offs_box.get_size()[0]),
+        alignment,
+        offs_box.get_dtype(),
+        offs_box.get_device(),
     )
-    offs[:-1] = (offs[:-1] / alignment).round() * alignment
-    offs[-1] = end_hint
-    return offs.to(dtype=offs_box.get_dtype(), device=offs_box.get_device())
 
 
 def _tuned_grouped_mm_common(
