@@ -20,6 +20,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 
 #include "RocLogger.h"
@@ -69,7 +70,6 @@ class RocprofLogger {
       rocprofiler_tracing_operation_t op);
 
  private:
-  bool registered_{false};
   void endTracing();
 
   static void insert_row_to_buffer(rocprofBase* row);
@@ -113,7 +113,6 @@ class RocprofLogger {
   std::atomic<uint64_t> totalRows_{0};
 
   bool externalCorrelationEnabled_{true};
-  bool logging_{false};
 
   friend class libkineto::RocprofActivityApi;
 };
