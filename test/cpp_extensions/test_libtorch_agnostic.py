@@ -64,6 +64,7 @@ class TestLibtorchAgnostic(TestCase):
     - libtorch_agn_2_13: Extension built with TORCH_TARGET_VERSION=2.13.0
     - libtorch_agn_2_14: Extension built with TORCH_TARGET_VERSION=2.14.0
     - libtorch_agn_2_15: Extension built with TORCH_TARGET_VERSION=2.15.0
+    - libtorch_agn_2_16: Extension built with TORCH_TARGET_VERSION=2.16.0
 
     Tests should be decorated with @skipIfTorchVersionLessThan to indicate the
     version that they target.
@@ -148,6 +149,16 @@ class TestLibtorchAgnostic(TestCase):
                 )
         else:
             print(f"Skipping 2.15 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 16):
+            try:
+                import libtorch_agn_2_16  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_16_extension"
+                )
+        else:
+            print(f"Skipping 2.16 extension (running on PyTorch {torch.__version__})")
 
     @onlyCPU
     def test_slow_sgd(self, device):
@@ -2513,6 +2524,25 @@ except RuntimeError as e:
                 r" \(originally from aoti_torch_aten_subtract_Tensor\(.*\) "
                 r"API call failed at .*my_stable_error_check\.cpp, line \d+\)$",
             )
+
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_my_is_privateuseone(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        t = torch.rand(2, 7, device=device)
+        self.assertFalse(libtorch_agnostic.ops.my_is_privateuseone(t))
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    def test_device_is_privateuseone(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        is_pu1 = libtorch_agnostic.ops.test_device_is_privateuseone
+        # Constructing torch.device objects needs no registered backend or GPU.
+        self.assertTrue(is_pu1(torch.device("privateuseone", 0)))
+        self.assertFalse(is_pu1(torch.device("cpu")))
+        self.assertFalse(is_pu1(torch.device("cuda", 0)))
+        self.assertFalse(is_pu1(torch.device("meta")))
 
 
 @unittest.skipIf(
