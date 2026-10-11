@@ -438,6 +438,92 @@ partial_fn = functools.partial(fn, scale=2)
         compiled_fn = torch.compile(module.partial_fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled_fn(x), module.partial_fn(x))
 
+    def test_functools_partial_nested_flattened(self):
+        # functools.partial(partial(f, *a, **k), ...) is flattened into a
+        # single partial of f, as in CPython's partial_new.
+        def fn(x):
+            p = functools.partial(functools.partial(capture_args, "asdf"), bar=True)
+            return p.func is capture_args, p.args, p.keywords, p(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(1), fn(1))
+        self.assertEqual(
+            opt_fn(1),
+            (True, ("asdf",), {"bar": True}, (("asdf", 1), {"bar": True})),
+        )
+
+    def test_functools_partial_nested_global_flattened(self):
+        def fn(x):
+            p = functools.partial(global_partial_capture_args, bar=True)
+            return p.func is capture_args, p.args, p.keywords, p(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(1), fn(1))
+        self.assertTrue(opt_fn(1)[0])
+        # Guarding must not create the inner partial's __dict__, which would
+        # stop eager from flattening it.
+        self.assertIsNone(global_partial_capture_args.__reduce__()[2][3])
+
+    def test_functools_partial_nested_with_attribute_not_flattened(self):
+        # A partial with an instance __dict__ is wrapped, not flattened.
+        def fn(inner, x):
+            p = functools.partial(inner, bar=True)
+            return p.func is inner, p.args, p.keywords, p(x.sin())
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3)
+        inner = functools.partial(capture_args, "asdf")
+        self.assertEqual(opt_fn(inner, x), fn(inner, x))
+        self.assertFalse(opt_fn(inner, x)[0])
+        self.assertEqual(cnt.frame_count, 1)
+
+        inner.attr = "spam"
+        self.assertEqual(opt_fn(inner, x), fn(inner, x))
+        self.assertTrue(opt_fn(inner, x)[0])
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_functools_partial_nested_merge_order(self):
+        # Inner args come before outer args; outer keywords override inner ones.
+        def fn(x):
+            p = functools.partial(functools.partial(capture_args, "a"), "b")
+            q = functools.partial(functools.partial(capture_args, k=1), k=2)
+            return p.args, q.keywords, p(x), q(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(1), fn(1))
+        self.assertEqual(opt_fn(1)[:2], (("a", "b"), {"k": 2}))
+
+    def test_functools_partial_nested_flattened_returned(self):
+        # Reconstructing a flattened partial gives the same object shape as eager.
+        def fn(x):
+            return functools.partial(
+                functools.partial(capture_args, "a", k=1), "b", k=2
+            ), x.sin()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        ref, _ = fn(x)
+        res, _ = opt_fn(x)
+        self.assertIs(ref.func, capture_args)
+        self.assertIs(res.func, capture_args)
+        self.assertEqual(res.args, ref.args)
+        self.assertEqual(res.keywords, ref.keywords)
+        self.assertEqual(res(1), ref(1))
+
+    def test_functools_partial_traced_setattr_graph_breaks(self):
+        # Flattening partials created while tracing relies on setattr on them
+        # graph breaking, so their instance dict is never set.
+        def fn(x):
+            inner = functools.partial(capture_args, "a")
+            inner.attr = "spam"
+            p = functools.partial(inner, bar=True)
+            return p.func is inner, p(x.sin())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(Unsupported):
+            opt_fn(torch.randn(3))
+
     @make_test
     def test_itertools_product(a, b):
         v = a
@@ -6478,6 +6564,13 @@ def udf_mul2(x, y, z):
 
 def udf_add(x, y):
     return x + y
+
+
+def capture_args(*args, **kwargs):
+    return args, kwargs
+
+
+global_partial_capture_args = functools.partial(capture_args, "asdf")
 
 
 class SmallNN(torch.nn.Module):

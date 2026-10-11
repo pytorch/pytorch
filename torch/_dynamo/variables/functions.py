@@ -3593,6 +3593,7 @@ class FunctoolsPartialVariable(VariableTracker):
 
     _nonvar_fields = {
         "original_cache_hash",
+        "flattenable",
         *VariableTracker._nonvar_fields,
     }
 
@@ -3602,6 +3603,7 @@ class FunctoolsPartialVariable(VariableTracker):
         args: list[VariableTracker],
         keywords: dict[str, VariableTracker],
         original_cache_hash: Any = None,
+        flattenable: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -3614,6 +3616,10 @@ class FunctoolsPartialVariable(VariableTracker):
         self.keywords = keywords
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
+        # Whether functools.partial(self, ...) unwraps self, as CPython's
+        # partial_new does for a partial whose instance dict was never created.
+        # Callers opt in only when they know the dict is unset.
+        self.flattenable = flattenable
 
     def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
