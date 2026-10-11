@@ -1321,7 +1321,8 @@ class CrossEntropyLoss(_WeightedLoss):
 
         >>> # Example of target with class indices
         >>> loss = nn.CrossEntropyLoss()
-        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> # Class-index targets must have dtype torch.long.
         >>> target = torch.empty(3, dtype=torch.long).random_(5)
         >>> output = loss(input, target)
         >>> output.backward()
