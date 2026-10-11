@@ -88,6 +88,20 @@ Here's the complete mapping from C++ to Python:
 | `_setDevice`         | `torch_openreg._C._set_device(idx)`      | `torch.openreg.set_device(idx)`  | Sets the active device                       |
 | `_exchangeDevice`    | `torch_openreg._C._exchange_device(idx)` | N/A (internal use only)          | Atomically swaps device and returns previous |
 
+### Optional capability queries
+
+{func}`torch.is_scaled_mm_supported` looks up an optional `_is_scaled_mm_supported`
+function on the device module registered with `torch._register_device_module`.
+It receives a `torch.device` whose index may be `None`, meaning the current device,
+and returns whether {func}`torch.nn.functional.scaled_mm` can run on that device in
+this build. It should return `False` when the backend is unavailable and raise for an
+invalid device index. Backends without this function report `False`.
+
+```python
+def _is_scaled_mm_supported(device: torch.device) -> bool:
+    return is_available()
+```
+
 (device-guard)=
 
 ## Guard
