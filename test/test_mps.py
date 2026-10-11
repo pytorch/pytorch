@@ -5439,6 +5439,14 @@ class TestMPS(TestCaseMPS):
             event.record()
             event.synchronize()
 
+    def test_gil_held_wait_with_async_copy_from_numpy(self):
+        # Hangs if Metal's completion thread needs the GIL to drop the numpy array of a non-blocking copy
+        # while a wait that keeps the GIL (0-dim MPS index) is pending
+        idx = torch.tensor(3, device="mps")
+        y = torch.from_numpy(np.ones(1024, dtype=np.float32)).to("mps", non_blocking=True)
+        self.assertEqual(torch.arange(16, device="mps")[idx].item(), 3)
+        self.assertEqual(y.sum().item(), 1024)
+
     # See https://github.com/pytorch/pytorch/pull/84742
     # and https://github.com/pytorch/pytorch/pull/78319
     @parametrize("binop", ['add', 'sub', 'mul', 'div'])
@@ -7640,6 +7648,17 @@ class TestMPS(TestCaseMPS):
         else:
             self.assertEqual(torch.div(mps_a, mps_b, rounding_mode="floor"),
                              torch.div(cpu_a, cpu_b, rounding_mode="floor"))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_remainder_extremal(self, dtype):
+        vals = [float("nan"), float("inf"), -float("inf"), 0.0, -0.0,
+                1.0, -1.0, 2.0, -2.0, 3.5, -3.5, 7.0, -7.0,
+                1e10, -1e10, 1e30, -1e30]
+        n = len(vals)
+        cpu_a = torch.tensor(vals, dtype=dtype).repeat_interleave(n)
+        cpu_b = torch.tensor(vals, dtype=dtype).repeat(n)
+        self.assertEqual(torch.remainder(cpu_a.to("mps"), cpu_b.to("mps")),
+                         torch.remainder(cpu_a, cpu_b))
 
     def test_remainder(self):
         res_cpu = torch.remainder(
