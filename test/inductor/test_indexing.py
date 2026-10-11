@@ -447,6 +447,16 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(expr2, actual)
         self.assertNotEqual(ModularIndexing(x, 1, b), actual)
 
+    def test_modular_indexing_symbolic_whole_period(self):
+        w = sympy.Symbol("w", integer=True, positive=True)
+        self.assertEqual(ModularIndexing(w, 1, w), 0)
+
+    def test_modular_indexing_fractional_period(self):
+        w = sympy.Symbol("w", integer=True, positive=True)
+        expr = ModularIndexing(w * (w + 1) / 2 + 1, 1, w)
+
+        self.assertEqual(expr.subs(w, 4), 3)
+
     def test_modular_indexing_positive(self):
         x = sympy.Symbol("x", integer=True, positive=True)
         expr = ModularIndexing(x, 1, 1024) - 1
