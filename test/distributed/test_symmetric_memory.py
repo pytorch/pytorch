@@ -3424,6 +3424,10 @@ tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device
             capture_output=True,
             text=True,
             timeout=120,
+            # Run outside the repo root: `python -c` resolves sys.path[0] to
+            # the CWD, and a source checkout's own "torch/" directory (no
+            # generated torch/version.py) would shadow the installed package.
+            cwd=tempfile.gettempdir(),
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result
@@ -3479,6 +3483,23 @@ tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device
                     torch.cuda.synchronize(device)
             del tensor, handle
             print("cleanup completed")
+            if {backend!r} == "NVSHMEM":
+                # Known race: NVSHMEM's background host proxy thread keeps
+                # polling CUDA independently of the main thread. After the
+                # main thread has already observed the device-side assert
+                # and skipped cleanup (see "skipping cleanup after CUDA
+                # error" above), the proxy thread can still issue its own
+                # CUDA call against the now-poisoned context, hit its own
+                # fatal-error path (nvshmem's proxy.cpp), and hard-exit the
+                # whole process with a nonzero code -- even though the main
+                # thread already finished successfully. Bypass the race by
+                # exiting immediately once our own assertions are done,
+                # before the proxy thread can win that race.
+                import os
+                import sys
+                sys.stdout.flush()
+                sys.stderr.flush()
+                os._exit(0)
             """,
         )
         self.assertIn("skipping cleanup after CUDA error", result.stderr)
