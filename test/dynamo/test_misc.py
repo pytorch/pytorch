@@ -1813,6 +1813,34 @@ graph():
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), fn(x))
 
+    def test_builtin_compile_and_exec_syntax_error(self):
+        def fn(x):
+            code = compile("y = 1", "<test>", "exec")
+            try:
+                compile("x := 0", "<test>", "exec")
+            except SyntaxError as e:
+                err = (str(e), e.msg, e.lineno, e.offset, e.text)
+            ns = {}
+            try:
+                exec("if True:\n  pass\n    pass", ns)
+            except IndentationError as e:
+                indent_err = (str(e), e.args)
+            return x + 1, code.co_filename, err, indent_err, list(ns)
+
+        x = torch.randn(4)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_builtin_compile_with_warning_graph_breaks(self):
+        def fn(x):
+            compile("x is 1", "<test>", "exec")
+            return x + 1
+
+        with self.assertRaisesRegex(Unsupported, "Failed to trace builtin operator"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
     def test_builtin_isinstance(self):
         def fn(x):
             t = torch.arange(1, 3)

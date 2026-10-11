@@ -3040,6 +3040,16 @@
       ]
     }
   ],
+  "GB4594": [
+    {
+      "Gb_type": "Unsupported SyntaxError location argument",
+      "Context": "{self} with location {info}",
+      "Explanation": "Dynamo only models a SyntaxError location given as a list or tuple of the right length.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB3840": [
     {
       "Gb_type": "leaf_function without fake_fn",

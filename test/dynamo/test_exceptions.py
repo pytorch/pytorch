@@ -1254,6 +1254,25 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(v, NameError)
         self.assertEqual(v.name, "undefined_name")
 
+    def test_reconstruct_SyntaxError(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            e = SyntaxError("boom", ("dir/f.py", 3, 2, "text", 3, 5))
+            e.text = "changed"
+            no_lineno = SyntaxError("m", ("f", True, 1, "t"))
+            return t.sin(), e, str(e), e.lineno, str(no_lineno)
+
+        t = torch.randn(2)
+        y, v, s, lineno, s2 = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertIsInstance(v, SyntaxError)
+        self.assertEqual(v.args, ("boom", ("dir/f.py", 3, 2, "text", 3, 5)))
+        self.assertEqual(v.text, "changed")
+        self.assertEqual(v.end_offset, 5)
+        self.assertEqual(s, "boom (f.py, line 3)")
+        self.assertEqual(lineno, 3)
+        self.assertEqual(s2, "m (f)")
+
     def test_reconstruct_StopIteration(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
