@@ -857,16 +857,17 @@ def _get_device_from_device_id(
         device_id if isinstance(device_id, torch.device) else torch.device(device_id)
     )
     if device.type != "cpu" and device.index is None:
+        curr_device_idx = device_handle.current_device()
         warnings.warn(
             f"FSDP got the argument `device_id` {device_id} on rank "
             f"{rank}, which does not have an explicit index. "
-            f"FSDP will use the current device {device_handle.current_device()}. "
+            f"FSDP will use the current device {curr_device_idx}. "
             f"If this is incorrect, please explicitly call `torch.{device.type}.set_device()` "
             "before FSDP initialization or pass in the explicit device "
             "index as the `device_id` argument.",
             stacklevel=2,
         )
-        device = torch.device(device_handle.current_device())
+        device = torch.device(device.type, curr_device_idx)
     return device
 
 
