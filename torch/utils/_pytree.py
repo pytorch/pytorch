@@ -45,6 +45,7 @@ from typing import (
 )
 from typing_extensions import deprecated, NamedTuple, Self, TypeIs
 
+import torch
 from torch.torch_version import TorchVersion as _TorchVersion
 
 
@@ -187,7 +188,11 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, type[Any]] = {}
 # NB: we try really hard to not import _cxx_pytree (which depends on optree)
 # as much as possible. This is for isolation: a user who is not using C++ pytree
 # shouldn't pay for it, and it helps makes things like cpython upgrades easier.
-_optree_minimum_version = _TorchVersion("0.13.0")
+_optree_minimum_version = _TorchVersion(
+    "0.20.0"  # the first version that provides Python 3.15 wheels while also the first version that supports frozendict
+    if torch._has_frozendict
+    else "0.13.0"
+)
 try:
     _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
@@ -838,12 +843,12 @@ def _list_unflatten(values: Iterable[T], context: Context) -> list[T]:
     return list(values)
 
 
-def _dict_flatten(d: dict[Any, T]) -> tuple[list[T], Context]:
+def _dict_flatten(d: Mapping[Any, T]) -> tuple[list[T], Context]:
     return list(d.values()), list(d.keys())
 
 
 def _dict_flatten_with_keys(
-    d: dict[Any, T],
+    d: Mapping[Any, T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _dict_flatten(d)
     # pyrefly: ignore [bad-return]
@@ -1076,6 +1081,24 @@ BUILTIN_TYPES: frozenset[type] = frozenset(
         deque,
     },
 )
+
+
+if torch._has_frozendict:
+
+    def _frozendict_unflatten(
+        values: Iterable[T], context: Context
+    ) -> torch._frozendict[Any, T]:
+        return torch._frozendict(zip(context, values, strict=True))
+
+    _private_register_pytree_node(
+        torch._frozendict,
+        _dict_flatten,
+        _frozendict_unflatten,
+        serialized_type_name="builtins.frozendict",
+        flatten_with_keys_fn=_dict_flatten_with_keys,
+    )
+    STANDARD_DICT_TYPES |= frozenset({torch._frozendict})
+    BUILTIN_TYPES |= frozenset({torch._frozendict})
 
 
 @deprecated(
@@ -1354,7 +1377,7 @@ class TreeSpec:
         if node_type is defaultdict:
             default_factory, dict_context = self._context
             hashable_context = (default_factory, tuple(dict_context))
-        elif node_type in (dict, OrderedDict):
+        elif node_type in STANDARD_DICT_TYPES:
             hashable_context = tuple(self._context)
         elif node_type is None or node_type in BUILTIN_TYPES:
             hashable_context = self._context
