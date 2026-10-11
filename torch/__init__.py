@@ -277,11 +277,14 @@ if sys.platform == "win32":
             ctypes.CDLL("msvcp140.dll")
             if platform.machine() != "ARM64":
                 ctypes.CDLL("vcruntime140_1.dll")
+                # C11 threads used by pthreadpool, shipped since VC++ 14.38.
+                # The win_arm64 wheels do not import it.
+                ctypes.CDLL("vcruntime140_threads.dll")
         except OSError:
             print(
                 textwrap.dedent(
                     """
-                    Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
+                    Microsoft Visual C++ Redistributable is not installed or is outdated, this may lead to the DLL load failure.
                     It can be downloaded at https://aka.ms/vs/17/release/vc_redist.x64.exe
                     """
                 ).strip()
