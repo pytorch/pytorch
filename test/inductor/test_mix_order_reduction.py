@@ -1564,6 +1564,36 @@ class MixOrderReductionTest(TestBase):
         self.assertEqual(list(act[1].shape), list(ref[1].shape))
         self.assertTrue(same(ref, act, tol=1e-3))
 
+    # nrows values are not multiples of XBLOCK, so the split loop has a tail
+    # iteration that reads rows >= xnumel. Regression for
+    # https://github.com/pytorch/pytorch/issues/195845
+    @parametrize("nrows", (40959, 40961, 40962))
+    def test_unmasked_tail_with_uneven_row_count(self, nrows):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        # `+ 1` turns a masked-load 0 into a non-identity value, so any tail
+        # row folded into the sum shifts the column sum by a whole 1.0.
+        def f(x):
+            y = x + 1
+            return y.sum(dim=0), y.sum(dim=1)
+
+        x = torch.randn(nrows, 768, device=GPU_TYPE)
+        ref = f(x)
+        act = torch.compile(
+            f, options={"triton.mix_order_reduction_initial_xblock": 2}
+        )(x)
+
+        # atol=1e-2 sits above fp32 reduction-order noise but well below the
+        # 1.0-per-tail-row corruption the bug produces.
+        self.assertEqual(act, ref, atol=1e-2, rtol=0)
+        # confirm mix-order codegen actually ran for this row count (metrics
+        # are reset per test by TestBase.setUp).
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
+
 
 class OverFusionTest(TestBase):
     """
