@@ -43,11 +43,11 @@ class SGD(Optimizer):
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
-        if lr < 0.0:
+        if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
-        if momentum < 0.0:
+        if not 0.0 <= momentum:
             raise ValueError(f"Invalid momentum value: {momentum}")
-        if weight_decay < 0.0:
+        if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
         defaults = {
