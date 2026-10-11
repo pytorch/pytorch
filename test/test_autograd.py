@@ -13374,6 +13374,114 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @parametrize("batch_first", [False, True])
+    @parametrize("enforce_sorted", [False, True])
+    def test_pack_padded_sequence_forward_ad(
+        self, device, dtype, batch_first, enforce_sorted
+    ):
+        lengths = torch.tensor([4, 3, 2] if enforce_sorted else [2, 4, 3])
+        order = lengths.argsort(descending=True).to(device)
+        batch_sizes = torch.tensor([(lengths > i).sum() for i in range(4)])
+        for features in ((), (2,), (2, 2)):
+            with self.subTest(features=features):
+                shape = (3, 5, *features) if batch_first else (5, 3, *features)
+                primal = make_tensor(
+                    shape, device=device, dtype=dtype, noncontiguous=True
+                )
+                tangent = make_tensor(
+                    shape, device=device, dtype=dtype, noncontiguous=True
+                )
+
+                def reference_data(value):
+                    time_first = value.transpose(0, 1) if batch_first else value
+                    ordered = time_first.index_select(1, order)
+                    return torch.cat(
+                        [ordered[i, :count] for i, count in enumerate(batch_sizes)]
+                    )
+
+                def fn(value):
+                    packed = nn.utils.rnn.pack_padded_sequence(
+                        value,
+                        lengths,
+                        batch_first=batch_first,
+                        enforce_sorted=enforce_sorted,
+                    )
+                    return packed.data
+
+                valid = torch.arange(5)[:, None] < lengths[None, :]
+                if batch_first:
+                    valid = valid.t()
+                valid = valid.to(device).reshape(*shape[:2], *([1] * len(features)))
+                expected_primal = (
+                    reference_data(primal),
+                    primal.masked_fill(~valid, 7),
+                )
+                expected_tangent = (
+                    reference_data(tangent),
+                    tangent.masked_fill(~valid, 0),
+                )
+                self.assertEqual(
+                    torch.func.jvp(fn, (primal,), (tangent,)),
+                    (expected_primal[0], expected_tangent[0]),
+                )
+                with fwAD.dual_level():
+                    dual = fwAD.make_dual(primal, tangent)
+                    packed = nn.utils.rnn.pack_padded_sequence(
+                        dual,
+                        lengths,
+                        batch_first=batch_first,
+                        enforce_sorted=enforce_sorted,
+                    )
+                    self.assertEqual(
+                        fwAD.unpack_dual(packed.data),
+                        (expected_primal[0], expected_tangent[0]),
+                    )
+                    self.assertEqual(packed.batch_sizes, batch_sizes)
+                    self.assertIsNone(fwAD.unpack_dual(packed.batch_sizes).tangent)
+                    padded, _ = nn.utils.rnn.pad_packed_sequence(
+                        packed,
+                        batch_first=batch_first,
+                        total_length=5,
+                        padding_value=7,
+                    )
+                    self.assertEqual(
+                        fwAD.unpack_dual(padded),
+                        (expected_primal[1], expected_tangent[1]),
+                    )
+                    ordinary = nn.utils.rnn.pack_padded_sequence(
+                        primal,
+                        lengths,
+                        batch_first=batch_first,
+                        enforce_sorted=enforce_sorted,
+                    )
+                    self.assertIsNone(fwAD.unpack_dual(ordinary.data).tangent)
+                _, zero_tangent = torch.func.jvp(
+                    fn, (primal,), (torch.zeros_like(primal),)
+                )
+                self.assertEqual(zero_tangent, torch.zeros_like(expected_tangent[0]))
+
+    @dtypes(torch.double)
+    @parametrize("batch_first", [False, True])
+    @parametrize("enforce_sorted", [False, True])
+    def test_pack_padded_sequence_forward_ad_gradcheck(
+        self, device, dtype, batch_first, enforce_sorted
+    ):
+        lengths = [3, 2] if enforce_sorted else [2, 3]
+        shape = (2, 4, 2) if batch_first else (4, 2, 2)
+        primal = make_tensor(shape, device=device, dtype=dtype, requires_grad=True)
+
+        def fn(value):
+            return nn.utils.rnn.pack_padded_sequence(
+                value,
+                lengths,
+                batch_first=batch_first,
+                enforce_sorted=enforce_sorted,
+            ).data
+
+        self.assertTrue(gradcheck(fn, (primal,), check_forward_ad=True))
+        self.assertTrue(gradgradcheck(fn, (primal,), check_fwd_over_rev=True))
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
