@@ -152,13 +152,17 @@ class ItertoolsVariable(VariableTracker):
             )
         elif self.value is itertools.product:
             if any(kw != "repeat" for kw in kwargs):
-                unimplemented(
-                    gb_type="Unsupported kwargs for itertools.product",
-                    context=f"call_function {self} {args} {kwargs}",
-                    explanation=f"Expected kwargs: 'repeat', but got "
-                    f"{','.join(set(kwargs.keys()) - {'repeat'})}",
-                    hints=[*graph_break_hints.USER_ERROR],
-                )
+                if len(kwargs) > 1:
+                    raise_type_error(
+                        tx,
+                        f"product() takes at most 1 keyword argument ({len(kwargs)} given)",
+                    )
+                name = next(iter(kwargs))
+                if sys.version_info >= (3, 13):
+                    msg = f"product() got an unexpected keyword argument {name!r}"
+                else:
+                    msg = f"{name!r} is an invalid keyword argument for product()"
+                raise_type_error(tx, msg)
 
             if "repeat" in kwargs:
                 r = kwargs["repeat"].as_python_constant()
