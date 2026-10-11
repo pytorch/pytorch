@@ -541,7 +541,7 @@ PyTypeObject* GetReduceOpMetaclass() {
   return metaclass;
 }
 
-PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
+PyObject* c10d_init(PyObject* /*_unused*/, PyObject* /*noargs*/) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
@@ -647,7 +647,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::init(
               [](std::vector<at::Tensor> params,
                  std::vector<std::vector<size_t>> bucket_indices,
-                 const std::vector<size_t>& per_bucket_size_limits,
+                 const std::vector<size_t>& /*per_bucket_size_limits*/,
                  c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
                  std::vector<bool> expect_sparse_gradients,
                  int64_t bucket_bytes_cap,
@@ -969,7 +969,7 @@ This class does not support ``__members__`` property.)");
           // other types.
           "__eq__",
           // NOLINTNEXTLINE(performance-unnecessary-value-param)
-          [](const ::c10d::ReduceOp& self, py::object) { return false; })
+          [](const ::c10d::ReduceOp& /*self*/, py::object) { return false; })
       .def(
           "__hash__",
           [](const ::c10d::ReduceOp& self) {
@@ -980,7 +980,7 @@ This class does not support ``__members__`` property.)");
           [](const ::c10d::ReduceOp& self) { return ::c10d::ReduceOp(self); })
       .def(
           "__deepcopy__",
-          [](const ::c10d::ReduceOp& self, const py::dict& memo) {
+          [](const ::c10d::ReduceOp& self, const py::dict& /*memo*/) {
             return ::c10d::ReduceOp(self);
           })
       .def(py::pickle(
@@ -1192,6 +1192,11 @@ Example:
   // Check if NVSHMEM is available on current system.
   module.def(
       "_is_nvshmem_available", ::c10d::nvshmem_extension::is_nvshmem_available);
+
+  module.def(
+      "_release_nvshmem_team_pool",
+      ::c10d::nvshmem_extension::release_nvshmem_team_pool,
+      py::arg("group_name"));
 #endif
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
@@ -1446,6 +1451,7 @@ Example:
           &::c10d::symmetric_memory::get_mempool_allocator)
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
+      .def_property_readonly("group_name", &SymmetricMemory::get_group_name)
       .def_property_readonly(
           "buffer_ptrs",
           [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
@@ -3136,6 +3142,21 @@ Arguments:
       .value("CUSTOM", ::c10d::ProcessGroup::BackendType::CUSTOM)
       .export_values();
 
+  // Getter for a Backend property that is backed by a virtual method. C++
+  // subclasses (ProcessGroupNCCL, ...) don't rebind these properties, so for
+  // them the getter must dispatch virtually to reach their override. For a
+  // Python subclass (PyBackend), reaching Backend's own property means the
+  // subclass doesn't override it or is calling super(); both want Backend's
+  // implementation, and dispatching virtually would go through the trampoline
+  // back into Python. This assumes PyBackend is the only trampoline below
+  // Backend.
+#define BACKEND_VIRTUAL_PROPERTY(method)                      \
+  [](::c10d::Backend& self) {                                 \
+    return dynamic_cast<::c10d::PyBackend*>(&self) != nullptr \
+        ? self.::c10d::Backend::method()                      \
+        : self.method();                                      \
+  }
+
   // TODO: The collection definitions handles direct instantiation of
   // ProcessGroup subclasses (e.g. dist.ProcessGroupGloo). This is not supported
   // and should be removed once all tests are transitioned
@@ -3171,15 +3192,15 @@ Arguments:
               py::arg("value"))
           .def_property_readonly(
               "supports_splitting",
-              &::c10d::Backend::supportsSplitting,
+              BACKEND_VIRTUAL_PROPERTY(supportsSplitting),
               "(test whether the backend supports splitting)")
           .def_property_readonly(
               "supports_coalescing",
-              &::c10d::Backend::supportsCoalescing,
+              BACKEND_VIRTUAL_PROPERTY(supportsCoalescing),
               "(test whether the backend supports coalescing)")
           .def_property_readonly(
               "_supports_time_estimate",
-              &::c10d::Backend::supportsTimeEstimation,
+              BACKEND_VIRTUAL_PROPERTY(supportsTimeEstimation),
               R"(Test whether the backend supports collective time estimation.
 
 This API is experimental and subject to change.)")
@@ -3197,11 +3218,11 @@ This API is experimental and subject to change.)")
 This API is experimental and subject to change.)")
           .def_property_readonly(
               "supports_shrinking",
-              &::c10d::Backend::supportsShrinking,
+              BACKEND_VIRTUAL_PROPERTY(supportsShrinking),
               "(test whether the backend supports communicator shrinking)")
           .def_property_readonly(
               "supports_reconfigure",
-              &::c10d::Backend::supportsReconfigure,
+              BACKEND_VIRTUAL_PROPERTY(supportsReconfigure),
               "(test whether the backend supports reconfigure for fault tolerance)")
           .def(
               "set_timeout",
@@ -3237,7 +3258,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "Reconfigure the backend with a new set of peers for fault tolerance")
           .def_property_readonly(
               "supports_window",
-              &::c10d::Backend::supportsWindow,
+              BACKEND_VIRTUAL_PROPERTY(supportsWindow),
               "(test whether the backend supports one-sided window operations)")
           .def(
               "new_window",
@@ -3247,7 +3268,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "Collectively create a one-sided communication window; all ranks must call in the same order")
           .def_property_readonly(
               "supports_abort_hooks",
-              &::c10d::Backend::supportsAbortHooks,
+              BACKEND_VIRTUAL_PROPERTY(supportsAbortHooks),
               "(test whether the backend supports abort hooks)")
           .def(
               "register_abort_hook",
@@ -3723,11 +3744,14 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "bound_device_id",
               &::c10d::Backend::getBoundDeviceId,
               &::c10d::Backend::setBoundDeviceId)
-          .def_property_readonly("options", &::c10d::Backend::getBackendOptions)
+          .def_property_readonly(
+              "options", BACKEND_VIRTUAL_PROPERTY(getBackendOptions))
           .def(
               "get_error",
               &::c10d::Backend::getError,
               py::call_guard<py::gil_scoped_release>());
+
+#undef BACKEND_VIRTUAL_PROPERTY
 
   // base Backend::Options binding
   // TODO: Maybe we can consider how to merge this with
@@ -4100,7 +4124,7 @@ for details.
           [](const ncclConfig_t& self) { return ncclConfig_t(self); })
       .def(
           "__deepcopy__",
-          [](const ncclConfig_t& self, const py::dict& memo) {
+          [](const ncclConfig_t& self, const py::dict& /*memo*/) {
             return ncclConfig_t(self);
           },
           py::arg("memo"));
@@ -4125,6 +4149,11 @@ Attributes:
             available parameters in the config. See
             https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
             for details.
+    lazy_init (bool): nccl2 only. Create the communicator on the first
+            operation instead of when the group is bound to a device, so a
+            group that never communicates allocates no NCCL resources. Such a
+            group can't be split from until its first operation. Default is
+            False.
 
 Example::
     >>> import torch.distributed as dist
@@ -4147,6 +4176,7 @@ Example::
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
+      .def_readwrite("lazy_init", &::c10d::ProcessGroupNCCL::Options::lazy_init)
       .def_readwrite(
           "use_pg_for_symm_mem_rendezvous",
           &::c10d::ProcessGroupNCCL::Options::use_pg_for_symm_mem_rendezvous)
@@ -4158,7 +4188,7 @@ Example::
       .def(
           "__deepcopy__",
           [](const ::c10d::ProcessGroupNCCL::Options& self,
-             const py::dict& memo) {
+             const py::dict& /*memo*/) {
             return ::c10d::ProcessGroupNCCL::Options(self);
           },
           py::arg("memo"));
