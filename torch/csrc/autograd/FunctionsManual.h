@@ -211,6 +211,18 @@ at::Tensor solve_backward_A(
     const at::Tensor& A,
     const at::Tensor& solution);
 at::Tensor cumsum_backward(const at::Tensor& grad, int64_t dim);
+at::Tensor associative_scan_backward(
+    const at::Tensor& grad,
+    const at::Tensor& self,
+    const std::string& combine_mode,
+    int64_t dim,
+    const at::Tensor& result,
+    bool reverse);
+std::vector<at::Tensor> associative_scan_tensor_list_backward(
+    const std::vector<at::Tensor>& grads,
+    const std::vector<at::Tensor>& xs,
+    int64_t dim,
+    bool reverse);
 at::Tensor logsumexp_backward(
     at::Tensor grad,
     const at::Tensor& self,
