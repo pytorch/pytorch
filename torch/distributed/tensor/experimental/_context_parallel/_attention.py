@@ -26,6 +26,7 @@ from torch.nn.attention.flex_attention import (
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 from ._cp_custom_ops import flex_cp_allgather
+from ._gated_delta import patch_gated_delta_rule, restore_gated_delta_rule
 from ._load_balancer import _create_default_load_balancer, _LoadBalancer
 
 
@@ -1050,8 +1051,10 @@ def _enable_context_parallel_dispatcher_impl(seq_dim: int, mesh: DeviceMesh) -> 
             sdpa_cp.sdpa_input_fn,
             sdpa_cp.sdpa_output_fn,
         )
+        patch_gated_delta_rule(mesh)
         _enable_cp_dtensor_dispatcher()
     elif _dispatch_mode == _DispatchMode.MODULE_WRAPPER:
+        patch_gated_delta_rule(mesh)
         _enable_cp_dtensor_dispatcher()
     else:
         raise ValueError(f"Unknown dispatch mode: {_dispatch_mode}")
@@ -1060,8 +1063,9 @@ def _enable_context_parallel_dispatcher_impl(seq_dim: int, mesh: DeviceMesh) -> 
 def _disable_context_parallel_dispatcher_impl() -> None:
     if _dispatch_mode == _DispatchMode.MONKEY_PATCH:
         _restore_function(F.scaled_dot_product_attention, F)
+        restore_gated_delta_rule()
     elif _dispatch_mode == _DispatchMode.MODULE_WRAPPER:
-        pass
+        restore_gated_delta_rule()
     else:
         raise NotImplementedError(f"Unknown dispatch mode: {_dispatch_mode}")
 
