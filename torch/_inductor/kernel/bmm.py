@@ -320,7 +320,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             args = [make_pointwise(_to_dtype)(x) for x in args]
 
         mul_pointwise = make_pointwise(ops.dot)(*args)
-        dot_reduction = make_reduction("dot")(mul_pointwise, 2)
+        dot_reduction = make_reduction("dot", override_return_dtype=out_dtype)(
+            mul_pointwise, 2
+        )
 
         return dot_reduction
 
