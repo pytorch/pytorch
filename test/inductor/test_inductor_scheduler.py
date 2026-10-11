@@ -912,6 +912,7 @@ class TestScheduler(TestCase):
 
         def reduction(index, group=(M, N)):
             node = self._mock_base_snode("buf1")
+            node.get_buffer_names.return_value = OrderedSet(["buf1"])
             node.is_reduction.return_value = True
             node.group = ("cuda", group)
             node.read_writes.reads = OrderedSet(
@@ -920,23 +921,36 @@ class TestScheduler(TestCase):
             return node
 
         row = reduction(N * x + r)
+        # Reads row's result back over the tile, as LayerNorm does.
+        reader = self._mock_base_snode("buf2")
+        reader.group = ("cuda", (M * N, 1))
+        reader.used_buffer_names.return_value = OrderedSet(["buf0", "buf1"])
+        reader.read_writes.reads = OrderedSet(
+            [
+                MemoryDep("buf0", N * x + r, (x, r), (M, N)),
+                MemoryDep("buf1", x, (x, r), (M, N)),
+            ]
+        )
         cases = [
-            (None, row, False),
+            (None, [row], False),
             # Across epilogue subtiles.
-            ((128, 32, 2), row, False),
+            ((128, 32, 2), [row], True),
+            # A row result is only complete after the last subtile.
+            ((128, 32, 2), [row, reader], False),
+            ((128, N, 1), [row, reader], True),
             # Across column tiles, only reductions that finish from partials fit.
-            ((128, 32, 1), row, False),
+            ((128, 32, 1), [row], False),
             # A column read: (M, N) matches (N, M), but the read isn't row-major.
-            ((128, N, 1), reduction(x + N * r), False),
-            ((128, N, 1), reduction(N * x + r, group=(M * N, 1)), False),
-            ((128, N, 1), row, True),
+            ((128, N, 1), [reduction(x + N * r)], False),
+            ((128, N, 1), [reduction(N * x + r, group=(M * N, 1))], False),
+            ((128, N, 1), [row], True),
         ]
         with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
-            for tile, node, expected in cases:
+            for tile, nodes, expected in cases:
                 self.assertEqual(
-                    tile_fits_reduction_epilogue(tile, template, [node]),
+                    tile_fits_reduction_epilogue(tile, template, nodes),
                     expected,
-                    (tile, node.read_writes.reads),
+                    (tile, [node.read_writes.reads for node in nodes]),
                 )
 
     def _mock_reduction_epilogue_snode(self, name, reads, group, reduction=False):
