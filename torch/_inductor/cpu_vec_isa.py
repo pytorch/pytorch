@@ -614,11 +614,7 @@ def get_isa_from_cpu_capability(
     return vec_isa_list[0]
 
 
-# Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
-# might have too much redundant content that is useless for ISA check. Hence,
-# we only cache some key isa information.
-@functools.cache
-def valid_vec_isa_list() -> list[VecISA]:
+def _detect_vec_isa_list(check_build: bool) -> list[VecISA]:
     isa_list: list[VecISA] = []
     if sys.platform == "darwin" and platform.processor() == "arm":
         isa_list.append(VecNEON())
@@ -661,17 +657,41 @@ def valid_vec_isa_list() -> list[VecISA]:
         isa_list.extend(
             isa
             for isa in supported_vec_isa_list
-            if all(flag in _cpu_supported_x86_isa for flag in str(isa).split()) and isa
+            if all(flag in _cpu_supported_x86_isa for flag in str(isa).split())
+            and (not check_build or isa)
         )
 
     return isa_list
 
 
-def pick_vec_isa() -> VecISA:
+# Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
+# might have too much redundant content that is useless for ISA check. Hence,
+# we only cache some key isa information.
+@functools.cache
+def valid_vec_isa_list() -> list[VecISA]:
+    """ISAs the host CPU supports AND the toolchain can produce a working
+    ``.so`` for (each candidate is verified with the dry-compile + dlopen
+    probe from `Note [Checking for Vectorized Support in Inductor]`)."""
+    return _detect_vec_isa_list(check_build=True)
+
+
+@functools.cache
+def cpuinfo_vec_isa_list() -> list[VecISA]:
+    """ISAs the host CPU supports, detected from cpuinfo alone -- no compiler
+    is invoked. The dry-compile probe in valid_vec_isa_list exists to verify
+    the *toolchain* before codegen; paths that only need to describe the host
+    (e.g. the package-load device-info check) can use this instead and avoid
+    multi-second probe costs on machines with a cold inductor cache."""
+    return _detect_vec_isa_list(check_build=False)
+
+
+def pick_vec_isa(*, check_build: bool = True) -> VecISA:
     if config.is_fbcode() and (platform.machine() in ["x86_64", "AMD64"]):
         return VecAVX2()
 
-    _valid_vec_isa_list: list[VecISA] = valid_vec_isa_list()
+    _valid_vec_isa_list: list[VecISA] = (
+        valid_vec_isa_list() if check_build else cpuinfo_vec_isa_list()
+    )
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
