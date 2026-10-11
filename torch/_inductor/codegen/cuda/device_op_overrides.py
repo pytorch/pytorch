@@ -86,6 +86,49 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 }                                              \\
             } while (0);
 
+            static inline void setKernelSharedMemory(
+                    CUfunction func,
+                    uint32_t sharedMemBytes) {
+                if (sharedMemBytes == 0) {
+                    return;
+                }
+            #if !defined(USE_ROCM)
+                // CUDA 13 cuda.h values, spelled out so older toolkits still build:
+                // CU_FUNC_ATTRIBUTE_SHARED_MEMORY_MODE and
+                // CU_SHARED_MEMORY_MODE_ALLOW_OVERSIZED_SHARED_MEMORY.
+                constexpr int kFuncAttrSharedMemoryMode = 17;
+                constexpr int kSharedMemoryModeAllowOversized = 3;
+                CUdevice device;
+                CUDA_DRIVER_CHECK(cuCtxGetDevice(&device));
+                int sharedOptin = 0;
+                CUDA_DRIVER_CHECK(cuDeviceGetAttribute(
+                    &sharedOptin,
+                    CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+                    device
+                ));
+                int sharedStatic = 0;
+                CUDA_DRIVER_CHECK(cuFuncGetAttribute(
+                    &sharedStatic, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, func
+                ));
+                // Above the opt-in limit (sm_107), static + dynamic shared memory
+                // is only available in the oversized shared memory mode.
+                if (sharedMemBytes + static_cast<uint32_t>(sharedStatic) >
+                        static_cast<uint32_t>(sharedOptin)) {
+                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                        func,
+                        static_cast<CUfunction_attribute>(kFuncAttrSharedMemoryMode),
+                        kSharedMemoryModeAllowOversized
+                    ));
+                    return;
+                }
+            #endif
+                CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                    func,
+                    CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                    sharedMemBytes
+                ))
+            }
+
             static inline CUfunction loadKernel(
                     std::string filePath,
                     const std::string &funcName,
@@ -105,13 +148,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     loaded_modules->push_back(mod);
                 }
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
-                if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
-                        func,
-                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                        sharedMemBytes
-                    ))
-                }
+                setKernelSharedMemory(func, sharedMemBytes);
                 return func;
             }
 
@@ -127,13 +164,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     loaded_modules->push_back(mod);
                 }
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
-                if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
-                        func,
-                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                        sharedMemBytes
-                    ))
-                }
+                setKernelSharedMemory(func, sharedMemBytes);
                 return func;
             }
 
