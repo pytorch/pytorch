@@ -30,6 +30,7 @@ import logging
 import math
 import operator
 import sys
+import threading
 import types
 import typing
 from collections.abc import Callable, Iterable, Sequence
@@ -72,12 +73,14 @@ from ..utils import (
     check_unspec_python_args,
     dict_methods,
     extract_fake_example_value,
+    get_custom_getattr,
     get_fake_value,
     has_torch_function,
     is_tensor_getset_descriptor,
     istype,
     no_keywords,
     numpy_operator_wrapper,
+    object_has_getattribute,
     proxy_args_kwargs,
     raise_args_mismatch,
     specialize_symnode,
@@ -169,7 +172,11 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .user_defined import (
+    is_data_descriptor,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -603,6 +610,88 @@ _VALUE_INDEPENDENT_INSTANCECHECKS = frozenset(
     )
     if hook is not None
 )
+
+_PROTOCOL_META = getattr(typing, "_ProtocolMeta", None)
+
+
+def _runtime_protocol_isinstance(
+    tx: "InstructionTranslatorBase", obj: UserDefinedObjectVariable, proto: Any
+) -> bool:
+    """isinstance(obj, proto) for a runtime_checkable Protocol, computed like
+    typing._ProtocolMeta.__instancecheck__: the ABC check, which reads the
+    object's class, then a walk over the Protocol's members.
+
+    A member in the instance dict is read from Dynamo's view of obj, so
+    attributes stored earlier in the frame count, and the input is guarded on
+    it. A member the class provides is read without tracing its descriptor:
+    3.12+ takes the class attribute itself, as inspect.getattr_static does,
+    and earlier versions run the descriptor on the real object, as hasattr()
+    does there, unguarded as before."""
+    from .lazy import LazyVariableTracker
+
+    real = obj.get_real_python_backed_value()
+    if abc.ABCMeta.__instancecheck__(proto, real):
+        return True
+    if sys.version_info >= (3, 12):
+        members = proto.__protocol_attrs__
+    else:
+        members = typing._get_protocol_attrs(proto)
+    non_methods = getattr(proto, "__non_callable_proto_members__", None)
+    if non_methods is None:  # before 3.12.2
+        non_methods = {m for m in members if not callable(getattr(proto, m, None))}
+    has_dict = hasattr(real, "__dict__")
+    # Sorted so the installed guards do not depend on set order.
+    for member in sorted(members):
+        is_method = member not in non_methods
+        class_attr = obj.lookup_class_mro_attr(member)
+        # An instance dict entry shadows any class attribute but a data
+        # descriptor.
+        shadowable = has_dict and not is_data_descriptor(class_attr)
+        if class_attr is NO_SUCH_SUBOBJ:
+            # Only the instance dict can hold it; this guards on its presence.
+            if not obj.call_obj_hasattr(tx, member).as_python_constant():
+                return False
+            from_dict = True
+        else:
+            from_dict = shadowable and obj.has_key_in_generic_dict(tx, member)
+        # Setting a method member to None opts out of the Protocol.
+        if from_dict:
+            if is_method:
+                entry = obj.tp_getattro_impl(tx, member)
+                if isinstance(entry, LazyVariableTracker) and not entry.is_realized():
+                    if entry.source is None:
+                        raise AssertionError("unrealized member without a source")
+                    # The type tells None apart; realizing the entry would
+                    # guard on its value.
+                    install_guard(entry.source.make_guard(GuardBuilder.TYPE_MATCH))
+                    if entry.peek_value() is None:
+                        return False
+                elif entry.is_constant_none():
+                    return False
+            continue
+        if sys.version_info >= (3, 12):
+            matches = not (is_method and class_attr is None)
+        else:
+            get = getattr(type(class_attr), "__get__", None)
+            try:
+                found = class_attr if get is None else get(class_attr, real, type(real))
+            except AttributeError:
+                matches = False
+            else:
+                matches = not (is_method and found is None)
+        # Another input could shadow the class attribute. Checked after the
+        # descriptor ran, since functools.cached_property fills the dict.
+        if shadowable and obj.source and member not in vars(real):
+            install_guard(
+                obj.source.make_guard(
+                    functools.partial(
+                        GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=member
+                    )
+                )
+            )
+        if not matches:
+            return False
+    return True
 
 
 def _uses_custom_classinfo_check(
@@ -2903,7 +2992,20 @@ class BuiltinVariable(BaseBuiltinVariable):
                 if answered_by_type
                 else arg.get_real_python_backed_value()
             )
-            if value is not NO_SUCH_SUBOBJ:
+            if (
+                type(member) is _PROTOCOL_META
+                and isinstance(arg, variables.UserDefinedObjectVariable)
+                and getattr(member, "_is_protocol", False)
+                and getattr(member, "_is_runtime_protocol", False)
+                # Attribute hooks and threading.local's per-thread dict make
+                # hasattr() and the instance dict disagree with the Protocol's
+                # lookup, so the real object answers for these, as before.
+                and not object_has_getattribute(value)
+                and get_custom_getattr(value) is None
+                and not isinstance(value, threading.local)
+            ):
+                val = _runtime_protocol_isinstance(tx, arg, member)
+            elif value is not NO_SUCH_SUBOBJ:
                 try:
                     val = isinstance(value, member)
                 except TypeError as e:
