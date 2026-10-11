@@ -87,6 +87,7 @@ from ..utils import (
     is_function,
     is_lru_cache_wrapper_trace_without_warning_allowed,
     is_tensor_base_attr_getter,
+    is_torch_class,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
@@ -4877,16 +4878,21 @@ class MethodDescriptorVariable(DescriptorVariable):
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L427
         if not args:
             raise_type_error(
-                tx,
-                f"descriptor '{self.descriptor.__name__}' of "
-                f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
+                tx, f"unbound method {self.descriptor.__qualname__}() needs an argument"
             )
         obj, *rest = args
         name = self.descriptor.__name__
         _check_descriptor_obj_type(tx, self.descriptor, obj)
-        # Dispatch through the owner (UDCV for the defining class) rather
-        # than obj.call_method, which would do MRO resolution from type(obj)
-        # and find Python overrides on subclasses.
+        obj = obj.realize()
+        if isinstance(obj, UserDefinedObjectVariable):
+            base_methods = obj._base_methods
+            if base_methods is not None and self.descriptor in base_methods:
+                return obj.call_base_method(tx, name, rest, kwargs)
+        method = obj.lookup_tp_method(name)
+        if method is not None:
+            result = method(obj, tx, name, rest, kwargs)
+            if result is not None:
+                return result
         return self.owner.call_method(tx, name, [obj, *rest], kwargs)
 
     def tp_descr_get_impl(
@@ -4894,13 +4900,54 @@ class MethodDescriptorVariable(DescriptorVariable):
         tx: "InstructionTranslatorBase",
         obj: VariableTracker,
         owner: VariableTracker,
-    ) -> "BoundBuiltinMethodVariable":
+    ) -> VariableTracker:
         # Mirrors method_get which calls PyCFunction_NewEx to produce a
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
+        if obj.is_constant_none():
+            return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
-        return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
+        # PyCFunction_NewEx creates a fresh object; see ClassMethodDescriptorVariable.
+        return BoundBuiltinMethodVariable(self.descriptor, obj)
+
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        # PyMethodDescr_Type leaves tp_richcompare NULL and inherits
+        # object_richcompare from object.
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
+
+@functools.cache
+def _same_c_function(left: Any, right: Any) -> bool | None:
+    """meth_richcompare's ml_meth check for two descriptors already known to
+    share a receiver. ml_meth is only observable through that comparison, so
+    bind both to one receiver and compare. Distinct descriptors can alias one C
+    function, e.g. int.conjugate and int.__trunc__. None means undecidable.
+    """
+    if left is right:
+        return True
+    if type(left) is not type(right):
+        return None
+    if isinstance(left, types.BuiltinFunctionType):
+        # Stored unbound in a type dict; m_self is the type itself.
+        return left == right
+    owner = left.__objclass__
+    if issubclass(right.__objclass__, owner):
+        owner = right.__objclass__
+    if isinstance(left, types.ClassMethodDescriptorType):
+        return left.__get__(None, owner) == right.__get__(None, owner)
+    try:
+        receiver = owner.__new__(owner)
+    except TypeError:
+        return None
+    return left.__get__(receiver) == right.__get__(receiver)
 
 
 class BoundBuiltinMethodVariable(VariableTracker):
@@ -4916,6 +4963,7 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     _nonvar_fields = {
         "descriptor",
+        "value",
         *VariableTracker._nonvar_fields,
     }
 
@@ -4976,11 +5024,14 @@ class BoundBuiltinMethodVariable(VariableTracker):
         | types.BuiltinFunctionType
         | types.ClassMethodDescriptorType,
         obj: VariableTracker,
+        value: types.BuiltinMethodType | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
         self.obj = obj
+        # The ID_MATCH-guarded runtime method, when built from one.
+        self.value = value
 
     def __repr__(self) -> str:
         cls_name = getattr(
@@ -4993,15 +5044,41 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
-        try:
-            return hash(self.as_python_constant()), False
-        except AsPythonConstantNotImplementedError:
-            return id(self), True
+        # It hashes m_self by identity, so only a guarded runtime method has a
+        # real hash; a method bound during tracing gets a compile-time-only one.
+        if self.value is not None:
+            return hash(self.value), False
+        return id(self), True
 
     def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
+        # meth_richcompare: equal iff both are builtin methods with the same
+        # m_self and the same C function (ml_meth).
+        # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L289-L317
+        if op not in ("__eq__", "__ne__") or not isinstance(
+            other, BoundBuiltinMethodVariable
+        ):
+            return ConstantVariable.create(NotImplemented)
 
-        return object_richcompare(self, tx, other, op)
+        if self.value is not None and other.value is not None:
+            eq = self.value == other.value
+            return ConstantVariable.create(eq if op == "__eq__" else not eq)
+
+        from .object_protocol import vt_identity_compare
+
+        same_self = vt_identity_compare(self.obj.realize(), other.obj.realize())
+        eq = None
+        if same_self is not None:
+            eq = same_self.as_python_constant() and _same_c_function(
+                self.descriptor, other.descriptor
+            )
+        if eq is None:
+            unimplemented(
+                gb_type="builtin method comparison with undecidable identity",
+                context=f"{self} {op} {other}",
+                explanation="Dynamo cannot determine the C-function and receiver identities of these builtin methods.",
+                hints=[*graph_break_hints.DIFFICULT],
+            )
+        return ConstantVariable.create(eq if op == "__eq__" else not eq)
 
     def as_python_constant(self) -> Any:
         obj = self.obj.as_python_constant()
@@ -5017,11 +5094,65 @@ class BoundBuiltinMethodVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
+        from .object_protocol import mro_lookup
+
+        # Handles calls like `list.append(L_subclass, item)`
+        # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L60-L90
+        # CPython calls the C function the method was created with. Dynamo has
+        # no function pointer, so it picks the implementation to trace from the
+        # descriptor and the receiver.
+        name = self.descriptor.__name__
+        obj = self.obj.realize()
+        descriptor = self.descriptor
+        args = list(args)
+        if isinstance(descriptor, types.ClassMethodDescriptorType):
+            # PyCMethod_New bound the C function to the class in obj; the class
+            # VT models the classmethod with itself as receiver.
+            return obj.call_method(tx, name, args, kwargs)
+        if not isinstance(descriptor, types.MethodDescriptorType):
+            # METH_STATIC C functions stored directly in a type dict, e.g.
+            # tuple.__new__; the receiver is the class itself.
+            return obj.call_method(tx, name, args, kwargs)
+        if is_torch_class(descriptor.__objclass__):
+            # TorchInGraphFunctionVariable records the descriptor itself in the
+            # graph, so a tensor subclass override never runs.
+            fn = VariableTracker.build(tx, descriptor)
+            return fn.call_function(tx, [obj, *args], kwargs)
+        if mro_lookup(obj.python_type(), name) is descriptor:
+            # Nothing overrides it, so name lookup reaches the same C method.
+            return obj.call_method(tx, name, args, kwargs)
+        if isinstance(obj, UserDefinedObjectVariable):
+            base_methods = obj._base_methods
+            if base_methods is not None and descriptor in base_methods:
+                return obj.call_base_method(tx, name, args, kwargs)
+        unimplemented(
+            gb_type="Bound builtin method shadowed by an override",
+            context=f"{self}",
+            explanation=f"type({obj}) overrides {name}, and Dynamo has no base implementation of the bound C method to call instead.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen(self.obj)
-        codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
+        # Rebuild through the descriptor: loading obj.<name> would resolve the
+        # name on type(obj) and find a subclass override.
+        descriptor = self.descriptor
+        load_descriptor = codegen.create_load_const_unchecked(descriptor)
+        if not hasattr(descriptor, "__get__"):
+            # METH_STATIC functions are already bound, e.g. tuple.__new__.
+            codegen.append_output(load_descriptor)
+            return
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [load_descriptor, *codegen.create_load_attrs("__get__")]
+            )
+        )
+        if isinstance(descriptor, types.ClassMethodDescriptorType):
+            codegen.append_output(codegen.create_load_const(None))
+            codegen(self.obj)
+            codegen.extend_output(create_call_function(2, False))
+        else:
+            codegen(self.obj)
+            codegen.extend_output(create_call_function(1, False))
 
 
 class ClassMethodDescriptorVariable(DescriptorVariable):
@@ -5083,14 +5214,15 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         # producing a builtin_function_or_method via PyCMethod_New.
         # It first requires owner to be a type and a subtype of __objclass__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
-        owner_value = owner.as_python_constant()
-        if not isinstance(owner_value, type):
+        owner_type = owner.python_type()
+        if not issubclass(owner_type, type):
             raise_type_error(
                 tx,
                 f"descriptor '{self.descriptor.__name__}' for type "
                 f"'{self.descriptor.__objclass__.__name__}' needs a type, not a "
-                f"'{type(owner_value).__name__}' as arg 2",
+                f"'{owner_type.__name__}' as arg 2",
             )
+        owner_value = owner.as_python_constant()
         if not issubclass(owner_value, self.descriptor.__objclass__):
             raise_type_error(
                 tx,
@@ -5098,7 +5230,25 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
                 f"'{self.descriptor.__objclass__.__name__}' but received "
                 f"'{owner_value.__name__}'",
             )
-        return BoundBuiltinMethodVariable(self.descriptor, owner, source=self.source)
+        return BoundBuiltinMethodVariable(self.descriptor, owner)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # classmethoddescr_call: bind args[0] through classmethod_get, then call
+        # the bound builtin_function_or_method with the remaining arguments.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L302-L326
+        if not args:
+            raise_type_error(
+                tx,
+                f"descriptor '{self.descriptor.__name__}' of "
+                f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
+            )
+        bound = self.tp_descr_get_impl(tx, ConstantVariable.create(None), args[0])
+        return bound.call_function(tx, args[1:], kwargs)
 
 
 # sm_init/cm_init run functools_wraps(), which copies these off the wrapped

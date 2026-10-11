@@ -1102,6 +1102,16 @@
       "Hints": []
     }
   ],
+  "GB7811": [
+    {
+      "Gb_type": "Bound builtin method shadowed by an override",
+      "Context": "{self}",
+      "Explanation": "type({obj}) overrides {name}, and Dynamo has no base implementation of the bound C method to call instead.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0069": [
     {
       "Gb_type": "Import failure",
@@ -2082,6 +2092,26 @@
       "Hints": [
         "Bind context_fn to an object created outside the compiled ",
         "region, or pass a function or functools.partial instead."
+      ]
+    }
+  ],
+  "GB5716": [
+    {
+      "Gb_type": "Unsupported descriptor source",
+      "Context": "class __dict__ source",
+      "Explanation": "Dynamo cannot safely guard a method descriptor returned by a custom metaclass __dict__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3051": [
+    {
+      "Gb_type": "builtin method comparison with undecidable identity",
+      "Context": "{self} {op} {other}",
+      "Explanation": "Dynamo cannot determine the C-function and receiver identities of these builtin methods.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
       ]
     }
   ],
@@ -4418,6 +4448,16 @@
         "Use a simpler sequence type that Dynamo can convert to a list ",
         "(e.g. list, tuple, list iterator, etc.)",
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB9674": [
+    {
+      "Gb_type": "Bound builtin classmethod with custom metaclass",
+      "Context": "{descriptor.__qualname__} bound to a class with a custom metaclass",
+      "Explanation": "Dynamo cannot safely wrap the class receiver without invoking metaclass hooks.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
