@@ -1,8 +1,11 @@
 # Owner(s): ["module: inductor"]
 
+import ast
 import itertools
 import os
 import re
+import subprocess
+import sys
 import tempfile
 from unittest import mock
 
@@ -405,6 +408,34 @@ class TestModuleLevelKernels(TestCase):
         # The wrapper defines get_args too; only a kernel's harness has this.
         mods = [m for m in PyCodeCache.modules if hasattr(m, "benchmark_all_configs")]
         self.assertTrue(mods)
+
+        # Run as a script, the wrapper compiles its kernels from its own defs, so
+        # benchmark_all_kernels has to find their harnesses from those.
+        def run_script(code, flag):
+            with tempfile.TemporaryDirectory() as d:
+                path = os.path.join(d, "module.py")
+                with open(path, "w") as f:
+                    f.write(code)
+                env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+                cmd = [sys.executable, path, flag]
+                out = subprocess.check_output(cmd, env=env, stderr=subprocess.STDOUT)
+            return out.decode()
+
+        defs = re.findall(r"^def triton_\w+\(", code, re.MULTILINE)
+        keys = ast.literal_eval(re.search(r"kernel_modules=(\[.*?\])", code).group(1))
+        self.assertEqual(len(keys), len(defs), keys)
+        # -c prints each kernel's key, then a line per config, which needs the kernel
+        # precompiled.
+        out = run_script(code, "-kc")
+        for key in keys:
+            self.assertRegex(out, rf"{key[:10]}\n  .*GB/s")
+        # A module missing from the cache dir is skipped and the rest still run.
+        missing = "z" * len(keys[0])
+        code = code.replace("kernel_modules=[", f"kernel_modules=[{missing!r}, ")
+        out = run_script(code, "-k")
+        self.assertIn(f"Skipping kernel module {missing}", out)
+        for key in keys:
+            self.assertRegex(out, rf"{key[:10]} .*GB/s")
 
 
 class TestDefaultWrapper(TestCase):
