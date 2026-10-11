@@ -730,7 +730,7 @@ class TestQuantizedOps(TestCase):
                 dqY = op(dqX, approximate=approximate)
                 qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
                                                dtype=torch_type)
-                qY_hat = op(qX)
+                qY_hat = op(qX, approximate=approximate)
                 self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
                                  msg=lambda msg: f"{msg}\nF.gelu failed ({qY} vs {qY_hat})")
 
