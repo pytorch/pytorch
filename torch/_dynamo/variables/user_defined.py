@@ -1218,9 +1218,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__
         ):
-            if self.value is collections.OrderedDict:
+            if (
+                self.value is collections.OrderedDict
+                and isinstance(args[0], UserDefinedClassVariable)
+                and args[0].value is collections.OrderedDict
+            ):
                 # Exact OrderedDict: represent as a bare OrderedDictVariable,
                 # mirroring dict.__new__(dict) -> ConstDictVariable.
+                # OrderedDict.__new__(Sub) must still build a Sub instance.
                 return OrderedDictVariable({}, mutation_type=ValueMutationNew())
             # Some C-level tp_new functions (dict.__new__, set.__new__) ignore
             # extra args — only the type arg matters.  Pass init_args=[] for

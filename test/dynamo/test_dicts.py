@@ -66,6 +66,10 @@ class FakeMapping:
         return self._value
 
 
+class _DictSubclass(dict):
+    pass
+
+
 class DictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1502,6 +1506,55 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(["b", "c", "a"], list(opt_fn(x).keys()))
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_ordered_dict_keyword_defaults(self):
+        def fn():
+            d = OrderedDict()
+            first = d.setdefault(key="a", default=9)
+            second = d.setdefault("a", default=4)
+            popped = d.pop(key="missing", default=6)
+            return first, second, popped, list(d.items())
+
+        self.assertEqual(fn(), (9, 9, 6, [("a", 9)]))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    @parametrize("cls", [dict, _DictSubclass], name_fn=lambda c: c.__name__)
+    @parametrize("method", ["pop", "setdefault"])
+    def test_dict_keyword_arguments_rejected(self, method, cls):
+        def fn():
+            d = cls(a=1)
+            try:
+                getattr(d, method)("a", default=2)
+            except TypeError as e:
+                return str(e)
+            return "no error"
+
+        expected = f"{cls.__name__}.{method}() takes no keyword arguments"
+        self.assertEqual(fn(), expected)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), expected)
+
+    def test_ordered_dict_new_subclass(self):
+        class OD(OrderedDict):
+            def __new__(cls, *args, **kwargs):
+                return OrderedDict.__new__(cls)
+
+        def fn():
+            d = OD()
+            d["a"] = 1
+            return type(d), list(d.items())
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_ordered_dict_new_exact(self):
+        def fn(x):
+            d = OrderedDict.__new__(OrderedDict)
+            d["a"] = x
+            d["b"] = x + 1
+            d.move_to_end("a")
+            return type(d), list(d.items())
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_mapping_proxy_ban_muation_on_dict_realization(self):
         def fn(x):
