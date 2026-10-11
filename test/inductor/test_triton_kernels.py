@@ -3318,6 +3318,22 @@ def forward(self, arg0_1, arg1_1):
         self._assert_triton_compile_option(options, "enable_fp_fusion", False)
 
     @requires_gpu
+    def test_generated_user_autotune_preserves_config_namespaces(self):
+        add_kernel = triton.autotune(
+            configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
+            key=[],
+        )(_get_backend_options_kernel(with_enable_fp_fusion=False))
+        f = _get_backend_options_fn(add_kernel)
+
+        x = torch.randn(4, device=GPU_TYPE)
+        out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, x)
+
+        self.assertEqual(out, x + x)
+        self.assertIn("configs_are_namespaced=True", code)
+        self.assertIn("'kwargs': {'BLOCK_SIZE': 128}", code)
+        self.assertIn("'compile_options': {'num_warps': 4", code)
+
+    @requires_gpu
     def test_triton_kernel_backend_options_preserved_in_fx_wrapper_hop(self):
         add_kernel = _get_backend_options_kernel(with_enable_fp_fusion=False)
         f = _get_backend_options_fn(add_kernel, BLOCK_SIZE=128, enable_fp_fusion=False)

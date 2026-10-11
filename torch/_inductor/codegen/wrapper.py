@@ -4417,6 +4417,7 @@ class PythonWrapperCodegen(CodeGen):
             f"""
             @triton_heuristics.user_autotune(
                 configs={[*map(config_to_dict, configs)]!r},
+                configs_are_namespaced=True,
                 inductor_meta={inductor_meta!r},
                 triton_meta={sanitized_triton_meta!r},
                 filename=__file__,

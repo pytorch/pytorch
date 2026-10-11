@@ -5330,6 +5330,7 @@ def user_autotune(
     filename=None,
     inductor_meta: InductorMeta | None = None,
     custom_kernel=False,
+    configs_are_namespaced=False,
 ):
     """
     Compile a user defined triton kernel
@@ -5337,7 +5338,8 @@ def user_autotune(
     if len(configs) == 0:
         configs = [triton.Config({})]
     else:
-        configs = [*map(config_from_flat_dict, configs)]
+        decoder = config_from_dict if configs_are_namespaced else config_from_flat_dict
+        configs = [*map(decoder, configs)]
     return cached_autotune(
         None,
         configs,
