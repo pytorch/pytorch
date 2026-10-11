@@ -3921,7 +3921,6 @@ class TestBinaryUfuncsDevice(TestCase):
         )
         self.assertEqual(torch.ldexp(mantissas, exponents), expected)
 
-    @skipXPU
     def test_ldexp_out_dtype_differs_from_input(self, device):
         # 2**20 and 2**-25 are out of half range, but the results are not.
         mantissas = torch.tensor([2**-10, -2.0], device=device, dtype=torch.half)
@@ -3930,7 +3929,6 @@ class TestBinaryUfuncsDevice(TestCase):
         torch.ldexp(mantissas, exponents, out=out)
         self.assertEqual(out, torch.tensor([2.0**10, -(2.0**-24)], device=device))
 
-    @skipXPU
     def test_ldexp_broadcast_exponent_no_resize_warning(self, device):
         mantissas = torch.ones(1, device=device)
         exponents = torch.tensor([1, 2, 3], device=device)

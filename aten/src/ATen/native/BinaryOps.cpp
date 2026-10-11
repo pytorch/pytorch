@@ -1594,13 +1594,16 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
     if (result.scalar_type() == self.scalar_type()) {
       return _ldexp_int_exponent(self, other, result);
     }
-    // The kernel can't cast its output, so compute in self's dtype and copy.
-    // Falling back to mul(self, 2**other) would compute 2**other in self's dtype,
-    // which over/underflows even when the final result is representable.
+    // The kernel can't cast its output, and TensorIterator only casts outputs when
+    // it also promotes inputs, which would turn the integer exponent into a float.
+    // So compute in self's dtype and copy, like cholesky_inverse_out. Falling back
+    // to mul(self, 2**other) would compute 2**other in self's dtype, which
+    // over/underflows even when the final result is representable.
+    // copy_ silently crosses devices, so check explicitly (the direct path above
+    // relies on TensorIterator's device check).
     TORCH_CHECK(result.device() == self.device(),
                 "Expected out tensor to have device ", self.device(), ", but got ", result.device(), " instead");
-    Tensor tmp = at::empty({0}, self.options());
-    _ldexp_int_exponent(self, other, tmp);
+    Tensor tmp = at::ldexp(self, other);
     at::native::resize_output(result, tmp.sizes());
     return result.copy_(tmp);
   }
