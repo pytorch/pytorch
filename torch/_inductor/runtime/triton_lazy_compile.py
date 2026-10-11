@@ -144,7 +144,10 @@ def run_triton_kernel_with_autotune(
     Run a Triton kernel with full autotuning using actual tensor arguments.
     """
     from torch._inductor.codecache import CodeCacheFuture, CudaKernelParamCache
-    from torch._inductor.runtime.triton_heuristics import config_to_dict
+    from torch._inductor.runtime.triton_heuristics import (
+        config_kwargs_from_dict,
+        config_to_dict,
+    )
 
     if kernel_name not in pending_kernels:
         raise RuntimeError(f"Kernel {kernel_name} not found in pending kernels.")
@@ -197,7 +200,8 @@ def run_triton_kernel_with_autotune(
     num_warps = cached_params["num_warps"]
     shared_mem = cached_params["shared_mem"]
 
-    config = config_to_dict(launcher.config) if launcher.config else {}
+    serialized_config = config_to_dict(launcher.config) if launcher.config else {}
+    config = config_kwargs_from_dict(serialized_config)
 
     # For combo/foreach kernels, the autotuned config may have empty kwargs
     # (e.g., the foreach heuristic only tunes num_warps, not XBLOCK).
@@ -241,7 +245,7 @@ def run_triton_kernel_with_autotune(
         # to remember which grid is chosen.
         precomputed_grids = inductor_meta.get("precomputed_grids", [])
         for idx, entry in enumerate(precomputed_grids):
-            entry_config = entry.get("config", {})
+            entry_config = config_kwargs_from_dict(entry.get("config", {}))
             if all(config.get(k) == v for k, v in entry_config.items()):
                 config_index = idx
                 break

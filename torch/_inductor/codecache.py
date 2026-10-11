@@ -5057,9 +5057,15 @@ class PyCodeCache:
 
 
 def _load_triton_kernel_from_source(
-    kernel_name: str, source_code: str
+    kernel_name: str, source_code: str, *, force_reload: bool = False
 ) -> CachingAutotuner:
-    return getattr(PyCodeCache.load(source_code), kernel_name)
+    if force_reload:
+        key, path = PyCodeCache.write(source_code)
+        PyCodeCache.modules_no_attr.pop(path, None)
+        module = PyCodeCache.load_by_key_path(key, path)
+    else:
+        module = PyCodeCache.load(source_code)
+    return getattr(module, kernel_name)
 
 
 @torch_key_cache
@@ -5686,7 +5692,9 @@ class StaticAutotunerFuture(CodeCacheFuture):
     A statically launchable CachingAutotuner, loaded from TritonBundler
     """
 
-    def __init__(self, static_autotuner: CachingAutotuner) -> None:
+    def __init__(
+        self, static_autotuner: CachingAutotuner, *, force_recompile: bool = False
+    ) -> None:
         # Pickled version of CachingAutotuner
         self.static_autotuner = static_autotuner
         # This needs to be set in AsyncCompile.triton, in case
@@ -5694,22 +5702,42 @@ class StaticAutotunerFuture(CodeCacheFuture):
         # We don't store the source code on the CachingAutotuner itself
         # since it can be very large.
         self.reload_kernel_from_src: Callable[[], Any] | None = None
+        self.compile_kernel_from_src: Callable[[bool], CachingAutotuner] | None = None
+        self.force_recompile = force_recompile
 
     def result(self, timeout: float | None = None) -> CachingAutotuner:
         # timeout is accepted for interface parity with other CodeCacheFuture
         # subclasses; this work is synchronous in-process and has no pending
         # future to wait on.
-        if self.reload_kernel_from_src is None:
+        from .runtime.static_triton_launcher import (
+            InvalidTritonKernelArtifactError,
+            MissingTritonKernelError,
+        )
+
+        if self.reload_kernel_from_src is None or self.compile_kernel_from_src is None:
             raise AssertionError(
-                "reload_kernel_from_src must be set before calling result()"
+                "source reload callbacks must be set before calling result()"
             )
+        if self.force_recompile:
+            log.warning("Bundled Triton kernel is untrusted; forcing JIT compilation")
+            self.static_autotuner.release_benchmark_artifacts()
+            return self.compile_kernel_from_src(True)
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
-            self.static_autotuner.recheck_autotune_cache(
-                reload_kernel_from_src=self.reload_kernel_from_src
-            )
-            self.static_autotuner.precompile(  # type: ignore[union-attr]
-                warm_cache_only=False,
-                reload_kernel=self.reload_kernel_from_src,
-                static_triton_bundle_key=None,  # no need to save again
-            )
-            return self.static_autotuner
+            try:
+                self.static_autotuner.recheck_autotune_cache()
+                self.static_autotuner.precompile(  # type: ignore[union-attr]
+                    warm_cache_only=False,
+                    reload_kernel=self.reload_kernel_from_src,
+                    static_triton_bundle_key=None,  # no need to save again
+                )
+                return self.static_autotuner
+            except MissingTritonKernelError as error:
+                log.warning(
+                    "Bundled Triton kernel is unavailable or invalid; "
+                    "falling back to JIT compilation"
+                )
+                compile_kernel_from_src = self.compile_kernel_from_src
+                self.static_autotuner.release_benchmark_artifacts()
+                return compile_kernel_from_src(
+                    isinstance(error, InvalidTritonKernelArtifactError)
+                )

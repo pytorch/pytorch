@@ -31,12 +31,17 @@ import os.path
 import re
 import threading
 import weakref
-from typing import Any
+from typing import Any, cast, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
 from torch._guards import CompileContext
-from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.runtime.runtime_utils import (
+    cache_dir,
+    triton_config_from_compile_options,
+    triton_config_to_compile_options,
+    triton_config_to_hashable,
+)
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
@@ -54,13 +59,17 @@ from ..remote_cache import (
     RemoteCacheJsonSerde,
 )
 from .hints import InductorMeta
-from .triton_compat import Config, HAS_WARP_SPEC
+
+
+if TYPE_CHECKING:
+    from .triton_compat import Config
 
 
 log = logging.getLogger(__name__)
 
 
 _InductorMetaTy = InductorMeta
+_TRITON_CONFIG_KEY = "triton_config"
 
 
 def inductor_meta_from_config() -> _InductorMetaTy:
@@ -213,12 +222,16 @@ class AutotuneCache:
     # which `configs` represents that option.
     def read_best(
         self, inductor_meta: _InductorMetaTy, configs: list[Config]
-    ) -> Config | None:
+    ) -> tuple[Config | None, bool]:
         if best := self._read():
-            return _load_cached_autotuning(
+            config = _load_cached_autotuning(
                 best, self.configs_hash, configs, inductor_meta
             )
-        return None
+            combo_completed = bool(best.get("found_by_combo_autotune", False)) and bool(
+                inductor_meta.get("combo_tuning_groups")
+            )
+            return config, combo_completed
+        return None, False
 
     # Set up local filesystem caching information
     def _setup_local_cache(
@@ -328,36 +341,24 @@ class AutotuneCache:
         time_taken_ns: int,
         found_by_coordesc: bool = False,
         triton_cache_hash: str | None = None,
+        found_by_combo_autotune: bool = False,
     ) -> None:
+        config_data: dict[str, JsonDataTy] = {
+            # pyrefly: ignore [missing-attribute]
+            "kwargs": config.kwargs,
+            "compile_options": triton_config_to_compile_options(config),
+        }
+        if (extra_options := getattr(config, "extra_options", None)) is not None:
+            config_data["extra_options"] = extra_options
+
         data: dict[str, JsonDataTy] = {
-            # pyrefly: ignore [missing-attribute]
-            **config.kwargs,
-            # pyrefly: ignore [missing-attribute]
-            "num_warps": config.num_warps,
-            # pyrefly: ignore [missing-attribute]
-            "num_stages": config.num_stages,
+            _TRITON_CONFIG_KEY: config_data,
             "configs_hash": self.configs_hash,
             "found_by_coordesc": found_by_coordesc,
+            "found_by_combo_autotune": found_by_combo_autotune,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
             "triton_cache_hash": triton_cache_hash,
         }
-        # Two configs can differ only in their register cap, so a cache entry
-        # without it would reload as the uncapped one.
-        if (maxnreg := getattr(config, "maxnreg", None)) is not None:
-            data["maxnreg"] = maxnreg
-        # Save extra_options if present on the config. This allows third-party
-        # backends to store custom tuned options alongside the standard config.
-        if extra_options := getattr(config, "extra_options", None):
-            data["extra_options"] = extra_options
-        if HAS_WARP_SPEC:
-            data.update(
-                {
-                    "num_consumer_groups": getattr(config, "num_consumer_groups", 0),
-                    "num_buffers_warp_spec": getattr(
-                        config, "num_buffers_warp_spec", 0
-                    ),
-                }
-            )
 
         self._record_artifact(data)
 
@@ -665,33 +666,6 @@ def _should_use_remote_autotune_cache(inductor_meta: _InductorMetaTy) -> bool:
     )
 
 
-def _reconstruct_triton_config(
-    best_config: dict[str, Any],
-    extra_options: JsonDataTy | None,
-    maxnreg: JsonDataTy = None,
-) -> Config:
-    num_warps = best_config.pop("num_warps")
-    num_stages = best_config.pop("num_stages")
-    config_args: dict[str, Any] = {
-        "num_warps": num_warps,
-        "num_stages": num_stages,
-    }
-    if maxnreg is not None:
-        config_args["maxnreg"] = maxnreg
-    if HAS_WARP_SPEC:
-        config_args.update(
-            {
-                "num_consumer_groups": best_config.pop("num_consumer_groups", 0),
-                "num_buffers_warp_spec": best_config.pop("num_buffers_warp_spec", 0),
-            }
-        )
-    # pyrefly: ignore [bad-argument-count, unexpected-keyword]
-    triton_config = Config(best_config, **config_args)
-    # pyrefly: ignore [missing-attribute]
-    triton_config.extra_options = extra_options
-    return triton_config
-
-
 def _load_cached_autotuning(
     best_config: dict[str, JsonDataTy],
     configs_hash: str,
@@ -700,6 +674,7 @@ def _load_cached_autotuning(
 ) -> Config | None:
     if best_config is None:
         return None
+    best_config = best_config.copy()
     if best_config.pop("configs_hash", None) != configs_hash:
         return None
 
@@ -708,30 +683,41 @@ def _load_cached_autotuning(
 
     best_config.pop("triton_cache_hash", None)
 
-    # Extract extra_options if present. This allows third-party backends
-    # to restore custom tuned options from the cache.
-    extra_options = best_config.pop("extra_options", None)
+    cached_found_by_coordesc = best_config.pop("found_by_coordesc", False)
+    found_by_coordesc = bool(
+        inductor_meta.get("coordinate_descent_tuning") and cached_found_by_coordesc
+    )
+    best_config.pop("found_by_combo_autotune", None)
 
-    found_by_coordesc = inductor_meta.get(
-        "coordinate_descent_tuning"
-    ) and best_config.pop("found_by_coordesc", False)
+    cached_config = best_config.pop(_TRITON_CONFIG_KEY, None)
+    if not isinstance(cached_config, dict):
+        return None
+    config_kwargs = cached_config.get("kwargs")
+    compile_options = cached_config.get("compile_options")
+    if not isinstance(config_kwargs, dict) or not isinstance(compile_options, dict):
+        return None
+    config_kwargs = cast(dict[str, Any], config_kwargs.copy())
+    compile_options = cast(dict[str, Any], compile_options.copy())
+    extra_options = cached_config.get("extra_options")
 
-    # Popped before matching, or it would be compared as (and later rebuilt
-    # into) a kernel kwarg.
-    maxnreg = best_config.pop("maxnreg", None)
+    triton_config = triton_config_from_compile_options(
+        config_kwargs, compile_options, extra_options
+    )
 
     if not found_by_coordesc:
-        matching_configs = [
-            cfg
-            for cfg in configs
-            # pyrefly: ignore [missing-attribute]
-            if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
-            # pyrefly: ignore [missing-attribute]
-            and cfg.num_warps == best_config.get("num_warps")
-            # pyrefly: ignore [missing-attribute]
-            and cfg.num_stages == best_config.get("num_stages")
-            and getattr(cfg, "maxnreg", None) == maxnreg
-        ]
+        cached_identity = triton_config_to_hashable(triton_config)
+        matching_configs = []
+        for cfg in configs:
+            identity = triton_config_to_hashable(
+                cfg,
+                extra_options=(
+                    cfg.extra_options
+                    if hasattr(cfg, "extra_options")
+                    else extra_options
+                ),
+            )
+            if identity == cached_identity:
+                matching_configs.append(cfg)
         if len(matching_configs) == 1:
             matched_config = matching_configs[0]
             # pyrefly: ignore [missing-attribute]
@@ -741,8 +727,6 @@ def _load_cached_autotuning(
     # Reconstruct Config from cached data. This handles both coordesc
     # configs and dynamically added configs (e.g. _dynamic_scale_rblock)
     # that aren't in the original config list.
-    best_config.pop("found_by_coordesc", None)
-    triton_config = _reconstruct_triton_config(best_config, extra_options, maxnreg)
     if found_by_coordesc:
         # pyrefly: ignore [missing-attribute]
         triton_config.found_by_coordesc = True

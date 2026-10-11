@@ -24,6 +24,18 @@ if TYPE_CHECKING:
     from .triton_compat import Config
 
 
+_UNSET = object()
+_TRITON_CONFIG_OPTION_DEFAULTS = (
+    ("num_ctas", 1),
+    ("maxnreg", None),
+    ("ir_override", None),
+)
+_TRITON_CONFIG_WARP_SPEC_DEFAULTS = (
+    ("num_consumer_groups", 0),
+    ("num_buffers_warp_spec", 0),
+)
+
+
 def conditional_product(*args: int) -> int:
     return functools.reduce(operator.mul, [x for x in args if x])
 
@@ -68,22 +80,97 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
     )
 
 
-def triton_config_to_hashable(cfg: Config) -> Hashable:
+def triton_config_to_hashable(cfg: Config, *, extra_options: Any = _UNSET) -> Hashable:
     """
     Convert triton config to a tuple that can uniquely identify it. We can use
     the return value as a dictionary key.
     """
+
+    def freeze(value: Any) -> Hashable:
+        if isinstance(value, dict):
+            return tuple(sorted((key, freeze(item)) for key, item in value.items()))
+        if isinstance(value, (list, tuple)):
+            return tuple(freeze(item) for item in value)
+        if isinstance(value, set):
+            return frozenset(freeze(item) for item in value)
+        return value
+
     # pyrefly: ignore [missing-attribute]
-    items = sorted(cfg.kwargs.items())
+    kwargs = freeze(cfg.kwargs)
+    compile_options = freeze(triton_config_to_compile_options(cfg))
+    extra_options = freeze(
+        getattr(cfg, "extra_options", None)
+        if extra_options is _UNSET
+        else extra_options
+    )
+    return (
+        ("kwargs", kwargs),
+        ("compile_options", compile_options),
+        (
+            "extra_options",
+            extra_options,
+        ),
+    )
+
+
+def triton_config_to_compile_options(cfg: Config) -> dict[str, Any]:
+    from torch._inductor.utils import forwarded_cuda_compile_options
+
+    compile_options = {
+        "num_warps": cfg.num_warps,  # pyrefly: ignore [missing-attribute]
+        "num_stages": cfg.num_stages,  # pyrefly: ignore [missing-attribute]
+    }
+    for key, default in _TRITON_CONFIG_OPTION_DEFAULTS:
+        if (value := getattr(cfg, key, default)) != default:
+            compile_options[key] = value
+    for key in forwarded_cuda_compile_options():
+        if (value := getattr(cfg, key, None)) is not None:
+            compile_options[key] = value
+
+    from .triton_compat import HAS_WARP_SPEC
+
+    for key, default in _TRITON_CONFIG_WARP_SPEC_DEFAULTS:
+        if HAS_WARP_SPEC or hasattr(cfg, key):
+            compile_options[key] = getattr(cfg, key, default)
+    return compile_options
+
+
+def triton_config_from_compile_options(
+    config_kwargs: dict[str, Any],
+    compile_options: dict[str, Any],
+    extra_options: Any,
+) -> Config:
+    from torch._inductor.utils import forwarded_cuda_compile_options
+
+    from .triton_compat import Config, HAS_WARP_SPEC
+
+    compile_options = compile_options.copy()
+    config_args = {
+        "num_warps": compile_options.pop("num_warps"),
+        "num_stages": compile_options.pop("num_stages"),
+    }
+    for key, default in _TRITON_CONFIG_OPTION_DEFAULTS:
+        if (value := compile_options.pop(key, default)) != default:
+            config_args[key] = value
+    warp_spec_options = {
+        key: compile_options.pop(key)
+        for key, _ in _TRITON_CONFIG_WARP_SPEC_DEFAULTS
+        if key in compile_options
+    }
+    if HAS_WARP_SPEC:
+        config_args.update(warp_spec_options)
+    forwarded_options = {
+        key: compile_options.pop(key)
+        for key in forwarded_cuda_compile_options()
+        if key in compile_options
+    }
+    # pyrefly: ignore [bad-argument-count, unexpected-keyword]
+    triton_config = Config(config_kwargs, **config_args)
+    for key, value in {**warp_spec_options, **forwarded_options}.items():
+        setattr(triton_config, key, value)
     # pyrefly: ignore [missing-attribute]
-    items.append(("num_warps", cfg.num_warps))
-    # pyrefly: ignore [missing-attribute]
-    items.append(("num_stages", cfg.num_stages))
-    # A register cap makes a different kernel; without it, unique_configs
-    # discards a capped config as a duplicate of the uncapped one.
-    if getattr(cfg, "maxnreg", None) is not None:
-        items.append(("maxnreg", cfg.maxnreg))
-    return tuple(items)
+    triton_config.extra_options = extra_options
+    return triton_config
 
 
 def validate_triton_config(cfg: Config) -> None:

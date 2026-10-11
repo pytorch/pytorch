@@ -97,6 +97,8 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
     structs get compile-time-initialized with the autotuned values.
     """
 
+    from ..runtime.triton_heuristics import config_kwargs_from_dict
+
     def braced(values: list[int]) -> str:
         return "{" + ", ".join(str(v) for v in values) + "}"
 
@@ -173,7 +175,7 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         shared_mem = params["shared_mem"]
 
         # params["config"] is already a dict (from config_to_dict in CachingAutotuner)
-        config_dict = params.get("config") or {}
+        config_dict = config_kwargs_from_dict(params.get("config") or {})
 
         # For combo/foreach kernels, merge default_config
         inductor_meta = params.get("inductor_meta") or {}
@@ -189,7 +191,7 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         if grid_type == "PrecomputedGrid":
             precomputed_grids = inductor_meta.get("precomputed_grids", [])
             for idx, entry in enumerate(precomputed_grids):
-                entry_config = entry.get("config", {})
+                entry_config = config_kwargs_from_dict(entry.get("config", {}))
                 if all(config_dict.get(k) == v for k, v in entry_config.items()):
                     config_index = idx
                     break
@@ -1084,7 +1086,10 @@ class DeferredTritonCallWrapper:
         ]
         arg_types = [arg_type_lookup[name] for name in call_args]
         arg_signatures = [triton_meta["signature"][name] for name in call_args]
-        num_ctas = params.get("config", {}).get("num_ctas", 1)
+        from ..runtime.triton_heuristics import config_compile_options_from_dict
+
+        compile_options = config_compile_options_from_dict(params.get("config", {}))
+        num_ctas = compile_options.get("num_ctas", 1)
         scratch_spaces = {
             name: params[name] * num_ctas
             for name in ["global_scratch", "profile_scratch"]

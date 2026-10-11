@@ -17,6 +17,11 @@ from .utils import _IS_WINDOWS, GPU_KERNEL_BIN_EXTS
 
 log = logging.getLogger(__name__)
 
+_BinaryArtifactIdentity = tuple[int | None, str, str]
+_BinaryArtifactName = tuple[str, str]
+_BinaryResolutionKey = tuple[_BinaryArtifactIdentity, bytes | None]
+_TritonCacheGroup = tuple[str, str]
+
 
 @dataclasses.dataclass(frozen=True)
 class TritonBundleEntry:
@@ -30,6 +35,7 @@ class TritonBundleEntry:
     kernel_hash: str
     device: int
     directory: str
+    autotuner: object
 
 
 @dataclasses.dataclass(frozen=True)
@@ -89,6 +95,104 @@ class TritonBundle:
     static_autotuners: list[StaticallyLaunchedAutotuner]
 
 
+@dataclasses.dataclass
+class _BundledBinaryIndex:
+    """Device-specific and device-agnostic views of bundled GPU binaries."""
+
+    by_name: dict[_BinaryArtifactName, dict[int, OrderedSet[bytes]]]
+
+    @classmethod
+    def from_bundle(cls, bundle: TritonBundle) -> "_BundledBinaryIndex":
+        index = cls({})
+        for artifacts in bundle.kernel_artifacts:
+            for artifact in artifacts.artifacts:
+                if (
+                    os.path.splitext(artifact.filename)[1]
+                    not in GPU_KERNEL_BIN_EXTS.values()
+                ):
+                    continue
+                name = artifacts.kernel_hash, artifact.filename
+                index.by_name.setdefault(name, {}).setdefault(
+                    artifacts.device, OrderedSet()
+                ).add(artifact.payload)
+        return index
+
+    def matching_payloads(self, identity: _BinaryArtifactIdentity) -> OrderedSet[bytes]:
+        device, kernel_hash, filename = identity
+        by_device = self.by_name.get((kernel_hash, filename), {})
+        if device is not None:
+            return by_device.get(device, OrderedSet())
+        payloads = OrderedSet()
+        for device_payloads in by_device.values():
+            payloads.update(device_payloads)
+        return payloads
+
+    def matching_groups(
+        self, identity: _BinaryArtifactIdentity
+    ) -> OrderedSet[_TritonCacheGroup]:
+        device, kernel_hash, filename = identity
+        by_device = self.by_name.get((kernel_hash, filename), {})
+        if device is None:
+            return OrderedSet(
+                (triton_cache_dir(entry_device), kernel_hash)
+                for entry_device in by_device
+            )
+        if device in by_device:
+            return OrderedSet(((triton_cache_dir(device), kernel_hash),))
+        return OrderedSet()
+
+
+@dataclasses.dataclass(frozen=True)
+class _BundledBinaryResolution:
+    payload: bytes | None
+    rejected: bool
+
+
+@dataclasses.dataclass
+class _BundledBinaryResolutions:
+    """Trusted payload decisions shared by bundle emission and static loading."""
+
+    by_key: dict[_BinaryResolutionKey, _BundledBinaryResolution]
+    untrusted_groups: OrderedSet[_TritonCacheGroup]
+
+    @staticmethod
+    def _key(compile_result) -> _BinaryResolutionKey:
+        return (
+            compile_result.bundled_artifact_identity(),
+            getattr(compile_result, "expected_cubin_digest", None),
+        )
+
+    @classmethod
+    def from_autotuners(
+        cls,
+        static_autotuners: list[StaticallyLaunchedAutotuner],
+        binary_index: _BundledBinaryIndex,
+    ) -> "_BundledBinaryResolutions":
+        resolutions = cls({}, OrderedSet())
+        for result in static_autotuners:
+            for compile_result in result.kernel.compile_results:
+                key = cls._key(compile_result)
+                if key in resolutions.by_key:
+                    continue
+                identity, _ = key
+                payloads = binary_index.matching_payloads(identity)
+                payload = next(iter(payloads)) if len(payloads) == 1 else None
+                rejected = len(payloads) > 1 or (
+                    payload is not None
+                    and not compile_result.matches_expected_cubin(payload)
+                )
+                if rejected:
+                    resolutions.untrusted_groups.update(
+                        binary_index.matching_groups(identity)
+                    )
+                    payload = None
+                resolutions.by_key[key] = _BundledBinaryResolution(payload, rejected)
+        return resolutions
+
+    def get(self, compile_result) -> _BundledBinaryResolution:
+        return self.by_key[self._key(compile_result)]
+
+
 class TritonBundler:
     """
     Lightweight Triton Kernel bundler that notes each time we compile a triton
@@ -107,7 +211,8 @@ class TritonBundler:
 
     _entries: list[TritonBundleEntry] | None = None
     _static_autotuners: list[StaticallyLaunchedAutotuner] | None = None
-    _winners: OrderedSet[str] | None = None
+    _winners: dict[object, OrderedSet[str]] | None = None
+    _omitted_groups: OrderedSet[_TritonCacheGroup] | None = None
 
     # __grp__kernel_name.json contains metadata with source code paths
     # we use this as sentinel value for search and replace
@@ -146,7 +251,8 @@ class TritonBundler:
             )
         cls._entries = []
         cls._static_autotuners = []
-        cls._winners = OrderedSet()
+        cls._winners = {}
+        cls._omitted_groups = OrderedSet()
 
     @classmethod
     def end_compile(cls) -> None:
@@ -158,28 +264,34 @@ class TritonBundler:
         cls._entries = None
         cls._static_autotuners = None
         cls._winners = None
+        cls._omitted_groups = None
 
     @classmethod
-    def put(cls, kernel_hash: str, device: int) -> None:
+    def put(cls, kernel_hash: str, device: int, autotuner: object) -> None:
         """
         Lazily observes that we have seen a Triton kernel compilation. Remembers
         it for when collect is later called.
         """
         if (entries := cls._entries) is not None:
             entries.append(
-                TritonBundleEntry(kernel_hash, device, triton_cache_dir(device))
+                TritonBundleEntry(
+                    kernel_hash, device, triton_cache_dir(device), autotuner
+                )
             )
 
     @classmethod
-    def put_winner(cls, kernel_hash: str) -> None:
+    def omit(cls, kernel_hash: str, device: int) -> None:
+        if cls._omitted_groups is not None:
+            cls._omitted_groups.add((triton_cache_dir(device), kernel_hash))
+
+    @classmethod
+    def put_winner(cls, kernel_hash: str, autotuner: object) -> None:
         """
-        Marks a kernel hash as a winning autotuning config. Only winning
-        kernels are included in the bundle by collect(). If no winners are
-        recorded (e.g. single-config kernels that skip autotuning), all
-        entries are bundled.
+        Marks a kernel hash as a winning config for one autotuner. Autotuners
+        without a recorded winner retain all candidates in the bundle.
         """
         if cls._winners is not None:
-            cls._winners.add(kernel_hash)
+            cls._winners.setdefault(autotuner, OrderedSet()).add(kernel_hash)
 
     @classmethod
     def put_static_autotuner(cls, key: str, kernel: "CachingAutotuner") -> None:  # type: ignore[name-defined] # noqa: F821
@@ -223,7 +335,9 @@ class TritonBundler:
 
     @classmethod
     def load_autotuners(
-        cls, static_autotuners: list[StaticallyLaunchedAutotuner] | None
+        cls,
+        static_autotuners: list[StaticallyLaunchedAutotuner] | None,
+        binary_resolutions: _BundledBinaryResolutions,
     ) -> list[str]:
         """
         Load statically launchable CachingAutotuners into async_compile.CompiledTritonKernels
@@ -234,16 +348,60 @@ class TritonBundler:
 
         from torch._inductor.async_compile import CompiledTritonKernels
         from torch._inductor.codecache import StaticAutotunerFuture
+        from torch._inductor.runtime.static_triton_launcher import (
+            MissingTritonKernelError,
+        )
 
         log.info("Loading %d statically launchable autotuners", len(static_autotuners))
         kernel_names = []
         with dynamo_timed("TritonBundler.load_cached_static_autotuners"):
             for result in static_autotuners:
+                force_recompile = False
                 try:
                     # Make sure the cubin path exists and is valid
                     for compile_result in result.kernel.compile_results:
-                        compile_result.reload_cubin_path()
-                except RuntimeError:
+                        kernel = compile_result.kernel
+                        has_retained_cubin = kernel.cubin_raw is not None
+                        if has_retained_cubin:
+                            if not compile_result.matches_expected_cubin(
+                                kernel.cubin_raw
+                            ):
+                                log.warning(
+                                    "Ignoring mismatched retained binary for %s",
+                                    result.kernel_name,
+                                )
+                                force_recompile = True
+                                break
+                            continue
+
+                        resolution = binary_resolutions.get(compile_result)
+                        bundled_cubin = resolution.payload
+                        reject_bundled_cubin = resolution.rejected
+                        if reject_bundled_cubin:
+                            log.warning(
+                                "Ignoring untrusted bundled binary for %s",
+                                result.kernel_name,
+                            )
+                            force_recompile = True
+                            break
+
+                        # Prefer the serialized bundle without reading the
+                        # canonical cache file. Only a bundle that omits this
+                        # binary may adopt a stable local snapshot.
+                        if bundled_cubin is not None:
+                            kernel.cubin_raw = bundled_cubin
+                            continue
+
+                        kernel.cubin_path = compile_result.cubin_path()
+                        kernel.retain_cubin_from_path()
+                        if not compile_result.matches_expected_cubin(kernel.cubin_raw):
+                            log.warning(
+                                "Ignoring mismatched local binary for %s",
+                                result.kernel_name,
+                            )
+                            force_recompile = True
+                            break
+                except MissingTritonKernelError:
                     log.warning(
                         "Failed to reload cubin file statically launchable autotuner %s",
                         result.kernel_name,
@@ -255,7 +413,7 @@ class TritonBundler:
                 # can launch a worker without waiting on the blocking step of
                 # StaticAutotunerFuture.result().
                 CompiledTritonKernels._cache[result.cache_key] = StaticAutotunerFuture(
-                    result.kernel
+                    result.kernel, force_recompile=force_recompile
                 )
                 counters["inductor"]["triton_bundler_load_static_autotuner"] += 1
                 kernel_names.append(result.kernel_name)
@@ -282,15 +440,15 @@ class TritonBundler:
         with dynamo_timed(key="TritonBundler.collect", log_pt2_compile_event=True):
             entries = cls._entries
             if entries is not None:
-                # Only bundle winning autotuning configs. If _winners is
-                # non-empty, skip entries whose kernel_hash is not a winner.
-                # When _winners is empty (single-config kernels, or no
-                # autotuning ran), bundle everything.
                 winners = cls._winners
                 result: list[TritonKernelArtifacts] = []
                 kernel_names: list[str] = []
                 for entry in entries:
-                    if winners and entry.kernel_hash not in winners:
+                    if (entry.directory, entry.kernel_hash) in cls._omitted_groups:
+                        log.debug("Skipping unowned kernel %s", entry.kernel_hash)
+                        continue
+                    group_winners = winners.get(entry.autotuner) if winners else None
+                    if group_winners and entry.kernel_hash not in group_winners:
                         log.debug("Skipping non-winning kernel %s", entry.kernel_hash)
                         continue
                     artifacts: list[TritonKernelArtifact] = []
@@ -376,58 +534,76 @@ class TritonBundler:
             key="TritonBundler.read_and_emit", log_pt2_compile_event=True
         ):
             kernel_names: list[str] = []
+            binary_resolutions = _BundledBinaryResolutions({}, OrderedSet())
+            if config.use_static_triton_launcher and bundle.static_autotuners:
+                binary_index = _BundledBinaryIndex.from_bundle(bundle)
+                binary_resolutions = _BundledBinaryResolutions.from_autotuners(
+                    bundle.static_autotuners, binary_index
+                )
 
             for artifacts in bundle.kernel_artifacts:
                 basedir = triton_cache_dir(artifacts.device)
-                directory = os.path.join(basedir, artifacts.kernel_hash)
-
-                if os.path.exists(directory) and len(os.listdir(directory)) != 0:
-                    # If directory already exists, we bail out and leave
-                    # local disk to take care of caching
-                    log.debug(
-                        "Bailing out TritonBundler.read_and_emit, %s is non empty",
-                        directory,
+                if (
+                    basedir,
+                    artifacts.kernel_hash,
+                ) in binary_resolutions.untrusted_groups:
+                    log.warning(
+                        "Skipping untrusted bundled Triton cache group %s",
+                        artifacts.kernel_hash,
                     )
                     continue
+                directory = os.path.join(basedir, artifacts.kernel_hash)
+                tmp_dir = None
+                try:
+                    if os.path.exists(directory) and os.listdir(directory):
+                        log.debug(
+                            "Bailing out TritonBundler.read_and_emit, %s is non empty",
+                            directory,
+                        )
+                        continue
 
-                Path(basedir).mkdir(parents=True, exist_ok=True)
+                    Path(basedir).mkdir(parents=True, exist_ok=True)
+                    tmp_dir = os.path.join(basedir, f"tmp.{uuid.uuid4()}")
+                    os.makedirs(tmp_dir)
+                    emitted_kernel_names = []
+                    for artifact in artifacts.artifacts:
+                        filepath = os.path.join(tmp_dir, artifact.filename)
+                        with open(filepath, "wb") as file:
+                            payload = artifact.payload
+                            if artifact.filename.endswith(".json"):
+                                payload = payload.replace(
+                                    TritonBundler._REPLACE_BYTES,
+                                    str.encode(directory),
+                                )
+                            file.write(payload)
+                        extension = os.path.splitext(artifact.filename)[1]
+                        if extension in GPU_KERNEL_BIN_EXTS.values():
+                            emitted_kernel_names.append(Path(artifact.filename).stem)
 
-                # Random ID to avoid any collisions
-                rnd_id = str(uuid.uuid4())
-                tmp_dir = os.path.join(basedir, f"tmp.{rnd_id}")
-                os.makedirs(tmp_dir)
-
-                for artifact in artifacts.artifacts:
-                    filepath = os.path.join(tmp_dir, artifact.filename)
-                    with open(filepath, "wb") as file:
-                        payload = artifact.payload
-                        if artifact.filename.endswith(".json"):
-                            payload = payload.replace(
-                                TritonBundler._REPLACE_BYTES, str.encode(directory)
-                            )
-                        file.write(payload)
-                    counters["inductor"]["triton_bundler_read_and_emit_kernel"] += 1
-                    extension = os.path.splitext(artifact.filename)[1]
-                    if extension in GPU_KERNEL_BIN_EXTS.values():
-                        # Each kernel has bunch of files like .cubin(for cuda), zebin(for xpu), .json, .ttir
-                        # Just append one of them without the extension
-                        kernel_names.append(Path(artifact.filename).stem)
-
-                if _IS_WINDOWS:
-                    with FileLock(directory + ".lock"):
-                        if os.path.exists(directory):
-                            shutil.rmtree(directory)
+                    if _IS_WINDOWS:
+                        with FileLock(directory + ".lock"):
+                            if os.path.exists(directory):
+                                shutil.rmtree(directory)
+                            os.replace(tmp_dir, directory)
+                    else:
                         os.replace(tmp_dir, directory)
-                else:
-                    # Atomic on POSIX systems
-                    try:
-                        os.replace(tmp_dir, directory)
-                    except OSError:
-                        log.warning("Directory %s is not empty - skipping!", tmp_dir)
+                    tmp_dir = None
+                    kernel_names.extend(emitted_kernel_names)
+                    counters["inductor"]["triton_bundler_read_and_emit_kernel"] += len(
+                        artifacts.artifacts
+                    )
+                except OSError:
+                    log.warning(
+                        "Unable to emit bundled Triton cache group %s",
+                        artifacts.kernel_hash,
+                        exc_info=True,
+                    )
+                    if tmp_dir is not None:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
 
-            if config.use_static_triton_launcher:
+            if config.use_static_triton_launcher and bundle.static_autotuners:
                 static_kernel_names = TritonBundler.load_autotuners(
-                    bundle.static_autotuners
+                    bundle.static_autotuners, binary_resolutions
                 )
             else:
                 static_kernel_names = []

@@ -1351,7 +1351,7 @@ class TestRecheckAutotuneCache(TestCase):
             "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
             return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}),
         ):
-            autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
+            autotuner.recheck_autotune_cache()
 
         # The compile_results should be narrowed to just the matching one
         self.assertEqual(len(autotuner.compile_results), 1)
@@ -1384,7 +1384,7 @@ class TestRecheckAutotuneCache(TestCase):
             "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
             return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}),
         ):
-            autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
+            autotuner.recheck_autotune_cache()
 
         self.assertEqual(len(autotuner.compile_results), 1)
         self.assertIs(autotuner.compile_results[0], result_b)
@@ -1410,7 +1410,7 @@ class TestRecheckAutotuneCache(TestCase):
             "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
             return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}),
         ):
-            autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
+            autotuner.recheck_autotune_cache()
 
         self.assertEqual(len(autotuner.compile_results), 1)
         self.assertFalse(autotuner.compile_results[0].config.found_by_coordesc)
@@ -1434,7 +1434,7 @@ class TestRecheckAutotuneCache(TestCase):
             "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
             return_value=([], None, {"autotune_cache_state": "miss"}),
         ):
-            autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
+            autotuner.recheck_autotune_cache()
 
         # Nothing should change
         self.assertEqual(len(autotuner.compile_results), 2)
@@ -1702,71 +1702,142 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
         autotuner._dynamic_scale_rblock()
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_load_cached_autotuning_reconstructs_unknown_config(self):
-        """
-        When the cached best config is not in the original configs list
-        (e.g. it was added by _dynamic_scale_rblock), _load_cached_autotuning
-        must reconstruct it from the cached data instead of returning None.
-        """
+    def test_load_cached_autotuning_rejects_missing_triton_config(self):
         from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
         from torch._inductor.runtime.triton_heuristics import hash_configs
 
-        original_configs = [
-            triton_config({"x": 1}, 16, num_stages=1),
-            triton_config({"x": 8}, 4, num_stages=1),
+        original_configs = [triton_config({"x": 1}, 16, num_stages=1)]
+        configs_hash = hash_configs(original_configs)
+        result = _load_cached_autotuning(
+            {"configs_hash": configs_hash}, configs_hash, original_configs, {}
+        )
+
+        self.assertIsNone(result)
+
+    @skipIfRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_bundle_winners_are_scoped_per_autotuner(self):
+        from torch._dynamo.device_interface import get_interface_for_device
+        from torch._inductor.runtime.triton_heuristics import triton_hash_to_path_key
+        from torch._inductor.triton_bundler import TritonBundler
+
+        @triton.jit
+        def sin_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
+            xoffset = tl.program_id(0) * XBLOCK
+            xindex = xoffset + tl.arange(0, XBLOCK)[:]
+            xmask = xindex < xnumel
+            value = tl.load(in_ptr0 + xindex, xmask)
+            tl.store(out_ptr0 + xindex, tl_math.sin(value), xmask)
+
+        selected_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        pending_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        selected_args["inductor_meta"]["grid_type"] = "Grid1D"
+        pending_args["inductor_meta"]["grid_type"] = "Grid1D"
+        pending_args["fn"] = sin_kernel
+        pending_args["configs"] = [
+            triton_config({"x": 32}, 64),
+            triton_config({"x": 512}, 64),
         ]
-        configs_hash = hash_configs(original_configs)
+        selected = CachingAutotuner(**selected_args)
+        pending = CachingAutotuner(**pending_args)
+        in_ptr = torch.rand(16, device=GPU_TYPE)
+        out_ptr = torch.empty_like(in_ptr)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
 
-        best_config_data = {
-            "XBLOCK": 1,
-            "R0_BLOCK": 1024,
-            "num_warps": 8,
-            "num_stages": 1,
-            "configs_hash": configs_hash,
-            "found_by_coordesc": False,
-            "time_taken_ms": 42,
-        }
+        with (
+            fresh_cache(),
+            config.patch(
+                bundle_triton_into_fx_graph_cache=True,
+                compile_threads=1,
+                use_static_triton_launcher=False,
+            ),
+        ):
+            TritonBundler.begin_compile()
+            try:
+                selected.precompile()
+                pending.precompile()
+                pending_hashes = {
+                    triton_hash_to_path_key(result.kernel.hash)
+                    for result in pending.compile_results
+                }
+                selected.run(in_ptr, out_ptr, 16, stream=stream)
+                selected_hash = selected.launchers[0].cache_hash
+                bundle, _ = TritonBundler.collect()
+            finally:
+                TritonBundler.end_compile()
+                selected.release_benchmark_artifacts()
+                pending.release_benchmark_artifacts()
 
-        result = _load_cached_autotuning(
-            best_config_data, configs_hash, original_configs, {}
+        self.assertEqual(
+            {artifacts.kernel_hash for artifacts in bundle.kernel_artifacts},
+            pending_hashes | {selected_hash},
         )
 
-        self.assertIsNotNone(result)
-        self.assertEqual(result.kwargs["XBLOCK"], 1)
-        self.assertEqual(result.kwargs["R0_BLOCK"], 1024)
-        self.assertEqual(result.num_warps, 8)
-        self.assertEqual(result.num_stages, 1)
-
+    @skipIfRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_load_cached_autotuning_still_matches_known_config(self):
-        """
-        When the cached best config IS in the original configs list,
-        _load_cached_autotuning must return that same config object.
-        """
-        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
-        from torch._inductor.runtime.triton_heuristics import hash_configs
+    def test_mixed_static_results_omit_shared_artifact_groups_across_devices(self):
+        from torch._inductor.runtime.runtime_utils import triton_cache_dir
+        from torch._inductor.runtime.triton_heuristics import (
+            StaticTritonCompileResult,
+            TritonCompileResult,
+        )
+        from torch._inductor.triton_bundler import TritonBundler
 
-        cfg_a = triton_config({"x": 1}, 16, num_stages=1)
-        cfg_b = triton_config({"x": 8}, 4, num_stages=1)
-        original_configs = [cfg_a, cfg_b]
-        configs_hash = hash_configs(original_configs)
-
-        best_config_data = {
-            **cfg_b.kwargs,
-            "num_warps": cfg_b.num_warps,
-            "num_stages": cfg_b.num_stages,
-            "configs_hash": configs_hash,
-            "found_by_coordesc": False,
-            "time_taken_ms": 42,
-        }
-
-        result = _load_cached_autotuning(
-            best_config_data, configs_hash, original_configs, {}
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        autotuner = CachingAutotuner(**args)
+        regular_autotuner = CachingAutotuner(
+            **TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
         )
 
-        self.assertIsNotNone(result)
-        self.assertIs(result, cfg_b)
+        with config.patch(use_static_triton_launcher=True):
+            static_result = autotuner._precompile_config(autotuner.configs[0])
+        with config.patch(use_static_triton_launcher=False):
+            regular_result = autotuner._precompile_config(autotuner.configs[1])
+            regular_autotuner._precompile_worker()
+        autotuner.compile_results = [static_result, regular_result]
+        autotuner.configs = None
+        autotuner.triton_meta["device"] = 0
+        regular_autotuner.triton_meta["device"] = 1
+
+        cubin_path = static_result.cubin_path()
+        with open(cubin_path, "rb") as file:
+            original_cubin = file.read()
+        try:
+            with open(cubin_path, "wb") as file:
+                file.write(b"tampered")
+
+            with config.patch(
+                bundle_triton_into_fx_graph_cache=True,
+                use_static_triton_launcher=True,
+                strict_static_triton_launcher=False,
+            ):
+                TritonBundler.begin_compile()
+                autotuner._precompile_worker()
+                regular_autotuner._precompile_worker()
+                bundle, _ = TritonBundler.collect()
+            result_types = {type(result) for result in autotuner.compile_results}
+            mixed_hashes = {result.kernel.hash for result in autotuner.compile_results}
+            regular_hashes = {
+                result.kernel.hash for result in regular_autotuner.compile_results
+            }
+        finally:
+            with open(cubin_path, "wb") as file:
+                file.write(original_cubin)
+            autotuner.release_benchmark_artifacts()
+            regular_autotuner.release_benchmark_artifacts()
+
+        self.assertFalse(autotuner._has_pending_runtime_autotuning())
+        self.assertEqual(
+            result_types,
+            {StaticTritonCompileResult, TritonCompileResult},
+        )
+        self.assertEqual(mixed_hashes, regular_hashes)
+        self.assertNotEqual(
+            autotuner.triton_meta["device"], regular_autotuner.triton_meta["device"]
+        )
+        self.assertEqual(triton_cache_dir(0), triton_cache_dir(1))
+        self.assertEqual(bundle.kernel_artifacts, [])
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_autotune_cache_round_trips_maxnreg(self):
@@ -1782,8 +1853,9 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         )
         from torch._inductor.runtime.triton_heuristics import hash_configs
 
-        uncapped = triton.Config({"x": 1}, num_warps=4, num_stages=2)
-        capped = triton.Config({"x": 1}, num_warps=4, num_stages=2, maxnreg=64)
+        kernel_options = {"x": 1, "maxnreg": 32}
+        uncapped = triton.Config(kernel_options, num_warps=4, num_stages=2)
+        capped = triton.Config(kernel_options, num_warps=4, num_stages=2, maxnreg=64)
         original_configs = [uncapped, capped]
         configs_hash = hash_configs(original_configs)
 
@@ -1793,11 +1865,11 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         with patch.object(AutotuneCacheBundler, "put"):
             cache.save(capped, time_taken_ns=1_000_000)
         saved = dict(local.put.call_args[0][1])
-        self.assertEqual(saved.get("maxnreg"), 64)
 
         result = _load_cached_autotuning(saved, configs_hash, original_configs, {})
         self.assertIs(result, capped)
-        self.assertNotIn("maxnreg", result.kwargs)
+        self.assertEqual(result.kwargs["maxnreg"], 32)
+        self.assertEqual(result.maxnreg, 64)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_rejects_hash_mismatch(self):
@@ -1824,11 +1896,10 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         self.assertIsNone(result)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_recheck_autotune_cache_compiles_dynamic_config(self):
+    def test_recheck_autotune_cache_rejects_dynamic_config(self):
         """
-        When the cached best config was added by _dynamic_scale_rblock
-        and isn't in compile_results, recheck_autotune_cache must compile
-        it (not silently drop it, leaving all original configs active).
+        When the cached best config was added after the static snapshot,
+        recheck_autotune_cache must force source recompilation.
         """
         from triton import Config
 
@@ -1848,17 +1919,21 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         mock_precompile = MagicMock(return_value=self._make_compile_result(dynamic_cfg))
         autotuner._precompile_config = mock_precompile
 
-        reload_fn = MagicMock()
-        reload_fn.return_value.fn = MagicMock()
+        from torch._inductor.runtime.static_triton_launcher import (
+            InvalidTritonKernelArtifactError,
+        )
 
         with patch(
             "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
             return_value=([dynamic_cfg], None, {"autotune_cache_state": "hit"}),
         ):
-            autotuner.recheck_autotune_cache(reload_kernel_from_src=reload_fn)
+            with self.assertRaisesRegex(
+                InvalidTritonKernelArtifactError,
+                "cached autotune winner is absent from the static snapshot",
+            ):
+                autotuner.recheck_autotune_cache()
 
-        self.assertEqual(len(autotuner.compile_results), 1)
-        mock_precompile.assert_called_once_with(dynamic_cfg)
+        mock_precompile.assert_not_called()
 
 
 @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
