@@ -802,6 +802,18 @@ class FakeTensorTest(TestCase):
         eager_out = model.forward(x, w, b)
         self.assertEqual(fake_out.stride(), eager_out.stride())
 
+    def test_nnpack_spatial_convolution_meta(self):
+        # _nnpack_spatial_convolution is CompositeExplicitAutograd with no meta
+        # kernel; FakeTensor/compile must not fall into the real NNPACK path.
+        # See #200443.
+        x = torch.randn(1, 2, 6, 6)
+        w = torch.randn(3, 2, 3, 3)
+        b = torch.randn(3)
+        expected = torch.nn.functional.conv2d(x, w, bias=b, stride=1, padding=0).shape
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            out = torch._nnpack_spatial_convolution(x, w, b, padding=0, stride=1)
+        self.assertEqual(out.shape, expected)
+
     def test_private_convolution_symint(self):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
