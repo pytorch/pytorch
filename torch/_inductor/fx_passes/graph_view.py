@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 import re
 from typing import Any, TYPE_CHECKING
 
@@ -10,6 +11,8 @@ from torch.utils._ordered_set import OrderedSet
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+log = logging.getLogger(__name__)
 
 
 def _get_module_stack(node: fx.Node) -> list[tuple[str, type[Any]]]:
@@ -92,11 +95,14 @@ class GraphView:
 
 def _clean_stack_name(stack_name: str) -> str:
     """
-    Clean up FX node's nn_module_stack metadata string to match the module name hierarchies
+    Clean up FX node's nn_module_stack metadata string to a dot-separated path.
 
-    Example:
+    Examples:
         Input: "L['self']._modules['layers']['0']._modules['attention']"
         Output: "layers.0.attention"
+
+        Input: "L['self'].networks.1.conv"
+        Output: "networks.1.conv"
     """
     cleaned = re.sub(r"^L\['self'\]\.?", "", stack_name)
     parts = re.findall(r"\['([^']+)'\]", cleaned)
@@ -105,6 +111,16 @@ def _clean_stack_name(stack_name: str) -> str:
 
 def _is_root(stack: str) -> bool:
     return stack == ""
+
+
+def _strip_instance_suffix(name: str) -> str:
+    """Strip the _N uniqueness suffix added by FX to node names (e.g. convolution_1 -> convolution)."""
+    return re.sub(r"_\d+$", "", name)
+
+
+def _outermost_prefix(stack: Any) -> str:
+    """Return the cleaned outermost (block-level) module path from an nn_module_stack."""
+    return _clean_stack_name(next(iter(stack.values()))[0])
 
 
 def make_graph_view(
