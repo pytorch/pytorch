@@ -1,0 +1,258 @@
+import os
+import threading
+
+import torch
+
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_gfx950 import (
+    build_flex_attn_bwd_module,
+)
+from torch._inductor.runtime.flydsl_cache import (
+    configure_flydsl_cache_dir,
+    run_cached_flydsl,
+    temporary_env,
+)
+
+
+{{gen_defines()}}
+
+
+_jit_launcher = None
+_jit_launcher_lock = threading.Lock()
+
+
+def _get_jit_launcher():
+    global _jit_launcher
+    launcher = _jit_launcher
+    if launcher is None:
+        with _jit_launcher_lock:
+            launcher = _jit_launcher
+            if launcher is None:
+                launcher = build_flex_attn_bwd_module(
+                    BATCH_SIZE,
+                    NUM_HEADS,
+                    SEQ_LEN,
+                    QK_HEAD_DIM,
+                    V_HEAD_DIM,
+                    "bf16",
+                    SPARSE_Q_BLOCK_SIZE,
+                    SPARSE_KV_BLOCK_SIZE,
+                    scale=float(SM_SCALE),
+                    max_partial_blocks=MAX_PARTIAL_BLOCKS,
+                    max_full_blocks=MAX_FULL_BLOCKS,
+                    block_mask_batch=BLOCK_MASK_BATCH,
+                    block_mask_heads=BLOCK_MASK_HEADS,
+                    mask_program=MASK_PROGRAM,
+                    mask_program_output=MASK_PROGRAM_OUTPUT,
+                    mask_buffer_shapes=MASK_BUFFER_SHAPES,
+                    mask_buffer_strides=MASK_BUFFER_STRIDES,
+                    q_stride=Q_STRIDE,
+                    k_stride=K_STRIDE,
+                    v_stride=V_STRIDE,
+                    out_stride=OUT_STRIDE,
+                    do_stride=DO_STRIDE,
+                    dq_stride=DQ_STRIDE,
+                    dk_stride=DK_STRIDE,
+                    dv_stride=DV_STRIDE,
+                    lse_in_log2=True,
+                    dq_accum_fp32=DQ_ACCUM_FP32,
+                )
+                _jit_launcher = launcher
+    return launcher
+
+
+def _run_flydsl_backward(
+    query,
+    key,
+    value,
+    attention_output,
+    grad_output,
+    logsumexp,
+    grad_key,
+    grad_value,
+    kv_num_blocks,
+    kv_indices,
+    full_kv_num_blocks,
+    full_kv_indices,
+    delta,
+    grad_query_workspace,
+    partial_kv_counts,
+    partial_kv_indices,
+    full_kv_counts,
+    full_kv_indices_transposed,
+{% for index in range(MASK_BUFFER_COUNT) %}
+    mask_buffer_{{index}},
+{% endfor %}
+    grad_query,
+    stream,
+):
+    configure_flydsl_cache_dir()
+{% for index in range(MASK_BUFFER_COUNT, 4) %}
+    mask_buffer_{{index}} = kv_num_blocks
+{% endfor %}
+    dispatch_args = (
+        query,
+        key,
+        value,
+        attention_output,
+        logsumexp,
+        grad_output,
+        grad_query,
+        grad_key,
+        grad_value,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        delta,
+        partial_kv_counts,
+        partial_kv_indices,
+        full_kv_counts,
+        full_kv_indices_transposed,
+        mask_buffer_0,
+        mask_buffer_1,
+        mask_buffer_2,
+        mask_buffer_3,
+        grad_query_workspace,
+        stream,
+    )
+    flydsl_compile_only = os.environ.get("FLYDSL_COMPILE_ONLY") == "1"
+    compile_only = os.environ.get("COMPILE_ONLY", "").lower() in (
+        "1", "true", "yes", "on"
+    )
+    if compile_only != flydsl_compile_only:
+        raise RuntimeError(
+            "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
+            "by the FlyDSL precompile path"
+        )
+    launcher = _get_jit_launcher()
+    compile_args = tuple(
+        flyc.from_torch_tensor(tensor) for tensor in dispatch_args[:-1]
+    ) + (stream,)
+    if flydsl_compile_only:
+        flyc.compile(launcher, *compile_args)
+    else:
+        run_cached_flydsl(
+            launcher,
+            *compile_args,
+            constexpr_param=compile_args[0],
+            compiler=flyc.compile,
+            dispatch_args=dispatch_args,
+        )
+    return grad_query
+
+
+{% set kernel_args = [
+    "query", "key", "value", "attention_output", "grad_output", "logsumexp",
+    "grad_key", "grad_value", "kv_num_blocks", "kv_indices",
+    "full_kv_num_blocks", "full_kv_indices", "delta", "grad_query_workspace",
+    "partial_kv_counts", "partial_kv_indices", "full_kv_counts",
+    "full_kv_indices_transposed",
+] %}
+{% for index in range(MASK_BUFFER_COUNT) %}
+{% set _ = kernel_args.append("mask_buffer_" ~ index) %}
+{% endfor %}
+{{def_kernel(*kernel_args)}}
+    grad_query = {{get_output()}}
+    return _run_flydsl_backward(
+        query,
+        key,
+        value,
+        attention_output,
+        grad_output,
+        logsumexp,
+        grad_key,
+        grad_value,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        delta,
+        grad_query_workspace,
+        partial_kv_counts,
+        partial_kv_indices,
+        full_kv_counts,
+        full_kv_indices_transposed,
+{% for index in range(MASK_BUFFER_COUNT) %}
+        mask_buffer_{{index}},
+{% endfor %}
+        grad_query,
+        stream,
+    )
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    flydsl_gpu_arch=None,
+):
+    """Warm FlyDSL's disk cache using metadata-only fake tensors."""
+    del device_index, device_capability
+
+    def _fake_proxy(name):
+        return torch.empty_strided(
+            tuple(precompile_shapes[name]),
+            tuple(precompile_strides[name]),
+            dtype=getattr(torch, precompile_dtypes[name]),
+            device="cpu",
+        )
+
+    env_updates = {"COMPILE_ONLY": "1", "FLYDSL_COMPILE_ONLY": "1"}
+    if flydsl_gpu_arch is not None:
+        env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
+
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    with temporary_env(env_updates):
+        with FakeTensorMode():
+            query = _fake_proxy("query")
+            key = _fake_proxy("key")
+            value = _fake_proxy("value")
+            attention_output = _fake_proxy("attention_output")
+            grad_output = _fake_proxy("grad_output")
+            logsumexp = _fake_proxy("logsumexp")
+            grad_key = _fake_proxy("grad_key")
+            grad_value = _fake_proxy("grad_value")
+            kv_num_blocks = _fake_proxy("kv_num_blocks")
+            kv_indices = _fake_proxy("kv_indices")
+            full_kv_num_blocks = _fake_proxy("full_kv_num_blocks")
+            full_kv_indices = _fake_proxy("full_kv_indices")
+            delta = _fake_proxy("delta")
+            grad_query_workspace = _fake_proxy("grad_query_workspace")
+            partial_kv_counts = _fake_proxy("partial_kv_counts")
+            partial_kv_indices = _fake_proxy("partial_kv_indices")
+            full_kv_counts = _fake_proxy("full_kv_counts")
+            full_kv_indices_transposed = _fake_proxy(
+                "full_kv_indices_transposed"
+            )
+{% for index in range(MASK_BUFFER_COUNT) %}
+            mask_buffer_{{index}} = _fake_proxy("mask_buffer_{{index}}")
+{% endfor %}
+            grad_query = _fake_proxy("output")
+            {{kernel_name}}_main(
+                query,
+                key,
+                value,
+                attention_output,
+                grad_output,
+                logsumexp,
+                grad_key,
+                grad_value,
+                kv_num_blocks,
+                kv_indices,
+                full_kv_num_blocks,
+                full_kv_indices,
+                delta,
+                grad_query_workspace,
+                partial_kv_counts,
+                partial_kv_indices,
+                full_kv_counts,
+                full_kv_indices_transposed,
+{% for index in range(MASK_BUFFER_COUNT) %}
+                mask_buffer_{{index}},
+{% endfor %}
+                grad_query,
+                stream=0,
+            )
