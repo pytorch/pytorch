@@ -353,6 +353,49 @@ class TestModuleLevelKernels(TestCase):
         self.assertGreater(len(kernels), 1, code)
         self.assertEqual(len(kernels), len(set(kernels)), kernels)
 
+    @requires_cuda_and_triton
+    @parametrize(
+        "patch",
+        [
+            {"benchmark_kernel": True},
+            {"benchmark_combo_kernel": True, "combo_kernels": True},
+            {
+                "benchmark_kernel": True,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        ],
+        name_fn=lambda p: "_".join(k for k, v in p.items() if v is True),
+    )
+    # In-process compiles, so each kernel's module is loaded into PyCodeCache here.
+    @config.patch(compile_threads=1)
+    def test_kernel_benchmark_harness(self, patch):
+        if "max_autotune" in patch and not is_big_gpu():
+            self.skipTest("Triton GEMM templates need a big GPU")
+
+        def fn(a, b, x, y):
+            # Independent pointwise kernels, which combo_kernels fuses into one, and a
+            # matmul, which max_autotune emits through the template path.
+            return a @ b, x.sin() * 2, y.cos() + 1
+
+        a, b = torch.randn(64, 64, device="cuda"), torch.randn(64, 64, device="cuda")
+        x, y = torch.randn(64, 128, device="cuda"), torch.randn(32, device="cuda")
+        PyCodeCache.cache_clear()
+        result, code = _code_for(fn, a, b, x, y, **patch)
+        self.assertEqual(result, fn(a, b, x, y))
+        self.assertEqual(_run_from_file(code, [a, b, x, y]), result)
+        if "max_autotune" in patch:
+            self.assertIn("triton_tem_", code)
+        if "combo_kernels" in patch:
+            self.assertIn("pid_offset", code)
+        # Only the wrapper's own harness is at module level; each kernel's stays in the
+        # module the kernel is compiled from, where benchmark_all_kernels finds it.
+        self.assertEqual(code.count("__main__"), 1, code)
+        self.assertNotIn("def get_args", code.split("def call(")[0])
+        # The wrapper defines get_args too; only a kernel's harness has this.
+        mods = [m for m in PyCodeCache.modules if hasattr(m, "benchmark_all_configs")]
+        self.assertTrue(mods)
+
 
 class TestDefaultWrapper(TestCase):
     @requires_cuda_and_triton
