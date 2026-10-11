@@ -29,6 +29,33 @@ except ImportError:
     cuda = None  # type: ignore[assignment]
 
 
+def _compile_for_current_device(cute, func, *args, **kwargs):
+    from cutlass.cutlass_dsl import CuTeDSL
+    from torch._inductor.async_compile import (
+        _cutedsl_arch_from_device_capability,
+    )
+
+    dsl = CuTeDSL._get_dsl()
+    runtime_arch = dsl.envar.arch
+    try:
+        cute.GPUArch(runtime_arch)
+        return cute.compile(func, *args, **kwargs)
+    except KeyError:
+        fallback_arch = _cutedsl_arch_from_device_capability(
+            torch.cuda.get_device_capability()
+        )
+
+    if fallback_arch is None:
+        return cute.compile(func, *args, **kwargs)
+
+    cute.GPUArch(fallback_arch)
+    dsl.envar.arch = fallback_arch
+    try:
+        return cute.compile(func, *args, **kwargs)
+    finally:
+        dsl.envar.arch = runtime_arch
+
+
 # ---------------------------------------------------------------------------
 # Elementwise add kernel
 # APIs: @cute.kernel, @cute.jit, cute.compile, from_dlpack, make_tiled_copy_tv,
@@ -708,7 +735,7 @@ class TestCuteDSLSmoketestCUDA(TestCase):
         b_cute = from_dlpack(b).mark_layout_dynamic()
         c_cute = from_dlpack(c).mark_layout_dynamic()
 
-        compiled = cute.compile(_host, a_cute, b_cute, c_cute)
+        compiled = _compile_for_current_device(cute, _host, a_cute, b_cute, c_cute)
         compiled(a_cute, b_cute, c_cute)
         torch.cuda.synchronize()
 
@@ -748,7 +775,9 @@ class TestCuteDSLSmoketestCUDA(TestCase):
 
         sgemm = SGemm()
         stream = cuda.CUstream(torch.cuda.current_stream().cuda_stream)
-        compiled = cute.compile(sgemm, a_cute, b_cute, c_cute, stream=stream)
+        compiled = _compile_for_current_device(
+            cute, sgemm, a_cute, b_cute, c_cute, stream=stream
+        )
         compiled(a_cute, b_cute, c_cute)
         torch.cuda.synchronize()
 
@@ -775,7 +804,9 @@ class TestCuteDSLSmoketestCUDA(TestCase):
         _y = from_dlpack(y, assumed_align=16, enable_tvm_ffi=True)
 
         norm = CtaNorm(N, "rms")
-        compiled = cute.compile(norm, _y, _x, _w, None, options="--enable-tvm-ffi")
+        compiled = _compile_for_current_device(
+            cute, norm, _y, _x, _w, None, options="--enable-tvm-ffi"
+        )
         compiled(y, x, weight, None, eps)
         torch.cuda.synchronize()
 
@@ -804,7 +835,9 @@ class TestCuteDSLSmoketestCUDA(TestCase):
         _y = from_dlpack(y, assumed_align=16, enable_tvm_ffi=True)
 
         norm = CtaNorm(N, "layer")
-        compiled = cute.compile(norm, _y, _x, _w, _b, options="--enable-tvm-ffi")
+        compiled = _compile_for_current_device(
+            cute, norm, _y, _x, _w, _b, options="--enable-tvm-ffi"
+        )
         compiled(y, x, weight, bias, eps)
         torch.cuda.synchronize()
 
@@ -874,7 +907,7 @@ class TestCuteDSLReadOnlyWrapperCUDA(TestCase):
         self.assertEqual(a_cow.const_data_ptr(), a_addr)
         self.assertEqual(b_cow.const_data_ptr(), b_addr)
 
-        compiled = cute.compile(_host, a_cute, b_cute, c_cute)
+        compiled = _compile_for_current_device(cute, _host, a_cute, b_cute, c_cute)
         compiled(a_cute, b_cute, c_cute)
         torch.cuda.synchronize()
 
