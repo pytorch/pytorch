@@ -1244,6 +1244,11 @@ In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `T
 collective desynchronization checks will work for all applications that use `c10d` collective calls backed by process groups created with the
 {func}`torch.distributed.init_process_group` and {func}`torch.distributed.new_group` APIs.
 
+:::{note}
+`TORCH_DISTRIBUTED_DEBUG=DETAIL` does not enable C++ stack traces on its own. `TORCH_SHOW_CPP_STACKTRACES` is a separate setting that must be
+set explicitly, because capturing stack traces can be expensive.
+:::
+
 
 ### torch.distributed.debug HTTP Server
 
