@@ -9649,6 +9649,111 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x, mod), fn(x, mod))
 
+    def test_isinstance_protocol_reads_instance_attributes(self):
+        # https://github.com/pytorch/pytorch/issues/196127
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        @typing.runtime_checkable
+        class HasFoo(typing.Protocol):
+            def foo(self) -> int: ...
+
+        @typing.runtime_checkable
+        class HasPortsFoo(typing.Protocol):
+            ports: tuple[int, ...]
+
+            def foo(self) -> int: ...
+
+        class Bag:
+            pass
+
+        class Nominal(HasPorts):
+            pass
+
+        class WithFoo:
+            def foo(self) -> int:
+                return 1
+
+        class OptedOut:
+            foo = None
+
+        def make(cls, **attrs):
+            o = cls()
+            for name, value in attrs.items():
+                setattr(o, name, value)
+            return o
+
+        def check(x, o, proto):
+            return x + 1 if isinstance(o, proto) else x - 1
+
+        # Objects of one class that differ in the members a Protocol reads need
+        # their own graphs, but only where the answer can differ: a nominal
+        # match reads no member, and a method member matters only through
+        # whether it is None.
+        x = torch.ones(3)
+        cases = {
+            "data member": (
+                HasPorts,
+                [make(Bag, ports=(1,)), make(Bag), make(Bag, ports=(2,))],
+                2,
+            ),
+            "method member": (
+                HasFoo,
+                [
+                    make(Bag, foo=lambda: 1),
+                    make(Bag, foo=None),
+                    make(Bag, foo=lambda: 2),
+                ],
+                2,
+            ),
+            "nominal": (HasPorts, [make(Nominal), make(Nominal, ports=(1,))], 1),
+            "class opts out": (HasPortsFoo, [make(OptedOut, ports=(1,))], 1),
+            "instance opts out": (
+                HasPortsFoo,
+                [make(WithFoo, ports=(1,)), make(WithFoo, ports=(1,), foo=None)],
+                2,
+            ),
+        }
+        for name, (proto, objs, frames) in cases.items():
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(check, backend=cnt, fullgraph=True)
+            for o in objs:
+                self.assertEqual(opt_fn(x, o, proto), check(x, o, proto), msg=name)
+            self.assertEqual(cnt.frame_count, frames, msg=name)
+
+        # The answer must see attributes stored earlier in the frame.
+        def set_before(x, o):
+            o.ports = (3,)
+            return check(x, o, HasPorts)
+
+        def del_before(x, o):
+            del o.ports
+            return check(x, o, HasPorts)
+
+        def none_before(x, o):
+            o.foo = None
+            return check(x, o, HasFoo)
+
+        def unshadow_before(x, o):
+            del o.foo
+            return check(x, o, HasPortsFoo)
+
+        def built_in_frame(x):
+            return check(x, make(Bag, ports=(1,)), HasPorts)
+
+        for fn, make_args in (
+            (set_before, lambda: (x, make(Bag))),
+            (del_before, lambda: (x, make(Bag, ports=(1,)))),
+            (none_before, lambda: (x, make(Bag, foo=lambda: 1))),
+            (unshadow_before, lambda: (x, make(WithFoo, ports=(1,), foo=None))),
+            (built_in_frame, lambda: (x,)),
+        ):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(*make_args()), fn(*make_args()), msg=fn.__name__)
+
     def test_isinstance_does_not_specialize_value_independent_constant(self):
         # Neither hook can see anything about a str that its type does not
         # already fix, so the answer must not realize the constant and guard
