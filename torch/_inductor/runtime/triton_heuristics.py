@@ -198,7 +198,8 @@ def lookup_autotune_config(
         fn_hash = generate_lookup_hash_from_source_code(str(size_hints), fn.src)
         if fn_hash in lookup_table:
             config_dict = lookup_table[fn_hash]
-            config_kwargs = config_kwargs_from_dict(config_dict)
+            cached_config = config_from_flat_dict(config_dict)
+            config_kwargs = cached_config.kwargs
             rsplit_size = inductor_meta.get("RSPLIT_SIZE")
             if rsplit_size is not None:
                 cached_rsplit_size = config_kwargs.get("RSPLIT_SIZE")
@@ -212,7 +213,6 @@ def lookup_autotune_config(
                     )
                 ):
                     return None
-            cached_config = config_from_dict(config_dict)
 
     return cached_config
 
