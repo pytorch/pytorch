@@ -847,7 +847,7 @@ def _get_listing_windows(source_dir: Path) -> list[Path]:
         itertools.chain(
             source_dir.glob("*.pyd"),
             (source_dir / "lib").glob("*.lib"),
-            (source_dir / "lib").glob(".dll"),
+            (source_dir / "lib").glob("*.dll"),
         )
     )
 
