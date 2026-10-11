@@ -218,8 +218,10 @@ def _view_as_real(
                 s[i] = torch.view_as_real(s[i])
 
 
-def _get_scalar_dtype(is_fused: bool | None = None) -> torch.dtype:
-    if is_fused:
+def _get_scalar_dtype(
+    is_fused: bool | None = None, device: torch.device | None = None
+) -> torch.dtype:
+    if is_fused and (device is None or device.type != "cuda"):
         return torch.float32
     return (
         torch.float64 if torch.get_default_dtype() == torch.float64 else torch.float32
@@ -830,7 +832,12 @@ class Optimizer:
                 break
         if key == "step":
             if capturable or fused:
-                return value.to(dtype=torch.float32, device=param.device)
+                dtype = (
+                    _get_scalar_dtype(is_fused=True, device=param.device)
+                    if fused
+                    else torch.float32
+                )
+                return value.to(dtype=dtype, device=param.device)
             else:
                 return value
         else:

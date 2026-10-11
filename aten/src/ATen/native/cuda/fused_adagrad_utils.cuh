@@ -71,9 +71,11 @@ struct FusedAdagradMathFunctor {
     }
 
     const auto corrected_lr = [&]() -> double {
-      auto* step_count =
-          reinterpret_cast<const float*>(tl.state_steps_addresses[tensor_loc]);
-      const auto denom = 1 + (*step_count - 1) * lr_decay;
+      const auto step_count = tl.state_step(tensor_loc);
+      const auto step_minus_one = tl.state_steps_is_double[tensor_loc]
+          ? step_count - 1
+          : static_cast<float>(step_count) - 1;
+      const auto denom = 1 + step_minus_one * lr_decay;
       const auto corrected_lr = lr_double / denom;
       return corrected_lr;
     }();
