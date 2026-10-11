@@ -54,6 +54,7 @@ import torch._logging
 from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
 from torch._dynamo.exc import (
     FakeTensorObservedException,
+    FakeTensorObservedIndexError,
     get_dynamo_observed_exception,
     ObservedException,
     TensorifyScalarRestartAnalysis,
@@ -3061,6 +3062,10 @@ class InstructionTranslatorBase(
                 raised_exception: ObservedException,
             ) -> None:
                 # Bubble the exception to the interpreter
+                if isinstance(raised_exception, FakeTensorObservedIndexError):
+                    raise IndexError(str(raised_exception)).with_traceback(
+                        raised_exception.__traceback__
+                    ) from None
                 if isinstance(raised_exception, FakeTensorObservedException):
                     from .exc import format_graph_break_message
 
