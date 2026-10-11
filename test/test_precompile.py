@@ -6930,6 +6930,103 @@ class TestExportPython(TestCase):
         self.assertEqual(build()(x), first)
         self.assertEqual(self._rng_state(device), first_state)
 
+    def test_inputs_sliced_from_one_buffer_are_not_aliased(self, device):
+        # Overlap must mean sharing actual bytes. torch._C._overlaps answers a different
+        # question -- storage IDENTITY -- and using it here rejected the arena /
+        # fused-QKV / KV-cache shape, where every input is a disjoint slice of one
+        # buffer. That is the main way real callers hand tensors to a kernel.
+        from torch.compiler._export_python import _shares_memory
+
+        base = make_tensor((8,), device=device, dtype=torch.float32)
+        self.assertFalse(_shares_memory(base[:4], base[4:]))
+        self.assertTrue(_shares_memory(base[:5], base[3:]))
+        self.assertTrue(_shares_memory(base, base))
+        self.assertFalse(_shares_memory(base[:0], base))
+
+        @torch.compiler.export_python(
+            path=self._tmp_path("arena_inputs.py"),
+            backend="eager",
+            example_inputs=(
+                make_tensor((4,), device=device, dtype=torch.float32),
+                make_tensor((4,), device=device, dtype=torch.float32),
+            ),
+        )
+        def add(a, b):
+            return a + b
+
+        buf = make_tensor((8,), device=device, dtype=torch.float32)
+        self.assertEqual(add(buf[:4], buf[4:]), buf[:4] + buf[4:])
+
+    def test_overlap_stamp_is_taken_before_capture_runs_fn(self, device):
+        # Capture runs fn on the example, and set_ there makes inputs alias that were
+        # distinct when the graph was traced. A stamp taken after capture records that
+        # aliasing and refuses the very call the artifact was traced for.
+        def fn(a, b):
+            a.set_(b)
+            return a + 1
+
+        def inputs():
+            return torch.zeros(4, device=device), torch.ones(4, device=device)
+
+        for label, example_inputs in [("first_call", None), ("example", inputs())]:
+            with self.subTest(path=label):
+                path = self._tmp_path(f"set_{label}.py")
+                wrapped = torch.compiler.export_python(
+                    path=path, backend="eager", example_inputs=example_inputs
+                )(fn)
+                self.assertEqual(wrapped(*inputs()), fn(*inputs()))
+                with open(path, encoding="utf-8") as f:
+                    self.assertIn("input-overlap: []\n", f.read())
+
+    def test_capture_copy_that_loses_parameter_aliasing_is_refused(self, device):
+        # nn.Parameter.__deepcopy__ is self.data.clone(), which does not join the
+        # storage memo, so two Parameters over one storage come back independent.
+        # Capturing from that copy bakes in aliasing the caller does not have.
+        class Tied(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                base = torch.zeros(8, device=device)
+                self.a = torch.nn.Parameter(base[:4])
+                self.b = torch.nn.Parameter(base[4:])
+                self.a.data, self.b.data = base[:4], base[:4]
+
+        def fn(mod, inp):
+            mod.a.data.add_(inp)
+            return mod.b.data + 0
+
+        one = torch.ones(4, device=device)
+        path = self._tmp_path("tied_param.py")
+        with self.assertRaisesRegex(PrecompileError, "example_inputs="):
+            torch.compiler.export_python(path=path)(fn)(Tied(), one)
+        # Refused before publishing: a later call must not load a poisoned artifact.
+        self.assertFalse(os.path.exists(path))
+
+        # The escape hatch the message names has to actually work, and agree with eager.
+        wrapped = torch.compiler.export_python(
+            path=self._tmp_path("tied_param_ex.py"), example_inputs=(Tied(), one)
+        )(fn)
+        self.assertEqual(wrapped(Tied(), one), fn(Tied(), one))
+        self.assertEqual(wrapped(Tied(), one), fn(Tied(), one))
+
+        # Weight tying through one shared Parameter OBJECT (the usual idiom) survives
+        # the copy, so it must still capture.
+        class ObjectTied(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(6, 4, device=device)
+                self.head = torch.nn.Linear(4, 6, bias=False, device=device)
+                self.head.weight = self.emb.weight
+
+            def forward(self, ids):
+                return self.head(self.emb(ids))
+
+        mod = ObjectTied()
+        ids = torch.zeros(2, dtype=torch.long, device=device)
+        run = torch.compiler.export_python(path=self._tmp_path("obj_tied.py"))(
+            lambda m, t: m(t)
+        )
+        self.assertEqual(run(mod, ids), mod(ids))
+
     def test_artifact_does_not_bake_the_capture_thread_count(self, device):
         # See the cpp.dynamic_threads pin in PrecompiledModule._compile. Capture runs in
         # a subprocess because it changes the process-global thread count, and the
@@ -6981,6 +7078,97 @@ class TestExportPython(TestCase):
         with self.assertLogs("torch.compiler._export_python", level="WARNING") as cm:
             self.assertEqual(loaded(x), fn(x))
         self.assertTrue(any("produced by torch" in m for m in cm.output))
+
+    def test_overlap_is_bytes_not_storage_identity(self, device):
+        # Two tensors can reach the same bytes through DIFFERENT UntypedStorages --
+        # from_numpy on overlapping slices, frombuffer, DLPack, __cuda_array_interface__
+        # onto a live arena. A storage-identity gate calls those disjoint, so the
+        # aliasing guard would go blind on exactly the arena / KV-cache shapes it is for.
+        import numpy as np
+
+        from torch.compiler._export_python import _shares_memory
+
+        arr = np.zeros(1024, dtype=np.float32)
+        lo, hi = torch.from_numpy(arr[0:512]), torch.from_numpy(arr[256:768])
+        self.assertNotEqual(
+            lo.untyped_storage().data_ptr(), hi.untyped_storage().data_ptr()
+        )
+        self.assertTrue(_shares_memory(lo, hi))
+
+        # Exactly ONE element of overlap: a two-element case survives dropping the +1
+        # from the span, so only this pins the boundary.
+        base = make_tensor((8,), device=device, dtype=torch.float32)
+        self.assertTrue(_shares_memory(base[:4], base[3:]))
+        self.assertFalse(_shares_memory(base[:4], base[4:]))
+        # A strided tensor's extent is not its numel; using numel under-reports it.
+        self.assertTrue(_shares_memory(base.as_strided((4,), (2,)), base[5:]))
+
+        # A 0-numel tensor whose bounding span is NOT empty: the numel guard is what
+        # rejects this, not the span arithmetic.
+        empty_wide = torch.empty(8, device=device).as_strided((3, 0), (1, 1))
+        self.assertFalse(_shares_memory(empty_wide, empty_wide))
+        self.assertFalse(
+            _shares_memory(torch.empty(4, device="meta"), torch.empty(4, device="meta"))
+        )
+
+    def test_input_aliasing_a_module_buffer_is_guarded(self, device):
+        # A tensor argument that aliases a module buffer must enter the overlap stamp.
+        # AOTAutograd dedups the two into one graph slot, so an artifact captured with
+        # that alias computes -- and on the eager backend mutates -- the wrong thing
+        # when the runtime call passes independent tensors.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b", torch.zeros(4, device=device))
+
+        def fn(m, x):
+            m.b.add_(1.0)
+            return m.b + x * 2
+
+        captured = M()
+        aliased = torch.compiler.export_python(
+            path=self._tmp_path("module_alias.py"),
+            backend="eager",
+            example_inputs=(captured, captured.b),
+        )(fn)
+        aliased(captured, captured.b)
+
+        fresh = M()
+        independent = torch.zeros(4, device=device)
+        with self.assertRaisesRegex(PrecompileError, "do not share memory"):
+            aliased(fresh, independent)
+        # ...and the rejected call left the caller's tensor alone.
+        self.assertEqual(independent, torch.zeros(4, device=device))
+
+    def test_input_aliasing_is_guarded(self, device):
+        # Aliasing decides what an in-place mutation means and is baked into the graph
+        # with no runtime guard, so an artifact captured on aliased inputs computes --
+        # and mutates -- the wrong thing when they are distinct. torch.compile guards
+        # this and recompiles; the artifact cannot, so it must refuse.
+        def fn(a, b):
+            a.add_(b)
+            return a * 2
+
+        seed = torch.arange(4.0, device=device)
+        aliased = torch.compiler.export_python(
+            path=self._tmp_path("alias_capture.py"),
+            backend="eager",
+            example_inputs=(seed, seed),
+        )(fn)
+        a = torch.arange(4.0, device=device)
+        with self.assertRaisesRegex(PrecompileError, "do not share memory"):
+            aliased(a, torch.ones(4, device=device))
+        self.assertEqual(a, torch.arange(4.0, device=device))  # left untouched
+
+        # The mirror case: captured distinct, called aliased.
+        distinct = torch.compiler.export_python(
+            path=self._tmp_path("alias_distinct.py"), backend="eager"
+        )(fn)
+        b = torch.arange(4.0, device=device)
+        distinct(b, torch.ones(4, device=device))
+        c = torch.arange(4.0, device=device)
+        with self.assertRaisesRegex(PrecompileError, "do not share memory"):
+            distinct(c, c)
 
     def test_loading_an_artifact_leaves_its_directory_alone(self, device):
         # Triton's autotune cache wrote a <hash>.best_config next to the artifact,
