@@ -17,7 +17,11 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
     foreach_reduce_scatter_copy_in,
 )
-from torch.distributed.fsdp.experimental import reduce_scatter_input_fn_with_native_copy
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_native_copy,
+    DefaultAllGatherLayout,
+    reduce_scatter_input_fn_with_native_copy,
+)
 from torch.distributed.pipelining._backward import (
     stage_backward_input,
     stage_backward_weight,
@@ -347,6 +351,9 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         )
         if native_copy:
             # Fresh bf16 gradients are widened into the fp32 buffer by the copy-in
+            model.set_all_gather_layout(
+                DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
+            )
             model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
         orig_reduce_scatter = dist.reduce_scatter_single

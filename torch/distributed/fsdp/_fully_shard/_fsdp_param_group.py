@@ -21,9 +21,13 @@ from torch.distributed.fsdp._common_utils import (
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
 
+from ._all_gather_layout import (
+    _PersistentBuffers,
+    AllGatherLayout,
+    DEFAULT_ALL_GATHER_LAYOUT,
+)
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
-    _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
     _wait_all_gather,
     AllGather,
@@ -258,8 +262,11 @@ class FSDPParamGroup:
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
-        # See Note [All-gather output fn] and Note [Reduce-scatter input fn]
-        self._all_gather_output_fn: Callable = _default_all_gather_output_fn
+        self._all_gather_layout: AllGatherLayout = DEFAULT_ALL_GATHER_LAYOUT
+        # FSDP-owned buffers behind the all-gather outputs when a custom layout
+        # chose them on the first unshard, freed on reshard
+        self._all_gather_buffers: _PersistentBuffers | None = None
+        # See Note [Reduce-scatter input fn]
         self._reduce_scatter_input_fn: Callable = _default_reduce_scatter_input_fn
         self._reduce_scatter_param_indices: list[int] = []
         self._fsdp_params_deferring_grad_upcast: list[FSDPParam] = []
@@ -392,6 +399,11 @@ class FSDPParamGroup:
         self._register_state_dict_hooks()
 
     def set_symm_mem(self, backend: Literal["NCCL"] = "NCCL") -> None:
+        if self._all_gather_layout.comm is not None:
+            raise AssertionError(
+                "cannot call set_symm_mem() while the all-gather layout is bound "
+                "to its comm"
+            )
         if not isinstance(self._all_gather_comm, (DefaultAllGather | SymmMemAllGather)):
             raise AssertionError(
                 "cannot call set_symm_mem() "
@@ -418,6 +430,11 @@ class FSDPParamGroup:
         Whether to (try to) use the ProcessGroup's allocate_tensor method for
         the staging buffers for collective comms.
         """
+        if self._all_gather_layout.comm is not None:
+            raise AssertionError(
+                "cannot call set_allocate_memory_from_process_group() while the "
+                "all-gather layout is bound to its comm"
+            )
         if not isinstance(
             self._all_gather_comm, (DefaultAllGather | ProcessGroupAllocAllGather)
         ):
@@ -479,6 +496,7 @@ class FSDPParamGroup:
                 param_all_gather_input_dtypes=[],
                 param_all_gather_input_numels=[],
                 all_gather_input_split_sizes=[],
+                all_gather_input_outer_sizes=[],
             )
 
             return
@@ -491,6 +509,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                self._all_gather_layout,
             )
 
     @_disable_functorch_if_active
@@ -545,11 +564,11 @@ class FSDPParamGroup:
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
-                foreach_all_gather_copy_out(
+                self._all_gather_buffers = foreach_all_gather_copy_out(
                     self._all_gather_result,
                     self.fsdp_params,
                     self._all_gather_process_group,
-                    all_gather_output_fn=self._all_gather_output_fn,
+                    self._all_gather_buffers,
                 )
 
         for fsdp_param in self.fsdp_params:
@@ -1121,12 +1140,23 @@ class FSDPParamGroup:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded()
             self._sharded_state = ShardedState.SHARDED
+            self._free_all_gather_buffers()
 
     def _to_sharded_post_forward(self):
         if not self.is_sharded_post_forward:
+            # Parameters copy their post-forward shards out of shared buffers
+            # before the group frees them
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded_post_forward()
             self._sharded_state = ShardedState.SHARDED_POST_FORWARD
+            self._free_all_gather_buffers()
+
+    def _free_all_gather_buffers(self) -> None:
+        # Every parameter's unsharded storage views the shared buffers
+        if self._all_gather_buffers is not None and not any(
+            fsdp_param.keep_unsharded_storage for fsdp_param in self.fsdp_params
+        ):
+            self._all_gather_buffers.free()
 
     def _to_unsharded(self):
         if not self.is_unsharded:
