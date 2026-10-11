@@ -3118,6 +3118,19 @@ class TestLinalg(TestCase):
                 self.assertEqual(S_s, S)
 
     @skipCPUIfNoLapack
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(*floating_and_complex_types())
+    def test_svd_default_driver_batched_above_32(self, device, dtype):
+        # Batched SVD with n > 32 used to loop gesvdj per matrix (perf cliff at
+        # n=32→33). Default driver=None should still reconstruct A. See #200486.
+        make_arg = partial(make_tensor, dtype=dtype, device=device)
+        A = make_arg((8, 33, 33))
+        U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+        self.assertEqual((U * S.to(dtype).unsqueeze(-2)) @ Vh, A)
+        self.assertEqual(torch.linalg.svdvals(A), S)
+
+    @skipCPUIfNoLapack
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
