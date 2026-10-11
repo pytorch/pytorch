@@ -7776,6 +7776,34 @@ class Scheduler:
 
             deferred_ms: dict[frozenset[str], float] = {}
 
+            def benchmark_epilogue_tma_plans(
+                choice: torch._inductor.select_algorithm.TritonTemplateCaller,
+            ) -> tuple[ir.ChoiceCaller, float]:
+                """The fastest of choice's variants with all or none of its
+                reduction epilogue's extra outputs on TMA, and its fused time;
+                choice and inf if both fail too."""
+                best: tuple[ir.ChoiceCaller, float] = (choice, float("inf"))
+                for plan in ("plain", "all"):
+                    variant = choice.with_epilogue_tma_plan(plan)
+                    try:
+                        # pyrefly: ignore [missing-attribute]
+                        with multi_node.swap_as_triton_caller(variant):
+                            future, mod = self.compile_kernel(
+                                node_list_fused, hint_override=variant.hint_override
+                            )
+                            if future is not None:
+                                future.result()
+                            # pyrefly: ignore [bad-argument-type]
+                            ms, _ = self.benchmark_codegened_module(mod, device)
+                    except Exception as e:
+                        fusion_log.debug(
+                            "Exception in %s epilogue TMA plan: %s", plan, e
+                        )
+                        continue
+                    if ms < best[1]:
+                        best = (variant, ms)
+                return best
+
             def deferred_epilogue_ms(tile: tuple[int, int, int] | None) -> float:
                 # Epilogue nodes reading reduction partials run after the
                 # wrapper finishes them, as separate kernels.
@@ -7861,6 +7889,18 @@ class Scheduler:
                                 # pyrefly: ignore [bad-argument-type]
                                 device,
                             )
+                            if (
+                                ms_fused == float("inf")
+                                and reduction_epilogue
+                                and epilogue_fusion
+                                and isinstance(
+                                    choice,
+                                    torch._inductor.select_algorithm.TritonTemplateCaller,
+                                )
+                            ):
+                                # Keeping only the extra outputs that fit on TMA can
+                                # spill registers where all or none of them doesn't.
+                                choice, ms_fused = benchmark_epilogue_tma_plans(choice)
                             if not is_nvgemm_choice and epilogue_fusion:
                                 # pyrefly: ignore [missing-attribute]
                                 ms_fused += deferred_epilogue_ms(multi_node.output_tile)
