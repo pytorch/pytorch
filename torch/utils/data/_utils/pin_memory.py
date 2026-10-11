@@ -7,6 +7,7 @@ static methods.
 
 import collections
 import copy
+import inspect
 import queue
 
 import torch
@@ -57,7 +58,22 @@ def pin_memory(data, device=None):
         return data.pin_memory()
 
     if hasattr(data, "pin_memory"):
-        return data.pin_memory()
+        fn = data.pin_memory
+        try:
+            params = inspect.signature(fn).parameters
+        except (TypeError, ValueError):
+            return fn()
+        param = params.get("device")
+        if param is not None:
+            if param.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.VAR_POSITIONAL,
+            ):
+                return fn(device)
+            return fn(device=device)
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            return fn(device=device)
+        return fn()
 
     if isinstance(data, (str, bytes)):
         return data
