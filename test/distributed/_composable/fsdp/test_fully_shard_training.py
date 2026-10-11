@@ -3325,7 +3325,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             all_reduce_hook: Callable[[torch.Tensor], None] | None,
             force_sum_reduction_for_comms: bool = False,
             *,
-            prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
+            reduce_scatter_input_fn: Callable = _default_reduce_scatter_input_fn,
         ):
             nonlocal reduce_scatter_streams
             reduce_scatter_streams.add(reduce_scatter_stream)
@@ -3344,7 +3344,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 partial_reduce_output,
                 all_reduce_hook,
                 force_sum_reduction_for_comms,
-                prepare_reduce_scatter_inputs=prepare_reduce_scatter_inputs,
+                reduce_scatter_input_fn=reduce_scatter_input_fn,
             )
 
         with (
@@ -3369,10 +3369,13 @@ class TestFullyShardInference(FSDPTest):
         return 2
 
     def test_inference(self):
+        torch.manual_seed(42)
         model = nn.Linear(8, 4, bias=False, device=device_type)
+        ref_model = copy.deepcopy(model)
         fully_shard(model, shard_placement_fn=lambda _: Shard(1))
         with torch.inference_mode():
-            model(torch.ones((2, 8), device=device_type))
+            inp = torch.ones((2, 8), device=device_type)
+            self.assertEqual(model(inp), ref_model(inp))
 
 
 class TestFullyShardWorldSize1(FSDPTest):
