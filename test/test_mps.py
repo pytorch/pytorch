@@ -17020,13 +17020,17 @@ class TestConsistency(TestCaseMPS):
         # MPS uses float32 intermediates for these ops, so the CPU reference
         # must also run in float32 to avoid comparing against less-precise
         # native half-precision CPU results.
-        use_float_ref = op.name in ["grid_sampler_2d", "grid_sampler_3d"] or (
+        use_float_ref = op.name in ["grid_sampler_2d", "grid_sampler_3d", "_segment_reduce"] or (
             op.name == "nn.functional.pad" and op.variant_test_name in ["reflect", "replicate", "replicate_negative"]
         )
         if use_float_ref and dtype is None and mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
             dtype = torch.float32
 
-        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
+        if op.name == "_segment_reduce" and dtype is not None:
+            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
+            cpu_sample.input = cpu_sample.input.detach().to(dtype).requires_grad_(mps_sample.input.requires_grad)
+        else:
+            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
@@ -17725,6 +17729,28 @@ class TestComplex(TestCase):
 @skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
     exact_dtype = True
+
+    @dtypes(torch.float16)
+    def test_segment_reduce_accumulation(self, device, dtype):
+        data = torch.ones((4096, 2), dtype=dtype, device=device, requires_grad=True)
+        result = torch.segment_reduce(data, "sum", lengths=torch.tensor([4096], device=device))
+        self.assertEqual(result, torch.full((1, 2), 4096., dtype=dtype, device=device))
+        result.sum().backward()
+        self.assertEqual(data.grad, torch.ones_like(data))
+
+    @dtypes(torch.float16)
+    def test_segment_reduce_prod_backward_overflow(self, device, dtype):
+        data = torch.ones((2, 1025), dtype=dtype, device=device)
+        data[:, :3] = 100.
+        data[1, -1] = 0.
+        data.requires_grad_()
+        offsets = torch.tensor([[0, 1025], [0, 1025]], dtype=torch.int32, device=device)
+        result = torch.segment_reduce(data, "prod", offsets=offsets, axis=1)
+        reference = data.detach().cpu().float().requires_grad_()
+        expected = torch.segment_reduce(reference, "prod", offsets=offsets.cpu(), axis=1)
+        result.sum().backward()
+        expected.sum().backward()
+        self.assertEqual(data.grad, reference.grad.to(device=device, dtype=dtype))
 
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod

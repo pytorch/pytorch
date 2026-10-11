@@ -1,0 +1,314 @@
+#include <ATen/native/mps/kernels/SegmentReduce.h>
+#include <c10/metal/error.h>
+#include <c10/metal/reduction_utils.h>
+#include <c10/metal/utils.h>
+#include <metal_stdlib>
+
+using namespace metal;
+using namespace c10::metal;
+
+template <typename I>
+kernel void segment_validate(
+    constant I* offsets,
+    device uint* valid,
+    constant SegmentReduceParams& p,
+    device ErrorMessages* errors,
+    constant ulong& base,
+    uint tid [[thread_position_in_grid]]) {
+  const ulong row = base + tid;
+  const ulong start = row * (p.segments + 1);
+  long previous = offsets[start];
+  bool ok = previous >= 0 && ulong(previous) <= p.axis_size;
+  for (ulong s = 1; s <= p.segments; ++s) {
+    const long next = offsets[start + s];
+    ok = ok && next >= previous && next >= 0 && ulong(next) <= p.axis_size;
+    previous = next;
+  }
+  valid[row] = ok;
+  if (!ok) {
+    TORCH_REPORT_ERROR(
+        errors,
+        "segment_reduce(): offsets must be nondecreasing and within the data axis");
+  }
+}
+
+template <SegmentReduction R>
+struct SegmentArithmeticOp {
+  static float identity() {
+    return R == SegmentReduction::Prod ? 1.0f : 0.0f;
+  }
+
+  static float combine(float a, float b) {
+    return R == SegmentReduction::Prod ? a * b : a + b;
+  }
+
+  static float threadgroup_reduce(
+      threadgroup float* partial,
+      float value,
+      uint tid,
+      uint width) {
+    if (R == SegmentReduction::Prod) {
+      return threadgroup_prod(partial, value, tid, width);
+    }
+    return threadgroup_sum(partial, value, tid, width);
+  }
+};
+
+template <SegmentReduction R>
+using SegmentOp = conditional_t<
+    R == SegmentReduction::Max,
+    MaxOp<float>,
+    conditional_t<
+        R == SegmentReduction::Min,
+        MinOp<float>,
+        SegmentArithmeticOp<R>>>;
+
+template <SegmentReduction R>
+inline float segment_finalize(float value, ulong length, bool has_initial) {
+  if (R == SegmentReduction::Mean) {
+    if (length != 0) {
+      return value / float(length);
+    }
+    if (!has_initial) {
+      return NAN;
+    }
+  }
+  return value;
+}
+
+template <typename T, typename I, SegmentReduction R, bool Parallel = false>
+kernel void segment_reduce_forward(
+    constant T* data,
+    device T* output,
+    constant I* offsets,
+    constant uint* valid,
+    constant SegmentReduceParams& p,
+    constant ulong& base,
+    uint tid [[thread_position_in_grid]],
+    uint group [[threadgroup_position_in_grid]],
+    uint width [[threads_per_threadgroup]]) {
+  using Op = SegmentOp<R>;
+  const ulong inner = Parallel ? 1 : p.inner;
+  const ulong index = base + (Parallel ? group : tid);
+  const ulong row = index / inner;
+  const ulong outer = row / p.segments;
+  if (!valid[outer]) {
+    return;
+  }
+  const ulong o = outer * (p.segments + 1) + row % p.segments;
+  const ulong start = offsets[o];
+  const ulong end = offsets[o + 1];
+  const ulong data_base = outer * p.axis_size * inner + index % inner;
+  const uint lane = Parallel ? tid % width : 0;
+  const uint step = Parallel ? width : 1;
+  float value = Parallel ? Op::identity()
+                         : float(T(p.has_initial ? p.initial : Op::identity()));
+  for (ulong j = start + lane; j < end; j += step) {
+    value = Op::combine(value, float(data[data_base + j * inner]));
+  }
+  if (Parallel) {
+    threadgroup float partial[8];
+    value = Op::threadgroup_reduce(partial, value, lane, width);
+    if (p.has_initial) {
+      value = start == end ? float(T(p.initial))
+                           : Op::combine(float(T(p.initial)), value);
+    }
+  }
+  if (lane == 0) {
+    output[index] = T(segment_finalize<R>(value, end - start, p.has_initial));
+  }
+}
+
+template <typename T, typename I, SegmentReduction R, bool Parallel = false>
+kernel void segment_reduce_backward(
+    constant T* grad,
+    constant T* output,
+    constant T* data,
+    device T* grad_input,
+    constant I* offsets,
+    constant uint* valid,
+    constant SegmentReduceParams& p,
+    constant ulong& base,
+    device float* prod_prefix,
+    uint tid [[thread_position_in_grid]],
+    uint group [[threadgroup_position_in_grid]],
+    uint width [[threads_per_threadgroup]]) {
+  const ulong index = base + (Parallel ? group : tid);
+  const ulong row = index / p.inner;
+  const ulong outer = row / p.segments;
+  if (!valid[outer]) {
+    return;
+  }
+  const ulong o = outer * (p.segments + 1) + row % p.segments;
+  const ulong start = offsets[o];
+  const ulong end = offsets[o + 1];
+  const ulong data_base = outer * p.axis_size * p.inner + index % p.inner;
+  const float g = float(grad[index]);
+  float result = float(output[index]);
+  bool parallel_writes = Parallel;
+  if (Parallel && R == SegmentReduction::Prod && sizeof(T) < sizeof(float) &&
+      result != 0 && !isnan(result)) {
+    // Cooperative loads preserve the ordered FP32 product without serial
+    // device reads.
+    threadgroup float4 tile[256];
+    threadgroup float product;
+    float prefix = T(p.has_initial ? p.initial : 1.0f);
+    const uint lane = tid % width;
+    for (ulong first = start; first < end; first += 1024) {
+      const uint count = uint(min(ulong(1024), end - first));
+      float4 values = 1.0f;
+#pragma unroll
+      for (uint i = 0; i < 4; ++i) {
+        const uint j = 4 * lane + i;
+        if (j < count) {
+          values[i] = float(data[data_base + (first + j) * p.inner]);
+        }
+      }
+      tile[lane] = values;
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      if (lane == 0) {
+        for (uint j = 0; j < count / 4; ++j) {
+          const float4 values = tile[j];
+          prefix *= values.x;
+          prefix *= values.y;
+          prefix *= values.z;
+          prefix *= values.w;
+        }
+        for (uint j = count / 4 * 4; j < count; ++j) {
+          prefix *= tile[j / 4][j % 4];
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    if (lane == 0) {
+      product = prefix;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    result = product;
+  }
+  if (R == SegmentReduction::Prod &&
+      ((!Parallel && sizeof(T) < sizeof(float)) || result == 0 ||
+       isnan(result))) {
+    if (Parallel && tid % width != 0) {
+      return;
+    }
+    parallel_writes = false;
+    // Exclusive prefix/suffix products keep zero/NaN handling linear.
+    opmath_t<T> prefix = T(p.has_initial ? p.initial : 1.0f);
+    for (ulong j = start; j < end; ++j) {
+      const ulong input_index = data_base + j * p.inner;
+      const float x = float(data[input_index]);
+      if (x == 0 || isnan(x)) {
+        prod_prefix[input_index] = prefix;
+      }
+      prefix *= x;
+    }
+    if (sizeof(T) < sizeof(float)) {
+      // The stored low-precision output can overflow even when gradients do
+      // not.
+      result = prefix;
+    }
+    if (result == 0 || isnan(result)) {
+      opmath_t<T> suffix = 1;
+      for (ulong j = end; j > start;) {
+        --j;
+        const ulong input_index = data_base + j * p.inner;
+        const float x = float(data[input_index]);
+        const float value = x == 0 || isnan(x)
+            ? g * (prod_prefix[input_index] * suffix)
+            : g * result / x;
+        grad_input[input_index] = T(value);
+        suffix *= x;
+      }
+      return;
+    }
+  }
+  const ulong first = start + (parallel_writes ? tid % width : 0);
+  const ulong step = parallel_writes ? width : 1;
+  long ties = 0;
+  if (R == SegmentReduction::Min || R == SegmentReduction::Max) {
+    for (ulong j = first; j < end; j += step) {
+      const float x = float(data[data_base + j * p.inner]);
+      ties += isnan(x) || x == result;
+    }
+    if (Parallel) {
+      threadgroup long partial[8];
+      ties = threadgroup_sum(partial, ties, tid % width, width);
+    }
+  }
+  for (ulong j = first; j < end; j += step) {
+    const ulong input_index = data_base + j * p.inner;
+    const float x = float(data[input_index]);
+    float value = g;
+    if (R == SegmentReduction::Min || R == SegmentReduction::Max) {
+      value = isnan(x) || x == result ? g : 0.0f;
+      // Preserve the CPU/CUDA behavior for nonpositive upstream gradients.
+      if (ties > 1 && value > 0) {
+        value /= float(ties);
+      }
+    } else if (R == SegmentReduction::Mean) {
+      value /= float(end - start);
+    } else if (R == SegmentReduction::Prod) {
+      value = g * result / x;
+    }
+    grad_input[input_index] = T(value);
+  }
+}
+
+#define REGISTER_SEGMENT_FORWARD(T, I, R, NAME, PARALLEL)                  \
+  template [[host_name("segment_" #NAME "_" #T "_" #I "_" #R)]]            \
+  kernel void segment_reduce_forward<T, I, SegmentReduction::R, PARALLEL>( \
+      constant T*,                                                         \
+      device T*,                                                           \
+      constant I*,                                                         \
+      constant uint*,                                                      \
+      constant SegmentReduceParams&,                                       \
+      constant ulong&,                                                     \
+      uint,                                                                \
+      uint,                                                                \
+      uint)
+
+#define REGISTER_SEGMENT_BACKWARD(T, I, R, NAME, PARALLEL)                  \
+  template [[host_name(#NAME "_" #T "_" #I "_" #R)]]                        \
+  kernel void segment_reduce_backward<T, I, SegmentReduction::R, PARALLEL>( \
+      constant T*,                                                          \
+      constant T*,                                                          \
+      constant T*,                                                          \
+      device T*,                                                            \
+      constant I*,                                                          \
+      constant uint*,                                                       \
+      constant SegmentReduceParams&,                                        \
+      constant ulong&,                                                      \
+      device float*,                                                        \
+      uint,                                                                 \
+      uint,                                                                 \
+      uint)
+
+#define REGISTER_SEGMENT(T, I, R)                              \
+  REGISTER_SEGMENT_FORWARD(T, I, R, serial, false);            \
+  REGISTER_SEGMENT_FORWARD(T, I, R, parallel, true);           \
+  REGISTER_SEGMENT_BACKWARD(T, I, R, segment_backward, false); \
+  REGISTER_SEGMENT_BACKWARD(T, I, R, segment_backward_parallel, true)
+
+#define REGISTER_SEGMENT_REDUCTIONS(T, I) \
+  REGISTER_SEGMENT(T, I, Max);            \
+  REGISTER_SEGMENT(T, I, Mean);           \
+  REGISTER_SEGMENT(T, I, Min);            \
+  REGISTER_SEGMENT(T, I, Sum);            \
+  REGISTER_SEGMENT(T, I, Prod)
+
+#define REGISTER_SEGMENT_INDEX(I)                \
+  template [[host_name("segment_validate_" #I)]] \
+  kernel void segment_validate<I>(               \
+      constant I*,                               \
+      device uint*,                              \
+      constant SegmentReduceParams&,             \
+      device ErrorMessages*,                     \
+      constant ulong&,                           \
+      uint);                                     \
+  REGISTER_SEGMENT_REDUCTIONS(float, I);         \
+  REGISTER_SEGMENT_REDUCTIONS(half, I);          \
+  REGISTER_SEGMENT_REDUCTIONS(bfloat, I)
+
+REGISTER_SEGMENT_INDEX(int);
+REGISTER_SEGMENT_INDEX(long);

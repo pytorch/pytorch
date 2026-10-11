@@ -23011,6 +23011,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         aten_name='segment_reduce',
         variant_test_name='lengths',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfMPS=_dispatch_dtypes((torch.float32, torch.float16, torch.bfloat16)),
         supports_out=False,
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
         supports_gradgrad=False,
@@ -23024,8 +23025,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
-            # Error: The operator 'aten::segment_reduce' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type='mps'),
         ),
     ),
     OpInfo(
@@ -23033,6 +23032,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         aten_name='segment_reduce',
         variant_test_name='offsets',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfMPS=_dispatch_dtypes((torch.float32, torch.float16, torch.bfloat16)),
         supports_out=False,
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
         supports_gradgrad=False,
@@ -23046,8 +23046,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
-            # Error: The operator 'aten::segment_reduce' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type='mps'),
         ),
     ),
 ]
