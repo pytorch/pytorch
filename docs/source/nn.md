@@ -55,6 +55,7 @@ These are the basic building blocks for graphs:
     ModuleDict
     ParameterList
     ParameterDict
+    BufferDict
 ```
 
 Global Hooks For Module

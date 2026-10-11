@@ -725,6 +725,7 @@ class NNModuleVariable(VariableTracker):
         module = tx.output.get_submodule(self.module_key)
 
         builtin_supported = (
+            torch.nn.BufferDict.__getitem__,
             torch.nn.ModuleDict.__getitem__,
             torch.nn.ModuleList.__getitem__,
             torch.nn.ParameterDict.__getitem__,
@@ -1169,7 +1170,9 @@ class NNModuleVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker | None:
         module = tx.output.get_submodule(self.module_key)
-        if not isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict)):
+        if not isinstance(
+            module, (torch.nn.BufferDict, torch.nn.ModuleDict, torch.nn.ParameterDict)
+        ):
             return None
         if not item.is_python_constant():
             return None
