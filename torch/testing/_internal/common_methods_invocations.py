@@ -811,18 +811,22 @@ def sample_inputs_ldexp(op_info, device, dtype, requires_grad, **kwargs):
     )
 
     if dtype.is_floating_point or dtype.is_complex:
-        x = make_tensor(
-            (5,),
-            device=device,
-            dtype=dtype,
-            requires_grad=requires_grad,
+        exponent_dtypes = (
+            torch.bool,
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
         )
-        exponent = torch.tensor(
-            [-2, -1, 0, 1, 3],
-            device=device,
-            dtype=torch.int32,
-        )
-        yield SampleInput(x, args=(exponent,))
+        for exponent_dtype in exponent_dtypes:
+            x = make_tensor((5,), device=device, dtype=dtype, requires_grad=requires_grad)
+            values = [-2, -1, 0, 1, 3] if exponent_dtype.is_signed else [0, 1, 0, 1, 3]
+            exponent = torch.tensor(values, device=device, dtype=exponent_dtype)
+            yield SampleInput(x, args=(exponent,))
 
 
 def error_inputs_arange(op, device, **kwargs):
