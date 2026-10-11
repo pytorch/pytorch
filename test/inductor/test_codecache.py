@@ -7324,7 +7324,10 @@ class TestAutotuneCacheExtraOptions(TestCase):
 
     @requires_triton()
     def test_flat_config_preserves_namespaced_key_names(self):
-        from torch._inductor.runtime.runtime_utils import triton_config_from_dict
+        from torch._inductor.runtime.runtime_utils import (
+            triton_config_from_dict,
+            triton_config_from_flat_dict,
+        )
         from torch._inductor.runtime.triton_heuristics import (
             fixed_config,
             user_autotune,
@@ -7343,6 +7346,17 @@ class TestAutotuneCacheExtraOptions(TestCase):
         self.assertEqual(config.num_stages, 1)
         self.assertTrue(callable(fixed_config(flat_config, None, {}, {})))
         self.assertTrue(callable(user_autotune([flat_config], {})))
+
+        schema_shaped_flat_config = {
+            "version": 1,
+            "kwargs": {},
+            "compile_options": {},
+        }
+        config = triton_config_from_flat_dict(schema_shaped_flat_config)
+
+        self.assertEqual(config.kwargs, schema_shaped_flat_config)
+        self.assertTrue(callable(fixed_config(schema_shaped_flat_config, None, {}, {})))
+        self.assertTrue(callable(user_autotune([schema_shaped_flat_config], {})))
 
     @requires_triton()
     @parametrize(

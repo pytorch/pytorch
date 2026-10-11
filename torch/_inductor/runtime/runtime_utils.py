@@ -228,10 +228,8 @@ def triton_config_from_namespaced_dict(config: dict[str, Any]) -> Config:
 def triton_config_from_flat_dict(config: dict[str, Any]) -> Config:
     from .triton_compat import Config
 
-    return Config(
-        triton_config_kwargs_from_dict(config),
-        **triton_config_compile_options_from_dict(config),
-    )
+    config = {**config}
+    return Config(config, **_pop_triton_config_kwargs(config))
 
 
 def triton_config_from_dict(config: dict[str, Any]) -> Config:
