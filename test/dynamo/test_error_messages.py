@@ -25,7 +25,13 @@ from torch._dynamo.exc import (
 )
 from torch._dynamo.testing import skipIfNotPy311, skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import IS_FBCODE, IS_S390X, munge_exc
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_FBCODE,
+    IS_S390X,
+    munge_exc,
+)
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -60,7 +66,9 @@ class WarningOnceLogger(logging.Logger):
 warning_once_logger = WarningOnceLogger("warning_once_logger")
 
 
-class ErrorMessagesTest(LoggingTestCase):
+class TestErrorMessages(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_inplace_view_on_graph_input_hint(self):
         def fn(x):
             x.transpose_(1, 2)
@@ -484,10 +492,10 @@ from user code:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3)),
             """\
 Skip inlining `torch.compiler.disable()`d function
-  Explanation: Skip inlining function <function ErrorMessagesTest.test_skipfile_dynamo_disable_wrapped_method.<locals>.Scheduler.index_for_timestep at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
+  Explanation: Skip inlining function <function TestErrorMessages.test_skipfile_dynamo_disable_wrapped_method.<locals>.Scheduler.index_for_timestep at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
   Hint: Remove the `torch.compiler.disable` call
 
-  Developer debug context: <function ErrorMessagesTest.test_skipfile_dynamo_disable_wrapped_method.<locals>.Scheduler.index_for_timestep at 0xmem_addr>
+  Developer debug context: <function TestErrorMessages.test_skipfile_dynamo_disable_wrapped_method.<locals>.Scheduler.index_for_timestep at 0xmem_addr>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0099.html
 
@@ -958,12 +966,12 @@ from user code:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
             """\
 Reconstruction failure
-  Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function ErrorMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
+  Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function TestErrorMessages.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
   Hint: If Dynamo is attempting to trace a return statement and your code is attempting to return a variable that Dynamo cannot reconstruct, then remove it from the return statement.
   Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
   Hint: Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have reconstruction rules may be fundamentally unreconstructable.
 
-  Developer debug context: UserMethodVariable(<function ErrorMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
+  Developer debug context: UserMethodVariable(<function TestErrorMessages.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0092.html
 
@@ -1025,12 +1033,12 @@ Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
 
 Reconstruction failure
-  Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function ErrorMessagesTest.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
+  Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function TestErrorMessages.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
   Hint: If Dynamo is attempting to trace a return statement and your code is attempting to return a variable that Dynamo cannot reconstruct, then remove it from the return statement.
   Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
   Hint: Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have reconstruction rules may be fundamentally unreconstructable.
 
-  Developer debug context: UserMethodVariable(<function ErrorMessagesTest.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
+  Developer debug context: UserMethodVariable(<function TestErrorMessages.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0092.html
 
@@ -1099,24 +1107,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return x + y""",
         )
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_fx_node_error_cross_device(self):
-        linear = torch.nn.Linear(10, 20, device="cuda").eval()
-
-        def fn(x):
-            return linear(x)
-
-        with self.assertRaises(TorchRuntimeError) as cm:
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(1, 10))
-
-        msg = str(cm.exception)
-        self.assertIn("Tensor device mismatch", msg)
-        self.assertIn("Expected all tensors to be on the same device", msg)
-        self.assertIn("cpu", msg)
-        self.assertIn("cuda", msg)
-        self.assertNotIn("Dynamo failed to run FX node with fake tensors", msg)
-        self.assertNotIn("Unhandled FakeTensor Device Propagation", msg)
 
     def test_data_dependent_branching_fullgraph(self):
         def fn(x):
@@ -2113,10 +2103,10 @@ call to a lru_cache wrapped function at: test_error_messages.py:N
             lambda: outer(f, torch.randn(3)),
             """\
 Skip calling `torch.compiler.disable()`d function
-  Explanation: Skip calling function `<function ErrorMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: None)
+  Explanation: Skip calling function `<function TestErrorMessages.test_disable_message.<locals>.f at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: None)
   Hint: Remove the `torch.compiler.disable` call
 
-  Developer debug context: <function ErrorMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>
+  Developer debug context: <function TestErrorMessages.test_disable_message.<locals>.f at 0xmem_addr>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0098.html
 
@@ -2135,10 +2125,10 @@ from user code:
             lambda: outer(g, torch.randn(3)),
             """\
 Skip calling `torch.compiler.disable()`d function
-  Explanation: Skip calling function `<function ErrorMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: test message)
+  Explanation: Skip calling function `<function TestErrorMessages.test_disable_message.<locals>.g at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: test message)
   Hint: Remove the `torch.compiler.disable` call
 
-  Developer debug context: <function ErrorMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>
+  Developer debug context: <function TestErrorMessages.test_disable_message.<locals>.g at 0xmem_addr>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0098.html
 
@@ -2296,10 +2286,10 @@ Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Encountered graph break when attempting to trace STORE_ATTR: storing an object's attribute, e.g. x.attr = y:
 
 Skip inlining `torch.compiler.disable()`d function
-  Explanation: Skip inlining function <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
+  Explanation: Skip inlining function <function TestErrorMessages.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
   Hint: Remove the `torch.compiler.disable` call
 
-  Developer debug context: <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr>
+  Developer debug context: <function TestErrorMessages.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0099.html
 
@@ -2319,10 +2309,10 @@ User code traceback:
                 lambda: fn(torch.ones(3)),
                 """\
 Skip inlining `torch.compiler.disable()`d function
-  Explanation: Skip inlining function <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
+  Explanation: Skip inlining function <function TestErrorMessages.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
   Hint: Remove the `torch.compiler.disable` call
 
-  Developer debug context: <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr>
+  Developer debug context: <function TestErrorMessages.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0099.html
 
@@ -3150,6 +3140,32 @@ User code traceback:
     ~~~~~~~~~~~~~~~~~~~~~~~~~^^
 """,
         )
+
+
+class TestErrorMessagesDevice(LoggingTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_fx_node_error_cross_device(self, device):
+        linear = torch.nn.Linear(10, 20, device=device).eval()
+
+        def fn(x):
+            return linear(x)
+
+        with self.assertRaises(TorchRuntimeError) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(1, 10))
+
+        msg = str(cm.exception)
+        self.assertIn("Tensor device mismatch", msg)
+        self.assertIn("Expected all tensors to be on the same device", msg)
+        self.assertIn("cpu", msg)
+        self.assertIn(device, msg)
+        self.assertNotIn("Dynamo failed to run FX node with fake tensors", msg)
+        self.assertNotIn("Unhandled FakeTensor Device Propagation", msg)
+
+
+instantiate_device_type_tests(
+    TestErrorMessagesDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
