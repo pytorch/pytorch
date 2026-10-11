@@ -536,12 +536,14 @@ class FSDPParamGroup:
 
             for fsdp_param in self.fsdp_params:
                 all_gather_inputs = fsdp_param.all_gather_inputs
-                fsdp_param.init_all_gather_outputs(
-                    [t.numel() for t in all_gather_inputs],
-                    [t.dtype for t in all_gather_inputs],
-                    world_size,
-                    self.device,
-                )
+                # Avoids building the lists once the outputs exist
+                if not fsdp_param.all_gather_outputs:
+                    fsdp_param.init_all_gather_outputs(
+                        [t.numel() for t in all_gather_inputs],
+                        [t.dtype for t in all_gather_inputs],
+                        world_size,
+                        self.device,
+                    )
                 for tensor, all_gather_input in zip(
                     fsdp_param.all_gather_outputs, all_gather_inputs
                 ):
