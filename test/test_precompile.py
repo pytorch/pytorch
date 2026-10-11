@@ -7961,12 +7961,12 @@ class TestExportPython(TestCase):
             return x * 2.0
 
         x = make_tensor((64,), device=device, dtype=torch.float32)
-        from torch.compiler._export_python import _verify_against_eager
+        from torch.compiler._export_python import _rng_state, _verify_against_eager
 
         nonfinite = fn(x)
         nonfinite[0] = float("nan")
         with self.assertRaisesRegex(PrecompileError, "where the result is finite"):
-            _verify_against_eager(fn, (x,), nonfinite, path)
+            _verify_against_eager(fn, (x,), (x,), nonfinite, path, _rng_state())
 
     def test_check_does_not_report_a_relative_diff_of_1e308(self, device):
         # The denominator was clamped to float64 tiny, so every exactly-zero reference
@@ -7977,13 +7977,13 @@ class TestExportPython(TestCase):
         def fn(x):
             return torch.relu(x)
 
-        from torch.compiler._export_python import _verify_against_eager
+        from torch.compiler._export_python import _rng_state, _verify_against_eager
 
         x = make_tensor((256,), device=device, dtype=torch.float32, low=-1, high=1)
         torch.compiler.export_python(path=path)(fn)(x)
         wrong = torch.relu(x) + 1.0
         with self.assertRaises(PrecompileError) as cm:
-            _verify_against_eager(fn, (x,), wrong, path)
+            _verify_against_eager(fn, (x,), (x,), wrong, path, _rng_state())
         message = str(cm.exception)
         self.assertIn("max rel diff", message)
         for absurd in ("e+30", "e+29", "e+308"):
@@ -7992,18 +7992,19 @@ class TestExportPython(TestCase):
     def test_check_compares_integer_outputs_exactly(self, device):
         # A float tolerance on an int64 near 1000 is ~1.0, so an off-by-one from a bad
         # index edit would pass.
-        from torch.compiler._export_python import _verify_against_eager
+        from torch.compiler._export_python import _rng_state, _verify_against_eager
 
         def fn(x):
             return x.to(torch.int64) + 1000
 
         x = make_tensor((64,), device=device, dtype=torch.float32, low=0, high=10)
+        path = self._tmp_path("int.py")
         with self.assertRaisesRegex(PrecompileError, "does not match"):
-            _verify_against_eager(fn, (x,), fn(x) + 1, self._tmp_path("int.py"))
+            _verify_against_eager(fn, (x,), (x,), fn(x) + 1, path, _rng_state())
 
     def test_check_reports_a_finite_diff_when_the_reference_has_inf(self, device):
         # Matching inf in both runs must not turn every reported statistic into nan.
-        from torch.compiler._export_python import _verify_against_eager
+        from torch.compiler._export_python import _rng_state, _verify_against_eager
 
         def fn(x):
             return torch.cat([x.new_full((1,), float("inf")), x])
@@ -8011,97 +8012,104 @@ class TestExportPython(TestCase):
         x = make_tensor((64,), device=device, dtype=torch.float32, low=1, high=2)
         wrong = fn(x)
         wrong[1:] += 1.0
+        path = self._tmp_path("inf.py")
         with self.assertRaises(PrecompileError) as cm:
-            _verify_against_eager(fn, (x,), wrong, self._tmp_path("inf.py"))
+            _verify_against_eager(fn, (x,), (x,), wrong, path, _rng_state())
         message = str(cm.exception)
         self.assertRegex(message, r"max abs diff 1\.000e\+00, max rel diff \d")
 
     def test_check_compares_non_tensor_outputs(self, device):
-        from torch.compiler._export_python import _verify_against_eager
+        from torch.compiler._export_python import _rng_state, _verify_against_eager
 
         def fn(x):
             return x * 2, 3
 
         x = make_tensor((8,), device=device, dtype=torch.float32)
+        path = self._tmp_path("scalar.py")
         with self.assertRaisesRegex(PrecompileError, "returns 4 where fn returns 3"):
-            _verify_against_eager(fn, (x,), (x * 2, 4), self._tmp_path("scalar.py"))
+            _verify_against_eager(fn, (x,), (x,), (x * 2, 4), path, _rng_state())
 
     def test_check_reports_an_output_on_the_wrong_device(self, device):
         if torch.device(device).type != "cuda":
             self.skipTest("needs a second device type")
-        from torch.compiler._export_python import _verify_against_eager
+        from torch.compiler._export_python import _rng_state, _verify_against_eager
 
         def fn(x):
             return x * 2
 
         x = make_tensor((8,), device=device, dtype=torch.float32)
+        path = self._tmp_path("dev.py")
         with self.assertRaisesRegex(PrecompileError, "/cpu but eager gives"):
-            _verify_against_eager(fn, (x,), fn(x).cpu(), self._tmp_path("dev.py"))
+            _verify_against_eager(fn, (x,), (x,), fn(x).cpu(), path, _rng_state())
 
     def test_check_tolerates_a_one_ulp_float8_difference(self, device):
         # One ulp of float8_e4m3fn is 12.5% relative: a rounding flip an honest artifact
         # is entitled to, far past the fp32 tolerances float8 used to fall back to.
-        from torch.compiler._export_python import _verify_against_eager
+        from torch.compiler._export_python import _rng_state, _verify_against_eager
 
         def fn(x):
             return x.to(torch.float8_e4m3fn)
 
         x = torch.tensor([1.0, 2.0, 3.0], device=device)
         honest = torch.tensor([1.125, 2.0, 3.0], device=device).to(torch.float8_e4m3fn)
-        _verify_against_eager(fn, (x,), honest, self._tmp_path("fp8ulp.py"))
+        path = self._tmp_path("fp8ulp.py")
+        _verify_against_eager(fn, (x,), (x,), honest, path, _rng_state())
 
     def test_check_uses_the_real_dtype_tolerances_for_complex(self, device):
         # complex128 fell back to fp32 tolerances, so a 1e-6 relative edit passed.
-        from torch.compiler._export_python import _verify_against_eager
+        from torch.compiler._export_python import _rng_state, _verify_against_eager
 
         def fn(x):
             return x * 2
 
         x = make_tensor((16,), device=device, dtype=torch.complex128, low=1, high=2)
+        path, wrong = self._tmp_path("c128.py"), fn(x) * (1 + 1e-6)
         with self.assertRaisesRegex(PrecompileError, "does not match"):
-            _verify_against_eager(
-                fn, (x,), fn(x) * (1 + 1e-6), self._tmp_path("c128.py")
-            )
+            _verify_against_eager(fn, (x,), (x,), wrong, path, _rng_state())
 
     def test_check_names_a_finiteness_mismatch_in_a_complex_output(self, device):
-        from torch.compiler._export_python import _verify_against_eager
+        from torch.compiler._export_python import _rng_state, _verify_against_eager
 
         def fn(x):
             return x * 2
 
         x = make_tensor((8,), device=device, dtype=torch.complex64)
-        wrong = fn(x)
+        path, wrong = self._tmp_path("cfinite.py"), fn(x)
         wrong[0] = complex(float("nan"), 0)
         with self.assertRaisesRegex(PrecompileError, "where the result is finite"):
-            _verify_against_eager(fn, (x,), wrong, self._tmp_path("cfinite.py"))
+            _verify_against_eager(fn, (x,), (x,), wrong, path, _rng_state())
 
     def test_check_names_a_non_finite_value_mismatch(self, device):
         # Both runs are non-finite at the same position, so the finite-only diff is 0;
         # the message must not say "max abs diff 0.000e+00".
-        from torch.compiler._export_python import _verify_against_eager
+        from torch.compiler._export_python import _rng_state, _verify_against_eager
 
         def fn(x):
             return torch.cat([x.new_full((1,), float("inf")), x])
 
         x = make_tensor((8,), device=device, dtype=torch.float32)
-        wrong = fn(x)
+        path, wrong = self._tmp_path("infsign.py"), fn(x)
         wrong[0] = -float("inf")
         with self.assertRaisesRegex(PrecompileError, "which non-finite value"):
-            _verify_against_eager(fn, (x,), wrong, self._tmp_path("infsign.py"))
+            _verify_against_eager(fn, (x,), (x,), wrong, path, _rng_state())
 
     def test_check_tolerates_rounding_where_eager_is_exactly_zero(self, device):
         # The atol cap is a fraction of the reference's magnitude, which is 0 here, so
         # it demanded bit-exact zeros; a fused layernorm of a constant row leaves ~3e-5.
-        from torch.compiler._export_python import _verify_against_eager
+        from torch.compiler._export_python import _rng_state, _verify_against_eager
 
         def fn(x):
             return x - x.mean(-1, keepdim=True)
 
         x = torch.ones(4, 16, device=device)
         path = self._tmp_path("zeros.py")
-        _verify_against_eager(fn, (x,), torch.full_like(x, 1e-6), path)
+        _verify_against_eager(
+            fn, (x,), (x,), torch.full_like(x, 1e-6), path, _rng_state()
+        )
         with self.assertRaisesRegex(PrecompileError, "does not match"):
-            _verify_against_eager(fn, (x,), torch.full_like(x, 1e-3), path)
+            _verify_against_eager(
+                fn, (x,), (x,), torch.full_like(x, 1e-3), path, _rng_state()
+            )
 
     def test_check_env_vars_are_parsed(self, device):
         from torch.compiler._export_python import (
@@ -8271,7 +8279,7 @@ class TestExportPython(TestCase):
         # The significance floor was derived from the tolerance cap, so with an explicit
         # atol nothing counted as significant and the message always said the reference
         # was all near-zero -- printed directly beside a non-zero magnitude.
-        from torch.compiler._export_python import _verify_against_eager
+        from torch.compiler._export_python import _rng_state, _verify_against_eager
 
         path = self._tmp_path("relmsg.py")
 
@@ -8281,8 +8289,168 @@ class TestExportPython(TestCase):
         x = make_tensor((256,), device=device, dtype=torch.float32, low=-1, high=1)
         with mock.patch.dict(os.environ, {"COMPILER_EXPORT_PYTHON_CHECK_ATOL": "1e-9"}):
             with self.assertRaises(PrecompileError) as cm:
-                _verify_against_eager(fn, (x,), torch.relu(x) + 1.0, path)
+                wrong = torch.relu(x) + 1.0
+                _verify_against_eager(fn, (x,), (x,), wrong, path, _rng_state())
         self.assertNotIn("all near-zero", str(cm.exception))
+
+    def test_a_small_magnitude_random_fn_is_skipped_not_blamed(self, device):
+        # The draw detector compared with the UNCAPPED tolerance while the real
+        # comparison used the capped one, so a small-magnitude random fn looked
+        # deterministic to the detector and wrong to the caller: reported as a bad
+        # hand-edit of an artifact nobody had touched.
+        path = self._tmp_path("smallrand.py")
+
+        def fn(x):
+            return torch.rand_like(x) * 1e-4
+
+        x = make_tensor((4096,), device=device, dtype=torch.float32)
+        from torch.compiler._export_python import _CHECK_ENV
+
+        with mock.patch.dict(os.environ, {_CHECK_ENV: "1"}):
+            torch.compiler.export_python(path=path)(fn)(x)
+            with self.assertLogs(
+                "torch.compiler._export_python", level="WARNING"
+            ) as lg:
+                torch.compiler.export_python(path=path)(fn)(x)
+        self.assertTrue(
+            any("draws from the generator" in line for line in lg.output), lg.output
+        )
+
+    def test_an_in_place_random_fn_is_skipped_not_blamed(self, device):
+        path = self._tmp_path("inplacerand.py")
+
+        def fn(x, y):
+            x.add_(torch.rand_like(x))
+            return y * 2
+
+        x = make_tensor((4096,), device=device, dtype=torch.float32)
+        y = make_tensor((4096,), device=device, dtype=torch.float32)
+        from torch.compiler._export_python import _CHECK_ENV
+
+        logger = "torch.compiler._export_python"
+        with mock.patch.dict(os.environ, {_CHECK_ENV: "1"}):
+            with self.assertLogs(logger, level="WARNING") as lg:
+                torch.compiler.export_python(path=path)(fn)(x.clone(), y)
+                torch.compiler.export_python(path=path)(fn)(x.clone(), y)
+        self.assertTrue(
+            any("draws from the generator" in line for line in lg.output), lg.output
+        )
+
+    def test_a_random_non_finite_mask_is_skipped_not_blamed(self, device):
+        # The finite-pattern check ran before draw detection, so a random -inf mask
+        # was blamed on a store bug in an artifact nobody had touched.
+        path = self._tmp_path("randmask.py")
+
+        def fn(x):
+            return x.masked_fill(torch.rand_like(x) < 0.1, float("-inf"))
+
+        x = make_tensor((4096,), device=device, dtype=torch.float32)
+        from torch.compiler._export_python import _CHECK_ENV
+
+        with mock.patch.dict(os.environ, {_CHECK_ENV: "1"}):
+            torch.compiler.export_python(path=path)(fn)(x)
+            with self.assertLogs(
+                "torch.compiler._export_python", level="WARNING"
+            ) as lg:
+                torch.compiler.export_python(path=path)(fn)(x)
+        self.assertTrue(
+            any("draws from the generator" in line for line in lg.output), lg.output
+        )
+
+    def test_check_leaves_the_cuda_generator_where_the_artifact_left_it(self, device):
+        if torch.device(device).type != "cuda":
+            self.skipTest("the CUDA generator is what the CPU-only rewind missed")
+        from torch.compiler._export_python import _CHECK_ENV
+
+        def fn(x):
+            return x + torch.rand_like(x)
+
+        x = make_tensor((1024,), device=device, dtype=torch.float32)
+        run = torch.compiler.export_python(path=self._tmp_path("cudarng.py"))(fn)
+        with mock.patch.dict(os.environ):
+            os.environ.pop(_CHECK_ENV, None)
+            run(x)
+            torch.manual_seed(0)
+            run(x)
+        unchecked = torch.cuda.get_rng_state()
+        with mock.patch.dict(os.environ, {_CHECK_ENV: "1"}):
+            torch.manual_seed(0)
+            run(x)
+        self.assertEqual(torch.cuda.get_rng_state(), unchecked)
+
+    def test_check_catches_a_hand_edit_to_an_in_place_write(self, device):
+        # The return value is untouched by the edit; only the in-place write changes.
+        path = self._tmp_path("inplace_edit.py")
+
+        def fn(x, y):
+            x.add_(y * 3.5)
+            return y + 1
+
+        x = make_tensor((64,), device=device, dtype=torch.float32)
+        y = make_tensor((64,), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(fn)(x.clone(), y)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        self.assertIn("3.5", source)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(source.replace("3.5", "9.25"))
+        from torch.compiler._export_python import _CHECK_ENV
+
+        with mock.patch.dict(os.environ, {_CHECK_ENV: "1"}):
+            with self.assertRaisesRegex(PrecompileError, "input 0 as the artifact"):
+                torch.compiler.export_python(path=path)(fn)(x.clone(), y)
+
+    def test_check_catches_a_hand_edit_to_a_module_buffer_write(self, device):
+        # pytree keeps an nn.Module as one opaque leaf, so its buffers need flattening.
+        path = self._tmp_path("buffer_edit.py")
+
+        class Counter(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("total", torch.zeros(64, device=device))
+
+            def forward(self, x):
+                self.total.add_(x * 3.5)
+                return x + 1
+
+        def run(model, inp):
+            return model(inp)
+
+        m = Counter()
+        x = make_tensor((64,), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(run)(m, x)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        self.assertIn("3.5", source)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(source.replace("3.5", "9.25"))
+        from torch.compiler._export_python import _CHECK_ENV
+
+        with mock.patch.dict(os.environ, {_CHECK_ENV: "1"}):
+            with self.assertRaisesRegex(PrecompileError, "input 0.total as the"):
+                torch.compiler.export_python(path=path)(run)(m, x)
+
+    def test_check_catches_an_edit_beside_a_random_in_place_write(self, device):
+        # Only the tensors that depend on the generator are skipped, not the whole call.
+        path = self._tmp_path("rand_edit.py")
+
+        def fn(x, y):
+            x.add_(torch.rand_like(x))
+            return y * 3.5
+
+        x = make_tensor((4096,), device=device, dtype=torch.float32)
+        y = make_tensor((4096,), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(fn)(x.clone(), y)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        self.assertIn("3.5", source)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(source.replace("3.5", "9.25"))
+        from torch.compiler._export_python import _CHECK_ENV
+
+        with mock.patch.dict(os.environ, {_CHECK_ENV: "1"}):
+            with self.assertRaisesRegex(PrecompileError, "output 0 of the artifact"):
+                torch.compiler.export_python(path=path)(fn)(x.clone(), y)
 
     def test_a_dtype_without_comparison_kernels_does_not_crash_the_check(self, device):
         # float8 is is_floating_point() but has neither isfinite nor the mul that
