@@ -1032,6 +1032,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ConstantVariable,
             GradModeVariable,
             InferenceModeVariable,
+            NullContextVariable,
             StreamContextVariable,
             SymNodeVariable,
             TensorVariable,
@@ -1944,8 +1945,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
         )
         def handle_device_interface_stream(
-            self, tx: "InstructionTranslatorBase", stream: "StreamVariable"
-        ) -> StreamContextVariable:
+            self,
+            tx: "InstructionTranslatorBase",
+            stream: "StreamVariable | ConstantVariable",
+        ) -> "StreamContextVariable | NullContextVariable":
             return StreamContextVariable.create(tx, stream)
 
         @register(torch.from_numpy)
