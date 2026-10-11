@@ -118,7 +118,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     @parametrize(
         "mapping_type",
-        [dict, OrderedDict, defaultdict],
+        [dict, OrderedDict, defaultdict, getattr(builtins, "frozendict", dict)],
     )
     def test_equality_preserves_key_hashes(self, mapping_type):
         class Key:
@@ -132,7 +132,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             key = Key()
             left, right = mapping_type(), mapping_type()
-            left[key] = right[key] = x
+            if mapping_type is getattr(builtins, "frozendict", None):
+                left, right = mapping_type({key: x}), mapping_type({key: x})
+            else:
+                left[key] = right[key] = x
             calls = key.calls
             result = left == right, left != right
             return x + 1, result, key.calls - calls
@@ -3337,7 +3340,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x), expected
         )
 
-    @parametrize("mapping_type", [dict])
+    @parametrize("mapping_type", [dict, getattr(builtins, "frozendict", dict)])
     def test_fromkeys_preserves_key_comparisons(self, mapping_type):
         class Key:
             def __init__(self):
@@ -3361,8 +3364,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), (x + 2, 1))
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
-    @parametrize("mapping_type", [dict])
-    @parametrize("iterable_type", [dict, set, frozenset])
+    @parametrize("mapping_type", [dict, getattr(builtins, "frozendict", dict)])
+    @parametrize(
+        "iterable_type", [dict, getattr(builtins, "frozendict", dict), set, frozenset]
+    )
     def test_fromkeys_preserves_key_hashes(self, mapping_type, iterable_type):
         class Key:
             def __init__(self):

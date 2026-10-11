@@ -509,6 +509,19 @@ def odict_fromkeys(
     return dict_fromkeys(cls, iterable, value)
 
 
+def frozendict_fromkeys(
+    cls: Callable[..., C], iterable: Iterable[T], value: U | None = None, /
+) -> C:
+    if not torch._has_frozendict:
+        raise AssertionError("requires builtins.frozendict")
+    # Use identity checks: tuple membership can invoke a metaclass's `__eq__`.
+    if any(
+        type(iterable) is kind for kind in (dict, torch._frozendict, set, frozenset)
+    ):
+        return cls(dict.fromkeys(iterable, value))
+    return cls((key, value) for key in iterable)
+
+
 def foreach_map_fn(*args: Any) -> Any:
     op = args[0]
     new_args: list[Any] = []
