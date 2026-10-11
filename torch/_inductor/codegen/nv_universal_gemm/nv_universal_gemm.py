@@ -11,6 +11,8 @@ import re
 from enum import auto, Enum
 from typing import Any, Literal
 
+import sympy
+
 import torch
 from torch._inductor import config
 from torch._inductor.autotune_process import (
@@ -504,8 +506,26 @@ class NVUniversalGemmCaller(ChoiceCaller):
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         return self.bmreq.benchmark(*args, out=out)
 
+    def _guard_dynamic_shape_constraints(self) -> None:
+        if self.variant != GemmVariant.GEMM:
+            return
+
+        input_sizes = [node.get_size() for node in self.input_nodes[:2]]
+        if self.swap_ab:
+            input_sizes = [input_sizes[1][::-1], input_sizes[0][::-1]]
+        operands = self.kernel.metadata.operands
+        constraints = (operands.A, operands.B, operands.out)
+        sizes = (*input_sizes, self._kernel_layout.size)
+        for constraint, size in zip(constraints, sizes, strict=True):
+            matrix_stride = constraint.stride[-2:]
+            major_dim = matrix_stride.index(1) - 2
+            divisor = constraint.divisibility
+            V.graph.sizevars.check(sympy.Eq(sympy.Mod(size[major_dim], divisor), 0))
+
     def output_node(self) -> TensorBox:
         from torch._inductor.ir import NVUniversalGemmBuffer
+
+        self._guard_dynamic_shape_constraints()
 
         # Without memoization, each call registers a new buffer (via
         # TemplateBuffer.__init__ → V.graph.register_buffer), leaking orphan
