@@ -124,6 +124,16 @@ def _closure_step(model, x):
     return get()
 
 
+def _identity(loss):
+    return loss
+
+
+def _callback_step(model, x, cb):
+    loss = (model(x) * _MULTIGRAPH_SCALE).sum()
+    loss.backward()
+    return cb(loss)
+
+
 # Module-level so the guards on it serialize and the entry is not bypassed.
 class _GraphBreakingChild(torch.nn.Module):
     def forward(self, x):
@@ -652,13 +662,52 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, r"closes over \['scale'\]"):
             reject("step", [code_entry(step, variants=[variant])])
 
-    def test_multigraph_driver_dispatches_entry_frame(self):
-        # The driver rebuilds the entry frame's f_locals (a keyword-only default
-        # the call omits, *args) and guards them against this module's LIVE dict.
+    def _scrub_minted(self, scope):
+        # A serving process never traced, so the names Dynamo minted into the
+        # captured module must not be what makes the guards pass; the driver
+        # binds the same names, so the cleanup drops those too.
+        minted = ("__compiled_fn", "__resume_at", "__builtins_dict__", "__import_")
+
+        def scrub():
+            return {n: scope.pop(n) for n in list(scope) if n.startswith(minted)}
+
+        removed = scrub()
+        self.addCleanup(lambda: (scrub(), scope.update(removed)))
+        return scrub
+
+    def _multigraph_driver(self, frames, backends, binding, **namespace):
+        # Returns _build_multigraph_forward exec'd in an artifact namespace. The
+        # records name this module, which is __main__ under a script run and the
+        # driver refuses that; serve them from an importable alias of it.
         import inspect
         from unittest import mock
 
         from torch import _precompile_driver as driver
+        from torch._precompile import _b64
+
+        module = "precompile_test_captured_module"
+        alias = mock.patch.dict(sys.modules, {module: sys.modules[__name__]})
+        self.addCleanup(alias.stop)
+        alias.start()
+        for frame in frames:
+            frame["python_module"] = module
+        ns = {
+            "__name__": "precompile_test_artifact",
+            **namespace,
+            "_FRAMES": _b64(frames),
+            "_BACKENDS": _b64(backends),
+            "_ENTRY_BINDING": _b64(binding),
+            "_DYNAMO_PYTHON_VERSION": tuple(sys.version_info[:2]),
+            "TORCH_VERSION": torch.__version__,
+        }
+        exec(inspect.getsource(driver._build_multigraph_forward), ns)
+        return ns["_build_multigraph_forward"]
+
+    def test_multigraph_driver_dispatches_entry_frame(self):
+        # The driver rebuilds the entry frame's f_locals (a keyword-only default
+        # the call omits, *args) and guards them against this module's LIVE dict.
+        from unittest import mock
+
         from torch._dynamo.output_graph import get_builtins_dict
         from torch._dynamo.package import (
             CompilePackage,
@@ -691,35 +740,11 @@ class TestPrecompile(TestCase):
             for backend_id, backend in package.cached_backends.items()
         }
         torch._dynamo.reset()
-        # A serving process never traced, so the names Dynamo minted into this
-        # module during capture must not be what makes the guards pass.
         scope = step.__globals__
-        minted = ("__compiled_fn", "__builtins_dict__", "__import_")
-
-        def scrub():
-            return {n: scope.pop(n) for n in list(scope) if n.startswith(minted)}
-
-        removed = scrub()
-        self.addCleanup(lambda: (scrub(), scope.update(removed)))
-        # The records name this module, which is __main__ under a script run and
-        # the driver refuses that; serve them from an importable alias of it.
-        module = "precompile_test_captured_module"
-        alias = mock.patch.dict(sys.modules, {module: sys.modules[__name__]})
-        self.addCleanup(alias.stop)
-        alias.start()
-        for frame in frames:
-            frame["python_module"] = module
+        self._scrub_minted(scope)
         binding = {"defaults": step.__defaults__, "kwdefaults": step.__kwdefaults__}
-        ns = {
-            "__name__": "precompile_test_artifact",
-            "_FRAMES": _b64(frames),
-            "_BACKENDS": _b64(backends),
-            "_ENTRY_BINDING": _b64(binding),
-            "_DYNAMO_PYTHON_VERSION": tuple(sys.version_info[:2]),
-            "TORCH_VERSION": torch.__version__,
-        }
-        exec(inspect.getsource(driver._build_multigraph_forward), ns)
-        build = ns["_build_multigraph_forward"]
+        build = self._multigraph_driver(frames, backends, binding)
+        ns = build.__globals__
         forward = build()
         self.assertEqual(forward(model, x), expected)
         self.assertEqual(forward(model, x, torch.ones(1)), expected_rest)
@@ -775,10 +800,8 @@ class TestPrecompile(TestCase):
         # default the call omits, *args, a continuation closing over a cell of
         # the entry frame (y, which rows() captures), and a module global the
         # entry reads (_MULTIGRAPH_SCALE, guarded by EQUALS_MATCH).
-        import inspect
         from unittest import mock
 
-        from torch import _precompile_driver as driver
         from torch._dynamo.package import CompilePackage
         from torch._dynamo.precompile_context import EagerCacheArtifact
         from torch._dynamo.precompile_package import default_guard_filter_fn
@@ -818,46 +841,18 @@ class TestPrecompile(TestCase):
             for backend_id, backend in package.cached_backends.items()
         }
         torch._dynamo.reset()
-        # The records name this module, which is __main__ under a script run and
-        # the driver refuses that; serve them from an importable alias of it.
-        module = "precompile_test_captured_module"
-        alias = mock.patch.dict(sys.modules, {module: sys.modules[__name__]})
-        self.addCleanup(alias.stop)
-        alias.start()
-        for frame in frames:
-            frame["python_module"] = module
-
-        ns = {
-            "__name__": "precompile_test_artifact",
-            # An artifact-namespace name the captured module also binds: the
-            # module's binding is the one the rebuilt bytecode must LOAD_GLOBAL.
-            "torch": None,
-            "_FRAMES": _b64(frames),
-            "_BACKENDS": _b64(backends),
-            "_ENTRY_BINDING": _b64(
-                {"defaults": step.__defaults__, "kwdefaults": step.__kwdefaults__}
-            ),
-            "_DYNAMO_PYTHON_VERSION": tuple(sys.version_info[:2]),
-            "TORCH_VERSION": torch.__version__,
-        }
-        exec(inspect.getsource(driver._build_multigraph_forward), ns)
-        build = ns["_build_multigraph_forward"]
+        binding = {"defaults": step.__defaults__, "kwdefaults": step.__kwdefaults__}
+        # torch: an artifact-namespace name the captured module also binds; the
+        # module's binding is the one the rebuilt bytecode must LOAD_GLOBAL.
+        build = self._multigraph_driver(frames, backends, binding, torch=None)
+        ns = build.__globals__
         # In the process that captured, the live compile of step still holds the
         # continuation's resume name: the load refuses, before seeding anything,
         # and sends the user to a fresh process (which the scrub below stands for).
         with self.assertRaisesRegex(PrecompileError, "fresh process"):
             build()
-        # A serving process never traced, so the names Dynamo minted into this
-        # module during capture must not be what makes the guards pass; the
-        # driver binds the same names, so the cleanup drops those too.
         scope = step.__globals__
-        minted = ("__compiled_fn", "__resume_at", "__builtins_dict__", "__import_")
-
-        def scrub():
-            return {n: scope.pop(n) for n in list(scope) if n.startswith(minted)}
-
-        removed = scrub()
-        self.addCleanup(lambda: (scrub(), scope.update(removed)))
+        scrub = self._scrub_minted(scope)
         forward = build()
         self.assertEqual(forward(model, x), expected)
         self.assertEqual(forward(model, x, scale=2.0), expected)
@@ -2906,10 +2901,8 @@ class TestPrecompile(TestCase):
         # during capture. Its record says so, a standalone artifact counts it as
         # covered, and the driver rebuilds it as the plain function it was, over
         # the frame ahead's cells when it has free variables ("closure").
-        import inspect
         from unittest import mock
 
-        from torch import _precompile_driver as driver
         from torch._dynamo.package import CompilePackage
         from torch._dynamo.precompile_context import EagerCacheArtifact
         from torch._dynamo.precompile_package import default_guard_filter_fn
@@ -2949,31 +2942,24 @@ class TestPrecompile(TestCase):
             backend_id: EagerCacheArtifact(key=backend_id, content=backend)
             for backend_id, backend in package.cached_backends.items()
         }
+        # Dynamo records a callback the continuation calls while it runs eager,
+        # trivial and with no resume names. Defined in the capturing script, its
+        # record names __main__; nothing names it, so that module is never
+        # imported and the load does not refuse. Captured before the scrub, so
+        # the scrub also removes the globals this capture mints.
+        cb_package = CompilePackage(_callback_step)
+        torch._dynamo.optimize(
+            backend="eager", package=cb_package, guard_filter_fn=default_guard_filter_fn
+        )(_callback_step)(torch.nn.Linear(4, 4), x, _identity)
+        *_, recorded = _multigraph_frames(cb_package.cache_entry())
+        self.assertEqual((recorded["trivial"], recorded["resume_names"]), (True, []))
+        callback = {**recorded, "python_module": "__main__"}
         torch._dynamo.reset()
-        scope = step.__globals__
-        minted = ("__compiled_fn", "__resume_at", "__builtins_dict__", "__import_")
-
-        def scrub():
-            return {n: scope.pop(n) for n in list(scope) if n.startswith(minted)}
-
-        removed = scrub()
-        self.addCleanup(lambda: (scrub(), scope.update(removed)))
-        module = "precompile_test_captured_module"
-        alias = mock.patch.dict(sys.modules, {module: sys.modules[__name__]})
-        self.addCleanup(alias.stop)
-        alias.start()
-        for frame in frames:
-            frame["python_module"] = module
-        ns = {
-            "__name__": "precompile_test_artifact",
-            "_FRAMES": _b64(frames),
-            "_BACKENDS": _b64(backends),
-            "_ENTRY_BINDING": _b64({"defaults": None, "kwdefaults": None}),
-            "_DYNAMO_PYTHON_VERSION": tuple(sys.version_info[:2]),
-            "TORCH_VERSION": torch.__version__,
-        }
-        exec(inspect.getsource(driver._build_multigraph_forward), ns)
-        forward = ns["_build_multigraph_forward"]()
+        self._scrub_minted(step.__globals__)
+        binding = {"defaults": None, "kwdefaults": None}
+        build = self._multigraph_driver(frames, backends, binding)
+        with mock.patch.dict(build.__globals__, {"_FRAMES": _b64([*frames, callback])}):
+            forward = build()
         served = torch.nn.Linear(4, 4)
         served.load_state_dict(model.state_dict())
         self.assertEqual(forward(served, x), expected_out)
@@ -3045,17 +3031,8 @@ class TestPrecompile(TestCase):
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         self.assertEqual(blob["tracer"], "dynamo")
         self.assertIsNone(blob["artifact"])
-        # A serving process never traced, so the names Dynamo minted into this
-        # module during capture must not be what makes the guards pass.
         torch._dynamo.reset()
-        scope = step.__globals__
-        minted = ("__compiled_fn", "__resume_at", "__builtins_dict__", "__import_")
-
-        def scrub():
-            return {n: scope.pop(n) for n in list(scope) if n.startswith(minted)}
-
-        removed = scrub()
-        self.addCleanup(lambda: (scrub(), scope.update(removed)))
+        self._scrub_minted(step.__globals__)
         f = _runnable_from_pair(python_code, cache, _trusted=True)
         self.assertFalse(f.installed)
         self.assertEqual(f(model, x2), expected2)
