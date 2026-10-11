@@ -401,12 +401,25 @@ class ConstantVariable(VariableTracker):
                         tx,
                         args=list(exc.args),
                     )
-            if (
-                hasattr(operator, name)
+            # operator's own module attributes (__format__, __reduce_ex__, ...)
+            # are not operators; only its aliases like `__add__ = add` are.
+            is_operator = (
+                name in operator.__dict__
                 and name not in _RICHCOMPARE_OPS
                 and len(args) == 1
-                and args[0].is_python_constant()
-            ):
+                and not kwargs
+            )
+            # __round__ is handled below: builtin round() passes ndigits=None by
+            # keyword, which the C method rejects. Rich comparisons can return
+            # NotImplemented and go through the generic path.
+            if not is_operator and name not in ("__round__", *_RICHCOMPARE_OPS):
+                try:
+                    result = getattr(self.value, name)(*const_args, **const_kwargs)
+                except Exception as e:
+                    raise_observed_exception(type(e), tx, args=list(e.args))
+                if ConstantVariable.is_literal(result):
+                    return ConstantVariable.create(result)
+            elif is_operator:
                 add_target = const_args[0]
                 op = getattr(operator, name)
                 if isinstance(
