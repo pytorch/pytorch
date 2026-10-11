@@ -3535,6 +3535,79 @@ class TestPrecompile(TestCase):
                 lambda a: torch.rand_like(a), torch.empty(4), backend="eager"
             )
 
+    def test_capture_of_a_seeded_op_that_cannot_draw_restores_nothing(self):
+        # SDPA traces to a tagged op either way; only the literal dropout_p decides
+        # whether it drew, so p=0.0 leaves a reseed made during capture in place and
+        # p=0.5 rewinds it.
+        def attention(p):
+            def run(a):
+                torch.random.default_generator.manual_seed(7)
+                return torch.nn.functional.scaled_dot_product_attention(
+                    a, a, a, dropout_p=p
+                )
+
+            return run
+
+        q = torch.randn(1, 1, 8, 16)
+        torch.manual_seed(0)
+        with self.assertLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(attention(0.0), q, backend="eager")
+        self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
+        torch.manual_seed(0)
+        before = torch.random.get_rng_state()
+        _precompile_pair(attention(0.5), q, backend="eager")
+        self.assertEqual(torch.random.get_rng_state(), before)
+
+    def test_op_can_draw_reads_the_gate_argument(self):
+        from torch._precompile import _op_can_draw
+
+        aten = torch.ops.aten
+        g = torch.fx.Graph()
+        x, traced = g.placeholder("x"), g.placeholder("t")
+        dropout = aten.native_dropout.default
+        no_dropout = aten._cudnn_attention_forward_no_dropout_inplace.default
+        cases = {
+            "train=False": (dropout, (x, 0.5, False), False),
+            "train=True": (dropout, (x, 0.5, True), True),
+            "train=None": (dropout, (x, 0.5, None), True),
+            "traced train fails closed": (dropout, (x, 0.5, traced), True),
+            "never draws": (no_dropout, (x, x, x, x, x, None, 1, 1), False),
+        }
+        for name, (op, args, can_draw) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(_op_can_draw(g.call_function(op, args)), can_draw)
+
+    def test_rng_gate_table_matches_the_op_registry(self):
+        # The table is a hand-listed subset of the op registry, so it rots silently in
+        # both directions: a typo'd key never fires, and a newly tagged gated op that
+        # is missing is treated as always-drawing. Rebuild it from the static schema
+        # registry, which unlike dir(torch.ops.aten) does not grow as tests touch ops.
+        # "p"/"prob" are NOT gates: bernoulli(p=0.0) still consumes randomness.
+        from torch._precompile import _RNG_GATED_BY_ARG
+
+        def tagged(name, overload):
+            packet = getattr(torch.ops.aten, name.split("::")[1], None)
+            op = getattr(packet, overload or "default", None)
+            return op is not None and torch.Tag.nondeterministic_seeded in op.tags
+
+        gates = ("dropout_p", "train", "training")
+        # Every overload's gate, so overloads that disagree (or one lacking the gate)
+        # fail rather than the first one seen winning.
+        discovered = {}
+        for schema in torch._C._jit_get_all_schemas():
+            if not schema.name.startswith("aten::"):
+                continue
+            if not tagged(schema.name, schema.overload_name):
+                continue
+            args = [a.name for a in schema.arguments]
+            gate = next((g for g in gates if g in args), None)
+            discovered.setdefault(schema.name, set()).add(gate)
+        never = {k for k, v in discovered.items() if v == {None}}
+        gated = {k: {v} for k, v in _RNG_GATED_BY_ARG.items() if v is not None}
+        self.assertEqual({k: v for k, v in discovered.items() if v != {None}}, gated)
+        # Never-drawing entries are tagged ops without a gate argument.
+        self.assertLessEqual(set(_RNG_GATED_BY_ARG) - set(gated), never)
+
     def test_concurrent_captures_are_serialized(self):
         # Capture clears the example tensors' .grad and reparametrizes the example
         # module in place, so two captures of a shared model in flight at once would
