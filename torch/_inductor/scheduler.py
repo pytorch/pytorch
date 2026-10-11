@@ -2734,11 +2734,13 @@ class BaseSchedulerNode:
     outputs_by_name: dict[str, SchedulerBuffer]
     override_estimated_runtime: float | None = None
     read_writes: dependencies.ReadWrites
+    _pruned_weak_deps: OrderedSet[WeakDep]
     unmet_dependencies: OrderedSet[Dep]
     written: bool = False
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
+        self._pruned_weak_deps = OrderedSet()
         self.debug_device_str: Callable[[BaseSchedulerNode], list[str]] = (
             lambda *args, **kwargs: []
         )
@@ -3719,29 +3721,34 @@ def _prune_redundant_deps(
             op_name = name_to_buf[dep.name].defining_op_name()
             name_to_dep_count[name_to_fused_node[op_name].get_name()] += 1
 
-    def should_prune(dep: Dep) -> bool:
-        if isinstance(dep, WeakDep):
-            op_name = name_to_buf[dep.name].defining_op_name()
-            is_redundant = name_to_dep_count[
-                name_to_fused_node[op_name].get_name()
-            ] > 0 and node.scheduler.fusable_weak_dep(
-                dep, name_to_fused_node[op_name], node
-            )
-            # These can occur because fused nodes always gather deps from their snodes
-            # If B has a weakdep on A
-            # B gets fused with C, then any time BC is fused, the weakdep will reappear
-            is_self_dep = name_to_fused_node[op_name] == node
-            return is_redundant or is_self_dep
-        else:
-            return False
+    def should_prune(dep: WeakDep) -> bool:
+        op_name = name_to_buf[dep.name].defining_op_name()
+        is_redundant = name_to_dep_count[
+            name_to_fused_node[op_name].get_name()
+        ] > 0 and node.scheduler.fusable_weak_dep(
+            dep, name_to_fused_node[op_name], node
+        )
+        # These can occur because fused nodes always gather deps from their snodes
+        # If B has a weakdep on A
+        # B gets fused with C, then any time BC is fused, the weakdep will reappear
+        is_self_dep = name_to_fused_node[op_name] == node
+        return is_redundant or is_self_dep
 
-    deps_to_prune = OrderedSet(
-        dep for dep in node.unmet_dependencies if should_prune(dep)
-    )
+    recorded_deps: OrderedSet[Dep] = OrderedSet()
+    node_leaves = OrderedSet(node.get_nodes())
+    for dep in node.unmet_dependencies:
+        if isinstance(dep, WeakDep) and should_prune(dep):
+            mutating_buf = name_to_buf.get(dep.mutating_buf)
+            if mutating_buf is None or mutating_buf.defining_op is None:
+                continue
+            mutating_node = mutating_buf.defining_op
+            if mutating_node not in node_leaves:
+                continue
+            mutating_node._pruned_weak_deps.add(dep)
+            recorded_deps.add(dep)
 
-    if deps_to_prune:
-        node.unmet_dependencies = node.unmet_dependencies - deps_to_prune
-        node.set_read_writes(node.read_writes.remove_reads(deps_to_prune))
+    if recorded_deps:
+        node.set_read_writes(node.read_writes.remove_reads(recorded_deps))
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
@@ -9661,6 +9668,24 @@ class Scheduler:
         fusion_log.info("Shared memory after inversion: %d", score)
         return score
 
+    def _pruned_weak_deps_still_fusable(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        candidate_nodes = (node1, node2)
+        candidate_leaves = tuple(node.get_nodes() for node in candidate_nodes)
+        all_leaves = tuple(itertools.chain.from_iterable(candidate_leaves))
+        for mutating_node in all_leaves:
+            for weak_dep in mutating_node._pruned_weak_deps:
+                if any(
+                    weak_dep.name in node.get_buffer_names() for node in candidate_nodes
+                ) and not self._fusable_weak_dep_for_readers(
+                    weak_dep,
+                    (leaf for leaf in all_leaves if leaf is not mutating_node),
+                    mutating_node,
+                ):
+                    return False
+        return True
+
     def shared_data_after_reordering_loop(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
@@ -10373,6 +10398,11 @@ class Scheduler:
                 can_reorder=can_reorder,
                 allow_mix_order_reduction=allow_mix_order_reduction,
             )
+            if can_fuse and not self._pruned_weak_deps_still_fusable(node1, node2):
+                WhyNoFuse(node1, node2)(
+                    "loop transform invalidated a pruned weak dependency"
+                )
+                can_fuse = False
             if (
                 can_fuse
                 and check_cycle
@@ -10930,16 +10960,27 @@ class Scheduler:
         return True
 
     def fusable_weak_dep(
-        self, weak_dep: WeakDep, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        self,
+        weak_dep: WeakDep,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
     ) -> bool:
         if weak_dep.name not in node1.get_buffer_names():
             return False
 
+        return self._fusable_weak_dep_for_readers(weak_dep, node1.get_nodes(), node2)
+
+    def _fusable_weak_dep_for_readers(
+        self,
+        weak_dep: WeakDep,
+        reading_nodes: Iterable[BaseSchedulerNode],
+        mutating_node: BaseSchedulerNode,
+    ) -> bool:
         # A weak dep can be fused if and only if the fused operation acts inplace
         # on the buffer being mutated. i.e. the same index is being read then mutated
         mutating_writes = [
             write
-            for write in node2.read_writes.writes
+            for write in mutating_node.read_writes.writes
             if write.name == weak_dep.mutating_buf
         ]
         if len(mutating_writes) != 1:
@@ -10960,11 +11001,8 @@ class Scheduler:
             return False
 
         real_name = self.mutation_real_name[weak_dep.mutating_buf]
-        relevant_reading_nodes = [node1]
-        if isinstance(node1, ForeachKernelSchedulerNode):
-            relevant_reading_nodes = node1.snodes
         num_concurrent_reads = 0
-        for reading_node in relevant_reading_nodes:
+        for reading_node in reading_nodes:
             # A read of an earlier mutation of the same buffer (the output of an
             # index_put_ into it, say) reads the same memory under another name.
             relevant_reads = [
@@ -10974,7 +11012,7 @@ class Scheduler:
             ]
             if not relevant_reads:
                 continue
-            device = node2.get_device()
+            device = mutating_node.get_device()
             if device is not None and (
                 (device.type == "cpu" and config.cpu_backend == "halide")
                 or (device.type == "cuda" and config.cuda_backend == "halide")
@@ -10992,7 +11030,10 @@ class Scheduler:
                 for read in relevant_reads
             ):
                 return False
-        return num_concurrent_reads <= 1
+        # CPU loop reordering is disabled, so multiple same-index reads in
+        # fused leaves cannot diverge through a loop transform. GPU remains
+        # conservative about reading a mutation buffer in multiple leaves.
+        return num_concurrent_reads <= 1 or mutating_node.is_cpu()
 
     @staticmethod
     def _same_index_with_prefix_size(read: MemoryDep, write: MemoryDep) -> bool:

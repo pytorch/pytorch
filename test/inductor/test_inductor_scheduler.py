@@ -152,6 +152,7 @@ class TestScheduler(TestCase):
         node.get_device.return_value = device
         node.get_nodes.return_value = [node]
         node.get_buffer_names.return_value = OrderedSet()
+        node._pruned_weak_deps = OrderedSet()
         node.used_buffer_names.return_value = OrderedSet()
         node.is_template.return_value = False
         node.is_reduction.return_value = False

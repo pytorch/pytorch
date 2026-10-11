@@ -139,6 +139,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -151,6 +152,7 @@ importlib.import_module("filelock")
 
 from torch._inductor import config, cpu_vec_isa, test_operators
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner, FxCompileMode
+from torch._inductor.fx_passes.joint_graph import remove_no_ops
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (  # noqa: F401
@@ -9306,29 +9308,51 @@ for dtype in (torch.int32, torch.int64):
 
         foo_opt = torch.compile(matmul_with_op)
 
-        # test no-op
+        # Floating-point add/sub by zero can change the sign of zero, so only
+        # multiplication and division by one should be kernel-free.
         fns = (
-            lambda x: x + torch.zeros([256, 256], dtype=torch.float32, device=x.device),
-            lambda x: x - torch.zeros([256, 256], dtype=torch.float32, device=x.device),
-            lambda x: x * torch.ones([256, 256], dtype=torch.float32, device=x.device),
-            lambda x: x / torch.ones([256, 256], dtype=torch.float32, device=x.device),
-            lambda x: x + 0,
-            lambda x: x - 0,
-            lambda x: x * 1,
-            lambda x: x / 1,
+            (
+                lambda x: x
+                + torch.zeros([256, 256], dtype=torch.float32, device=x.device),
+                False,
+            ),
+            (
+                lambda x: x
+                - torch.zeros([256, 256], dtype=torch.float32, device=x.device),
+                False,
+            ),
+            (
+                lambda x: x
+                * torch.ones([256, 256], dtype=torch.float32, device=x.device),
+                True,
+            ),
+            (
+                lambda x: x
+                / torch.ones([256, 256], dtype=torch.float32, device=x.device),
+                True,
+            ),
+            (lambda x: x + 0, False),
+            (lambda x: x - 0, False),
+            (lambda x: x * 1, True),
+            (lambda x: x / 1, True),
         )
 
         inps = [torch.rand([256, 256], device=self.device) for _ in range(2)]
 
-        for fn in fns:
+        for fn, should_eliminate in fns:
             out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
             self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
             atol, rtol = None, None
-            if self.device == "cpu":
-                FileCheck().check_not("cpp_fused").run(source_codes[0])
+            if should_eliminate:
+                if self.device == "cpu":
+                    FileCheck().check_not("cpp_fused").run(source_codes[0])
+                else:
+                    FileCheck().check_not("triton.jit").run(source_codes[0])
+            elif self.device == "cpu":
+                FileCheck().check("cpp_fused").run(source_codes[0])
             else:
-                FileCheck().check_not("triton.jit").run(source_codes[0])
+                FileCheck().check("triton.jit").run(source_codes[0])
 
         # test dtype conversion
         for lowp_dtype in [torch.float16, torch.bfloat16]:
@@ -9338,7 +9362,7 @@ for dtype in (torch.int32, torch.int64):
                 torch.rand([256, 256], device=self.device, dtype=lowp_dtype)
                 for _ in range(2)
             ]
-            for fn in fns:
+            for fn, _ in fns:
                 out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
                 self.assertEqual(
                     out, matmul_with_op(inps[0], inps[1], fn), atol=atol, rtol=rtol
@@ -23305,6 +23329,136 @@ def _run_and_get_stripped_kernels(
 ) -> tuple[_T, list[str]]:
     result, codes = run_and_get_kernels(fn, *args, **kwargs)
     return result, [_strip_tmp_path(code) for code in codes]
+
+
+@instantiate_parametrized_tests
+class NoOpFoldingTests(InductorTestCase):
+    def _trace_and_fold(self, fn, *args, identity_target=None, zero_target=None):
+        gm = make_fx(fn, tracing_mode="real")(*args)
+        if identity_target is not None:
+            self.assertEqual(
+                len(gm.graph.find_nodes(op="call_function", target=identity_target)), 1
+            )
+        zeros = OrderedSet()
+        if zero_target is not None:
+            zero_nodes = gm.graph.find_nodes(op="call_function", target=zero_target)
+            self.assertEqual(len(zero_nodes), 1)
+            zeros = OrderedSet(zero_nodes)
+        remove_no_ops(gm, zeros, OrderedSet())
+        gm.recompile()
+        return gm
+
+    def test_identity_before_multiple_mm_consumers_is_folded(self):
+        def fn(x, a, b):
+            value = x * 1
+            return torch.mm(value, a), torch.mm(value, b)
+
+        x = torch.randn(2, 2)
+        a = torch.randn(2, 2)
+        b = torch.randn(2, 2)
+        gm = self._trace_and_fold(fn, x, a, b, identity_target=aten.mul.Tensor)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 0
+        )
+        self.assertEqual(gm(x, a, b), fn(x, a, b))
+
+    def test_identity_of_slice_before_value_consumer_is_folded(self):
+        def fn(x):
+            return torch.sin(x[:, 1:] * 1)
+
+        x = torch.randn(3, 4)
+        gm = self._trace_and_fold(fn, x, identity_target=aten.mul.Tensor)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 0
+        )
+        self.assertEqual(gm(x), fn(x))
+
+    @parametrize("mutation", ["direct", "view", "unbind"])
+    def test_identity_before_mm_preserves_mutated_replacement(self, mutation):
+        def fn(x, y):
+            value = x * 1
+            if mutation == "view":
+                x.view(-1).add_(10)
+            elif mutation == "unbind":
+                torch.unbind(x)[0].add_(10)
+            else:
+                x.add_(10)
+            return torch.mm(value, y)
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+        gm = self._trace_and_fold(fn, x, y)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        self.assertEqual(gm(x.clone(), y), fn(x.clone(), y))
+
+    def test_identity_of_view_before_mm_preserves_base_mutation(self):
+        def fn(x, y):
+            view = x.view(2, 2)
+            value = view * 1
+            x.add_(10)
+            return torch.mm(value, y)
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+        gm = self._trace_and_fold(fn, x, y)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        self.assertEqual(gm(x.clone(), y), fn(x.clone(), y))
+
+    @parametrize("case", ("float_negative_zero", "complex_conjugate"))
+    def test_add_zero_preserves_signed_zero(self, case):
+        if case == "complex_conjugate":
+            x = torch.tensor([-1 + 0j], dtype=torch.complex64)
+
+            def fn(x):
+                return torch.angle(x.conj() + 0)
+
+        else:
+            x = torch.tensor([-0.0])
+
+            def fn(x):
+                return torch.sin(x + 0)
+
+        gm = self._trace_and_fold(fn, x)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.add.Tensor)), 1
+        )
+        self.assertEqual(torch.signbit(gm(x)), torch.signbit(fn(x)))
+
+    def test_sub_negative_zero_preserves_signed_zero(self):
+        def fn(x):
+            return torch.sin(x - torch.full_like(x, -0.0))
+
+        x = torch.tensor([-0.0])
+        gm = self._trace_and_fold(fn, x, zero_target=aten.full_like.default)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.sub.Tensor)), 1
+        )
+        self.assertEqual(torch.signbit(gm(x)), torch.signbit(fn(x)))
+
+    @parametrize(
+        "op_name",
+        ["add", "sub", "mul", "div"],
+    )
+    @parametrize("consumer", ["sin", "sum"])
+    def test_identity_before_value_consumer_preserves_value(self, op_name, consumer):
+        op = getattr(aten, op_name).Tensor
+        identity = 0 if op_name in ("add", "sub") else 1
+
+        def fn(x):
+            return getattr(torch, consumer)(op(x, identity))
+
+        x = torch.ones(2)
+        gm = self._trace_and_fold(fn, x)
+        # Floating-point addition/subtraction by zero can change its sign.
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=op)),
+            1 if op_name in ("add", "sub") else 0,
+        )
+        self.assertEqual(gm(x), fn(x))
 
 
 if __name__ == "__main__":
