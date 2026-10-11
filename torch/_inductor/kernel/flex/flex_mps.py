@@ -14,6 +14,11 @@ from .common import infer_dense_strides, maybe_realize
 
 
 BLOCK_M = 32
+COOPERATIVE_BLOCK_M = 8
+COOPERATIVE_NUM_THREADS = 128
+# Empirical ceiling, not a universal hardware cutoff. Explicit shared scratch
+# is 4 * (8 * D_QK + 8 * 128 + 8 * 4), or 28,800 bytes at this limit.
+COOPERATIVE_MAX_HEAD_DIM = 768
 
 
 def lower_mps(
@@ -106,15 +111,30 @@ def lower_mps(
     if not sizevars.evaluate_expr(sympy.Eq(B, Bkv) | sympy.Eq(Bkv, 1)):
         raise AssertionError(f"Bq and Bkv must broadcastable. Got Bq={B} and Bkv={Bkv}")
 
+    # Conservative policy from M4 forward measurements. Small half heads
+    # regressed; unequal head widths and BF16 need broader performance coverage.
+    # This checks the realized IR layout, not arbitrary original tensor views.
+    use_cooperative = (
+        dtype in (torch.float32, torch.float16)
+        and 48 <= d_qk <= COOPERATIVE_MAX_HEAD_DIM
+        and d_v == d_qk
+        and all(
+            sizevars.statically_known_equals(inp.get_stride()[-1], 1)
+            for inp in (query, key, value)
+        )
+    )
+    block_m = COOPERATIVE_BLOCK_M if use_cooperative else BLOCK_M
+    num_threads = COOPERATIVE_NUM_THREADS if use_cooperative else BLOCK_M
+
     SPARSE_KV_BLOCK_SIZE_val = sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE_val = sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
-    if SPARSE_Q_BLOCK_SIZE_val < BLOCK_M or SPARSE_Q_BLOCK_SIZE_val % BLOCK_M != 0:
-        # Each threadgroup tiles BLOCK_M query rows and looks up sparse-mask info
+    if SPARSE_Q_BLOCK_SIZE_val < block_m or SPARSE_Q_BLOCK_SIZE_val % block_m != 0:
+        # Each threadgroup tiles block_m query rows and looks up sparse-mask info
         # at sparse_q_idx = m_base / SPARSE_Q_BLOCK_SIZE; a smaller/non-multiple
         # SPARSE_Q_BLOCK_SIZE makes one threadgroup span multiple sparse blocks.
         raise NotImplementedError(
             f"flex_attention on MPS requires SPARSE_Q_BLOCK_SIZE to be a positive "
-            f"multiple of {BLOCK_M}, got {SPARSE_Q_BLOCK_SIZE_val}"
+            f"multiple of {block_m}, got {SPARSE_Q_BLOCK_SIZE_val}"
         )
 
     if not sizevars.statically_known_multiple_of(Hq, Hkv):
@@ -168,13 +188,14 @@ def lower_mps(
         score_mod_graph=subgraph.graph_module,
         mask_mod_graph=mask_graph.graph_module,
         has_full_blocks=has_full_blocks,
-        block_m=BLOCK_M,
+        block_m=block_m,
         scale=scale_val,
         score_captured=score_meta,
         mask_captured=mask_meta,
         write_lse=write_lse,
         write_max=write_max,
         captures_fit_int32=captures_fit_int32,
+        use_cooperative=use_cooperative,
     )
 
     out_size = [B, Hq, seq_len_q, v_head_dim]
@@ -238,9 +259,9 @@ def lower_mps(
     # the scalar_capture_names appended in _generate_metal_shader.
     scalar_args += [*score_scalars, *mask_scalars]
 
-    # (num_q_blocks, Hq, B); each threadgroup owns BLOCK_M query rows.
+    # (num_q_blocks, Hq, B); each threadgroup owns block_m query rows.
     grid = (
-        sympy.ceiling(seq_len_q / BLOCK_M),
+        sympy.ceiling(seq_len_q / block_m),
         Hq,
         B,
     )
@@ -266,7 +287,8 @@ def lower_mps(
         shader_source=shader_source,
         scalar_args=scalar_args,
         grid=grid,
-        block_m=BLOCK_M,
+        block_m=block_m,
+        num_threads=num_threads,
         num_mutated_outputs=int(write_lse) + int(write_max),
     )
 
