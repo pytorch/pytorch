@@ -22,7 +22,6 @@ from unittest import mock
 import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
-from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._precompile import _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.compiler.precompile import (
@@ -1055,9 +1054,6 @@ class TestPrecompile(TestCase):
         self.assertEqual(ns["forward"](m, x), m(x))
 
     @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA + Triton")
-    @mock.patch.object(
-        PythonWrapperCodegen, "defines_triton_kernels_as_code", lambda self: True
-    )
     def test_artifact_with_module_level_kernels_runs_from_its_file(self):
         # A module-level Triton kernel reads its source back from the module's file,
         # which both the header's runpy.run_path recipe and the inlined load provide.
