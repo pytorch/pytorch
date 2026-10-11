@@ -44,10 +44,10 @@ from torch.utils._triton import get_triton_version, has_triton_stable_tma_api
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
+    forwarded_cuda_compile_options,
     get_importable_constexpr_types,
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
-    tlx_only_cuda_options,
     tlx_only_hip_options,
     TMA_ALIGNMENT,
     triton_version_uses_attrs_dict,
@@ -86,6 +86,7 @@ from .runtime_utils import (
     validate_triton_config,
 )
 from .static_triton_launcher import (
+    is_registered_static_launch_device,
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
@@ -879,16 +880,14 @@ class CachingAutotuner(KernelInterface):
             raise NoTritonConfigsError("No triton configs are available")
 
         compile_results = []
-        exc = None
+        exc_msg = ""
         for c in self.configs:
             try:
                 compile_results.append(self._precompile_config(c))
             except (OutOfResources, PTXASError, IntelGPUError) as e:
-                exc = e
+                exc_msg = f"{type(e).__name__}: {e}"
         if len(compile_results) == 0:
-            raise NoTritonConfigsError(
-                f"No valid triton configs. {type(exc).__name__}: {exc}"
-            )
+            raise NoTritonConfigsError(f"No valid triton configs. {exc_msg}")
         self.compile_results = compile_results
         self.configs = None
 
@@ -1370,7 +1369,7 @@ class CachingAutotuner(KernelInterface):
         compile_meta["device_type"] = self.device_props.type
         compile_meta["cc"] = self.device_props.cc
 
-        for k in tlx_only_cuda_options():
+        for k in forwarded_cuda_compile_options():
             if v := getattr(cfg, k, None):
                 compile_meta[k] = v
 
@@ -1389,6 +1388,9 @@ class CachingAutotuner(KernelInterface):
             "debug": compile_meta["debug"],
             "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
         }
+        # Backends without a maxnreg option drop it in parse_options.
+        if (maxnreg := getattr(cfg, "maxnreg", None)) is not None:
+            options["maxnreg"] = maxnreg
         if "enable_fp_fusion" in compile_meta:
             options["enable_fp_fusion"] = compile_meta["enable_fp_fusion"]
         if HAS_WARP_SPEC:
@@ -1411,7 +1413,7 @@ class CachingAutotuner(KernelInterface):
             )
             if compile_meta.get("disable_ftz", False):
                 options["enable_reflect_ftz"] = False
-            for k in tlx_only_cuda_options():
+            for k in forwarded_cuda_compile_options():
                 if v := getattr(cfg, k, None):
                     options[k] = v
         # Backend options are consumed by Triton out-of-band from the kernel
@@ -3098,8 +3100,13 @@ class StaticTritonCompileResult(CompileResult[_T]):
             return None
 
         def check_can_launch() -> _KernelType:
-            if triton_meta.get("device_type") not in ("cuda", "xpu", "hip"):
-                raise CannotStaticallyLaunchKernel("Non-cuda/XPU/ROCm device")
+            if not is_registered_static_launch_device(
+                triton_meta.get("device_type", "")
+            ):
+                raise CannotStaticallyLaunchKernel(
+                    "No static Triton kernel launcher registered for device type "
+                    f"{triton_meta.get('device_type')}",
+                )
 
             if triton_meta.get("device_type") == "xpu" and XPU_KERNEL_FORMAT == "spv":
                 raise CannotStaticallyLaunchKernel(
@@ -5184,7 +5191,7 @@ def template(
             if k in triton_meta:
                 config_kwargs[k] = triton_meta[k]
 
-    for k in tlx_only_cuda_options():
+    for k in forwarded_cuda_compile_options():
         if v := triton_meta.get(k, None):
             config_args[k] = v
 
@@ -5221,6 +5228,10 @@ def config_to_dict(config: Config) -> dict[str, Any]:
         "num_warps": config.num_warps,
         "num_stages": config.num_stages,
     }
+    # config_from_dict pops maxnreg back out (_pop_config_kwargs), so it must
+    # survive the round trip or a user config's register cap silently vanishes.
+    if getattr(config, "maxnreg", None) is not None:
+        config_dict["maxnreg"] = config.maxnreg
     if HAS_WARP_SPEC:
         config_dict.update(
             {
