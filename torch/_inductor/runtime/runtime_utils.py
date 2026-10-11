@@ -215,21 +215,29 @@ def triton_config_compile_options_from_dict(
     return _pop_triton_config_kwargs(config)
 
 
-def triton_config_from_dict(config: dict[str, Any]) -> Config:
-    if {"kwargs", "compile_options"} <= set(config):
-        if not _is_namespaced_triton_config(config):
-            raise ValueError("invalid namespaced Triton config")
-        return triton_config_from_compile_options(
-            {**config["kwargs"]},
-            {**config["compile_options"]},
-            config.get("extra_options"),
-        )
+def triton_config_from_namespaced_dict(config: dict[str, Any]) -> Config:
+    if not _is_namespaced_triton_config(config):
+        raise ValueError("invalid namespaced Triton config")
+    return triton_config_from_compile_options(
+        {**config["kwargs"]},
+        {**config["compile_options"]},
+        config.get("extra_options"),
+    )
+
+
+def triton_config_from_flat_dict(config: dict[str, Any]) -> Config:
     from .triton_compat import Config
 
     return Config(
         triton_config_kwargs_from_dict(config),
         **triton_config_compile_options_from_dict(config),
     )
+
+
+def triton_config_from_dict(config: dict[str, Any]) -> Config:
+    if _is_namespaced_triton_config(config):
+        return triton_config_from_namespaced_dict(config)
+    return triton_config_from_flat_dict(config)
 
 
 def _pop_triton_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:

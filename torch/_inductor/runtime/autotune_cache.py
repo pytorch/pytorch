@@ -38,7 +38,7 @@ import torch
 from torch._guards import CompileContext
 from torch._inductor.runtime.runtime_utils import (
     cache_dir,
-    triton_config_from_dict,
+    triton_config_from_namespaced_dict,
     triton_config_to_dict,
     triton_config_to_hashable,
 )
@@ -689,7 +689,7 @@ def _load_cached_autotuning(
     if "version" not in cached_config:
         cached_config = {"version": 1, **cached_config}
     try:
-        triton_config = triton_config_from_dict(cached_config)
+        triton_config = triton_config_from_namespaced_dict(cached_config)
     except (KeyError, TypeError, ValueError):
         return None
     extra_options = triton_config.extra_options

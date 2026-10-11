@@ -7323,6 +7323,28 @@ class TestAutotuneCacheExtraOptions(TestCase):
         self.assertEqual(legacy.kwargs["version"], 1)
 
     @requires_triton()
+    def test_flat_config_preserves_namespaced_key_names(self):
+        from torch._inductor.runtime.runtime_utils import triton_config_from_dict
+        from torch._inductor.runtime.triton_heuristics import (
+            fixed_config,
+            user_autotune,
+        )
+
+        flat_config = {
+            "kwargs": 4,
+            "compile_options": 8,
+            "num_warps": 4,
+            "num_stages": 1,
+        }
+        config = triton_config_from_dict(flat_config)
+
+        self.assertEqual(config.kwargs, {"kwargs": 4, "compile_options": 8})
+        self.assertEqual(config.num_warps, 4)
+        self.assertEqual(config.num_stages, 1)
+        self.assertTrue(callable(fixed_config(flat_config, None, {}, {})))
+        self.assertTrue(callable(user_autotune([flat_config], {})))
+
+    @requires_triton()
     @parametrize(
         "option,first_value,selected_value",
         (

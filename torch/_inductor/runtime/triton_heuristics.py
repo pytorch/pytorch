@@ -82,6 +82,7 @@ from .runtime_utils import (
     next_power_of_2,
     triton_cache_dir,
     triton_config_from_dict as config_from_dict,
+    triton_config_from_flat_dict as config_from_flat_dict,
     triton_config_kwargs_from_dict as config_kwargs_from_dict,
     triton_config_to_dict as config_to_dict,
     triton_config_to_hashable,
@@ -5315,7 +5316,7 @@ def fixed_config(
     """
     return cached_autotune(
         None,
-        [config_from_dict(config)],
+        [config_from_flat_dict(config)],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.FIXED,
@@ -5336,7 +5337,7 @@ def user_autotune(
     if len(configs) == 0:
         configs = [triton.Config({})]
     else:
-        configs = [*map(config_from_dict, configs)]
+        configs = [*map(config_from_flat_dict, configs)]
     return cached_autotune(
         None,
         configs,
