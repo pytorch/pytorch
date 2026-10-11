@@ -2397,7 +2397,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 # str(expr) is key for self.symbol_name_to_range
                 expr_str = str(sym)
                 for arg in sym.args:
-                    self._parse_sym_expr(arg)
+                    _process_sym_expr(arg)
                 # symbol caching
                 if expr_str in self.symbol_name_to_symbol:
                     sym = self.symbol_name_to_symbol[expr_str]
