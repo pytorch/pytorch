@@ -118,7 +118,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
+from .dicts import ConstDictVariable, OrderedDictVariable, pyanydict_check
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
@@ -1152,11 +1152,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
         elif name == "fromkeys" and issubclass(self.value, dict):
-            if not issubclass(self.value, collections.OrderedDict):
-                no_keywords(tx, f"{self.value.__name__}.fromkeys", kwargs)
-                check_positional(tx, "fromkeys", len(args), 1, 2)
+            if issubclass(self.value, collections.OrderedDict):
+                return tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.odict_fromkeys),
+                    [self, *args],
+                    kwargs,
+                )
+            no_keywords(tx, f"{self.value.__name__}.fromkeys", kwargs)
+            check_positional(tx, "fromkeys", len(args), 1, 2)
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, self, *args, **kwargs
+                tx, self, *args
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
@@ -5267,8 +5272,10 @@ class DefaultDictVariable(ConstDictVariable):
         key: "VariableTracker",
     ) -> "VariableTracker":
         """defaultdict.__getitem__: dict lookup with __missing__ fallback."""
-        if key in self:
-            return self.getitem_const(tx, key)
+        hashed = self._lookup_key(tx, key)
+        value = self.items.get(hashed)
+        if value is not None:
+            return value
         return self.call_method(tx, "__missing__", [key], {})
 
     def nb_or_impl(
@@ -5290,28 +5297,14 @@ class DefaultDictVariable(ConstDictVariable):
         if not isinstance(self_, DefaultDictVariable):
             raise AssertionError(f"Expected DefaultDictVariable, got {type(self_)}")
 
-        if not pydict_check(other_):
+        if not pyanydict_check(other_):
             return variables.ConstantVariable.create(NotImplemented)
 
-        # A UserDefinedDictVariable is now itself a ConstDictVariable (MI), so
-        # `left.items` is the storage in both cases.
-        if not isinstance(left, ConstDictVariable):
-            raise AssertionError(
-                f"Expected ConstDictVariable, got {type(left)}: {left}"
-            )
-        items = left.items
-
-        new = tx.output.side_effects.track_new_user_defined_object(
-            VariableTracker.build(tx, dict),
-            VariableTracker.build(tx, collections.defaultdict),
-            [],
-            tx=tx,
+        cls = VariableTracker.build(tx, type).call_function(tx, [self_], {})
+        new = cast(
+            ConstDictVariable, cls.call_function(tx, [self_.default_factory, left], {})
         )
-        new.default_factory = self.default_factory  # type: ignore[missing-attribute]
-        new.items.update(items)  # type: ignore[missing-attribute]
-        default_factory = new.default_factory  # type: ignore[missing-attribute]
-        tx.output.side_effects.store_attr(new, "default_factory", default_factory)
-        new.call_method(tx, "update", [right], {})
+        ConstDictVariable.dict_update(new, tx, [right], {})
         return new
 
     def nb_inplace_or_impl(
