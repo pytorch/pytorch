@@ -21,6 +21,7 @@ from sympy import Expr
 import torch
 import torch._logging
 import torch.fx
+import torch.utils._pytree as pytree
 from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
@@ -1641,7 +1642,14 @@ class GraphLowering(torch.fx.Interpreter):
         target: str,  # type: ignore[override]
         args: tuple[()],  # type: ignore[override]
         kwargs: dict[str, object],
-    ) -> Constant | TensorBox | ShapeAsConstantBuffer | ir.Subgraph | TorchBindObject:
+    ) -> (
+        Constant
+        | TensorBox
+        | ShapeAsConstantBuffer
+        | ir.Subgraph
+        | TorchBindObject
+        | pytree.TreeSpec
+    ):
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
 
@@ -1661,6 +1669,9 @@ class GraphLowering(torch.fx.Interpreter):
             )
             self.seen_subgraphs[target] = out
             return out
+
+        if isinstance(value, pytree.TreeSpec):
+            return value
 
         if isinstance(value, torch._C.ScriptObject):
             self.torchbind_constants[target] = value
