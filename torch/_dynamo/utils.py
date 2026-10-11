@@ -22,6 +22,7 @@ import dataclasses
 import datetime
 import dis
 import enum
+import fractions
 import functools
 import gc
 import importlib
@@ -3022,6 +3023,7 @@ common_constant_types: set[type] = {
     bool,
     str,
     bytes,
+    fractions.Fraction,
     type(None),
     Ellipsis.__class__,
     NotImplemented.__class__,
