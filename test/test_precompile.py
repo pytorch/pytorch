@@ -7372,6 +7372,74 @@ class TestExportPython(TestCase):
             self.assertEqual(loaded(x), fn(x))
         self.assertTrue(any("produced by torch" in m for m in cm.output))
 
+    def test_code_devices_reads_the_literal_device_forms(self, device):
+        from torch.compiler._export_python import _code_devices
+
+        src = (
+            "buf0 = empty_strided_cpu_pinned((4,), (1,), torch.float32)\n"
+            "a = x.cuda()\n"
+            "b = torch.ones(4, device='xpu:0')\n"
+            "c = y.to('meta')\n"
+            "d = torch.device('mps')\n"
+            "e = async_compile.triton('k', device_str='hpu')\n"
+        )
+        self.assertEqual(_code_devices(src), {"cpu", "cuda", "xpu", "meta", "mps"})
+
+    @unittest.skipUnless(TEST_CUDA, "needs a device the inputs do not live on")
+    def test_autocast_stamp_covers_devices_only_the_graph_touches(self, device):
+        # Input devices alone miss a graph whose inputs are on one device and whose
+        # matmuls run on another, so the stamp must name the compute device too.
+        if torch.device(device).type != "cpu":
+            self.skipTest("the point is inputs on cpu and compute on the accelerator")
+
+        def fn(inp):
+            return (inp.cuda() @ inp.cuda().t()).cpu()
+
+        path = self._tmp_path("autocast_graph.py")
+        x = make_tensor((8, 8), device="cpu", dtype=torch.float32)
+        run = torch.compiler.export_python(path=path)(fn)
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            run(x)
+            run(x)
+        with open(path, encoding="utf-8") as f:
+            stamp = next(l for l in f if "autocast:" in l)
+        self.assertIn("cuda", stamp)
+        with self.assertRaisesRegex(PrecompileError, "autocast"):
+            run(x)  # outside the region the kernels were built for
+
+        # A pure-CPU helper first called inside a CUDA autocast region is not locked to it.
+        def cpu_only(inp):
+            return inp.sin() + 1
+
+        helper = torch.compiler.export_python(path=self._tmp_path("cpu_only.py"))(
+            cpu_only
+        )
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            helper(x)
+        self.assertEqual(helper(x), cpu_only(x))
+
+    def test_meta_module_tensor_does_not_crash_the_autocast_stamp(self, device):
+        # autocast does not model meta (is_autocast_enabled("meta") raises), and a module
+        # can carry a meta tensor it never reads (deferred init), so the stamp must skip
+        # devices autocast does not know.
+        class DeferredInit(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, device=device)
+                self.register_buffer("proto", torch.empty(4, device="meta"))
+                self.spare = torch.nn.Parameter(torch.empty(4, device="meta"))
+
+            def forward(self, inp):
+                return self.linear(inp)
+
+        mod = DeferredInit()
+        x = make_tensor((2, 4), device=device, dtype=torch.float32)
+        path = self._tmp_path("deferred.py")
+        run = torch.compiler.export_python(path=path)(lambda m, t: m(t))
+        self.assertEqual(run(mod, x), mod(x))
+        self.assertTrue(os.path.exists(path))  # published, so no capture is re-paid
+        self.assertEqual(run(mod, x), mod(x))  # and the loaded artifact runs too
+
     def test_overlap_is_bytes_not_storage_identity(self, device):
         # Two tensors can reach the same bytes through DIFFERENT UntypedStorages --
         # from_numpy on overlapping slices, frombuffer, DLPack, __cuda_array_interface__
@@ -7586,6 +7654,34 @@ class TestExportPython(TestCase):
         # ...and the rejected call left the caller's tensor alone.
         self.assertEqual(independent, torch.zeros(4, device=device))
 
+    def test_dropping_a_checked_stamp_warns(self, device):
+        # The docstring promises a per-call warning for each dropped checked stamp.
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+        for tag, name in (
+            ("input-overlap:", "input-aliasing"),
+            ("autocast:", "autocast"),
+        ):
+            path = self._tmp_path(f"drop_{name}.py")
+
+            def build():
+                @torch.compiler.export_python(path=path, backend="eager")
+                def run(a, b):
+                    return a + b
+
+                return run
+
+            build()(x, x)
+            with open(path, encoding="utf-8") as f:
+                lines = f.readlines()
+            kept = [line for line in lines if tag not in line]
+            self.assertEqual(len(kept), len(lines) - 1, f"{tag} stamp not found")
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(kept)
+            with self.assertLogs("torch.compiler._export_python", "WARNING") as logs:
+                build()(x, x)
+            expected = f"carries no recorded {name} stamp"
+            self.assertTrue(any(expected in m for m in logs.output), logs.output)
+
     def test_input_aliasing_is_guarded(self, device):
         # Aliasing decides what an in-place mutation means and is baked into the graph
         # with no runtime guard, so an artifact captured on aliased inputs computes --
@@ -7615,6 +7711,41 @@ class TestExportPython(TestCase):
         c = torch.arange(4.0, device=device)
         with self.assertRaisesRegex(PrecompileError, "do not share memory"):
             distinct(c, c)
+
+    def test_autocast_state_is_guarded(self, device):
+        # Ambient autocast picks the dtypes the kernels were specialized for, and is
+        # invisible to make_fx's guards, so calling under a different autocast context
+        # silently returns the capture-time dtype.
+        @torch.compiler.export_python(
+            path=self._tmp_path("autocast.py"), backend="eager"
+        )
+        def run(a, b):
+            return a @ b
+
+        device_type = torch.device(device).type
+        x = make_tensor((8, 8), device=device, dtype=torch.float32)
+        self.assertEqual(run(x, x).dtype, torch.float32)
+        with self.assertRaisesRegex(PrecompileError, "autocast state does not match"):
+            with torch.autocast(device_type, torch.bfloat16):
+                run(x, x)
+
+    def test_autocast_dtype_is_guarded_and_a_matching_context_reloads(self, device):
+        device_type = torch.device(device).type
+        path = self._tmp_path("autocast_dtype.py")
+
+        def fn(a, b):
+            return a @ b
+
+        x = make_tensor((8, 8), device=device, dtype=torch.float32)
+        export = torch.compiler.export_python(path=path, backend="eager")
+        with torch.autocast(device_type, torch.bfloat16):
+            expected = export(fn)(x, x)
+            # A fresh decorator reads the stamp back from disk.
+            reloaded = torch.compiler.export_python(path=path, backend="eager")(fn)
+            self.assertEqual(reloaded(x, x), expected)
+        with self.assertRaisesRegex(PrecompileError, "autocast state does not match"):
+            with torch.autocast(device_type, torch.float16):
+                torch.compiler.export_python(path=path, backend="eager")(fn)(x, x)
 
     def test_loading_an_artifact_leaves_its_directory_alone(self, device):
         # Triton's autotune cache wrote a <hash>.best_config next to the artifact,
