@@ -117,6 +117,256 @@ def _require_cuda_bindings() -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Default capture-end pass: rewrite small memset nodes into fill-kernel nodes.
+#
+# A cudaMemsetAsync recorded into a CUDA graph (e.g. zero_() on a dense tensor)
+# becomes a memset node. The GPU replays a memset node several microseconds
+# slower than a kernel node when the buffer is small (GB200: +2-4 us per node
+# at <= 4 KiB, no difference from 16 KiB up), and it breaks kernel-to-kernel
+# launch pipelining inside the graph. A model that zeroes one small buffer per
+# layer inside a captured graph pays that per node per replay. The pass runs
+# once per capture as the first global capture-end hook, on the live
+# cudaGraph_t, and keeps eager execution untouched.
+#
+# The replacement node is torch's own fill_ kernel. For each distinct
+# (nbytes, value, dst % 16) the kernel is side-captured once on a tensor that
+# aliases the memset destination, and its kernel-node parameters are cached;
+# every further node with the same key reuses them with only the destination
+# pointer argument patched (found by value in the parameter blocks, whose sizes
+# come from cuFuncGetParamInfo, so nothing about the kernel's argument layout
+# is assumed). The node is inserted with the memset's incoming edge data and
+# its outgoing edges are re-added with their original edge data.
+#
+# Requires cuda-bindings >= 13 (the edge-data graph API); otherwise the pass is
+# not registered. Configuration: ``_memset_to_kernel_max_bytes`` (module level,
+# default 8192; 0 disables the pass).
+# ---------------------------------------------------------------------------
+_memset_to_kernel_max_bytes: int = 8192
+_memset_to_kernel_warned = False
+# (nbytes, value, dst % 16) -> (func handle as int, grid, block, shared_mem, param_blocks, dst_at_capture)
+_fill_kernel_cache: dict[tuple[int, int, int], tuple] = {}
+
+
+def _cuda_bindings_at_least_13() -> bool:
+    try:
+        import cuda.bindings  # pyrefly: ignore[missing-import]
+
+        return int(str(cuda.bindings.__version__).split(".")[0]) >= 13
+    except Exception:
+        return False
+
+
+class _DevicePointerArray:
+    """Minimal ``__cuda_array_interface__`` over a raw device pointer (no copy, no ownership)."""
+
+    def __init__(self, ptr: int, nbytes: int) -> None:
+        self.__cuda_array_interface__ = {
+            "shape": (nbytes,),
+            "typestr": "|u1",
+            "data": (ptr, False),
+            "strides": None,
+            "version": 3,
+        }
+
+
+def _kernel_param_sizes(drv: Any, func: Any) -> list[int]:
+    """Host-side size of every parameter of ``func`` (cuFuncGetParamInfo until it errors)."""
+    sizes: list[int] = []
+    while True:
+        res = drv.cuFuncGetParamInfo(func, len(sizes))
+        if res[0] != drv.CUresult.CUDA_SUCCESS:
+            return sizes
+        sizes.append(int(res[2]))
+
+
+def _capture_fill_kernel(
+    rt: Any, drv: Any, ptr: int, nbytes: int, value: int, stream: Any
+) -> tuple:
+    """Side-capture ``fill_`` on the ``nbytes`` bytes at ``ptr`` and return the kernel node's
+    (func, grid, block, shared_mem, param_blocks, ptr). The side graph is the C++ base class, so
+    no Python capture hooks fire and no finalizer is armed; it is destroyed on return."""
+    import ctypes
+
+    t = torch.as_tensor(_DevicePointerArray(ptr, nbytes))
+    if t.data_ptr() != ptr or t.numel() != nbytes:
+        raise RuntimeError(
+            "fill_ side capture: tensor does not alias the memset destination"
+        )
+    side = torch._C._CUDAGraph(True)
+    with torch.cuda.stream(stream):
+        side.capture_begin(None, "global")
+        t.fill_(value & 0xFF)
+        side.capture_end_pre()
+    side_raw = side.raw_cuda_graph()
+    _, n = _check_cuda_bindings(rt.cudaGraphGetNodes(side_raw, 0))
+    nodes, n = _check_cuda_bindings(rt.cudaGraphGetNodes(side_raw, n))
+    kernels = [
+        nd
+        for nd in nodes[:n]
+        if _check_cuda_bindings(rt.cudaGraphNodeGetType(nd))
+        == rt.cudaGraphNodeType.cudaGraphNodeTypeKernel
+    ]
+    if len(kernels) != 1:
+        raise RuntimeError(
+            f"expected one kernel node in the fill_ side capture, got {len(kernels)}"
+        )
+    # Driver API: the runtime-API query resolves the kernel against the calling runtime
+    # instance and fails with cudaErrorInvalidDeviceFunction for kernels registered by
+    # libtorch; cuGraphKernelNodeGetParams works for any kernel node.
+    p = _check_cuda_bindings(drv.cuGraphKernelNodeGetParams(kernels[0]))
+    sizes = _kernel_param_sizes(drv, p.func)
+    arg_ptrs = (ctypes.c_void_p * len(sizes)).from_address(int(p.kernelParams))
+    blocks = [ctypes.string_at(arg_ptrs[i], sizes[i]) for i in range(len(sizes))]
+    # Plain ints only: struct-field accessors on `p` are views into the struct's memory.
+    return (
+        int(p.func),
+        (int(p.gridDimX), int(p.gridDimY), int(p.gridDimZ)),
+        (int(p.blockDimX), int(p.blockDimY), int(p.blockDimZ)),
+        int(p.sharedMemBytes),
+        blocks,
+        ptr,
+    )
+
+
+def _add_fill_kernel_node(
+    drv: Any, raw: Any, deps: list, dep_edges: Any, entry: tuple, ptr: int
+) -> Any:
+    """Add a kernel node to ``raw`` from a cached fill_ capture, with the destination argument
+    patched to ``ptr``; returns the new node. cuGraphAddNode copies the arguments, so the
+    patched parameter blocks only need to live for this call."""
+    import ctypes
+
+    func, grid, block, shared_mem, blocks, old_ptr = entry
+    old, new = old_ptr.to_bytes(8, "little"), ptr.to_bytes(8, "little")
+    bufs = []
+    found = 0
+    for b in blocks:
+        if old in b:
+            b = b.replace(old, new)
+            found += 1
+        bufs.append(ctypes.create_string_buffer(b, len(b)))
+    if found == 0:
+        raise RuntimeError(
+            "fill_ kernel parameters do not contain the destination pointer"
+        )
+    arg_ptrs = (ctypes.c_void_p * len(bufs))(*[ctypes.addressof(b) for b in bufs])
+    params = drv.CUgraphNodeParams()
+    params.type = drv.CUgraphNodeType.CU_GRAPH_NODE_TYPE_KERNEL
+    k = params.kernel
+    k.func = drv.CUfunction(func)
+    k.gridDimX, k.gridDimY, k.gridDimZ = grid
+    k.blockDimX, k.blockDimY, k.blockDimZ = block
+    k.sharedMemBytes = shared_mem
+    k.kernelParams = ctypes.addressof(arg_ptrs)
+    k.extra = 0
+    return _check_cuda_bindings(
+        drv.cuGraphAddNode(raw, deps, dep_edges if deps else None, len(deps), params)
+    )
+
+
+def _rewrite_small_memset_nodes(graph: CUDAGraph, max_bytes: int | None = None) -> int:
+    r"""Replace memset nodes of at most ``max_bytes`` bytes in ``graph``'s captured
+    ``cudaGraph_t`` with equivalent fill-kernel nodes, preserving their dependencies and
+    edge data.
+
+    Must run after capture has ended and before the graph is instantiated; the default
+    capture-end hook does this for every capture. Only what ``cudaMemsetAsync`` records
+    (1-D, byte-sized elements) is rewritten; nodes inside child or conditional graphs are
+    left alone. Requires cuda-bindings >= 13. Returns the number of nodes rewritten.
+    """
+    if max_bytes is None:
+        max_bytes = _memset_to_kernel_max_bytes
+    if max_bytes <= 0:
+        return 0
+    _require_cuda_bindings()
+    if _cuda_runtime is None or _cuda_driver is None:  # narrow for the type checker
+        raise AssertionError("expected _cuda_runtime and _cuda_driver to be not None")
+    rt, drv = _cuda_runtime, _cuda_driver
+    raw = graph.raw_cuda_graph()
+    graph_handle = drv.CUgraph(int(raw))
+    _, n = _check_cuda_bindings(rt.cudaGraphGetNodes(raw, 0))
+    nodes, n = _check_cuda_bindings(rt.cudaGraphGetNodes(raw, n))
+    stream = None
+    rewritten = 0
+    for node in list(nodes[:n]):
+        if (
+            _check_cuda_bindings(rt.cudaGraphNodeGetType(node))
+            != rt.cudaGraphNodeType.cudaGraphNodeTypeMemset
+        ):
+            continue
+        p = _check_cuda_bindings(rt.cudaGraphMemsetNodeGetParams(node))
+        if int(p.height) != 1 or int(p.elementSize) != 1:
+            continue
+        nbytes = int(p.width)
+        if nbytes == 0 or nbytes > max_bytes:
+            continue
+        dst, value = int(p.dst), int(p.value) & 0xFF
+        dnode = drv.CUgraphNode(int(node))
+        _, _, nd = _check_cuda_bindings(drv.cuGraphNodeGetDependencies(dnode, 0))
+        deps, dep_edges, nd = _check_cuda_bindings(
+            drv.cuGraphNodeGetDependencies(dnode, nd)
+        )
+        _, _, no = _check_cuda_bindings(drv.cuGraphNodeGetDependentNodes(dnode, 0))
+        outs, out_edges, no = _check_cuda_bindings(
+            drv.cuGraphNodeGetDependentNodes(dnode, no)
+        )
+        key = (nbytes, value, dst % 16)
+        entry = _fill_kernel_cache.get(key)
+        if entry is None:
+            if stream is None:
+                stream = torch.cuda.Stream()
+            entry = _capture_fill_kernel(rt, drv, dst, nbytes, value, stream)
+            _fill_kernel_cache[key] = entry
+        kernel_node = _add_fill_kernel_node(
+            drv, graph_handle, list(deps[:nd]), list(dep_edges[:nd]), entry, dst
+        )
+        if no:
+            try:
+                _check_cuda_bindings(
+                    drv.cuGraphAddDependencies(
+                        graph_handle,
+                        [kernel_node] * no,
+                        list(outs[:no]),
+                        list(out_edges[:no]),
+                        no,
+                    )
+                )
+            except Exception:
+                # Never leave a fill kernel that is not ordered before the memset's
+                # consumers: remove it and keep the original memset node.
+                drv.cuGraphDestroyNode(kernel_node)
+                raise
+        # The memset node is destroyed last, so an interrupted rewrite leaves the graph
+        # as captured.
+        _check_cuda_bindings(rt.cudaGraphDestroyNode(node))
+        rewritten += 1
+    return rewritten
+
+
+def _run_default_memset_pass(graph: CUDAGraph) -> None:
+    """Default global capture-end hook: run the pass, warn once if it fails.
+
+    The hook runner (_run_global_hooks) swallows every hook exception; this wrapper exists
+    so that a failing pass is reported once, with the exception text, instead of silently.
+    A failed rewrite cannot corrupt the graph: the kernel node is inserted before its
+    memset node is destroyed, so at worst a buffer is zeroed twice.
+    """
+    global _memset_to_kernel_warned
+    if _memset_to_kernel_max_bytes <= 0:
+        return
+    try:
+        _rewrite_small_memset_nodes(graph, _memset_to_kernel_max_bytes)
+    except Exception as e:
+        if not _memset_to_kernel_warned:
+            _memset_to_kernel_warned = True
+            warnings.warn(
+                "CUDA graph memset-to-kernel pass failed and is skipped for this graph "
+                f"(set torch.cuda.graphs._memset_to_kernel_max_bytes = 0 to silence): {e!r}",
+                stacklevel=2,
+            )
+
+
 class _RetainedCallbacks:
     r"""Holds destroy callbacks and retained objects for a single capture cycle
     of a :class:`CUDAGraph`.
@@ -179,6 +429,16 @@ _global_replay_start_hooks: OrderedDict[int, Callable[[CUDAGraph], None]] = (
     OrderedDict()
 )
 _global_replay_end_hooks: OrderedDict[int, Callable[[CUDAGraph], None]] = OrderedDict()
+
+# The default memset->kernel pass is a global capture-end hook (see _run_default_memset_pass),
+# registered first so it runs before user hooks observe the graph. It is inserted directly
+# rather than via register_graph_capture_end_hook so that importing this module does not
+# import torch.utils.hooks while torch itself is still initialising. Keyed below
+# RemovableHandle's id range (ids start at 0) so user hooks never collide with it. CUDA 13+
+# only (edge-data graph API).
+_DEFAULT_MEMSET_PASS_HOOK_ID = -1
+if _cuda_runtime is not None and _cuda_bindings_at_least_13():
+    _global_capture_end_hooks[_DEFAULT_MEMSET_PASS_HOOK_ID] = _run_default_memset_pass
 
 
 def _register_global_hook(
