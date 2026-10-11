@@ -15,8 +15,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <map>
-#include <optional>
 #include <ostream>
+#include <span>
 #include <system_error>
 
 #include <pti/pti.h>
@@ -203,32 +203,39 @@ void warnIfIttNotifyLibInvalid() noexcept {
   }
 }
 
-// The PTI view an activity type is collected through, if it has one of its own.
-// Shared by enable and disable so the two cannot drift apart.
-constexpr std::optional<pti_view_kind> findPtiViewKind(ActivityType activity) {
+template <pti_view_kind... kViews>
+constexpr pti_view_kind kViewKinds[] = {kViews...};
+
+// The PTI views an activity type is collected through, if it has any of its
+// own. Shared by enable and disable so the two cannot drift apart.
+constexpr std::span<const pti_view_kind> findPtiViewKinds(
+    ActivityType activity) {
   switch (activity) {
     case ActivityType::GPU_MEMCPY:
-      return PTI_VIEW_DEVICE_GPU_MEM_COPY;
+      // PTI reports a peer-to-peer copy only through its own view.
+      return kViewKinds<
+          PTI_VIEW_DEVICE_GPU_MEM_COPY,
+          PTI_VIEW_DEVICE_GPU_MEM_COPY_P2P>;
     case ActivityType::GPU_MEMSET:
-      return PTI_VIEW_DEVICE_GPU_MEM_FILL;
+      return kViewKinds<PTI_VIEW_DEVICE_GPU_MEM_FILL>;
     case ActivityType::CONCURRENT_KERNEL:
-      return PTI_VIEW_DEVICE_GPU_KERNEL;
+      return kViewKinds<PTI_VIEW_DEVICE_GPU_KERNEL>;
     case ActivityType::EXTERNAL_CORRELATION:
-      return PTI_VIEW_EXTERNAL_CORRELATION;
+      return kViewKinds<PTI_VIEW_EXTERNAL_CORRELATION>;
     case ActivityType::XPU_RUNTIME:
-      return PTI_VIEW_RUNTIME_API;
+      return kViewKinds<PTI_VIEW_RUNTIME_API>;
     case ActivityType::XPU_DRIVER:
-      return PTI_VIEW_DRIVER_API;
+      return kViewKinds<PTI_VIEW_DRIVER_API>;
     case ActivityType::OVERHEAD:
-      return PTI_VIEW_COLLECTION_OVERHEAD;
+      return kViewKinds<PTI_VIEW_COLLECTION_OVERHEAD>;
     case ActivityType::XPU_SYNC:
-      return PTI_VIEW_DEVICE_SYNCHRONIZATION;
+      return kViewKinds<PTI_VIEW_DEVICE_SYNCHRONIZATION>;
     case ActivityType::COLLECTIVE_COMM:
-      return PTI_VIEW_COMMUNICATION;
+      return kViewKinds<PTI_VIEW_COMMUNICATION>;
     default:
       // XPU_SCOPE_PROFILER among others: enabled by
       // XpuptiScopeProfilerSession's constructor, not by a view.
-      return std::nullopt;
+      return {};
   }
 }
 } // namespace
@@ -240,11 +247,13 @@ void XpuptiActivityApi::enableXpuptiActivities(
 
   externalCorrelationEnabled_ = false;
   selected_activities.forEach([this](ActivityType activity) {
-    const auto view = findPtiViewKind(activity);
-    if (not view) {
+    const auto views = findPtiViewKinds(activity);
+    if (views.empty()) {
       return;
     }
-    XPUPTI_CALL(ptiViewEnable(*view));
+    for (const auto view : views) {
+      XPUPTI_CALL(ptiViewEnable(view));
+    }
 
     // What enabling a view takes on top of the view itself.
     switch (activity) {
@@ -270,8 +279,8 @@ void XpuptiActivityApi::enableXpuptiActivities(
 void XpuptiActivityApi::disablePtiActivities(
     const ActivityTypeMask& selected_activities) {
   selected_activities.forEach([](ActivityType activity) {
-    if (const auto view = findPtiViewKind(activity)) {
-      XPUPTI_CALL(ptiViewDisable(*view));
+    for (const auto view : findPtiViewKinds(activity)) {
+      XPUPTI_CALL(ptiViewDisable(view));
     }
   });
   externalCorrelationEnabled_ = false;

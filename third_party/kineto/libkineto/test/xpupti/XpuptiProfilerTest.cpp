@@ -9,12 +9,17 @@
 #include "XpuptiTestUtilities.h"
 
 #include "include/GenericTraceActivity.h"
+#include "include/MetadataFieldCatalog.h"
 #include "include/libkineto.h"
 #include "src/plugin/xpupti/XpuptiActivityProfiler.h"
+#include "test/xpupti/compute/XpuptiPeerCopyCompute.h"
 
+#include <fmt/ranges.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
+#include <optional>
 #include <set>
 #include <unordered_set>
 
@@ -312,4 +317,48 @@ TEST(XpuptiProfilerTest, GpuUserAnnotationLinkedActivityRetry) {
   auto pBuffer =
       runGpuUserAnnotationCase(LinkedActivityMode::MissFirstThenLinked);
   expectTwoUserAnnotations(*pBuffer);
+}
+
+TEST(XpuptiProfilerTest, PeerToPeerMemcpy) {
+  KN::XPUActivityProfiler profiler;
+  auto pSession =
+      profiler.configure({KN::ActivityType::GPU_MEMCPY}, KN::Config{});
+
+  const auto now = [] {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+  };
+  const int64_t startTime = now();
+  pSession->start();
+  const bool copied = CopyPeerToPeerOnXpu(1024);
+  pSession->stop();
+  const int64_t endTime = now();
+  if (!copied) {
+    GTEST_SKIP() << "needs two GPUs with peer access";
+  }
+
+  TestActivityLogger logger;
+  pSession->processTrace(
+      logger,
+      [](int32_t) -> const KN::ITraceActivity* { return nullptr; },
+      startTime,
+      endTime);
+  EXPECT_TRUE(pSession->errors().empty())
+      << fmt::format("{}", fmt::join(pSession->errors(), ","));
+
+  auto pBuffer = pSession->getTraceBuffer();
+  ASSERT_EQ(pBuffer->activities.size(), 1);
+  const auto& activity = *pBuffer->activities[0];
+  EXPECT_EQ(activity.type(), KN::ActivityType::GPU_MEMCPY);
+  EXPECT_EQ(
+      activity.getMetadataValue(libkineto::XpuMetadataFields::kBytes),
+      std::optional<uint64_t>{1024});
+  const auto fromDevice =
+      activity.getMetadataValue(libkineto::XpuMetadataFields::kFromDevice);
+  const auto toDevice =
+      activity.getMetadataValue(libkineto::XpuMetadataFields::kToDevice);
+  EXPECT_EQ(fromDevice, std::optional<int64_t>{activity.deviceId()});
+  ASSERT_TRUE(toDevice.has_value());
+  EXPECT_NE(*fromDevice, *toDevice);
 }
