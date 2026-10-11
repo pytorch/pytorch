@@ -3397,7 +3397,7 @@ class LoweringTest(MultiProcContinuousTest):
 
 @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 class SymmMemCleanupTest(TestCase):
-    def _run_cleanup(self, device, backend, body):
+    def _run_cleanup(self, device, backend, body, *, expected_returncode=0):
         if backend == "NCCL" and (
             not dist.is_nccl_available() or torch.cuda.nccl.version() < (2, 27, 0)
         ):
@@ -3425,7 +3425,9 @@ tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device
             text=True,
             timeout=120,
         )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            result.returncode, expected_returncode, result.stdout + result.stderr
+        )
         return result
 
     @parametrize("backend", ["CUDA", "NCCL", "NVSHMEM"])
@@ -3455,6 +3457,10 @@ tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device
     @parametrize("backend", ["CUDA", "NCCL", "NVSHMEM"])
     @parametrize("observed", [False, True])
     def test_free_after_device_assert(self, device, backend, observed):
+        # NVSHMEM 3.8's proxy thread terminates the subprocess with 255 after
+        # a device-side assert, even when the assert was already observed. The
+        # CUDA context remains poisoned and the proxy subsequently sees the error.
+        expected_returncode = 255 if backend == "NVSHMEM" else 0
         result = self._run_cleanup(
             device,
             backend,
@@ -3480,6 +3486,7 @@ tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device
             del tensor, handle
             print("cleanup completed")
             """,
+            expected_returncode=expected_returncode,
         )
         self.assertIn("skipping cleanup after CUDA error", result.stderr)
         self.assertIn("cleanup completed", result.stdout)
