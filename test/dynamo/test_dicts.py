@@ -246,7 +246,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         expected = fn(x)
-        # CPython gh-119004 added mutation detection, backported to 3.12.7.
+        # CPython python/cpython#119004 added mutation detection, backported to 3.12.7.
         if sys.version_info >= (3, 12, 7):
             self.assertEqual(expected, (x + 50, 3))
         else:
