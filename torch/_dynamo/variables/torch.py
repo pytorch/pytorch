@@ -3000,11 +3000,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker:
-            device = None
+            device_arg = None
             if kwargs and "device" in kwargs:
-                device = torch.device(as_python_device(kwargs["device"]))
+                device_arg = as_python_device(kwargs["device"])
             elif args:
-                device = torch.device(as_python_device(args[0]))
+                device_arg = as_python_device(args[0])
+            # An explicit None means "current device", same as no argument.
+            device = None if device_arg is None else torch.device(device_arg)
 
             if device is None:
                 device_type = _synchronize_fn_to_device_type.get(self.value)
