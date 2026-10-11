@@ -6383,6 +6383,21 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         torch.view_as_real(out_test).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
 
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_compile_linalg_solve_left_false_imag(self, backend):
+        def solve(a, b):
+            return torch.imag(torch.linalg.solve(a, b, left=False))
+
+        def solve_ex(a, b):
+            return torch.imag(torch.linalg.solve_ex(a, b, left=False).result)
+
+        a = torch.eye(2, dtype=torch.complex64)
+        b = torch.randn(2, 2, dtype=torch.complex64)
+        for f in (solve, solve_ex):
+            expected = f(a, b)
+            actual = torch.compile(f, backend=backend, fullgraph=True)(a, b)
+            self.assertEqual(actual, expected)
+
     def test_compile_complex_tensor_constant_signed_zero(self):
         def f(x):
             y = torch.tensor([1e28 + 2j, -1e-28j])
