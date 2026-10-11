@@ -81,6 +81,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     serialTest,
     skipIfHpu,
+    skipIfNoLapack,
     skipIfWindows,
     skipIfXpu,
     xfailIfS390X,
@@ -1042,6 +1043,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         if guard_manager_wrapper.diff_guard_root:
             self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
 
+    @skipIfNoLapack
     def test_linalg_inv_singular_aot_eager_raises(self):
         def fn(x):
             return torch.linalg.inv(x)
@@ -1056,6 +1058,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._C._LinAlgError, msg):
             opt_fn(x)
 
+    @skipIfNoLapack
     def test_linalg_inv_check_errors_preserved_in_aot_graph(self):
         def fn(x):
             return torch.linalg.inv(x)
