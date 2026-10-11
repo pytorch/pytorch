@@ -338,7 +338,32 @@ class TestCutlassBackend(TestCase):
         self.assertTrue(try_import_cutlass())
         from torch._inductor.codecache import cutlass_key
 
-        self.assertIsNotNone(cutlass_key())
+        self.assertIsNotNone(cutlass_key(GPU_TYPE))
+
+    def test_get_config_request_key_passes_device_type(self):
+        """
+        Regression test: device_type must be part of get_config_request_key's
+        signature, not only of its call site.
+
+        It was added to the call site alone, so every CUTLASS GEMM reached through
+        maybe_fetch_ops() raised "TypeError: get_config_request_key() takes 3
+        positional arguments but 4 were given" before even entering the body.
+        """
+        from torch._inductor.codegen.cutlass import cache
+
+        with mock.patch.object(
+            cache,
+            "cutlass_key",
+            side_effect=lambda device_type: device_type.encode(),
+        ):
+            cuda_key = cache.get_config_request_key("90", "12.4", "1", "cuda")
+            xpu_key = cache.get_config_request_key("20", "20250201", "1", "xpu")
+            cuda_key_again = cache.get_config_request_key("90", "12.4", "1", "cuda")
+
+        # device_type is threaded into the key ...
+        self.assertNotEqual(cuda_key, xpu_key)
+        # ... and the key stays deterministic for identical inputs.
+        self.assertEqual(cuda_key, cuda_key_again)
 
     @skipXPUIf(True, "CUDA-specific CUTLASS arch feature set")
     @parametrize("arch", ("103", "107"))
