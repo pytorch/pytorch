@@ -5,6 +5,7 @@ import builtins
 import enum
 import itertools
 import operator
+import sys
 import types
 import unittest
 import weakref
@@ -246,7 +247,11 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         expected = fn(x)
-        self.assertEqual(expected, (x + 50, 3))
+        # CPython gh-119004 added mutation detection, backported to 3.12.7.
+        if sys.version_info >= (3, 12, 7):
+            self.assertEqual(expected, (x + 50, 3))
+        else:
+            self.assertEqual(expected, (x + (operation is operator.ne), 3))
         self.assertEqual(torch.compile(fn, backend="eager")(x), expected)
 
     @parametrize("operation", [operator.eq, operator.ne])
