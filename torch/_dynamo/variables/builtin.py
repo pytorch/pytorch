@@ -288,6 +288,42 @@ BUILTIN_TO_TENSOR_FN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # if not, we swap the args and use the r* version of the op.
 BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 
+# operator function -> the methods Python tries on the left operand, e.g.
+# operator.isub -> (__isub__, __sub__)
+_USER_BINOP_DUNDERS: dict[Callable[..., Any], tuple[str, ...]] = {
+    getattr(operator, dunder): dunders
+    for name in ("add", "sub", "mul", "matmul", "truediv", "floordiv", "mod", "pow")
+    + ("lshift", "rshift", "and", "or", "xor")
+    for dunder, dunders in (
+        (f"__{name}__", (f"__{name}__",)),
+        (f"__i{name}__", (f"__i{name}__", f"__{name}__")),
+    )
+}
+
+
+def _calls_user_binop(
+    fn: Callable[..., Any], a: VariableTracker, b: VariableTracker
+) -> bool:
+    """Whether eager calls the user-defined object's operator method for ``fn(a, b)``
+    when the other operand is a Tensor, e.g. ``Box.__rmul__`` for ``tensor * box``."""
+    if isinstance(a, UserDefinedObjectVariable) and b.is_tensor():
+        user, user_is_lhs = a, True
+    elif isinstance(b, UserDefinedObjectVariable) and a.is_tensor():
+        user, user_is_lhs = b, False
+    else:
+        return False
+    cls = user.python_type()
+    # Tensor operators accept Python numbers, so e.g. the __radd__ of an int
+    # subclass never runs for ``tensor + A(3)``.
+    if issubclass(cls, (int, float, complex, torch.Tensor)):
+        return False
+    if not has_torch_function(user):
+        return True
+    # A Tensor operator dispatches to __torch_function__ first, so only the left
+    # operand's own method runs before it.
+    return user_is_lhs and any(hasattr(cls, d) for d in _USER_BINOP_DUNDERS[fn])
+
+
 # Sentinel for `inspect.getattr_static` lookups that must distinguish
 # "attribute absent" from "attribute is None" (e.g. `__reversed__ = None`
 # opt-out).
@@ -1353,6 +1389,26 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
         ):
             if obj.tensor_args_type(arg_types):
+                user_binop_handler = getattr(obj, f"call_{fn.__name__}", None)
+                if (
+                    fn in _USER_BINOP_DUNDERS
+                    and len(arg_types) == 2
+                    and not has_kwargs
+                    and any(issubclass(t, UserDefinedObjectVariable) for t in arg_types)
+                    and user_binop_handler is not None
+                ):
+
+                    def handle_user_binop(
+                        tx: "InstructionTranslatorBase",
+                        args: list[VariableTracker],
+                        kwargs: dict[str, VariableTracker],
+                    ) -> VariableTracker | None:
+                        if _calls_user_binop(fn, *args):
+                            # pyrefly: ignore [not-callable]
+                            return user_binop_handler(tx, *args)
+                        return obj._handle_insert_op_in_graph(tx, args, kwargs)
+
+                    return handle_user_binop
                 return obj._handle_insert_op_in_graph
             elif has_kwargs:
                 # need runtime check for kwargs
