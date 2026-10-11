@@ -1489,6 +1489,30 @@ static PyObject* THPModule_allowTF32CuBLAS(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_setAllowGfx942TF32RoundingToNearest(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_TYPE(
+      PyBool_Check(arg),
+      "set_allow_gfx942_tf32_rounding_to_nearest expects a bool, but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowGfx942TF32RoundingToNearest(Py_IsTrue(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_allowGfx942TF32RoundingToNearest(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (at::globalContext().allowGfx942TF32RoundingToNearest()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_setPreferCublasltGroupedGemm(
     PyObject* _unused,
     PyObject* arg) {
@@ -2220,6 +2244,14 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_warn_deprecation", THPModule_warnDeprecation, METH_NOARGS, nullptr},
     {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS, nullptr},
     {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O, nullptr},
+    {"_get_cublas_allow_gfx942_tf32_rounding_to_nearest",
+     THPModule_allowGfx942TF32RoundingToNearest,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cublas_allow_gfx942_tf32_rounding_to_nearest",
+     THPModule_setAllowGfx942TF32RoundingToNearest,
+     METH_O,
+     nullptr},
     {"_get_cublaslt_prefer_grouped_gemm",
      THPModule_preferCublasltGroupedGemm,
      METH_NOARGS,

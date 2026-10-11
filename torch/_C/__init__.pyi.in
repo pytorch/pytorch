@@ -1277,6 +1277,12 @@ def _get_cudnn_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuDNN
 def _set_cudnn_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuDNN
 def _get_cublas_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuBLAS
 def _set_cublas_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuBLAS
+def _get_cublas_allow_gfx942_tf32_rounding_to_nearest() -> (
+    _bool
+): ...  # THPModule_allowGfx942TF32RoundingToNearest
+def _set_cublas_allow_gfx942_tf32_rounding_to_nearest(
+    arg: _bool,
+) -> None: ...  # THPModule_setAllowGfx942TF32RoundingToNearest
 def _get_cublaslt_prefer_grouped_gemm() -> _bool: ...  # THPModule_preferCublasltGroupedGemm
 def _set_cublaslt_prefer_grouped_gemm(
     arg: _bool,

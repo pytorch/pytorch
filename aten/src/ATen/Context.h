@@ -403,6 +403,8 @@ class TORCH_API Context {
   void setAllowTF32OneDNN(bool /*b*/);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool /*b*/);
+  bool allowGfx942TF32RoundingToNearest() const;
+  void setAllowGfx942TF32RoundingToNearest(bool /*b*/);
   Float32MatmulPrecision float32MatmulPrecision() const;
   Float32Precision float32Precision(Float32Backend backend, Float32Op op) const;
   CuBLASReductionOption allowFP16ReductionCuBLAS() const;
@@ -532,6 +534,7 @@ class TORCH_API Context {
   CuBLASReductionOption allow_bf16_reduction_cublas =
       CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
   bool allow_fp16_accumulation_cublas = false;
+  bool allow_gfx942_tf32_rounding_to_nearest = false;
   bool prefer_cublaslt_grouped_gemm = false;
   std::optional<int32_t> sm_carveout = std::nullopt;
   bool enabled_mkldnn = true;

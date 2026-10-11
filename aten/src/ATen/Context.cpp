@@ -412,6 +412,14 @@ void Context::setAllowTF32CuBLAS(bool b) {
   setFloat32Precision(Float32Backend::CUDA, Float32Op::MATMUL, b ? Float32Precision::TF32 : Float32Precision::IEEE);
 }
 
+bool Context::allowGfx942TF32RoundingToNearest() const {
+  return allow_gfx942_tf32_rounding_to_nearest;
+}
+
+void Context::setAllowGfx942TF32RoundingToNearest(bool b) {
+  allow_gfx942_tf32_rounding_to_nearest = b;
+}
+
 bool Context::preferCublasltGroupedGemm() const {
   return prefer_cublaslt_grouped_gemm;
 }
