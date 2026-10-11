@@ -2019,6 +2019,9 @@ class PythonWrapperCodegen(CodeGen):
         # Each module-level Triton kernel's (name in source, source), which
         # AsyncCompile compiles it from; see PyCodeCache.load_by_key_path.
         self.kernel_sources: dict[str, tuple[str, str]] = {}
+        # Cache keys of the kernel modules whose benchmark harness
+        # emit_triton_kernel_definition cut from the module-level kernel.
+        self.kernel_harness_modules: list[str] = []
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Kernel argument name -> cached tensor and its lifetime/storage metadata.
         self.kernel_autotune_example_arg_cache: dict[str, AutotuneExampleArg] = {}
@@ -4024,6 +4027,10 @@ class PythonWrapperCodegen(CodeGen):
             return
 
         self.benchmark_compiled_module(output)
+        # A module-level kernel's harness stays in its own module, which a run of this
+        # one as a script does not otherwise load (see emit_triton_kernel_definition).
+        kernel_modules = self.kernel_harness_modules
+        modules_arg = f", kernel_modules={kernel_modules!r}" if kernel_modules else ""
 
         output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
@@ -4033,7 +4040,8 @@ class PythonWrapperCodegen(CodeGen):
                     "args = get_args()",
                     (
                         f"compiled_module_main('{get_benchmark_name()}', "
-                        "lambda times, repeat: benchmark_compiled_module(args, times=times, repeat=repeat))"
+                        "lambda times, repeat: benchmark_compiled_module(args, times=times, repeat=repeat)"
+                        f"{modules_arg})"
                     ),
                 ]
             )
@@ -4136,7 +4144,8 @@ class PythonWrapperCodegen(CodeGen):
         # can start on it now, as it does for a string kernel. It gets the source the
         # string form would have compiled, so both forms share every compile cache.
         self.kernel_sources[kernel_name] = (subs_name, src_code)
-        kernel_file = f"{get_hash(src_code.strip())}.py"
+        kernel_key = get_hash(src_code.strip())
+        kernel_file = f"{kernel_key}.py"
         if async_compile.AsyncCompile.use_process_pool():
             async_compile.AsyncCompile().triton(subs_name, src_code)
         autotune_body = (
@@ -4150,6 +4159,7 @@ class PythonWrapperCodegen(CodeGen):
         # kernel's __main__ block would run whenever the wrapper does.
         if harness := re.search(r"^def get_args\(\):$", src_code, re.MULTILINE):
             src_code = src_code[: harness.start()]
+            self.kernel_harness_modules.append(kernel_key)
         if "if __name__ == '__main__':" in src_code:
             raise AssertionError(f"kernel {kernel_name} kept its benchmark harness")
         # The string form passes filename=__file__ from its own module, which is named by
@@ -6222,6 +6232,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.user_defined_kernel_cache = root.user_defined_kernel_cache
         # This subgraph's kernels are spliced into the root module.
         self.kernel_sources = root.kernel_sources
+        self.kernel_harness_modules = root.kernel_harness_modules
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
