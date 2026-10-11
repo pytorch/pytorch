@@ -5119,10 +5119,15 @@ class TestLinalg(TestCase):
 
     @onlyAccelerator
     @dtypes(torch.float)
-    def test_triangular_solve_large(self, device, dtype):
+    @parametrize("bs", [1, 2])
+    @parametrize("k", [524280, 524281, 524282])
+    def test_triangular_solve_large(self, device, dtype, bs, k):
         # Repro for https://github.com/pytorch/pytorch/issues/79191
-        A = torch.randn(1, 2, 2, device=device, dtype=dtype).tril_()
-        B = torch.randn(1, 2, 524281, device=device, dtype=dtype)
+        # k > 524280 triggers the cuBLAS large-input workaround on CUDA < 12.1,
+        # which returned silently wrong results for bs >= 2. See
+        # https://github.com/pytorch/pytorch/pull/187717
+        A = torch.randn(bs, 2, 2, device=device, dtype=dtype).tril_()
+        B = torch.randn(bs, 2, k, device=device, dtype=dtype)
         X = torch.linalg.solve_triangular(A, B, upper=False)
         self.assertEqual(A @ X, B)
 
