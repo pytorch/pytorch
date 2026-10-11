@@ -4884,18 +4884,10 @@ class MethodDescriptorVariable(DescriptorVariable):
         name = self.descriptor.__name__
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj = obj.realize()
-        obj_type = obj.python_type()
         if isinstance(obj, UserDefinedObjectVariable):
             base_methods = obj._base_methods
             if base_methods is not None and self.descriptor in base_methods:
                 return obj.call_base_method(tx, name, rest, kwargs)
-        if obj_type is not self.descriptor.__objclass__:
-            unimplemented(
-                gb_type="Unbound builtin method on unsupported subclass",
-                context=f"{self.descriptor.__qualname__}({obj_type.__name__}, ...)",
-                explanation="Dynamo cannot safely dispatch this C method descriptor through a modeled subclass.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
         method = obj.lookup_tp_method(name)
         if method is not None:
             result = method(obj, tx, name, rest, kwargs)
@@ -4932,6 +4924,32 @@ class MethodDescriptorVariable(DescriptorVariable):
         return object_richcompare(self, tx, other, op)
 
 
+@functools.cache
+def _same_c_function(left: Any, right: Any) -> bool | None:
+    """meth_richcompare's ml_meth check for two descriptors already known to
+    share a receiver. ml_meth is only observable through that comparison, so
+    bind both to one receiver and compare. Distinct descriptors can alias one C
+    function, e.g. int.conjugate and int.__trunc__. None means undecidable.
+    """
+    if left is right:
+        return True
+    if type(left) is not type(right):
+        return None
+    if isinstance(left, types.BuiltinFunctionType):
+        # Stored unbound in a type dict; m_self is the type itself.
+        return left == right
+    owner = left.__objclass__
+    if issubclass(right.__objclass__, owner):
+        owner = right.__objclass__
+    if isinstance(left, types.ClassMethodDescriptorType):
+        return left.__get__(None, owner) == right.__get__(None, owner)
+    try:
+        receiver = owner.__new__(owner)
+    except TypeError:
+        return None
+    return left.__get__(receiver) == right.__get__(receiver)
+
+
 class BoundBuiltinMethodVariable(VariableTracker):
     """Bound builtin_function_or_method (PyCFunction_Type).
 
@@ -4945,6 +4963,7 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     _nonvar_fields = {
         "descriptor",
+        "value",
         *VariableTracker._nonvar_fields,
     }
 
@@ -5005,11 +5024,14 @@ class BoundBuiltinMethodVariable(VariableTracker):
         | types.BuiltinFunctionType
         | types.ClassMethodDescriptorType,
         obj: VariableTracker,
+        value: types.BuiltinMethodType | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
         self.obj = obj
+        # The ID_MATCH-guarded runtime method, when built from one.
+        self.value = value
 
     def __repr__(self) -> str:
         cls_name = getattr(
@@ -5022,71 +5044,41 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
-        if self.source is not None:
-            value = tx.output.resolve_source_value(self.source)
-            if type(value) is types.BuiltinMethodType:
-                return hash(value), False
-        unimplemented(
-            gb_type="Hashing a newly bound builtin method",
-            context=f"hash({self})",
-            explanation="The method hash depends on runtime receiver and C-function identities.",
-            hints=[*graph_break_hints.DIFFICULT],
-        )
+        # It hashes m_self by identity, so only a guarded runtime method has a
+        # real hash; a method bound during tracing gets a compile-time-only one.
+        if self.value is not None:
+            return hash(self.value), False
+        return id(self), True
 
     def tp_richcompare_impl(self, tx, other, op):
+        # meth_richcompare: equal iff both are builtin methods with the same
+        # m_self and the same C function (ml_meth).
+        # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L289-L317
         if op not in ("__eq__", "__ne__") or not isinstance(
             other, BoundBuiltinMethodVariable
         ):
             return ConstantVariable.create(NotImplemented)
 
-        from .builtin import BuiltinVariable
-        from .object_protocol import generic_richcompare, vt_identity_compare
+        if self.value is not None and other.value is not None:
+            eq = self.value == other.value
+            return ConstantVariable.create(eq if op == "__eq__" else not eq)
 
-        obj = self.obj.realize()
-        other_obj = other.obj.realize()
-        if obj.source is not None and other_obj.source is not None:
-            obj_id = BuiltinVariable(id).call_id(tx, obj)
-            other_obj_id = BuiltinVariable(id).call_id(tx, other_obj)
-            same_receiver = generic_richcompare(tx, obj_id, other_obj_id, "__eq__")
-        elif obj.source is None and other_obj.source is None:
-            same_receiver = vt_identity_compare(obj, other_obj)
-        else:
-            same_receiver = None
+        from .object_protocol import vt_identity_compare
 
-        equal = (
-            same_receiver.as_python_constant() if same_receiver is not None else None
-        )
-        if equal and self.descriptor is not other.descriptor:
-            left_get = getattr(self.descriptor, "__get__", None)
-            right_get = getattr(other.descriptor, "__get__", None)
-            if left_get is None or right_get is None:
-                equal = None
-            else:
-                try:
-                    receiver = obj.as_python_constant()
-                    left = (
-                        left_get(None, receiver)
-                        if isinstance(self.descriptor, types.ClassMethodDescriptorType)
-                        else left_get(receiver)
-                    )
-                    right = (
-                        right_get(None, receiver)
-                        if isinstance(other.descriptor, types.ClassMethodDescriptorType)
-                        else right_get(receiver)
-                    )
-                except (NotImplementedError, TypeError):
-                    equal = None
-                else:
-                    equal = left == right
-        if equal is not None:
-            return ConstantVariable.create(equal if op == "__eq__" else not equal)
-
-        unimplemented(
-            gb_type="builtin method comparison with undecidable identity",
-            context=f"{self} {op} {other}",
-            explanation="Dynamo cannot determine the C-function and receiver identities of these builtin methods.",
-            hints=[*graph_break_hints.DIFFICULT],
-        )
+        same_self = vt_identity_compare(self.obj.realize(), other.obj.realize())
+        eq = None
+        if same_self is not None:
+            eq = same_self.as_python_constant() and _same_c_function(
+                self.descriptor, other.descriptor
+            )
+        if eq is None:
+            unimplemented(
+                gb_type="builtin method comparison with undecidable identity",
+                context=f"{self} {op} {other}",
+                explanation="Dynamo cannot determine the C-function and receiver identities of these builtin methods.",
+                hints=[*graph_break_hints.DIFFICULT],
+            )
+        return ConstantVariable.create(eq if op == "__eq__" else not eq)
 
     def as_python_constant(self) -> Any:
         obj = self.obj.as_python_constant()

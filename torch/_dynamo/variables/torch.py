@@ -3839,15 +3839,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     args=list(exc.args),
                 )
 
-        # call_tensor_method records `x.<name>(...)`, which resolves on type(x)
-        # when the graph runs. If a tensor subclass overrides the method, fall
-        # through so the graph calls the descriptor itself.
-        if self.is_tensor_method() and not (
-            args
-            and args[0].is_tensor()
-            and mro_lookup(args[0].python_type(), self.value.__name__)
-            is not mro_lookup(torch.Tensor, self.value.__name__)
-        ):
+        if self.is_tensor_method():
             name = self.value.__name__
             # Guard against inplace view op on input tensor (not supported)
             if args and args[0].is_tensor():
@@ -3870,7 +3862,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                                 "Ensure you do not modify input tensor in place.",
                             ],
                         )
-            return self.call_tensor_method(tx, list(args), kwargs)
+            # call_tensor_method records `x.<name>(...)`, which resolves on
+            # type(x) when the graph runs. If a tensor subclass overrides the
+            # method, fall through so the graph calls the descriptor itself.
+            self_type = args[0].python_type() if args and args[0].is_tensor() else None
+            if (
+                self_type is None
+                or self_type is torch.Tensor
+                or mro_lookup(self_type, name) is mro_lookup(torch.Tensor, name)
+            ):
+                return self.call_tensor_method(tx, list(args), kwargs)
 
         special_handler = self._get_handlers().get(self.value)
         if special_handler:

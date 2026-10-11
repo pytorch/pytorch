@@ -2105,16 +2105,6 @@
       ]
     }
   ],
-  "GB4545": [
-    {
-      "Gb_type": "Hashing a newly bound builtin method",
-      "Context": "hash({self})",
-      "Explanation": "The method hash depends on runtime receiver and C-function identities.",
-      "Hints": [
-        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
-      ]
-    }
-  ],
   "GB3051": [
     {
       "Gb_type": "builtin method comparison with undecidable identity",
@@ -4466,16 +4456,6 @@
       "Gb_type": "Bound builtin classmethod with custom metaclass",
       "Context": "{descriptor.__qualname__} bound to a class with a custom metaclass",
       "Explanation": "Dynamo cannot safely wrap the class receiver without invoking metaclass hooks.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB1242": [
-    {
-      "Gb_type": "Unbound builtin method on unsupported subclass",
-      "Context": "{self.descriptor.__qualname__}({obj_type.__name__}, ...)",
-      "Explanation": "Dynamo cannot safely dispatch this C method descriptor through a modeled subclass.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

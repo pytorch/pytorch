@@ -1971,7 +1971,9 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, method_self, obj_source)
-            return BoundBuiltinMethodVariable(descriptor, obj_vt, source=self.source)
+            return BoundBuiltinMethodVariable(
+                descriptor, obj_vt, value=value, source=self.source
+            )
         elif isinstance(value, types.MethodDescriptorType) and not is_torch_class(
             value.__objclass__
         ):
