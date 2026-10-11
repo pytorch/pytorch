@@ -971,3 +971,287 @@ AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace() {
       get_torch_exception_what_without_backtrace()
           .c_str();
 }
+
+struct TorchProcessGroupOpaque {
+#ifdef USE_DISTRIBUTED
+  std::shared_ptr<c10d::ProcessGroup> group;
+#endif
+};
+
+struct TorchWorkOpaque {
+#ifdef USE_DISTRIBUTED
+  std::shared_ptr<c10d::ProcessGroup> group;
+  std::vector<at::Tensor> tensors;
+  c10::intrusive_ptr<c10d::Work> work;
+#endif
+};
+
+#ifdef USE_DISTRIBUTED
+namespace {
+
+std::vector<at::Tensor> stable_collective_tensors(
+    const AtenTensorHandle* tensors,
+    size_t count) {
+  TORCH_CHECK(
+      tensors != nullptr && count > 0, "expected a nonempty tensor array");
+  std::vector<at::Tensor> result;
+  result.reserve(count);
+  for (size_t i = 0; i < count; ++i) {
+    TORCH_CHECK(tensors[i] != nullptr, "tensor handle must not be null");
+    result.push_back(
+        *torch::aot_inductor::tensor_handle_to_tensor_pointer(tensors[i]));
+  }
+  return result;
+}
+
+c10d::ReduceOp stable_reduce_op(int32_t op) {
+  switch (op) {
+    case 0:
+      return c10d::ReduceOp::SUM;
+    case 1:
+      return c10d::ReduceOp::AVG;
+    case 2:
+      return c10d::ReduceOp::PRODUCT;
+    case 3:
+      return c10d::ReduceOp::MIN;
+    case 4:
+      return c10d::ReduceOp::MAX;
+    case 5:
+      return c10d::ReduceOp::BAND;
+    case 6:
+      return c10d::ReduceOp::BOR;
+    case 7:
+      return c10d::ReduceOp::BXOR;
+    default:
+      TORCH_CHECK(false, "invalid stable reduction code: ", op);
+  }
+}
+
+std::unique_ptr<TorchWorkOpaque> stable_collective_work(
+    TorchProcessGroupHandle group,
+    TorchWorkHandle* ret) {
+  TORCH_CHECK(ret != nullptr, "ret must not be null");
+  *ret = nullptr;
+  TORCH_CHECK(group != nullptr, "group must not be null");
+  auto result = std::make_unique<TorchWorkOpaque>();
+  result->group = group->group;
+  return result;
+}
+
+} // namespace
+#endif
+
+AOTITorchError torch_delete_process_group(TorchProcessGroupHandle group) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({ delete group; });
+}
+
+AOTITorchError torch_delete_work(TorchWorkHandle work) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({ delete work; });
+}
+
+AOTITorchError torch_process_group_from_pyobject(
+    void* obj,
+    TorchProcessGroupHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+#ifdef USE_DISTRIBUTED
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = nullptr;
+    auto result = std::make_unique<TorchProcessGroupOpaque>();
+    result->group =
+        torch::detail::getPyObjectConversionImpl().process_group_from_pyobject(
+            static_cast<PyObject*>(obj));
+    *ret = result.release();
+#else
+    TORCH_CHECK(false, "stable c10d requires a PyTorch build with USE_DISTRIBUTED=1");
+#endif
+  });
+}
+
+AOTITorchError torch_process_group_rank(
+    TorchProcessGroupHandle group,
+    int64_t* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+#ifdef USE_DISTRIBUTED
+    TORCH_CHECK(group && ret, "group and ret must not be null");
+    *ret = group->group->getRank();
+#else
+    TORCH_CHECK(false, "stable c10d requires a PyTorch build with USE_DISTRIBUTED=1");
+#endif
+  });
+}
+
+AOTITorchError torch_process_group_size(
+    TorchProcessGroupHandle group,
+    int64_t* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+#ifdef USE_DISTRIBUTED
+    TORCH_CHECK(group && ret, "group and ret must not be null");
+    *ret = group->group->getSize();
+#else
+    TORCH_CHECK(false, "stable c10d requires a PyTorch build with USE_DISTRIBUTED=1");
+#endif
+  });
+}
+
+AOTITorchError torch_process_group_backend(
+    TorchProcessGroupHandle group,
+    StringHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+#ifdef USE_DISTRIBUTED
+    TORCH_CHECK(group && ret, "group and ret must not be null");
+    *ret = nullptr;
+    auto name = std::make_unique<std::string>(group->group->getBackendName());
+    *ret = reinterpret_cast<StringHandle>(name.release());
+#else
+    TORCH_CHECK(false, "stable c10d requires a PyTorch build with USE_DISTRIBUTED=1");
+#endif
+  });
+}
+
+AOTITorchError torch_process_group_allreduce(
+    TorchProcessGroupHandle group,
+    const AtenTensorHandle* tensors,
+    size_t count,
+    int32_t reduce_op,
+    TorchWorkHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+#ifdef USE_DISTRIBUTED
+    auto result = stable_collective_work(group, ret);
+    c10d::AllreduceOptions options;
+    options.reduceOp = stable_reduce_op(reduce_op);
+    result->tensors = stable_collective_tensors(tensors, count);
+    result->work = result->group->allreduce(result->tensors, options);
+    TORCH_CHECK(result->work, "backend returned no Work");
+    *ret = result.release();
+#else
+    TORCH_CHECK(false, "stable c10d requires a PyTorch build with USE_DISTRIBUTED=1");
+#endif
+  });
+}
+
+AOTITorchError torch_process_group_allreduce_coalesced(
+    TorchProcessGroupHandle group,
+    const AtenTensorHandle* tensors,
+    size_t count,
+    int32_t reduce_op,
+    TorchWorkHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+#ifdef USE_DISTRIBUTED
+    auto result = stable_collective_work(group, ret);
+    c10d::AllreduceCoalescedOptions options;
+    options.reduceOp = stable_reduce_op(reduce_op);
+    result->tensors = stable_collective_tensors(tensors, count);
+    result->work = result->group->allreduce_coalesced(result->tensors, options);
+    TORCH_CHECK(result->work, "backend returned no Work");
+    *ret = result.release();
+#else
+    TORCH_CHECK(false, "stable c10d requires a PyTorch build with USE_DISTRIBUTED=1");
+#endif
+  });
+}
+
+AOTITorchError torch_process_group_broadcast(
+    TorchProcessGroupHandle group,
+    const AtenTensorHandle* tensors,
+    size_t count,
+    int64_t root_rank,
+    int64_t root_tensor,
+    TorchWorkHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+#ifdef USE_DISTRIBUTED
+    auto result = stable_collective_work(group, ret);
+    TORCH_CHECK(
+        root_rank >= 0 && root_rank < result->group->getSize(),
+        "invalid root rank");
+    TORCH_CHECK(
+        root_tensor >= 0 && static_cast<size_t>(root_tensor) < count,
+        "invalid root tensor");
+    result->tensors = stable_collective_tensors(tensors, count);
+    c10d::BroadcastOptions options;
+    options.rootRank = root_rank;
+    options.rootTensor = root_tensor;
+    result->work = result->group->broadcast(result->tensors, options);
+    TORCH_CHECK(result->work, "backend returned no Work");
+    *ret = result.release();
+#else
+    TORCH_CHECK(false, "stable c10d requires a PyTorch build with USE_DISTRIBUTED=1");
+#endif
+  });
+}
+
+AOTITorchError torch_process_group_allgather(
+    TorchProcessGroupHandle group,
+    AtenTensorHandle input,
+    const AtenTensorHandle* outputs,
+    size_t count,
+    TorchWorkHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+#ifdef USE_DISTRIBUTED
+    auto result = stable_collective_work(group, ret);
+    TORCH_CHECK(
+        count == static_cast<size_t>(result->group->getSize()),
+        "allgather needs one output per rank");
+    auto inputs = stable_collective_tensors(&input, 1);
+    auto output_tensors = stable_collective_tensors(outputs, count);
+    result->tensors = output_tensors;
+    result->tensors.push_back(inputs[0]);
+    std::vector<std::vector<at::Tensor>> nested_outputs{output_tensors};
+    result->work = result->group->allgather(nested_outputs, inputs);
+    TORCH_CHECK(result->work, "backend returned no Work");
+    *ret = result.release();
+#else
+    TORCH_CHECK(false, "stable c10d requires a PyTorch build with USE_DISTRIBUTED=1");
+#endif
+  });
+}
+
+AOTITorchError torch_process_group_barrier(
+    TorchProcessGroupHandle group,
+    const int64_t* device_ids,
+    size_t count,
+    TorchWorkHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+#ifdef USE_DISTRIBUTED
+    auto result = stable_collective_work(group, ret);
+    TORCH_CHECK(
+        count == 0 || device_ids != nullptr,
+        "device_ids must not be null when count is nonzero");
+    c10d::BarrierOptions options;
+    for (size_t i = 0; i < count; ++i) {
+      TORCH_CHECK(device_ids[i] >= 0, "invalid barrier device index");
+      options.device_ids.push_back(device_ids[i]);
+    }
+    result->work = result->group->barrier(options);
+    TORCH_CHECK(result->work, "backend returned no Work");
+    *ret = result.release();
+#else
+    TORCH_CHECK(false, "stable c10d requires a PyTorch build with USE_DISTRIBUTED=1");
+#endif
+  });
+}
+
+AOTITorchError torch_work_wait(
+    TorchWorkHandle work,
+    int64_t timeout_ms,
+    bool* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+#ifdef USE_DISTRIBUTED
+    TORCH_CHECK(work && ret, "work and ret must not be null");
+    TORCH_CHECK(timeout_ms >= 0, "timeout_ms must be nonnegative");
+    *ret = work->work->wait(std::chrono::milliseconds(timeout_ms));
+#else
+    TORCH_CHECK(false, "stable c10d requires a PyTorch build with USE_DISTRIBUTED=1");
+#endif
+  });
+}
+
+AOTITorchError torch_work_is_completed(TorchWorkHandle work, bool* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+#ifdef USE_DISTRIBUTED
+    TORCH_CHECK(work && ret, "work and ret must not be null");
+    *ret = work->work->isCompleted();
+#else
+    TORCH_CHECK(false, "stable c10d requires a PyTorch build with USE_DISTRIBUTED=1");
+#endif
+  });
+}

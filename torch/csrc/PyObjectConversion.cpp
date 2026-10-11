@@ -20,6 +20,14 @@ struct NoopPyObjectConversion final : PyObjectConversionInterface {
   bool is_tensor_pyobject(PyObject* /*obj*/) const override {
     TORCH_CHECK(false, kNoImplMsg);
   }
+
+#ifdef USE_DISTRIBUTED
+  std::shared_ptr<c10d::ProcessGroup> process_group_from_pyobject(
+      PyObject* /*obj*/) const override {
+    TORCH_CHECK(
+        false, "torch_process_group_from_pyobject requires libtorch_python");
+  }
+#endif
   at::Tensor tensor_from_pyobject(PyObject* /*obj*/) const override {
     TORCH_CHECK(false, kNoImplMsg);
   }
