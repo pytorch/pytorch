@@ -47,12 +47,14 @@ _VERSION_TAG = "# torch.compiler.export_python torch-version: "
 # the version stamp it is exec-inert, and dropping it in a hand-edit just turns the
 # check off (see _check_module_training).
 _MODULE_TRAINING_TAG = "# torch.compiler.export_python module-training: "
-# Which input tensors overlapped in memory at capture. make_fx bakes that into the
-# graph with no runtime guard, and aliased inputs change what a mutation means.
-# Exec-inert like the other stamps, and dropping it turns only its own check off. What
-# no stamp guards is a change in HOW two aliased inputs overlap -- capture's relative
-# offsets stay baked in, exactly as they do under torch.compile.
+# Which input tensors overlapped in memory at capture, and which of them were literally
+# the same object. make_fx bakes both into the graph with no runtime guard: aliased
+# inputs change what a mutation means, and one object passed twice is deduped into a
+# single graph slot. Exec-inert like the other stamps, and dropping one turns only its
+# own check off. What no stamp guards is a change in HOW two aliased inputs overlap --
+# capture's relative offsets stay baked in, exactly as they do under torch.compile.
 _INPUT_OVERLAP_TAG = "# torch.compiler.export_python input-overlap: "
+_INPUT_DUPLICATE_TAG = "# torch.compiler.export_python input-duplicates: "
 
 # os.link failures that mean the filesystem cannot do hard links at all, as opposed to
 # a real I/O problem (a full disk, a bad permission) that must not be swallowed. EINVAL
@@ -254,6 +256,28 @@ def _input_overlaps(
     ]
 
 
+def _input_duplicates(
+    args: Sequence[Any], tensors: list[torch.Tensor] | None = None
+) -> list[list[int]]:
+    """Which input positions hold the SAME tensor object, as [first, repeat] pairs.
+
+    Not implied by _input_overlaps: AOTAutograd dedups arguments that are one object
+    into a single graph slot, and byte overlap cannot tell that apart from two views
+    that merely intersect. Both report the same pair set, so without this an artifact
+    captured from overlapping views silently computes the wrong thing when handed one
+    tensor twice. torch.compile guards it and recompiles ("Duplicate tensors found").
+    """
+    if tensors is None:
+        tensors = _input_tensors(args)
+    first: dict[int, int] = {}
+    pairs = []
+    for i, tensor in enumerate(tensors):
+        seen_at = first.setdefault(id(tensor), i)
+        if seen_at != i:
+            pairs.append([seen_at, i])
+    return pairs
+
+
 class ExportedPythonArtifact:
     """Materializes and disk-caches a ``torch.compiler.precompile`` artifact.
 
@@ -295,6 +319,7 @@ class ExportedPythonArtifact:
         self._example_inputs = None if example_inputs is None else tuple(example_inputs)
         self._module_training: list[tuple[int, list[tuple[str, bool]]]] | None = None
         self._input_overlaps: list[list[int]] | None = None
+        self._input_duplicates: list[list[int]] | None = None
         self._loaded: Callable[..., Any] | None = None
         # (pid, tid) currently inside _materialize: the re-entrancy guard the reentrant
         # capture lock cannot provide. The pid keeps it correct in a forked child, which
@@ -363,6 +388,7 @@ class ExportedPythonArtifact:
             f"{_VERSION_TAG}{torch.__version__}\n"
             f"{_MODULE_TRAINING_TAG}{module_training!r}\n"
             f"{_INPUT_OVERLAP_TAG}{example_overlaps!r}\n"
+            f"{_INPUT_DUPLICATE_TAG}{_input_duplicates(example, example_tensors)!r}\n"
             f"{code}"
         )
         # os.link does not follow a symlink at its destination, so resolve one first: a
@@ -428,7 +454,7 @@ class ExportedPythonArtifact:
         tensors: list[torch.Tensor] | None = None
 
         def input_tensors() -> list[torch.Tensor]:
-            # Walked once and shared by the checks below. Lazily, so an artifact
+            # Walked once and shared by the two checks below. Lazily, so an artifact
             # whose stamps were all hand-edited away does not pay for a walk no check
             # will read.
             nonlocal tensors
@@ -452,6 +478,25 @@ class ExportedPythonArtifact:
                     f"memory the way capture did (captured overlapping index pairs "
                     f"{self._input_overlaps}, got {actual}). Aliasing is baked into the "
                     "graph, so this call would compute against the wrong assumption."
+                )
+        if self._input_duplicates is None:
+            log.warning(
+                "torch.compiler.export_python: the artifact at %s carries no recorded "
+                "input-duplicate stamp, so a runtime call that repeats a tensor object "
+                "differently than capture is unchecked. Delete %s to regenerate it.",
+                self._path,
+                self._path,
+            )
+        else:
+            actual_duplicates = _input_duplicates(args, input_tensors())
+            if actual_duplicates != self._input_duplicates:
+                raise _precompile_error(
+                    "torch.compiler.export_python: the runtime inputs repeat tensor "
+                    "objects differently than capture did (captured duplicate index "
+                    f"pairs {self._input_duplicates}, got {actual_duplicates}). "
+                    "AOTAutograd folds arguments that are one object into a single "
+                    "graph slot, so this call would compute against the wrong "
+                    "assumption -- byte overlap alone cannot see the difference."
                 )
 
     def _check_module_training(self, args: tuple[Any, ...]) -> None:
@@ -581,6 +626,7 @@ class ExportedPythonArtifact:
             self._warn_on_version_skew(code)
         self._module_training = self._read_stamp(code, _MODULE_TRAINING_TAG)
         self._input_overlaps = self._read_stamp(code, _INPUT_OVERLAP_TAG)
+        self._input_duplicates = self._read_stamp(code, _INPUT_DUPLICATE_TAG)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None
         self._decompositions = None
