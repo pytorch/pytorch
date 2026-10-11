@@ -66,6 +66,7 @@ log = logging.getLogger(__name__)
 try:
     from quantization.fx.test_quantize_fx import TestFuseFx  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFx  # noqa: F401
+    from quantization.fx.test_quantize_fx import TestQuantizeFxCUDASpecific  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
     from quantization.fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
