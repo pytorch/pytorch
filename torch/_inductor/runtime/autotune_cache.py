@@ -699,7 +699,10 @@ def _load_cached_autotuning(
     compile_options = cached_config.get("compile_options")
     if not isinstance(config_kwargs, dict) or not isinstance(compile_options, dict):
         return None
-    triton_config = triton_config_from_dict(cast(dict[str, Any], cached_config))
+    try:
+        triton_config = triton_config_from_dict(cast(dict[str, Any], cached_config))
+    except (KeyError, TypeError, ValueError):
+        return None
     extra_options = triton_config.extra_options
 
     if not found_by_coordesc:
