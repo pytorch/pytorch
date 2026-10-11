@@ -662,6 +662,9 @@ class TritonTemplateKernel(TritonKernel):
 
         # input buffers which we are allowed to prologue fuse into
         self.prologue_supported_inputs: OrderedSet[str] = OrderedSet()
+        # Track prologue-fusion-supported input indices before duplicate
+        # arguments are deduplicated.
+        self._prologue_fusion_supported_input_indices: OrderedSet[int] = OrderedSet()
 
         # input buffers which we are fusing into
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
@@ -719,6 +722,15 @@ class TritonTemplateKernel(TritonKernel):
     def _gen_tmp_var(self) -> str:
         return f"_tmp_var{next(self.tmp_var_ctr)}"
 
+    def _finalize_prologue_supported_inputs(self) -> None:
+        # Remove a prologue-fusible buffer if it also appears at an unsupported
+        # template input position.
+        self.prologue_supported_inputs -= OrderedSet(
+            input_node.get_name()
+            for index, input_node in enumerate(self.input_nodes)
+            if index not in self._prologue_fusion_supported_input_indices
+        )
+
     def input_dependent_preserved_state(self) -> str:
         # Not adding self.args.output_buffers on purpose. But we do not need to reproduce it on a cache hit.
         # (never accessed).
@@ -728,6 +740,8 @@ class TritonTemplateKernel(TritonKernel):
                 self.args.sizevars,
                 self.args.workspace_args,
                 self.prologue_supported_inputs,
+                # Record occurrence-only changes for generated-code cache replay.
+                self._prologue_fusion_supported_input_indices,
                 self.frozen_layouts_cnt,
             ]
         )
@@ -751,6 +765,7 @@ class TritonTemplateKernel(TritonKernel):
     def replay_cached_events(self, events: RecordedEventsType) -> None:
         for f, args, kwargs in events:
             getattr(self, f)(*args, **kwargs)
+        self._finalize_prologue_supported_inputs()
 
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
@@ -1048,10 +1063,11 @@ class TritonTemplateKernel(TritonKernel):
             self.args.input_buffers[input_node.get_name()] = arg_name
 
         # The args may be duplicated, so renaming must be after args are de-duplicated.
-        for name in argnames:
+        for named_index, name in enumerate(argnames, start=self.prefix_args):
             input_node = self.named_input_nodes[name]
             if self.prologue_loads_all_inputs:
                 self.prologue_supported_inputs.add(input_node.get_name())
+                self._prologue_fusion_supported_input_indices.add(named_index)
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
             if input_node.get_name() in self.prologue_fused_inputs:
@@ -1324,6 +1340,10 @@ class TritonTemplateKernel(TritonKernel):
         input_node = self.named_input_nodes[input_name]
         if not self.prologue_loads_all_inputs:
             self.prologue_supported_inputs.add(input_node.get_name())
+            named_input_index = self.prefix_args + list(self.named_input_nodes).index(
+                input_name
+            )
+            self._prologue_fusion_supported_input_indices.add(named_input_index)
 
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
@@ -1859,10 +1879,9 @@ class TritonTemplateKernel(TritonKernel):
                 *self.extra_template_env_fns,
             ]
         }
-        return PartialRender(
-            template.render(**template_env, **kwargs),
-            self.render_hooks,
-        )
+        rendered_template = template.render(**template_env, **kwargs)
+        self._finalize_prologue_supported_inputs()
+        return PartialRender(rendered_template, self.render_hooks)
 
     def make_load(self, name, indices, mask):
         """
