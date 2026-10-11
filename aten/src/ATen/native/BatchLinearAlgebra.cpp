@@ -3864,13 +3864,17 @@ Tensor& linalg_solve_triangular_out(
   //   copy out_f into out
   // return out
   //
-  // Note: The logic for the negative bit is the same as that for the conjugate bit
-  //
   // Note: [Cloning A] If we are careful when allocating B when it needs to be allocated at the
   // beginning of the algorithm, it is possible to always elide the copy of A here.
   // Via this trick, the algorithm will copy at most one of A or B (never both) whenever A
   // and B are F-ready and not A.is_neg() (which happens almost always in practice).
   // When called as f(A, B, out=B) in most practical cases it'll perform no copies.
+  //
+  // Note: The logic for the negative bit is NOT the same as that for the conjugate bit.
+  // Conjugation is semilinear: AX = conj(B) <=> conj(A)conj(X) = B, so a conj bit on out_f
+  // legitimately moves onto A. Negation is linear: -(AX) = A(-X), so a neg bit on out_f is
+  // absorbed entirely by X (the solution is written into out_f's memory, which already
+  // carries the bit) and must never be applied to A. Only A's own neg bit has to be resolved.
 
   const bool avoid_copy_A = A_.transpose(-2, -1).is_contiguous() && A_.is_conj();
   if (avoid_copy_A) {
@@ -3921,61 +3925,44 @@ Tensor& linalg_solve_triangular_out(
   Tensor A_f = std::move(A_);  // The A that will go into fortran
 
   bool A_is_conj = A_f.is_conj() != out_f.is_conj();
-  bool A_is_neg = A_f.is_neg() != out_f.is_neg();
+  // Only A's own neg bit matters. out_f's neg bit is absorbed by X, see the note above.
+  bool A_is_neg = A_f.is_neg();
   bool A_is_f_contig = (A_f.stride(-1) == 1) == transpose_A;
   if C10_UNLIKELY (!is_row_or_column_contiguous(A_f)) {
-    // We first annotate with flags on A_f all the conj / transpose / neg coming from out
-    // and then we clone the resulting tensor to resolve all of them in memory
+    // We first annotate with flags on A_f the conj coming from out
+    // and then we clone the resulting tensor to resolve all of A's flags in memory
+    // (including A's own neg bit, which the clone materialises)
     if (out_f.is_conj()) {
       A_f = A_f.conj();
     }
     A_is_conj = false;
-
-    if (out_f.is_neg()) {
-      A_f = A_f._neg_view();
-    }
     A_is_neg = false;
 
     // This choice is to be consistent with how we flip `upper` later on
-    // Note that this is the same reasoning we apply for neg and conj below
-    // If B has neg or out or transpose, then we need to resolve it in memory
     A_f = transpose_A ? A_f.clone(at::MemoryFormat::Contiguous)
                       : cloneBatchedColumnMajor(A_f);
     A_is_f_contig = true;
   } else if C10_UNLIKELY (A_is_f_contig && A_is_conj) {
-    if C10_UNLIKELY (A_f.is_neg() || out_f.is_neg()) {
-      // Cases A_is_neg (remember that B.is_neg() iff out_f.is_same(B))
-      // -AX = -B => A(-X) = B. Swap neg of A_f. Nothing to do on X as X.is_same(B).
-      // -AX = B. We resolve the neg in memory
-      // AX = -B => -A -X = B. We resolve the neg in memory for A,
-      //                       Since X.is_same(B), we already have that X.is_neg() == true
-
-      // We do the neg with a view, as this will be resolved in the clone below
-      if (out_f.is_neg()) {
-        A_f = A_f._neg_view();
-      }
-      A_is_neg = false;
-    }
+    // If A_f has its own neg bit set, it is resolved in the clone below,
+    // which copies the negated values into memory.
     // We resolve the transpose if necessary and then leave A_f F-transposed,
     // as BLAS can handle the case F-transposed and conjugated
     A_f = at::clone(transpose_A ? A_f.mT() : A_f, at::MemoryFormat::Contiguous);
     A_is_f_contig = false;
+    A_is_neg = false;
     if (transpose_A) {
       upper = !upper;
     }
     // As we've already resolved the conj of A in the clone
     A_is_conj = out_f.is_conj();
   } else if C10_UNLIKELY (A_is_neg) {
-    // We follow the same logic as above, only that in this case we need to perform the
-    // negation in memory
-    if (out_f.is_neg()) {
-      A_f = -A_f;
-    } else {
-      A_f = A_f.resolve_neg();
-    }
+    // A_f is F-ready but has its own neg bit set. BLAS ignores the bit and reads
+    // the raw memory, so we resolve it in memory (this returns a new tensor).
+    A_f = A_f.resolve_neg();
     A_is_neg = false;
-    // As we've already resolved the conj of A in the negationa bove
-    A_is_conj = out_f.is_conj();
+    // Recompute from the flags A_f actually carries now, rather than assuming
+    // what resolve_neg did with a conj bit on A_f.
+    A_is_conj = A_f.is_conj() != out_f.is_conj();
   }
   // Invariant: out_f is F-contig and A_f is F-ready
   // neg has been resolved
