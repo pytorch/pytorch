@@ -3398,6 +3398,39 @@ class TestPrecompile(TestCase):
                 backend="eager",
             )
 
+    def test_capture_rejected_after_tracing_still_restores_rng(self):
+        # These rejections all fire with a complete graph in hand, so they know what
+        # the capture drew and must not leave the caller's stream advanced.
+        const = torch.ones(4)
+
+        class GradBuffer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b", torch.ones(4, requires_grad=True))
+
+        def buffer_grad(m, a):
+            (torch.rand_like(a) * m.b).sum().backward()
+
+        x = torch.ones(4, requires_grad=True)
+        rejected = {
+            "neither a graph input": (lambda a: torch.rand_like(a) + const, (x,)),
+            "user input received a gradient": (
+                lambda a: (torch.rand_like(a) * a).sum().backward(),
+                (x,),
+            ),
+            "registered buffer received a gradient": (
+                buffer_grad,
+                (GradBuffer(), torch.ones(4)),
+            ),
+        }
+        for pattern, (fn, args) in rejected.items():
+            with self.subTest(pattern):
+                torch.manual_seed(0)
+                before = torch.random.get_rng_state()
+                with self.assertRaisesRegex(PrecompileError, pattern):
+                    _precompile_pair(fn, *args, backend="eager")
+                self.assertEqual(torch.random.get_rng_state(), before)
+
     def test_capture_through_an_opaque_op_restores_every_generator(self):
         # A custom op can draw inside its own kernel with nothing in the graph to say
         # so; its presence alone makes capture restore every saved generator.
