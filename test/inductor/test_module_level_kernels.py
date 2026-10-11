@@ -14,6 +14,7 @@ from unittest import mock
 import torch
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan
+from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor import CompiledArtifact, config
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import PyCodeCache
@@ -108,6 +109,21 @@ def {op}_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
     mask = offs < n
     tl.store(out_ptr + offs, op(tl.load(in_ptr + offs, mask=mask)), mask=mask)
 """
+
+
+# A user kernel whose source holds a backslash escape.
+_DOC_MODULE = r'''
+import triton
+import triton.language as tl
+
+
+@triton.jit
+def doc_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    """Adds one.\n"""
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n
+    tl.store(out_ptr + offs, tl.load(in_ptr + offs, mask=mask) + 1, mask=mask)
+'''
 
 
 def _import_kernels(d, template, kernels):
@@ -624,6 +640,40 @@ class TestModuleLevelKernels(TestCase):
             for op in ("abs", "floor"):
                 self.assertRegex(code, rf"(?m) import {op} as op_{op}_kernel_\d+$")
             self.assertEqual(tuple(_run_from_file(code, [x])), expected)
+
+    @requires_cuda_and_triton
+    def test_user_defined_kernel_source_with_backslashes(self):
+        with tempfile.TemporaryDirectory() as d:
+            (mod,) = _import_kernels(d, _DOC_MODULE, {"_kd_doc": {}})
+
+            def fn(x):
+                out = torch.empty_like(x)
+                mod.doc_kernel[(4,)](x, out, x.numel(), BLOCK=64)
+                return out
+
+            x = torch.randn(256, device="cuda")
+            result, code = _code_for(fn, x)
+            self.assertEqual(result, x + 1)
+            self.assertIn(r'"""Adds one.\n"""', code)
+
+    @requires_cuda_and_triton
+    @parametrize("autotune_at_compile_time", [False, True])
+    def test_kernel_source_with_backslashes(self, autotune_at_compile_time):
+        # Inline asm escapes its newlines for the string form's ''' literal.
+        asm = "{\n.reg .pred p;\nsetp.ge.s32 p, $1, $2;\nselp.u32 $0, 1, 0, p;\n}"
+
+        def fn(x, y):
+            return inline_asm_elementwise(
+                x, y, asm_str=asm, constraints="=r,r,r", dtype=torch.int32
+            )
+
+        x = torch.randint(-8, 8, (256,), device="cuda", dtype=torch.int32)
+        y = torch.randint(-8, 8, (256,), device="cuda", dtype=torch.int32)
+        cfg = {"triton.autotune_at_compile_time": autotune_at_compile_time}
+        result, code = _code_for(fn, x, y, **cfg)
+        self.assertEqual(result, (x >= y).int())
+        # The def holds the asm as the string form's literal decodes it.
+        self.assertIn(r"{\n.reg .pred p;\n", code)
 
 
 class TestDefaultWrapper(TestCase):
