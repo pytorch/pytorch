@@ -1380,6 +1380,118 @@ class TestBlackwellTMALoadFusion(TestCase):
             re.search(r"def triton_tem_fused\w*\([^)]*\bks0\b", codes[-1]), codes[-1]
         )
 
+    DYNAMIC_M_PARTIAL_OPS = {
+        # (fn, N): column reductions finish from per-row-tile partials, row
+        # reductions of a tile narrower than N from per-column-tile partials.
+        "col_sum": (lambda a, b: (a @ b).float().sum(0), 200),
+        # Unmasked out-of-range rows would each add 1.
+        "col_plus1": (lambda a, b: ((a @ b).float() + 1).sum(0), 200),
+        "col_mean": (lambda a, b: (a @ b).float().mean(0), 200),
+        "col_sum_bf16": (lambda a, b: (a @ b).sum(0), 200),
+        "row_col": (lambda a, b: ((c := (a @ b).float()).sum(-1), c.sum(0)), 128),
+        "wide_row_sum": (lambda a, b: (a @ b).float().sum(-1), 512),
+        # Two partial regions of 3 * M floats each, so the second one starts at
+        # a symbolic offset.
+        "wide_rows_two": (
+            lambda a, b: ((c := (a @ b).float()).sum(-1), (c - 100).amax(-1)),
+            384,
+        ),
+    }
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", tuple(DYNAMIC_M_PARTIAL_OPS))
+    @parametrize("split", (False, True))
+    @parametrize("epilogue_subtile", (1, 2, 4))
+    def test_blackwell_mm_partial_reduction_epilogue_dynamic_m(
+        self, op: str, split: bool, epilogue_subtile: int
+    ):
+        """With a dynamic M, reductions that finish from partials size them
+        symbolically: one compiled graph is correct for every M."""
+        fn, N = self.DYNAMIC_M_PARTIAL_OPS[op]
+        torch._dynamo.reset()
+        K = 128
+        b = torch.randint(-1, 2, (K, N), device=GPU_TYPE).to(torch.bfloat16)
+        counter = CompileCounterWithBackend("inductor")
+        codes = []
+        with (
+            self._mm_config(
+                BlackwellGPUGemmConfig(
+                    128, 128, 64, 3, 8, epilogue_subtile=epilogue_subtile
+                ),
+                **{
+                    "triton.template_reduction_epilogue": True,
+                    "split_reductions": split,
+                },
+            ),
+            self._poison_outputs(),
+            # run_and_get_code resets dynamo, which would drop the dynamic graph.
+            mock.patch.object(GraphLowering, "save_output_code", codes.append),
+        ):
+            compiled = torch.compile(fn, backend=counter)
+            for M in (1024, 1001, 7, 129, 4099):
+                a = torch.randint(-1, 2, (M, K), device=GPU_TYPE).to(torch.bfloat16)
+                torch._dynamo.mark_dynamic(a, 0)
+                tol = 1e-5 if op == "col_mean" else 0
+                self.assertEqual(compiled(a, b), fn(a, b), atol=tol, rtol=tol)
+        self.assertEqual(counter.frame_count, 1)
+        code = codes[-1]
+        kernels = re.findall(r"def (triton_\w+)\(", code)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        self.assertFalse(
+            any(k.startswith(("triton_per", "triton_red")) for k in kernels), kernels
+        )
+        # The wrapper finishes the partials with symbolic sizes.
+        self.assertIsNotNone(
+            re.search(r"\.view\(torch\.float32\)\.view\([^)]*\bs\d+", code), code
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", ("col_sum", "wide_rows_two"))
+    def test_blackwell_mm_partial_reduction_epilogue_dynamic_m_benchmark(self, op: str):
+        """Epilogue benchmarking runs the fused kernel and its partials finish
+        at the hint of a dynamic M."""
+        fn, N = self.DYNAMIC_M_PARTIAL_OPS[op]
+        K = 128
+        a = torch.randint(-1, 2, (1001, K), device=GPU_TYPE).to(torch.bfloat16)
+        b = torch.randint(-1, 2, (K, N), device=GPU_TYPE).to(torch.bfloat16)
+        torch._dynamo.mark_dynamic(a, 0)
+        benchmark = Scheduler.benchmark_codegened_module
+        finishes = []
+
+        def benchmark_and_record(self, module, device):
+            ms, path = benchmark(self, module, device)
+            with open(path) as f:
+                if ".view(torch.float32)" in f.read():
+                    finishes.append(ms)
+            return ms, path
+
+        with (
+            mock.patch.object(
+                Scheduler, "benchmark_codegened_module", benchmark_and_record
+            ),
+            self._poison_outputs(),
+        ):
+            actual, _ = self._run_with_mm_config(
+                fn,
+                (a, b),
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+                fused_ms=None,
+                **{
+                    "triton.template_reduction_epilogue": True,
+                    "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+                },
+            )
+        self.assertEqual(actual, fn(a, b))
+        # A fused config that spills times as inf, but only after its first
+        # run, which already executed the finish.
+        self.assertTrue(finishes)
+
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
