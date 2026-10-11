@@ -1260,6 +1260,11 @@ class SideEffects:
                 var.reconstruct(cg)
                 cg.add_cache(var)
                 var.source = TempLocalSource(cg.tempvars[var])
+            elif isinstance(var, variables.ClassMethodVariable):
+                # classmethod cannot be built via object.__new__ either.
+                var.reconstruct(cg)
+                cg.add_cache(var)
+                var.source = TempLocalSource(cg.tempvars[var])
             else:
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)
@@ -2068,6 +2073,18 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                 cg(var.source)  # type: ignore[attr-defined]
                 ctx.suffixes.append(
                     [*create_call_function(1, False), create_instruction("POP_TOP")]
+                )
+                side_effect_occurred = True
+            elif isinstance(var, variables.ClassMethodVariable) and (
+                mutation_kind is AttrMutationKind.INSTANCE_DICT
+            ):
+                cg(var.source)  # type: ignore[attr-defined]
+                cg.extend_output(cg.create_load_attrs("__dict__"))
+                cg.load_method("pop")
+                cg(variables.ConstantVariable(name))
+                cg(variables.ConstantVariable(None))
+                ctx.suffixes.append(
+                    [*create_call_method(2), create_instruction("POP_TOP")]
                 )
                 side_effect_occurred = True
             elif (
