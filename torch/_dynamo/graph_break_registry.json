@@ -679,6 +679,16 @@
       ]
     }
   ],
+  "GB1552": [
+    {
+      "Gb_type": "dict_items.isdisjoint with a data-dependent comparison",
+      "Context": "isdisjoint {self} {item} -> {found}",
+      "Explanation": "isdisjoint stops at the first matching item, but comparing this item with a stored value does not give a constant result.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0046": [
     {
       "Gb_type": "Encountered torch.is_inference_mode_enabled during tracing",
