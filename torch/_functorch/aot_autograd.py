@@ -1117,6 +1117,13 @@ def prepare_aot_module_simplified(
         PlainAOTInput(i) for i in range(len(full_args) - len(full_args_descs))
     )
 
+    if not flatten and isinstance(mod, torch.fx.GraphModule):
+        input_names = tuple(n.name for n in mod.graph.find_nodes(op="placeholder"))
+        if len(input_names) == len(full_args) - aot_config.num_params_buffers:
+            aot_config = dataclasses.replace(
+                aot_config, original_input_names=input_names
+            )
+
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
     fake_flat_args, act_input_paths = process_inputs(
