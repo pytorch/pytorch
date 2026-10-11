@@ -499,7 +499,9 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         from torch._higher_order_ops.utils import _hop_compile_and_call
 
         return _hop_compile_and_call(
-            _invoke_subgraph_placeholder_wrapper, (func, args, kwargs)
+            _invoke_subgraph_placeholder_wrapper,
+            (func, args, kwargs),
+            preserve_export_regions=True,
         )
 
     return func(*args, **kwargs)
