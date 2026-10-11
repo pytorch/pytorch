@@ -4131,24 +4131,33 @@ class PythonWrapperCodegen(CodeGen):
                 metadata,
             )
             return
+        # When inductor loads this module, the def binds the kernel AsyncCompile built
+        # from this source rather than compiling itself in process, so the worker pool
+        # can start on it now, as it does for a string kernel. It gets the source the
+        # string form would have compiled, so both forms share every compile cache.
+        self.kernel_sources[kernel_name] = (subs_name, src_code)
+        if async_compile.AsyncCompile.use_process_pool():
+            async_compile.AsyncCompile().triton(subs_name, src_code)
+        autotune_body = (
+            self.async_compile_triton_body(subs_name, src_code, device_type)
+            if config.triton.autotune_at_compile_time
+            else None
+        )
         # src_code is already a complete module: the triton imports, the
         # @triton_heuristics.* decorator that builds the CachingAutotuner, and the
         # @triton.jit def. Spliced at module level it binds kernel_name to the same
         # object async_compile.triton would have returned, so the launch site
-        # (KERNEL.run(...)) is unchanged.
-        # Kernels define module-level @triton.jit helpers under names that are only
-        # unique per kernel (scan combine_fns, flex attention's forward_inner, ...), so
-        # two kernels can define the same name with different bodies; in one shared
-        # namespace the later def would win for both. Make them kernel-unique.
-        helpers = re.findall(r"^def (\w+)\(", src_code, re.MULTILINE)
-        for helper in OrderedSet(helpers) - OrderedSet([kernel_name, subs_name]):
-            src_code = re.sub(rf"\b{helper}\b", f"{helper}_{kernel_name}", src_code)
-        # When inductor loads this module, the def binds the kernel AsyncCompile built
-        # from this source rather than compiling itself in process, so the worker pool
-        # can start on it now, as it does for a string kernel.
-        self.kernel_sources[kernel_name] = (subs_name, src_code)
-        if async_compile.AsyncCompile.use_process_pool():
-            async_compile.AsyncCompile().triton(subs_name, src_code)
+        # (KERNEL.run(...)) is unchanged. Its def is named subs_name, which is `triton_`
+        # for every kernel without unique_kernel_names, and kernels define module-level
+        # @triton.jit helpers under names that are only unique per kernel (scan
+        # combine_fns, flex attention's forward_inner, ...). In one shared namespace the
+        # later def would win for all of them, so make every def name kernel-unique.
+        renames = {subs_name: kernel_name}
+        for helper in re.findall(r"^def (\w+)\(", src_code, re.MULTILINE):
+            if helper not in (kernel_name, subs_name):
+                renames[helper] = f"{helper}_{kernel_name}"
+        for old, new in renames.items():
+            src_code = re.sub(rf"\b{old}\b", new, src_code)
         self.define_kernel(
             kernel_name,
             src_code,
@@ -4158,11 +4167,7 @@ class PythonWrapperCodegen(CodeGen):
             # them, and a module-level kernel there has no __file__ to name itself by,
             # so that block keeps the AsyncCompile form. It runs at compile time only
             # and is not carried in the emitted module.
-            autotune_body=(
-                self.async_compile_triton_body(subs_name, src_code, device_type)
-                if config.triton.autotune_at_compile_time
-                else None
-            ),
+            autotune_body=autotune_body,
         )
 
     def defines_triton_kernels_as_code(self) -> bool:

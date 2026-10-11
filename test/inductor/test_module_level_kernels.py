@@ -336,6 +336,23 @@ class TestModuleLevelKernels(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], hits)
             self.assertEqual(result, x * 8)
 
+    @requires_cuda_and_triton
+    @config.patch({"compile_threads": 2, "triton.unique_kernel_names": False})
+    def test_kernels_without_unique_names(self):
+        self.assertTrue(AsyncCompile.wait_process_pool_ready())
+        x = torch.randn(64, 128, device="cuda")
+        with mock.patch.object(
+            CachingAutotuner, "_precompile_config", _compiled_in_this_process
+        ):
+            result, code = _code_for(_cond_softmax, x)
+        self.assertEqual(result, _cond_softmax(x))
+        # The pool built the pre-rename sources; this compiles the renamed defs.
+        self.assertEqual(_run_from_file(code, [x])[0], result)
+        self.assertNotIn("def triton_(", code)
+        kernels = re.findall(r"^def (triton_\w+)\(", code, re.MULTILINE)
+        self.assertGreater(len(kernels), 1, code)
+        self.assertEqual(len(kernels), len(set(kernels)), kernels)
+
 
 class TestDefaultWrapper(TestCase):
     @requires_cuda_and_triton
