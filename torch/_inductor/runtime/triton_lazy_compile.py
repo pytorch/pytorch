@@ -23,6 +23,7 @@ from .hints import (
     TRITON_DEFAULT_RSPLIT,
     TRITON_DEFAULT_RSPLIT_SIZE,
 )
+from .runtime_utils import triton_config_kwargs_from_dict
 from .triton_heuristics import CachingAutotuner
 
 
@@ -144,7 +145,6 @@ def run_triton_kernel_with_autotune(
     Run a Triton kernel with full autotuning using actual tensor arguments.
     """
     from torch._inductor.codecache import CodeCacheFuture, CudaKernelParamCache
-    from torch._inductor.runtime.triton_heuristics import config_kwargs_from_dict
 
     if kernel_name not in pending_kernels:
         raise RuntimeError(f"Kernel {kernel_name} not found in pending kernels.")
@@ -241,7 +241,7 @@ def run_triton_kernel_with_autotune(
         # to remember which grid is chosen.
         precomputed_grids = inductor_meta.get("precomputed_grids", [])
         for idx, entry in enumerate(precomputed_grids):
-            entry_config = config_kwargs_from_dict(entry.get("config", {}))
+            entry_config = triton_config_kwargs_from_dict(entry.get("config", {}))
             if all(config.get(k) == v for k, v in entry_config.items()):
                 config_index = idx
                 break
