@@ -5881,6 +5881,11 @@ class Scheduler:
         )
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
         self.previous_node: BaseSchedulerNode | None = None
+        # Nodes whose kernels may still be running when the next kernel starts
+        # with PDL, or None if unknown. Launching a kernel that waits for its
+        # predecessor clears it (see TritonKernel.call_kernel); combo and multi
+        # kernels never clear it, which is conservative.
+        self.previous_nodes: list[BaseSchedulerNode] | None = None
         self.current_node: BaseSchedulerNode | None = None
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
@@ -12553,6 +12558,8 @@ class Scheduler:
         self.current_device = self.default_device_context
         if self.previous_node is not None:
             raise AssertionError("expected previous_node to be None")
+        if self.previous_nodes is not None:
+            raise AssertionError("expected previous_nodes to be None")
         previous_nodes_by_stream: dict[
             tuple[torch.device | None, int], BaseSchedulerNode
         ] = {}
@@ -12746,8 +12753,11 @@ class Scheduler:
 
             if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
                 previous_nodes_by_stream[stream_key] = node
+                if self.previous_nodes is not None:
+                    self.previous_nodes.append(node)
             else:
                 previous_nodes_by_stream.pop(stream_key, None)
+                self.previous_nodes = None
 
         if self.current_device != self.default_device_context:
             # when default_device_context is not None, we are codegen
@@ -12761,6 +12771,7 @@ class Scheduler:
                 V.graph.wrapper_code.codegen_device_guard_exit()
 
         self.previous_node = None
+        self.previous_nodes = None
         self.flush()
 
     def benchmark_combo_kernel(
@@ -12916,6 +12927,8 @@ class Scheduler:
         if isinstance(node, NopKernelSchedulerNode):
             raise AssertionError("expected node to not be a NopKernelSchedulerNode")
         node_stream = self.get_node_stream(node)
+        # PDL only overlaps kernels within a stream
+        self.previous_nodes = None
         self._current_stream_ctx = V.graph.wrapper_code.codegen_cuda_stream_enter(
             stream_idx=node_stream,
         )
