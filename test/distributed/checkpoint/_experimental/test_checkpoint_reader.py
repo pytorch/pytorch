@@ -12,6 +12,11 @@ from torch.distributed.checkpoint._experimental.types import RankInfo
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
+
 class TestCheckpointReader(TestCase):
     def setUp(self):
         super().setUp()
@@ -55,13 +60,13 @@ class TestCheckpointReader(TestCase):
 
     def move_tensors_to_device(self, state_dict: Any, device: str) -> Any:
         """
-        Recursively move all tensors in a nested dictionary to CUDA.
+        Recursively move all tensors in a nested dictionary to the accelerator.
 
         Args:
             state_dict (dict): A dictionary potentially containing nested dictionaries and tensors.
 
         Returns:
-            dict: A new dictionary with all tensors moved to CUDA.
+            dict: A new dictionary with all tensors moved to the accelerator.
         """
         if isinstance(state_dict, dict):
             return {
@@ -71,7 +76,7 @@ class TestCheckpointReader(TestCase):
         elif isinstance(state_dict, list):
             return [self.move_tensors_to_device(item, device) for item in state_dict]
         elif isinstance(state_dict, torch.Tensor):
-            return state_dict.cuda() if device == "cpu" else state_dict.cpu()
+            return state_dict.to(device_type) if device == "cpu" else state_dict.cpu()
         else:
             return state_dict
 
@@ -112,7 +117,7 @@ class TestCheckpointReader(TestCase):
     def test_read_with_map_location(self):
         """Test that read correctly uses the map_location parameter."""
         # Call read with map_location='cpu'
-        map_location = "cuda" if torch.cuda.is_available() else "cpu"
+        map_location = device_type
         read_state_dict, _ = self.reader.read(
             self.checkpoint_path, map_location=map_location
         )

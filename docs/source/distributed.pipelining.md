@@ -401,10 +401,150 @@ You can implement your own pipeline schedule by extending one of the following t
 
 `PipelineScheduleSingle` is for schedules that assigns *only one* stage per rank.
 `PipelineScheduleMulti` is for schedules that assigns multiple stages per rank.
+All stages assigned to one rank must execute on one device; adjacent same-rank
+stages pass activations and gradients directly without device copies.
 
 For example, `ScheduleGPipe` and `Schedule1F1B` are subclasses of `PipelineScheduleSingle`.
 Whereas, `ScheduleInterleaved1F1B`, `ScheduleLoopedBFS`, `ScheduleInterleavedZeroBubble`, and `ScheduleZBVZeroBubble`
 are subclasses of `PipelineScheduleMulti`.
+
+### Accessing Stage Forward Information
+
+A runtime surrounding a pipeline stage may need to select resources by the
+global logical stage and current microbatch. Physical pipeline rank is not a
+substitute for logical stage identity because one rank may own several stages
+in an interleaved schedule.
+
+Register a context factory on the stage without changing the wrapped module's
+forward signature:
+
+```python
+from contextlib import contextmanager
+
+from torch.distributed.pipelining import PipelineStageInfo
+
+
+@contextmanager
+def stage_forward_context(info: PipelineStageInfo):
+    planner.enter(
+        stage_index=info.stage_index,
+        microbatch_index=info.microbatch_index,
+        is_metadata_inference=info.is_metadata_inference,
+    )
+    try:
+        yield
+    finally:
+        planner.exit()
+
+
+handle = stage.register_forward_context(stage_forward_context)
+```
+
+The factory is called around each built-in stage forward. Dynamic metadata
+inference uses microbatch zero and sets `is_metadata_inference=True`, allowing a
+consumer to distinguish the representative probe from real microbatch-zero
+execution. Static metadata setup does not execute the module and therefore does
+not enter the context.
+
+Only one context can be registered on a stage at a time. Remove its handle
+before registering another context. Register before the first schedule step if
+the consumer must observe dynamic metadata inference.
+
+The context executes outside a compiled or exported stage module, so it does
+not add graph inputs or change the module signature. CUDA graph capture runs
+the Python context while recording the stage computation, but replay does not
+re-enter Python; consumers must bind replay-stable state during capture. A
+custom schedule action receives this context only when it delegates execution
+to `stage.forward_one_chunk()`.
+
+```{eval-rst}
+.. autoclass:: torch.distributed.pipelining.PipelineStageInfo
+  :members:
+
+.. automethod:: torch.distributed.pipelining.PipelineStage.register_forward_context
+```
+
+### Controlling FSDP Unshard Lookahead
+
+Multi-stage runtime schedules lower a compute-only schedule into explicit FSDP
+`UNSHARD` and `RESHARD` actions. Two parameters control different parts of
+that lowering:
+
+- `max_active_stages` is the target parameter-residency window. It determines
+  which stages remain unsharded and where `RESHARD` actions are inserted.
+- `unshard_lookahead` is the issue-distance window. It determines how many
+  upcoming distinct logical stages may begin unsharding.
+
+Separating these windows allows a schedule to issue fewer all-gathers early
+without evicting parameters sooner or adding another unshard/reshard cycle.
+An asynchronous unshard is still real GPU work:
+
+```text
+pre-all-gather cast or quantization
+  -> copy-in and packing
+  -> all-gather
+  -> copy-out
+  -> post-all-gather quantization or layout preparation
+  -> parameter ready
+```
+
+`async_op=True` avoids a host-side wait, but these kernels, copies, collective
+traffic, allocations, and stream dependencies can still contend with the
+forward. Issuing the entire residency window at once can therefore put
+non-critical parameter preparation ahead of useful compute.
+
+The `"auto"` policy estimates how much of this work fits into each rank's
+pipeline startup bubble. Let a balanced stage forward take `F`, and let the
+composite critical-path cost of preparing one stage's unsharded parameters be
+`U`. Ignoring pipeline transfer latency, rank `r` waits approximately
+`U + rF` before its first useful forward. This can complete approximately
+`floor((U + rF) / U)` unshards; issuing one more allows the next unshard to
+overlap that first forward. With the simplifying assumption `F = U = T`, the
+lookahead is `r + 2`, capped by `max_active_stages`.
+
+For PP4 with `max_active_stages=4`, `"auto"` resolves to `(2, 3, 4, 4)`:
+
+```text
+interval           | 0..T    | T..2T   | 2T..3T  | 3T..4T  | 4T..5T
+-------------------+---------+----------+----------+----------+---------
+rank 0 forward     | blocked | F(first) |          |          |
+rank 0 preparation | U0      | U1       |          |          |  => 2
+-------------------+---------+----------+----------+----------+---------
+rank 1 forward     | blocked | blocked  | F(first) |          |
+rank 1 preparation | U0      | U1       | U2       |          |  => 3
+-------------------+---------+----------+----------+----------+---------
+rank 2 forward     | blocked | blocked  | blocked  | F(first) |
+rank 2 preparation | U0      | U1       | U2       | U3       |  => 4
+-------------------+---------+----------+----------+----------+---------
+rank 3 forward     | blocked | blocked  | blocked  | blocked  | F(first)
+rank 3 preparation | U0      | U1       | U2       | U3       |  => 4
+```
+
+The diagram is an analytical starting point, not an exact CUDA-stream model.
+`Uk` denotes preparation of the kth upcoming rank-local stage, not a global
+stage index. Vertically aligned preparation and forward cells are intended to
+overlap.
+Real stages may be unbalanced, unshard phases may overlap only partially, and
+network or memory-bandwidth contention may change the best distance. Choose a
+policy accordingly:
+
+| Policy | Per-rank issue distance | Intended use |
+| --- | --- | --- |
+| `"full"` | `max_active_stages` | Compatibility default matching the original full-window behavior. |
+| `"auto"` | `min(pp_rank + 2, max_active_stages)` | Deterministic startup-bubble estimate that avoids recipe-level tuning; not a universal optimum. |
+| Tuple | The corresponding positive integer for each PP rank | Expert tuning for measured model, topology, and fabric behavior. |
+
+A custom compute-only schedule may be combined with a tuple before lowering.
+For exact `UNSHARD` and communication placement, supply an already lowered
+`compute_comms` schedule; `unshard_lookahead` cannot retune actions that are
+already present.
+
+An atomic compound action remains indivisible, so it may extend either window
+by up to the action's number of stages minus one. Non-full policies can also
+move absolute P2P action positions because unshards consume lowering rounds.
+They do not change compute order, `RESHARD` placement, residency episodes, or
+collective counts. Applications should benchmark an explicit tuple when stage
+costs differ materially from the balanced model.
 
 ## Logging
 
@@ -485,6 +625,51 @@ The following set of APIs transform your model into a pipeline representation.
 ```
 
 ### Pipeline Schedules
+
+#### Activation-liveness analysis
+
+Pipeline runtimes and memory planners can use
+`analyze_pipeline_activation_liveness` to determine how many reusable logical
+slots are needed for activations retained from forward through backward. The
+analysis does not allocate tensors. It returns a
+`PipelineActivationLiveness` plan whose
+`slot_by_stage_and_microbatch[(stage_index, microbatch_index)]` values are slot
+IDs that a caller may map to buffers or arena regions.
+
+An activation becomes live at its forward (`F`) action. Full backward (`B`)
+releases it. For schedules that separate input backward (`I`) from weight
+backward (`W`), `I` does not release the activation because `W` may still need
+the saved forward state; `W` releases it. Lifetimes include both endpoint
+positions, so actions grouped into the same compound schedule position overlap.
+
+For example, consider two stages and two microbatches on one pipeline rank:
+
+```text
+position:  0     1     2     3     4     5     6     7
+action:   F0,0  F1,0  F0,1  B1,0  B0,0  F1,1  B1,1  B0,1
+```
+
+With `granularity="stage_microbatch"`, the four activation lifetimes are
+`(0, 4)`, `(1, 3)`, `(2, 7)`, and `(5, 6)`; the final lifetime may reuse the
+first slot. With `granularity="microbatch"`, the selected stages for each
+microbatch share one conservative lifetime: `(0, 4)` for microbatch 0 and
+`(2, 7)` for microbatch 1. The latter mode is useful when a consumer manages
+all selected stages for one microbatch as one storage unit. Stage indices are
+global logical indices and commonly identify virtual stages hosted by the same
+pipeline rank.
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.pipelining
+```
+
+```{eval-rst}
+.. autofunction:: torch.distributed.pipelining.schedules.analyze_pipeline_activation_liveness
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.pipelining.schedules.PipelineActivationLiveness
+  :members:
+```
 
 ```{eval-rst}
 .. automodule:: torch.distributed.pipelining.schedules

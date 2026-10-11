@@ -278,8 +278,15 @@ static void sort_single_block(const Tensor& input,
   const bool sel_mode = sel.count > 0;
   auto n_rows = static_cast<int>(input.numel() / sort_size);
   const auto type_str = scalarToMetalTypeString(input);
-  const auto kernel = sel_mode ? fmt::format("sort_block_topk_{}_tptg{}", type_str, tptg)
-                               : fmt::format("sort_block_{}_tptg{}{}", type_str, tptg, stable ? "_stable" : "");
+  // Non-stable float sorts compare integer keys, which is several times faster
+  // than the NaN-aware float compare.
+  const bool keyed = input.is_floating_point() && !stable;
+  const auto kernel = keyed ? fmt::format("sort_block_fkey_{}_tptg{}", type_str, tptg)
+      : sel_mode            ? fmt::format("sort_block_topk_{}_tptg{}", type_str, tptg)
+                            : fmt::format("sort_block_{}_tptg{}{}", type_str, tptg, stable ? "_stable" : "");
+  if (keyed && !sel_mode) {
+    sel = {0, sort_size};
+  }
 
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
@@ -289,7 +296,7 @@ static void sort_single_block(const Tensor& input,
       getMPSProfiler().beginProfileKernel(pso, kernel, {input}, mpsStream);
       [enc setComputePipelineState:pso];
       const auto strides = std::array<int64_t, 2>{stride_sort, stride_seg};
-      if (sel_mode) {
+      if (sel.count > 0) {
         mtl_setArgs(
             enc, input, values, indices, sort_size, strides, descending, std::array<int32_t, 2>{sel.offset, sel.count});
       } else {

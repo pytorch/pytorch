@@ -1275,6 +1275,8 @@ as_strided = _make_prim(
     return_type=RETURN_TYPE.VIEW,
     doc=_as_strided_doc,
 )
+prim.impl("as_strided", torch.library.fallthrough_kernel, "Conjugate")
+prim.impl("as_strided", torch.library.fallthrough_kernel, "Negative")
 
 
 def _broadcast_in_dim_meta(

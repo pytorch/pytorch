@@ -1,6 +1,7 @@
 # Owner(s): ["module: nestedtensor"]
 # ruff: noqa: F841
 import ast
+import contextlib
 import io
 import itertools
 import math
@@ -18,7 +19,9 @@ import torch._dynamo
 import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
+from torch._inductor.codegen.common import BackendFeature, has_backend_feature
 from torch.nested._internal.nested_tensor import (
+    _rebuild_njt,
     buffer_from_jagged,
     jagged_from_list,
     nested_view_from_values_offsets,
@@ -41,7 +44,6 @@ from torch.testing._internal.common_device_type import (
     PYTORCH_CUDA_MEMCHECK,
     skipCPUIf,
     skipCUDAIf,
-    skipCUDAIfRocm,
     skipMeta,
 )
 from torch.testing._internal.common_dtype import floating_types_and_half
@@ -56,7 +58,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
-    skipIfRocm,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
@@ -957,6 +958,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         self.assertEqual(a.grad, torch.ones(2, 4, device=device, dtype=dtype))
         self.assertEqual(b.grad, torch.ones(5, 4, device=device, dtype=dtype))
 
+    @serialTest()
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
     @parametrize("weights_only", [False, True])
@@ -969,12 +971,20 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
                 nt2._nested_tensor_storage_offsets(),
             )
 
+        # Strided nested tensors are not allowlisted for weights_only load by
+        # default and must be opted into via safe_globals.
+        load_ctx = (
+            torch.serialization.safe_globals([torch._utils._rebuild_nested_tensor])
+            if weights_only
+            else contextlib.nullcontext()
+        )
         nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
         for a in [nt_contiguous, nt_noncontiguous]:
             buffer = io.BytesIO()
             serialized = torch.save(a, buffer)
             buffer.seek(0)
-            b = torch.load(buffer, weights_only=weights_only)
+            with load_ctx:
+                b = torch.load(buffer, weights_only=weights_only)
             # should be both conceptually equal and metadata equivalent
             self.assertEqual(a, b)
             compare_metadata(a, b)
@@ -4055,6 +4065,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         return example_lists
 
+    @serialTest()
     @dtypes(torch.float32)
     @parametrize(
         "contiguity",
@@ -4096,10 +4107,18 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt.size()
         nt.stride()
 
+        # NJTs are not allowlisted for weights_only load by default and must be
+        # opted into via safe_globals.
+        load_ctx = (
+            torch.serialization.safe_globals([_rebuild_njt, NestedTensor])
+            if weights_only
+            else contextlib.nullcontext()
+        )
         with tempfile.TemporaryFile() as f:
             torch.save(nt, f)
             f.seek(0)
-            nt_loaded = torch.load(f, weights_only=weights_only)
+            with load_ctx:
+                nt_loaded = torch.load(f, weights_only=weights_only)
 
             self.assertIsNot(nt, nt_loaded)
             # we expect a new offsets tensor -> different nested int upon load
@@ -6716,7 +6735,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             a.copy_(b)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/175482")
     def test_index_put_error(self, device):
         import subprocess
 
@@ -7359,8 +7377,6 @@ torch.cuda.synchronize()
     )
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @onlyCUDA
-    # flash_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
-    @skipIfRocm
     @skipIfTorchDynamo()
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
@@ -7489,11 +7505,10 @@ torch.cuda.synchronize()
 
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
-    @skipCUDAIfRocm  # not needed
     @skipIfTorchDynamo("compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize("use_legacy_api", [True, False])
-    @skipCPUIf(True, "SPDA Math NT fallback causes failure: see issue #133644")
+    @skipCPUIf(True, "SDPA Math NT fallback causes failure: see issue #133644")
     @unittest.skipIf(
         "RelWithAssert" in torch.__config__.show(),
         "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
@@ -7505,8 +7520,14 @@ torch.cuda.synchronize()
         d3 = 16
         n_heads = 2
         d_head = d3 // n_heads
-        max_length_1 = 10
-        max_length_2 = 20
+
+        # Key and value declare different values on purpose so the cache
+        # assertions below can tell their metadata apart. Both must be >= the
+        # true max of 27: an understated value reaches the varlen kernel launch
+        # bound directly and silently truncates attention.
+        max_seqlen_key = 27
+        max_seqlen_value = 28
+
         torch.manual_seed(0)
 
         class mha(torch.nn.Module):
@@ -7520,16 +7541,18 @@ torch.cuda.synchronize()
                 value = self.linear(value)
                 if self.use_legacy_api:
                     key = convert_jagged_to_nested_tensor_legacy(
-                        value, offsets, max_length_1
+                        value, offsets, max_seqlen_key
                     )
                     value = convert_jagged_to_nested_tensor_legacy(
-                        value, offsets, max_length_2
+                        value, offsets, max_seqlen_value
                     )
                     query = convert_dense_to_nested_tensor_legacy(query)
                 else:
-                    key = convert_jagged_to_nested_tensor(value, offsets, max_length_1)
+                    key = convert_jagged_to_nested_tensor(
+                        value, offsets, max_seqlen_key
+                    )
                     value = convert_jagged_to_nested_tensor(
-                        value, offsets, max_length_2
+                        value, offsets, max_seqlen_value
                     )
                     query = convert_dense_to_nested_tensor(query)
                 q = query.view(bs, -1, n_heads, d_head).transpose(1, 2)
@@ -7559,7 +7582,9 @@ torch.cuda.synchronize()
 
         query = torch.rand(bs, d1, d3, device=device)
         value = torch.rand(30, d2, requires_grad=True, device=device)
-        # total_length must > than max_length otherwise flash_attn backward will fail
+
+        # Sequence lengths [2, 1, 27], so the true max is 27. total_length (30)
+        # must stay greater than the declared max or flash_attn backward fails.
         offsets = torch.tensor([0, 2, 3, 30], device=device)
 
         m = mha(use_legacy_api)
@@ -7576,8 +7601,8 @@ torch.cuda.synchronize()
         value_grad = value.grad  # save for comparison later
         self.assertIsNotNone(value_grad)
         # check that max_seqlen is cached properly
-        self.assertEqual(cached_key_max_seqlen, max_length_1)
-        self.assertEqual(cached_value_max_seqlen, max_length_2)
+        self.assertEqual(cached_key_max_seqlen, max_seqlen_key)
+        self.assertEqual(cached_value_max_seqlen, max_seqlen_value)
 
         # check if the output is numerically equivalent with the eager mode
         m_eager = mha(use_legacy_api)
@@ -7847,8 +7872,6 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
-    @skipIfRocm
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_compile_preserves_metadata_cache(self, device, dtype):
         # shape (B, *, D)
@@ -8133,26 +8156,41 @@ torch.cuda.synchronize()
         self.assertEqual(compiled_output, expected_output, rtol=1e-3, atol=1e-3)
 
         # === Verify that computation fusion happens. ===
-        # Fallback op call -> fusion didn't happen.
+        # Each fused op is gated on the backend features its kernel needs:
+        # _jagged_to_padded_dense_forward on INDIRECT_INDEXING and
+        # _padded_dense_to_jagged_forward on BUCKETIZE + INDIRECT_INDEXING.
+        # CPU (CppScheduling) fuses the former but falls back for the latter,
+        # which does not declare BUCKETIZE.
+        has_indirect_indexing = has_backend_feature(
+            torch.device(device), BackendFeature.INDIRECT_INDEXING
+        )
+        has_bucketize = has_backend_feature(
+            torch.device(device), BackendFeature.BUCKETIZE
+        )
+        fused = has_indirect_indexing and has_bucketize
+
+        # Fallback op call -> fusion didn't happen. get_kernel_metadata emits
+        # op calls in comment blocks even for fused kernels, so ignore comments.
         fallback_op_calls_present = any(
-            "torch.ops.aten._padded_dense_to_jagged_forward.default("
-            in generated_code[i]
-            or "torch.ops.aten._jagged_to_padded_dense_forward.default("
-            in generated_code[i]
-            for i in range(len(generated_code))
+            not line.lstrip().startswith("#")
+            and (
+                "torch.ops.aten._padded_dense_to_jagged_forward.default(" in line
+                or "torch.ops.aten._jagged_to_padded_dense_forward.default(" in line
+            )
+            for generated_code_item in generated_code
+            for line in generated_code_item.splitlines()
         )
 
-        # NB: Fusion isn't supported on CPU.
-        self.assertEqual("cuda" in device, not fallback_op_calls_present)
+        self.assertEqual(fused, not fallback_op_calls_present)
 
         for i in range(len(generated_code)):
             # Examine buffer construction lines in the generated code to determine
-            # whether fusion occurred. If fusion happens, a 3D buffer with shape
+            # whether fusion occurred. If both ops fuse, a 3D buffer with shape
             # (B, max_seqlen, D) should never be materialized.
             buffer_constructions = [
                 line.strip()
                 for line in generated_code[i].split("\n")
-                if "empty_strided_cuda(" in line
+                if f"empty_strided_{torch.device(device).type}(" in line
             ]
 
             buffer_dims = [
@@ -8161,7 +8199,7 @@ torch.cuda.synchronize()
                 for t in buffer_constructions
             ]
 
-            if "cuda" in device:
+            if fused:
                 self.assertFalse(any(d == 3 for d in buffer_dims))
 
     @dtypes(torch.float32)

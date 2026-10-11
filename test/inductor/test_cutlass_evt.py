@@ -163,7 +163,7 @@ class TestCutlassEVT(TestCase):
                 {"buf0": buf0, "buf1": buf1, "buf2": buf2, "buf3": buf3, "buf4": buf4}
             )
         ):
-            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                 "buf0",
                 [
                     MockSchedulerNode(buf3),
@@ -171,10 +171,14 @@ class TestCutlassEVT(TestCase):
                 ],
                 OrderedSet([]),
             )
+        self.assertTrue(epilogue.is_evt_fallback)
+        reads = list(epilogue.reads)
+        writes = list(epilogue.writes)
+        code = epilogue.source
         self.assertExpectedInline(reads, """['buf1', 'buf2']""")
         self.assertExpectedInline(writes, """['buf0', 'buf3', 'buf4']""")
         self.assertExpectedInline(
-            renames,
+            epilogue.renames,
             """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_2': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
@@ -273,7 +277,7 @@ index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
                 {"buf0": buf0, "buf1": buf1, "buf2": buf2, "buf3": buf3, "buf4": buf4}
             )
         ):
-            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                 "buf0",
                 [
                     MockSchedulerNode(buf3),
@@ -281,10 +285,13 @@ index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
                 ],
                 OrderedSet([]),
             )
+        reads = list(epilogue.reads)
+        writes = list(epilogue.writes)
+        code = epilogue.source
         self.assertExpectedInline(reads, """['buf1', 'buf2']""")
         self.assertExpectedInline(writes, """['buf0', 'buf3', 'buf4']""")
         self.assertExpectedInline(
-            renames,
+            epilogue.renames,
             """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_2': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
@@ -332,7 +339,7 @@ return tmp_0, tmp_2, D""",
                 {"buf0": buf0, "buf1": buf1, "buf2": buf2, "buf3": buf3, "buf4": buf4}
             )
         ):
-            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                 "buf0",
                 [
                     MockSchedulerNode(buf3),
@@ -340,10 +347,13 @@ return tmp_0, tmp_2, D""",
                 ],
                 OrderedSet(["buf0"]),
             )
+        reads = list(epilogue.reads)
+        writes = list(epilogue.writes)
+        code = epilogue.source
         self.assertExpectedInline(reads, """['buf1', 'buf2']""")
         self.assertExpectedInline(writes, """['buf3', 'buf4']""")
         self.assertExpectedInline(
-            renames,
+            epilogue.renames,
             """{'accum': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_1': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
@@ -375,11 +385,14 @@ return tmp_1, D""",
 
         buf1 = MockComputedBuffer("buf1", inner_fn, torch.float32, size)
         with V.set_graph_handler(MockGraphHandler({"buf0": buf0, "buf1": buf1})):
-            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                 "buf0",
                 [MockSchedulerNode(buf1)],
                 OrderedSet(["buf0"]),
             )
+        reads = list(epilogue.reads)
+        writes = list(epilogue.writes)
+        code = epilogue.source
         self.assertExpectedInline(reads, """[]""")
         self.assertExpectedInline(writes, """['buf1']""")
         self.assertExpectedInline(
@@ -415,11 +428,14 @@ return D""",
 
         buf1 = MockComputedBuffer("buf1", inner_fn, torch.float32, size)
         with V.set_graph_handler(MockGraphHandler({"buf0": buf0, "buf1": buf1})):
-            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                 "buf0",
                 [MockSchedulerNode(buf1)],
                 OrderedSet(["buf0"]),
             )
+        reads = list(epilogue.reads)
+        writes = list(epilogue.writes)
+        code = epilogue.source
         self.assertExpectedInline(reads, """[]""")
         self.assertExpectedInline(writes, """['buf1']""")
         # Sigmoid doesn't match _fuse_activations (not x/denom form with x in num)
@@ -458,11 +474,14 @@ return D""",
 
         buf1 = MockComputedBuffer("buf1", inner_fn, torch.float32, size)
         with V.set_graph_handler(MockGraphHandler({"buf0": buf0, "buf1": buf1})):
-            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                 "buf0",
                 [MockSchedulerNode(buf1)],
                 OrderedSet(["buf0"]),
             )
+        reads = list(epilogue.reads)
+        writes = list(epilogue.writes)
+        code = epilogue.source
         self.assertExpectedInline(reads, """[]""")
         self.assertExpectedInline(writes, """['buf1']""")
         # _fuse_activations folds x/(1+exp(0.0-x)) into silu(x)

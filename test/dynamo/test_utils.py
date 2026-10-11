@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
+import gc
 import json
 import os
 import pprint
@@ -49,6 +50,56 @@ class TestUtils(TestCase):
         hook2()
         self.assertNotIn("myglobal", scope)
 
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=12345)
+    def test_deferred_full_gc(self):
+        saved = gc.get_threshold()
+        try:
+            with utils.deferred_full_gc():
+                self.assertEqual(gc.get_threshold()[2], 12345)
+                # Nested compiles share the outermost adjustment.
+                with utils.deferred_full_gc():
+                    self.assertEqual(gc.get_threshold()[2], 12345)
+                self.assertEqual(gc.get_threshold()[2], 12345)
+            self.assertEqual(gc.get_threshold(), saved)
+            # gen0 and gen1 are left alone, so they keep collecting.
+            self.assertEqual(gc.get_threshold()[:2], saved[:2])
+        finally:
+            gc.set_threshold(*saved)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=12345)
+    def test_deferred_full_gc_restores_on_exception(self):
+        # A depth counter left above zero would silently turn the feature into a
+        # no-op for the rest of the process and pin the raised threshold.
+        saved = gc.get_threshold()
+        try:
+            with self.assertRaises(RuntimeError):
+                with utils.deferred_full_gc():
+                    raise RuntimeError("boom")
+            self.assertEqual(gc.get_threshold(), saved)
+            self.assertEqual(utils._gc_threshold_depth, 0)
+            # The next one still installs the threshold.
+            with utils.deferred_full_gc():
+                self.assertEqual(gc.get_threshold()[2], 12345)
+        finally:
+            gc.set_threshold(*saved)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=None)
+    def test_deferred_full_gc_disabled(self):
+        saved = gc.get_threshold()
+        with utils.deferred_full_gc():
+            self.assertEqual(gc.get_threshold(), saved)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=100)
+    def test_deferred_full_gc_does_not_lower_threshold(self):
+        saved = gc.get_threshold()
+        try:
+            gc.set_threshold(saved[0], saved[1], 5000)
+            with utils.deferred_full_gc():
+                self.assertEqual(gc.get_threshold()[2], 5000)
+            self.assertEqual(gc.get_threshold()[2], 5000)
+        finally:
+            gc.set_threshold(*saved)
+
     def test_nan(self):
         a = torch.Tensor([float("nan")])
         b = torch.Tensor([float("nan")])
@@ -69,18 +120,18 @@ class TestUtils(TestCase):
 
     def test_larger_multiplier_for_smaller_tensor(self):
         """
-        Tensor numel between (10, 500]
+        Tensor numel between (10, 1000)
         """
-        N = 100
+        N = 512
         fp64_ref = torch.full([N], 0.0, dtype=torch.double)
         a = torch.full([N], 1.0)
-        tol = 4 * 1e-2
+        tol = 1e-3
         self.assertTrue(utils.same(a, a * 2, fp64_ref=fp64_ref, tol=tol))
-        self.assertFalse(utils.same(a, a * 4, fp64_ref=fp64_ref, tol=tol))
+        self.assertFalse(utils.same(a, a * 7.57, fp64_ref=fp64_ref, tol=tol))
         self.assertTrue(
             utils.same(
                 a,
-                a * 4,
+                a * 7.57,
                 fp64_ref=fp64_ref,
                 use_larger_multiplier_for_smaller_tensor=True,
                 tol=tol,
@@ -346,6 +397,24 @@ class TestUtils(TestCase):
 
         self.assertIsInstance(parsed, dict)
         self.assertNotIn("ignore_logging_functions", parsed)
+
+    def test_enumerate_items_with_dict_position_snapshots(self):
+        # VariableBuilder wraps a dict by consuming this generator lazily inside
+        # dict(...). When the dict is a frame-globals dict, Dynamo can add or
+        # drop generated globals (e.g. __resume_at removed by a CleanupHook) on
+        # it mid-iteration. A live items view would raise "dictionary changed
+        # size during iteration"; the snapshot must tolerate the mutation.
+        d = {f"k{i}": i for i in range(8)}
+        d["__resume_at_stale"] = -1
+
+        out = {}
+        for idx, (_, k, v) in enumerate(utils.enumerate_items_with_dict_position(d)):
+            if idx == 1:
+                del d["__resume_at_stale"]
+            out[k] = v
+
+        self.assertEqual(out["k0"], 0)
+        self.assertEqual(len(out), 9)
 
 
 class TestModel(torch.nn.Module):

@@ -361,7 +361,7 @@ struct AutogradZeroSpecializer {
           state_[n->output()] = State::Zero;
         } break;
         case prim::profile: {
-          // this a profile node on a tensor use
+          // this is a profile node on a tensor use
           // if we decided to specialize this graph
           // its input may have undefinedness info
           // otherwise it should be Unknown

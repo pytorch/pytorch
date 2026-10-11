@@ -43,6 +43,7 @@ import threading
 import time
 import traceback
 import types
+import unittest
 import weakref
 from collections import defaultdict, deque
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
@@ -92,7 +93,7 @@ from .bytecode_transformation import (
     Instruction,
     is_generator,
     is_jump_absolute,
-    unique_id,
+    unique_id_unbound_in,
 )
 from .code_context import code_context
 from .codegen import PyCodegen
@@ -102,6 +103,7 @@ from .exc import (
     BackendCompilerFailed,
     collapse_resume_frames,
     format_frame_info,
+    format_user_stack,
     get_stack_above_dynamo,
     raise_observed_exception,
     raise_value_error,
@@ -125,7 +127,7 @@ from .polyfills import (
     impl_MATCH_KEYS,
     impl_MATCH_SEQUENCE,
 )
-from .replay_record import DummyModule, ExecutionRecorder
+from .replay_record import ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
@@ -156,7 +158,13 @@ from .utils import (
     PySendResult,
     unpack_iterable,
 )
-from .variables.base import SourceLocation, typestr, ValueMutationNew, VariableTracker
+from .variables.base import (
+    AttributeMutationNew,
+    SourceLocation,
+    typestr,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
@@ -167,6 +175,7 @@ from .variables.ctx_manager import (
     WithExitFunctionVariable,
 )
 from .variables.dicts import ConstDictVariable
+from .variables.exception import TracebackVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     CO_VARARGS,
@@ -176,21 +185,25 @@ from .variables.functions import (
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
 from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
+    DequeIteratorVariable,
+    DequeReverseIteratorVariable,
     ListIteratorVariable,
+    ListReverseIteratorVariable,
     ListVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .variables.misc import (
     CellVariable,
     NullVariable,
     PythonModuleVariable,
-    TracebackVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
@@ -205,7 +218,12 @@ from .variables.object_protocol import (
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
-from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
+from .variables.tensor import (
+    _contains_graph_intermediate,
+    supported_comparison_ops,
+    SymNodeVariable,
+    TensorVariable,
+)
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
     TorchFunctionModeVariable,
@@ -1113,6 +1131,9 @@ def break_graph_if_unsupported(
                     # If there is, we roll back to the checkpoint and fall back.
                     if isinstance(excp, Unsupported):
                         excp.remove_from_stats()
+                    preserve_skip_frame = (
+                        excp.skip_frame and excp.preserve_skip_frame_after_inline
+                    )
                     unimplemented(
                         gb_type="Graph break under GenericContextWrappingVariable",
                         context=f"Active generic context managers: {self.active_generic_context_managers}",
@@ -1122,9 +1143,16 @@ def break_graph_if_unsupported(
                             *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
                         ],
                         from_exc=excp,
+                        skip_frame=preserve_skip_frame,
+                        preserve_skip_frame_after_inline=preserve_skip_frame,
+                        # Only a preserved whole-frame skip may remain
+                        # invocation-scoped; replacement graph breaks are cached.
+                        apply_to_code=(
+                            excp.apply_to_code if preserve_skip_frame else True
+                        ),
                     )
 
-                if getattr(excp, "skip_frame", False):
+                if excp.skip_frame:
                     raise
 
                 if not self.should_compile_partial_graph():
@@ -1607,6 +1635,102 @@ class InstructionTranslatorBase(
         self.symbolic_locals = {
             k: v for k, v in self.symbolic_locals.items() if k in normalized_reads
         }
+
+    def has_live_graph_intermediate(self) -> bool:
+        """Return whether a differentiable intermediate must cross this break."""
+
+        # Note [Liveness scan for eager autograd graph breaks]
+        # AOTAutograd does not preserve edges between differentiably related
+        # outputs of the current compiled prefix. A false negative here can
+        # therefore silently change gradients. These roots cover the persistent
+        # stores currently known to carry values across the break: the current and
+        # inlined parent frames, active exception state, modified pre-existing
+        # objects (including globals), active context managers, backward state,
+        # tensor hooks, saved tensors, and suspended local generators. New
+        # persistent VariableTracker storage must extend this list.
+
+        def get_live_values(tx: InstructionTranslatorBase) -> list[Any]:
+            values: list[Any] = [
+                tx.stack,
+                tx.symbolic_cellvars,
+                [tx.exn_vt_stack[i] for i in range(len(tx.exn_vt_stack))],
+                tx.active_generic_context_managers,
+                [
+                    entry.with_context
+                    for entry in tx.block_stack
+                    if entry.with_context is not None
+                ],
+            ]
+            if tx.exn_vt_stack._current_exception is not None:
+                values.append(tx.exn_vt_stack._current_exception)
+            if isinstance(tx, InliningGeneratorInstructionTranslator):
+                # A suspended generator detaches its exception segment from the
+                # shared stack, but those exception values remain live in the
+                # generator frame.
+                values.append(tx.gi_exc_state.items)
+            instruction = tx.current_instruction
+            if instruction not in tx.instructions:
+                # Before Python 3.11, creating a local generator does not run its
+                # inline tracer, so it still points at the synthetic initial NOP.
+                instruction = tx.instructions[0]
+            reads = livevars_analysis(tx.instructions, instruction)
+            for name in reads:
+                key = name.replace(".", "implicit") if name.startswith(".") else name
+                if key in tx.symbolic_locals:
+                    values.append(tx.symbolic_locals[key])
+            return values
+
+        live_values: list[Any] = []
+        cur_tx: InstructionTranslatorBase | None = self
+        while cur_tx is not None:
+            live_values.extend(get_live_values(cur_tx))
+            cur_tx = cur_tx.parent
+
+        side_effects = self.output.side_effects
+        modified_existing_vars = [
+            var
+            for var in side_effects.id_to_variable.values()
+            if not isinstance(var.mutation_type, AttributeMutationNew)
+            and side_effects.is_modified(var)
+        ]
+        live_values.extend(
+            [
+                modified_existing_vars,
+                self.output.backward_state,
+                side_effects.tensor_hooks,
+                side_effects.save_for_backward,
+            ]
+        )
+
+        # LocalGeneratorObjectVariable deliberately excludes its instruction
+        # translator from generic VariableTracker traversal. Its created or
+        # suspended frame can nevertheless keep graph intermediates live here.
+        pending_values = list(live_values)
+        visit_cache: dict[int, Any] = {}
+        seen_generator_tracers: set[int] = set()
+        while pending_values:
+            generators: list[LocalGeneratorObjectVariable] = []
+
+            def collect_generator(vt: VariableTracker) -> None:
+                if isinstance(vt, LocalGeneratorObjectVariable):
+                    generators.append(vt)
+
+            VariableTracker.visit(
+                collect_generator,
+                pending_values.pop(),
+                cache=visit_cache,
+                side_effects=side_effects,
+            )
+            for generator in generators:
+                tracer = generator.inline_tracer
+                if id(tracer) in seen_generator_tracers:
+                    continue
+                seen_generator_tracers.add(id(tracer))
+                generator_values = get_live_values(tracer)
+                live_values.extend(generator_values)
+                pending_values.extend(generator_values)
+
+        return _contains_graph_intermediate(live_values, side_effects)
 
     def call_function(
         self,
@@ -2268,17 +2392,34 @@ class InstructionTranslatorBase(
                 raise AssertionError("expected type(val) is bool to be true")
             self.is_tracing_resume_prologue = val
 
+    def _raise_unbound_local_error(self, name: str) -> NoReturn:
+        raise_observed_exception(
+            UnboundLocalError,
+            self,
+            args=[
+                f"cannot access local variable '{name}' where it is not associated with a value"
+            ],
+        )
+
     def DELETE_FAST(self, inst: Instruction) -> None:
-        var = self.symbolic_locals.get(inst.argval)
+        name = inst.argval
+        var = self.symbolic_locals.get(name)
+        if var is None or istype(var, NullVariable):
+            self._raise_unbound_local_error(name)
         if isinstance(var, TensorVariable):
             self._maybe_emit_sync_dealloc(var)
-        del self.symbolic_locals[inst.argval]
+        if sys.version_info >= (3, 12):
+            # LOAD_FAST_CHECK handles NULL locals on Python 3.12 and newer.
+            self.symbolic_locals[name] = NullVariable()
+        else:
+            del self.symbolic_locals[name]
 
     def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
         from .variables.streams import get_current_stream, new_event
 
         device = var.device
-        if device is None or device.type not in ("cuda", "xpu"):
+        acc = torch.accelerator.current_accelerator()
+        if device is None or acc is None or device.type != acc.type:
             return
 
         node = var.proxy.node
@@ -2408,11 +2549,14 @@ class InstructionTranslatorBase(
             )
         self.output.side_effects.store_global(variable, name, value)
 
-    # Cache note: This cache only exists for the duration of this
-    # InstructionTranslator - so it should be safe to do.
-    @cache_method
+    # Keyed by module_name alone, not the whole argument tuple as @cache_method
+    # would key it, so a later argument cannot silently split the memo. Per
+    # translator, as the decorator was, and written only past the alias check.
     def import_source(self, module_name: str) -> GlobalSource:
         """Create an alias to a module for use in guards"""
+        if (memo := self._import_source_memo.get(module_name)) is not None:
+            return memo
+
         if "torch_package" in module_name:
             value = torch.package.package_importer._package_imported_modules[
                 module_name
@@ -2434,7 +2578,9 @@ class InstructionTranslatorBase(
             )
         f_globals[alias] = value
         self.output.update_co_names(alias)
-        return GlobalSource(alias)
+        source = GlobalSource(alias)
+        self._import_source_memo[module_name] = source
+        return source
 
     def resolve_name(self, name: str, package: str, level: int) -> str:
         """
@@ -2506,6 +2652,17 @@ class InstructionTranslatorBase(
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
+            # A non-module sys.modules entry must not reach import_source, which
+            # binds the result into the traced globals. The replay arm needs no
+            # check: its values are the DummyModules add_local_mod admitted.
+            if not isinstance(value, types.ModuleType):
+                unimplemented(
+                    gb_type="Bad import result",
+                    context=typestr(value),
+                    explanation="Import result is not a Python module.",
+                    hints=[],
+                )
+
             if level != 0:
                 pkg = self.calc_package()
                 module_name = self.resolve_name(module_name, pkg, level)
@@ -2525,18 +2682,8 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [unbound-name]
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        # pyrefly: ignore [unbound-name]
-        if isinstance(value, (types.ModuleType, DummyModule)):
-            # pyrefly: ignore [unbound-name, bad-argument-type]
-            self.push(PythonModuleVariable(value, source=source))
-        else:
-            unimplemented(
-                gb_type="Bad import result",
-                # pyrefly: ignore [unbound-name]
-                context=typestr(value),
-                explanation="Import result is not a Python module.",
-                hints=[],
-            )
+        # pyrefly: ignore [unbound-name, bad-argument-type]
+        self.push(PythonModuleVariable(value, source=source))
 
     # fb internal 3.12 opcode
     EAGER_IMPORT_NAME = IMPORT_NAME
@@ -2902,144 +3049,170 @@ class InstructionTranslatorBase(
         self.call_function(fn, args, {})
 
     def exception_handler(self, raised_exception: ObservedException) -> None:
-        observed_exn_gb_explanation = (
-            "Dynamo found no exception handler at the top-level compiled function "
-            "when encountering an exception. Exception will propagate outside the compiled region."
-        )
-
-        def bubble_exception_to_interpreter() -> None:
-            # Bubble the exception to the interpreter
-            if isinstance(raised_exception, FakeTensorObservedException):
-                from .exc import format_graph_break_message
-
-                msg = format_graph_break_message(
-                    "RuntimeError when making fake tensor call",
-                    "",
-                    str(raised_exception),
-                    [*graph_break_hints.USER_ERROR],
-                )
-                e = exc.TorchRuntimeError(
-                    msg, getattr(raised_exception, "real_stack", None)
-                )
-                raise e.with_traceback(raised_exception.__traceback__) from None
-
-            curr_exc = self.exn_vt_stack.get_raised_exception()
-            dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
-            if not isinstance(raised_exception, dynamo_exc):
-                raise AssertionError(
-                    "expected isinstance(raised_exception, dynamo_exc) to be true"
-                )  # sanity check
-            unimplemented(
-                gb_type="Observed exception",
-                context=f"raised exception {curr_exc.debug_repr()}",
-                explanation=observed_exn_gb_explanation,
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-                from_exc=raised_exception,
+        try:
+            observed_exn_gb_explanation = (
+                "Dynamo found no exception handler at the top-level compiled function "
+                "when encountering an exception. Exception will propagate outside the compiled region."
             )
 
-        if sys.version_info >= (3, 11):
-            exn_tab_entry = self.current_instruction.exn_tab_entry
-            if exn_tab_entry:
-                # Implementation is based on https://github.com/python/cpython/blob/3.11/Objects/exception_handling_notes.txt
+            # Takes the exception as an argument rather than closing over it,
+            # so that the `del` below actually drops the only reference.
+            def bubble_exception_to_interpreter(
+                raised_exception: ObservedException,
+            ) -> None:
+                # Bubble the exception to the interpreter
+                if isinstance(raised_exception, FakeTensorObservedException):
+                    from .exc import format_graph_break_message
 
-                # 1) pop values from the stack until it matches the stack depth
-                # for the handler
-                while len(self.stack) > exn_tab_entry.depth:
-                    self.pop()
-
-                # 2) if 'lasti' is true, then push the offset that the exception was raised at
-                if exn_tab_entry.lasti:
-                    self.push(
-                        VariableTracker.build(self, self.current_instruction.offset)
+                    msg = format_graph_break_message(
+                        "RuntimeError when making fake tensor call",
+                        "",
+                        str(raised_exception),
+                        [*graph_break_hints.USER_ERROR],
                     )
+                    # Raised without binding to a local: a local would put this
+                    # frame on the new exception's traceback and keep the
+                    # exception alive from it, forming a cycle.
+                    raise exc.TorchRuntimeError(
+                        msg, getattr(raised_exception, "real_stack", None)
+                    ).with_traceback(raised_exception.__traceback__) from None
 
-                # 3) push the exception to the stack
-                self.push(self.exn_vt_stack.get_raised_exception())
-
-                # 4) jump to the handler
-                self.jump(exn_tab_entry)  # type: ignore[arg-type]
-            else:
-                # No handler found. Bubble the exception to the parent
-                # instruction translator. We use special exception for this.
-                self.stack.clear()
-
-                # attach traceback to the exception and set it as current exception
                 curr_exc = self.exn_vt_stack.get_raised_exception()
-                self._attach_traceback_to_exception(curr_exc)
+                exc_python_type = curr_exc.python_type()
+                if (self.one_graph or self.error_on_graph_break) and issubclass(
+                    exc_python_type, unittest.SkipTest
+                ):
+                    try:
+                        skip_args: list[Any] = [
+                            a.as_python_constant() for a in curr_exc.args
+                        ]
+                    except NotImplementedError:
+                        skip_args = []
+                    raise exc_python_type(*skip_args) from None
 
-                if type(self) is InstructionTranslator:
-                    bubble_exception_to_interpreter()
-                raise raised_exception
-        else:
-            if len(self.block_stack):
-                # base implementation - https://github.com/python/cpython/blob/3.10/Python/ceval.c#L4455
-
-                block_stack_entry = self.block_stack.pop()
-
-                while block_stack_entry.inst.opname == "EXCEPT_HANDLER":
-                    # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
-                    self.popn(3)
-                    self.exn_vt_stack.pop()
-                    if len(self.block_stack) == 0:
-                        # No handler found in this frame. Bubble the exception to the parent
-                        # instruction translator.
-                        self.stack.clear()
-                        if type(self) is InstructionTranslator:
-                            bubble_exception_to_interpreter()
-
-                        raise raised_exception
-                    block_stack_entry = self.block_stack.pop()
-
-                exception_var = self.exn_vt_stack.get_raised_exception()
-                self.exn_vt_stack.move_current_exception_to_stack()
-
-                # 1) pop values from the stack until it matches the stack depth
-                # for the handler
-                while len(self.stack) > block_stack_entry.stack_index:
-                    self.pop()
-
-                # Push a dummy block stack entry of EXCEPT_HANDLER
-                # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
-                except_handler_inst = Instruction(int(1e6), "EXCEPT_HANDLER", None, 0)
-                self.block_stack.append(
-                    BlockStackEntry(except_handler_inst, None, len(self.stack))
+                dynamo_exc = exc.get_dynamo_observed_exception(exc_python_type)
+                if not isinstance(raised_exception, dynamo_exc):
+                    raise AssertionError(
+                        "expected isinstance(raised_exception, dynamo_exc) to be true"
+                    )  # sanity check
+                unimplemented(
+                    gb_type="Observed exception",
+                    context=f"raised exception {curr_exc.debug_repr()}",
+                    explanation=observed_exn_gb_explanation,
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                    from_exc=raised_exception,
                 )
 
-                # Push old exception
-                if len(self.exn_vt_stack) >= 2:
-                    old_exception = self.exn_vt_stack[-2]
+            if sys.version_info >= (3, 11):
+                exn_tab_entry = self.current_instruction.exn_tab_entry
+                if exn_tab_entry:
+                    # Implementation is based on https://github.com/python/cpython/blob/3.11/Objects/exception_handling_notes.txt
 
-                    # Push the old exception on to stack - tb, value, type
+                    # 1) pop values from the stack until it matches the stack depth
+                    # for the handler
+                    while len(self.stack) > exn_tab_entry.depth:
+                        self.pop()
+
+                    # 2) if 'lasti' is true, then push the offset that the exception was raised at
+                    if exn_tab_entry.lasti:
+                        self.push(
+                            VariableTracker.build(self, self.current_instruction.offset)
+                        )
+
+                    # 3) push the exception to the stack
+                    self.push(self.exn_vt_stack.get_raised_exception())
+
+                    # 4) jump to the handler
+                    self.jump(exn_tab_entry)  # type: ignore[arg-type]
+                else:
+                    # No handler found. Bubble the exception to the parent
+                    # instruction translator. We use special exception for this.
+                    self.stack.clear()
+
+                    # attach traceback to the exception and set it as current exception
+                    curr_exc = self.exn_vt_stack.get_raised_exception()
+                    self._attach_traceback_to_exception(curr_exc)
+
+                    if type(self) is InstructionTranslator:
+                        bubble_exception_to_interpreter(raised_exception)
+                    raise raised_exception
+            else:
+                if len(self.block_stack):
+                    # base implementation - https://github.com/python/cpython/blob/3.10/Python/ceval.c#L4455
+
+                    block_stack_entry = self.block_stack.pop()
+
+                    while block_stack_entry.inst.opname == "EXCEPT_HANDLER":
+                        # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
+                        self.popn(3)
+                        self.exn_vt_stack.pop()
+                        if len(self.block_stack) == 0:
+                            # No handler found in this frame. Bubble the exception to the parent
+                            # instruction translator.
+                            self.stack.clear()
+                            if type(self) is InstructionTranslator:
+                                bubble_exception_to_interpreter(raised_exception)
+
+                            raise raised_exception
+                        block_stack_entry = self.block_stack.pop()
+
+                    exception_var = self.exn_vt_stack.get_raised_exception()
+                    self.exn_vt_stack.move_current_exception_to_stack()
+
+                    # 1) pop values from the stack until it matches the stack depth
+                    # for the handler
+                    while len(self.stack) > block_stack_entry.stack_index:
+                        self.pop()
+
+                    # Push a dummy block stack entry of EXCEPT_HANDLER
+                    # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
+                    handler_inst = Instruction(int(1e6), "EXCEPT_HANDLER", None, 0)
+                    self.block_stack.append(
+                        BlockStackEntry(handler_inst, None, len(self.stack))
+                    )
+
+                    # Push old exception
+                    if len(self.exn_vt_stack) >= 2:
+                        old_exception = self.exn_vt_stack[-2]
+
+                        # Push the old exception on to stack - tb, value, type
+                        # Traceback is currently mapped to UnknownVariable
+                        self.push(variables.UnknownVariable())
+                        self.push(old_exception)
+
+                        self.push(variables.BuiltinVariable(old_exception.exc_type))
+                    else:
+                        # Push empty exception tb, value, type
+                        self.push(ConstantVariable.create(None))
+                        self.push(ConstantVariable.create(None))
+                        self.push(ConstantVariable.create(None))
+
+                    # Push new exception - tb, val, type
                     # Traceback is currently mapped to UnknownVariable
                     self.push(variables.UnknownVariable())
-                    self.push(old_exception)
+                    self.push(exception_var)
 
-                    self.push(variables.BuiltinVariable(old_exception.exc_type))
+                    self.push(variables.BuiltinVariable(exception_var.exc_type))
+
+                    # Jump to target
+                    self.jump(block_stack_entry)
                 else:
-                    # Push empty exception tb, value, type
-                    self.push(ConstantVariable.create(None))
-                    self.push(ConstantVariable.create(None))
-                    self.push(ConstantVariable.create(None))
-
-                # Push new exception - tb, val, type
-                # Traceback is currently mapped to UnknownVariable
-                self.push(variables.UnknownVariable())
-                self.push(exception_var)
-
-                self.push(variables.BuiltinVariable(exception_var.exc_type))
-
-                # Jump to target
-                self.jump(block_stack_entry)
-            else:
-                # No handler found. Bubble the exception to the parent
-                # instruction translator. We use special exception for this.
-                self.stack.clear()
-                if type(self) is InstructionTranslator:
-                    bubble_exception_to_interpreter()
-                raise raised_exception
+                    # No handler found. Bubble the exception to the parent
+                    # instruction translator. We use special exception for this.
+                    self.stack.clear()
+                    if type(self) is InstructionTranslator:
+                        bubble_exception_to_interpreter(raised_exception)
+                    raise raised_exception
+        finally:
+            # This frame is on `raised_exception`'s traceback whenever the
+            # exception escapes, so holding the argument here would form a
+            # reference cycle that pins every frame on the stack (including
+            # user frames) until the next gc pass. CPython does the same
+            # implicit cleanup for `except ... as e`.
+            del raised_exception
 
     def PUSH_EXC_INFO(self, inst: Instruction) -> None:
         # https://docs.python.org/3/library/dis.html#opcode-PUSH_EXC_INFO
@@ -3126,11 +3299,9 @@ class InstructionTranslatorBase(
                 UserDefinedExceptionObjectVariable,
             ),
         ):
-            unimplemented(
-                gb_type="Exception with bad expected type",
-                context=str(expected_exc_types),
-                explanation=f"`except ...` has unsupported type {expected_exc_types}.",
-                hints=[*graph_break_hints.USER_ERROR],
+            exc.raise_type_error(
+                self,
+                "catching classes that do not inherit from BaseException is not allowed",
             )
 
         if sys.version_info >= (3, 11):
@@ -3158,11 +3329,9 @@ class InstructionTranslatorBase(
                     UserDefinedExceptionClassVariable,
                 ),
             ):
-                unimplemented(
-                    gb_type="Exception with non-type expectation",
-                    context=str(expected_type),
-                    explanation=f"`except ...` expects a non-type: {expected_type}.",
-                    hints=[*graph_break_hints.USER_ERROR],
+                exc.raise_type_error(
+                    self,
+                    "catching classes that do not inherit from BaseException is not allowed",
                 )
             if pyexception_instance_check(exc_instance) and issubclass(
                 exc_instance.exc_type,  # type: ignore[union-attr]
@@ -3282,6 +3451,9 @@ class InstructionTranslatorBase(
         # Map to a dictionary of str -> VariableTracker
         # pyrefly: ignore [bad-assignment, unbound-name]
         kwargsvars = kwargsvars.keys_as_python_constant()
+        # pyrefly: ignore [not-iterable]
+        if not all(isinstance(k, str) for k in kwargsvars):
+            exc.raise_type_error(self, "keywords must be strings")
         # pyrefly: ignore [bad-argument-type, unbound-name]
         self.call_function(fn, argsvars.items, kwargsvars)
 
@@ -3351,6 +3523,15 @@ class InstructionTranslatorBase(
         except Unsupported:
             if not obj.is_python_constant():
                 raise
+            # An eager getattr would run a user-defined __get__ at trace time
+            # and bake its result into the graph.
+            if isinstance(obj, variables.UserDefinedClassVariable) and isinstance(
+                inspect.getattr_static(
+                    type(obj.lookup_cls_mro_attr(attr)), "__get__", None
+                ),
+                types.FunctionType,
+            ):
+                raise
             source = AttrSource(obj.source, attr) if obj.source else None
             result = VariableTracker.build(
                 self, getattr(obj.as_python_constant(), attr), source=source
@@ -3386,6 +3567,14 @@ class InstructionTranslatorBase(
             [obj, VariableTracker.build(self, inst.argval)],
             {},
         )
+
+    def DELETE_DEREF(self, inst: Instruction) -> None:
+        if inst.argval not in self.cell_and_freevars():
+            raise AssertionError(
+                "expected inst.argval in self.cell_and_freevars() to be true"
+            )
+        cell = self._cellvar(inst.argval)
+        self.output.side_effects.store_cell(cell, variables.DeletedVariable())
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
         # Only check side_effects — a pure dict lookup with no observable
@@ -3513,7 +3702,12 @@ class InstructionTranslatorBase(
                 raise AssertionError("expected resume_inst.target to be true")
             resume_inst = resume_inst.target
 
-        resume_name = unique_id(f"__resume_at_{resume_inst.offset}")
+        # The name is skipped forward here rather than inside
+        # install_global_unsafe, which cannot hand a substitute back to callers
+        # that use the name they passed for more than the install: this one bakes
+        # it into the resume function itself and records it on the package.
+        resume_prefix = f"__resume_at_{resume_inst.offset}"
+        resume_name = unique_id_unbound_in(resume_prefix, self.output.global_scope)
 
         # More locals may have been pruned in the current/leaf frame
         # after the unsupported instruction (e.g. branch).
@@ -4236,8 +4430,11 @@ class InstructionTranslatorBase(
             # Convert the attribute to a dictionary before assigning it
             # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
             items = annotations.items
+            ann_items: dict[VariableTracker, VariableTracker] = dict(
+                zip(items[::2], items[1::2], strict=True)
+            )
             ann = ConstDictVariable(
-                dict(zip(items[::2], items[1::2], strict=True)),
+                ann_items,
                 mutation_type=ValueMutationNew(),
             )
             fn.annotations = ann
@@ -4407,6 +4604,10 @@ class InstructionTranslatorBase(
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_VALUE(self, inst: Instruction) -> None:
         flags = inst.arg
         if flags is None:
@@ -4447,7 +4648,7 @@ class InstructionTranslatorBase(
                 )
         self.push(
             variables.StringFormatVariable.create(
-                "".join(format_string_parts), args, kwargs
+                self, "".join(format_string_parts), args, kwargs
             )
         )
 
@@ -4703,7 +4904,7 @@ class InstructionTranslatorBase(
                 )
             kw_names = kw_names.as_python_constant()
         else:
-            kw_names = self.kw_names.value if self.kw_names else ()
+            kw_names = self.kw_names.as_python_constant() if self.kw_names else ()
 
         if inst.arg is None:
             raise AssertionError("expected inst.arg is not None to be true")
@@ -4910,13 +5111,9 @@ class InstructionTranslatorBase(
                 self._comprehension_depth -= 1
 
     def LOAD_FAST_CHECK(self, inst: Instruction) -> None:
-        if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
-            unimplemented(
-                gb_type="LOAD_FAST_CHECK on uninitialized variable",
-                context=inst.argval,
-                explanation=f"Attempted to load uninitialized local variable {inst.argval}",
-                hints=[*graph_break_hints.USER_ERROR],
-            )
+        name = inst.argval
+        if istype(self.symbolic_locals.get(name), NullVariable):
+            self._raise_unbound_local_error(name)
         self.LOAD_FAST(inst)
 
     def LOAD_FAST_AND_CLEAR(self, inst: Instruction) -> None:
@@ -5044,8 +5241,11 @@ class InstructionTranslatorBase(
             # Convert the attribute to a dictionary before assigning it
             # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
             items = attr.items
+            ann_items: dict[VariableTracker, VariableTracker] = dict(
+                zip(items[::2], items[1::2], strict=True)
+            )
             ann = ConstDictVariable(
-                dict(zip(items[::2], items[1::2], strict=True)),
+                ann_items,
                 mutation_type=ValueMutationNew(),
             )
             fn.annotations = ann
@@ -5056,14 +5256,26 @@ class InstructionTranslatorBase(
 
         self.push(fn)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when converting an f-string value",
+    )
     def CONVERT_VALUE(self, inst: Instruction) -> None:
         if inst.arg is None:
             raise AssertionError("expected inst.arg is not None to be true")
         self.push(self._convert_value(self.pop(), inst.arg))
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_SIMPLE(self, inst: Instruction) -> None:
         self._format_value(VariableTracker.build(self, ""), 0)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_WITH_SPEC(self, inst: Instruction) -> None:
         self._format_value(self.pop(), 0)
 
@@ -5156,10 +5368,8 @@ class InstructionTranslatorBase(
     ) -> str:
         if additional_stack_frames is None:
             additional_stack_frames = []
-        return "".join(
-            traceback.format_list(
-                [self.frame_summary()] + list(reversed(additional_stack_frames))
-            )
+        return format_user_stack(
+            [self.frame_summary()] + list(reversed(additional_stack_frames))
         )
 
     def frame_summary(self) -> traceback.FrameSummary:
@@ -5167,6 +5377,7 @@ class InstructionTranslatorBase(
         # colno/end_colno kwargs were added to FrameSummary in 3.11
         kwargs: dict[str, Any] = {}
         if sys.version_info >= (3, 11) and positions is not None:
+            kwargs["end_lineno"] = positions.end_lineno
             kwargs["colno"] = positions.col_offset
             kwargs["end_colno"] = positions.end_col_offset
         return traceback.FrameSummary(
@@ -5182,7 +5393,7 @@ class InstructionTranslatorBase(
         nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
         return nn_modules_pattern.match(filename) is not None
 
-    def store_global_weakref_by_id(self, prefix: str, value: Any) -> str:
+    def store_global_weakref_by_id(self, prefix: str, value: object) -> str:
         global_name = self.output.install_global_by_id(prefix, weakref.ref(value))
         install_guard(
             GlobalWeakRefSource(global_name).make_guard(GuardBuilder.WEAKREF_ALIVE)
@@ -5304,13 +5515,11 @@ class InstructionTranslatorBase(
         stack_above_dynamo_formatted = ""
         if config.verbose:
             stack_above_dynamo = get_stack_above_dynamo()
-            stack_above_dynamo_formatted = "".join(
-                traceback.format_list(stack_above_dynamo)
-            )
+            stack_above_dynamo_formatted = format_user_stack(stack_above_dynamo)
         else:
             user_stack = get_stack_above_dynamo() + user_stack  # type: ignore[assignment]
             user_stack = collapse_resume_frames(user_stack)
-        user_stack_formatted = "".join(traceback.format_list(user_stack))
+        user_stack_formatted = format_user_stack(user_stack)
 
         # Add HOP context after the first line of reason if present
         if exc is not None:
@@ -5456,6 +5665,8 @@ class InstructionTranslatorBase(
         )
         # Per-prefix record of the most recently generated pycode varname.
         self._pycode_last_varname: dict[str, str] = {}
+        # Module name -> the alias source import_source minted for it.
+        self._import_source_memo: dict[str, GlobalSource] = {}
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
@@ -6008,7 +6219,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 hints=[],
             )
 
-        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+        if isinstance(
+            func, (UserFunctionVariable, UserMethodVariable)
+        ) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
         ):
             msg = inspect.getattr_static(
@@ -6073,12 +6286,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func,
             (
                 UserFunctionVariable,
+                UserMethodVariable,
                 NestedUserFunctionVariable,
                 LocalGeneratorFunctionVariable,
             ),
         ):
             raise AssertionError(
-                "expected isinstance( func, ( UserFunctionVariable, NestedUserFunctionVariable, LocalGeneratorFunctionVariable, ), ) to be true"
+                "expected isinstance( func, ( UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable, LocalGeneratorFunctionVariable, ), ) to be true"
             )
         code: types.CodeType = func.get_code()
         result = None
@@ -6235,9 +6449,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # bubble up the exception to the parent frame.
             raise
         except (Unsupported, UserError) as e:
-            # If this graph break has skip_frame set, unset it
-            # since it refers to the current frame and not the parent.
-            e.skip_frame = False
+            if not e.preserve_skip_frame_after_inline:
+                # If this graph break has skip_frame set, unset it
+                # since it refers to the current frame and not the parent.
+                e.skip_frame = False
+                e.apply_to_code = True
             raise
         except Exception:
             log.debug("FAILED INLINING %s", code)
@@ -6534,7 +6750,14 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        if not isinstance(tos, ListIteratorVariable):
+        iter_vts = (
+            ListIteratorVariable,
+            TupleIteratorVariable,
+            DequeIteratorVariable,
+            DequeReverseIteratorVariable,
+            ListReverseIteratorVariable,
+        )
+        if not isinstance(tos, iter_vts):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)

@@ -106,6 +106,16 @@ kernel void exponential(
   }
 }
 
+// Workaround for compiler bug that incorrectly eliminates float to bfloat cast
+template <typename T>
+T volcast(float x) {
+  if IF_CONSTEXPR (metal::is_same_v<T, bfloat>) {
+    volatile float v = x;
+    return static_cast<T>(v);
+  }
+  return static_cast<T>(x);
+}
+
 // Uniform[from, to). One Philox round per 4 outputs.
 template <typename T>
 kernel void uniform_dist(
@@ -122,7 +132,9 @@ kernel void uniform_dist(
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
-    output[base + i] = static_cast<T>(from + scale * u);
+    T value = static_cast<T>(from + scale * u);
+    // Casting to T can round up to the excluded upper bound.
+    output[base + i] = value == params.y ? volcast<T>(from) : value;
   }
 }
 
@@ -365,9 +377,7 @@ REGISTER_EXPONENTIAL(bfloat);
 // Bernoulli with scalar probability p. Each thread processes 4 elements,
 // amortizing one Philox-4x32-10 round (4 uint32s) across the group so the
 // kernel becomes bandwidth-bound rather than RNG-bound. The mask bit is
-// converted to T via `c10::metal::cast_to`, which routes complex destinations
-// to `T(value, 0)` — matching the previous MPSGraph behaviour where bool was
-// cast to complex as "1+0j" / "0+0j".
+// converted to T via `c10::metal::cast_to`.
 template <typename T>
 kernel void bernoulli_scalar(
     device T* output [[buffer(0)]],
@@ -435,8 +445,6 @@ REGISTER_BERNOULLI(char);
 REGISTER_BERNOULLI(short);
 REGISTER_BERNOULLI(int);
 REGISTER_BERNOULLI(long);
-REGISTER_BERNOULLI(float2);
-REGISTER_BERNOULLI(half2);
 
 constant constexpr int BINOMIAL_RANDOMS_STRIDE = 32;
 

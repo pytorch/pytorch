@@ -382,7 +382,7 @@ at::Tensor evenly_distribute_backward(
 Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn);
 Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask);
 Tensor masked_fill_inplace_if_safe(
-    Tensor tensor,
+    const Tensor& tensor,
     const Tensor& mask,
     const Scalar& value);
 at::Tensor var_backward(
@@ -766,6 +766,15 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     int64_t padding_mode,
     bool align_corners,
     std::array<bool, 3> output_mask);
+Tensor grid_sampler_2d_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& grid_p,
+    const Tensor& grid_t,
+    const Tensor& result,
+    int64_t interpolation_mode,
+    int64_t padding_mode,
+    bool align_corners);
 std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     const Tensor& ggI,
     const Tensor& ggGrid,
@@ -776,6 +785,15 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     int64_t padding_mode,
     bool align_corners,
     std::array<bool, 3> output_mask);
+Tensor grid_sampler_3d_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& grid_p,
+    const Tensor& grid_t,
+    const Tensor& result,
+    int64_t interpolation_mode,
+    int64_t padding_mode,
+    bool align_corners);
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& grad,
     const Tensor& x1,
@@ -933,6 +951,14 @@ std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
     const Tensor& result);
 Tensor i1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
+Tensor bessel_j1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
+Tensor bessel_y1_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result);

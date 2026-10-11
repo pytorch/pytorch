@@ -39,14 +39,11 @@
 #include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/tensor_dtypes.h>
 
 #include <torch/csrc/autograd/function.h>
 #include <functional>
 #include <memory>
-#include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -79,21 +76,6 @@ inline void check_legacy_fn_attr_access(
       "is a legacy access pattern that is no longer supported. For examples "
       "on how to use new‑style autograd functions, see "
       "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
-}
-
-// TODO: We shouldn't need to call this function because the engine
-// can already persist the errors for us. This still seems to be
-// needed for the DistEngine however.
-//
-// python test/distributed/rpc/test_tensorpipe_agent.py -k
-// test_backward_autograd_engine_error
-//
-// See Note [ Persisting PyErr state across autograd engine threads ]
-void throw_python_error() {
-  python_error err;
-  err.persist();
-  // NOLINTNEXTLINE(hicpp-exception-baseclass)
-  throw std::move(err);
 }
 
 PyObject* materialize_needs_input_grad(THPFunction* self) {
@@ -1407,6 +1389,50 @@ PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_input_grad_buffers(PyObject* self, void* unused) {
+  HANDLE_TH_ERRORS
+  auto* py_fn = reinterpret_cast<THPFunction*>(self);
+  auto node = py_fn->cdata;
+  check_legacy_fn_attr_access(node, "input_grad_buffers");
+  TORCH_CHECK(
+      node->post_hooks().empty(),
+      "input_grad_buffers does not support post-hooks on the producing "
+      "autograd node because directly accumulated gradients are returned as "
+      "None and cannot be observed or replaced by those hooks");
+
+  variable_list buffers;
+  {
+    pybind11::gil_scoped_release no_gil;
+    buffers = get_current_input_grad_buffers(node.get());
+  }
+
+  THPObjectPtr result(
+      PyTuple_New(static_cast<Py_ssize_t>(py_fn->is_variable_input.size())));
+  if (!result) {
+    return nullptr;
+  }
+
+  size_t variable_idx = 0;
+  for (const auto i : c10::irange(py_fn->is_variable_input.size())) {
+    THPObjectPtr item;
+    if (!py_fn->is_variable_input[i] || !buffers[variable_idx].defined()) {
+      item = Py_NewRef(Py_None);
+    } else {
+      item = THPVariable_Wrap(buffers[variable_idx]);
+    }
+    if (!item) {
+      return nullptr;
+    }
+    if (py_fn->is_variable_input[i]) {
+      ++variable_idx;
+    }
+    PyTuple_SET_ITEM(result.get(), i, item.release());
+  }
+  TORCH_INTERNAL_ASSERT(variable_idx == buffers.size());
+  return result.release();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
@@ -2287,6 +2313,11 @@ static struct PyGetSetDef THPFunction_properties[] = {
     {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
     {"_input_metadata",
      (getter)THPFunction_input_metadata,
+     nullptr,
+     nullptr,
+     nullptr},
+    {"_input_grad_buffers",
+     (getter)THPFunction_input_grad_buffers,
      nullptr,
      nullptr,
      nullptr},

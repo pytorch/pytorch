@@ -64,7 +64,7 @@ def _unwrap_dtensor_for_comparison(actual, expected):
 
 
 class ErrorMeta(Exception):
-    """Internal testing exception that makes that carries error metadata."""
+    """Internal testing exception that carries error metadata."""
 
     def __init__(
         self, type: type[Exception], msg: str, *, id: tuple[Any, ...] = ()
@@ -146,7 +146,7 @@ def get_tolerances(
     atol: float | None,
     id: tuple[Any, ...] = (),
 ) -> tuple[float, float]:
-    """Gets absolute and relative to be used for numeric comparisons.
+    """Gets absolute and relative tolerances to be used for numeric comparisons.
 
     If both ``rtol`` and ``atol`` are specified, this is a no-op. If both are not specified, the return value of
     :func:`default_tolerances` is used.
@@ -158,7 +158,7 @@ def get_tolerances(
         (Tuple[float, float]): Valid absolute and relative tolerances.
     """
     if (rtol is None) ^ (atol is None):
-        # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
+        # We require both tolerances to be omitted or specified, because specifying only one might lead to surprising
         # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
         raise ErrorMeta(
             ValueError,
@@ -852,7 +852,7 @@ class TensorLikePair(Pair):
 
         If ``actual`` and ``expected`` are ...
 
-        - ... not on the same :attr:`~torch.Tensor.device`, they are moved CPU memory.
+        - ... not on the same :attr:`~torch.Tensor.device`, they are moved to CPU memory.
         - ... not of the same ``dtype``, they are promoted  to a common ``dtype`` (according to
             :func:`torch.promote_types`).
         - ... not of the same ``layout``, they are converted to strided tensors.

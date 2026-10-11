@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
-#include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -10,7 +9,6 @@
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/cpu/zmath.h>
 
 #include <c10/util/irange.h>
 
@@ -602,16 +600,14 @@ TORCH_META_FUNC(_linalg_solve_ex)(const Tensor& A,
   TORCH_CHECK(left || !vector_case, "linalg.solve: Vector broadcasting of the left hand side is not supported for left=False. In this case linalg.solve is equivalent to B / A.squeeze(-1)");
   auto result_shape = vector_case ? IntArrayRef(B_broad_shape.data(), B_broad_shape.size() - 1)
                                   : B_broad_shape;
-  // row major for mps implementation
-  auto result_strides = at::native::batched_matrix_contiguous_strides(result_shape, /*f_contig=*/A.device().type() != at::kMPS? left : false);
+  auto result_strides = at::native::batched_matrix_contiguous_strides(result_shape, /*f_contig=*/left);
 
   set_output_strided(0, result_shape, result_strides, B.options());
 
   auto shape = A.sizes();
   auto ndim = shape.size();
 
-  // LU, row major for mps
-  auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/A.device().type() != at::kMPS? true : false);
+  auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f_contig=*/true);
   set_output_strided(1, shape, LU_strides, A.options());
 
   // pivots
@@ -4021,7 +4017,7 @@ Tensor linalg_vander_symint(
     const Tensor& x,
     std::optional<c10::SymInt> N) {
   auto t = x.scalar_type();
-  TORCH_CHECK(t == ScalarType::Float ||
+  TORCH_CHECK_NOT_IMPLEMENTED(t == ScalarType::Float ||
               t == ScalarType::Double ||
               t == ScalarType::ComplexFloat ||
               t == ScalarType::ComplexDouble ||

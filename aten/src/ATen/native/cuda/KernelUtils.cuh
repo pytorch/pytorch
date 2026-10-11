@@ -1,5 +1,7 @@
 #pragma once
-#include <ATen/cuda/Atomic.cuh>
+#include <ATen/core/TensorAccessor.h>
+#include <torch/headeronly/cuda/Atomic.h>
+#include <torch/headeronly/cuda/KernelUtils.h>
 
 #if !(defined(USE_ROCM) || ((defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
 #include <cuda_bf16.h>
@@ -10,16 +12,51 @@
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 
-#include <ATen/cuda/detail/ROCmMacros.cuh>
-
-#define ATOMICADD unsafeAtomicAdd
-#define NATIVE_ZERO_BF16 __float2bfloat16(0.0f)
-#else
-#define ATOMICADD atomicAdd
-#define NATIVE_ZERO_BF16 __int2bfloat16_rz(0)
+#include <torch/headeronly/cuda/detail/ROCmMacros.h>
 #endif
 
 namespace at::native {
+
+using torch::headeronly::fastAtomicAdd;
+using torch::headeronly::fastSpecializedAtomicAdd;
+
+// Scatter into a packed accessor without naming a bound.
+//
+// fastAtomicAdd needs to know how far it may look for a pairing partner -- see
+// Note [Passing pointer and offset to fastAtomicAdd] in GridSampler.cu. A
+// caller holding a raw pointer supplies that by hand, and too large a value
+// lets the pairing write past the allocation. An accessor already carries what
+// it would be derived from:
+//
+//   memory_span = 1 + sum over d of (size[d] - 1) * stride[d]
+//
+// the distance to the last addressable element rather than the element count,
+// which is what at::native::storage_size_for computes on the host. The two
+// differ for a strided view, whose gaps are legal pairing partners: inside the
+// region, though belonging to whatever the view was taken from, and only ever
+// receiving a zero.
+template <
+    typename scalar_t,
+    size_t N,
+    template <typename U> class PtrTraits,
+    typename index_t,
+    typename... Idx>
+__device__ __forceinline__ void fastAtomicAdd(
+    at::GenericPackedTensorAccessor<scalar_t, N, PtrTraits, index_t> accessor,
+    scalar_t value,
+    Idx... indices) {
+  static_assert(
+      sizeof...(Idx) == N, "fastAtomicAdd needs one index per dimension");
+  const index_t index[N] = {static_cast<index_t>(indices)...};
+  index_t offset = 0;
+  index_t memory_span = 1;
+#pragma unroll
+  for (size_t d = 0; d < N; ++d) {
+    offset += index[d] * accessor.stride(d);
+    memory_span += (accessor.size(d) - 1) * accessor.stride(d);
+  }
+  fastAtomicAdd(accessor.data(), offset, memory_span, value, true);
+}
 
 __device__ __forceinline__ size_t
 idx(const size_t nc,
@@ -41,138 +78,6 @@ __device__ __forceinline__ index_t idx_cl(
     const index_t width,
     const index_t channel) {
   return ((n * height + h) * width + w) * channel + c;
-}
-
-// fastSpecializedAtomicAdd (and fastAtomicAdd) are an optimization
-// that speed up half-precision atomics.  The situation with half
-// precision atomics is that we have a slow __half atomic, and
-// a fast vectored __half2 atomic (this can be worth up to a 6x
-// speedup, see https://github.com/pytorch/pytorch/pull/21879).
-// We can convert a __half atomic into a __half2 atomic by simply
-// pairing the __half with a zero entry on the left/right depending
-// on alignment... but only if this wouldn't cause an out of bounds
-// access!  Thus, you must specify tensor and numel so we can check
-// if you would be out-of-bounds and use a plain __half atomic if
-// you would be.
-template <
-    typename scalar_t,
-    typename index_t,
-    typename std::enable_if_t<std::is_same_v<c10::Half, scalar_t>>* = nullptr>
-__device__ __forceinline__ void fastSpecializedAtomicAdd(
-    scalar_t* tensor,
-    index_t index,
-    const index_t numel,
-    scalar_t value) {
-#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700))
-  gpuAtomicAddNoReturn(
-      reinterpret_cast<at::Half*>(tensor) + index,
-      static_cast<at::Half>(value));
-#else
-  // Accounts for the chance tensor falls on an odd 16 bit alignment (ie, not 32
-  // bit aligned)
-  __half* target_addr = reinterpret_cast<__half*>(tensor + index);
-  bool low_byte =
-      (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__half2) == 0);
-
-  if (low_byte && index < (numel - 1)) {
-    __half2 value2;
-    value2.x = static_cast<__half>(value);
-    value2.y = __int2half_rz(0);
-    ATOMICADD(reinterpret_cast<__half2*>(target_addr), value2);
-
-  } else if (!low_byte && index > 0) {
-    __half2 value2;
-    value2.x = __int2half_rz(0);
-    value2.y = static_cast<__half>(value);
-    ATOMICADD(reinterpret_cast<__half2*>(target_addr - 1), value2);
-
-  } else {
-#ifdef USE_ROCM
-    gpuAtomicAddNoReturn(
-        reinterpret_cast<at::Half*>(tensor) + index,
-        static_cast<at::Half>(value));
-#else
-    atomicAdd(
-        reinterpret_cast<__half*>(tensor) + index, static_cast<__half>(value));
-#endif
-  }
-#endif
-}
-
-template <
-    typename scalar_t,
-    typename index_t,
-    typename std::enable_if_t<std::is_same_v<c10::BFloat16, scalar_t>>* =
-        nullptr>
-__device__ __forceinline__ void fastSpecializedAtomicAdd(
-    scalar_t* tensor,
-    index_t index,
-    const index_t numel,
-    scalar_t value) {
-#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-  gpuAtomicAddNoReturn(
-      reinterpret_cast<at::BFloat16*>(tensor) + index,
-      static_cast<at::BFloat16>(value));
-#else
-  // Accounts for the chance tensor falls on an odd 16 bit alignment (ie, not 32
-  // bit aligned)
-  __nv_bfloat16* target_addr = reinterpret_cast<__nv_bfloat16*>(tensor + index);
-  bool low_byte =
-      (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__nv_bfloat162) ==
-       0);
-
-  if (low_byte && index < (numel - 1)) {
-    __nv_bfloat162 value2;
-    value2.x = *reinterpret_cast<__nv_bfloat16*>(&value);
-    value2.y = NATIVE_ZERO_BF16;
-    ATOMICADD(reinterpret_cast<__nv_bfloat162*>(target_addr), value2);
-
-  } else if (!low_byte && index > 0) {
-    __nv_bfloat162 value2;
-    value2.x = NATIVE_ZERO_BF16;
-    value2.y = *reinterpret_cast<__nv_bfloat16*>(&value);
-    ATOMICADD(reinterpret_cast<__nv_bfloat162*>(target_addr - 1), value2);
-
-  } else {
-#ifdef USE_ROCM
-    gpuAtomicAddNoReturn(
-        reinterpret_cast<at::BFloat16*>(tensor) + index,
-        static_cast<at::BFloat16>(value));
-#else
-    atomicAdd(
-        reinterpret_cast<__nv_bfloat16*>(tensor) + index,
-        *reinterpret_cast<__nv_bfloat16*>(&value));
-#endif
-  }
-#endif
-}
-
-template <
-    typename scalar_t,
-    typename index_t,
-    typename std::enable_if_t<
-        !std::is_same_v<c10::Half, scalar_t> &&
-        !std::is_same_v<c10::BFloat16, scalar_t>>* = nullptr>
-__device__ __forceinline__ void fastSpecializedAtomicAdd(
-    scalar_t* tensor,
-    index_t index,
-    const index_t numel,
-    scalar_t value) {
-  gpuAtomicAddNoReturn(tensor + index, value);
-}
-
-template <class scalar_t, class index_t>
-__device__ __forceinline__ void fastAtomicAdd(
-    scalar_t* tensor,
-    index_t index,
-    const index_t numel,
-    scalar_t value,
-    bool fast_atomics) {
-  if (fast_atomics) {
-    fastSpecializedAtomicAdd(tensor, index, numel, value);
-  } else {
-    gpuAtomicAddNoReturn(tensor + index, value);
-  }
 }
 
 #ifdef USE_ROCM
@@ -262,7 +167,7 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
   if constexpr (
       std::is_same<scalar_t, c10::BFloat16>::value ||
       std::is_same<scalar_t, c10::Half>::value) {
-    typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
+    typedef short __attribute__((ext_vector_type(2))) vec_short2;
     union ill {
       unsigned int i[2];
       int64_t il;
@@ -410,8 +315,5 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
   }
 }
 #endif
-
-#undef ATOMICADD
-#undef NATIVE_ZERO_BF16
 
 } // namespace at::native

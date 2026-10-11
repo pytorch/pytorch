@@ -18,7 +18,7 @@ def _untie_named_tensors_map(
     """
     Unties all tied tensors in the module to parameters_and_buffers.
 
-    This function returns a new untied_parameters_and_buffers dictionary and leave the original
+    This function returns a new untied_parameters_and_buffers dictionary and leaves the original
     untied_parameters_and_buffers dictionary unchanged. It adds new (missing) keys for tied tensors
     in the module to untied_parameters_and_buffers. The value of the new key is the user-given value
     in the original parameters_and_buffers dictionary.

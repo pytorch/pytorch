@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_tuple.py b/test/cpython/v3_13/test_tuple.py
-index 9ce80c5e8ea..c6eab3ff1e9 100644
+index 9ce80c5e8ea0093e00176c3c7078e0ad3123d4c3..c6eab3ff1e92cf4054641e96318608eae388718c 100644
 --- a/test/cpython/v3_13/test_tuple.py
 +++ b/test/cpython/v3_13/test_tuple.py
 @@ -1,4 +1,58 @@

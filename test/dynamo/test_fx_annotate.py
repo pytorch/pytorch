@@ -7,7 +7,7 @@ import torch._dynamo.test_case
 import torch.fx.traceback as fx_traceback
 import torch.utils.checkpoint
 from torch._dynamo.test_case import run_tests
-from torch._dynamo.testing import AotEagerAndRecordGraphs
+from torch._dynamo.testing import AotEagerAndRecordGraphs, EagerAndRecordGraphs
 from torch.nn.attention.flex_attention import (
     _dense_to_ordered,
     create_block_mask,
@@ -232,6 +232,141 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager")
         x = torch.randn(10, requires_grad=True)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def _custom_meta_by_target(self, graphs, targets):
+        return [
+            node.meta.get("custom")
+            for graph in graphs
+            for node in graph.graph.nodes
+            if node.op == "call_function" and node.target in targets
+        ]
+
+    def test_graph_break_preserves_annotation(self):
+        def fn(x):
+            with fx_traceback.annotate({"pp_stage": 0}):
+                x = torch.sin(x)
+                torch._dynamo.graph_break()
+                x = torch.cos(x)
+            return torch.tan(x)
+
+        backend = EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        x = torch.randn(10)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(
+            self._custom_meta_by_target(backend.graphs, (torch.sin, torch.cos)),
+            [{"pp_stage": 0}, {"pp_stage": 0}],
+        )
+        self.assertEqual(
+            self._custom_meta_by_target(backend.graphs, (torch.tan,)), [None]
+        )
+
+    def test_annotation_applies_to_frame_after_graph_break(self):
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                x = torch.sin(x)
+                torch._dynamo.graph_break()
+                return torch.cos(x)
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            @fx_traceback.annotate_fn({"stage": "parent"})
+            def forward(self, x):
+                return self.child(torch.relu(x))
+
+        backend = EagerAndRecordGraphs()
+        mod = Parent()
+        opt_mod = torch.compile(mod, backend=backend)
+        x = torch.randn(10)
+        self.assertEqual(mod(x), opt_mod(x))
+        self.assertEqual(
+            self._custom_meta_by_target(
+                backend.graphs, (torch.relu, torch.sin, torch.cos)
+            ),
+            [{"stage": "parent"}] * 3,
+        )
+
+    def test_frame_after_graph_break_guards_on_annotation(self):
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                torch._dynamo.graph_break()
+                return torch.sin(x)
+
+        def make_parent(tag):
+            class Parent(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.child = Child()
+
+                @fx_traceback.annotate_fn({"tag": tag})
+                def forward(self, x):
+                    return self.child(x)
+
+            return Parent()
+
+        backend = EagerAndRecordGraphs()
+        x = torch.randn(10)
+        for tag in ("a", "b", "a"):
+            torch.compile(make_parent(tag), backend=backend)(x)
+        # The resumed Child frame is compiled once per distinct annotation and
+        # reused when the same annotation is active again.
+        self.assertEqual(
+            self._custom_meta_by_target(backend.graphs, (torch.sin,)),
+            [{"tag": "a"}, {"tag": "b"}],
+        )
+
+    def test_eager_annotation_applies_to_compiled_frame(self):
+        def fn(x):
+            return torch.sin(x)
+
+        backend = EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        x = torch.randn(10)
+        opt_fn(x)
+        with fx_traceback.annotate({"tag": "eager"}):
+            opt_fn(x)
+        opt_fn(x)
+        self.assertEqual(
+            self._custom_meta_by_target(backend.graphs, (torch.sin,)),
+            [None, {"tag": "eager"}],
+        )
+
+    def test_nested_annotation_in_frame_entered_under_annotation(self):
+        def fn(x):
+            with fx_traceback.annotate({"tag": "inner"}):
+                return torch.sin(x)
+
+        backend = EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        x = torch.randn(10)
+        with fx_traceback.annotate({"tag": "outer"}):
+            opt_fn(x)
+            self.assertEqual(fx_traceback._get_current_annotation(), {"tag": "outer"})
+            opt_fn(x)
+        self.assertEqual(
+            self._custom_meta_by_target(backend.graphs, (torch.sin,)),
+            [{"tag": "inner"}],
+        )
+
+    def test_frame_guards_on_tensor_valued_annotation(self):
+        def fn(x):
+            return torch.sin(x)
+
+        backend = EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        x = torch.randn(10)
+        first, second = torch.zeros(2), torch.ones(2)
+        for value in (first, second, first):
+            with fx_traceback.annotate({"tag": value}):
+                opt_fn(x)
+        self.assertEqual(
+            self._custom_meta_by_target(backend.graphs, (torch.sin,)),
+            [{"tag": first}, {"tag": second}],
+        )
 
     def test_annotation_on_runtime_asserts(self):
         class M(torch.nn.Module):
