@@ -55,6 +55,7 @@ from torch.testing._internal.common_quantization import (
     RNNDynamicModel,
     SingleLayerLinearDynamicModel,
     skipIfNoFBGEMM,
+    skipIfNoFBGEMMFp16Linear,
     test_only_eval_fn,
     TwoLayerLinearModel,
 )
@@ -1236,7 +1237,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
             )
 
 
-@skipIfNoFBGEMM
+@skipIfNoFBGEMMFp16Linear
 class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
     hw_classification = HardwareClassification.GENERIC
 

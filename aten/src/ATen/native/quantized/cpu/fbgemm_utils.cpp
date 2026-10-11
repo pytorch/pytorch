@@ -431,14 +431,12 @@ int register_linear_params() {
               [](SerializationType state)
                   -> c10::intrusive_ptr<
                       LinearPackedParamsBase> { // __setstate__
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__) && !defined(_M_ARM64)
                 if (at::globalContext().qEngine() == at::QEngine::FBGEMM ||
                     at::globalContext().qEngine() == at::QEngine::X86) {
                   const auto& weight = std::get<0>(state);
                   if (weight.scalar_type() == at::kQInt8) {
-#if !defined(__aarch64__) && !defined(_M_ARM64)
                     return std::apply(PackedLinearWeight::prepack, std::move(state));
-#endif
                   } else if (weight.scalar_type() == at::kFloat) {
                     // NB: fp16 weight is serialized as float
                     return std::apply(PackedLinearWeightFp16::prepack, std::move(state));
@@ -465,6 +463,13 @@ int register_linear_params() {
                 if (at::globalContext().qEngine() == at::QEngine::ONEDNN ||
                     at::globalContext().qEngine() == at::QEngine::X86) {
                   const auto& weight = std::get<0>(state);
+#if defined(USE_FBGEMM) && (defined(__aarch64__) || defined(_M_ARM64))
+                  if (weight.scalar_type() == at::kFloat) {
+                    // fp16 weight is serialized as float; see
+                    // QLinearPackWeightFp16 for why ONEDNN uses FBGEMM here.
+                    return std::apply(PackedLinearWeightFp16::prepack, std::move(state));
+                  }
+#endif
                   TORCH_CHECK(
                       weight.scalar_type() == at::kQInt8,
                       "ONEDNN only supports INT8 bit width currently. Got ",
