@@ -523,6 +523,12 @@ at::Tensor binary_cross_entropy_with_logits_target_backward(
 at::Tensor log_sigmoid_double_backward(
     const at::Tensor& grad,
     const at::Tensor& input);
+at::Tensor masked_softmax_jvp(
+    const at::Tensor& self_t,
+    const at::Tensor& result,
+    const at::Tensor& mask,
+    std::optional<int64_t> dim,
+    std::optional<int64_t> mask_type);
 at::Tensor softmax_double_backward(
     const at::Tensor& grad,
     const at::Tensor& grad_output,

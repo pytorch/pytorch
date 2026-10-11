@@ -2210,6 +2210,7 @@
 - name: _masked_softmax(Tensor self, Tensor mask, int? dim=None, int? mask_type=None) -> Tensor
   self: _masked_softmax_backward(grad, result, mask, dim)
   mask: non_differentiable
+  result: masked_softmax_jvp(self_t, result, mask, dim, mask_type)
 
 - name: _prelu_kernel(Tensor self, Tensor weight) -> Tensor
   self, weight: "grad.defined() ? _prelu_kernel_backward(grad, self, weight) : std::tuple<Tensor, Tensor>()"
