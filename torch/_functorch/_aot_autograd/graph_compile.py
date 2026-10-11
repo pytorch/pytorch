@@ -66,6 +66,7 @@ from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
+    _should_disable_saved_tensors_hooks,
     AOTDedupeWrapper,
     AOTDispatchAutograd,
     AOTDispatchAutogradCompileSpec,
@@ -2307,6 +2308,9 @@ def _aot_stage2a_partition(
                 )
             )
 
+            fw_metadata.disable_saved_tensors_hooks = (
+                _should_disable_saved_tensors_hooks()
+            )
             maybe_inline_graph_saved_tensors_hooks(
                 fw_module,
                 bw_module,

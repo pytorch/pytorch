@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from copy import copy
@@ -51,7 +52,6 @@ from .runtime_wrappers import (
     SubclassMeta,
 )
 from .schemas import AOTAutogradCacheInfo, AOTConfig  # noqa: F401
-from .utils import simple_wraps
 
 
 if TYPE_CHECKING:
@@ -622,6 +622,22 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
 
         Which we'll handle separately later on, if necessary.
         """
+        return self.load_deferring_runtime_wrappers(args, aot_config, fx_config)()
+
+    def load_deferring_runtime_wrappers(
+        self,
+        args: list[torch.Tensor],
+        aot_config: AOTConfig | CacheableAOTConfig,
+        fx_config: _CompileFxKwargs,
+    ) -> Callable[[], Callable[..., Any]]:
+        """
+        Load the compiled graphs now, and return a thunk that finishes
+        wrap_post_compile by applying the runtime wrappers. The runtime wrappers
+        read the ambient execution context (autocast, saved tensors hooks) to
+        make the same decisions AOTAutograd made when it compiled the graph, so
+        they must be built where torch.compile would have built them: at the
+        graph's first call, not wherever the artifact loads.
+        """
         from torch._dynamo.utils import dynamo_timed
 
         self._log_cached_graphs(aot_config)
@@ -634,17 +650,20 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 self._load_and_post_compile(args, fx_config)
             )
 
-        with aggregate_runtime_wrapper_sources():
-            compiled_function = self._apply_runtime_wrappers(
-                compiled_fw_func,
-                compiled_bw_func,
-                needs_autograd,
-                runtime_aot_config,
-            )
-        # Now that we're pretty sure it's a successful load, add guards
-        # to the existing shape environment from the cache.
-        self._check_guards(args)
-        return compiled_function
+        def apply_runtime_wrappers() -> Callable[..., Any]:
+            with aggregate_runtime_wrapper_sources():
+                compiled_function = self._apply_runtime_wrappers(
+                    compiled_fw_func,
+                    compiled_bw_func,
+                    needs_autograd,
+                    runtime_aot_config,
+                )
+            # Now that we're pretty sure it's a successful load, add guards
+            # to the existing shape environment from the cache.
+            self._check_guards(args)
+            return compiled_function
+
+        return apply_runtime_wrappers
 
 
 class AOTAutogradResult(GenericAOTAutogradResult[CompiledForward, CompiledBackward]):
@@ -725,7 +744,7 @@ def deserialize_bundled_cache_entry(
         # if one is not available
         context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
     with torch._guards.tracing(context):
-        compiled_fn = entry.wrap_post_compile(
+        apply_runtime_wrappers = entry.load_deferring_runtime_wrappers(
             [],
             entry.sanitized_aot_config,
             {
@@ -733,19 +752,31 @@ def deserialize_bundled_cache_entry(
                 "boxed_forward_device_index": boxed_forward_device_index,
             },
         )
-    # Ensure the deserialized cache entry is still serializable
 
-    compiled_fn = SerializableCompiledFunction(compiled_fn, lambda: serializable_copy)
+    # Loading happens wherever the caller sets up, typically outside the
+    # autocast and saved tensors hooks contexts the graph runs under, so the
+    # runtime wrappers are built at the first call instead.
+    compiled_fn: SerializableCompiledFunction | None = None
+    lock = threading.Lock()
+
+    def build() -> SerializableCompiledFunction:
+        nonlocal compiled_fn
+        with lock:
+            if compiled_fn is None:
+                with torch._guards.tracing(context):
+                    # Ensure the deserialized cache entry is still serializable
+                    compiled_fn = SerializableCompiledFunction(
+                        apply_runtime_wrappers(), lambda: serializable_copy
+                    )
+            return compiled_fn
 
     # TODO: this ignores flat_params, which can exist
     # if inline_builtin_nn_modules=False
-    @simple_wraps(compiled_fn)
     def forward(*runtime_args: Any) -> Any:
-        return compiled_fn(list(runtime_args))
+        fn = compiled_fn if compiled_fn is not None else build()
+        return fn(list(runtime_args))
 
-    if not hasattr(compiled_fn, "serialize"):
-        raise AssertionError("compiled_fn must have serialize attribute")
-    forward.serialize = compiled_fn.serialize  # type: ignore[attr-defined]
+    forward.serialize = lambda: serializable_copy  # type: ignore[attr-defined]
 
     return forward
 

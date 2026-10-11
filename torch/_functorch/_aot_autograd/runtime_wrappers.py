@@ -1212,7 +1212,15 @@ def _create_runtime_wrapper(
         del args
         return result
 
-    if not (trace_joint and _should_disable_saved_tensors_hooks()):
+    # A wrapper rebuilt from a cache entry may run outside the hooks context the
+    # graph was compiled (and its hooks inlined) under.
+    if not (
+        trace_joint
+        and (
+            runtime_metadata.disable_saved_tensors_hooks
+            or _should_disable_saved_tensors_hooks()
+        )
+    ):
         return runtime_wrapper
 
     @simple_wraps(runtime_wrapper)
