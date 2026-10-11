@@ -3743,6 +3743,121 @@ class TestPrecompile(TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
 
+    def test_inlined_forward_names_the_artifact_in_tracebacks(self):
+        # The emitted source is meant to be edited, so a traceback out of it has to name
+        # the file the reader edits, with its source lines.
+        import traceback
+
+        from torch._precompile import _make_inlined_forward
+
+        code, _cache = _precompile_pair(lambda a: a + 1, torch.ones(2), backend="eager")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "artifact.py")
+            with open(path, "w") as f:
+                f.write(code)
+            forward = _make_inlined_forward(code, warn=False, filename=path)
+            # Not assertRaises, which clears the traceback's frames.
+            try:
+                forward(torch.ones(3))
+                self.fail("a wrong-shape input was accepted")
+            except PrecompileError as e:
+                frames = traceback.extract_tb(e.__traceback__)
+        in_artifact = [fr for fr in frames if fr.filename == path]
+        self.assertTrue(in_artifact, frames)
+        self.assertTrue(all(fr.line for fr in in_artifact), in_artifact)
+        # With no filename the source still runs from a real file, which triton needs.
+        anonymous = _make_inlined_forward(code, warn=False)
+        self.assertTrue(os.path.exists(anonymous.__code__.co_filename))
+
+    def test_load_names_the_artifact_file_in_tracebacks(self):
+        import traceback
+
+        with tempfile.TemporaryDirectory() as d:
+            artifact, cache = os.path.join(d, "a.py"), os.path.join(d, "a.cache")
+            with capture(
+                lambda a: a + 1,
+                artifact_path=artifact,
+                cache_path=cache,
+                tracer=MakeFxTracer(),
+                backend="eager",
+            ) as cap:
+                cap(torch.ones(2))
+            f = load(artifact, cache)
+            try:
+                f(torch.ones(3))
+                self.fail("a wrong-shape input was accepted")
+            except PrecompileError as e:
+                frames = traceback.extract_tb(e.__traceback__)
+        self.assertTrue(any(fr.filename == artifact for fr in frames), frames)
+
+    def test_load_of_an_edited_artifact_says_to_run_it_directly(self):
+        with tempfile.TemporaryDirectory() as d:
+            artifact, cache = os.path.join(d, "a.py"), os.path.join(d, "a.cache")
+            with capture(
+                lambda a: a + 1,
+                artifact_path=artifact,
+                cache_path=cache,
+                tracer=MakeFxTracer(),
+                backend="eager",
+            ) as cap:
+                cap(torch.ones(2))
+            with open(artifact, "a") as f:
+                f.write("# a hand edit\n")
+            with self.assertRaisesRegex(PrecompileError, "edited after capture"):
+                load(artifact, cache)
+            ns = runpy.run_path(artifact)
+            self.assertEqual(ns["forward"](torch.ones(2)), torch.ones(2) + 1)
+
+    def test_generated_source_says_it_may_be_edited(self):
+        # The artifact's own header is the only documentation most readers will see. It
+        # used to carry a generated-code "do not edit" banner, which is exactly backwards
+        # for source whose purpose is to be tuned in place.
+        for backend in ("eager", "inductor"):
+            code, _cache = _precompile_pair(
+                lambda a: a + 1, torch.ones(2), backend=backend
+            )
+            self.assertIn("Editing it is supported", code)
+
+    def test_inductor_cpu_reduction_sizes_its_accumulator_at_run_time(self):
+        # The cpp.dynamic_threads pin: an accumulator array sized at the capture's thread
+        # count overflows when the artifact runs under a larger OMP team. Inductor bakes
+        # one only when the thread count equals os.cpu_count().
+        prev = torch.get_num_threads()
+        torch.set_num_threads(os.cpu_count())
+        try:
+            code, _cache = _precompile_pair(lambda a: a.sum(), torch.randn(1 << 20))
+        finally:
+            torch.set_num_threads(prev)
+        self.assertNotRegex(code, r"_arr\[\d+\]")
+        self.assertIn("_arr[max_threads]", code)
+
+    @unittest.skipIf(not TEST_CUDA, "needs CUDA")
+    def test_inductor_artifact_turns_off_the_local_autotune_cache(self):
+        # The local autotune cache writes a <hash>.best_config next to __file__, which
+        # is the artifact once load() runs it from its path.
+        code, _cache = _precompile_pair(
+            lambda a: (a * 2).relu(), torch.ones(64, device="cuda")
+        )
+        self.assertIn("'autotune_local_cache': False", code)
+
+    @unittest.skipIf(not TEST_CUDA, "needs CUDA")
+    def test_load_runs_triton_kernels_from_the_artifact_file(self):
+        # @triton.jit reads a module-level kernel's source by filename, and load() hands
+        # it the artifact itself rather than a copy in the inductor cache dir.
+        def fn(a):
+            return (a * 2).relu()
+
+        with tempfile.TemporaryDirectory() as d:
+            artifact, cache = os.path.join(d, "a.py"), os.path.join(d, "a.cache")
+            with capture(
+                fn, artifact_path=artifact, cache_path=cache, tracer=MakeFxTracer()
+            ) as cap:
+                cap(torch.ones(64, device="cuda"))
+            loaded = load(artifact, cache)
+            self.assertEqual(loaded._loaded_forward.__code__.co_filename, artifact)
+            x = torch.randn(64, device="cuda")
+            self.assertEqual(loaded(x), fn(x))
+
 
 class _FilesModel(torch.nn.Module):
     def __init__(self):
