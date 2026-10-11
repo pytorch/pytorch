@@ -566,6 +566,8 @@ if(LINUX AND USE_CUDA AND CPU_AARCH64 AND USE_PRIORITIZED_TEXT_FOR_LD AND LLVM_B
 endif()
 cmake_dependent_option(USE_LLVM_BOLT "Optimize libraries with LLVM BOLT."
   "${USE_LLVM_BOLT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
+set(LLVM_BOLT_PROFILES_DIR "" CACHE PATH
+  "Directory containing LLVM BOLT profiles; empty uses bundled profiles.")
 
 # Enable third party mimalloc library to improve memory allocation performance
 # on Windows and AArch64.
@@ -970,12 +972,14 @@ if(USE_LLVM_BOLT)
     append_cxx_flag_if_supported("${_flag}" CMAKE_CXX_FLAGS)
   endforeach()
 
-  # Extract the committed BOLT profiles for the build-time optimization
-  # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
-  set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
-  file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
-  file(ARCHIVE_EXTRACT INPUT "${PROJECT_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
-       DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
+  if(NOT LLVM_BOLT_PROFILES_DIR)
+    # Extract the committed BOLT profiles for the build-time optimization
+    # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
+    set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
+    file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
+    file(ARCHIVE_EXTRACT INPUT "${PROJECT_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
+         DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
+  endif()
 
   add_custom_target(bolt_profile_quality_summary ALL
     COMMAND "${Python_EXECUTABLE}"
