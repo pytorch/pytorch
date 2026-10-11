@@ -3289,6 +3289,22 @@ class TestLinalg(TestCase):
             else:
                 torch.autograd.gradcheck(lambda b: torch.cholesky_solve(b, L, upper=False), (b,))
 
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_cholesky_solve_forward_ad(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196694:
+        # b has the shape of L.shape[:-1], and the JVP read it as a batch of vectors
+        def f(t):
+            L = t.new_tensor([[[2, 0], [0, 3]], [[3, 0], [1, 2]]]) + t * t.new_tensor([[[0, 0], [1, 0]], [[0, 0], [2, 0]]])
+            b = t.new_tensor([[1, 2], [-1, 3]])
+            w = t.new_tensor([[[1, 2], [3, 4]], [[2, -1], [4, 3]]])
+            return (torch.cholesky_solve(b, L, upper=False) * w).sum()
+
+        t = torch.tensor(-7.0, dtype=dtype, device=device)
+        _, actual = torch.func.jvp(f, (t,), (torch.ones_like(t),))
+        self.assertEqual(actual, torch.func.grad(f)(t))
+
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3,
@@ -5167,6 +5183,22 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 2)
             self.assertTrue("An output with one or more elements was resized" in str(w[0].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[1].message))
+
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_triangular_solve_forward_ad(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196707:
+        # with unitriangular=True the JVP used the tangent of the diagonal
+        def f(t):
+            a = t.new_tensor([[[2, 0], [0, 3]], [[1, 1], [0, 4]]]) + t * t.new_tensor([[[1, 1 / 4], [0, -1]], [[2, -1 / 3], [0, 1]]])
+            b = t.new_tensor([[[1, 2], [3, -1]], [[2, -2], [1, 4]]])
+            w = t.new_tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+            x = torch.triangular_solve(b, a, upper=True, transpose=False, unitriangular=True)[0]
+            return (x * w).sum()
+
+        t = torch.tensor(-10.0, dtype=dtype, device=device)
+        _, actual = torch.func.jvp(f, (t,), (torch.ones_like(t),))
+        self.assertEqual(actual, torch.func.grad(f)(t))
 
     def check_single_matmul(self, x, y):
 
