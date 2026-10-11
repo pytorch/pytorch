@@ -641,6 +641,7 @@ def ttir_to_functions(
             parent_block_id = parent_block.id()
             if parent_block_id not in block_id_to_block_arg_ids:
                 block_id_to_block_arg_ids[parent_block_id] = []
+                op_stack.setdefault(parent_block_id, defaultdict(list))
                 for i in range(parent_block.get_num_arguments()):
                     block_id_to_block_arg_ids[parent_block_id].append(
                         reindex(parent_block.get_argument(i).id()),
