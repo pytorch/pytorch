@@ -2137,3 +2137,13 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+
+[[linter]]
+code = 'TEST_LINTER'
+include_patterns = ['test/**/*.py']
+command = [
+    'python3',
+    'tools/linter/adapters/test_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
