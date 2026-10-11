@@ -517,6 +517,7 @@ def dict_fromkeys(
     return result
 
 
+# OrderedDict.fromkeys allows keyword arguments
 def odict_fromkeys(
     cls: Callable[..., C], /, iterable: Iterable[T], value: U | None = None
 ) -> C:
