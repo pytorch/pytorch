@@ -25,6 +25,7 @@ import functools
 import getpass
 import inspect
 import itertools
+import json
 import logging
 import os
 import re
@@ -855,7 +856,41 @@ class InputReader:
         # reproduces even on random data.
         if save_dir is None:
             log.warning("no save_dir specified, will generate random data")
-        self.store = ContentStoreReader(save_dir) if save_dir is not None else None
+        self.store = None
+        self.strict_storage = False
+        if save_dir is not None:
+            storage_manifest_path = os.path.join(save_dir, "storage_manifest.json")
+            if os.path.exists(storage_manifest_path):
+                with open(storage_manifest_path) as f:
+                    storage_manifest = json.load(f)
+                if storage_manifest.get("schema_version") != 1:
+                    raise ValueError(
+                        "unsupported storage manifest schema: "
+                        f"{storage_manifest.get('schema_version')}"
+                    )
+                store_root = os.path.abspath(
+                    os.path.join(save_dir, storage_manifest["store"])
+                )
+                capture_root = os.path.abspath(
+                    os.path.dirname(os.path.normpath(save_dir))
+                )
+                try:
+                    inside_capture = (
+                        os.path.commonpath((capture_root, store_root)) == capture_root
+                    )
+                except ValueError:
+                    inside_capture = False
+                if not inside_capture:
+                    raise ValueError(
+                        f"content store path escapes the capture root: {store_root}"
+                    )
+                self.store = ContentStoreReader(
+                    store_root,
+                    storage_metadata=storage_manifest["storages"],
+                )
+                self.strict_storage = True
+            else:
+                self.store = ContentStoreReader(save_dir)
         self.args: list[Any] = []
         self.pbar = pbar
 
@@ -875,7 +910,8 @@ class InputReader:
             try:
                 storage = self.store.read_storage(storage_hash)
             except FileNotFoundError:
-                pass
+                if self.strict_storage:
+                    raise
             else:
                 if device != storage.device:
                     log.warning("device mismatch: %s != %s", device, storage.device)
@@ -980,23 +1016,28 @@ def _serialize_sym_tuple(vals: Sequence[int | torch.SymInt]) -> str:
 
 
 class InputWriter:
-    def __init__(self, save_dir: str | None, *, stable_hash: bool = False) -> None:
+    def __init__(
+        self,
+        save_dir: str | None,
+        *,
+        stable_hash: bool = False,
+        content_store: ContentStoreWriter | None = None,
+    ) -> None:
         self._lines: list[str] = []
         # TODO: consider ensuring tensor and storage counters line up?
         self.storage_counter = itertools.count()
         self.save_dir = save_dir
-        self.store = (
-            ContentStoreWriter(save_dir, stable_hash=stable_hash)
-            if save_dir is not None
-            else None
-        )
+        self.store = content_store
+        if self.store is None and save_dir is not None:
+            self.store = ContentStoreWriter(save_dir, stable_hash=stable_hash)
         self.seen_storages: dict[StorageWeakRef, str] = {}
+        self.storage_hashes: set[str] = set()
 
     def lines(self) -> list[str]:
         r = [
             "def load_args(reader):",
         ]
-        r.extend(f"    {l}" for l in self._lines)
+        r.extend(f"    {l}" for l in self._lines or ["pass"])
         # In case we need to change the internal format of load_args
         # in an FC-breaking way
         r.append("load_args._version = 0")
@@ -1039,6 +1080,7 @@ class InputWriter:
         storage_hash = None
         if self.store is not None and untyped_storage.device.type != "meta":
             storage_hash = self.store.write_storage(untyped_storage)
+            self.storage_hashes.add(storage_hash)
         self._lines.append(
             f"{v} = reader.storage({storage_hash!r}, {nbytes_source}{maybe_device}{maybe_dtype_hint})"
         )

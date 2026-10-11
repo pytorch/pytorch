@@ -33,13 +33,35 @@ import functools
 import hashlib
 import os.path
 import struct
+import tempfile
 from collections import defaultdict
+from collections.abc import Mapping
+from typing import Any, Literal, TypedDict
 
 import torch
 import torch._prims as prims
 import torch._utils
 import torch.nn.functional as F
 from torch.multiprocessing.reductions import StorageWeakRef
+
+
+StorageCodec = Literal["none", "zstd"]
+_MIN_COMPRESSION_SAVINGS = 0.01
+
+
+class StorageMetadata(TypedDict):
+    path: str
+    codec: StorageCodec
+    logical_nbytes: int
+    stored_nbytes: int
+
+
+def _zstandard() -> Any | None:
+    return torch._utils.try_import("zstandard")
+
+
+def zstd_available() -> bool:
+    return _zstandard() is not None
 
 
 def lazy_compile(**compile_kwargs):
@@ -145,24 +167,102 @@ class ContentStoreWriter:
     #       0000..00
     #   tensors/
     #     name
-    def __init__(self, loc: str, stable_hash: bool = False) -> None:
+    def __init__(
+        self,
+        loc: str,
+        stable_hash: bool = False,
+        *,
+        compression: Literal["zstd"] | None = None,
+    ) -> None:
+        if compression == "zstd" and not zstd_available():
+            raise RuntimeError("zstd compression requires the zstandard package")
         self.loc: str = loc
         self.seen_storage_hashes: set[str] = set()
         self.stable_hash = stable_hash
+        self.compression = compression
+        self.storage_metadata: dict[str, StorageMetadata] = {}
+        self.bytes_written = 0
+
+    def _existing_storage(self, h: str, logical_nbytes: int) -> bool:
+        for codec, suffix in (("zstd", ".zst"), ("none", "")):
+            relative_path = os.path.join("storages", f"{h}{suffix}")
+            path = os.path.join(self.loc, relative_path)
+            if os.path.exists(path):
+                self.storage_metadata[h] = {
+                    "path": relative_path,
+                    "codec": codec,
+                    "logical_nbytes": logical_nbytes,
+                    "stored_nbytes": os.path.getsize(path),
+                }
+                self.seen_storage_hashes.add(h)
+                return True
+        return False
+
+    def _write_new_storage(
+        self, h: str, storage: torch.UntypedStorage
+    ) -> StorageMetadata:
+        subfolder = os.path.join(self.loc, "storages")
+        os.makedirs(subfolder, exist_ok=True)
+        raw_fd, raw_path = tempfile.mkstemp(prefix=f".{h}.", dir=subfolder)
+        os.close(raw_fd)
+        compressed_path: str | None = None
+        try:
+            torch.save(storage, raw_path)
+            raw_size = os.path.getsize(raw_path)
+            codec: StorageCodec = "none"
+            chosen_path = raw_path
+            suffix = ""
+            if self.compression == "zstd":
+                # Raw zstd is intentional for this portable, streamable artifact
+                # format. Managed Compression's Python API materializes each
+                # multi-GB payload as a single bytes object.
+                compressed_fd, compressed_path = tempfile.mkstemp(
+                    prefix=f".{h}.", suffix=".zst", dir=subfolder
+                )
+                os.close(compressed_fd)
+                zstandard = _zstandard()
+                if zstandard is None:
+                    raise RuntimeError(
+                        "zstd compression requires the zstandard package"
+                    )
+                with (
+                    open(raw_path, "rb") as source,
+                    open(compressed_path, "wb") as destination,
+                ):
+                    zstandard.ZstdCompressor(level=1, write_checksum=True).copy_stream(
+                        source, destination
+                    )
+                if os.path.getsize(compressed_path) < raw_size * (
+                    1 - _MIN_COMPRESSION_SAVINGS
+                ):
+                    codec = "zstd"
+                    chosen_path = compressed_path
+                    suffix = ".zst"
+
+            relative_path = os.path.join("storages", f"{h}{suffix}")
+            target = os.path.join(self.loc, relative_path)
+            os.replace(chosen_path, target)
+            stored_nbytes = os.path.getsize(target)
+            self.bytes_written += stored_nbytes
+            return {
+                "path": relative_path,
+                "codec": codec,
+                "logical_nbytes": storage.nbytes(),
+                "stored_nbytes": stored_nbytes,
+            }
+        finally:
+            for path in (raw_path, compressed_path):
+                if path is not None and os.path.exists(path):
+                    os.unlink(path)
 
     # TODO: offer some sort of non-blocking API to speed things up
     def write_storage(self, storage: torch.UntypedStorage) -> str:
         h = hash_storage(storage, stable_hash=self.stable_hash)
         if h in self.seen_storage_hashes:
             return h
-        # TODO: consider not using torch.save for this; we don't actually
-        # need any metadata for the storage
-        subfolder = os.path.join(self.loc, "storages")
-        os.makedirs(subfolder, exist_ok=True)
-        target = os.path.join(subfolder, h)
-        if os.path.exists(target):
+        if self._existing_storage(h, storage.nbytes()):
             return h
-        torch.save(storage, target)
+        self.storage_metadata[h] = self._write_new_storage(h, storage)
         self.seen_storage_hashes.add(h)
         return h
 
@@ -190,8 +290,15 @@ class ContentStoreWriter:
 
 
 class ContentStoreReader:
-    def __init__(self, loc: str, *, cache=True) -> None:
+    def __init__(
+        self,
+        loc: str,
+        *,
+        cache=True,
+        storage_metadata: Mapping[str, StorageMetadata] | None = None,
+    ) -> None:
         self.loc = loc
+        self.storage_metadata = storage_metadata
         self.storage_cache: (
             dict[torch.device | None, dict[str, StorageWeakRef]] | None
         ) = None
@@ -211,11 +318,45 @@ class ContentStoreReader:
             s = torch.UntypedStorage._new_with_weak_ptr(ws.cdata)
             if s is not None:
                 return s
-        s = torch.load(
-            os.path.join(self.loc, "storages", h),
-            weights_only=True,
-            map_location=device,
-        )._untyped_storage
+        if self.storage_metadata is None:
+            path = os.path.join(self.loc, "storages", h)
+            codec = "none"
+        else:
+            if h not in self.storage_metadata:
+                raise FileNotFoundError(
+                    f"storage hash {h} is missing from the manifest"
+                )
+            metadata = self.storage_metadata[h]
+            path = os.path.abspath(os.path.join(self.loc, metadata["path"]))
+            root = os.path.abspath(self.loc)
+            try:
+                inside_store = os.path.commonpath((root, path)) == root
+            except ValueError:
+                inside_store = False
+            if not inside_store:
+                raise ValueError(f"storage path escapes the content store: {path}")
+            codec = metadata["codec"]
+
+        if codec == "none":
+            loaded = torch.load(path, weights_only=True, map_location=device)
+        elif codec == "zstd":
+            zstandard = _zstandard()
+            if zstandard is None:
+                raise RuntimeError(
+                    "reading zstd-compressed storage requires the zstandard package"
+                )
+            with (
+                open(path, "rb") as source,
+                tempfile.TemporaryFile() as decompressed,
+            ):
+                zstandard.ZstdDecompressor().copy_stream(source, decompressed)
+                decompressed.seek(0)
+                loaded = torch.load(
+                    decompressed, weights_only=True, map_location=device
+                )
+        else:
+            raise ValueError(f"unknown content-store codec: {codec}")
+        s = loaded._untyped_storage
         if s is None:
             raise AssertionError(
                 f"expected storage for hash {h} in {os.path.join(self.loc, 'storages')}, got None"
