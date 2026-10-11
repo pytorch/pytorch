@@ -3,6 +3,7 @@ import enum
 import functools
 import itertools
 import logging
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -52,6 +53,16 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 logger: logging.Logger = logging.getLogger(__name__)
 aten = torch._ops.ops.aten
+_SCAN_PARALLEL_BW_MIN_CHUNK_BUDGET_ELEMS: int = 2**20
+
+
+def _validate_parallel_backward_init(linit: list[torch.Tensor]) -> None:
+    first_dtype = linit[0].dtype
+    first_device = linit[0].device
+    if any(x.dtype != first_dtype or x.device != first_device for x in linit[1:]):
+        raise RuntimeError(
+            "All init leaves must have the same dtype and device when parallel_backward=True"
+        )
 
 
 def wrap_combine_fn_flat(
@@ -118,6 +129,7 @@ def scan(
     *,
     dim: int = 0,
     reverse: bool = False,
+    parallel_backward: bool = False,
     length: int | None = None,
 ) -> tuple[pytree.PyTree, pytree.PyTree]:
     r"""
@@ -148,6 +160,17 @@ def scan(
     Keyword Args:
         dim (int): the dimension to scan over, default 0.
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
+        parallel_backward (bool): use an associative-scan backward instead of the default
+            sequential one, default ``False``. Trades memory for depth: it materializes a
+            ``[scan_length, D, D]`` Jacobian sequence, where ``D`` is the total number of
+            elements in the carry, so it wins only for small carries and long scans. All
+            carry leaves must share the same dtype and device. Under ``torch.vmap``,
+            ``D`` counts the carry of a single batch element, so write ``combine_fn`` for
+            one sequence and vmap it rather than batching the carry by hand, which would put
+            the batch dimension into ``D``. Because the Jacobians are composed densely, a
+            non-finite entry in one of them can make the gradients of all carry elements of
+            that batch element ``nan``, where the sequential backward keeps it confined to
+            the affected elements.
         length (int or None): Optional number of scan iterations, default ``None``.
             When ``xs`` has tensor leaves, ``length`` is optional; if given it must equal
             ``xs.shape[dim]`` and serves only as a consistency check (no constraint when
@@ -226,7 +249,7 @@ def scan(
     elif not xs_has_tensors:
         return init, []
 
-    def _validate_input(cfn, lxs, linit, d, r, l):
+    def _validate_input(cfn, lxs, linit, d, r, pb, l):
         # Basic arguments check
         if not callable(cfn):
             raise RuntimeError(f"Combine_fn must be a callable, but got {cfn}")
@@ -234,6 +257,10 @@ def scan(
             raise RuntimeError("Dim must be an int, but got " + str(type(d)))
         if not isinstance(r, bool):
             raise RuntimeError("Reverse must be a bool, but got " + str(type(r)))
+        if not isinstance(pb, bool):
+            raise RuntimeError(
+                "parallel_backward must be a bool, but got " + str(type(pb))
+            )
 
         if l is not None and xs_has_tensors and lxs[0].shape[d] != l:
             raise RuntimeError(
@@ -247,6 +274,8 @@ def scan(
         for x in linit:
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All init leaves must be a Tensor but got {x}")
+        if pb:
+            _validate_parallel_backward_init(linit)
 
         # Checks for xs
         for x in lxs:
@@ -260,7 +289,9 @@ def scan(
     ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
 
-    _validate_input(combine_fn, leaves_xs_orig, leaves_init, dim, reverse, length)
+    _validate_input(
+        combine_fn, leaves_xs_orig, leaves_init, dim, reverse, parallel_backward, length
+    )
 
     # Move scan dim to 0 and always perform scan on dim 0
     leaves_xs = []
@@ -283,7 +314,9 @@ def scan(
     )
 
     def run_flattened_scan(combine_fn, leaves_init, leaves_xs):
-        return scan_op(combine_fn, leaves_init, leaves_xs, ())
+        return scan_op(
+            combine_fn, leaves_init, leaves_xs, (), parallel_backward=parallel_backward
+        )
 
     carry, out = _maybe_compile_and_run_fn(
         run_flattened_scan,
@@ -317,6 +350,8 @@ class ScanOp(HigherOrderOperator):
         additional_inputs,
         *,
         mutated_arg_indices: str = "",
+        parallel_backward: bool = False,
+        num_vmap_dims: int = 0,
     ):
         # There is currently an issue that the ScanOp is sometimes called with
         # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
@@ -332,15 +367,40 @@ class ScanOp(HigherOrderOperator):
             else additional_inputs
         )
         validate_subgraph_args_types(additional_inputs)
-        kwargs = {}
+        if not isinstance(parallel_backward, bool):
+            raise RuntimeError(
+                f"parallel_backward must be a bool, but got {type(parallel_backward)}"
+            )
+        if (
+            isinstance(num_vmap_dims, bool)
+            or not isinstance(num_vmap_dims, int)
+            or num_vmap_dims < 0
+        ):
+            raise RuntimeError(
+                f"num_vmap_dims must be a non-negative integer, got {num_vmap_dims!r}"
+            )
+        kwargs: dict[str, Any] = {}
         if mutated_arg_indices:
             kwargs["mutated_arg_indices"] = mutated_arg_indices
+        if parallel_backward:
+            kwargs["parallel_backward"] = parallel_backward
+        if num_vmap_dims:
+            kwargs["num_vmap_dims"] = num_vmap_dims
         # pyrefly: ignore [missing-attribute]
         return super().__call__(combine_fn, init, xs, additional_inputs, **kwargs)
 
+    # parallel_backward and num_vmap_dims only steer the backward algorithm in
+    # scan_autograd, so they are deliberately not part of the schema.
     # pyrefly: ignore [bad-override]
     def gen_schema(
-        self, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+        self,
+        combine_fn,
+        init,
+        xs,
+        additional_inputs,
+        mutated_arg_indices="",
+        parallel_backward=False,
+        num_vmap_dims=0,
     ):
         from torch._higher_order_ops.schema import HopSchemaGenerator
 
@@ -579,7 +639,15 @@ def trace_scan(
 
 
 @scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def scan_op_dense(combine_fn, init, xs, additional_inputs, mutated_arg_indices=""):
+def scan_op_dense(
+    combine_fn,
+    init,
+    xs,
+    additional_inputs,
+    mutated_arg_indices="",
+    parallel_backward=False,
+    num_vmap_dims=0,
+):
     mode = _get_current_dispatch_mode()
     if mode is not None:
         raise AssertionError("Mode should never be enabled for CPU/CUDA key")
@@ -608,13 +676,20 @@ class ScanAutogradOp(torch.autograd.Function):
         n_init,
         n_xs,
         n_additional_inputs,
+        parallel_backward,
+        num_vmap_dims,
         *operands,
     ):
         init, xs, additional_inputs = split_into_chunks(
             operands, [n_init, n_xs, n_additional_inputs]
         )
         ctx._scan_impl = ScanAutogradImpl(
-            hop_partitioned_graph, init, xs, additional_inputs
+            hop_partitioned_graph,
+            init,
+            xs,
+            additional_inputs,
+            parallel_backward,
+            num_vmap_dims,
         )
         with torch._C._AutoDispatchBelowAutograd():
             return ctx._scan_impl.call_forward()
@@ -622,6 +697,8 @@ class ScanAutogradOp(torch.autograd.Function):
     @staticmethod
     def backward(ctx, *grad_fw_outputs):
         return (
+            None,
+            None,
             None,
             None,
             None,
@@ -665,12 +742,23 @@ class ScanAutogradImpl:
     """
 
     def __init__(
-        self, hop_partitioned_graph: HopPartitionedGraph, init, xs, additional_inputs
+        self,
+        hop_partitioned_graph: HopPartitionedGraph,
+        init,
+        xs,
+        additional_inputs,
+        parallel_backward: bool,
+        num_vmap_dims: int,
     ):
         self.hop_partitioned_graph = hop_partitioned_graph
         self.init = init
         self.xs = xs
         self.additional_inputs = additional_inputs
+        self.parallel_backward = parallel_backward
+        if self.parallel_backward:
+            _validate_parallel_backward_init(self.init)
+        # Trailing carry dims that are vmap batch dims, see _call_backward_parallel.
+        self.num_vmap_dims = num_vmap_dims
         self.forward_intermediates_handling_policies: list[
             ScanForwardIntermediatesHandlingPolicy
         ] = []
@@ -863,8 +951,330 @@ class ScanAutogradImpl:
     def call_backward(self, *grad_fw_outputs):
         """
         Recall that fw_outputs = (*carry, *ys), bw_gm takes in (*fw_intermediates, *grad_carry, *grad_ys)
-        and returns (*grad_init, *grad_xs, *grad_additional_inputs)
-        The backward is a reversed scan that can be constructed as follows:
+        and returns (*grad_init, *grad_xs, *grad_additional_inputs).
+
+        Dispatches to the parallel (associative-scan) or sequential (reversed
+        torch.scan) backward below, selected via scan()'s parallel_backward argument.
+        """
+        n_carry = len(self.init)
+        grad_carry, grad_ys = grad_fw_outputs[:n_carry], grad_fw_outputs[n_carry:]
+        additional_inputs_tensor_masks = [
+            isinstance(t, torch.Tensor) for t in self.additional_inputs
+        ]
+
+        scan_length = self.xs[0].shape[0] if len(self.xs) > 0 else 0
+        if scan_length == 0:
+            zero_grad_additional_inputs: list[torch.Tensor | None] = [
+                torch.zeros_like(t)
+                for t in filter_with_masks(
+                    self.additional_inputs, additional_inputs_tensor_masks
+                )
+            ]
+            return (
+                *grad_carry,
+                *[torch.zeros_like(x) for x in self.xs],
+                *fill_none_with_masks(
+                    zero_grad_additional_inputs, additional_inputs_tensor_masks
+                ),
+            )
+
+        impl = (
+            self._call_backward_parallel
+            if self.parallel_backward
+            else self._call_backward_sequential
+        )
+        return impl(grad_carry, grad_ys, additional_inputs_tensor_masks, scan_length)
+
+    def _call_backward_parallel(
+        self, grad_carry, grad_ys, additional_inputs_tensor_masks, scan_length
+    ):
+        """
+        bw_gm is a VJP, so it is affine in the carry gradient and the backward recurrence
+        grad_carry_s = A_s @ grad_carry_{s+1} + b_s can be solved without a sequential
+        scan: b_s is a zero-carry evaluation, the columns of A_s are evaluations on basis
+        cotangents with zeroed grad_ys, and composing the per-step affine maps is a
+        reversed associative_scan.
+
+        Once every carry gradient is known, grad_xs and grad_additional_inputs for all
+        steps come from one more batched evaluation of the same bw_gm, with
+        grad_additional_inputs summed over time since additional_inputs are time-invariant.
+        """
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        fw_policy = self.forward_intermediates_handling_policies
+        saved_intermediates = self.saved_intermediates
+        saved_fw_xs = self.saved_fw_xs
+        saved_fw_additional_inputs = self.saved_fw_additional_inputs
+
+        n_carry = len(self.init)
+        n_xs = len(self.xs)
+
+        bw_init = [grad_carry]
+        bw_xs = [
+            grad_ys,
+            saved_fw_xs,
+            saved_intermediates,
+        ]
+        bw_additional_inputs = saved_fw_additional_inputs
+
+        _, flat_spec = pytree.tree_flatten((bw_init, bw_xs, bw_additional_inputs))
+
+        def bw_single_step_wrapper(*args):
+            bw_init, bw_xs, bw_additional_inputs = pytree.tree_unflatten(
+                args, flat_spec
+            )
+            (grad_carry,) = bw_init
+            grad_y, saved_fw_xs, saved_intermediates = bw_xs
+            saved_fw_additional_inputs = bw_additional_inputs
+
+            fw_intermediates = []
+            xs_it = iter(saved_fw_xs)
+            carry_it = iter(saved_intermediates)
+            addi_it = iter(saved_fw_additional_inputs)
+            for policy in fw_policy:
+                if policy in (
+                    ScanForwardIntermediatesHandlingPolicy.CLONE,
+                    ScanForwardIntermediatesHandlingPolicy.KEEP,
+                ):
+                    fw_intermediates.append(next(carry_it))
+                elif policy == ScanForwardIntermediatesHandlingPolicy.REMOVE_XS:
+                    fw_intermediates.append(next(xs_it))
+                elif (
+                    policy
+                    == ScanForwardIntermediatesHandlingPolicy.REMOVE_ADDITIONAL_INPUTS
+                ):
+                    fw_intermediates.append(next(addi_it))
+                else:
+                    raise RuntimeError(f"Unknown policy: {policy}")
+
+            flat_out = self.hop_partitioned_graph.bw_gm(
+                *fw_intermediates,
+                *grad_carry,
+                *grad_y,
+            )
+
+            next_grad_carry, grad_xs, grad_addi = split_into_chunks(
+                flat_out,  # type: ignore[arg-type]
+                [n_carry, n_xs, len(self.additional_inputs)],
+            )
+            return (
+                *next_grad_carry,
+                *grad_xs,
+                *filter_with_masks(grad_addi, additional_inputs_tensor_masks),
+            )
+
+        single_step_bw_xs = pytree.tree_map(first_slice_copy, bw_xs)
+        single_step_args = tuple(
+            pytree.tree_flatten((bw_init, single_step_bw_xs, bw_additional_inputs))[0]
+        )
+        # Full per-step graph: needed once at the end for grad_xs/grad_additional_inputs.
+        bw_full_gm = materialize_as_graph(bw_single_step_wrapper, single_step_args)
+
+        # Carry-only graph: A_s and b_s only need the carry outputs, and dead code
+        # elimination drops the ops that would otherwise run once per basis vector.
+        bw_carry_gm = materialize_as_graph(
+            lambda *args: bw_single_step_wrapper(*args)[:n_carry], single_step_args
+        )
+        bw_carry_gm.graph.eliminate_dead_code()
+        bw_carry_gm.recompile()
+
+        # Under vmap, scan_batch_rule parks the batch dims last on every carry leaf, and
+        # since vmap never mixes batch elements the carry Jacobian is block diagonal:
+        # n_batch blocks of n_elem x n_elem rather than one dense matrix of their
+        # product. Without vmap, n_batch is 1 and n_elem is the whole carry.
+        n_vmap = self.num_vmap_dims
+        batch_shape = grad_carry[0].shape[grad_carry[0].ndim - n_vmap :]
+        elem_shapes = [g.shape[: g.ndim - n_vmap] for g in grad_carry]
+        elem_numels = [math.prod(shape) for shape in elem_shapes]
+        n_batch = math.prod(batch_shape)
+        n_elem = sum(elem_numels)
+
+        def flatten_carry(carry_leaves, n_lead):
+            # [*lead, *elem, *batch] per leaf -> [*lead, n_batch, n_elem]
+            return torch.cat(
+                [
+                    x.reshape(*x.shape[:n_lead], width, n_batch).transpose(-1, -2)
+                    for x, width in zip(carry_leaves, elem_numels)
+                ],
+                dim=-1,
+            )
+
+        def unflatten_carry(flat):
+            # [*lead, n_batch, n_elem] -> [*lead, *elem, *batch] per leaf
+            leaves = []
+            start = 0
+            for shape, width in zip(elem_shapes, elem_numels):
+                part = flat[..., start : start + width].transpose(-1, -2)
+                leaves.append(part.reshape(flat.shape[:-2] + shape + batch_shape))
+                start += width
+            return leaves
+
+        def expand_over_basis(x):
+            return x.unsqueeze(1).expand(scan_length, n_elem, *x.shape[1:])
+
+        def run_bw(gm, grad_carry_b, grad_ys_b, xs_b, intermediates_b, n_batch_dims):
+            args = tuple(
+                pytree.tree_flatten(
+                    (
+                        [grad_carry_b],
+                        [grad_ys_b, xs_b, intermediates_b],
+                        bw_additional_inputs,
+                    )
+                )[0]
+            )
+            in_dims = tuple(
+                [0]
+                * (
+                    len(grad_carry_b)
+                    + len(grad_ys_b)
+                    + len(xs_b)
+                    + len(intermediates_b)
+                )
+                + [None] * len(bw_additional_inputs)
+            )
+            fn = gm
+            for _ in range(n_batch_dims):
+                fn = torch.vmap(fn, in_dims=in_dims, out_dims=0)
+            return fn(*args)
+
+        # bw_gm is a VJP, so it is affine in the incoming carry gradient:
+        #   grad_carry_s = A_s @ grad_carry_{s+1} + b_s
+        # b_s is the zero-carry evaluation and the columns of A_s are the same VJP
+        # evaluated on basis carry cotangents with zeroed grad_ys. Seeding basis vector
+        # j in every batch element at once yields column j of all diagonal blocks.
+        zero_carry_over_time = [
+            torch.zeros((scan_length, *g.shape), dtype=g.dtype, device=g.device)
+            for g in grad_carry
+        ]
+        b_prefix = flatten_carry(
+            list(
+                run_bw(
+                    bw_carry_gm,
+                    zero_carry_over_time,
+                    grad_ys,
+                    saved_fw_xs,
+                    saved_intermediates,
+                    1,
+                )
+            ),
+            1,
+        )
+
+        eye = torch.eye(n_elem, dtype=grad_carry[0].dtype, device=grad_carry[0].device)
+        basis = unflatten_carry(eye.unsqueeze(1).expand(n_elem, n_batch, n_elem))
+        columns_out = run_bw(
+            bw_carry_gm,
+            [b.unsqueeze(0).expand(scan_length, *b.shape) for b in basis],
+            [
+                y.new_zeros(y.shape[1:])[None, None].expand(
+                    scan_length, n_elem, *y.shape[1:]
+                )
+                for y in grad_ys
+            ],
+            [expand_over_basis(x) for x in saved_fw_xs],
+            [expand_over_basis(x) for x in saved_intermediates],
+            2,
+        )
+        # [T, basis, n_batch, n_elem] -> [T, n_batch, n_elem, basis]
+        a_prefix = flatten_carry(list(columns_out), 2).permute(0, 2, 3, 1)
+
+        # Each step's map is composed with the suffix that follows it in time.
+        # associative_scan vmaps the combine over time, so a_* is [n_batch, H, H].
+        def compose_affine(lhs, rhs):
+            (a_l, b_l), (a_r, b_r) = lhs, rhs
+            if n_elem == 1:
+                # 1x1 blocks compose elementwise, which beats bmm on them.
+                return a_r * a_l, torch.addcmul(b_r, a_r.squeeze(-1), b_l)
+            b = torch.baddbmm(b_r.unsqueeze(-1), a_r, b_l.unsqueeze(-1))
+            return torch.bmm(a_r, a_l), b.squeeze(-1)
+
+        comp_a, comp_b = associative_scan(
+            compose_affine,
+            (a_prefix, b_prefix),
+            dim=0,
+            reverse=True,
+            combine_mode="generic",
+        )
+
+        flat_state0 = flatten_carry(list(grad_carry), 0)
+        # carry_grads[s] is the gradient of the carry entering forward step s.
+        if n_elem == 1:
+            carry_grads = comp_a.squeeze(-1) * flat_state0 + comp_b
+        else:
+            carry_grads = (comp_a @ flat_state0.unsqueeze(-1)).squeeze(-1) + comp_b
+        step_carry_out_grads = torch.cat(
+            [carry_grads[1:], flat_state0.unsqueeze(0)], dim=0
+        )
+
+        # grad_xs and grad_additional_inputs for every step follow from one more
+        # batched evaluation of the same (correct, no_grad-respecting) bw_gm, now that
+        # every step's incoming carry gradient is known. bw_gm already reduces
+        # additional-input grads over the batch dim but not over time, so vmapping it
+        # over time yields a [steps, *addi] temporary that is summed chunk by chunk.
+        # Each chunk's temporary is sized to the Jacobian buffers (with a floor of
+        # _SCAN_PARALLEL_BW_MIN_CHUNK_BUDGET_ELEMS elements to prevent excessive chunks
+        # when the carry is small). Since the Jacobian buffers are freed first, the
+        # reduction exceeds the Jacobian-buffer size by at most
+        # _SCAN_PARALLEL_BW_MIN_CHUNK_BUDGET_ELEMS elements.
+        n_addi = sum(additional_inputs_tensor_masks)
+        step_carry_leaves = unflatten_carry(step_carry_out_grads)
+        addi_numel = sum(
+            t.numel()
+            for t in filter_with_masks(
+                self.additional_inputs, additional_inputs_tensor_masks
+            )
+        )
+        jacobian_numel = a_prefix.numel()
+        del a_prefix, b_prefix, columns_out, comp_a, comp_b
+        chunk = scan_length
+        if addi_numel > 0:
+            budget = max(jacobian_numel, _SCAN_PARALLEL_BW_MIN_CHUNK_BUDGET_ELEMS)
+            chunk = max(1, min(scan_length, budget // addi_numel))
+
+        grad_xs_parts: list[list[torch.Tensor]] = []
+        grad_additional_inputs: list[torch.Tensor | None] = []
+        for start in range(0, scan_length, chunk):
+            sl = slice(start, start + chunk)
+            flat_out = run_bw(
+                bw_full_gm,
+                [c[sl] for c in step_carry_leaves],
+                [g[sl] for g in grad_ys],
+                [x[sl] for x in saved_fw_xs],
+                [x[sl] for x in saved_intermediates],
+                1,
+            )
+            _, grad_xs_chunk, grad_addi_chunk = split_into_chunks(
+                flat_out,
+                [n_carry, n_xs, n_addi],
+            )
+            grad_xs_parts.append(list(grad_xs_chunk))
+            summed = [g.sum(0) for g in grad_addi_chunk]
+            grad_additional_inputs = (
+                summed
+                if not grad_additional_inputs
+                else [acc + g for acc, g in zip(grad_additional_inputs, summed)]
+            )
+
+        grad_xs = (
+            grad_xs_parts[0]
+            if len(grad_xs_parts) == 1
+            else [torch.cat(parts, dim=0) for parts in zip(*grad_xs_parts)]
+        )
+        # carry_grads[0] is a view into the [scan_length, n_batch, n_elem] buffer;
+        # clone so each grad_init leaf owns its storage instead of pinning the buffer.
+        return (
+            *[g.clone() for g in unflatten_carry(carry_grads[0])],
+            *grad_xs,
+            *fill_none_with_masks(
+                grad_additional_inputs, additional_inputs_tensor_masks
+            ),
+        )
+
+    def _call_backward_sequential(
+        self, grad_carry, grad_ys, additional_inputs_tensor_masks, scan_length
+    ):
+        """
+        The original backward: a reversed torch.scan that can be constructed as follows:
 
           grad_additional_inputs = torch.zeros_like(additional_inputs)
           bw_init = (grad_carry, grad_additional_inputs)
@@ -891,12 +1301,6 @@ class ScanAutogradImpl:
         saved_fw_xs = self.saved_fw_xs
         saved_fw_additional_inputs = self.saved_fw_additional_inputs
 
-        n_carry = len(self.init)
-
-        grad_carry, grad_ys = grad_fw_outputs[:n_carry], grad_fw_outputs[n_carry:]
-        additional_inputs_tensor_masks = [
-            bool(isinstance(t, torch.Tensor)) for t in self.additional_inputs
-        ]
         grad_additional_inputs = [
             torch.zeros_like(t)
             for t in filter_with_masks(
@@ -1006,7 +1410,15 @@ class ScanAutogradImpl:
 
 
 @scan_op.py_autograd_impl
-def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices=""):
+def scan_autograd(
+    combine_fn,
+    init,
+    xs,
+    additional_inputs,
+    mutated_arg_indices="",
+    parallel_backward=False,
+    num_vmap_dims=0,
+):
     with disable_proxy_modes_tracing():
         # If init was passed in with requires_grad=False, AOT joint creation drops it from
         # grad_primals and zero-fills, severing the carry chain and silently
@@ -1038,6 +1450,8 @@ def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices="
         len(init),
         len(xs),
         len(additional_inputs),
+        parallel_backward,
+        num_vmap_dims,
         *init,
         *xs,
         *additional_inputs,
@@ -1046,8 +1460,17 @@ def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices="
 
 @scan_op.py_impl(ProxyTorchDispatchMode)
 def scan_proxy_mode(
-    mode, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+    mode,
+    combine_fn,
+    init,
+    xs,
+    additional_inputs,
+    mutated_arg_indices="",
+    parallel_backward=False,
+    num_vmap_dims=0,
 ):
+    # Only scan_autograd, which runs above this key, uses parallel_backward, so the
+    # traced graph does not need to carry it.
     return trace_scan(
         mode,
         scan_op,
@@ -1061,7 +1484,14 @@ def scan_proxy_mode(
 
 @scan_op.py_impl(FakeTensorMode)
 def scan_fake_tensor_mode(
-    mode, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+    mode,
+    combine_fn,
+    init,
+    xs,
+    additional_inputs,
+    mutated_arg_indices="",
+    parallel_backward=False,
+    num_vmap_dims=0,
 ):
     with mode:
         scan_length = xs[0].shape[0]
@@ -1090,7 +1520,14 @@ def scan_fake_tensor_mode(
 
 @scan_op.py_functionalize_impl
 def scan_functionalize(
-    ctx, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+    ctx,
+    combine_fn,
+    init,
+    xs,
+    additional_inputs,
+    mutated_arg_indices="",
+    parallel_backward=False,
+    num_vmap_dims=0,
 ):
     from torch._higher_order_ops.utils import (
         _check_alias_and_mutation,
@@ -1152,13 +1589,22 @@ def scan_functionalize(
             unwrapped_xs,
             unwrapped_additional_inputs,
             mutated_arg_indices=mutated_arg_indices,
+            parallel_backward=parallel_backward,
+            num_vmap_dims=num_vmap_dims,
         )
     return ctx.wrap_tensors(ret)
 
 
 @scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
 def scan_batch_rule(
-    interpreter, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+    interpreter,
+    combine_fn,
+    init,
+    xs,
+    additional_inputs,
+    mutated_arg_indices="",
+    parallel_backward=False,
+    num_vmap_dims=0,
 ):
     unbatched_args, in_dims = unwrap_batched(
         (init, xs, additional_inputs), interpreter.level()
@@ -1177,9 +1623,16 @@ def scan_batch_rule(
             interpreter.randomness(),
             op_name="scan",
         )
-        op_kwargs = {}
+        op_kwargs: dict[str, Any] = {}
         if mutated_arg_indices:
             op_kwargs["mutated_arg_indices"] = mutated_arg_indices
+        if parallel_backward:
+            op_kwargs["parallel_backward"] = parallel_backward
+        # vmap never mixes batch elements, so when every carry leaf is batched at this
+        # level its batch dim (parked last) is one more independent trailing carry dim.
+        # An unbatched carry leaf is state shared by all elements and couples them.
+        if all(bdim is not None for bdim in in_dims[0]):
+            op_kwargs["num_vmap_dims"] = num_vmap_dims + 1
         unwrapped_out = scan_op(
             wrapper,
             unbatched_init,

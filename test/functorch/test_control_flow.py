@@ -2,6 +2,7 @@
 import contextlib
 import functools
 import unittest
+import unittest.mock
 
 import torch
 import torch.utils._pytree as pytree
@@ -185,6 +186,14 @@ def compile_mode_helper(fct, compile_mode):
         return torch.compile(fct, fullgraph=True, backend="eager")
     else:
         return fct
+
+
+# parallel_backward only changes how gradients are computed, so its True cells
+# duplicate the False ones when the test runs no backward.
+skip_parallel_backward_without_autograd = decorateIf(
+    unittest.skip,
+    lambda params: params["parallel_backward"] and not params["autograd"],
+)
 
 
 ALIAS_FN = [
@@ -2714,9 +2723,11 @@ class GraphModule(torch.nn.Module):
         )
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skip_parallel_backward_without_autograd
+    @parametrize("parallel_backward", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("autograd", [False, True])
-    def test_scan_closure_RNN(self, compile_mode, autograd):
+    def test_scan_closure_RNN(self, compile_mode, autograd, parallel_backward):
         dim = 1
         device = torch.device("cpu")
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -2751,6 +2762,7 @@ class GraphModule(torch.nn.Module):
             x,
             dim=dim,
             reverse=False,
+            parallel_backward=parallel_backward,
         )
         self.assertEqual(result[0], expected_result_state)
         self.assertEqual(result[1], expected_result_out)
@@ -3846,10 +3858,14 @@ class TestControlFlowDevice(_TestControlFlowBase):
             self.check_autograd(result, expected_result, (init, init2, inp))
 
     @skipCUDAIf(not SM70OrLater, "triton")
+    @skip_parallel_backward_without_autograd
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("autograd", [False, True])
-    def test_scan_non_pointwise(self, device, reverse, compile_mode, autograd):
+    def test_scan_non_pointwise(
+        self, device, reverse, compile_mode, autograd, parallel_backward
+    ):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
@@ -3868,6 +3884,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
             x,
             dim=0,
             reverse=reverse,
+            parallel_backward=parallel_backward,
         )
         self.assertEqual(result, expected_result)
 
@@ -4281,13 +4298,14 @@ class TestControlFlowDevice(_TestControlFlowBase):
 
     @skipIfTorchDynamo("don't test compile on compile")
     @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize(
         "partial_grad", ["xs", "init", "additional_inputs", "complex", "random"]
     )
     def test_scan_closure_RNN_partial_autograd(
-        self, device, reverse, compile_mode, partial_grad
+        self, device, reverse, compile_mode, partial_grad, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4353,7 +4371,14 @@ class TestControlFlowDevice(_TestControlFlowBase):
                 return (c_new_0, c_new_1), h_new
 
             inits = (h, h_1)
-            result = scan_fct(RNN, inits, (x, x1), dim=dim, reverse=reverse)
+            result = scan_fct(
+                RNN,
+                inits,
+                (x, x1),
+                dim=dim,
+                reverse=reverse,
+                parallel_backward=parallel_backward,
+            )
             result_exp = _fake_scan(RNN, (h, h_1), (x, x1), dim=dim, reverse=reverse)
             self.assertEqual(result, result_exp)
 
@@ -4523,11 +4548,13 @@ class TestControlFlowDevice(_TestControlFlowBase):
             )
 
     @skipCUDAIf(not SM70OrLater, "triton")
+    @skip_parallel_backward_without_autograd
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_init_carries_unequal_grad(
-        self, device, reverse, compile_mode, autograd
+        self, device, reverse, compile_mode, autograd, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4541,6 +4568,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
             x,
             dim=dim,
             reverse=reverse,
+            parallel_backward=parallel_backward,
         )
         result_exp = _fake_scan(
             get_scan_combine_fn("fct_c1_no_grad", True),
@@ -4561,11 +4589,13 @@ class TestControlFlowDevice(_TestControlFlowBase):
             self.check_autograd(res_req_grad_flat, res_exp_req_grad_flat, (x, h2))
 
     @skipCUDAIf(not SM70OrLater, "triton")
+    @skip_parallel_backward_without_autograd
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_init_carries_equal_grad(
-        self, device, reverse, compile_mode, autograd
+        self, device, reverse, compile_mode, autograd, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4579,6 +4609,7 @@ class TestControlFlowDevice(_TestControlFlowBase):
             x,
             dim=dim,
             reverse=reverse,
+            parallel_backward=parallel_backward,
         )
         result_exp = _fake_scan(
             get_scan_combine_fn("fct_c1_no_grad", True),
@@ -4599,11 +4630,13 @@ class TestControlFlowDevice(_TestControlFlowBase):
             self.check_autograd(res_req_grad_flat, res_exp_req_grad_flat, (x, h2))
 
     @skipCUDAIf(not SM70OrLater, "triton")
+    @skip_parallel_backward_without_autograd
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_for_out(
-        self, device, reverse, compile_mode, autograd
+        self, device, reverse, compile_mode, autograd, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4618,7 +4651,14 @@ class TestControlFlowDevice(_TestControlFlowBase):
                 h_new = torch.tanh(x[0] + x[1] + y)
             return (c1, c2), h_new
 
-        result = scan_fct(fct_ys_no_grad, (h1, h2), x, dim=dim, reverse=reverse)
+        result = scan_fct(
+            fct_ys_no_grad,
+            (h1, h2),
+            x,
+            dim=dim,
+            reverse=reverse,
+            parallel_backward=parallel_backward,
+        )
         result_exp = _fake_scan(fct_ys_no_grad, (h1, h2), x, dim=dim, reverse=reverse)
         self.assertEqual(result, result_exp)
 
@@ -4626,11 +4666,13 @@ class TestControlFlowDevice(_TestControlFlowBase):
             self.check_autograd(result[0], result_exp[0], (x, h1, h2))
 
     @skipCUDAIf(not SM70OrLater, "triton")
+    @skip_parallel_backward_without_autograd
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_additional_inputs_partial(
-        self, device, reverse, compile_mode, autograd
+        self, device, reverse, compile_mode, autograd, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4651,7 +4693,14 @@ class TestControlFlowDevice(_TestControlFlowBase):
 
             return c_new, h_new2
 
-        result = scan_fct(fct_no_grad_bhh_Whh, h, x, dim=dim, reverse=reverse)
+        result = scan_fct(
+            fct_no_grad_bhh_Whh,
+            h,
+            x,
+            dim=dim,
+            reverse=reverse,
+            parallel_backward=parallel_backward,
+        )
         result_exp = _fake_scan(fct_no_grad_bhh_Whh, h, x, dim=dim, reverse=reverse)
         self.assertEqual(result, result_exp)
 
@@ -4659,11 +4708,13 @@ class TestControlFlowDevice(_TestControlFlowBase):
             self.check_autograd(result[1], result_exp[1], (h, x, W_ih, b_ih))
 
     @skipCUDAIf(not SM70OrLater, "triton")
+    @skip_parallel_backward_without_autograd
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_additional_inputs_all(
-        self, device, reverse, compile_mode, autograd
+        self, device, reverse, compile_mode, autograd, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4684,7 +4735,14 @@ class TestControlFlowDevice(_TestControlFlowBase):
             h_new2 = h_new + h_new_no_grad
             return c_new2, h_new2
 
-        result = scan_fct(fct_no_grad_bih_Wih_bhh_Whh, h, x, dim=dim, reverse=reverse)
+        result = scan_fct(
+            fct_no_grad_bih_Wih_bhh_Whh,
+            h,
+            x,
+            dim=dim,
+            reverse=reverse,
+            parallel_backward=parallel_backward,
+        )
         result_exp = _fake_scan(
             fct_no_grad_bih_Wih_bhh_Whh, h, x, dim=dim, reverse=reverse
         )
@@ -4694,11 +4752,13 @@ class TestControlFlowDevice(_TestControlFlowBase):
             self.check_autograd(result[1], result_exp[1], (h, x))
 
     @skipCUDAIf(not SM70OrLater, "triton")
+    @skip_parallel_backward_without_autograd
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_carries_ys_same_grad(
-        self, device, reverse, compile_mode, autograd
+        self, device, reverse, compile_mode, autograd, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4719,7 +4779,14 @@ class TestControlFlowDevice(_TestControlFlowBase):
             h_new2 = h_new + h_new_no_grad
             return c_new2, h_new2
 
-        result = scan_fct(fct_no_grad_bih_Wih_bhh_Whh, h, x, dim=dim, reverse=reverse)
+        result = scan_fct(
+            fct_no_grad_bih_Wih_bhh_Whh,
+            h,
+            x,
+            dim=dim,
+            reverse=reverse,
+            parallel_backward=parallel_backward,
+        )
         result_exp = _fake_scan(
             fct_no_grad_bih_Wih_bhh_Whh, h, x, dim=dim, reverse=reverse
         )
@@ -4729,10 +4796,14 @@ class TestControlFlowDevice(_TestControlFlowBase):
             self.check_autograd(result[1], result_exp[1], (h, x))
 
     @skipCUDAIf(not SM70OrLater, "triton")
+    @skip_parallel_backward_without_autograd
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("autograd", [False, True])
-    def test_scan_closure_nested(self, device, reverse, compile_mode, autograd):
+    def test_scan_closure_nested(
+        self, device, reverse, compile_mode, autograd, parallel_backward
+    ):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         # Simple non-nested case
@@ -4746,7 +4817,9 @@ class TestControlFlowDevice(_TestControlFlowBase):
             h_new = torch.tanh(c_new + x)
             return c_new, h_new
 
-        result = scan_fct(f1, h, x, dim=1, reverse=reverse)
+        result = scan_fct(
+            f1, h, x, dim=1, reverse=reverse, parallel_backward=parallel_backward
+        )
         result_exp = _fake_scan(f1, h, x, dim=1, reverse=reverse)
         self.assertEqual(result, result_exp)
 
@@ -4789,7 +4862,14 @@ class TestControlFlowDevice(_TestControlFlowBase):
             h_new = torch.tanh(c_new + x)
             return c_new, h_new
 
-        result1 = chain_fct(scan_fct, f1, f2, x1, h1, h2)
+        result1 = chain_fct(
+            functools.partial(scan_fct, parallel_backward=parallel_backward),
+            f1,
+            f2,
+            x1,
+            h1,
+            h2,
+        )
         expected_result = chain_fct(_fake_scan, f1, f2, x1, h1, h2)
         self.assertEqual(result1, expected_result)
 
@@ -4815,7 +4895,14 @@ class TestControlFlowDevice(_TestControlFlowBase):
             h_new = torch.tanh(c_new + x)
             return c_new, h_new
 
-        result1 = chain_fct(scan_fct, f1, f2, x1, h1, h2)
+        result1 = chain_fct(
+            functools.partial(scan_fct, parallel_backward=parallel_backward),
+            f1,
+            f2,
+            x1,
+            h1,
+            h2,
+        )
         expected_result = chain_fct(_fake_scan, f1, f2, x1, h1, h2)
         self.assertEqual(result1, expected_result)
 
@@ -4823,6 +4910,295 @@ class TestControlFlowDevice(_TestControlFlowBase):
             self.check_autograd(
                 result1, expected_result, (h1, h2, x1, W_1, b_1, W_2, b_2)
             )
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("compile_mode", ["none", "eager"])
+    def test_scan_parallel_backward_dispatch(self, device, compile_mode):
+        # Both backwards match _fake_scan, so a gradient check alone cannot tell which
+        # one ran. Toggle the flag through one (possibly compiled) function so that a
+        # setting leaking from the previous call would also be caught.
+        from torch._higher_order_ops.scan import ScanAutogradImpl
+
+        used = []
+
+        def spy(name):
+            orig = getattr(ScanAutogradImpl, name)
+
+            def wrapper(impl, *args, **kwargs):
+                used.append(name)
+                return orig(impl, *args, **kwargs)
+
+            return unittest.mock.patch.object(ScanAutogradImpl, name, wrapper)
+
+        def combine_fn(carry, x):
+            next_carry = torch.tanh(carry + x)
+            return next_carry, next_carry.clone()
+
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        with spy("_call_backward_parallel"), spy("_call_backward_sequential"):
+            for parallel_backward in (True, False, True):
+                used.clear()
+                init = torch.zeros(3, device=device, requires_grad=True)
+                xs = torch.randn(5, 3, device=device, requires_grad=True)
+                carry, ys = scan_fct(
+                    combine_fn, init, xs, parallel_backward=parallel_backward
+                )
+                torch.autograd.grad(
+                    (carry, ys),
+                    (init, xs),
+                    (torch.ones_like(carry), torch.ones_like(ys)),
+                )
+                expected = (
+                    "_call_backward_parallel"
+                    if parallel_backward
+                    else "_call_backward_sequential"
+                )
+                self.assertEqual(used, [expected])
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("compile_mode", ["none", "eager"])
+    def test_scan_parallel_backward_carry_grads(self, device, compile_mode):
+        # Carries of mixed rank, including a 0-dim one, are flattened into a single
+        # buffer by the parallel backward and must come back with their own shapes
+        # and storage.
+        def combine_fn(carry, x):
+            c0, c1, c2 = carry
+            n0 = torch.tanh(c0 + x.sum())
+            n1 = torch.tanh(c1 + n0)
+            n2 = torch.tanh(c2 + x + c1.sum())
+            return (n0, n1, n2), n2.clone()
+
+        init = (
+            torch.tensor(0.5, device=device),
+            torch.randn(2, 3, device=device),
+            torch.randn(4, device=device),
+        )
+        xs = torch.randn(5, 4, device=device)
+        cotangents = [torch.randn_like(t) for t in init] + [
+            torch.randn(5, 4, device=device)
+        ]
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        grads = []
+        for parallel_backward in (False, True):
+            init_ = [t.clone().requires_grad_(True) for t in init]
+            xs_ = xs.clone().requires_grad_(True)
+            carry, ys = scan_fct(
+                combine_fn, tuple(init_), xs_, parallel_backward=parallel_backward
+            )
+            grads.append(torch.autograd.grad((*carry, ys), [*init_, xs_], cotangents))
+        expected, result = grads
+        self.assertEqual(result, expected)
+        for g in result[:3]:
+            self.assertEqual(g.untyped_storage().nbytes(), g.numel() * g.element_size())
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_scan_parallel_backward_chunked_additional_inputs_grad(self, device):
+        # Each chunk's [steps, *addi] temporary is capped at the Jacobian buffer size:
+        # a 2-element carry over 10 steps gives 10 * 2 * 2 = 40 elements, and W, a hold
+        # 12, so the reduction runs in chunks of 40 // 12 = 3 steps (3 + 3 + 3 + 1),
+        # exercising the accumulation, the grad_xs concatenation and the ragged chunk.
+        W = torch.randn(5, 2, device=device, requires_grad=True)
+        a = torch.randn(2, device=device, requires_grad=True)
+        init = torch.randn(2, device=device, requires_grad=True)
+        xs = torch.randn(10, 5, device=device, requires_grad=True)
+        cotangents = (torch.randn_like(init), torch.randn(10, 2, device=device))
+
+        def combine_fn(carry, x):
+            next_carry = torch.tanh(carry * a + x @ W)
+            return next_carry, next_carry.clone()
+
+        def grads(parallel_backward):
+            carry, ys = scan(combine_fn, init, xs, parallel_backward=parallel_backward)
+            return torch.autograd.grad((carry, ys), [init, xs, W, a], cotangents)
+
+        with unittest.mock.patch(
+            "torch._higher_order_ops.scan._SCAN_PARALLEL_BW_MIN_CHUNK_BUDGET_ELEMS", 0
+        ):
+            self.assertEqual(grads(True), grads(False))
+
+    @skipIfTorchDynamo(
+        "the sequential reference backward fails scan's init/carry stride check "
+        "when dynamo traces it with vmap's batch-last carry grads"
+    )
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("carry_numel", [1, 3])
+    @parametrize("case", ["vmap", "nested_vmap", "shared_carry"])
+    def test_scan_parallel_backward_vmap(self, device, carry_numel, case):
+        # Under vmap, batch elements never interact, so the parallel backward builds
+        # one carry_numel x carry_numel Jacobian block per element (carry_numel == 1
+        # takes the elementwise compose). A carry leaf shared by all elements couples
+        # them and must fall back to the dense Jacobian (num_vmap_dims == 0).
+        from torch._higher_order_ops.scan import ScanAutogradImpl
+
+        seen = []
+        orig = ScanAutogradImpl._call_backward_parallel
+
+        def spy(impl, *args, **kwargs):
+            seen.append(impl.num_vmap_dims)
+            return orig(impl, *args, **kwargs)
+
+        W = torch.randn(carry_numel, carry_numel, device=device, requires_grad=True)
+        shared = torch.randn(2, device=device)
+
+        def step(carry, x):
+            u, h = carry
+            next_u = u * 0.9
+            next_h = torch.tanh(h @ W + x + next_u.sum())
+            return (next_u, next_h), next_h.clone()
+
+        batch = (2, 3) if case == "nested_vmap" else (3,)
+        h0 = torch.randn(*batch, carry_numel, device=device)
+        u0 = shared if case == "shared_carry" else torch.randn(*batch, 2, device=device)
+        xs = torch.randn(*batch, 5, carry_numel, device=device)
+        cot = (torch.randn_like(h0), torch.randn_like(xs))
+
+        in_dims = (None if case == "shared_carry" else 0, 0, 0)
+        grads = []
+        for parallel_backward in (False, True):
+
+            def fn(u, h, x, parallel_backward=parallel_backward):
+                return scan(step, (u, h), x, parallel_backward=parallel_backward)
+
+            for _ in batch:
+                fn = torch.vmap(fn, in_dims=in_dims)
+            h, x = h0.clone().requires_grad_(True), xs.clone().requires_grad_(True)
+            with unittest.mock.patch.object(
+                ScanAutogradImpl, "_call_backward_parallel", spy
+            ):
+                (_, carry), ys = fn(u0, h, x)
+                grads.append(torch.autograd.grad((carry, ys), (h, x, W), cot))
+
+        self.assertEqual(grads[1], grads[0])
+        self.assertEqual(seen, [0 if case == "shared_carry" else len(batch)])
+
+    def test_scan_parallel_backward_must_be_bool(self, device):
+        def combine_fn(carry, x):
+            next_carry = carry + x
+            return next_carry, next_carry.clone()
+
+        init = torch.zeros(3, device=device)
+        xs = torch.randn(5, 3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "parallel_backward must be a bool"):
+            scan(combine_fn, init, xs, parallel_backward=1)
+
+    def test_scan_parallel_backward_scan_length_one(self, device):
+        def combine_fn(carry, x):
+            next_carry = torch.tanh(carry + x)
+            return next_carry, next_carry.clone()
+
+        init = torch.randn(3, device=device, requires_grad=True)
+        xs = torch.randn(1, 3, device=device, requires_grad=True)
+        cotangents = (torch.randn_like(init), torch.randn(1, 3, device=device))
+
+        def grads(pb):
+            c, y = scan(combine_fn, init, xs, parallel_backward=pb)
+            return torch.autograd.grad((c, y), (init, xs), cotangents)
+
+        self.assertEqual(grads(True), grads(False))
+
+    def test_scan_parallel_backward_counter_loop(self, device):
+        def combine_fn(carry, _):
+            next_carry = torch.tanh(carry + 0.1)
+            return next_carry, next_carry.clone()
+
+        init = torch.randn(3, device=device, requires_grad=True)
+        cotangents = (torch.randn_like(init), torch.randn(5, 3, device=device))
+
+        def grads(pb):
+            c, y = scan(combine_fn, init, None, length=5, parallel_backward=pb)
+            return torch.autograd.grad((c, y), init, cotangents)
+
+        self.assertEqual(grads(True), grads(False))
+
+    def test_scan_parallel_backward_partial_grad(self, device):
+        def combine_fn(carry, x):
+            next_carry = torch.tanh(carry + x)
+            return next_carry, next_carry.clone()
+
+        init = torch.randn(3, device=device, requires_grad=True)
+        xs = torch.randn(5, 3, device=device, requires_grad=True)
+
+        c_par, _ = scan(combine_fn, init, xs, parallel_backward=True)
+        c_seq, _ = scan(combine_fn, init, xs, parallel_backward=False)
+        self.assertEqual(
+            torch.autograd.grad(c_par.sum(), (init, xs)),
+            torch.autograd.grad(c_seq.sum(), (init, xs)),
+        )
+
+        _, y_par = scan(combine_fn, init, xs, parallel_backward=True)
+        _, y_seq = scan(combine_fn, init, xs, parallel_backward=False)
+        self.assertEqual(
+            torch.autograd.grad(y_par.sum(), (init, xs)),
+            torch.autograd.grad(y_seq.sum(), (init, xs)),
+        )
+
+    def test_scan_parallel_backward_mixed_dtype_carry_error(self, device):
+        def combine_fn(carry, x):
+            c0, c1 = carry
+            return (c0 + x, c1 + x), (x.clone(),)
+
+        xs = torch.randn(5, 3, dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "All init leaves must be a Tensor"):
+            scan(
+                combine_fn,
+                (1, torch.zeros(3, device=device)),
+                xs,
+                parallel_backward=True,
+            )
+
+        init = (
+            torch.zeros(3, dtype=torch.float32, device=device),
+            torch.zeros(3, dtype=torch.float64, device=device),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "All init leaves must have the same dtype and device"
+        ):
+            scan(combine_fn, init, xs, parallel_backward=True)
+
+        init_mixed_device = (
+            torch.zeros(3, device="cpu"),
+            torch.zeros(3, device="meta"),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "All init leaves must have the same dtype and device"
+        ):
+            scan(combine_fn, init_mixed_device, xs, parallel_backward=True)
+
+    def test_scan_parallel_backward_num_vmap_dims_validation(self, device):
+        from torch._higher_order_ops.scan import scan_op
+
+        def combine_fn(carry, x):
+            return carry + x, (carry + x).clone()
+
+        init = torch.zeros(3, device=device)
+        xs = torch.randn(5, 3, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "num_vmap_dims must be a non-negative integer"
+        ):
+            scan_op(combine_fn, (init,), (xs,), (), num_vmap_dims=-1)
+        with self.assertRaisesRegex(
+            RuntimeError, "num_vmap_dims must be a non-negative integer"
+        ):
+            scan_op(combine_fn, (init,), (xs,), (), num_vmap_dims=True)
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_scan_parallel_backward_compile_inference(self, device):
+        def combine_fn(carry, x):
+            next_carry = torch.tanh(carry + x)
+            return next_carry, next_carry.clone()
+
+        def f(init, xs):
+            return scan(combine_fn, init, xs, parallel_backward=True)
+
+        init = torch.randn(3, device=device)
+        xs = torch.randn(5, 3, device=device)
+        expected = f(init, xs)
+        compiled = torch.compile(f, backend="inductor", fullgraph=True)
+        self.assertEqual(expected, compiled(init, xs))
+        with torch.no_grad():
+            self.assertEqual(expected, compiled(init, xs))
 
     @onlyAccelerator
     def test_scan_input_mutation(self, device):
