@@ -1147,6 +1147,15 @@ def export_python(
     whatever the grad mode of the call that triggered capture. Calling the artifact
     under ``torch.no_grad()`` is unaffected and is the ordinary inference path.
 
+    Capturing does not advance the default generators the first call is about to draw
+    from: capture restores the generator state it consumed, within the limits
+    :class:`torch.compiler.precompile.MakeFxTracer` documents. A draw from an explicit
+    ``torch.Generator`` leaves it advanced and logs a warning. When capture restores a
+    generator, it also rewinds any draw a concurrent thread made from that generator
+    during capture. This is about generator position, not value parity with eager:
+    ``backend="inductor"`` lowers random ops to its own philox and produces different
+    values than eager at the same seed.
+
     Args:
         path: Filesystem path for the emitted Python source. Parent directories are
             created as needed. Its presence is the sole signal used to decide whether

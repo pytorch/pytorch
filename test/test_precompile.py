@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: pt2"]
+import contextlib
 import copy
 import errno
 import functools
@@ -5641,6 +5642,14 @@ class TestExportPython(TestCase):
         self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         return os.path.join(d, name)
 
+    def _library(self, name, kind="DEF"):
+        # _scoped_library's teardown without its block: these tests define an op and
+        # then use it several statements later, and wrapping each body in a with just
+        # to reach the op reads worse than destroying the library at cleanup.
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        return stack.enter_context(torch.library._scoped_library(name, kind))
+
     def test_eager_write_then_load(self, device):
         path = self._tmp_path()
         x = make_tensor((4, 4), device=device, dtype=torch.float32)
@@ -5783,6 +5792,131 @@ class TestExportPython(TestCase):
         self.assertEqual(build()(x), x.sin())
         self.assertEqual(os.listdir(os.path.dirname(path)), [os.path.basename(path)])
         self.assertEqual(build()(x), x.sin())
+
+    def _rng_state(self, device):
+        cpu = torch.random.get_rng_state()
+        if torch.device(device).type == "cpu":
+            return cpu, None
+        module = torch.get_device_module(torch.device(device).type)
+        return cpu, module.get_rng_state(torch.device(device))
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_first_call_preserves_rng_state(self, device, backend):
+        x = torch.empty((4,), device=device)
+        path = self._tmp_path(f"rng_{backend}.py")
+
+        def build():
+            @torch.compiler.export_python(path=path, backend=backend)
+            def run(inp):
+                return torch.rand_like(inp)
+
+            return run
+
+        torch.manual_seed(1234)
+        first = build()(x)
+        first_state = self._rng_state(device)
+
+        torch.manual_seed(1234)
+        loaded = build()(x)
+        loaded_state = self._rng_state(device)
+        self.assertEqual(first, loaded)
+        self.assertEqual(first_state, loaded_state)
+
+    def test_first_call_preserves_noncurrent_cuda_rng_state(self, device):
+        if torch.device(device).type != "cuda" or torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+        path = self._tmp_path("rng_noncurrent.py")
+
+        def build():
+            @torch.compiler.export_python(path=path, backend="eager")
+            def run(inp):
+                return torch.rand_like(inp)
+
+            return run
+
+        with torch.cuda.device(0):
+            x = torch.empty(8, device="cuda:1")
+            torch.manual_seed(1234)
+            torch.cuda.manual_seed_all(1234)
+            first = build()(x)
+            first_state = torch.cuda.get_rng_state(1)
+
+            torch.manual_seed(1234)
+            torch.cuda.manual_seed_all(1234)
+            loaded = build()(x)
+            loaded_state = torch.cuda.get_rng_state(1)
+
+        self.assertEqual(first, loaded)
+        self.assertEqual(first_state, loaded_state)
+
+    def _capture_racing_a_concurrent_draw(self, run, x):
+        """Run ``run(x)``'s first capture with a concurrent torch.rand(8) inside it.
+
+        Returns (error_or_None, the concurrently drawn tensor). The capture is stalled
+        on entry so the draw is guaranteed to land between the pre-capture generator
+        snapshot and the post-capture restore decision.
+        """
+        import torch._precompile as precompile_impl
+
+        entered = threading.Event()
+        release = threading.Event()
+        real_capture = precompile_impl._capture
+
+        def synchronized_capture(*args, **kwargs):
+            entered.set()
+            self.assertTrue(release.wait(10))
+            return real_capture(*args, **kwargs)
+
+        errors = []
+
+        def worker():
+            try:
+                run(x)
+            except BaseException as e:
+                errors.append(e)
+
+        with mock.patch.object(precompile_impl, "_capture", synchronized_capture):
+            thread = threading.Thread(target=worker)
+            thread.start()
+            self.assertTrue(entered.wait(10))
+            concurrent = torch.rand(8)
+            release.set()
+            thread.join(20)
+        self.assertFalse(thread.is_alive())
+        return (errors[0] if errors else None), concurrent
+
+    def test_random_capture_restores_rng_off_the_main_thread(self, device):
+        # Restoring the generators the capture drew from is what keeps a random fn's
+        # first call faithful, and it is not conditioned on thread identity: the
+        # capturing call and the loading call agree even from a worker thread.
+        path = self._tmp_path("rng_worker.py")
+
+        def build():
+            @torch.compiler.export_python(path=path, backend="eager")
+            def run(inp):
+                return torch.rand_like(inp)
+
+            return run
+
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+        results = []
+        errors = []
+
+        def worker():
+            try:
+                out = build()(x)
+                results.append((out, self._rng_state(device)))
+            except BaseException as e:
+                errors.append(e)
+
+        for _ in range(2):
+            torch.manual_seed(1234)
+            thread = threading.Thread(target=worker)
+            thread.start()
+            thread.join(20)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(results[0], results[1])
 
     def test_explicit_examples_released_after_materialization(self, device):
         example = make_tensor((4,), device=device, dtype=torch.float32)
@@ -6066,6 +6200,70 @@ class TestExportPython(TestCase):
 
         with self.assertRaisesRegex(TypeError, "must be passed directly"):
             nested([torch.nn.Linear(4, 4).to(device)], x)
+
+    def test_capture_failure_leaves_rng_alone(self, device):
+        # A capture that fails before it has a graph has nothing to attribute draws
+        # to, so it must not rewind: that would replay a concurrent thread's draws.
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(
+            path=self._tmp_path("capture_fail.py"), backend="eager"
+        )
+        def run(inp):
+            torch.rand(4)
+            raise ValueError("fn failed mid-trace")
+
+        torch.manual_seed(1234)
+        before = torch.random.get_rng_state()
+        with self.assertRaisesRegex(ValueError, "fn failed mid-trace"):
+            run(x)
+        self.assertNotEqual(torch.random.get_rng_state(), before)
+
+    def test_capture_drawing_only_on_the_accelerator_leaves_cpu_rng_alone(self, device):
+        # The restore is per generator, not all-or-nothing: rewinding the CPU generator
+        # for a graph that only drew on the accelerator replays an unrelated CPU draw.
+        if torch.device(device).type == "cpu":
+            self.skipTest("needs a non-CPU generator to draw from")
+        path = self._tmp_path("cuda_only_rng.py")
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return torch.rand_like(inp)
+
+        x = torch.zeros(4, device=device)
+        torch.manual_seed(1234)
+        error, concurrent = self._capture_racing_a_concurrent_draw(run, x)
+        self.assertIsNone(error)
+        self.assertNotEqual(torch.rand(8), concurrent)
+
+    def test_untagged_drawing_op_still_restores(self, device):
+        # An opaque custom op can draw inside its own kernel with nothing in the graph
+        # to say so -- the shape this API targets. It may draw on a generator other
+        # than its output's device (here always CPU), so a non-aten op in the graph has
+        # to restore every snapshotted generator, not just its output device's.
+        lib = self._library("precompile_untagged")
+        lib.define("draw(Tensor x) -> Tensor")
+
+        def draw(x):
+            return x + torch.rand(x.shape).to(x.device)
+
+        lib.impl("draw", draw, "CompositeExplicitAutograd")
+        path = self._tmp_path("untagged.py")
+
+        def build():
+            @torch.compiler.export_python(path=path, backend="eager")
+            def run(inp):
+                return torch.ops.precompile_untagged.draw(inp)
+
+            return run
+
+        x = torch.zeros(4, device=device)
+        torch.manual_seed(1234)
+        first = build()(x).clone()
+        first_state = self._rng_state(device)
+        torch.manual_seed(1234)
+        self.assertEqual(build()(x), first)
+        self.assertEqual(self._rng_state(device), first_state)
 
     def test_artifact_does_not_bake_the_capture_thread_count(self, device):
         # See the cpp.dynamic_threads pin in PrecompiledModule._compile. Capture runs in
