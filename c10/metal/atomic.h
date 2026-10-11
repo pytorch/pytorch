@@ -28,6 +28,29 @@ static inline void atomic_binary_op_helper(
       ::metal::memory_order_relaxed));
 }
 
+// atomic_compare_exchange on ::metal::atomic<float> compares its operands as
+// floats, so once a NaN is stored the expected value never compares equal to
+// itself and the CAS loop in atomic_binary_op_helper spins forever, hanging the
+// GPU. Comparing the bit patterns instead is what the uint-backed overload
+// further down already does for half and bfloat.
+static inline void atomic_binary_op_bitwise_helper(
+    device ::metal::atomic<float>* data,
+    long offset,
+    float value,
+    float (*op)(float, float)) {
+  auto ptr = reinterpret_cast<device ::metal::atomic<uint>*>(data) + offset;
+  auto old = ::metal::atomic_load_explicit(ptr, ::metal::memory_order_relaxed);
+  uint desired;
+  do {
+    desired = as_type<uint>(op(as_type<float>(old), value));
+  } while (!::metal::atomic_compare_exchange_weak_explicit(
+      ptr,
+      &old,
+      desired,
+      ::metal::memory_order_relaxed,
+      ::metal::memory_order_relaxed));
+}
+
 template <>
 struct AtomicType<float> {
   using type = ::metal::atomic<float>;
@@ -40,7 +63,7 @@ struct AtomicType<float> {
       long offset,
       float value,
       float (*op)(float, float)) {
-    atomic_binary_op_helper(data, offset, value, op);
+    atomic_binary_op_bitwise_helper(data, offset, value, op);
   }
 };
 
