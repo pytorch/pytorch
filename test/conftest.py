@@ -4,6 +4,9 @@ import json
 import os
 import re
 import sys
+import types
+import unittest
+import unittest.case as _unittest_case
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from types import MethodType
@@ -19,6 +22,84 @@ from _pytest.stash import StashKey
 from _pytest.terminal import _get_raw_skip_reason
 
 from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestShardPlugin
+
+
+# unittest.skipIf(True) and skipUnless(False) both call skip(), so the
+# wrapper is identical afterwards. Stamp skip() only when those are not
+# the caller. Known-failure decorators set __pt_rerun_code_skip__ themselves.
+_UNCONDITIONAL_SKIP_ATTR = "__pt_unconditional_skip__"
+_RERUN_CODE_SKIP_ATTR = "__pt_rerun_code_skip__"
+_RERUN_SKIP_DEVICE_ATTR = "__pt_rerun_skip_device__"
+
+
+def _load_rerun_code_skip_attrs() -> tuple[str, str, str]:
+    # Prefer the source file so this plugin loads when torch is not built.
+    import importlib.util
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "torch"
+        / "testing"
+        / "_internal"
+        / "rerun_code_skip.py"
+    )
+    if path.is_file():
+        spec = importlib.util.spec_from_file_location("_pt_rerun_code_skip", path)
+        if spec is not None and spec.loader is not None:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return (
+                mod.UNCONDITIONAL_SKIP_ATTR,
+                mod.RERUN_CODE_SKIP_ATTR,
+                mod.RERUN_SKIP_DEVICE_ATTR,
+            )
+    from torch.testing._internal.rerun_code_skip import (
+        RERUN_CODE_SKIP_ATTR,
+        RERUN_SKIP_DEVICE_ATTR,
+        UNCONDITIONAL_SKIP_ATTR,
+    )
+
+    return UNCONDITIONAL_SKIP_ATTR, RERUN_CODE_SKIP_ATTR, RERUN_SKIP_DEVICE_ATTR
+
+
+(
+    _UNCONDITIONAL_SKIP_ATTR,
+    _RERUN_CODE_SKIP_ATTR,
+    _RERUN_SKIP_DEVICE_ATTR,
+) = _load_rerun_code_skip_attrs()
+
+_ORIG_UNITTEST_SKIP = _unittest_case.skip
+_CONDITIONAL_SKIP_CODES = (
+    _unittest_case.skipIf.__code__,
+    _unittest_case.skipUnless.__code__,
+)
+
+
+def _stamp_unconditional_skip(test_item: Any) -> Any:
+    try:
+        setattr(test_item, _UNCONDITIONAL_SKIP_ATTR, True)
+    except (AttributeError, TypeError):
+        return test_item
+    return test_item
+
+
+def _rerun_aware_unittest_skip(reason: Any) -> Any:
+    from_conditional = sys._getframe(1).f_code in _CONDITIONAL_SKIP_CODES
+    result = _ORIG_UNITTEST_SKIP(reason)
+    if from_conditional:
+        return result
+    if isinstance(reason, types.FunctionType):
+        return _stamp_unconditional_skip(result)
+
+    def _stamp(test_item: Any) -> Any:
+        return _stamp_unconditional_skip(result(test_item))
+
+    return _stamp
+
+
+_unittest_case.skip = _rerun_aware_unittest_skip
+unittest.skip = _rerun_aware_unittest_skip
 
 
 try:
@@ -322,19 +403,193 @@ def pytest_report_teststatus(report, config):
         )
 
 
+def _skip_func(obj: Any) -> Any:
+    if obj is None:
+        return None
+    return getattr(obj, "__func__", obj)
+
+
+def _has_rerun_stamp(obj: Any) -> bool:
+    if obj is None:
+        return False
+    return bool(
+        getattr(obj, _UNCONDITIONAL_SKIP_ATTR, False)
+        or getattr(obj, _RERUN_CODE_SKIP_ATTR, False)
+    )
+
+
+def _copy_rerun_stamps(src: Any, dst: Any) -> None:
+    for attr in (_UNCONDITIONAL_SKIP_ATTR, _RERUN_CODE_SKIP_ATTR):
+        if getattr(src, attr, False):
+            try:
+                setattr(dst, attr, True)
+            except (AttributeError, TypeError):
+                pass
+
+
+def _device_allows_rerun(item: Any, target: Any) -> bool:
+    expected = getattr(target, _RERUN_SKIP_DEVICE_ATTR, None)
+    if expected is None:
+        return True
+    cls = getattr(item, "cls", None)
+    return getattr(cls, "device_type", None) == expected
+
+
+# Kept on the item until the test finishes, then written with record_property.
+_CODE_SKIP_REASON_ATTR = "_pt_code_skip_reason"
+# Class-level unittest.skip is cleared on the first method. Later methods
+# still need the original __unittest_skip_why__.
+_SAVED_SKIP_WHY_ATTR = "_pt_saved_skip_why"
+
+
+def _remember_code_skip_reason(item: Any, reason: Any) -> None:
+    if reason is None:
+        return
+    text = reason if isinstance(reason, str) else str(reason)
+    text = text.strip()
+    if not text:
+        return
+    prev = getattr(item, _CODE_SKIP_REASON_ATTR, None)
+    if isinstance(prev, str) and prev:
+        if text == prev or text in prev.split("\n"):
+            return
+        text = f"{prev}\n{text}"
+    try:
+        setattr(item, _CODE_SKIP_REASON_ATTR, text)
+    except (AttributeError, TypeError):
+        return
+
+
+def _unittest_skip_why(obj: Any) -> str:
+    why = getattr(obj, "__unittest_skip_why__", None)
+    if not why:
+        why = getattr(obj, _SAVED_SKIP_WHY_ATTR, None)
+    if not why:
+        return ""
+    return why if isinstance(why, str) else str(why)
+
+
+def _clear_unittest_skip(obj: Any) -> None:
+    if not getattr(obj, "__unittest_skip__", False):
+        return
+    why = getattr(obj, "__unittest_skip_why__", None)
+    if why:
+        try:
+            setattr(obj, _SAVED_SKIP_WHY_ATTR, why)
+        except (AttributeError, TypeError):
+            pass
+    obj.__unittest_skip__ = False
+    obj.__unittest_skip_why__ = ""
+
+
+def _replace_item_obj(item: Any, replacement: Any) -> None:
+    cls = getattr(item, "cls", None)
+    name = getattr(item, "originalname", None) or getattr(item, "name", None)
+    if cls is not None and name and hasattr(cls, name):
+        setattr(cls, name, replacement)
+        item._obj = None
+    else:
+        item.obj = replacement
+
+
+def _pytest_skip_reason(markers: list[Any]) -> str:
+    parts: list[str] = []
+    for marker in markers:
+        kwargs = getattr(marker, "kwargs", None)
+        reason = kwargs.get("reason") if isinstance(kwargs, dict) else None
+        if not reason:
+            args = getattr(marker, "args", None) or ()
+            if args:
+                reason = args[0]
+        if not reason:
+            continue
+        text = reason if isinstance(reason, str) else str(reason)
+        text = text.strip()
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
+
+
+def _enable_unconditional_unittest_skip(item: Any) -> bool:
+    target = _skip_func(getattr(item, "obj", None))
+    if _has_rerun_stamp(target) and _device_allows_rerun(item, target):
+        wrapped = getattr(target, "__wrapped__", None)
+        if wrapped is not None:
+            _remember_code_skip_reason(item, _unittest_skip_why(target))
+            _copy_rerun_stamps(target, wrapped)
+            _replace_item_obj(item, wrapped)
+            return True
+        if getattr(target, "__unittest_skip__", False):
+            _remember_code_skip_reason(item, _unittest_skip_why(target))
+            _clear_unittest_skip(target)
+            return True
+    cls = getattr(item, "cls", None)
+    class_stamped = cls is not None and _has_rerun_stamp(cls)
+    if class_stamped and getattr(cls, "__unittest_skip__", False):
+        _remember_code_skip_reason(item, _unittest_skip_why(cls))
+        _clear_unittest_skip(cls)
+        return True
+    if class_stamped:
+        _remember_code_skip_reason(item, getattr(cls, _SAVED_SKIP_WHY_ATTR, None))
+    return False
+
+
+def _enable_unconditional_pytest_skip(item: Any) -> bool:
+    own_skip = [m for m in item.own_markers if getattr(m, "name", None) == "skip"]
+    if not own_skip:
+        return False
+    # skipif is conditional. Do not clear it.
+    if any(True for _ in item.iter_markers(name="skipif")):
+        return False
+    _remember_code_skip_reason(item, _pytest_skip_reason(own_skip))
+    item.own_markers[:] = [
+        m for m in item.own_markers if getattr(m, "name", None) != "skip"
+    ]
+    target = _skip_func(getattr(item, "obj", None))
+    if target is not None:
+        setattr(target, _UNCONDITIONAL_SKIP_ATTR, True)
+    return True
+
+
+def _keep_for_rerun(item: Any, disabled_tests: dict[str, set[str]]) -> bool:
+    """Keep GitHub-disabled tests and code skips that rerun mode executes."""
+    parent = item.parent
+    test_class = parent.name if parent is not None else ""
+    # Pytest 7 names a module node after its path relative to rootdir
+    # (`test/tmpX/foo.py`). The disabled JSON, and older pytest, use the
+    # file name. Match both so a module-level listing still collects.
+    parent_keys = {test_class, os.path.basename(test_class)}
+    cls = getattr(item, "cls", None)
+    if cls is not None:
+        parent_keys.add(cls.__name__)
+    listed = any(
+        key in disabled_tests and item.name in disabled_tests[key]
+        for key in parent_keys
+        if key
+    )
+    unittest_skip = _enable_unconditional_unittest_skip(item)
+    pytest_skip = _enable_unconditional_pytest_skip(item)
+    return listed or unittest_skip or pytest_skip
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(items: list[Any]) -> None:
     """
     This hook is used when rerunning disabled tests to get rid of all skipped tests
     instead of running and skipping them N times. This avoids flooding the console
     and XML outputs with junk. So we want this to run last when collecting tests.
+
+    Unconditional unittest.skip, pytest.mark.skip, and known-failure code
+    skips are kept and their skip is cleared so the body runs. The reason
+    is copied onto the item first. skipIf and other capability skips are
+    not cleared and do not get a code_skip property.
     """
     rerun_disabled_tests = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
     if not rerun_disabled_tests:
         return
 
     disabled_regex = re.compile(r"(?P<test_name>.+)\s+\([^\.]+\.(?P<test_class>.+)\)")
-    disabled_tests = defaultdict(set)
+    disabled_tests: dict[str, set[str]] = defaultdict(set)
 
     # This environment has already been set by run_test before it calls pytest
     disabled_tests_file = os.getenv("DISABLED_TESTS_FILE", "")
@@ -349,20 +604,18 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
                 test_class = m["test_class"]
                 disabled_tests[test_class].add(test_name)
 
-    # When rerunning disabled test, ignore all test cases that are not disabled
+    # When rerunning disabled tests, ignore cases that are neither disabled on
+    # GitHub nor a code skip this mode executes.
     filtered_items = []
 
     for item in items:
-        test_name = item.name
-        test_class = item.parent.name
-
-        if (
-            test_class not in disabled_tests
-            or test_name not in disabled_tests[test_class]
-        ):
+        if not _keep_for_rerun(item, disabled_tests):
             continue
 
+        reason = getattr(item, _CODE_SKIP_REASON_ATTR, None)
         cpy = copy.copy(item)
+        if reason:
+            _remember_code_skip_reason(cpy, reason)
         cpy._initrequest()
 
         filtered_items.append(cpy)
@@ -370,6 +623,28 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
     items.clear()
     # NB: Need to edit items directly here to have the list reflected back to pytest
     items.extend(filtered_items)
+
+
+def _record_property(item: Any, name: str, value: str) -> None:
+    """Same write as pytest's record_property fixture."""
+    props = getattr(item, "user_properties", None)
+    if not isinstance(props, list):
+        return
+    for pair in props:
+        if isinstance(pair, tuple) and pair and pair[0] == name:
+            return
+    props.append((name, value))
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_makereport(item: Any, call: Any) -> None:
+    # junitxml writes record_property values from the teardown report, which
+    # copies item.user_properties when that report is built.
+    if getattr(call, "when", None) == "teardown":
+        reason = getattr(item, _CODE_SKIP_REASON_ATTR, None)
+        if isinstance(reason, str) and reason:
+            _record_property(item, "code_skip", reason)
+    yield
 
 
 def _spawns_multiple_processes(
