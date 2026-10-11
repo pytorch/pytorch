@@ -629,6 +629,10 @@ if rank == 0:
 
 ## Collective functions
 
+:::{note}
+The standard collective operations in `torch.distributed` are not generally autograd-aware. If you need autograd-aware collective communication, refer to the functional collective operations in `torch.distributed._functional_collectives`, while noting that this module is currently private and its API may evolve.
+:::
+
 ```{eval-rst}
 .. autofunction:: broadcast
 ```
