@@ -206,6 +206,10 @@ def _hold(fn):
 _mislabeled_holder = _hold(_exec_function())
 
 
+def _package_op(x):
+    return x + 1
+
+
 @dataclasses.dataclass
 class _GraphBreakingDataclass:
     x: torch.Tensor
@@ -402,6 +406,32 @@ print(eval(f"bbmod.{name}.{path}") is code)
             )(fn)
             package.install(backends)
             self.assertEqual(expected, compiled_fn(x))
+
+    def test_module_function_guard_saves_unfiltered_and_reports_a_miss(self):
+        # No guard_filter_fn: the CLOSURE_MATCH on _package_op is still saved,
+        # as a FUNCTION_CODE_MATCH, and a rebinding names it in the refusal.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return _package_op(x) * 2
+
+        x = torch.randn(3)
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+        expected = compiled_fn(x)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(package=package)(fn)
+            package.install(backends)
+            self.assertEqual(expected, compiled_fn(x))
+            with patch.dict(globals(), {"_package_op": lambda x: x - 1}):
+                with self.assertRaisesRegex(RuntimeError, "___check_function_code"):
+                    compiled_fn(x)
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
