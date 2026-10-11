@@ -28,6 +28,7 @@ import warnings
 from _codecs import encode
 from collections import Counter, OrderedDict
 from collections.abc import Callable
+from contextvars import ContextVar
 from pickle import (
     APPEND,
     APPENDS,
@@ -85,6 +86,9 @@ _blocklisted_modules = [
 ]
 
 _marked_safe_globals_set: set[Callable | tuple[Callable, str]] = set()
+_safe_globals_context: ContextVar[
+    tuple[frozenset[Callable | tuple[Callable, str]], ...]
+] = ContextVar("safe_globals", default=())
 
 
 def _add_safe_globals(safe_globals: list[Callable | tuple[Callable, str]]):
@@ -93,13 +97,17 @@ def _add_safe_globals(safe_globals: list[Callable | tuple[Callable, str]]):
 
 
 def _get_safe_globals() -> list[Callable | tuple[Callable, str]]:
-    global _marked_safe_globals_set
     return list(_marked_safe_globals_set)
+
+
+def _get_effective_safe_globals() -> set[Callable | tuple[Callable, str]]:
+    return _marked_safe_globals_set.union(*_safe_globals_context.get())
 
 
 def _clear_safe_globals():
     global _marked_safe_globals_set
     _marked_safe_globals_set = set()
+    _safe_globals_context.set(tuple(frozenset() for _ in _safe_globals_context.get()))
 
 
 def _remove_safe_globals(
@@ -114,10 +122,12 @@ class _safe_globals:
         self.safe_globals = safe_globals
 
     def __enter__(self):
-        _add_safe_globals(self.safe_globals)
+        _safe_globals_context.set(
+            (*_safe_globals_context.get(), frozenset(self.safe_globals))
+        )
 
     def __exit__(self, type, value, tb):
-        _remove_safe_globals(self.safe_globals)
+        _safe_globals_context.set(_safe_globals_context.get()[:-1])
 
 
 class _PendingNewobj:
@@ -135,7 +145,7 @@ class _PendingNewobj:
 # _get_allowed_globals due to the lru_cache
 def _get_user_allowed_globals():
     rc: dict[str, Any] = {}
-    for f in _marked_safe_globals_set:
+    for f in _get_effective_safe_globals():
         if isinstance(f, tuple):
             if len(f) != 2:
                 raise ValueError(
