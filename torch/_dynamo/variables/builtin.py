@@ -102,9 +102,10 @@ from .dicts import (
     DictItemsVariable,
     DictKeysVariable,
     DictViewVariable,
-    pydict_checkexact,
+    pyanydict_checkexact,
+    pyfrozendict_check,
+    pyfrozendict_checkexact,
 )
-from .hashable import HashableTracker
 from .lists import (
     BaseListVariable,
     ByteArrayVariable,
@@ -3510,7 +3511,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if len(args) == 1 and isinstance(args[0], variables.FrozenDictVariable):
+        if len(args) == 1 and pyfrozendict_check(args[0]):
             # dict() preserves stored hashes when copying a frozendict.
             result = ConstDictVariable({}, mutation_type=ValueMutationNew())
             result.dict_update(tx, args, kwargs)
@@ -3526,13 +3527,14 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         no_keywords(tx, "dict.fromkeys", kwargs)
         check_positional(tx, "fromkeys", len(args), 1, 2)
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
-        if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
+        if pyanydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
+            if isinstance(args[0], ConstDictVariable):
+                args[0].install_dict_keys_match_guard()
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
-            return ConstDictVariable(
-                dict.fromkeys(args[0].items.keys(), value),  # type: ignore[arg-type]
-                mutation_type=ValueMutationNew(),
-            )
-        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args, **kwargs)
+            result = ConstDictVariable({}, mutation_type=ValueMutationNew())
+            result.items.update(dict.fromkeys(args[0].items.keys(), value))
+            return result
+        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args)
 
     tp_methods = {
         "fromkeys": Method(fromkeys),
@@ -3564,6 +3566,10 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0]
+            if name in ("__eq__", "__ne__") and isinstance(obj, ConstDictVariable):
+                no_keywords(tx, f"dict.{name}", kwargs)
+                check_positional(tx, name, len(args), 2, 2)
+                return ConstDictVariable.tp_richcompare_impl(obj, tx, args[1], name)
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)
             return obj.call_method(tx, name, args[1:], kwargs)
@@ -3591,12 +3597,11 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         user_cls: VariableTracker,
         /,
         *args: VariableTracker,
-        **kwargs: VariableTracker,
     ) -> VariableTracker:
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.dict_fromkeys),
             [user_cls, *args],
-            kwargs,
+            {},
         )
 
 
@@ -3614,15 +3619,11 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         check_positional(tx, "frozendict", len(args), 0, 1)
-        if (
-            len(args) == 1
-            and isinstance(args[0], variables.FrozenDictVariable)
-            and not kwargs
-        ):
+        if len(args) == 1 and pyfrozendict_checkexact(args[0]) and not kwargs:
             return args[0]
         storage = ConstDictVariable({}, mutation_type=ValueMutationNew())
-        storage.dict_update(tx, args, kwargs)
-        return variables.FrozenDictVariable(storage.items)
+        storage.dict_update(tx, args, kwargs, container_name="frozendict")
+        return variables.FrozenDictVariable(storage=storage)
 
     def call_method(
         self,
@@ -3662,12 +3663,12 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
             result = self.call_function(tx, args[1:], kwargs)
             if not isinstance(result, variables.FrozenDictVariable):
                 raise AssertionError(f"Expected FrozenDictVariable, got {type(result)}")
-            return variables.FrozenDictVariable(result.items)
+            return variables.FrozenDictVariable(storage=result.storage)
         if name == "fromkeys":
             return self.fromkeys(tx, args, kwargs)
         if name in self._fn.__dict__ and callable(self._fn.__dict__[name]):
             check_positional(tx, name, len(args), 1, sys.maxsize)
-            if not isinstance(args[0], variables.FrozenDictVariable):
+            if not pyfrozendict_check(args[0]):
                 raise_type_error(
                     tx,
                     f"descriptor '{name}' for 'frozendict' objects doesn't apply "
@@ -3684,23 +3685,11 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         no_keywords(tx, "frozendict.fromkeys", kwargs)
         check_positional(tx, "fromkeys", len(args), 1, 2)
-        value = args[1] if len(args) == 2 else ConstantVariable.create(None)
-        iterable = args[0]
-        if isinstance(iterable, ConstDictVariable):
-            iterable.install_dict_keys_match_guard()
-        if istype(
-            iterable,
-            (
-                ConstDictVariable,
-                variables.FrozenDictVariable,
-                SetVariable,
-                FrozensetVariable,
-            ),
-        ):
-            keys = iterable.items.keys()
-        else:
-            keys = [HashableTracker(key) for key in unpack_iterable(tx, iterable)]
-        return variables.FrozenDictVariable(dict.fromkeys(keys, value))
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, polyfills.frozendict_fromkeys),
+            [self, *args],
+            kwargs,
+        )
 
 
 class IterBuiltinVariable(BaseBuiltinVariable):
