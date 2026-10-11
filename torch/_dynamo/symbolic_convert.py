@@ -2499,18 +2499,18 @@ class InstructionTranslatorBase(
         if self.exec_recorder:
             if name in self.f_globals:
                 self.exec_recorder.add_global_var(name, self.f_globals[name])
-            else:
+            elif name not in self.symbolic_globals:
                 if name not in self.f_builtins:
                     raise AssertionError("expected name in self.f_builtins to be true")
                 self.exec_recorder.builtins[name] = self.f_builtins[name]
-
-        if name not in self.f_globals:
-            return self.load_builtin(inst)
 
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
             self.push(self.output.side_effects.load_global(variable, name))
             return
+
+        if name not in self.f_globals:
+            return self.load_builtin(inst)
 
         value = self.f_globals[name]
         self.push(VariableTracker.build(self, value, GlobalSource(name)))
@@ -6653,9 +6653,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def _load_global(self, inst: Instruction) -> None:
         name = inst.argval
-        if name not in self.f_globals:
-            return self.load_builtin(inst)
-
         if self.output.global_scope is self.f_globals:
             # If the global scope matches that of the root frame, use handler in
             # root frame instruction translator, to enforce consistency.
@@ -6664,6 +6661,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
             if self.output.side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
                 self.push(self.output.side_effects.load_attr(fglobals_vt, name))
+            elif name not in self.f_globals:
+                return self.load_builtin(inst)
             else:
                 value = self.f_globals[name]
                 self.push(VariableTracker.build(self, value, global_source))
