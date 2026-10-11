@@ -62,6 +62,7 @@ from .nv_universal_gemm import GemmVariant, NVUniversalGemmCaller
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from ...ir import ReductionEpilogue
     from ...kernel.gemm_epilogue import GemmReductionPlan
     from .epilogue_lowering import NVGemmEpilogueProgram
     from .nv_universal_gemm_kernel import NVUniversalGemmKernel
@@ -510,6 +511,29 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 n_group,
             )
         return supported
+
+    @staticmethod
+    def _choice_fits_reduction(
+        choice: NVUniversalGemmCaller,
+        min_tile_shape: tuple[int, int],
+    ) -> bool:
+        """Whether choice's tiles can hold an epilogue's reduction groups."""
+        required_tile = min_tile_shape[::-1] if choice.swap_ab else min_tile_shape
+        tile_shape = choice.kernel.metadata.design.tile_shape
+        return NVUniversalGemmScheduling._supports_reduction_layout(
+            choice, min_tile_shape
+        ) and all(tile_shape[axis] >= required_tile[axis] for axis in (0, 1))
+
+    @classmethod
+    def reduction_epilogue_min_tile_shape(
+        cls, epilogue: ReductionEpilogue
+    ) -> tuple[int, int] | None:
+        """The min_tile_shape an NVGEMM choice needs to host epilogue, or None
+        if NVGEMM can't fuse it."""
+        backend = V.graph.scheduler.get_backend(epilogue.node1.get_device())
+        if not backend.can_fuse_reduction_epilogue(epilogue.node1, epilogue.node2):
+            return None
+        return cls._lower_epilogue(epilogue.template, epilogue.nodes).min_tile_shape
 
     @staticmethod
     def _best_nvgemm_choice(
