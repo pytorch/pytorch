@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import dataclasses
 import itertools
 import logging
 from typing import TYPE_CHECKING
@@ -35,6 +36,7 @@ from .mm_common import (
     is_batch_stride_largest_or_zero,
     mm_args,
     use_native_matmul,
+    zero_addmm_input,
 )
 
 
@@ -133,6 +135,41 @@ def _bmm_shared_a_configs(dtype):
             "num_warps": warps,
         }
 
+
+@SymbolicGridFn
+def blackwell_bmm_grid(b, m, n, meta, *, cdiv, max, min):
+    # Flatten batch and matrix tiles into one global persistent work queue.
+    grid_m = cdiv(m, meta["BLOCK_M"])
+    tiles = b * grid_m * cdiv(n, meta["BLOCK_N"])
+    grid_x = min(meta["NUM_SMS"], tiles)
+    return (grid_x, 1, 1)
+
+
+blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
+    name="blackwell_bmm",
+    grid=blackwell_bmm_grid,
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_bmm"),
+    cache_codegen_enabled_for_template=True,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class BlackwellBMMConfig:
+    block_m: int
+    block_n: int
+    block_k: int
+    num_stages: int
+    num_warps: int
+    epilogue_subtile: int = 1
+    data_partition_factor: int = 1
+    separate_epilogue_store: bool = True
+
+
+BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
+    BlackwellBMMConfig(64, 64, 128, 5, 4),
+    BlackwellBMMConfig(128, 128, 128, 3, 8),
+    BlackwellBMMConfig(128, 256, 64, 4, 8),
+)
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
@@ -390,6 +427,10 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
     use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
+    template_inp = inp
+    if not use_bf16x9 and beta == 0:
+        template_inp = zero_addmm_input(inp, mat1, mat2)
+
     if use_native_matmul(mat1, mat2):
         if beta == 0:
             arg1 = 0
@@ -449,6 +490,13 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
+        if beta == 0:
+            # bmm_template reads inp, and autotuning benchmarks every baddbmm
+            # choice on the same inputs, so ATen gets the zeros too.
+            *_, inp = mm_args(mat1, mat2, template_inp, layout=layout)
+            kernel_inputs = MMKernelInputs(
+                [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+            )
 
     # Single unified call for all templates
     choices.extend(
