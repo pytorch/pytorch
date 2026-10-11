@@ -12,6 +12,7 @@ import io
 import itertools
 import math
 import operator
+import pickle
 import unittest
 import warnings
 import weakref
@@ -20,7 +21,7 @@ from contextlib import ContextDecorator, ExitStack, nullcontext
 from functools import partial, wraps
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from common_utils import (
     capture_codegen_source,
@@ -57,12 +58,14 @@ from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
+from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import (
     _aot_export_function,
     aot_export_joint_simple,
     aot_export_module,
     SerializableAOTDispatchCompiler,
 )
+from torch._functorch._aot_autograd.utils import maybe_wrap_compiled_graph
 from torch._functorch.partitioners import (
     _extract_fwd_bwd_modules,
     _extract_fwd_bwd_outputs,
@@ -251,6 +254,320 @@ class AOTTestCase(TestCase):
                 actual_inner = getattr(actual, attr)
                 if isinstance(expected_inner, torch.Tensor):
                     self.assertTensorMetadataEqual(actual_inner, expected_inner)
+
+
+class TestCompiledGraphWrapper(AOTTestCase):
+    def test_unset_hook_returns_the_original_callable(self) -> None:
+        compiled = Mock()
+        with functorch_config.patch(compiled_graph_wrapper=None):
+            self.assertIs(maybe_wrap_compiled_graph(compiled, "forward"), compiled)
+
+    def test_hook_receives_graph_metadata_and_replaces_the_callable(self) -> None:
+        def compiled(x):
+            return x
+
+        compiled._fx_graph_cache_key = "cache-key"
+        compiled._fx_graph_cache_debug_lines = ["debug-line"]
+        compiled.guards_expr = "x.size(0) == 3"
+
+        @wraps(compiled)
+        def replacement(x):
+            return compiled(x)
+
+        wrapper = Mock(return_value=replacement)
+
+        with (
+            functorch_config.patch(compiled_graph_wrapper=wrapper),
+            patch(
+                "torch._functorch._aot_autograd.logging_utils.get_aot_graph_name",
+                return_value="model__0_backward_0",
+            ),
+        ):
+            actual = maybe_wrap_compiled_graph(compiled, "backward")
+
+        self.assertIs(actual, replacement)
+        wrapper.assert_called_once_with(
+            compiled, "model__0_backward_0", graph_role="backward"
+        )
+
+    @parametrize(
+        "case,expected_reason",
+        [
+            ("not_callable", "replacement is not callable"),
+            ("missing_chain", "does not reach the original"),
+            ("cyclic_chain", "cyclic __wrapped__ chain"),
+            ("unreadable_chain", "metadata could not be read"),
+        ],
+    )
+    def test_invalid_replacement_returns_original(
+        self, case: str, expected_reason: str
+    ) -> None:
+        def compiled(x):
+            return x
+
+        if case == "not_callable":
+            replacement = None
+        elif case == "missing_chain":
+
+            def replacement(x):
+                return x
+
+        elif case == "cyclic_chain":
+
+            def replacement(x):
+                return x
+
+            replacement.__wrapped__ = replacement
+        else:
+
+            class BrokenWrapper:
+                def __call__(self, x):
+                    return x
+
+                @property
+                def __wrapped__(self):
+                    raise RuntimeError("broken metadata")
+
+            replacement = BrokenWrapper()
+
+        wrapper = Mock(return_value=replacement)
+        with (
+            functorch_config.patch(compiled_graph_wrapper=wrapper),
+            patch(
+                "torch._functorch._aot_autograd.logging_utils.get_aot_graph_name",
+                return_value="model__0_backward_0",
+            ),
+            self.assertLogs(
+                "torch._functorch._aot_autograd.utils", level="WARNING"
+            ) as logs,
+        ):
+            actual = maybe_wrap_compiled_graph(compiled, "backward")
+
+        self.assertIs(actual, compiled)
+        self.assertIn("model__0_backward_0", logs.output[0])
+        self.assertIn("backward", logs.output[0])
+        self.assertIn(expected_reason, logs.output[0])
+
+    @parametrize(
+        "compiled_boxed,replacement_boxed", [(True, False), (False, True)]
+    )
+    def test_changed_boxed_call_returns_original(
+        self, compiled_boxed: bool, replacement_boxed: bool
+    ) -> None:
+        def compiled(args):
+            return args
+
+        def replacement(args):
+            return args
+
+        compiled._boxed_call = compiled_boxed
+        replacement._boxed_call = replacement_boxed
+        replacement.__wrapped__ = compiled
+
+        with (
+            functorch_config.patch(
+                compiled_graph_wrapper=Mock(return_value=replacement)
+            ),
+            self.assertLogs(
+                "torch._functorch._aot_autograd.utils", level="WARNING"
+            ) as logs,
+        ):
+            actual = maybe_wrap_compiled_graph(compiled, "forward")
+
+        self.assertIs(actual, compiled)
+        self.assertIn("replacement changed _boxed_call", logs.output[0])
+
+    def test_class_level_boxed_call_is_preserved(self) -> None:
+        class BoxedCallable:
+            _boxed_call = True
+
+            def __call__(self, args):
+                return args
+
+        compiled = BoxedCallable()
+
+        class BoxedReplacement:
+            _boxed_call = True
+
+            def __call__(self, args):
+                return compiled(args)
+
+        replacement = BoxedReplacement()
+        replacement.__wrapped__ = compiled
+
+        with functorch_config.patch(
+            compiled_graph_wrapper=Mock(return_value=replacement)
+        ):
+            actual = maybe_wrap_compiled_graph(compiled, "forward")
+
+        self.assertIs(actual, replacement)
+
+    @parametrize(
+        "metadata_name",
+        ["_fx_graph_cache_key", "_fx_graph_cache_debug_lines", "guards_expr"],
+    )
+    def test_missing_cache_metadata_returns_original(self, metadata_name: str) -> None:
+        def compiled(x):
+            return x
+
+        def replacement(x):
+            return x
+
+        setattr(compiled, metadata_name, "original")
+        replacement.__wrapped__ = compiled
+
+        with (
+            functorch_config.patch(
+                compiled_graph_wrapper=Mock(return_value=replacement)
+            ),
+            self.assertLogs(
+                "torch._functorch._aot_autograd.utils", level="WARNING"
+            ) as logs,
+        ):
+            actual = maybe_wrap_compiled_graph(compiled, "inference")
+
+        self.assertIs(actual, compiled)
+        self.assertIn(
+            f"did not preserve instance attribute {metadata_name}", logs.output[0]
+        )
+
+    def test_time_taken_is_preserved(self) -> None:
+        def compiled(x):
+            return x
+
+        compiled._time_taken_ns = 1234
+
+        @wraps(compiled)
+        def replacement(x):
+            return compiled(x)
+
+        with functorch_config.patch(
+            compiled_graph_wrapper=Mock(return_value=replacement)
+        ):
+            actual = maybe_wrap_compiled_graph(compiled, "backward")
+
+        self.assertIs(actual, replacement)
+        self.assertIs(actual._time_taken_ns, compiled._time_taken_ns)
+
+    def test_arbitrary_instance_attributes_are_shallowly_preserved(self) -> None:
+        def compiled(x):
+            return x
+
+        tensor_metadata = torch.randn(2)
+        mutable_metadata = {"tensor": tensor_metadata}
+        compiled.tensor_metadata = tensor_metadata
+        compiled.mutable_metadata = mutable_metadata
+
+        @wraps(compiled)
+        def replacement(x):
+            return compiled(x)
+
+        replacement.instrumentation = object()
+        with functorch_config.patch(
+            compiled_graph_wrapper=Mock(return_value=replacement)
+        ):
+            actual = maybe_wrap_compiled_graph(compiled, "forward")
+
+        self.assertIs(actual, replacement)
+        self.assertIs(actual.tensor_metadata, tensor_metadata)
+        self.assertIs(actual.mutable_metadata, mutable_metadata)
+        self.assertIs(actual.instrumentation, replacement.instrumentation)
+
+    def test_callback_exception_propagates(self) -> None:
+        def compiled(x):
+            return x
+
+        def wrapper(compiled, graph_name, *, graph_role):
+            raise RuntimeError("consumer failed")
+
+        with (
+            functorch_config.patch(compiled_graph_wrapper=wrapper),
+            self.assertRaisesRegex(RuntimeError, "consumer failed"),
+        ):
+            maybe_wrap_compiled_graph(compiled, "forward")
+
+    @parametrize("eager_backward", [False, True])
+    def test_replacement_executes_without_repeated_wrapping(
+        self, eager_backward: bool
+    ) -> None:
+        wrap_counts: dict[str, int] = {}
+        invocation_counts: dict[str, int] = {}
+
+        def wrapper(compiled, graph_name, *, graph_role):
+            wrap_counts[graph_role] = wrap_counts.get(graph_role, 0) + 1
+
+            @wraps(compiled)
+            def replacement(*args):
+                invocation_counts[graph_role] = (
+                    invocation_counts.get(graph_role, 0) + 1
+                )
+                return compiled(*args)
+
+            return replacement
+
+        def fn(x):
+            return ((x.sin() * x).sum(),)
+
+        x = torch.randn(4, requires_grad=True)
+        expected_out = fn(x.detach())[0]
+        expected_grad = x.detach().sin() + x.detach() * x.detach().cos()
+        with functorch_config.patch(
+            compiled_graph_wrapper=wrapper,
+            force_non_lazy_backward_lowering=eager_backward,
+        ):
+            graph = make_fx(fn)(x)
+            compiled = aot_module_simplified(
+                graph, (x,), fw_compiler=nop, bw_compiler=nop
+            )
+            out = compiled(x)[0]
+            self.assertEqual(wrap_counts.get("backward", 0), int(eager_backward))
+            out.backward()
+            self.assertEqual(out, expected_out)
+            self.assertEqual(x.grad, expected_grad)
+
+            x.grad = None
+            out = compiled(x)[0]
+            out.backward()
+            self.assertEqual(out, expected_out)
+            self.assertEqual(x.grad, expected_grad)
+
+        self.assertEqual(wrap_counts, {"forward": 1, "backward": 1})
+        self.assertEqual(invocation_counts, {"forward": 2, "backward": 2})
+
+    def test_hook_is_excluded_from_aot_config_serialization(self) -> None:
+        def wrapper(compiled, graph_name, *, graph_role):
+            return compiled
+
+        with functorch_config.patch(compiled_graph_wrapper=wrapper):
+            serialized = pickle.loads(functorch_config.save_config())
+
+        self.assertNotIn("compiled_graph_wrapper", serialized)
+
+    def test_hook_runs_for_forward_backward_and_inference(self) -> None:
+        wrapped_graphs: list[tuple[str, str]] = []
+
+        def wrapper(compiled, graph_name, *, graph_role):
+            wrapped_graphs.append((graph_name, graph_role))
+            return compiled
+
+        with functorch_config.patch(compiled_graph_wrapper=wrapper):
+            train = aot_function(
+                lambda x: x.sin(), fw_compiler=nop, bw_compiler=nop
+            )
+            train(torch.randn(3, requires_grad=True)).sum().backward()
+
+            inference = aot_function(
+                lambda x: x.cos(),
+                fw_compiler=nop,
+                inference_compiler=nop,
+            )
+            inference(torch.randn(3))
+
+        self.assertCountEqual(
+            [graph_role for _, graph_role in wrapped_graphs],
+            ["forward", "backward", "inference"],
+        )
+        self.assertTrue(all(graph_name for graph_name, _ in wrapped_graphs))
 
 
 _pack_body_calls: list[int] = []
@@ -13034,6 +13351,7 @@ class TestEagerFusionModuleInfo(AOTTestCase):
 instantiate_parametrized_tests(TestAOTAutograd)
 instantiate_parametrized_tests(TestPartitioning)
 instantiate_parametrized_tests(TestAOTModuleSimplified)
+instantiate_parametrized_tests(TestCompiledGraphWrapper)
 instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")
 
@@ -13294,6 +13612,7 @@ class MockFXGraphCache:
         is_backward,
         constants,
         evaluate_guards,
+        fx_kwargs=None,
     ):
         gm = self.cache.get(key)
         if gm is not None:
