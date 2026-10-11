@@ -762,6 +762,10 @@ def _call_while_loop(
     hop_name: str,
 ) -> VariableTracker:
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
+    from torch._prims_common import compute_required_storage_length
+
+    from ..source import RandomValueSource
+    from .builder import wrap_fx_proxy
 
     args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
     cond_fn, body_fn, operands, additional_inputs = args
@@ -827,35 +831,44 @@ def _call_while_loop(
                 # See NOTE [unspecialize constant tensor carry]
                 if not carry.is_tensor():
                     raise AssertionError("Expected carry to be a tensor")
-                cloned_carry = carry.clone()
-                # type: ignore[attr-defined]
-                cloned_carry.proxy.node.meta["example_value"].constant = None
-                return cloned_carry
+                example = carry.as_proxy().node.meta["example_value"]
+                if isinstance(
+                    example, torch.nested._internal.nested_tensor.NestedTensor
+                ):
+                    cloned_carry = carry.call_method(
+                        tx, "clone", args=[], kwargs={}
+                    ).clone()
+                    cloned_carry.as_proxy().node.meta["example_value"].constant = None
+                    return cloned_carry
+                size, stride, offset = (
+                    example.size(),
+                    example.stride(),
+                    example.storage_offset(),
+                )
+                with tx.output.fake_mode:
+                    extent = compute_required_storage_length(size, stride, offset)
+                    example_value = torch.empty_strided(
+                        (extent,),
+                        (1,),
+                        dtype=example.dtype,
+                        device=example.device,
+                        requires_grad=example.requires_grad,
+                    ).as_strided(size, stride, offset)
+                cast("FakeTensor", example_value).constant = None
+                proxy = tx.output.current_tracer.create_graph_input(
+                    "child", carry.python_type(), example_value
+                )
+                return wrap_fx_proxy(tx, proxy, example_value=example_value)
 
-        # clone inputs across subgraphs, to avoid unbacked memoization in fake prop
+        # Preserve carry geometry without sharing unbacked memoization across subgraphs.
         cond_operands_seq = [
-            unspecialize_carried_inputs(
-                tx,
-                (
-                    carry.call_method(tx, "clone", args=[], kwargs={})
-                    if carry.is_tensor()
-                    else carry
-                ),
-            )
-            for carry in operands_seq
+            unspecialize_carried_inputs(tx, carry) for carry in operands_seq
         ]
         body_operands_seq = [
-            unspecialize_carried_inputs(
-                tx,
-                (
-                    carry.call_method(tx, "clone", args=[], kwargs={})
-                    if carry.is_tensor()
-                    else carry
-                ),
-            )
-            for carry in operands_seq
+            unspecialize_carried_inputs(tx, carry) for carry in operands_seq
         ]
 
+    random_calls_before_cond = len(tx.output.random_calls)
     # create cond subgrpahs
     (
         (cond_r, _cond_treespec),
@@ -929,6 +942,58 @@ def _call_while_loop(
                 ],
             )
         else:
+            # Replay can take a different path on the original operands. Drop
+            # speculative RNG inputs as well as calls so their types cannot be reused.
+            for index in reversed(
+                range(random_calls_before_cond, len(tx.output.random_calls))
+            ):
+                source = RandomValueSource(index)
+                random_var = tx.output.unspec_variable_map.pop(source.name)
+                random_proxy = random_var.as_proxy()
+                for tracer in reversed(tx.output.tracers):
+                    proxy = (
+                        random_proxy
+                        if tracer is tx.output.root_tracer
+                        else tracer.lifted_freevars.pop(random_proxy, None)
+                    )
+                    if proxy is None:
+                        continue
+                    tensor_inputs = [
+                        node
+                        for node in tracer.graph.find_nodes(op="placeholder")
+                        if isinstance(node.meta["example_value"], torch.Tensor)
+                    ]
+                    del tracer._input_versions_at_beginning[
+                        tensor_inputs.index(proxy.node)
+                    ]
+                    tracer.remove_node(proxy.node)
+                tx.output.input_source_to_sizes_strides.pop(source, None)
+            del tx.output.random_calls[random_calls_before_cond:]
+
+            input_versions = []
+            if not self.supports_input_mutation:
+                for arg in operands_seq + additional_inputs_seq:
+                    if arg.is_tensor():
+                        tensor_arg = cast("TensorVariable", arg)
+                        input_versions.append(
+                            (tensor_arg, tensor_arg._get_fake_version())
+                        )
+            cond_fn.call_function(tx, operands_seq + additional_inputs_seq, {})
+            if any(vt._get_fake_version() != version for vt, version in input_versions):
+                # gb_registry_linter requires these locals to match check_aliasing_and_input_mutation.
+                context = (
+                    f"Input mutation detected while replaying {hop_name}'s cond_fn"
+                )
+                name = hop_name
+                unimplemented(
+                    gb_type="Encountered input mutation during higher order op tracing",
+                    context=context,
+                    explanation=f"Higher order ops do not support input mutation. Found in {name}",
+                    hints=[
+                        "Consider using the debug context to change user code to avoid mutation.",
+                        "Please open an issue.",
+                    ],
+                )
             return operands
 
     # create body subgraph
