@@ -4,8 +4,11 @@ import copy
 import functools
 import itertools
 import os
+import re
 import tempfile
 import unittest
+import warnings
+import weakref
 from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
@@ -28,6 +31,8 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _default_all_gather_output_fn,
+    _default_reduce_scatter_input_fn,
     _div_if_needed,
     _get_gradient_divide_factors,
     DefaultAllGather,
@@ -264,9 +269,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 all_gather_stream=stream,
                 shard_placement_fn=shard_placement_fn,
             )
-        params = [nn.Parameter(torch.empty(12, 256, device=self.device))]
-        with self.assertRaisesRegex(NotImplementedError, "divisible"):
-            self._init_fsdp_param_group(params, 8, shard_placement_fn)
 
     def _test_all_gather(
         self,
@@ -321,7 +323,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         # Check all-gather correctness
         check_all_gathered_params(orig_params, module)
 
-        # For reshard after after forward as an int, further test emulating the
+        # For reshard after forward as an int, further test emulating the
         # pre-backward all-gather, which copies flat post-forward shards
         if type(reshard_after_forward) is not int:
             return
@@ -572,6 +574,162 @@ class TestFullyShardNativeCollectiveCopy(TestCase):
 instantiate_device_type_tests(
     TestFullyShardNativeCollectiveCopy, globals(), only_for=("cpu", "cuda", "xpu")
 )
+
+
+class TestFullyShardDefaultAllGatherOutputFn(TestCase):
+    def test_smaller_payload_fills_prefix(self, device):
+        # Two ranks gather two elements each into an output sized for four each
+        output = torch.full((8,), -1.0, device=device)
+        with warnings.catch_warnings():
+            # e.g. the deprecated resize of a mismatched out=
+            warnings.simplefilter("error")
+            _default_all_gather_output_fn(
+                torch.arange(4.0, device=device), [output], [2], [1], 2
+            )
+        expected = torch.tensor([0.0, 1, 2, 3, -1, -1, -1, -1], device=device)
+        self.assertEqual(output, expected)
+
+    def test_byte_buffer_reassembles_typed_rows(self, device):
+        # Mixed dtypes gather bytes: per rank, a (2, 2) chunk of a parameter
+        # gathered along dim 1, then two bf16 tags
+        base = torch.arange(4.0, device=device).view(2, 2)
+        chunks = [base + 10 * rank for rank in range(2)]
+        tags = [torch.full((2,), rank, device=device).bfloat16() for rank in range(2)]
+        all_gather_output = torch.cat(
+            [t.view(torch.uint8).view(-1) for pair in zip(chunks, tags) for t in pair]
+        )
+        outputs = [torch.empty(8, device=device), torch.empty_like(tags[0]).repeat(2)]
+        cat_dtypes: list[torch.dtype] = []
+
+        class RecordCatDtypes(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func == torch.ops.aten.cat.out:
+                    cat_dtypes.append(kwargs["out"].dtype)
+                return func(*args, **kwargs)
+
+        with RecordCatDtypes():
+            _default_all_gather_output_fn(
+                all_gather_output, outputs, [16, 4], [2, 1], 2
+            )
+        self.assertEqual(outputs[0].view(2, 4), torch.cat(chunks, dim=1))
+        self.assertEqual(outputs[1], torch.cat(tags))
+        # Typed rows get vectorized cat kernels that bytes may not
+        self.assertEqual(cat_dtypes, [torch.float32])
+
+
+instantiate_device_type_tests(
+    TestFullyShardDefaultAllGatherOutputFn, globals(), only_for=("cpu", "cuda", "xpu")
+)
+
+
+class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_copy(self):
+        # A size-1 shard mesh copies each sharded parameter into its output
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )["shard"]
+
+        def init_models():
+            model = nn.Sequential(
+                nn.Linear(8, 8, device=device_type), nn.Linear(8, 8, device=device_type)
+            )
+            ref_model = copy.deepcopy(model)
+            for module in (*model, model):
+                fully_shard(module, mesh=mesh)
+            return model, ref_model
+
+        inp = torch.randn((2, 8), device=device_type)
+        # The inner modules all-gather again in backward, which must keep the
+        # version counters of the parameters saved in forward
+        model, ref_model = init_models()
+        for _ in range(2):
+            model(inp).sum().backward()
+            ref_model(inp).sum().backward()
+            check_sharded_parity(self, ref_model, model)
+        # Outputs created under inference mode have no version counter
+        model, ref_model = init_models()
+        with torch.inference_mode():
+            for _ in range(2):
+                self.assertEqual(model(inp), ref_model(inp))
+
+    @skip_if_lt_x_gpu(1)
+    def test_copy_fns(self):
+        # Records what FSDP passes its copy functions, which delegate to the
+        # defaults, against Note [All-gather output fn] and
+        # Note [Reduce-scatter input fn]
+        model = nn.Sequential(
+            nn.Linear(8, 8, device=device_type), nn.Linear(8, 4, device=device_type)
+        )
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, shard_placement_fn=lambda param: Shard(param.ndim - 1))
+        all_gather_calls: list[tuple[list[int], list[int], int]] = []
+        copy_in_numels: list[int] = []
+        grad_refs: list[weakref.ReferenceType[torch.Tensor]] = []
+
+        def all_gather_output_fn(output, outputs, split_sizes, outer_sizes, ws):
+            self.assertFalse(torch.is_grad_enabled())
+            all_gather_calls.append((list(split_sizes), list(outer_sizes), ws))
+            _default_all_gather_output_fn(output, outputs, split_sizes, outer_sizes, ws)
+
+        def reduce_scatter_input_fn(unsharded_grads, shard_dims, world_size):
+            copy_in = _default_reduce_scatter_input_fn(
+                unsharded_grads, shard_dims, world_size
+            )
+            grad_refs.extend(weakref.ref(grad) for grad in unsharded_grads)
+
+            def recording_copy_in(reduce_scatter_input):
+                copy_in_numels.append(reduce_scatter_input.numel())
+                copy_in(reduce_scatter_input)
+
+            return recording_copy_in
+
+        group = fully_shard.state(model)._fsdp_param_group
+        group._all_gather_output_fn = all_gather_output_fn
+        group._reduce_scatter_input_fn = reduce_scatter_input_fn
+        inp = torch.randn((2, 8), device=device_type)
+        model(inp).sum().backward()
+        ref_model(inp).sum().backward()
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            dist.all_reduce(ref_param.grad)
+            ref_param.grad.div_(self.world_size)
+            self.assertEqual(param.grad.full_tensor(), ref_param.grad)
+        # The Shard(1) weights' padded sharded sizes are (8, 2) and (4, 2)
+        self.assertEqual(all_gather_calls, [([16, 2, 8, 1], [8, 1, 4, 1], 4)])
+        self.assertEqual(copy_in_numels, [27 * self.world_size])
+        # FSDP frees the gradients, including the copies that the fn reordered
+        self.assertEqual([ref() for ref in grad_refs], [None] * 4)
+
+    @skip_if_lt_x_gpu(1)
+    def test_post_forward_shard_dim1_needs_divisible_dim0(self):
+        # Post-forward shards chunk dim 0, which 2 ranks cannot split for 3 rows
+        def init_model():
+            model = nn.Sequential(nn.Linear(8, 3, bias=False, device=device_type))
+            fully_shard(
+                model[0],
+                reshard_after_forward=2,
+                shard_placement_fn=lambda param: Shard(1),
+            )
+            fully_shard(model)
+            return model
+
+        inp = torch.randn((2, 8), device=device_type)
+        msg = "Resharding the Shard(1) parameter 0.weight to 2 ranks after forward requires dim 0 of its size (3, 8) to be divisible by 2"
+        with self.assertRaisesRegex(NotImplementedError, re.escape(msg)):
+            init_model()(inp)
+        # Configurations that never reshard to the post-forward mesh still work
+        model = init_model()
+        model.set_reshard_after_forward(True)
+        model(inp).sum().backward()
 
 
 class TestFullyShardCommunication(FSDPTestContinuous):
