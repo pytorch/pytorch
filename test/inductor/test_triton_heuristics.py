@@ -22,7 +22,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     runOnRocm,
     skipIfRocm,
-    subtest,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -1635,7 +1634,6 @@ class TestFastLauncherDeviceSupport(TestCase):
             fast_launcher.assert_not_called()
 
 
-@instantiate_parametrized_tests
 class TestDynamicScaleRblockCacheInteraction(TestCase):
     """Tests for _dynamic_scale_rblock + autotune cache interaction.
 
@@ -1704,24 +1702,72 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
         autotuner._dynamic_scale_rblock()
 
-    @parametrize(
-        "cached_config_data",
-        [
-            subtest(None, name="missing"),
-            subtest(
-                {
+    def test_load_cached_autotuning_rejects_missing_triton_config(self):
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        original_configs = [triton_config({"x": 1}, 16, num_stages=1)]
+        configs_hash = hash_configs(original_configs)
+        result = _load_cached_autotuning(
+            {"configs_hash": configs_hash}, configs_hash, original_configs, {}
+        )
+
+        self.assertIsNone(result)
+
+    def test_load_cached_autotuning_rejects_unsupported_config_version(self):
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        original_configs = [triton_config({"x": 1}, 16, num_stages=1)]
+        configs_hash = hash_configs(original_configs)
+        result = _load_cached_autotuning(
+            {
+                "configs_hash": configs_hash,
+                "triton_config": {
                     "version": 2,
                     "kwargs": {"x": 1},
                     "compile_options": {"num_warps": 16, "num_stages": 1},
                 },
-                name="unsupported_version",
-            ),
-            subtest(
-                {"version": 1, "kwargs": {}, "compile_options": {}},
-                name="malformed",
-            ),
-            subtest(
-                {
+            },
+            configs_hash,
+            original_configs,
+            {},
+        )
+
+        self.assertIsNone(result)
+
+    def test_load_cached_autotuning_rejects_malformed_config(self):
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        original_configs = [triton_config({"x": 1}, 16, num_stages=1)]
+        configs_hash = hash_configs(original_configs)
+        result = _load_cached_autotuning(
+            {
+                "configs_hash": configs_hash,
+                "triton_config": {
+                    "version": 1,
+                    "kwargs": {},
+                    "compile_options": {},
+                },
+            },
+            configs_hash,
+            original_configs,
+            {},
+        )
+
+        self.assertIsNone(result)
+
+    def test_load_cached_autotuning_rejects_unknown_compile_option(self):
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        original_configs = [triton_config({"x": 1}, 16, num_stages=1)]
+        configs_hash = hash_configs(original_configs)
+        result = _load_cached_autotuning(
+            {
+                "configs_hash": configs_hash,
+                "triton_config": {
                     "version": 1,
                     "kwargs": {"x": 1},
                     "compile_options": {
@@ -1730,20 +1776,11 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
                         "unknown_backend_option": 1,
                     },
                 },
-                name="unknown_compile_option",
-            ),
-        ],
-    )
-    def test_load_cached_autotuning_rejects_invalid_config(self, cached_config_data):
-        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
-        from torch._inductor.runtime.triton_heuristics import hash_configs
-
-        original_configs = [triton_config({"x": 1}, 16, num_stages=1)]
-        configs_hash = hash_configs(original_configs)
-        data = {"configs_hash": configs_hash}
-        if cached_config_data is not None:
-            data["triton_config"] = cached_config_data
-        result = _load_cached_autotuning(data, configs_hash, original_configs, {})
+            },
+            configs_hash,
+            original_configs,
+            {},
+        )
 
         self.assertIsNone(result)
 
