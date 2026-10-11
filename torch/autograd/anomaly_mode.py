@@ -14,9 +14,11 @@ class detect_anomaly:
 
     This does two things:
 
-    - Running the forward pass with detection enabled will allow the backward
-      pass to print the traceback of the forward operation that created the failing
-      backward function.
+    - Running the forward pass with detection enabled will attach the traceback
+      of the forward operation that created the failing backward function to the
+      exception raised during backward. This makes the forward context visible
+      to error-reporting frameworks that surface exception messages rather than
+      warnings.
     - If ``check_nan`` is ``True``, any backward computation that generates "nan"
       value will raise an error. Default ``True``.
 
@@ -58,11 +60,6 @@ class detect_anomaly:
         ...     inp = torch.rand(10, 10, requires_grad=True)
         ...     out = run_fn(inp)
         ...     out.backward()
-            Traceback of forward call that caused the error:
-              File "tmp.py", line 53, in <module>
-                out = run_fn(inp)
-              File "tmp.py", line 44, in run_fn
-                out = MyFunc.apply(a)
             Traceback (most recent call last):
               File "<stdin>", line 4, in <module>
               File "/your/pytorch/install/torch/_tensor.py", line 93, in backward
@@ -73,6 +70,11 @@ class detect_anomaly:
                 return self._forward_cls.backward(self, *args)
               File "<stdin>", line 8, in backward
             RuntimeError: Some error in backward
+            Error detected in MyFuncBackward. Traceback of forward call that caused the error:
+              File "tmp.py", line 53, in <module>
+                out = run_fn(inp)
+              File "tmp.py", line 44, in run_fn
+                out = MyFunc.apply(a)
 
     """
 
