@@ -103,6 +103,7 @@ from .dicts import (
     DictKeysVariable,
     DictViewVariable,
     pyanydict_checkexact,
+    pydict_check,
     pyfrozendict_check,
     pyfrozendict_checkexact,
 )
@@ -3566,6 +3567,18 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0]
+            if not pydict_check(obj):
+                if isinstance(resolved_fn, types.WrapperDescriptorType):
+                    raise_type_error(
+                        tx,
+                        f"descriptor '{name}' requires a 'dict' object "
+                        f"but received a '{obj.python_type_name()}'",
+                    )
+                raise_type_error(
+                    tx,
+                    f"descriptor '{name}' for 'dict' objects doesn't apply "
+                    f"to a '{obj.python_type_name()}' object",
+                )
             if name in ("__eq__", "__ne__") and isinstance(obj, ConstDictVariable):
                 no_keywords(tx, f"dict.{name}", kwargs)
                 check_positional(tx, name, len(args), 2, 2)
