@@ -113,6 +113,9 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   c10::SymInt sym_storage_offset(const TensorImpl* /*self*/) const override {
     PANIC(sym_storage_offset);
   }
+  bool backed_size_oblivious() const override {
+    PANIC(backed_size_oblivious);
+  }
 
   // Just swallow the event, don't do anything
   void trace_gpu_event_creation(c10::DeviceType device_type, uintptr_t event)

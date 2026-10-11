@@ -1432,15 +1432,14 @@ def sanitize_pytest_xml(xml_file: str):
     tree.write(xml_file)
 
 
-def get_pytest_test_cases(argv: list[str]) -> dict[str, Any]:
-    """Maps the cwd-relative node id of each collected test to its pytest item."""
+def get_pytest_test_cases(argv: list[str]) -> list[str]:
     class TestCollectorPlugin:
         def __init__(self) -> None:
-            self.tests: dict[str, Any] = {}
+            self.tests: list[Any] = []
 
         def pytest_collection_finish(self, session):
             for item in session.items:
-                self.tests[session.config.cwd_relative_nodeid(item.nodeid)] = item
+                self.tests.append(session.config.cwd_relative_nodeid(item.nodeid))
 
     test_collector_plugin = TestCollectorPlugin()
     import pytest
@@ -1582,20 +1581,7 @@ def run_tests(argv=None):
 
             timeout = None if RERUN_DISABLED_TESTS else 15 * 60
 
-            started = time.time()
             exitcode, _ = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
-
-            if TEST_SAVE_TORCHCI_REPORTS and USE_PYTEST:
-                # A child that crashed or timed out couldn't record its test.
-                try:
-                    from torch.testing._internal.torchci import plugin, recovery
-
-                    prefix = os.path.join(TEST_SAVE_TORCHCI_REPORTS, sanitize_test_filename(argv[0]))
-                    test = plugin.identity(test_cases[test_case_full_name])
-                    recorded = recovery.effective_exit_code(exitcode, time.time() - started, timeout)
-                    recovery.record_dead_subprocess(prefix, test, recorded, started)
-                except Exception as e:
-                    print(f"torchci: could not record the test: {e!r}", file=sys.stderr)
 
             if exitcode != 0:
                 # This is sort of hacky, but add on relevant env variables for distributed tests.
@@ -2730,6 +2716,21 @@ def requires_cuda_p2p_access():
         "cuda p2p access is not available",
     )
 
+def requires_accelerator_p2p_access():
+    acc = torch.accelerator.current_accelerator(True)
+    if acc is not None and acc.type == "cuda":
+        return requires_cuda_p2p_access()
+    device_module = torch.get_device_module(acc) if acc is not None else None
+    can_access_peer = getattr(device_module, "can_device_access_peer", None)
+    num_devices = torch.accelerator.device_count()
+    p2p_access_available = can_access_peer is not None and num_devices >= 2 and all(
+        can_access_peer(i, j) for i in range(num_devices) for j in range(i + 1, num_devices)
+    )
+    return skip_but_pass_in_sandcastle_if(
+        not p2p_access_available,
+        "accelerator p2p access is not available",
+    )
+
 # Reverts the linalg backend back to default to make sure potential failures in one
 # test do not affect other tests
 def setLinalgBackendsToDefaultFinally(fn):
@@ -3004,8 +3005,8 @@ def requires_multigpu(fn):
     run under an internal test runner that has no pytest, where the skip alone
     is the whole behaviour.
     """
-    reason = "requires >= 2 GPUs"
-    skip = torch.cuda.device_count() < 2
+    reason = "requires >= 2 accelerators"
+    skip = torch.accelerator.device_count() < 2
 
     if isinstance(fn, type):
         if has_pytest:
@@ -3104,8 +3105,9 @@ def to_gpu(obj, type_map=None):
         if not obj.is_leaf:
             raise AssertionError("expected obj to be a leaf tensor")
         t = type_map.get(obj.dtype, obj.dtype)
+        device_type = torch.accelerator.current_accelerator(check_available=True).type
         with torch.no_grad():
-            res = obj.to(dtype=t, device="cuda", copy=True)
+            res = obj.to(dtype=t, device=device_type, copy=True)
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):

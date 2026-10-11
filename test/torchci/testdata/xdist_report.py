@@ -1,5 +1,5 @@
-"""A test that kills its xdist worker, between passing tests and a failing last
-test (TestReportCrashes.test_xdist_worker_crash)."""
+"""Tests run under xdist with -x (TestReportJsonl.test_xdist_maxfail): one kills
+its worker, and the last one fails."""
 
 import os
 

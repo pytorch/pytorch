@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
-import re
-import signal
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -26,22 +23,17 @@ class TestId(NamedTuple):
     declared_case_name: str
 
 
-def nodeid_identity(nodeid: str) -> TestId:
-    """A test's identity from its node id alone: for a pytest-cpp gtest, whose node
-    id is ``<binary>::<suite>.<test>``, and for a Python test whose xdist worker died
-    before reporting it, so plugin.identity never saw its item. A gtest is
-    ``cpp/<binary>``, its suite and test name, with a value-parameterized ``/N``
-    dropped from the declared name. A Python test's declared name only drops pytest
-    parameters."""
-    path, _, rest = nodeid.partition("::")
-    if not path.endswith(".py"):
-        suite, _, case_name = rest.partition(".")
-        declared = re.sub(r"/\d+$", "", case_name)
-        return TestId(f"cpp/{Path(path).stem}", suite, case_name, "cpp", declared)
-    head, bracket, params = rest.partition("[")
-    parts = head.split("::")
-    suite = parts[-2] if len(parts) > 1 else ""
-    return TestId(path, suite, parts[-1] + bracket + params, "python", parts[-1])
+def gtest_identity(binary: str, name: str) -> TestId:
+    """A pytest-cpp gtest's identity, from its binary and gtest name.
+
+    pytest-cpp names a gtest ``<suite>.<test>`` from --gtest_list_tests. gtest
+    suite and test names are C++ identifiers, so neither contains ".", and the
+    split is exact. gtest adds an instantiation's ``Prefix/`` and a typed suite's
+    ``/N`` to the suite, and a value-parameterized test's ``/<param>`` to the test
+    name; the declared name drops that ``/<param>``."""
+    suite, _, case_name = name.partition(".")
+    declared = case_name.partition("/")[0]
+    return TestId(f"cpp/{Path(binary).stem}", suite, case_name, "cpp", declared)
 
 
 def report_path(prefix: str, report_uuid: str) -> str:
@@ -89,14 +81,6 @@ def run_record(
         "ended_at": int(ended * 1000),
         "properties": {},
     }
-
-
-def exit_summary(exit_code: int) -> str:
-    """The outcome summary of a run whose process exited with ``exit_code``."""
-    summary = f"the test process exited with code {exit_code}"
-    with contextlib.suppress(ValueError):
-        summary += f" ({signal.Signals(-exit_code).name})"
-    return summary
 
 
 def line(record: dict[str, Any]) -> str:
