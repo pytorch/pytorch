@@ -2954,14 +2954,11 @@ class TestPrecompile(TestCase):
             backend_id: EagerCacheArtifact(key=backend_id, content=backend)
             for backend_id, backend in package.cached_backends.items()
         }
-        torch._dynamo.reset()
-        self._scrub_minted(step.__globals__)
-        binding = {"defaults": None, "kwdefaults": None}
-        build = self._multigraph_driver(frames, backends, binding)
         # Dynamo records a callback the continuation calls while it runs eager,
         # trivial and with no resume names. Defined in the capturing script, its
         # record names __main__; nothing names it, so that module is never
-        # imported and the load does not refuse.
+        # imported and the load does not refuse. Captured before the scrub, so
+        # the scrub also removes the globals this capture mints.
         cb_package = CompilePackage(_callback_step)
         torch._dynamo.optimize(
             backend="eager", package=cb_package, guard_filter_fn=default_guard_filter_fn
@@ -2969,6 +2966,10 @@ class TestPrecompile(TestCase):
         *_, recorded = _multigraph_frames(cb_package.cache_entry())
         self.assertEqual((recorded["trivial"], recorded["resume_names"]), (True, []))
         callback = {**recorded, "python_module": "__main__"}
+        torch._dynamo.reset()
+        self._scrub_minted(step.__globals__)
+        binding = {"defaults": None, "kwdefaults": None}
+        build = self._multigraph_driver(frames, backends, binding)
         with mock.patch.dict(build.__globals__, {"_FRAMES": _b64([*frames, callback])}):
             forward = build()
         served = torch.nn.Linear(4, 4)
@@ -5998,6 +5999,33 @@ class TestPrecompileNoCompilation(TestCase):
             MultiKernelCall.benchmark_sub_kernels(multi_kernel)
         benchmark.assert_not_called()
         self.assertEqual(multi_kernel.mock_calls, [])
+
+    def test_no_compilation_runs_a_cached_multi_kernel_choice(self):
+        from torch._inductor.codegen.multi_kernel import MultiKernelCall
+        from torch._inductor.utils import fresh_cache
+
+        def kernels():
+            return [
+                types.SimpleNamespace(
+                    fn=types.SimpleNamespace(cache_key=f"k{i}"),
+                    size_hints={},
+                    triton_meta={},
+                    inductor_meta={"kernel_name": f"k{i}"},
+                    run=mock.Mock(),
+                )
+                for i in range(2)
+            ]
+
+        arg_index = {0: [slice(0, 1)], 1: [slice(0, 1)]}
+        with fresh_cache():
+            stored = MultiKernelCall("mk", kernels(), arg_index)
+            stored.picked_kernel = 1
+            stored.store_cache()
+            cached = MultiKernelCall("mk", kernels(), arg_index)
+            with torch.compiler.precompile.no_compilation():
+                cached.run("arg")
+        cached._kernels[1].run.assert_called_once_with("arg")
+        cached._kernels[0].run.assert_not_called()
 
     @parametrize("backend", ("cutedsl", "flydsl", "pallas", "nv_universal_gemm"))
     def test_no_compilation_loads_alternate_runtime_kernel_in_process(self, backend):
