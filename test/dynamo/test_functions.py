@@ -5207,6 +5207,21 @@ class GraphModule(torch.nn.Module):
             ],
         )
 
+    def test_construct_singleton_types(self):
+        def fn():
+            results = []
+            for singleton in (None, Ellipsis, NotImplemented):
+                cls = type(singleton)
+                results.append(cls() is singleton)
+                for args, kwargs in (((1, 2), {}), ((), {"a": 1, "b": 2})):
+                    try:
+                        cls(*args, **kwargs)
+                    except TypeError as exc:
+                        results.append(str(exc))
+            return results
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
     @make_test
     def test_range_iterator(a, b):
         it = range(5).__iter__()
