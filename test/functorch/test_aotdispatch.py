@@ -6222,6 +6222,7 @@ class <lambda>(torch.nn.Module):
         getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
         getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
+        alias: "f32[1, 3, 3, 3]" = torch.ops.aten.alias.default(relu);  alias = None
         alias_1: "f32[1, 3, 3, 3]" = torch.ops.aten.alias.default(relu)
         sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
         alias_2: "f32[1, 3, 3, 3]" = torch.ops.aten.alias.default(relu);  relu = None
@@ -6354,6 +6355,109 @@ class <lambda>(torch.nn.Module):
         grads_test = bw_g(*activations, *grad_outs)
         for g_ref, g_test in zip(grads_ref, grads_test):
             self.assertEqual(g_ref, g_test)
+
+    def test_aot_export_simplified_preserves_export_default_cia_ops(self):
+        def f(x):
+            return (
+                F.interpolate(x, size=(8, 8), mode="bilinear", align_corners=False),
+            )
+
+        x = torch.randn(1, 3, 4, 4)
+
+        gm = aot_export_joint_simple(
+            f,
+            [x],
+            trace_joint=False,
+            decompositions=torch.export.default_decompositions(),
+        )
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertEqual(targets, [torch.ops.aten.upsample_bilinear2d.vec])
+
+    def test_aot_export_simplified_empty_decomp_table_preserves_cia_ops(self):
+        def f(x, y):
+            return (torch.matmul(x, y),)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 4)
+
+        gm = aot_export_joint_simple(
+            f,
+            [x, y],
+            trace_joint=False,
+            decompositions={},
+        )
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertEqual(targets, [torch.ops.aten.matmul.default])
+
+    def test_aot_export_simplified_none_decomp_table_keeps_raw_semantics(self):
+        def f(x, y):
+            return (torch.matmul(x, y),)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 4)
+
+        gm = aot_export_joint_simple(
+            f,
+            [x, y],
+            trace_joint=False,
+            decompositions=None,
+        )
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertEqual(targets, [torch.ops.aten.mm.default])
+
+    def test_aot_export_simplified_joint_keeps_gradients(self):
+        # Preserved CIA ops have no autograd kernel, so joint tracing must
+        # keep decomposing them instead of dropping the gradients.
+        def f(x, y):
+            return (torch.matmul(x, y).sum(),)
+
+        x = torch.randn(2, 3, requires_grad=True)
+        y = torch.randn(3, 4, requires_grad=True)
+
+        gm = aot_export_joint_simple(
+            f,
+            [x, y],
+            trace_joint=True,
+            decompositions={},
+        )
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertNotIn(torch.ops.aten.matmul.default, targets)
+        output_node = next(n for n in gm.graph.nodes if n.op == "output")
+        self.assertTrue(all(out is not None for out in output_node.args[0]))
+        self.assertEqual(len(output_node.args[0]), 3)
+
+    def test_aot_export_simplified_keeps_existing_fake_rules(self):
+        from torch._subclasses.fake_impls import _is_op_registered_to_fake_rule
+
+        def f(x, y):
+            return (torch.matmul(x, y),)
+
+        ops = [torch.ops.aten.item.default, torch.ops.aten.nonzero_numpy.default]
+        self.assertTrue(all(_is_op_registered_to_fake_rule(op) for op in ops))
+        aot_export_joint_simple(
+            f,
+            [torch.randn(2, 3), torch.randn(3, 4)],
+            trace_joint=False,
+            decompositions={},
+        )
+        self.assertTrue(all(_is_op_registered_to_fake_rule(op) for op in ops))
+
+    def test_aot_export_module_keeps_raw_decomposition_semantics(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return (torch.matmul(x, y),)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 4)
+
+        gm, _ = aot_export_module(
+            M(),
+            [x, y],
+            trace_joint=False,
+            decompositions={},
+        )
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertEqual(targets, [torch.ops.aten.mm.default])
 
     def test_aot_export_metadata_mutation_banned(self):
         def fn(p, x):
