@@ -6042,6 +6042,28 @@ class TestExportPython(TestCase):
         self.assertEqual(m.running_mean, ref.running_mean)
         self.assertEqual(m.running_var, ref.running_var)
 
+    def test_clobbered_non_artifact_source_raises_clean_error(self, device):
+        # A hand-edit that drops forward() names the path rather than raising a raw
+        # KeyError.
+        path = self._tmp_path("clobber.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        self.assertEqual(run(x), x + 1)
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("x = 1\n")
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run2(inp):
+            return inp + 1
+
+        with self.assertRaisesRegex(PrecompileError, "clobber.py defines no forward"):
+            run2(x)
+
     def test_kwargs_bound_positionally(self, device):
         path = self._tmp_path("kw.py")
         x = make_tensor((4,), device=device, dtype=torch.float32)
@@ -6181,6 +6203,85 @@ class TestExportPython(TestCase):
         self.assertEqual(run2(x), x + 1)
         with open(path, encoding="utf-8") as f:
             self.assertEqual(f.read(), first)
+
+    def test_artifact_raising_at_module_scope_is_a_distinct_error(self, device):
+        # The third arm of _load's taxonomy: not a syntax/structure problem and not a
+        # failed import, but source that blows up while being exec'd.
+        path = self._tmp_path("raises.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        self.assertEqual(run(x), x + 1)
+        with open(path, encoding="utf-8") as f:
+            code = f.read()
+        # A KeyError raised by the file is not mistaken for a missing forward().
+        for raised in ("RuntimeError('boom')", "KeyError('boom')"):
+            with self.subTest(raised):
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(f"raise {raised}\n" + code)
+
+                @torch.compiler.export_python(path=path, backend="eager")
+                def loaded(inp):
+                    return inp + 1
+
+                with self.assertRaisesRegex(
+                    PrecompileError, "unexpected error occurred .*boom"
+                ):
+                    loaded(x)
+
+    def test_artifact_deleted_between_gate_and_read_regenerates(self, device):
+        # A peer deleting the artifact to force a regenerate must not surface as a bare
+        # FileNotFoundError from behind the presence gate.
+        path = self._tmp_path("toctou.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def seed(inp):
+            return inp + 1
+
+        self.assertEqual(seed(x), x + 1)
+
+        real_exists = os.path.exists
+
+        def exists_then_delete(p):
+            result = real_exists(p)
+            if p == path and result:
+                os.remove(p)
+            return result
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def racer(inp):
+            return inp + 1
+
+        with mock.patch.object(os.path, "exists", exists_then_delete):
+            self.assertEqual(racer(x), x + 1)
+        self.assertTrue(real_exists(path))
+
+    def test_path_naming_a_directory_is_a_clean_error(self, device):
+        path = self._tmp_path("adirectory.py")
+        os.makedirs(path)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        with self.assertRaisesRegex(PrecompileError, "readable UTF-8 file rather"):
+            run(make_tensor((4,), device=device, dtype=torch.float32))
+
+    def test_artifact_that_is_not_utf8_is_a_clean_error(self, device):
+        path = self._tmp_path("latin1.py")
+        with open(path, "wb") as f:
+            f.write(b"# \xff\n")
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        with self.assertRaisesRegex(PrecompileError, "readable UTF-8 file\\."):
+            run(make_tensor((4,), device=device, dtype=torch.float32))
 
     def test_none_and_nested_module_arguments_name_their_own_cause(self, device):
         x = make_tensor((4,), device=device, dtype=torch.float32)

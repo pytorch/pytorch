@@ -3119,7 +3119,14 @@ def _make_inlined_forward(
     else:
         module_ns = {"__name__": "_precompiled_artifact", "__file__": filename}
         exec(compile(python_code, filename, "exec"), module_ns)
-    return cast("Callable[..., object]", module_ns["forward"])
+    forward = module_ns.get("forward")
+    if forward is None:
+        where = filename or "the precompile source"
+        raise PrecompileError(
+            f"precompile: {where} defines no forward(); a hand-edit may have dropped or "
+            "renamed it."
+        )
+    return cast("Callable[..., object]", forward)
 
 
 # The os.link failures that mean "this filesystem does not do hard links" (a
