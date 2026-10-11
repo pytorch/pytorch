@@ -1669,6 +1669,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
 
+    @skipIfNoONEDNN
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
