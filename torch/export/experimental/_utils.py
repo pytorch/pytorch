@@ -188,6 +188,42 @@ def _get_main_cpp_file(
     return ib.getvalue()
 
 
+# TheRock ships these outside torch/lib. libtorch's $ORIGIN RPATH finds them
+# at process start, but GNU ld does not search that RPATH while linking a new
+# executable, so the sample binary needs the directories on the link line too.
+_ROCM_SDK_LINK_DIRS = (
+    "../_rocm_sdk_core/lib",
+    "../_rocm_sdk_core/lib/host-math/lib",
+    "../_rocm_sdk_core/lib/rocm_sysdeps/lib",
+    "../_rocm_sdk_libraries/lib",
+    "../_rocm_sdk_devel/lib",
+    "../_rocm_sdk_devel/lib/host-math/lib",
+    "../_rocm_sdk_devel/lib/rocm_sysdeps/lib",
+)
+
+
+def _rocm_sdk_link_lines() -> list[str]:
+    lines = [
+        "if(DEFINED TORCH_INSTALL_PREFIX)",
+        "  foreach(_rocm_rel IN ITEMS",
+    ]
+    lines.extend(f'    "{rel}"' for rel in _ROCM_SDK_LINK_DIRS)
+    lines.extend(
+        [
+            "  )",
+            '    set(_rocm_dir "${TORCH_INSTALL_PREFIX}/${_rocm_rel}")',
+            '    if(IS_DIRECTORY "${_rocm_dir}")',
+            "      target_link_options(main PRIVATE",
+            '        "LINKER:-rpath-link,${_rocm_dir}"',
+            '        "LINKER:-rpath,${_rocm_dir}")',
+            "    endif()",
+            "  endforeach()",
+            "endif()",
+        ]
+    )
+    return lines
+
+
 def _get_make_file(package_name: str, model_names: list[str], device_type: str) -> str:
     ib = IndentedBuffer()
 
@@ -235,4 +271,8 @@ def _get_make_file(package_name: str, model_names: list[str], device_type: str) 
             ib.writeline("target_link_libraries(main PRIVATE cuda ${CUDA_LIBRARIES})")
     elif device_type == "xpu":
         ib.writeline("target_link_libraries(main PRIVATE sycl ze_loader)")
+
+    if test_configs.use_libtorch and torch.version.hip:
+        ib.newline()
+        ib.writelines(_rocm_sdk_link_lines())
     return ib.getvalue()
