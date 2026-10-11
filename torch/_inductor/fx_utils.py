@@ -866,6 +866,8 @@ def get_mutated_storages(gm: torch.fx.GraphModule) -> OrderedSet[int]:
             if storage is not None:
                 storages.add(storage)
     return storages
+
+
 def _same_size_stride_and_storage_offset(
     lhs: torch.Tensor,
     rhs: torch.Tensor,

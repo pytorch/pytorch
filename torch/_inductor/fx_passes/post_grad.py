@@ -1483,13 +1483,9 @@ def true_noop(*args, **kwargs):
 def _collect_output_storage(
     graph: torch.fx.Graph,
 ) -> OrderedSet[int | None]:
-    output_node = graph.output_node()
-    outputs = output_node.args[0]
-    if not isinstance(outputs, (list, tuple)):
-        outputs = (outputs,)
     return OrderedSet(
         get_node_storage(output)
-        for output in outputs
+        for output in pytree.tree_leaves(graph.output_node().args[0])
         if isinstance(output, torch.fx.Node)
     )
 
