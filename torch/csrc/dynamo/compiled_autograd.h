@@ -1135,8 +1135,6 @@ struct IValuePacker {
       return at::SymBoolType::get();
     } else if constexpr (::std::is_same_v<T, c10::Layout>) {
       return at::LayoutType::get();
-    } else if constexpr (::std::is_same_v<T, ::std::string>) {
-      return at::StringType::get();
     } else if constexpr (::std::is_same_v<T, at::Device>) {
       return at::DeviceObjType::get();
     } else if constexpr (::std::is_same_v<T, at::Scalar>) {
@@ -1159,6 +1157,26 @@ struct IValuePacker {
       return at::NoneType::get();
     }
 #endif
+  }
+};
+
+// NB: This is a full specialization rather than a branch in the primary
+// template's packed_type() if-constexpr chain: the (fully-qualified)
+// ::std::is_same_v<T, ::std::string> comparison in that chain triggers
+// "error C2872: 'std': ambiguous symbol" when the header is compiled by
+// nvcc/hipcc on Windows in downstream extension builds, which do not define
+// USE_CUDA/USE_ROCM and therefore do not take the carve-out above.
+// See https://github.com/pytorch/pytorch/issues/148317.
+template <>
+struct IValuePacker<std::string> {
+  static at::IValue pack(const std::string& t) {
+    return t;
+  }
+  static std::string unpack(const at::IValue& t) {
+    return t.to<std::string>();
+  }
+  static at::TypePtr packed_type() {
+    return at::StringType::get();
   }
 };
 
