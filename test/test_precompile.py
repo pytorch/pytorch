@@ -7592,6 +7592,212 @@ class TestExportPython(TestCase):
                 run(x.clone())
                 run(x.clone())
 
+    def test_artifact_defines_each_kernel_once(self, device):
+        # A kernel emitted twice under one name means the first copy is dead: a reader
+        # tunes the block size they find first and nothing happens. For a file whose
+        # purpose is being edited, a silent no-op is the worst possible response.
+        path = self._tmp_path("dedupe.py")
+
+        def fn(a, b):
+            return (a * 2 + b).relu()
+
+        x = make_tensor((4096,), device=device, dtype=torch.float32)
+        y = make_tensor((4096,), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(fn)(x, y)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        # Both forms: a hoisted kernel is a module-level def, a non-hoistable one is
+        # still bound by an async_compile call.
+        defined = re.findall(r"^def (triton_\w+)\(", source, re.MULTILINE)
+        defined += re.findall(r"^(\w+) = async_compile\.", source, re.MULTILINE)
+        self.assertTrue(defined, "no kernel definition found in the artifact")
+        for name in set(defined):
+            self.assertEqual(
+                defined.count(name),
+                1,
+                f"{name} is defined more than once; the earlier copies are dead code",
+            )
+
+    def test_artifact_header_invites_editing_and_loads_as_documented(self, device):
+        # The file's whole purpose is being hand-tuned, so a "do not edit" banner is
+        # actively wrong -- and the header's own load snippet has to work on an artifact
+        # whose kernel has been hoisted to module level, which a bare
+        # exec(open(...).read()) does not: @triton.jit resolves its source by filename.
+        path = self._tmp_path("header.py")
+
+        def fn(inp):
+            return inp.sin() + 1
+
+        x = make_tensor((8,), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(fn)(x)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        self.assertNotIn("do not edit", source)
+        self.assertIn("COMPILER_EXPORT_PYTHON_CHECK=1 compares against eager", source)
+        if torch.device(device).type == "cpu":
+            self.assertNotIn("stream=... argument", source)
+        self.assertIn("Editing it is supported", source)
+        # the documented snippet
+        self.assertIn('ns = runpy.run_path("this_file.py")', source)
+        self.assertEqual(runpy.run_path(path)["forward"](x), fn(x))
+
+    @unittest.skipUnless(TEST_CUDA, "needs a Triton kernel to break")
+    def test_broken_kernel_names_the_artifact_and_its_line(self, device):
+        # A typo in a hoisted Triton kernel is a plain Python SyntaxError against the
+        # artifact, and the reader needs the exact line in the file they edited.
+        if torch.device(device).type != "cuda":
+            self.skipTest("Triton kernels are the CUDA codegen path")
+        path = self._tmp_path("broken_kernel.py")
+
+        def fn(a, b):
+            return (a * 2 + b).relu()
+
+        x = make_tensor((4096,), device=device, dtype=torch.float32)
+        y = make_tensor((4096,), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(fn)(x, y)
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines(True)
+        target = next(
+            i for i, line in enumerate(lines) if line.strip().startswith("tl.store(")
+        )
+        lines.insert(target, "    broken = tl.load(\n")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("".join(lines))
+
+        with self.assertRaises(PrecompileError) as caught:
+            torch.compiler.export_python(path=path)(fn)(x, y)
+        message = str(caught.exception)
+        self.assertIn(path, message)
+        # Kernels are hoisted to module level, so this is an ordinary Python SyntaxError
+        # against the artifact and the line is exact -- no cache file, no line mapping.
+        self.assertIn("does not parse at line", message)
+        reported = re.search(r"does not parse at line (\d+)", message)
+        self.assertIsNotNone(reported, message)
+        self.assertEqual(int(reported.group(1)), target + 1, message)
+
+    def test_kernel_compile_error_maps_the_cache_line_to_the_artifact(self, device):
+        if torch.device(device).type != "cpu":
+            self.skipTest("a string and file unit test; one device is enough")
+        from torch._inductor.exc import CppCompileError
+        from torch.compiler._export_python import _explain_kernel_compile_error
+
+        kernel = [
+            "#include <cstdint>",
+            'extern "C" void kernel(float* out, int64_t n)',
+            "{",
+            "    for (int64_t i = 0; i < n; ++i) {",
+            "        float a = 1.0f;",
+            "",
+            "        out[i] = a +;",
+            "    }",
+            "}",
+        ]
+        lines = ["import torch", "", "src = r'''", *kernel, "'''", "x = 1"]
+        artifact = "\n".join(lines)
+        with (
+            tempfile.TemporaryDirectory(prefix="kernel_cache_") as d,
+            mock.patch.dict(os.environ, {"TORCHINDUCTOR_CACHE_DIR": d}),
+        ):
+            for ext in ("cpp", "hpp"):
+                cache = os.path.join(d, f"ckernel.{ext}")
+                with open(cache, "w", encoding="utf-8") as f:
+                    f.write("\n".join(kernel) + "\n")
+                error = f"{cache}:7:22: error: expected expression"
+                for message in (error, f"In file included from {d}/hdr.h:2,\n{error}"):
+                    explained = _explain_kernel_compile_error(
+                        artifact, "/p/a.py", CppCompileError(["g++", cache], message)
+                    )
+                    self.assertIn("around line 10: expected expression.", explained)
+            twice = artifact + "\n" + "\n".join(kernel)
+            explained = _explain_kernel_compile_error(
+                twice, "/p/a.py", CppCompileError(["g++"], f"{cache}:7:22: error: x")
+            )
+            self.assertNotIn("around line", explained)
+            self.assertIn("Edit it there, not in the cache file", explained)
+            # Anything that is not a located C++ compile error keeps the generic message,
+            # which carries the original error, even if it names a cache path.
+            for exc in (
+                PermissionError(13, "Permission denied", f"{d}/ab"),
+                RuntimeError(f"{cache}:7:22: error: x"),
+                CppCompileError(["g++", cache], "ld: cannot find -lfoo"),
+                CppCompileError(["g++", cache], "/usr/include/x.h:3:1: error: y"),
+            ):
+                self.assertIsNone(
+                    _explain_kernel_compile_error(artifact, "/p/a.py", exc)
+                )
+
+    def test_broken_cpp_kernel_names_the_artifact_and_its_line(self, device):
+        if torch.device(device).type != "cpu":
+            self.skipTest("C++ kernels are the CPU codegen path")
+        path = self._tmp_path("broken_cpp.py")
+
+        def fn(a, b):
+            return (a * 2 + b).relu().sum(dim=-1)
+
+        x = make_tensor((64, 64), device=device, dtype=torch.float32)
+        y = make_tensor((64, 64), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(fn)(x, y)
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines(True)
+        if not any("async_compile.cpp" in line for line in lines):
+            self.skipTest("no C++ kernel in this artifact")
+        start = next(i for i, s in enumerate(lines) if "cpp_pybinding(" in s)
+        end = next(i for i in range(start + 1, len(lines)) if "'''" in lines[i])
+        target = max(i for i in range(start, end) if lines[i].strip() == "}")
+        lines.insert(target, "    int broken = ;\n")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("".join(lines))
+        with self.assertRaises(PrecompileError) as caught:
+            torch.compiler.export_python(path=path)(fn)(x, y)
+        message = str(caught.exception)
+        self.assertIn(path, message)
+        self.assertIn(f"around line {target + 1}:", message)
+
+    @unittest.skipUnless(TEST_CUDA, "Triton kernels are the hoisted backend")
+    def test_artifact_defines_its_kernels_as_code(self, device):
+        # A kernel inside a string cannot be edited cleanly or reported against. What
+        # is left of AsyncCompile is the wait, which compiles the module-level defs on
+        # the worker pool when the file loads.
+        if torch.device(device).type != "cuda":
+            self.skipTest("only Triton kernels become module-level code")
+        path = self._tmp_path("light.py")
+
+        def fn(a, b):
+            return (a * 2 + b).relu().sum(dim=-1)
+
+        x = make_tensor((256, 512), device=device, dtype=torch.float32)
+        y = make_tensor((256, 512), device=device, dtype=torch.float32)
+        expected = torch.compiler.export_python(path=path)(fn)(x, y)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        self.assertRegex(source, r"(?m)^def triton_\w+\(")
+        self.assertNotIn("= async_compile.triton(", source)
+        self.assertIn("async_compile.wait(globals())", source)
+        # and it still runs, from a fresh load
+        self.assertEqual(torch.compiler.export_python(path=path)(fn)(x, y), expected)
+
+    def test_non_hoistable_backend_keeps_its_compile_machinery(self, device):
+        # Only Triton kernels become module-level code. A C++ kernel cannot: the text is
+        # C++ and producing the value needs a compiler invocation, so its artifact keeps
+        # the AsyncCompile it binds through. Dropping it by mode rather than by need
+        # would strand a live reference and the artifact would not load at all.
+        if torch.device(device).type != "cpu":
+            self.skipTest("C++ kernels are the non-hoistable backend")
+        path = self._tmp_path("cpp_backend.py")
+
+        def fn(a, b):
+            return (a * 2 + b).relu().sum(dim=-1)
+
+        x = make_tensor((4096,), device=device, dtype=torch.float32)
+        y = make_tensor((4096,), device=device, dtype=torch.float32)
+        expected = torch.compiler.export_python(path=path)(fn)(x, y)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        if "async_compile.cpp" not in source:
+            self.skipTest("graph did not lower to a C++ kernel")
+        self.assertIn("AsyncCompile()", source)
+        self.assertEqual(torch.compiler.export_python(path=path)(fn)(x, y), expected)
+
     def test_meta_module_tensor_does_not_crash_the_autocast_stamp(self, device):
         # autocast does not model meta (is_autocast_enabled("meta") raises), and a module
         # can carry a meta tensor it never reads (deferred init), so the stamp must skip
@@ -8228,6 +8434,24 @@ class TestExportPython(TestCase):
         torch.compiler.export_python(path=path)(fn)(x, w, b)
         torch.compiler.export_python(path=path)(fn)(x, w, b)
         self.assertEqual(sorted(os.listdir(directory)), ["artifact.py"])
+
+    def test_banner_tells_you_to_drop_the_stream_argument(self, device):
+        # The banner's migration recipe (KERNEL.run -> KERNEL[grid]) omitted the one
+        # thing that actually breaks: the line being replaced passes stream=raw_streamN,
+        # and triton rejects it. A cold agent copied it forward and got an AssertionError.
+        if torch.device(device).type != "cuda":
+            self.skipTest("the recipe is about triton launch sites")
+        path = self._tmp_path("banner.py")
+
+        def fn(x):
+            return (x * 2).relu()
+
+        x = make_tensor((1024,), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(fn)(x)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        self.assertRegex(source, r"\.run\(.*, stream=raw_stream\d+\)")
+        self.assertIn("AND delete the\n#     stream=... argument", source)
 
     def test_a_missing_or_malformed_cpu_isa_stamp_warns(self, device):
         # The only checked stamp that raises must not go quiet when a hand-edit drops
