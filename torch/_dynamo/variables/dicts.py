@@ -499,7 +499,7 @@ class ConstDictVariable(VariableTracker):
         try:
             return HashableTracker(key)
         except ObservedTypeError:
-            if sys.version_info < (3, 15):
+            if sys.version_info < (3, 14):
                 raise
             error = tx.exn_vt_stack.get_raised_exception()
             message = generic_str(tx, error).as_python_constant()
@@ -984,6 +984,16 @@ class OrderedDictVariable(ConstDictVariable):
     # gives move_to_end/popitem(last=) below their real backing storage.
     items: "collections.OrderedDict[HashableTracker, VariableTracker]"  # pyrefly: ignore[bad-override]
 
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, polyfills.odict_update), [self, *args], kwargs
+        )
+
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
@@ -1127,11 +1137,11 @@ class OrderedDictVariable(ConstDictVariable):
         )
         if owner.python_type() is collections.OrderedDict:
             new = OrderedDictVariable({}, mutation_type=ValueMutationNew())
-            ConstDictVariable.dict_update(new, tx, [left], {})
+            OrderedDictVariable.tp_init_impl(new, tx, [left], {})
         else:
             cls = VariableTracker.build(tx, type).call_function(tx, [owner], {})
             new = cast(ConstDictVariable, cls.call_function(tx, [left], {}))
-        ConstDictVariable.dict_update(new, tx, [right], {})
+        OrderedDictVariable.tp_init_impl(new, tx, [right], {})
         return new
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
