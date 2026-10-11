@@ -17,7 +17,6 @@ import hashlib
 import importlib
 import inspect
 import io
-import itertools
 import json
 import logging
 import os
@@ -87,7 +86,6 @@ class SerializedCode:
     co_linetable: bytes | None = None
     co_qualname: str | None = None
     co_exceptiontable: bytes | None = None
-    co_lnotab: str | None = None
 
     @classmethod
     @_code_cache
@@ -703,15 +701,14 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
         raise PackageError(f"Cannot find module for code {code}")
 
     toplevel: Any = module
-    if sys.version_info >= (3, 11):
-        parts = code.co_qualname.split(".")
+    parts = code.co_qualname.split(".")
 
-        for part in parts:
-            if not hasattr(toplevel, part):
-                _raise_resolution_error(code, toplevel)
-            toplevel = getattr(toplevel, part)
-            if inspect.isfunction(toplevel) or inspect.ismethod(toplevel):
-                break
+    for part in parts:
+        if not hasattr(toplevel, part):
+            _raise_resolution_error(code, toplevel)
+        toplevel = getattr(toplevel, part)
+        if inspect.isfunction(toplevel) or inspect.ismethod(toplevel):
+            break
     seen = set()
 
     def _find_code_source(obj: Any) -> str | None:
@@ -759,34 +756,6 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                         toplevel = obj
                         return f".__closure__[{i}].cell_contents{res}"
 
-        if sys.version_info < (3, 11):
-            if inspect.ismodule(obj):
-                for value in obj.__dict__.values():
-                    if not (
-                        inspect.isfunction(value)
-                        or inspect.isclass(value)
-                        or inspect.ismethod(value)
-                    ):
-                        continue
-                    if (res := _find_code_source(value)) is not None:
-                        return res
-
-            if inspect.isclass(obj):
-                for name in itertools.chain(obj.__dict__.keys(), dir(obj)):
-                    try:
-                        value = getattr(obj, name)
-                    except AttributeError:
-                        continue
-                    if not (
-                        inspect.isfunction(value)
-                        or inspect.isclass(value)
-                        or inspect.ismethod(value)
-                    ):
-                        continue
-                    if (res := _find_code_source(value)) is not None:
-                        if value.__name__ != name:
-                            _raise_resolution_error(code, toplevel)
-                        return res
         return None
 
     code_source = _find_code_source(toplevel)

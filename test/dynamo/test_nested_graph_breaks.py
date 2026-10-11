@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import sys
 import unittest
 
 import torch
@@ -812,8 +811,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
             new_inst("STORE_ATTR", argval="attr"),
             new_inst("RETURN_VALUE"),
         ]
-        if sys.version_info >= (3, 11):
-            insts = [new_inst("RESUME", arg=0)] + insts
+        insts = [new_inst("RESUME", arg=0)] + insts
         code_keys = torch._dynamo.bytecode_transformation.get_code_keys()
         code_options = {k: getattr(inner3.__code__, k) for k in code_keys}
         _, inner3_code = (
