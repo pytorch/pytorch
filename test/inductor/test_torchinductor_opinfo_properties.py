@@ -683,33 +683,8 @@ FBCODE_BATCH_INVARIANCE_XFAILS = {
     },
 }
 
-FBCODE_UNARY_NUMERICAL_XFAILS = {
-    "inductor_default": {
-        "sqrt": {bf16, fp32},
-    },
-    "inductor_numerics": {
-        "exp2": {bf16, fp32},
-        "expm1": {bf16, fp32},
-        "log1p": {fp32},
-        "reciprocal": {bf16, fp32},
-        "rsqrt": {bf16, fp32},
-        "sin": {fp32},
-        "sqrt": {bf16, fp32},
-        "tan": {bf16, fp32},
-        "tanh": {fp32},
-    },
-}
-
-FBCODE_BINARY_NUMERICAL_XFAILS = {
-    "inductor_numerics": {
-        "fmod": {bf16, fp32},
-    },
-}
-
 FBCODE_XFAIL_DICTS = {
     "batch_invariance": FBCODE_BATCH_INVARIANCE_XFAILS,
-    "unary_numerical": FBCODE_UNARY_NUMERICAL_XFAILS,
-    "binary_numerical": FBCODE_BINARY_NUMERICAL_XFAILS,
 }
 
 if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
