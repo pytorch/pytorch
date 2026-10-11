@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import keyword
+import operator
 import sys
 
 import torch
@@ -611,6 +612,7 @@ class ComputedLazyConstantTests(TestCase):
             ("pos_int", lambda t, a: (t.sin(), +a), [(t, 5), (t, 9)]),
             ("abs_int", lambda t, a: (t.sin(), abs(a)), [(t, -5), (t, 9)]),
             ("not_int", lambda t, a: (t.sin(), not a), [(t, 5), (t, 0)]),
+            ("invert_int", lambda t, a: (t.sin(), ~a), [(t, 5), (t, 9)]),
             ("neg_float", lambda t, a: (t.sin(), -a), [(t, 5.5), (t, -9.25)]),
             ("neg_bool", lambda t, a: (t.sin(), -a), [(t, True), (t, False)]),
             ("not_bool", lambda t, a: (t.sin(), not a), [(t, True), (t, False)]),
@@ -620,16 +622,6 @@ class ComputedLazyConstantTests(TestCase):
             with self.subTest(name=name):
                 torch._dynamo.reset()
                 self._check(fn, arg_sets, expected_frames=1)
-
-    def test_invert_falls_back(self):
-        t = torch.ones(2)
-
-        def fn(t, a):
-            return t.sin(), ~a
-
-        opt_fn = torch.compile(fn, backend="eager")
-        for a in (5, 9):
-            self.assertTrue(same(fn(t, a), opt_fn(t, a)))
 
     @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
     def test_unary_symbolic_operand_realizes(self):
@@ -663,6 +655,7 @@ class ComputedLazyConstantTests(TestCase):
         t = torch.ones(2)
         cases = [
             ("len_str", lambda t, a: (t.sin(), len(a)), [(t, "xy"), (t, "pqr")]),
+            ("str_int", lambda t, a: (t.sin(), str(a)), [(t, 5), (t, 9)]),
             ("bool_int", lambda t, a: (t.sin(), bool(a)), [(t, 5), (t, 0)]),
             ("min_int", lambda t, a, b: (t.sin(), min(a, b)), [(t, 1, 2), (t, 9, 3)]),
             ("max_int", lambda t, a, b: (t.sin(), max(a, b)), [(t, 1, 2), (t, 9, 3)]),
@@ -682,18 +675,21 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, True), (t, False)], expected_frames=2)
 
-    def test_str_on_symbolic_int_compiles(self):
+    def test_concrete_only_op_on_symbolic_int_compiles(self):
         t = torch.ones(2)
-        d = {str(i): i for i in range(4)}
+        for name, op in [("str", str), ("invert", operator.invert)]:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                d = {op(i): i for i in range(4)}
 
-        def fn(t, idx):
-            return t.relu() * d[str(idx)]
+                def fn(t, idx):
+                    return t.relu() * d[op(idx)]
 
-        counter = CompileCounter()
-        opt_fn = torch.compile(fn, backend=counter)
-        for idx in range(4):
-            self.assertEqual(fn(t, idx), opt_fn(t, idx))
-        self.assertGreater(counter.frame_count, 1)
+                counter = CompileCounter()
+                opt_fn = torch.compile(fn, backend=counter)
+                for idx in range(4):
+                    self.assertEqual(fn(t, idx), opt_fn(t, idx))
+                self.assertGreater(counter.frame_count, 1)
 
     def test_builtin_fn_in_branch_recompiles(self):
         t = torch.ones(2)
