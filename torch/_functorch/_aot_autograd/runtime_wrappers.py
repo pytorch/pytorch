@@ -543,6 +543,47 @@ class _FirstInvocationContext:
         return nullcontext()
 
 
+# Note [Resolving lazy negative inputs at the backend boundary]
+# A tensor made by Tensor._neg_view() shares storage with its base and only sets
+# the Negative dispatch key; eager kernels negate its values lazily. The graph
+# AOTAutograd traces is correct when run eagerly on such an input, but backend
+# compilers like Inductor read the storage directly and ignore the bit, so they
+# compute on the un-negated values (#145093).
+#
+# The runtime wrapper therefore hands the compiled graph resolve_neg() copies of
+# these inputs, and the backend compiles against resolved example inputs. The
+# mutation epilogue and output alias replay keep using the user's original
+# tensors, which are captured before the call. A mutation the graph performs
+# in place lands on the copy, so it is copied back after the call. Only inputs
+# that carried the bit when the graph was traced are resolved, so graphs
+# without such inputs are unchanged.
+#
+# Conjugate-bit inputs are left alone: tracing already records their
+# conjugation as explicit ops (e.g. Tensor.imag emits _conj), so resolving them
+# before the call would apply it twice.
+def _resolve_neg_inputs(
+    args: list[Any],
+    neg_input_indices: tuple[int, ...],
+    neg_inputs_mutated_in_graph: tuple[int, ...],
+) -> list[tuple[Tensor, Tensor]]:
+    """Replace inputs carrying the lazy negative bit with resolved copies.
+
+    Returns (original, resolved) pairs for the inputs that the graph mutates in
+    place, for _copy_back_neg_inputs() to call after the graph ran.
+    """
+    originals = [args[i] for i in neg_inputs_mutated_in_graph]
+    for i in neg_input_indices:
+        args[i] = args[i].resolve_neg()
+    return [(orig, args[i]) for orig, i in zip(originals, neg_inputs_mutated_in_graph)]
+
+
+def _copy_back_neg_inputs(pairs: list[tuple[Tensor, Tensor]]) -> None:
+    if pairs:
+        with torch.no_grad():
+            for orig, resolved in pairs:
+                orig.copy_(resolved)
+
+
 # Note [RuntimeWrapper codegen specification methods]
 # The run() method on _RuntimeCompiledFnInvoker and the capture_orig_inputs(),
 # increment_mutation_versions(), and finalize() methods on _RuntimeForwardEpilogue
@@ -561,6 +602,9 @@ class _RuntimeCompiledFnInvoker:
     first_invocation_ctx: _FirstInvocationContext = field(
         default_factory=_FirstInvocationContext
     )
+    # See Note [Resolving lazy negative inputs at the backend boundary]
+    neg_input_indices: tuple[int, ...] = ()
+    neg_inputs_mutated_in_graph: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         if not getattr(self.compiled_fn, "_boxed_call", False):
@@ -586,13 +630,20 @@ class _RuntimeCompiledFnInvoker:
                     if not prev_view_replay_enabled:
                         torch._C._set_view_replay_enabled(True)
                     with torch.enable_grad():
+                        neg_pairs = _resolve_neg_inputs(
+                            args_,
+                            self.neg_input_indices,
+                            self.neg_inputs_mutated_in_graph,
+                        )
                         on_before_call()
-                        return call_func_at_runtime_with_args(
+                        outs = call_func_at_runtime_with_args(
                             self.compiled_fn,
                             args_,
                             disable_amp=self.disable_amp,
                             steal_args=True,
                         )
+                        _copy_back_neg_inputs(neg_pairs)
+                        return outs
                 finally:
                     if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:
                         torch._C._set_view_replay_enabled(prev_view_replay_enabled)
@@ -606,13 +657,18 @@ class _RuntimeCompiledFnInvoker:
             try:
                 if grad_enabled:
                     torch._C._set_grad_enabled(False)
+                neg_pairs = _resolve_neg_inputs(
+                    args, self.neg_input_indices, self.neg_inputs_mutated_in_graph
+                )
                 on_before_call()
-                return call_func_at_runtime_with_args(
+                outs = call_func_at_runtime_with_args(
                     self.compiled_fn,
                     args,
                     disable_amp=self.disable_amp,
                     steal_args=True,
                 )
+                _copy_back_neg_inputs(neg_pairs)
+                return outs
             finally:
                 if grad_enabled:
                     torch._C._set_grad_enabled(True)
@@ -859,11 +915,42 @@ def _codegen_normalize_as_list(
     buf.emit(f"{var_name} = [{var_name}]", indent=indent_level + 1)
 
 
+def _codegen_resolve_neg_inputs(
+    buf: "PySourceBuilder",
+    args_name: str,
+    neg_input_indices: tuple[int, ...],
+    neg_inputs_mutated_in_graph: tuple[int, ...],
+    *,
+    indent: int,
+) -> None:
+    # See Note [Resolving lazy negative inputs at the backend boundary]
+    if neg_input_indices:
+        buf.add_global("_resolve_neg_inputs_", _resolve_neg_inputs)
+        buf.emit(
+            f"_neg_pairs_ = _resolve_neg_inputs_({args_name}, "
+            f"{neg_input_indices!r}, {neg_inputs_mutated_in_graph!r})",
+            indent=indent,
+        )
+
+
+def _codegen_copy_back_neg_inputs(
+    buf: "PySourceBuilder",
+    neg_inputs_mutated_in_graph: tuple[int, ...],
+    *,
+    indent: int,
+) -> None:
+    if neg_inputs_mutated_in_graph:
+        buf.add_global("_copy_back_neg_inputs_", _copy_back_neg_inputs)
+        buf.emit("_copy_back_neg_inputs_(_neg_pairs_)", indent=indent)
+
+
 def _codegen_compiled_fn_invocation(
     buf: "PySourceBuilder",
     trace_joint: bool,
     indices_of_inps_to_detach: list[int],
     disable_amp: bool,
+    neg_input_indices: tuple[int, ...],
+    neg_inputs_mutated_in_graph: tuple[int, ...],
 ) -> None:
     buf.emit("with _first_ctx_():", indent=1)
     # trace_joint is known at codegen time. Only the joint/training path needs
@@ -883,6 +970,9 @@ def _codegen_compiled_fn_invocation(
         buf.emit("if not prev_view_replay_enabled:", indent=3)
         buf.emit("torch._C._set_view_replay_enabled(True)", indent=4)
         buf.emit("with torch.enable_grad():", indent=3)
+        _codegen_resolve_neg_inputs(
+            buf, "args_", neg_input_indices, neg_inputs_mutated_in_graph, indent=4
+        )
         buf.emit("_on_before_call_()", indent=4)
         if disable_amp:
             buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
@@ -892,6 +982,7 @@ def _codegen_compiled_fn_invocation(
         else:
             buf.emit("all_outs = _compiled_fn_(args_)", indent=4)
             _codegen_normalize_as_list(buf, "all_outs", indent_level=4)
+        _codegen_copy_back_neg_inputs(buf, neg_inputs_mutated_in_graph, indent=4)
         buf.emit("finally:", indent=2)
         buf.emit(
             "if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:",
@@ -904,6 +995,9 @@ def _codegen_compiled_fn_invocation(
         buf.emit("grad_enabled = torch.is_grad_enabled()", indent=2)
         buf.emit("try:", indent=2)
         buf.emit("if grad_enabled: torch._C._set_grad_enabled(False)", indent=3)
+        _codegen_resolve_neg_inputs(
+            buf, "args", neg_input_indices, neg_inputs_mutated_in_graph, indent=3
+        )
         buf.emit("_on_before_call_()", indent=3)
         if disable_amp:
             buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
@@ -913,6 +1007,7 @@ def _codegen_compiled_fn_invocation(
         else:
             buf.emit("all_outs = _compiled_fn_(args)", indent=3)
             _codegen_normalize_as_list(buf, "all_outs", indent_level=3)
+        _codegen_copy_back_neg_inputs(buf, neg_inputs_mutated_in_graph, indent=3)
         buf.emit("finally:", indent=2)
         buf.emit("if grad_enabled: torch._C._set_grad_enabled(True)", indent=3)
     buf.emit("del args", indent=1)
@@ -981,11 +1076,22 @@ def _create_runtime_wrapper(
     keep_input_mutations: bool,
     disable_amp: bool,
 ) -> Callable[..., Any]:
+    # See Note [Resolving lazy negative inputs at the backend boundary]
+    neg_input_indices = tuple(
+        i for i, info in enumerate(runtime_metadata.input_info) if info.is_neg
+    )
+    neg_inputs_mutated_in_graph = tuple(
+        i
+        for i in neg_input_indices
+        if runtime_metadata.input_info[i].mutation_type == MutationType.MUTATED_IN_GRAPH
+    )
     compiled_invoker = _RuntimeCompiledFnInvoker(
         compiled_fn=compiled_fn,
         indices_of_inps_to_detach=indices_of_inps_to_detach,
         trace_joint=trace_joint,
         disable_amp=disable_amp,
+        neg_input_indices=neg_input_indices,
+        neg_inputs_mutated_in_graph=neg_inputs_mutated_in_graph,
     )
     runtime_epilogue = _RuntimeForwardEpilogue(
         runtime_metadata=runtime_metadata,
@@ -1173,7 +1279,12 @@ def _create_runtime_wrapper(
     _codegen_capture_orig_inputs(buf, epilogue_args_idx)
     _codegen_increment_mutation_versions(buf, keep_input_mutations, runtime_metadata)
     _codegen_compiled_fn_invocation(
-        buf, trace_joint, indices_of_inps_to_detach, disable_amp
+        buf,
+        trace_joint,
+        indices_of_inps_to_detach,
+        disable_amp,
+        neg_input_indices,
+        neg_inputs_mutated_in_graph,
     )
     _codegen_epilogue(
         buf,
