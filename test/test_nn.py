@@ -56,7 +56,7 @@ from torch.testing._internal.common_modules import module_inputs_torch_nn_Linear
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck, gradgradcheck, \
-    GRADCHECK_NONDET_TOL
+    GRADCHECK_NONDET_TOL, DeterministicGuard
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
@@ -9942,6 +9942,19 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
     def test_upsamplingTrilinear3d(self, device, align_corners, memory_format):
+        self._test_upsamplingTrilinear3d(device, align_corners, memory_format)
+
+    @onlyCUDA
+    @parametrize_test("align_corners", [True, False])
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
+    def test_upsamplingTrilinear3d_deterministic(self, device, align_corners, memory_format):
+        self._test_upsamplingTrilinear3d(
+            device, align_corners, memory_format, deterministic=True
+        )
+
+    def _test_upsamplingTrilinear3d(
+        self, device, align_corners, memory_format, deterministic=False
+    ):
         kwargs = dict(mode='trilinear', align_corners=align_corners)
 
         # test float scale factor up & downsampling
@@ -9959,22 +9972,60 @@ class TestNNDeviceType(NNTestCase):
 
             grad_out = torch.randn_like(out_t).contiguous(memory_format=memory_format)
             in_t.grad = None
-            out_t.backward(grad_out)
+            if deterministic:
+                with DeterministicGuard(True):
+                    out_t.backward(grad_out)
+            else:
+                out_t.backward(grad_out)
             grad_in = in_t.grad
             self.assertTrue(grad_in.is_contiguous(memory_format=memory_format))
+
+            if deterministic:
+                input_ref = in_t.detach().cpu().requires_grad_()
+                output_ref = F.interpolate(input_ref, scale_factor=scale_factor, **kwargs)
+                output_ref.backward(grad_out.cpu())
+                self.assertEqual(grad_in.cpu(), input_ref.grad, atol=1e-10, rtol=1e-10)
 
             if memory_format == torch.channels_last_3d:
                 # check if grad inputs CF and CL match
                 in_t.grad = None
-                out_t.backward(grad_out.contiguous())
+                if deterministic:
+                    with DeterministicGuard(True):
+                        out_t.backward(grad_out.contiguous())
+                else:
+                    out_t.backward(grad_out.contiguous())
                 self.assertEqual(in_t.grad, grad_in)
 
             input = torch.randn(1, 2, 4, 4, 4, requires_grad=True, dtype=torch.double)
             self.assertEqual(
                 F.interpolate(input, (out_size, out_size, out_size), **kwargs),
                 F.interpolate(input, scale_factor=scale_factor, **kwargs))
-            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-            gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+            # Compiled autograd cannot currently fake the SymInt lists for this CUDA backward.
+            gradcheck_context = (
+                torch._dynamo.compiled_autograd._disable()
+                if TEST_WITH_TORCHDYNAMO and torch.device(device).type == "cuda"
+                else contextlib.nullcontext()
+            )
+            with gradcheck_context:
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+
+            if deterministic and not TEST_WITH_ROCM:
+                input_cuda = torch.randn(
+                    1, 2, 4, 4, 4, device=device, dtype=torch.double
+                ).contiguous(memory_format=memory_format).requires_grad_()
+                compiled_autograd_context = (
+                    torch._dynamo.compiled_autograd._disable()
+                    if TEST_WITH_TORCHDYNAMO
+                    else contextlib.nullcontext()
+                )
+                with compiled_autograd_context, DeterministicGuard(True):
+                    self.assertTrue(gradcheck(
+                        lambda x: F.interpolate(x, scale_factor=scale_factor, **kwargs),
+                        (input_cuda,)))
+                    self.assertTrue(gradgradcheck(
+                        lambda x: F.interpolate(x, scale_factor=scale_factor, **kwargs),
+                        (input_cuda,)))
 
     @skipMPS
     @onlyAccelerator
