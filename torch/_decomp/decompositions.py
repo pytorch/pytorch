@@ -1140,6 +1140,36 @@ def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     return r
 
 
+@register_decomposition(aten._stft_r2c)
+def _stft_r2c(
+    self: Tensor,
+    n_fft: int,
+    hop_length: int,
+    n_frames: int,
+    window: Tensor | None,
+    onesided: bool,
+    normalization: int,
+) -> Tensor:
+    frames = self.as_strided(
+        (self.shape[0], n_frames, n_fft),
+        (self.stride(0), hop_length * self.stride(1), self.stride(1)),
+    )
+    if window is not None:
+        frames = frames * window
+    return torch.ops.aten._fft_r2c(frames, [frames.dim() - 1], normalization, onesided)
+
+
+@register_decomposition(aten._istft_c2r)
+def _istft_c2r(
+    self: Tensor,
+    n_fft: int,
+    window: Tensor,
+    normalization: int,
+) -> Tensor:
+    frames = torch.ops.aten._fft_c2r(self, [self.dim() - 1], normalization, n_fft)
+    return frames * window
+
+
 @register_decomposition(aten.unfold_backward)
 @out_wrapper()
 def unfold_backward(
