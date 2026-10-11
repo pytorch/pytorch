@@ -14,6 +14,14 @@ from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import make_dynamo_test, run_tests
 
 
+class Indexable:
+    def __init__(self, value=0):
+        self.value = value
+
+    def __index__(self):
+        return self.value
+
+
 class ByteArrayTest(torch._dynamo.test_case.TestCase):
     """bytearray-specific tests, ported from CPython ByteArrayTest."""
 
@@ -368,6 +376,100 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b, self.type2test(b"abab"))
         b *= 0
         self.assertEqual(b, self.type2test())
+
+    @make_dynamo_test
+    def test_append(self):
+        b = self.type2test(b"hell")
+        b.append(ord("o"))
+        self.assertEqual(b, b"hello")
+        self.assertEqual(b.append(100), None)
+        b.append(Indexable(ord("A")))
+        self.assertEqual(b, b"hellodA")
+        self.assertRaises(TypeError, lambda: b.append(b"o"))
+        self.assertRaises(ValueError, lambda: b.append(256))
+        self.assertRaises(ValueError, lambda: b.append(-1))
+        self.assertEqual(b, b"hellodA")
+
+    @make_dynamo_test
+    def test_extend(self):
+        a = self.type2test(b"hello")
+        a.extend(a)
+        self.assertEqual(a, b"hellohello")
+        a = self.type2test()
+        a.extend(map(int, b"ab"))
+        a.extend(int(x) for x in b"cd")
+        a.extend([101, Indexable(102)])
+        self.assertEqual(a, b"abcdef")
+        self.assertRaises(ValueError, a.extend, [0, 1, 2, 256])
+        self.assertRaises(ValueError, a.extend, map(int, "X"))
+        self.assertEqual(a, b"abcdef")
+        self.assertRaises(TypeError, a.extend, "def")
+        with self.assertRaisesRegex(TypeError, "can't extend bytearray with float"):
+            a.extend(1.0)
+
+    def test_extend_consumes_iterator(self):
+        def f(ba):
+            it = iter([1, 2])
+            ba.extend(it)
+            return next(it, "done")
+
+        b, expected = bytearray(b"a"), bytearray(b"a")
+        out = torch.compile(f, backend="eager", fullgraph=True)(b)
+        self.assertEqual(out, f(expected))
+        self.assertEqual(b, expected)
+
+    def test_extend_stops_at_first_out_of_range_byte(self):
+        def f(ba):
+            seen = []
+
+            def gen():
+                for x in (1, 300, 2):
+                    seen.append(x)
+                    yield x
+                raise RuntimeError("drained past the bad byte")
+
+            try:
+                ba.extend(gen())
+            except ValueError as e:
+                return str(e), seen
+            return None, seen
+
+        self.assertEqual(
+            torch.compile(f, backend="eager", fullgraph=True)(bytearray()),
+            f(bytearray()),
+        )
+
+    def test_append_extend_arg_mutation(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(ba, x):
+            ba.append(ord("c"))
+            ba.extend(b"de")
+            return len(ba), x + 1
+
+        b = bytearray(b"ab")
+        out_len, out_y = f(b, torch.ones(1))
+        self.assertEqual(out_len, 5)
+        self.assertEqual(b, bytearray(b"abcde"))
+        self.assertEqual(out_y, torch.ones(1) + 1)
+
+    def test_append_graph_break(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(ba, x):
+            x = x + 1
+            ba.append(1)
+            x = x * 2
+            torch._dynamo.graph_break()
+            ba.extend(ba)
+            return x - 1
+
+        b = bytearray(b"a")
+        self.assertEqual(f(b, torch.ones(1)), torch.full((1,), 3.0))
+        self.assertEqual(b, bytearray(b"a\x01a\x01"))
+        # One frame on each side of the explicit graph break: append and extend
+        # are traced, and their mutations are replayed on the input.
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_repr(self):
         @torch.compile(backend="eager")
