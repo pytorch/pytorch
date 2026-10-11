@@ -620,6 +620,9 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
 bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120_121(
     sdp_params const& params,
     bool debug) {
+#if USE_ROCM
+  return true;
+#endif
   // Flash Attention will raise an error in the backward pass if the head_dim
   // is unsupported on SM86-SM89 or SM120-SM121.
   using sm86 = SMVersion<8, 6>;
