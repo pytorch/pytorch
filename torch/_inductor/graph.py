@@ -3207,6 +3207,13 @@ class GraphLowering(torch.fx.Interpreter):
             ]
             key, path = PyCodeCache.write(wrapper_code.value)
             output_code_log.debug("Output code written to: %s", path)
+            kernel_sources = self.wrapper_code.kernel_sources
+            if kernel_sources:
+                # write() keeps a file already at this path, e.g. a hand-edited copy;
+                # its defs must compile themselves.
+                with open(path) as f:
+                    if f.read() != wrapper_code.value:
+                        kernel_sources.clear()
 
             V.debug.output_code(path)
             V.debug.copy(os.path.splitext(path)[0] + ".debug")

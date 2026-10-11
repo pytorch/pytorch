@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import itertools
 import os
 import re
 import tempfile
@@ -8,12 +9,18 @@ from unittest import mock
 import torch
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan
-from torch._inductor import config
+from torch._inductor import CompiledArtifact, config
 from torch._inductor.async_compile import AsyncCompile
+from torch._inductor.codecache import PyCodeCache
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import collect_defined_kernels, is_big_gpu, run_and_get_code
+from torch._inductor.utils import (
+    collect_defined_kernels,
+    fresh_cache,
+    is_big_gpu,
+    run_and_get_code,
+)
 from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -43,6 +50,10 @@ def _run_from_file(code, args):
 
 def _softmax(x):
     return torch.softmax(x * 2, dim=-1)
+
+
+def _double(x):
+    return x * 2
 
 
 def _cond_softmax(x):
@@ -258,6 +269,72 @@ class TestModuleLevelKernels(TestCase):
         x = torch.randn(64, 128, device="cuda")
         result, _ = _code_for(_cond_softmax, x)
         self.assertEqual(result, _cond_softmax(x))
+
+    @requires_cuda_and_triton
+    @config.patch(compile_threads=2, fx_graph_cache=True)
+    def test_cached_kernels_compile_on_the_worker_pool(self):
+        self.assertTrue(AsyncCompile.wait_process_pool_ready())
+        # torch.cond bypasses the FX graph cache, so this uses a graph without one.
+        x = torch.randn(64, 128, device="cuda")
+        _code_for(_softmax, x)
+        counters.clear()
+        with mock.patch.object(
+            CachingAutotuner, "_precompile_config", _compiled_in_this_process
+        ):
+            result, _ = _code_for(_softmax, x)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(result, _softmax(x))
+
+    @requires_cuda_and_triton
+    def test_hand_edit_to_a_saved_module_takes_effect(self):
+        x = torch.ones(4, device="cuda")
+        gms = []
+        torch.compile(lambda t: t * 2, backend=lambda gm, _: gms.append(gm) or gm)(x)
+        with tempfile.TemporaryDirectory() as d, config.patch(fx_graph_cache=True):
+            with fresh_cache():
+                artifact = torch._inductor.standalone_compile(gms[0], [x])
+                self.assertEqual(artifact(x)[0], x * 2)
+                artifact.save(path=d, format="unpacked")
+            paths = [os.path.join(r, n) for r, _, ns in os.walk(d) for n in ns]
+            edited = 0
+            for path in paths:
+                if path.endswith(".py"):
+                    with open(path) as f:
+                        code = f.read()
+                    if "def call(" in code and "2.0, tl.float32" in code:
+                        with open(path, "w") as f:
+                            f.write(code.replace("2.0, tl.float32", "8.0, tl.float32"))
+                        edited += 1
+            self.assertEqual(edited, 1)
+            counters.clear()
+            with fresh_cache():
+                loaded = CompiledArtifact.load(path=d, format="unpacked")
+                self.assertEqual(loaded(x)[0], x * 8)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @requires_cuda_and_triton
+    @config.patch(fx_graph_cache=False)
+    def test_hand_edit_to_a_cached_module_survives_a_recompile(self):
+        x = torch.ones(4, device="cuda")
+        # A fresh AOT counter makes the recompile emit the same module, at the same path.
+        counter = mock.patch(
+            "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
+        )
+        with counter:
+            _, code = _code_for(_double, x)
+        _, path = PyCodeCache.write(code)
+        self.assertIn("2.0, tl.float32", code)
+        with open(path, "w") as f:
+            f.write(code.replace("2.0, tl.float32", "8.0, tl.float32"))
+        # The first recompile misses the FX graph cache and caches the edited module;
+        # the second loads that entry.
+        for hits in (0, 1):
+            PyCodeCache.cache_clear()
+            counters.clear()
+            with counter, config.patch(fx_graph_cache=True):
+                result, _ = _code_for(_double, x)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], hits)
+            self.assertEqual(result, x * 8)
 
 
 class TestDefaultWrapper(TestCase):
