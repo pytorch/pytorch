@@ -42,6 +42,7 @@ from ..utils import (
 from .base import Member, Method, readonly_setter, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
+from .object_protocol import repr_guard
 
 
 if TYPE_CHECKING:
@@ -103,9 +104,12 @@ class BaseSetVariable(VariableTracker):
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # set_repr: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
         name = self.python_type_name()
-        if not self.items:
-            return VariableTracker.build(tx, f"{name}()")
-        items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, f"{name}(...)")
+            if not self.items:
+                return VariableTracker.build(tx, f"{name}()")
+            items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
         if self.python_type() is set:
             return VariableTracker.build(tx, f"{{{items}}}")
         return VariableTracker.build(tx, f"{name}({{{items}}})")
@@ -591,9 +595,6 @@ class SetVariable(BaseSetVariable):
 
     def as_python_constant(self) -> Any:
         return {k.vt.as_python_constant() for k in self.set_items}
-
-    def repr_recursive_sentinel(self) -> str:
-        return f"{self.python_type_name()}(...)"
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach([x.vt for x in self.set_items])
@@ -1165,9 +1166,6 @@ class FrozensetVariable(BaseSetVariable):
     def as_python_constant(self) -> Any:
         return frozenset({k.vt.as_python_constant() for k in self.set_items})
 
-    def repr_recursive_sentinel(self) -> str:
-        return f"{self.python_type_name()}(...)"
-
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.extend_output(
@@ -1301,7 +1299,10 @@ class DictKeySetVariable(BaseSetVariable):
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # dictview_repr in Objects/dictobject.c: the type name around a list repr.
-        items = ", ".join(tracked_repr(tx, k.vt) for k in self.items)
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, "...")
+            items = ", ".join(tracked_repr(tx, k.vt) for k in self.items)
         return VariableTracker.build(tx, f"dict_keys([{items}])")
 
     def is_hashable(self) -> bool:
