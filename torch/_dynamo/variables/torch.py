@@ -3588,7 +3588,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             hints=[
                 "Create the tensor outside the compiled region.",
                 "Do not set `requires_grad=True`.",
-                "If this is a tensor factory whose result is only used inside the compiled region, turn `torch._dynamo.config.graph_break_on_factory_requires_grad` off.",  # noqa: B950
+                "If this is a tensor factory whose result is only used inside the compiled region, turn `torch._dynamo.config.graph_break_on_factory_requires_grad` off.",
                 *graph_break_hints.SUPPORTABLE,
             ],
         )
