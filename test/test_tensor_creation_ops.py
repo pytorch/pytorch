@@ -3538,6 +3538,29 @@ class TestRandomTensorCreation(TestCase):
                 with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
                     torch.normal(input, std)
 
+    def test_normal_negative_std_tensor_under_compile(self, device):
+        if torch.device(device).type != "cpu":
+            return
+
+        def negative():
+            mean = torch.zeros((4,), device=device)
+            std = torch.full((4,), -1.0, device=device)
+            return torch.normal(mean, std)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"normal expects all elements of std >= 0.0"
+        ):
+            torch.compile(negative, backend="inductor")()
+
+        def nonnegative():
+            return torch.normal(
+                torch.zeros((4,), device=device), torch.ones((4,), device=device)
+            )
+
+        out = torch.compile(nonnegative, backend="inductor")()
+        self.assertEqual(out.shape, (4,))
+        self.assertTrue(torch.isfinite(out).all())
+
     # https://github.com/pytorch/pytorch/issues/126834
     @xfailIfTorchDynamo
     @dtypes(torch.float, torch.double, torch.half)
