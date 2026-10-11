@@ -13374,6 +13374,128 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @parametrize("inplace", [False, True])
+    def test_addr_mixed_dtype_backward(self, device, dtype, inplace):
+        dtypes = (torch.float32, torch.float64, torch.complex64, torch.complex128)
+        make = partial(
+            make_tensor, device=device, requires_grad=True, noncontiguous=True
+        )
+        for vec1_dtype, vec2_dtype in product(dtypes, repeat=2):
+            promoted_dtype = torch.promote_types(
+                dtype, torch.promote_types(vec1_dtype, vec2_dtype)
+            )
+            if inplace and not torch.can_cast(promoted_dtype, dtype):
+                continue
+            with self.subTest(vec1_dtype=vec1_dtype, vec2_dtype=vec2_dtype):
+                inputs = (
+                    make((3, 2), dtype=dtype),
+                    make((3,), dtype=vec1_dtype),
+                    make((2,), dtype=vec2_dtype),
+                )
+                if inplace:
+                    actual = (
+                        inputs[0].clone().addr_(inputs[1], inputs[2], beta=0.5, alpha=2)
+                    )
+                else:
+                    actual = torch.addr(*inputs, beta=0.5, alpha=2)
+                base, vec1, vec2 = (t.to(promoted_dtype) for t in inputs)
+                expected = base * 0.5 + vec1.outer(vec2) * 2
+                if inplace:
+                    expected = expected.to(dtype)
+                self.assertEqual(actual, expected)
+                grad = torch.randn_like(actual)
+                self.assertEqual(
+                    torch.autograd.grad(actual, inputs, grad),
+                    torch.autograd.grad(expected, inputs, grad),
+                )
+
+    @dtypes(torch.float32, torch.complex64)
+    def test_addr_mixed_dtype_inplace_precision(self, device, dtype):
+        high_dtype = torch.complex128 if dtype.is_complex else torch.float64
+        # Keep the promoted vector/scalar values until after the matvec. Casting
+        # them to the in-place output dtype first would underflow or overflow.
+        for v1, v2, vec2_dtype, alpha, grad_value in [
+            (1.0, 1e-50, high_dtype, 1, 1e30),
+            (1e-50, 1e50, high_dtype, 1, 1),
+            (1e-50, 1.0, dtype, 1e50, 1),
+        ]:
+            with self.subTest(v1=v1, v2=v2, alpha=alpha):
+                inputs = (
+                    torch.zeros((1, 1), device=device, dtype=dtype, requires_grad=True),
+                    torch.tensor(
+                        [v1], device=device, dtype=high_dtype, requires_grad=True
+                    ),
+                    torch.tensor(
+                        [v2], device=device, dtype=vec2_dtype, requires_grad=True
+                    ),
+                )
+                actual = inputs[0].clone().addr_(inputs[1], inputs[2], alpha=alpha)
+                expected = (inputs[0] + inputs[1].outer(inputs[2]) * alpha).to(dtype)
+                self.assertEqual(actual, expected)
+                grad = torch.full_like(actual, grad_value)
+                self.assertEqual(
+                    torch.autograd.grad(actual, inputs, grad),
+                    torch.autograd.grad(expected, inputs, grad),
+                    atol=0,
+                    rtol=1e-6,
+                )
+
+        # beta is applied in the forward's promoted dtype too, even though the
+        # self gradient is ultimately cast back to the in-place output dtype.
+        for grad_value in (1e-20, 0.0):
+            with self.subTest(grad_value=grad_value):
+                inputs = (
+                    torch.full(
+                        (1, 1), 1e-20, device=device, dtype=dtype, requires_grad=True
+                    ),
+                    torch.ones(1, device=device, dtype=high_dtype, requires_grad=True),
+                    torch.ones(1, device=device, dtype=high_dtype, requires_grad=True),
+                )
+                actual = inputs[0].clone().addr_(inputs[1], inputs[2], beta=1e40)
+                expected = (
+                    inputs[0].to(high_dtype) * 1e40 + inputs[1].outer(inputs[2])
+                ).to(dtype)
+                self.assertEqual(actual, expected)
+                grad = torch.full_like(actual, grad_value)
+                self.assertEqual(
+                    torch.autograd.grad(actual, inputs, grad),
+                    torch.autograd.grad(expected, inputs, grad),
+                    atol=0,
+                    rtol=1e-6,
+                )
+
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("input_shape", [(), (1, 2)])
+    def test_addr_mixed_dtype_gradcheck(self, device, dtype, input_shape):
+        make = partial(make_tensor, device=device, requires_grad=True)
+        for vec1_dtype, vec2_dtype in product((torch.double, torch.cdouble), repeat=2):
+            coefficients = [(1, 1), (0, 2), (3, 0), (0, 0)]
+            if any(dt.is_complex for dt in (dtype, vec1_dtype, vec2_dtype)):
+                coefficients.append((1 + 2j, 2 - 1j))
+            for beta, alpha in coefficients:
+                with self.subTest(
+                    vec1_dtype=vec1_dtype, vec2_dtype=vec2_dtype, beta=beta, alpha=alpha
+                ):
+                    inputs = (
+                        make(input_shape, dtype=dtype),
+                        make((2,), dtype=vec1_dtype),
+                        make((2,), dtype=vec2_dtype),
+                    )
+
+                    def fn(base, vec1, vec2):
+                        return torch.addr(base, vec1, vec2, beta=beta, alpha=alpha)
+
+                    self.assertTrue(gradcheck(fn, inputs, check_forward_ad=True))
+                    self.assertTrue(
+                        gradgradcheck(
+                            fn,
+                            inputs,
+                            check_fwd_over_rev=True,
+                            check_undefined_grad=not TEST_WITH_TORCHDYNAMO,
+                        )
+                    )
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
