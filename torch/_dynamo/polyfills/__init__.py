@@ -426,23 +426,6 @@ def assert_dict_equal(
     self_.assertTrue(d1 == d2, msg)
 
 
-def assert_multi_line_equal(
-    self_: Any, first: T, second: T, msg: str | None = None
-) -> None:
-    return self_.assertTrue(first == second, msg)
-
-
-# The original impl. uses difflib
-def assert_sequence_equal(
-    self_: Any,
-    seq1: Sequence[T],
-    seq2: Sequence[T],
-    msg: str | None = None,
-    seq_type: type[Any] | None = None,
-) -> None:
-    return self_.assertTrue(seq1 == seq2, msg)
-
-
 def getattr_and_trace(*args: Any, **kwargs: Any) -> Any:
     wrapper_obj = args[0]
     attr_name = args[1]
