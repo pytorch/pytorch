@@ -2221,6 +2221,42 @@ class PythonWrapperCodegen(CodeGen):
     def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")
 
+    def _preamble_imports(self) -> tuple[str, ...]:
+        return (
+            "from ctypes import c_void_p, c_long, c_int",
+            "import torch",
+            "import math",
+            "import random",
+            "import os",
+            "import tempfile",
+            "from math import inf, nan",
+            "from cmath import nanj",
+            "from torch._inductor.hooks import run_intermediate_hooks",
+            "from torch._inductor.utils import maybe_profile",
+            "from torch._inductor.codegen.memory_planning import _align as align",
+            "from torch import device, empty_strided",
+            "from torch._inductor.select_algorithm import extern_kernels",
+        )
+
+    def _preamble_bindings(self) -> tuple[str, ...]:
+        guards = "torch._C._dynamo.guards"
+        return (
+            "aten = torch.ops.aten",
+            "inductor_ops = torch.ops.inductor",
+            "_quantized = torch.ops._quantized",
+            f"assert_size_stride = {guards}.assert_size_stride",
+            f"assert_size_stride_grouped = {guards}.assert_size_stride_grouped",
+            f"assert_alignment = {guards}.assert_alignment",
+            f"empty_strided_cpu = {guards}._empty_strided_cpu",
+            f"empty_strided_cpu_pinned = {guards}._empty_strided_cpu_pinned",
+            f"empty_strided_cuda = {guards}._empty_strided_cuda",
+            f"empty_strided_xpu = {guards}._empty_strided_xpu",
+            f"empty_strided_mtia = {guards}._empty_strided_mtia",
+            f"reinterpret_tensor = {guards}._reinterpret_tensor",
+            "alloc_from_pool = torch.ops.inductor._alloc_from_pool",
+            "async_compile = AsyncCompile()",
+        )
+
     def write_header(self) -> None:
         """Write the header section of the generated Python wrapper code."""
         context = torch._guards.TracingContext.try_get()
@@ -2231,48 +2267,17 @@ class PythonWrapperCodegen(CodeGen):
         if int(config.aot_inductor.debug_intermediate_value_printer) > 0:
             inductor_debug_utils = "from torch._inductor.codegen.debug_utils import _print_debugging_tensor_value_info"
         elif torch._inductor.config.test_configs.track_memory_lifecycle:
-            inductor_debug_utils = "from torch._inductor.runtime.debug_utils import tracked_empty_strided\n"
+            inductor_debug_utils = (
+                "from torch._inductor.runtime.debug_utils import tracked_empty_strided"
+            )
 
-        self.imports.splice(
-            f"""
-                {aot_config_comment}
-                from ctypes import c_void_p, c_long, c_int
-                import torch
-                import math
-                import random
-                import os
-                import tempfile
-                from math import inf, nan
-                from cmath import nanj
-                from torch._inductor.hooks import run_intermediate_hooks
-                from torch._inductor.utils import maybe_profile
-                from torch._inductor.codegen.memory_planning import _align as align
-                from torch import device, empty_strided
-                from {async_compile.__name__} import AsyncCompile
-                from torch._inductor.select_algorithm import extern_kernels
-                {inductor_debug_utils}
-            """,
-            strip=True,
-        )
-        self.header.splice(
-            """
-                aten = torch.ops.aten
-                inductor_ops = torch.ops.inductor
-                _quantized = torch.ops._quantized
-                assert_size_stride = torch._C._dynamo.guards.assert_size_stride
-                assert_size_stride_grouped = torch._C._dynamo.guards.assert_size_stride_grouped
-                assert_alignment = torch._C._dynamo.guards.assert_alignment
-                empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
-                empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
-                empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
-                empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
-                empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
-                reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
-                alloc_from_pool = torch.ops.inductor._alloc_from_pool
-                async_compile = AsyncCompile()
-            """,
-            strip=True,
-        )
+        if aot_config_comment:
+            self.imports.writeline(aot_config_comment)
+        self.imports.writelines(self._preamble_imports())
+        self.imports.writeline(f"from {async_compile.__name__} import AsyncCompile")
+        if inductor_debug_utils:
+            self.imports.writeline(inductor_debug_utils)
+        self.header.writelines(self._preamble_bindings())
         try:
             # Only add empty_strided_p2p() if distributed and SymmetricMemory
             # is available
