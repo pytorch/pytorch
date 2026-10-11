@@ -2564,6 +2564,20 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 has_output_scale=has_output_scale,
             )
 
+    @parametrize("cc", (100, 103, 107))
+    def test_compile_uses_device_capability(self, cc):
+        from torch._inductor.codegen.nv_universal_gemm import (
+            nv_universal_gemm_kernel as nvgemm,
+        )
+
+        kernel = MagicMock()
+        with patch.object(nvgemm, "_create_gemm_arguments") as args:
+            nvgemm._compile_nvgemm(
+                "SCALED_GEMM", (), None, None, kernel_obj=kernel, cc=cc
+            )
+
+        kernel.compile.assert_called_once_with(args.return_value, target_sm=f"{cc}a")
+
     def test_atomic_reduction_fusion_hooks(self):
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
