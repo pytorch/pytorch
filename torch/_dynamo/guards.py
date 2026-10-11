@@ -5391,7 +5391,10 @@ class GuardsStatePickler(FunctionPicklerBase):
             if pruned:
                 missing = self._missing("unguarded attribute")
                 state = {k: missing if k in pruned else v for k, v in vars(obj).items()}
-                return type(obj).__new__, (type(obj),), state
+                # Swap only the state: a dict or list subclass's default reduce
+                # also carries its items. Every protocol >= 2 reduces alike.
+                rv = obj.__reduce_ex__(2)
+                return (*rv[:2], state, *rv[3:])
 
         return NotImplemented
 

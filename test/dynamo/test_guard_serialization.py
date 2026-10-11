@@ -821,6 +821,12 @@ class LockHolder:
         self.lock = threading.Lock()
 
 
+class LockDict(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.lock = threading.Lock()
+
+
 class ReducedHolder:
     def __init__(self, scale, cfg):
         self.scale = scale
@@ -3997,6 +4003,16 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, inputs(3), True)
         self._test_check_fn(ref, loaded, inputs(4), False)
+
+    def test_a_dict_subclass_keeps_its_items_when_pruned(self):
+        def fn(x, cfg):
+            return x * cfg["lr"]
+
+        x = torch.randn(3)
+        # The lock is an unguarded attribute; the items live outside __dict__.
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, LockDict(lr=2))
+        self._test_check_fn(ref, loaded, {"x": x, "cfg": LockDict(lr=2)}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "cfg": LockDict(lr=3)}, False)
 
     def test_closure_match(self):
         def fn(x):
