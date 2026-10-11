@@ -481,9 +481,12 @@ def _default_all_gather_output_fn(
             copy_output = torch.empty_like(output)
             reassembled.append((copy_output, output, outer_size))
         split_output = copy_output.view(torch.uint8) if byte_views else copy_output
-        if (numel := split_size * world_size) != split_output.numel():
-            split_output = split_output.narrow(0, 0, numel)
-        split_outputs.append(split_output.view(world_size, -1))
+        try:
+            split_output = split_output.view(world_size, split_size)
+        except RuntimeError:  # the output of a smaller payload
+            split_output = split_output.narrow(0, 0, world_size * split_size)
+            split_output = split_output.view(world_size, split_size)
+        split_outputs.append(split_output)
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs
     )
@@ -539,7 +542,7 @@ def foreach_all_gather_copy_out(
             outer_sizes.append(layout.outer_size)
     if all_gather_output.numel() == 0:
         return  # nothing was gathered
-    non_inference_outputs = tuple(t for t in outputs if not t.is_inference())
+    non_inference_outputs = tuple([t for t in outputs if not t.is_inference()])
     # Views share their base's version counter
     with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
         # See Note [All-gather output fn]
@@ -593,7 +596,7 @@ def foreach_reduce(
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
     *,
-    reduce_scatter_input_fn: Callable = _default_reduce_scatter_input_fn,
+    prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -631,7 +634,7 @@ def foreach_reduce(
         fsdp_param.padded_sharded_param_size.numel() for fsdp_param in fsdp_params
     ]
     # See Note [Reduce-scatter input fn]
-    copy_in = reduce_scatter_input_fn(unsharded_grads, shard_dims, world_size)
+    copy_in = prepare_reduce_scatter_inputs(unsharded_grads, shard_dims, world_size)
     reduce_scatter_output_numel = sum(padded_sharded_numels)
     reduce_scatter_input = reduce_scatter_comm.allocate(
         (reduce_scatter_output_numel * world_size,),
