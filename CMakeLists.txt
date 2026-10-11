@@ -980,10 +980,11 @@ if(USE_LLVM_BOLT)
   add_custom_target(bolt_profile_quality_summary ALL
     COMMAND "${Python_EXECUTABLE}"
       "${PROJECT_SOURCE_DIR}/tools/bolt_profile_quality.py"
-      "${CMAKE_BINARY_DIR}/logs"
+      "$<TARGET_PROPERTY:bolt_profile_quality_summary,SCRIPT_ARGS>"
     COMMENT "Summarizing BOLT profile quality"
     VERBATIM
     USES_TERMINAL
+    COMMAND_EXPAND_LISTS
   )
 endif()
 
