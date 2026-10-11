@@ -846,7 +846,7 @@ class ConstDictVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        if isinstance(other, FrozenDictVariable):
+        if pyfrozendict_check(other):
             return FrozenDictVariable.nb_or_impl(other, tx, self, not reverse)
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4643-L4658
         self_, other_ = (other, self) if reverse else (self, other)
@@ -1335,6 +1335,10 @@ class FrozenDictVariable(VariableTracker):
         hashed = self._lookup_key(tx, key)
         value = self.items.get(hashed)
         if value is None:
+            if isinstance(self, variables.UserDefinedObjectVariable):
+                result = self._maybe_call_special(tx, "__missing__", [key])
+                if result is not None:
+                    return result
             raise_observed_exception(KeyError, tx, args=[key])
         return value
 
@@ -1471,7 +1475,10 @@ class FrozenDictVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return variables.FrozenDictBuiltinVariable().fromkeys(tx, args, kwargs)
+        cls = None
+        if isinstance(self, variables.UserDefinedObjectVariable):
+            cls = VariableTracker.build(tx, self.python_type(), self.cls_source)
+        return variables.FrozenDictBuiltinVariable().fromkeys(tx, args, kwargs, cls=cls)
 
     tp_methods = {
         "copy": Method(frozen_copy),

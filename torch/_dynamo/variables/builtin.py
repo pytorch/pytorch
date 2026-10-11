@@ -76,6 +76,7 @@ from ..utils import (
     has_torch_function,
     is_tensor_getset_descriptor,
     istype,
+    lazily_unpack,
     no_keywords,
     numpy_operator_wrapper,
     proxy_args_kwargs,
@@ -2520,6 +2521,27 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, dir(arg.as_python_constant()))
         return None
 
+    def call__frozendict_fromkeys(
+        self,
+        tx: "InstructionTranslatorBase",
+        seed: VariableTracker,
+        iterable: VariableTracker,
+        value: VariableTracker,
+        /,
+    ) -> VariableTracker:
+        storage = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        storage.dict_update(tx, [seed], {}, container_name="frozendict")
+        if pyanydict_checkexact(iterable) or pyanyset_checkexact(iterable):
+            if isinstance(iterable, ConstDictVariable):
+                iterable.install_dict_keys_match_guard()
+            for key in iterable.items:
+                storage.items[key] = value
+        else:
+            for key in lazily_unpack(tx, iterable):
+                hashed = storage._lookup_key(tx, key, container_name="frozendict")
+                storage.items[hashed] = value
+        return variables.FrozenDictVariable(storage=storage)
+
     def call_set(
         self,
         tx: "InstructionTranslatorBase",
@@ -3666,17 +3688,14 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
                     f"frozendict.__new__({cls.__name__}): {cls.__name__} "
                     "is not a subtype of frozendict",
                 )
-            if cls is not self._fn:
-                unimplemented(
-                    gb_type="frozendict subclass allocation",
-                    context="frozendict.__new__",
-                    explanation="Dynamo does not yet support allocating frozendict subclasses.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
             result = self.call_function(tx, args[1:], kwargs)
             if not isinstance(result, variables.FrozenDictVariable):
                 raise AssertionError(f"Expected FrozenDictVariable, got {type(result)}")
-            return variables.FrozenDictVariable(storage=result.storage)
+            if cls is self._fn:
+                return variables.FrozenDictVariable(storage=result.storage)
+            return tx.output.side_effects.track_new_user_defined_object(
+                self, args[0], [result], tx=tx
+            )
         if name == "fromkeys":
             return self.fromkeys(tx, args, kwargs)
         if name in self._fn.__dict__ and callable(self._fn.__dict__[name]):
@@ -3687,6 +3706,8 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
                     f"descriptor '{name}' for 'frozendict' objects doesn't apply "
                     f"to a '{args[0].python_type_name()}' object",
                 )
+            if isinstance(args[0], UserDefinedObjectVariable):
+                return args[0].call_base_method(tx, name, args[1:], kwargs)
             return args[0].call_method(tx, name, args[1:], kwargs)
         return super().call_method(tx, name, args, kwargs)
 
@@ -3695,12 +3716,14 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
+        *,
+        cls: VariableTracker | None = None,
     ) -> VariableTracker:
         no_keywords(tx, "frozendict.fromkeys", kwargs)
         check_positional(tx, "fromkeys", len(args), 1, 2)
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.frozendict_fromkeys),
-            [self, *args],
+            [self if cls is None else cls, *args],
             kwargs,
         )
 

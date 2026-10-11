@@ -492,11 +492,26 @@ def construct_dict(
     return self
 
 
+def _frozendict_fromkeys(seed: Any, iterable: Iterable[T], value: U | None, /) -> Any:
+    # Let CPython's _PyDict_FromKeys populate the seed with native insertion order,
+    # cached key hashes and frozendict-specific errors.
+    class SeededFrozenDict(torch._frozendict):
+        def __new__(cls, *args):
+            return args[0] if args else seed
+
+    return SeededFrozenDict.fromkeys(iterable, value)
+
+
 def dict_fromkeys(
     cls: Callable[..., C], iterable: Iterable[T], value: U | None = None, /
 ) -> C:
     # Mirrors the subclass path in CPython's _PyDict_FromKeys.
     result: Any = cls()
+    if torch._has_frozendict and issubclass(type(result), torch._frozendict):
+        # CPython's _PyDict_FromKeys (Objects/dictobject.c) copies a frozen
+        # constructor result, then calls cls(populated_frozendict). Subclasses
+        # inheriting frozendict.__new__ therefore invoke __init__ twice.
+        return cls(_frozendict_fromkeys(result, iterable, value))
     for key in iterable:
         result[key] = value
     return result
@@ -514,6 +529,8 @@ def frozendict_fromkeys(
 ) -> C:
     if not torch._has_frozendict:
         raise AssertionError("requires builtins.frozendict")
+    if cls is not torch._frozendict:
+        return dict_fromkeys(cls, iterable, value)
     # Use identity checks: tuple membership can invoke a metaclass's `__eq__`.
     if any(
         type(iterable) is kind for kind in (dict, torch._frozendict, set, frozenset)
