@@ -266,7 +266,10 @@ Tensor internal_new_from_data(
     bool copy_variables,
     bool copy_numpy,
     bool type_inference,
-    bool pin_memory = false) {
+    bool pin_memory = false,
+    // When false, use only the sequence-conversion path: asarray sets this
+    // after its own __dlpack__ attempt failed, so it must not be re-attempted.
+    bool try_dlpack = true) {
   TORCH_CHECK_TYPE(
       !THPUtils_checkString(data),
       "new(): invalid data type '",
@@ -340,7 +343,7 @@ Tensor internal_new_from_data(
   }
 #endif
 
-  if (PyObject_HasAttrString(data, "__dlpack__")) {
+  if (try_dlpack && PyObject_HasAttrString(data, "__dlpack__")) {
     py::object tensor_o =
         py::module::import("torch").attr("utils").attr("dlpack").attr(
             "from_dlpack")(py::handle(data));
@@ -1956,6 +1959,26 @@ Tensor asarray(
     tensor = tensor_fromDLPack(obj);
   }
 
+  // Check whether 'obj' exposes a '__dlpack__' method, preferring it over the
+  // buffer protocol so dtype, device, and shape come from the producer.
+  if (!tensor.defined() && PyObject_HasAttrString(obj, "__dlpack__")) {
+    // Resolved outside the try so a broken install propagates instead of
+    // silently falling back.
+    auto from_dlpack =
+        py::module::import("torch").attr("utils").attr("dlpack").attr(
+            "from_dlpack");
+    try {
+      tensor = from_dlpack(py::handle(obj)).cast<Tensor>();
+    } catch (const py::error_already_set& e) {
+      // Only fall back for a producer failure another path can still handle;
+      // otherwise the producer's error is the one worth reporting.
+      if (!e.matches(PyExc_Exception) ||
+          (PyObject_CheckBuffer(obj) == 0 && PySequence_Check(obj) == 0)) {
+        throw;
+      }
+    }
+  }
+
   // Check whether 'obj' implements the buffer protocol
   if (!tensor.defined() && PyObject_CheckBuffer(obj) != 0) {
     // When no dtype is given, infer it from the buffer's declared format
@@ -2015,9 +2038,9 @@ Tensor asarray(
       tensor.set_requires_grad(return_requires_grad);
     }
   } else {
-    // Undefined tensor means it does not implement neither DLPack nor
-    // the buffer protocol. Last case is a sequence, in which case we must
-    // copy (copy can't be false).
+    // Undefined tensor means DLPack and the buffer protocol are unavailable
+    // or failed. Last case is a sequence, in which case we must copy (copy
+    // can't be false).
     TORCH_CHECK_VALUE(
         !force_alias, "can't alias arbitrary sequence into a tensor.");
 
@@ -2032,7 +2055,9 @@ Tensor asarray(
         obj,
         /* copy_variables = */ false,
         /* copy_numpy = */ false,
-        /* type_inference = */ !dtype.has_value());
+        /* type_inference = */ !dtype.has_value(),
+        /* pin_memory = */ false,
+        /* try_dlpack = */ false);
     tensor.set_requires_grad(return_requires_grad);
   }
 
