@@ -9865,7 +9865,9 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
                 )
             )
 
-        if dmajor >= 10:
+        # SWIZZLE_32_4_4 and NVFP4 are NVIDIA-only; on ROCm dmajor is the gfx
+        # major (e.g. 12 on gfx120x), not an SM version.
+        if dmajor >= 10 and not torch.version.hip:
             # MXFP8
             scale1 = make_scale((M, K // 32)).to(torch.float8_e8m0fnu)
             scale2 = make_scale((K // 32, N)).to(torch.float8_e8m0fnu)
