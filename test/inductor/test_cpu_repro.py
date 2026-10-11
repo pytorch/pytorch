@@ -92,6 +92,21 @@ requires_vectorization = unittest.skipUnless(
 )
 
 
+@contextlib.contextmanager
+def capture_cpp_loop_shapes():
+    shapes = []
+    original = CppKernelProxy.codegen_nodes
+
+    def record(kernel, nodes, *args, **kwargs):
+        shape = tuple(nodes[0].group[1][0])
+        result = original(kernel, nodes, *args, **kwargs)
+        shapes.append(shape)
+        return result
+
+    with patch.object(CppKernelProxy, "codegen_nodes", record):
+        yield shapes
+
+
 def _can_check_vec_metrics():
     return (
         cpu_vec_isa.valid_vec_isa_list()
@@ -1289,6 +1304,100 @@ class CPUReproTests(TestCase):
                 mod,
                 (v,),
             )
+
+    @config.patch(force_disable_caches=True)
+    @parametrize("target", (50, 45, 7))
+    def test_negative_pad_loop_split_tail(self, target):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 50, (2, 2))
+                self.bn = nn.BatchNorm2d(50)
+                self.fc = nn.Linear(target, 10)
+
+            def forward(self, x):
+                x = self.bn(self.conv(x))
+                x = x.view(x.shape[0], -1)
+                x = F.pad(x, (0, target - x.shape[-1]))
+                return self.fc(x), torch.sin(x)
+
+        torch.manual_seed(420)
+        model = M().eval()
+        x = torch.randn(3, 1, 4, 4)
+        with torch.no_grad(), capture_cpp_loop_shapes() as shapes:
+            self.assertEqual(torch.compile(model)(x), model(x))
+
+        expected = {
+            50: [(3, 5, 9), (3, 5)],
+            45: [(3, 5, 9)],
+            7: [(3, 7)],
+        }
+        self.assertEqual(shapes, expected[target])
+
+    def test_negative_pad_loop_split_dynamic_extent(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 50, (2, 2))
+                self.bn = nn.BatchNorm2d(50)
+
+            def forward(self, x, target):
+                x = self.bn(self.conv(x))
+                x = x.view(x.shape[0], -1)
+                return F.pad(x, (0, target.shape[-1] - x.shape[-1]))
+
+        torch.manual_seed(420)
+        model = M().eval()
+        x = torch.randn(3, 1, 4, 4)
+        dynamic_target = torch.randn(3, 8)
+        torch._dynamo.mark_dynamic(dynamic_target, 1, min=2, max=100)
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(model, backend=counter, fullgraph=True)
+
+        with torch.no_grad():
+            for target in (
+                dynamic_target,
+                torch.randn(3, 9),
+                torch.randn(3, 10),
+                torch.randn(3, 21),
+            ):
+                self.assertEqual(compiled(x, target), model(x, target))
+        self.assertEqual(counter.frame_count, 1)
+
+    @config.patch(force_disable_caches=True)
+    def test_loop_split_dynamic_tail(self):
+        def fn(x):
+            return torch.arange(x.shape[0], device=x.device) // 9 + x
+
+        torch.manual_seed(420)
+        x = torch.randn(10)
+        torch._dynamo.mark_dynamic(x, 0, min=2, max=100)
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+
+        with capture_cpp_loop_shapes() as shapes:
+            self.assertEqual(compiled(x), fn(x))
+            for size in (8, 9, 21):
+                other = torch.randn(size)
+                self.assertEqual(compiled(other), fn(other))
+
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual([len(shape) for shape in shapes], [2, 1])
+
+        symbols = set()
+        for shape in shapes:
+            for dim in shape:
+                symbols.update(sympy.sympify(dim).free_symbols)
+
+        self.assertEqual(len(symbols), 1)
+        (extent,) = symbols
+
+        for size in (8, 9, 10, 21, 99, 100):
+            evaluated = [
+                tuple(sympy.sympify(dim).subs(extent, size) for dim in shape)
+                for shape in shapes
+            ]
+            self.assertEqual(evaluated, [(size // 9, 9), (size % 9,)])
 
     def test_masked_fill_with_inf_or_nan_value(self):
         def fn(value, mask):
