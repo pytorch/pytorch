@@ -462,7 +462,7 @@ inline float2 pow(T a, U b) {
   const auto r = ::metal::precise::sqrt(a.x * a.x + a.y * a.y);
 
   // Special case: if r is 0, return 0
-  if (r == 0.0) {
+  if (r == 0.0 && b.x > 0) {
     return float2(0.0, 0.0);
   }
 
