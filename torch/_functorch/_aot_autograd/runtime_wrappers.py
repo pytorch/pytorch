@@ -1346,7 +1346,8 @@ class FakifiedOutWrapper(InductorWrapper):
         tracing_context = torch._guards.TracingContext.try_get()
         if tracing_context and tracing_context.fakify_first_call:
             self.out_metas = [
-                n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])
+                n.meta["val"] if isinstance(n, fx.Node) else n
+                for n in (list(fw_module.graph.nodes)[-1].args[0])
             ]
         else:
             self.needs_post_compile = False
