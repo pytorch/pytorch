@@ -1178,6 +1178,101 @@ def helper(x):
         code_str = " ".join(code)
         self.assertIn("tt.pointer_range", code_str)
 
+    def test_record_negative_offset_non_hip(self):
+        kernel = TritonKernel.__new__(TritonKernel)
+        kernel.negative_offset_found = False
+        with (
+            patch.object(torch.version, "hip", None),
+            patch.object(
+                sympy, "expand", side_effect=AssertionError("unexpected expand")
+            ),
+        ):
+            kernel._record_negative_offset("arg0", sympy.Integer(-6))
+        self.assertFalse(kernel.negative_offset_found)
+
+    @parametrize("rebased", [False, True])
+    @parametrize("masked", [False, True])
+    def test_record_negative_offset_rebase(self, rebased, masked):
+        kernel = TritonKernel.__new__(TritonKernel)
+        kernel.negative_offset_found = False
+        kernel._load_mask = "mask" if masked else None
+        if rebased:
+            self._graph.inputs_with_negative_as_strided_offset.add("arg0")
+        with patch.object(torch.version, "hip", "test"):
+            kernel._record_negative_offset("arg0", sympy.Integer(-6))
+        self.assertEqual(kernel.negative_offset_found, rebased)
+
+    @parametrize("precomputed", [False, True])
+    def test_record_negative_offset_symbolic_rebase(self, precomputed):
+        kernel = TritonKernel.__new__(TritonKernel)
+        kernel.negative_offset_found = False
+        x = make_symbol(SymT.INDEX, 0)
+        size = make_symbol(SymT.SIZE, 0)
+        kernel.var_ranges = lambda: {x: sympy.Integer(12)}
+        self._graph.sizevars.shape_env.var_to_range[size] = ValueRanges(6, 12)
+        self._graph.inputs_with_negative_as_strided_offset.add("arg0")
+        offset = size + 1
+        if precomputed:
+            offset = self._graph.sizevars.lookup_precomputed_size(offset)
+        with patch.object(torch.version, "hip", "test"):
+            kernel._record_negative_offset("arg0", x + offset)
+            self.assertFalse(kernel.negative_offset_found)
+            kernel._record_negative_offset("arg0", x - offset)
+            self.assertTrue(kernel.negative_offset_found)
+
+    @parametrize("hip", [None, "test"])
+    @parametrize("offset", [0, 6, 7])
+    def test_negative_as_strided_rebase_marker(self, hip, offset):
+        from torch._inductor.lowering import as_strided
+
+        x = ir.TensorBox.create(
+            ir.InputBuffer(
+                name="arg0",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"), torch.float32, [sympy.Integer(6)]
+                ),
+            )
+        )
+        self._graph.graph_input_storage_offsets["arg0"] = sympy.Integer(6)
+        with patch.object(torch.version, "hip", hip):
+            as_strided(x, [sympy.Integer(6)], [sympy.Integer(1)], offset)
+        self.assertEqual(
+            "arg0" in self._graph.inputs_with_negative_as_strided_offset,
+            hip is not None and offset < 6,
+        )
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch("triton.emit_pointer_range_32", True)
+    @parametrize(
+        "case", ["pad", "as_strided", "masked_as_strided", "elementwise", "cat"]
+    )
+    def test_pointer_range_negative_rebase(self, case):
+        self._skip_unless_annotation_is_literal()
+
+        def fn(x):
+            if case == "pad":
+                return torch.nn.functional.pad(x, (64, 64)) + 1
+            if case == "as_strided":
+                return x.as_strided((12,), (1,), 0) + 1
+            if case == "masked_as_strided":
+                return (
+                    torch.nn.functional.pad(x.as_strided((12,), (1,), 0), (64, 64)) + 1
+                )
+            if case == "cat":
+                return torch.cat((x, x)) + 1
+            return x + 1
+
+        # Padding a shifted input is safe; padding an explicitly rebased view
+        # still has active negative lanes relative to that same input pointer.
+        x = torch.arange(12, device=GPU_TYPE, dtype=torch.float32)[6:]
+        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(actual, fn(x))
+        self.assertEqual(
+            " ".join(code).count("tt.pointer_range"),
+            0 if case in ("as_strided", "masked_as_strided") else 2,
+        )
+
     def _skip_unless_annotation_is_literal(self):
         """Only the V4 descriptor puts ``tt.pointer_range`` in the generated code.
 

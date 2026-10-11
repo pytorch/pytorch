@@ -461,6 +461,7 @@ class GraphLowering(torch.fx.Interpreter):
         # InputBuffer offsets are relative to input.data_ptr(); explicit FX
         # as_strided storage offsets are relative to the input's storage.
         self.graph_input_storage_offsets: dict[str, Expr] = {}
+        self.inputs_with_negative_as_strided_offset: OrderedSet[str] = OrderedSet()
         self.symbolic_input_sources: dict[
             sympy.Symbol, tuple[str, Literal["size", "stride"], int]
         ] = {}
