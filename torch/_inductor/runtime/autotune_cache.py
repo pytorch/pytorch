@@ -38,8 +38,8 @@ import torch
 from torch._guards import CompileContext
 from torch._inductor.runtime.runtime_utils import (
     cache_dir,
-    triton_config_from_compile_options,
-    triton_config_to_compile_options,
+    triton_config_from_dict,
+    triton_config_to_dict,
     triton_config_to_hashable,
 )
 from torch.compiler._cache import (
@@ -343,16 +343,8 @@ class AutotuneCache:
         triton_cache_hash: str | None = None,
         found_by_combo_autotune: bool = False,
     ) -> None:
-        config_data: dict[str, JsonDataTy] = {
-            # pyrefly: ignore [missing-attribute]
-            "kwargs": config.kwargs,
-            "compile_options": triton_config_to_compile_options(config),
-        }
-        if (extra_options := getattr(config, "extra_options", None)) is not None:
-            config_data["extra_options"] = extra_options
-
         data: dict[str, JsonDataTy] = {
-            _TRITON_CONFIG_KEY: config_data,
+            _TRITON_CONFIG_KEY: triton_config_to_dict(config),
             "configs_hash": self.configs_hash,
             "found_by_coordesc": found_by_coordesc,
             "found_by_combo_autotune": found_by_combo_autotune,
@@ -692,17 +684,16 @@ def _load_cached_autotuning(
     cached_config = best_config.pop(_TRITON_CONFIG_KEY, None)
     if not isinstance(cached_config, dict):
         return None
+    # Cache entries written before the shared schema was versioned used the same
+    # namespaced representation without an explicit version field.
+    if "version" not in cached_config:
+        cached_config = {"version": 1, **cached_config}
     config_kwargs = cached_config.get("kwargs")
     compile_options = cached_config.get("compile_options")
     if not isinstance(config_kwargs, dict) or not isinstance(compile_options, dict):
         return None
-    config_kwargs = cast(dict[str, Any], config_kwargs.copy())
-    compile_options = cast(dict[str, Any], compile_options.copy())
-    extra_options = cached_config.get("extra_options")
-
-    triton_config = triton_config_from_compile_options(
-        config_kwargs, compile_options, extra_options
-    )
+    triton_config = triton_config_from_dict(cast(dict[str, Any], cached_config))
+    extra_options = triton_config.extra_options
 
     if not found_by_coordesc:
         cached_identity = triton_config_to_hashable(triton_config)

@@ -81,8 +81,10 @@ from .runtime_utils import (
     get_num_bytes,
     next_power_of_2,
     triton_cache_dir,
-    triton_config_from_compile_options,
-    triton_config_to_compile_options,
+    triton_config_compile_options_from_dict as config_compile_options_from_dict,
+    triton_config_from_dict as config_from_dict,
+    triton_config_kwargs_from_dict as config_kwargs_from_dict,
+    triton_config_to_dict as config_to_dict,
     triton_config_to_hashable,
     triton_hash_to_path_key,
     validate_triton_config,
@@ -5306,79 +5308,20 @@ def template(
     )
 
 
-def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
-    """Extract triton.Config options that should become kwargs"""
-    popped = {}
-    for key in (
-        "num_warps",
-        "num_stages",
-        "num_ctas",
-        "maxnreg",
-        "num_consumer_groups",
-        "num_buffers_warp_spec",
-    ):
-        val = config.pop(key, None)
-        if val is not None:
-            popped[key] = val
-    return popped
-
-
-def config_to_dict(config: Config) -> dict[str, Any]:
-    return {
-        "version": 1,
-        "kwargs": {**config.kwargs},
-        "compile_options": triton_config_to_compile_options(config),
-        "extra_options": getattr(config, "extra_options", None),
-    }
-
-
-def _is_namespaced_config(config: dict[str, Any]) -> bool:
-    return (
-        {"version", "kwargs", "compile_options"} <= set(config)
-        and set(config) <= {"version", "kwargs", "compile_options", "extra_options"}
-        and config.get("version") == 1
-        and isinstance(config["kwargs"], dict)
-        and isinstance(config["compile_options"], dict)
-    )
-
-
-def config_kwargs_from_dict(config: dict[str, Any]) -> dict[str, Any]:
-    if _is_namespaced_config(config):
-        return {**config["kwargs"]}
-    config = {**config}
-    _pop_config_kwargs(config)
-    return config
-
-
-def config_compile_options_from_dict(config: dict[str, Any]) -> dict[str, Any]:
-    if _is_namespaced_config(config):
-        return {**config["compile_options"]}
-    config = {**config}
-    return _pop_config_kwargs(config)
-
-
-def config_from_dict(config: dict[str, Any]) -> Config:
-    if _is_namespaced_config(config):
-        return triton_config_from_compile_options(
-            config_kwargs_from_dict(config),
-            config_compile_options_from_dict(config),
-            config.get("extra_options"),
-        )
-    return Config(
-        config_kwargs_from_dict(config), **config_compile_options_from_dict(config)
-    )
-
-
 def fixed_config(
     config, filename, triton_meta: TritonMeta, inductor_meta: InductorMeta
 ):
     """
     Used when the configuration is already decided at compile time
     """
-    config = {**config}
     return cached_autotune(
         None,
-        [triton.Config(config, **_pop_config_kwargs(config))],
+        [
+            triton.Config(
+                config_kwargs_from_dict(config),
+                **config_compile_options_from_dict(config),
+            )
+        ],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.FIXED,

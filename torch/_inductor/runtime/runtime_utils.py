@@ -173,6 +173,74 @@ def triton_config_from_compile_options(
     return triton_config
 
 
+def triton_config_to_dict(config: Config) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "version": 1,
+        "kwargs": {**config.kwargs},  # pyrefly: ignore [missing-attribute]
+        "compile_options": triton_config_to_compile_options(config),
+    }
+    if (extra_options := getattr(config, "extra_options", None)) is not None:
+        result["extra_options"] = extra_options
+    return result
+
+
+def _is_namespaced_triton_config(config: dict[str, Any]) -> bool:
+    return (
+        {"version", "kwargs", "compile_options"} <= set(config)
+        and set(config) <= {"version", "kwargs", "compile_options", "extra_options"}
+        and config.get("version") == 1
+        and isinstance(config["kwargs"], dict)
+        and isinstance(config["compile_options"], dict)
+    )
+
+
+def triton_config_kwargs_from_dict(config: dict[str, Any]) -> dict[str, Any]:
+    if _is_namespaced_triton_config(config):
+        return {**config["kwargs"]}
+    config = {**config}
+    _pop_triton_config_kwargs(config)
+    return config
+
+
+def triton_config_compile_options_from_dict(
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    if _is_namespaced_triton_config(config):
+        return {**config["compile_options"]}
+    config = {**config}
+    return _pop_triton_config_kwargs(config)
+
+
+def triton_config_from_dict(config: dict[str, Any]) -> Config:
+    if _is_namespaced_triton_config(config):
+        return triton_config_from_compile_options(
+            triton_config_kwargs_from_dict(config),
+            triton_config_compile_options_from_dict(config),
+            config.get("extra_options"),
+        )
+    from .triton_compat import Config
+
+    return Config(
+        triton_config_kwargs_from_dict(config),
+        **triton_config_compile_options_from_dict(config),
+    )
+
+
+def _pop_triton_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
+    popped = {}
+    for key in (
+        "num_warps",
+        "num_stages",
+        "num_ctas",
+        "maxnreg",
+        "num_consumer_groups",
+        "num_buffers_warp_spec",
+    ):
+        if (value := config.pop(key, None)) is not None:
+            popped[key] = value
+    return popped
+
+
 def validate_triton_config(cfg: Config) -> None:
     # [Note: Triton pre_hook in inductor]
     # pre-hook is a lambda function, which we don't attempt to serialize.
