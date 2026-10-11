@@ -1213,14 +1213,12 @@ def _create_runtime_wrapper(
         return result
 
     # A wrapper rebuilt from a cache entry may run outside the hooks context the
-    # graph was compiled (and its hooks inlined) under.
-    if not (
-        trace_joint
-        and (
-            runtime_metadata.disable_saved_tensors_hooks
-            or _should_disable_saved_tensors_hooks()
-        )
-    ):
+    # graph was compiled (and its hooks inlined) under, so the recorded decision
+    # wins over the ambient hooks.
+    disable_hooks = runtime_metadata.disable_saved_tensors_hooks
+    if disable_hooks is None:
+        disable_hooks = _should_disable_saved_tensors_hooks()
+    if not (trace_joint and disable_hooks):
         return runtime_wrapper
 
     @simple_wraps(runtime_wrapper)

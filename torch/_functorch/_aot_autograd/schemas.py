@@ -591,7 +591,8 @@ class ViewAndMutationMeta:
     # disabled because inlineable hooks were inlined into the graphs. Recorded
     # when the joint graph is partitioned, since a wrapper rebuilt from a cache
     # entry may run outside the hooks context the graph was compiled under.
-    disable_saved_tensors_hooks: bool = False
+    # None for entries that predate the field.
+    disable_saved_tensors_hooks: bool | None = None
 
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.

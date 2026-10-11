@@ -760,7 +760,7 @@ def deserialize_bundled_cache_entry(
     lock = threading.Lock()
 
     def build() -> SerializableCompiledFunction:
-        nonlocal compiled_fn
+        nonlocal compiled_fn, context
         with lock:
             if compiled_fn is None:
                 with torch._guards.tracing(context):
@@ -768,6 +768,7 @@ def deserialize_bundled_cache_entry(
                     compiled_fn = SerializableCompiledFunction(
                         apply_runtime_wrappers(), lambda: serializable_copy
                     )
+                context = None
             return compiled_fn
 
     # TODO: this ignores flat_params, which can exist
