@@ -54,6 +54,11 @@ class TorchtitanTestRunner(BaseRunner):
         with working_directory(self.work_directory):
             pip_install_packages(packages=["-e", "."])
             pip_install_packages(packages=["pytest", "pytest-cov"])
+            # Some models (e.g. Qwen3.5, Kimi K3) require the VLM extras
+            # (e.g. flash-linear-attention) declared in
+            # .ci/docker/requirements-vlm.txt; the PyTorch CI image doesn't
+            # ship these, so install them here.
+            pip_install_packages(requirements=".ci/docker/requirements-vlm.txt")
 
     def run(self):
         self.prepare()
