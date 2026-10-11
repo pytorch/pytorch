@@ -1883,6 +1883,15 @@ enable_linear_binary_folding = (
 # Adds NVTX annotations around training phases
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
 
+# Emit a zero-length profiler range "inductor_provenance:<kernel>:<debug_handle>"
+# before each Python-wrapper kernel launch that has a provenance debug handle
+# (trace.provenance_tracking_level), so profiler kernels can be attributed to
+# post-grad nodes exactly, including extern kernels and repeated launches.
+# Top-level rather than trace.* so it is part of the FX graph cache key.
+provenance_profiler_markers: bool = (
+    os.environ.get("TORCHINDUCTOR_PROVENANCE_PROFILER_MARKERS", "0") == "1"
+)
+
 # Enable caching codegen of triton templates.
 enable_caching_generated_triton_templates: bool = True
 
