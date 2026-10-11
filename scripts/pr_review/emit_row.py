@@ -280,9 +280,9 @@ def main() -> int:
             or not is_neutral_prose(verdict.get("summary"), MAX_SUMMARY)
         ):
             # A verdict extract_verdict.py could not have written. Record the
-            # run without publishing anything it says. The workflow reads the
-            # status and verdict back out of this row, so the label step
-            # follows this decision.
+            # run without publishing anything it says. Dr. CI reads the
+            # status and verdict back out of this row, so it follows this
+            # decision.
             print(
                 "::warning::verdict.json failed the publish-side re-check",
                 file=sys.stderr,
