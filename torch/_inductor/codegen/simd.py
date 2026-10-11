@@ -4238,7 +4238,8 @@ class SIMDScheduling(BaseScheduling):
             V.graph._current_kernel_module_fqn = None
 
         result = self._codegen_nodes(nodes, coalesce_analysis)  # type: ignore[arg-type]
-        V.graph._current_kernel_module_fqn = None  # reset so non-simd kernels don't inherit stale FQN
+        # Reset so non-simd kernels don't inherit a stale FQN.
+        V.graph._current_kernel_module_fqn = None
         return result
 
     @staticmethod
