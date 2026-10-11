@@ -17,6 +17,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
     foreach_reduce_scatter_copy_in,
 )
+from torch.distributed.fsdp.experimental import reduce_scatter_input_fn_with_native_copy
 from torch.distributed.pipelining._backward import (
     stage_backward_input,
     stage_backward_weight,
@@ -51,6 +52,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
 )
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.checkpoint import checkpoint
 
 
@@ -315,6 +317,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             {
                 "reshard_after_forward": [False, True, 2],
                 "use_shard_placement_fn": [False, True],
+                "native_copy": [False, True],
             },
             self._test_reduce_dtype_fp32_reduce,
         )
@@ -330,7 +333,10 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         )
 
     def _test_reduce_dtype_fp32_reduce(
-        self, reshard_after_forward: bool | int, use_shard_placement_fn: bool
+        self,
+        reshard_after_forward: bool | int,
+        use_shard_placement_fn: bool,
+        native_copy: bool,
     ):
         param_dtype, reduce_dtype = torch.bfloat16, torch.float32
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
@@ -339,6 +345,9 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             reduce_dtype=reduce_dtype,
             use_shard_placement_fn=use_shard_placement_fn,
         )
+        if native_copy:
+            # Fresh bf16 gradients are widened into the fp32 buffer by the copy-in
+            model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
         orig_reduce_scatter = dist.reduce_scatter_single
 
@@ -1192,6 +1201,49 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 self.assertEqual(storage_nbytes, local_grad.nbytes)
             else:
                 self.assertGreater(storage_nbytes, local_grad.nbytes)
+
+    @skip_if_lt_x_gpu(2)
+    def test_native_copy_in_mixed_grad_dtypes(self):
+        # Mixes the Linear's deferred bf16 Shard(1) gradient with the fp32
+        # norm's. The default copy-in reorders the former; the native one doesn't.
+        copy_ins: list[tuple[list[torch.dtype], list[int] | None]] = []
+
+        class RecordCopyIns(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func == torch.ops.fsdp.chunk_cat_mixed_dtype.default:
+                    dtypes = [grad.dtype for grad in args[0]]
+                    copy_ins.append((dtypes, kwargs.get("num_leading_dims")))
+                return func(*args, **kwargs)
+
+        def placement_fn(param: nn.Parameter) -> Shard:
+            return Shard(param.ndim - 1)
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+            param_dtype_override_fn=lambda p: torch.float32 if p.ndim == 1 else None,
+        )
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn(4, 16, device=device_type)
+        models = []
+        for input_fn in (None, reduce_scatter_input_fn_with_native_copy):
+            torch.manual_seed(42)
+            model = nn.Sequential(
+                nn.Linear(16, 16, bias=False, device=device_type),
+                nn.RMSNorm(16, device=device_type),
+            )
+            fully_shard(model, mp_policy=mp_policy, shard_placement_fn=placement_fn)
+            model.set_reduce_scatter_input_fn(input_fn)
+            loss = model(inp).sum()
+            with RecordCopyIns():
+                loss.backward()
+            models.append(model)
+        dtypes = [torch.bfloat16, torch.float32]
+        self.assertEqual(copy_ins, [(dtypes, None), (dtypes, [1, 0])])
+        ref_model, model = models
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            self.assertEqual(param.grad.full_tensor(), ref_param.grad.full_tensor())
 
     @skip_if_lt_x_gpu(2)
     def test_structured_input_output(self):
