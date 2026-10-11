@@ -19,6 +19,7 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
+from ._fsdp_collectives import _default_reduce_scatter_input_fn
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
@@ -876,6 +877,40 @@ class FSDPModule:
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
+
+    def set_reduce_scatter_input_fn(
+        self, fn: Callable | None, /, *, recurse: bool = True
+    ) -> None:
+        r"""Set the function that prepares reduce-scatter inputs.
+
+        .. warning::
+            This API is experimental. The callback signature and supported FSDP
+            internals may change without backward compatibility.
+
+        ``copy_in = fn(unsharded_grads, shard_dims, world_size)`` runs before FSDP
+        allocates the reduce-scatter input and may replace entries of
+        ``unsharded_grads``, e.g. with reordered copies.
+        ``copy_in(reduce_scatter_input)`` then fills that flat buffer so that,
+        viewed as ``(world_size, -1)``, row ``r`` holds each gradient's padded
+        shard ``r`` in order, cast from any gradient dtype to the buffer's. Both
+        run on the current stream, also when ``world_size`` is 1. FSDP frees
+        ``copy_in`` and the gradients afterward, so keep neither. See
+        :mod:`torch.distributed.fsdp.experimental` for a native implementation.
+
+        Args:
+            fn (Optional[Callable]): Function returning the copy-in function, or
+                ``None`` to restore the default.
+            recurse (bool): Whether to also set the function for all nested FSDP
+                modules. Defaults to ``True``.
+        """
+        fn = _default_reduce_scatter_input_fn if fn is None else fn
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group._reduce_scatter_input_fn = fn
 
     def set_reduce_scatter_unused_params(
         self, reduce_scatter_unused_params: bool, *, recurse: bool = True
