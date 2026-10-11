@@ -511,6 +511,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             str.__new__,
             collections.deque.__new__,
             types.SimpleNamespace.__new__,
+            property.__new__,
         }
         return c_new_fns.union(exceptions)
 
@@ -1233,6 +1234,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 set.__new__,
                 collections.deque.__new__,
                 types.SimpleNamespace.__new__,
+                property.__new__,
             ):
                 init_args: list[VariableTracker] = []
             else:

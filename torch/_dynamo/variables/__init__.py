@@ -106,6 +106,7 @@ from .functions import (
     TMADescriptorStableVariable,
     TritonSetAllocatorVariable,
     TupleGetterVariable,
+    UserDefinedPropertyVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperDescriptorVariable,
