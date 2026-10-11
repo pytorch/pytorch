@@ -910,7 +910,7 @@ class FSDPModule:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group._reduce_scatter_input_fn = fn
+                    fsdp_param_group._prepare_reduce_scatter_inputs = fn
 
     def set_reduce_scatter_unused_params(
         self, reduce_scatter_unused_params: bool, *, recurse: bool = True
