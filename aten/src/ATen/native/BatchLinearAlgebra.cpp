@@ -3931,7 +3931,6 @@ Tensor& linalg_solve_triangular_out(
   if C10_UNLIKELY (!is_row_or_column_contiguous(A_f)) {
     // We first annotate with flags on A_f the conj coming from out
     // and then we clone the resulting tensor to resolve all of A's flags in memory
-    // (including A's own neg bit, which the clone materialises)
     if (out_f.is_conj()) {
       A_f = A_f.conj();
     }
@@ -3956,13 +3955,11 @@ Tensor& linalg_solve_triangular_out(
     // As we've already resolved the conj of A in the clone
     A_is_conj = out_f.is_conj();
   } else if C10_UNLIKELY (A_is_neg) {
-    // A_f is F-ready but has its own neg bit set. BLAS ignores the bit and reads
-    // the raw memory, so we resolve it in memory (this returns a new tensor).
+    // A_f is F-ready but has its own neg bit set. BLAS ignores it, so resolve it
     A_f = A_f.resolve_neg();
     A_is_neg = false;
-    // Recompute from the flags A_f actually carries now, rather than assuming
-    // what resolve_neg did with a conj bit on A_f.
-    A_is_conj = A_f.is_conj() != out_f.is_conj();
+    // As we've already resolved the conj of A in the clone
+    A_is_conj = out_f.is_conj();
   }
   // Invariant: out_f is F-contig and A_f is F-ready
   // neg has been resolved
