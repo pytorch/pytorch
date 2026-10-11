@@ -17,6 +17,7 @@ from torch.nn import Parameter
 from torch.optim import Optimizer, SGD
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.optim.optimizer import (
+    _get_scalar_dtype,
     register_optimizer_step_post_hook,
     register_optimizer_step_pre_hook,
 )
@@ -44,6 +45,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    set_default_dtype,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
@@ -1000,6 +1002,79 @@ class TestOptimRenewed(TestCase):
                 for k in og_p_state:
                     actual = new_p_state[k]
                     self.assertEqual(og_p_state[k], actual, rtol=rtol, atol=atol)
+
+    @parametrize("default_dtype", [torch.float16, torch.float32, torch.float64])
+    @parametrize("is_fused", [None, False, True])
+    @parametrize("target_device", [None, "cpu", "cuda", "mps", "xpu"])
+    def test_get_scalar_dtype(self, device, default_dtype, is_fused, target_device):
+        target_device = torch.device(target_device) if target_device else None
+        expected = torch.float32
+        if default_dtype == torch.float64 and (
+            not is_fused or (target_device is not None and target_device.type == "cuda")
+        ):
+            expected = torch.float64
+        with set_default_dtype(default_dtype):
+            self.assertEqual(_get_scalar_dtype(is_fused, target_device), expected)
+
+    @parametrize("default_dtype", [torch.float32, torch.float64])
+    @parametrize("amsgrad", [False, True])
+    @optims(
+        [
+            optim
+            for optim in optim_db
+            if optim.optim_cls
+            in (torch.optim.Adam, torch.optim.AdamW, torch.optim.Adagrad)
+        ],
+        dtypes=[torch.float32],
+    )
+    def test_fused_step_dtype(self, device, dtype, optim_info, default_dtype, amsgrad):
+        device_type = torch.device(device).type
+        if device_type not in optim_info.supports_fused_on:
+            self.skipTest(
+                f"Fused {optim_info.optim_cls.__name__} is unsupported on {device_type}"
+            )
+        kwargs = {"lr": 0.01}
+        if optim_info.optim_cls is torch.optim.Adagrad:
+            if amsgrad:
+                self.skipTest("Adagrad does not support AMSGrad")
+            kwargs["lr_decay"] = 0.1
+        else:
+            kwargs["amsgrad"] = amsgrad
+        expected_dtype = (
+            torch.float64
+            if device_type == "cuda" and default_dtype == torch.float64
+            else torch.float32
+        )
+        with set_default_dtype(default_dtype):
+            param = torch.ones(8, device=device, dtype=dtype, requires_grad=True)
+            reference = param.detach().clone().requires_grad_()
+            optimizer = optim_info.optim_cls([param], fused=True, **kwargs)
+            reference_optimizer = optim_info.optim_cls(
+                [reference], fused=False, **kwargs
+            )
+            for _ in range(3):
+                param.grad = torch.full_like(param, 0.25)
+                reference.grad = param.grad.clone()
+                optimizer.step()
+                reference_optimizer.step()
+                self.assertEqual(param, reference)
+            step = optimizer.state[param]["step"]
+            self.assertEqual(step.dtype, expected_dtype)
+            self.assertEqual(step, torch.tensor(3, device=device, dtype=expected_dtype))
+
+            state = deepcopy(optimizer.state_dict())
+            for param_state in state["state"].values():
+                param_state["step"] = param_state["step"].to(
+                    device="cpu", dtype=torch.float64
+                )
+            optimizer.load_state_dict(state)
+            step = optimizer.state[param]["step"]
+            self.assertEqual(step.dtype, expected_dtype)
+            self.assertEqual(step.device, param.device)
+            optimizer.step()
+            reference_optimizer.step()
+            self.assertEqual(param, reference)
+            self.assertEqual(step, torch.tensor(4, device=device, dtype=expected_dtype))
 
     @skipMPS  # MPS does not support float64
     @onlyAccelerator
