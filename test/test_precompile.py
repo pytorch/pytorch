@@ -5017,6 +5017,51 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("refused", out.stdout)
 
     @skipIfCrossRef
+    def test_an_installed_artifact_names_a_changed_helper_module_at_load(self):
+        # The changed source is a helper in another module, inlined into a
+        # frame of the entry's: the refusal names that module, not the entry's.
+        helper = self.module_name + "_helper"
+        entry = self.module_name + "_entry"
+        helper_path = os.path.join(self.dir, helper + ".py")
+        with open(helper_path, "w") as f:
+            f.write("def scaled(y):\n    return y.sin()\n")
+        with open(os.path.join(self.dir, entry + ".py"), "w") as f:
+            f.write(
+                f"import torch\nimport {helper} as helper\n\n\n"
+                "def breaking(y):\n    y = helper.scaled(y)\n"
+                "    torch._dynamo.graph_break()\n    return y.cos()\n\n\n"
+                "def entry(model, x):\n    return breaking(model(x)) + 1\n"
+            )
+        for name in (helper, entry):
+            self.addCleanup(sys.modules.pop, name, None)
+        importlib.invalidate_caches()
+        fn = importlib.import_module(entry).entry
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        with open(helper_path, "w") as f:
+            f.write("def scaled(y):\n    return y.sin() * 1\n")
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "try:\n"
+            "    torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "except torch.compiler.PrecompileError as e:\n"
+            "    cause = f'Source code changes detected for {sys.argv[4]} '\n"
+            "    assert cause in str(e), e\n"
+            "    assert 'If the cause names a source that changed' in str(e), e\n"
+            "    print('refused')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache, helper]
+        out = subprocess.run(
+            [sys.executable, "-c", script, *argv],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("refused", out.stdout)
+
+    @skipIfCrossRef
     def test_an_installed_artifact_passes_the_models_own_errors_through(self):
         # Only Dynamo's fail_on_recompile refusal becomes a PrecompileError; a
         # RuntimeError the served model raises on a covered call is its own.
