@@ -5064,14 +5064,10 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # Inherited dict/OrderedDict __init__ populates the underlying storage
-        # (CPython dict_init == dict.update); defaultdict.__init__'s first arg
-        # is the default_factory and has its own path.  Mirrors call_method's
-        # __init__ handling.
-        if self._maybe_get_baseclass_method("__init__") in (
-            dict.__init__,
-            collections.OrderedDict.__init__,
-        ):
+        init = self._maybe_get_baseclass_method("__init__")
+        if init is collections.OrderedDict.__init__:
+            return OrderedDictVariable.tp_init_impl(self, tx, args, kwargs)
+        if init is dict.__init__:
             # dict_init calls the real C-level update directly, bypassing any
             # subclass override of update() -- self.call_method would
             # dispatch to an override if the subclass defines one, which is
