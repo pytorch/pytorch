@@ -1140,12 +1140,21 @@ def export_python(
     or a call that passes extra keyword arguments to ``fn``'s ``**kwargs``, is
     rejected, since neither is expressible in the artifact's positional convention.
 
-    Python attributes and Python control flow are specialized at capture and must
-    remain compatible with the example. That includes ``torch.is_grad_enabled()``:
-    capture traces with grad enabled so a backward inside ``fn`` is built as graph
-    ops, so a ``fn`` that branches on it always captures the grad-enabled branch,
-    whatever the grad mode of the call that triggered capture. Calling the artifact
-    under ``torch.no_grad()`` is unaffected and is the ordinary inference path.
+    Each ``nn.Module`` argument's per-submodule ``training`` state, which ``make_fx``
+    resolves without emitting a guard, is recorded as a comment stamp and checked on
+    every call. Where ``torch.compile`` would recompile, an artifact cannot, so treat
+    any ambient change between capture and call as needing a fresh capture unless a
+    stamp covers it. A hand-edit that drops a stamp turns that one check off: a checked
+    stamp then warns on every call, while a dropped version stamp just silences the
+    version warning. All stamps must stay in the artifact's leading comment block: the
+    reader stops at the first non-comment line, so inserting code above them turns every
+    check off. Other Python attributes and Python control flow are specialized at
+    capture and must remain compatible with the example. That includes
+    ``torch.is_grad_enabled()``: capture traces with grad enabled so a backward inside
+    ``fn`` is built as graph ops, so a ``fn`` that branches on it always captures the
+    grad-enabled branch, whatever the grad mode of the call that triggered capture.
+    Calling the artifact under ``torch.no_grad()`` is unaffected and is the ordinary
+    inference path.
 
     Capturing does not advance the default generators the first call is about to draw
     from: capture restores the generator state it consumed, within the limits
@@ -1161,18 +1170,22 @@ def export_python(
             created as needed. Its presence is the sole signal used to decide whether
             to precompile or to load: an existing ``path`` is loaded as-is, even by a
             different ``fn`` or with a different ``backend``, ``tracer``,
-            ``decompositions`` or ``example_inputs``. Loading any existing artifact
-            also warns before executing it because ``path`` is trusted executable Python
-            and may have been edited or replaced. A CUDA artifact additionally embeds
-            inductor's kernel-cache paths, so it is not byte-stable across machines or
-            users even when the numerics are. A Triton kernel listed in the artifact's
-            ``KERNEL_CONFIGS`` launches with the config autotuning chose at capture, so
-            a cold start does not retune it; a kernel missing there autotunes on its
-            first launch. Concurrent first writers use first-publisher-wins semantics:
-            every loser loads the complete artifact that won instead of executing
-            different generated source. (On a filesystem without hard links this
-            degrades to last-writer-wins; the file is never partial either way.) New
-            files use the permissions selected by the process umask.
+            ``decompositions`` or ``example_inputs``. The artifact records the producing
+            torch version in its first line; loading it under a different torch logs a
+            warning (it still runs) so a committed artifact gone stale across a torch
+            upgrade is visible. A hand-edit that drops that line disables the version
+            warning. Loading any existing artifact also warns before executing it
+            because ``path`` is trusted executable Python and may have been edited or
+            replaced. A CUDA artifact additionally embeds inductor's kernel-cache paths,
+            so it is not byte-stable across machines or users even when the numerics
+            are. A Triton kernel listed in the artifact's ``KERNEL_CONFIGS`` launches
+            with the config autotuning chose at capture, so a cold start does not retune
+            it; a kernel missing there autotunes on its first launch. Concurrent first
+            writers use first-publisher-wins semantics: every loser loads the complete
+            artifact that won instead of executing different generated source. (On a
+            filesystem without hard links this degrades to last-writer-wins; the file is
+            never partial either way.) New files use the permissions selected by the
+            process umask.
         backend: How the captured graph is realized: ``"inductor"`` (default) or
             ``"eager"``. Forwarded to the capture.
         tracer: Capture front-end; ``"make_fx"`` (default) is the only one

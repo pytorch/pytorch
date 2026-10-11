@@ -5982,6 +5982,64 @@ class TestExportPython(TestCase):
         self.assertTrue(inspect.ismethod(model.run))
         self.assertEqual(model.run(x), x + 1)
 
+    def test_module_training_state_is_guarded(self, device):
+        path = self._tmp_path("module_training.py")
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                return inp + 1 if self.training else inp - 1
+
+        model = Model().to(device).train()
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(mod, inp):
+            return mod(inp)
+
+        self.assertEqual(run(model, x), x + 1)
+        model.eval()
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def loaded(mod, inp):
+            return mod(inp)
+
+        with self.assertRaisesRegex(PrecompileError, "training state"):
+            loaded(model, x)
+
+    def test_hand_edit_dropping_training_stamp_warns_and_runs(self, device):
+        # The artifact is meant to be hand-edited, so dropping the stamp turns the
+        # guard off with a warning rather than bricking the file -- the same contract
+        # the version stamp already has.
+        path = self._tmp_path("module_training_edit.py")
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                return inp + 1 if self.training else inp - 1
+
+        model = Model().to(device).train()
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(mod, inp):
+            return mod(inp)
+
+        self.assertEqual(run(model, x), x + 1)
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+        kept = [line for line in lines if "module-training:" not in line]
+        self.assertEqual(len(kept), len(lines) - 1)
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(kept)
+        model.eval()
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def loaded(mod, inp):
+            return mod(inp)
+
+        with self.assertLogs("torch.compiler._export_python", level="WARNING") as logs:
+            self.assertEqual(loaded(model, x), x + 1)
+        self.assertTrue(any("no recorded training state" in m for m in logs.output))
+
     def test_decorated_function_is_picklable(self, device):
         name = "_export_python_pickle_fixture"
 
@@ -6489,6 +6547,91 @@ class TestExportPython(TestCase):
         with open(path, encoding="utf-8") as f:
             self.assertEqual(f.read(), first)
 
+    def test_version_skew_warns(self, device):
+        path = self._tmp_path("skew.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        self.assertEqual(run(x), x + 1)
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().split("\n")
+        tag = "# torch.compiler.export_python torch-version: "
+        self.assertTrue(lines[0].startswith(tag))
+        lines[0] = tag + "0.0.0-bogus"
+        # Displaced from line 1 on purpose: every stamp is read from the leading
+        # comment block, so a hand-edit that adds a comment above them must not quietly
+        # disable the one check that catches a stale committed artifact.
+        lines.insert(0, "# a hand-edit above the stamps")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run2(inp):
+            return inp + 1
+
+        # A stamped-but-mismatched artifact warns about the skew but still runs.
+        with self.assertLogs("torch.compiler._export_python", level="WARNING") as cm:
+            self.assertEqual(run2(x), x + 1)
+        self.assertTrue(any("0.0.0-bogus" in m for m in cm.output))
+
+    def test_no_version_warning_when_stamp_absent(self, device):
+        path = self._tmp_path("nostamp.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        self.assertEqual(run(x), x + 1)
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().split("\n")
+        tag = "# torch.compiler.export_python torch-version: "
+        self.assertTrue(lines[0].startswith(tag))
+        lines = lines[1:]
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run2(inp):
+            return inp + 1
+
+        # A hand-edit that drops the stamp still gets the executable-file warning, but
+        # must not get a version-skew warning.
+        with self.assertLogs("torch.compiler._export_python", level="WARNING") as cm:
+            self.assertEqual(run2(x), x + 1)
+        self.assertTrue(any("about to EXEC" in message for message in cm.output))
+        self.assertFalse(any("produced by torch" in message for message in cm.output))
+
+    def test_env_import_failure_distinct_message(self, device):
+        # A valid artifact that fails to import a dependency under the current torch
+        # gets a distinct "different torch version or environment" error, not the
+        # clobbered-source message, so version skew is diagnosable.
+        path = self._tmp_path("badimport.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        self.assertEqual(run(x), x + 1)
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+        # Below the leading comment block, so the stamps stay readable.
+        end = next(i for i, line in enumerate(lines) if not line.startswith("#"))
+        lines.insert(end, "import a_module_that_does_not_exist_xyz\n")
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run2(inp):
+            return inp + 1
+
+        with self.assertRaisesRegex(PrecompileError, "different torch|environment"):
+            run2(x)
+
     def test_artifact_raising_at_module_scope_is_a_distinct_error(self, device):
         # The third arm of _load's taxonomy: not a syntax/structure problem and not a
         # failed import, but source that blows up while being exec'd.
@@ -6517,6 +6660,63 @@ class TestExportPython(TestCase):
                 ):
                     loaded(x)
 
+    def test_nested_submodule_training_state_is_guarded(self, device):
+        # named_modules() walks the whole tree, but every other test model is a leaf,
+        # so only this pins that a flip on a CHILD is caught.
+        path = self._tmp_path("nested_training.py")
+
+        class Inner(torch.nn.Module):
+            def forward(self, inp):
+                return inp + 1 if self.training else inp - 1
+
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = Inner()
+
+            def forward(self, inp):
+                return self.inner(inp)
+
+        model = Outer().to(device).train()
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(mod, inp):
+            return mod(inp)
+
+        self.assertEqual(run(model, x), x + 1)
+        model.inner.eval()  # the root stays in train()
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def loaded(mod, inp):
+            return mod(inp)
+
+        with self.assertRaisesRegex(
+            PrecompileError, "submodule 'inner' was training=True at capture"
+        ):
+            loaded(model, x)
+
+    def test_training_stamp_is_taken_before_capture_runs_fn(self, device):
+        # Capture runs fn on the example, so a fn that sets the mode itself must not
+        # stamp the mode it set: the per-call check reads the caller's modules before
+        # the call runs, and every call would be refused.
+        path = self._tmp_path("fn_sets_training.py")
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                return inp + 1 if self.training else inp - 1
+
+        model = Model().to(device).eval()
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def step(mod, inp):
+            mod.train()
+            return mod(inp)
+
+        self.assertEqual(step(model, x), x + 1)
+        self.assertEqual(step(model, x), x + 1)
+
     def test_recursive_decorated_function_raises_not_hangs(self, device):
         path = self._tmp_path("recursive.py")
         depth = [1]
@@ -6530,6 +6730,71 @@ class TestExportPython(TestCase):
 
         with self.assertRaisesRegex(PrecompileError, "re-entrant call"):
             f(make_tensor((4,), device=device, dtype=torch.float32))
+
+    def test_mangled_training_stamp_degrades_like_a_missing_one(self, device):
+        # The stamp is an exec-inert comment; a botched hand-edit of it must not raise
+        # a SyntaxError from a line that does not affect what the artifact runs.
+        path = self._tmp_path("mangled_stamp.py")
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                return inp + 1
+
+        model = Model().to(device)
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(mod, inp):
+            return mod(inp)
+
+        self.assertEqual(run(model, x), x + 1)
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+        for i, line in enumerate(lines):
+            if "module-training:" in line:
+                lines[i] = line.split(":")[0] + ": [(0, [('', unclosed\n"
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def loaded(mod, inp):
+            return mod(inp)
+
+        with self.assertLogs("torch.compiler._export_python", "WARNING") as logs:
+            self.assertEqual(loaded(model, x), x + 1)
+        self.assertTrue(any("no recorded training state" in m for m in logs.output))
+
+    def test_parseable_but_wrong_training_stamp_raises(self, device):
+        # Only a stamp that fails to parse degrades to "unchecked"; one that parses is a
+        # recorded state, and a call that does not match it is refused.
+        path = self._tmp_path("wrong_stamp.py")
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                return inp + 1
+
+        model = Model().to(device)
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(mod, inp):
+            return mod(inp)
+
+        self.assertEqual(run(model, x), x + 1)
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+        for i, line in enumerate(lines):
+            if "module-training:" in line:
+                lines[i] = line.split(":")[0] + ": []\n"
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def loaded(mod, inp):
+            return mod(inp)
+
+        with self.assertRaisesRegex(PrecompileError, "training state does not match"):
+            loaded(model, x)
 
     def test_artifact_deleted_between_gate_and_read_regenerates(self, device):
         # A peer deleting the artifact to force a regenerate must not surface as a bare
@@ -6693,6 +6958,29 @@ class TestExportPython(TestCase):
         baked = re.findall(r"_arr\[(\d+)\]", source)
         self.assertEqual(baked, [], f"artifact bakes a fixed per-thread array: {baked}")
         self.assertIn("_arr[max_threads]", source)
+
+    def test_pathological_version_stamp_warns_rather_than_raising(self, device):
+        # torch.__version__ is a TorchVersion, whose __eq__ PEP-440-parses the operand
+        # and re-raises anything that is not InvalidVersion, so a stamp of enough digits
+        # took the whole load path down with a ValueError -- permanently, on every call.
+        # A mangled stamp is a hand-edit like any other and must degrade to a warning.
+        path = self._tmp_path("bigversion.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        def fn(inp):
+            return inp + 1
+
+        torch.compiler.export_python(path=path, backend="eager")(fn)(x)
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines(True)
+        lines[0] = f"# torch.compiler.export_python torch-version: {'9' * 4400}\n"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("".join(lines))
+
+        loaded = torch.compiler.export_python(path=path, backend="eager")(fn)
+        with self.assertLogs("torch.compiler._export_python", level="WARNING") as cm:
+            self.assertEqual(loaded(x), fn(x))
+        self.assertTrue(any("produced by torch" in m for m in cm.output))
 
     def test_loading_an_artifact_leaves_its_directory_alone(self, device):
         # Triton's autotune cache wrote a <hash>.best_config next to the artifact,
