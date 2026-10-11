@@ -262,6 +262,9 @@ class CUDACombinedScheduling(BaseScheduling):
     def codegen_mix_order_reduction(self, node):
         return self._triton_scheduling.codegen_mix_order_reduction(node)
 
+    def benchmark_mix_order_reduction(self, node):
+        return self._triton_scheduling.benchmark_mix_order_reduction(node)
+
     def codegen_staged_reduction(self, node):
         return self._triton_scheduling.codegen_staged_reduction(node)
 
