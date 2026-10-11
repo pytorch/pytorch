@@ -20,6 +20,7 @@ import unittest
 import torch
 import torch.nn as nn
 from torch._inductor import config
+from torch._inductor.utils import run_and_get_code
 from torch.cuda._graph_annotations import (
     _HAS_CUDA_BINDINGS,
     _is_tools_id_unavailable,
@@ -29,6 +30,7 @@ from torch.cuda._graph_annotations import (
     save_kernel_annotations,
 )
 from torch.testing._internal.common_utils import run_tests, TemporaryFileName, TestCase
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 # --- Fixtures (ported from the external validation harness) ---
@@ -508,6 +510,41 @@ class TestCudagraphFqnAnnotations(TestCase):
                 f"L.layers.{i}.proj.add_tensor",
             }
         self.assertEqual(all_strs, expected)
+
+
+@unittest.skipUnless(HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
+class TestStaleFqnReset(TestCase):
+    def test_user_triton_kernel_not_annotated_with_stale_fqn(self):
+        # A user Triton kernel after a SIMD kernel must not inherit its FQN.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_one(x_ptr, out_ptr, n, BLOCK_SIZE: tl.constexpr):
+            offs = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n
+            tl.store(out_ptr + offs, tl.load(x_ptr + offs, mask=mask) + 1, mask=mask)
+
+        class Act(nn.Module):
+            def forward(self, x):
+                return x.relu()
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.act = Act()
+
+            def forward(self, x):
+                y = self.act(x)
+                out = torch.empty_like(y)
+                add_one[(y.numel(),)](y, out, y.numel(), BLOCK_SIZE=16)
+                return out
+
+        x = torch.randn(64, device="cuda")
+        with config.patch({"triton.cudagraph_kernel_annotations": True}):
+            _, (code,) = run_and_get_code(torch.compile(Model(), fullgraph=True), x)
+        # Only the relu SIMD kernel is annotated, not add_one.
+        self.assertEqual(code.count("mark_kernels("), 1, code)
 
 
 class TestGraphViewHelpers(TestCase):
