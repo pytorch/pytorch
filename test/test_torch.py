@@ -1735,7 +1735,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
-    def test_nondeterministic_alert_CTCLoss(self, device):
+    def test_no_nondeterministic_alert_CTCLoss(self, device):
         module = torch.nn.CTCLoss()
         input = torch.randn(50, 3, 15, device=device, requires_grad=True)
         target = torch.randint(1, 14, (3, 30), device=device)
@@ -1747,7 +1747,7 @@ class TestTorchDeviceType(TestCase):
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
             'ctc_loss_backward_gpu',
-            torch.device(device).type == 'cuda')
+            False)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
