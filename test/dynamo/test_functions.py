@@ -7855,6 +7855,249 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, expected)
 
+    def test_locally_defined_class_closure_mutation(self):
+        # Regression test for gh-197896
+        def make(kind):
+            state = {"n": 0} if kind.startswith("dict") else []
+
+            class Helper:
+                def touch(self):
+                    if kind == "dict +=":
+                        state["n"] += 1
+                    elif kind == "dict setitem":
+                        state["k"] = 1
+                    elif kind == "list append":
+                        state.append(1)
+                    elif kind == "list +=":
+                        state.extend([1])
+
+            def f(x):
+                Helper().touch()
+                return x + 1
+
+            return f, state
+
+        for kind, expected_state in [
+            ("dict +=", {"n": 2}),
+            ("dict setitem", {"n": 0, "k": 1}),
+            ("list append", [1, 1]),
+            ("list +=", [1, 1]),
+        ]:
+            f, state = make(kind)
+            g = torch.compile(f, backend="eager", fullgraph=True)
+            out1 = g(torch.ones(1))
+            out2 = g(torch.ones(1))
+            self.assertEqual(out1, torch.tensor([2.0]))
+            self.assertEqual(out2, torch.tensor([2.0]))
+            self.assertEqual(state, expected_state)
+
+    def test_locally_defined_context_manager_closure_mutation(self):
+        # Locally defined context manager instantiated inside compiled function
+        log = []
+
+        class CM:
+            def __enter__(self):
+                log.append("enter")
+                return self
+
+            def __exit__(self, *a):
+                log.append("exit")
+                return False
+
+        def f_cm(x):
+            with CM():
+                y = x + 1
+            return y * 2
+
+        g_cm = torch.compile(f_cm, backend="eager", fullgraph=True)
+        res = g_cm(torch.ones(2))
+        self.assertEqual(res, torch.full((2,), 4.0))
+        self.assertEqual(log, ["enter", "exit"])
+
+    def test_locally_defined_class_property_closure_mutation(self):
+        # Locally defined class with @property mutating a closure variable
+        prop_log = []
+
+        class PropHelper:
+            @property
+            def val(self):
+                prop_log.append("read")
+                return 1
+
+        def f_prop(x):
+            return x + PropHelper().val
+
+        g_prop = torch.compile(f_prop, backend="eager", fullgraph=True)
+        self.assertEqual(g_prop(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(g_prop(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(prop_log, ["read", "read"])
+
+    def test_build_class_in_compiled_fn_closure_mutation(self):
+        # Class defined inside the compiled function mutating enclosing closure state
+        inner_log = []
+
+        def f_inner(x):
+            class InnerHelper:
+                def touch(self):
+                    inner_log.append("touched")
+
+            InnerHelper().touch()
+            return x + 1
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            g_inner = torch.compile(f_inner, backend="eager", fullgraph=True)
+            g_inner(torch.ones(1))
+            g_inner(torch.ones(1))
+        self.assertEqual(inner_log, ["touched", "touched"])
+
+    def test_locally_defined_method_nonlocal_rebind(self):
+        n = 0
+
+        class Helper:
+            def touch(self):
+                nonlocal n
+                n += 1
+
+        def fn(x):
+            Helper().touch()
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(n, 2)
+
+    def test_locally_instantiated_method_rebind(self):
+        old_log = []
+        new_log = []
+
+        class Helper:
+            def value(self):
+                old_log.append("old")
+                return 1
+
+            @classmethod
+            def cm_value(cls):
+                old_log.append("old_cm")
+                return 10
+
+        def new_value(self):
+            new_log.append("new")
+            return 2
+
+        @classmethod
+        def new_cm_value(cls):
+            new_log.append("new_cm")
+            return 20
+
+        class CM:
+            def __enter__(self):
+                old_log.append("old_enter")
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def new_enter(self):
+            new_log.append("new_enter")
+            return self
+
+        def fn(x):
+            with CM():
+                return x + Helper().value() + Helper().cm_value()
+
+        backend = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        out1 = compiled(torch.ones(1))
+        Helper.value = new_value
+        out2 = compiled(torch.ones(1))
+        Helper.cm_value = new_cm_value
+        out3 = compiled(torch.ones(1))
+        CM.__enter__ = new_enter
+        out4 = compiled(torch.ones(1))
+
+        self.assertEqual(out1, torch.tensor([12.0]))
+        self.assertEqual(out2, torch.tensor([13.0]))
+        self.assertEqual(out3, torch.tensor([23.0]))
+        self.assertEqual(out4, torch.tensor([23.0]))
+        self.assertEqual(
+            old_log, ["old_enter", "old", "old_cm", "old_enter", "old_cm", "old_enter"]
+        )
+        self.assertEqual(new_log, ["new", "new", "new_cm", "new_enter", "new", "new_cm"])
+        self.assertEqual(backend.frame_count, 4)
+
+    def test_lru_cache_method_closure_mutation(self):
+        log = []
+
+        class Helper:
+            @functools.lru_cache(0)
+            def touch(self):
+                log.append("touch")
+
+        def fn(x):
+            Helper().touch()
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertGreater(counter.frame_count, 0)
+        self.assertEqual(log, ["touch", "touch"])
+
+    def test_getattr_closure_mutation(self):
+        log = []
+
+        class Desc:
+            def __get__(self, obj, objtype=None):
+                log.append("desc1")
+                return 2
+
+        class Helper:
+            desc = Desc()
+
+            def __getattr__(self, name):
+                log.append(f"getattr:{name}")
+                return 1
+
+        def new_get(self, obj, objtype=None):
+            log.append("desc2")
+            return 20
+
+        def new_getattr(self, name):
+            log.append(f"getattr2:{name}")
+            return 100
+
+        def fn(x):
+            return x + Helper().missing + Helper().desc
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([4.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([4.0]))
+
+        count_before = counter.frame_count
+        Desc.__get__ = new_get
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([22.0]))
+        self.assertEqual(counter.frame_count, count_before + 1)
+
+        Helper.__getattr__ = new_getattr
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([121.0]))
+        self.assertEqual(counter.frame_count, count_before + 2)
+        self.assertEqual(
+            log,
+            [
+                "getattr:missing",
+                "desc1",
+                "getattr:missing",
+                "desc1",
+                "getattr:missing",
+                "desc2",
+                "getattr2:missing",
+                "desc2",
+            ],
+        )
+
 
 instantiate_parametrized_tests(FunctionTests)
 instantiate_parametrized_tests(DefaultsTests)

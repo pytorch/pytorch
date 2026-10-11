@@ -3203,20 +3203,26 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
-                source = self.source
+                source = self.source and AttrSource(self.source, name)
                 source_fn = None
-                if source:
+                if self.cls_source:
                     source_fn = self.get_source_by_walking_mro(tx, name)
                 # TODO(jansel): add a guard to check for monkey patching?
                 from ..mutation_guard import unpatched_nn_module_init
 
                 if method is torch.nn.Module.__init__:
                     method = unpatched_nn_module_init
-                return UserMethodVariable(
-                    variables.UserFunctionVariable(
+                if source_fn is not None:
+                    fn_vt = variables.UserFunctionVariable.create_with_source(
+                        method, source_fn
+                    )
+                else:
+                    fn_vt = variables.UserFunctionVariable(
                         method,
-                        source=source_fn or (source and AttrSource(source, "__func__")),
-                    ),
+                        source=source and AttrSource(source, "__func__"),
+                    )
+                return UserMethodVariable(
+                    fn_vt,
                     self,
                     source=source,
                 ).call_function(tx, args, kwargs)  # type: ignore[arg-type]
@@ -3892,7 +3898,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
             # descriptor protocol and skip past the property wrapper.
-            if self.source:
+            if self.cls_source is not None:
                 source = self.get_source_by_walking_mro(tx, name)
             prop_vt = variables.PropertyVariable(type_attr, source=source)
             return prop_vt.tp_descr_get_impl(
@@ -3978,7 +3984,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             type_attr = unpatched_nn_module_init
 
-        can_use_mro_source = self.cls_source is not None and self.source is not None
+        can_use_mro_source = self.cls_source is not None
 
         # LOAD_ATTR + CALL (3.11+) never hits call_method unless getattr
         # returns CallMethodVariable. object_generic_getattr already does this;
@@ -4035,8 +4041,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
             return md_vt.tp_descr_get_impl(tx, self, class_vt)
         elif is_lru_cache_wrapped_function(type_attr):
+            fn_source = source
+            if can_use_mro_source:
+                fn_source = self.get_source_by_walking_mro(tx, name)
             fn_vt = variables.WrapperUserFunctionVariable(
-                type_attr, "__wrapped__", source=source
+                type_attr, "__wrapped__", source=fn_source
             )
             return variables.WrapperUserMethodVariable(fn_vt, self, source=source)
         elif isinstance(type_attr, types.FunctionType):
@@ -4061,8 +4070,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             fn_source = var_source or (
                 self.source and AttrSource(TypeSource(self.source), name)
             )
+            if var_source is not None:
+                fn_vt = variables.UserFunctionVariable.create_with_source(
+                    type_attr, var_source
+                )
+            else:
+                fn_vt = variables.UserFunctionVariable(type_attr, source=fn_source)
             return variables.UserMethodVariable(
-                variables.UserFunctionVariable(type_attr, source=fn_source),
+                fn_vt,
                 self,
                 source=source,
             )
@@ -4086,8 +4101,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # without __get__, etc.).
         if can_use_mro_source:
             source = self.get_source_by_walking_mro(tx, name)
-        elif not source and self.cls_source is not None:
-            source = AttrSource(self.cls_source, name)
         return VariableTracker.build(tx, type_attr, source)
 
     def invoke_descriptor_get(
@@ -4108,13 +4121,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             descriptor_var = UserDefinedObjectVariable(descriptor)
 
         owner_var = UserDefinedClassVariable(type(self.value))
+        fn = descriptor.__get__.__func__  # type: ignore[union-attr]
+        if descriptor_get_source is not None:
+            # descriptor_get_source is type(descriptor).__get__, which is
+            # already the function; it has no __func__ to unwrap.
+            fn_vt = variables.UserFunctionVariable.create_with_source(
+                fn, descriptor_get_source
+            )
+        else:
+            fn_vt = variables.UserFunctionVariable(fn)
         return variables.UserMethodVariable(
-            variables.UserFunctionVariable(
-                # descriptor_get_source is type(descriptor).__get__, which is
-                # already the function; it has no __func__ to unwrap.
-                descriptor.__get__.__func__,  # type: ignore[union-attr]
-                source=descriptor_get_source,
-            ),
+            fn_vt,
             descriptor_var,
             source=descriptor_get_source,
         ).call_function(tx, [self, owner_var], {})
@@ -4166,13 +4183,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 new_source = None
                 if self.source:
                     new_source = AttrSource(self.source, "__getattr__")
-                out = variables.UserMethodVariable(
+                if self.cls_source is not None:
+                    fn_source = self.get_source_by_walking_mro(tx, "__getattr__")
+                    fn_vt = variables.UserFunctionVariable.create_with_source(
+                        getattr_fn, fn_source
+                    )
+                else:
                     # See the note in tp_getattro_impl above: off the builder so
                     # the accessor guard is not installed eagerly.
-                    variables.UserFunctionVariable(
+                    fn_vt = variables.UserFunctionVariable(
                         getattr_fn,
                         source=new_source and AttrSource(new_source, "__func__"),
-                    ),
+                    )
+                out = variables.UserMethodVariable(
+                    fn_vt,
                     self,
                     source=new_source,
                 ).call_function(tx, [variables.ConstantVariable.create(name)], {})
