@@ -5288,6 +5288,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             and not isinstance(obj, (torch.nn.Module, torch.Tensor))
             and type(obj).__module__.partition(".")[0] != "torch"
             and _pickles_from_dict(type(obj))
+            and not hasattr(type(obj), "__slots__")
             and id(obj) not in self._whole_compared_values
         ):
             # A guarded user object (a train pipeline, a wrapper holding a
@@ -5296,7 +5297,17 @@ class GuardsStatePickler(FunctionPicklerBase):
             # reducers above get first refusal. Nothing a guard compares whole
             # is pruned (_whole_compared_values); skipping torch's own types on
             # top of that is only a conservative filter, so they stay whole.
-            self._prune_unguarded_attributes(obj)
+            # The sentinel goes into this object's state only, not into
+            # missing_values: another object pickled whole may hold the same
+            # attribute and need it at load.
+            pruned = self._unguarded_attributes(obj)
+            if pruned:
+                missing = self._missing("unguarded attribute")
+                state = {k: missing if k in pruned else v for k, v in vars(obj).items()}
+                # Swap only the state: a dict or list subclass's default reduce
+                # also carries its items. Every protocol >= 2 reduces alike.
+                rv = obj.__reduce_ex__(2)
+                return (*rv[:2], state, *rv[3:])
 
         return NotImplemented
 
@@ -5359,7 +5370,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         return carried or None
 
     def _prune_unguarded_attributes(self, obj: Any) -> None:
-        """Mark every ``__dict__`` value nothing guards as prunable.
+        for attr in self._unguarded_attributes(obj).values():
+            self.missing_values[id(attr)] = attr
+
+    def _unguarded_attributes(self, obj: Any) -> dict[str, Any]:
+        """The ``__dict__`` values nothing guards, which are prunable.
 
         Reaching an object through the guard tree does not mean its whole state
         is needed, only the attributes a guard actually reads. The rest becomes
@@ -5371,6 +5386,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         __setstate__, or ``_pickles_from_dict``), since any other hook may read
         anything.
         """
+        unguarded = {}
         for name, attr in obj.__dict__.items():
             if isinstance(attr, (torch.Tensor, torch.nn.Module)):
                 continue
@@ -5386,7 +5402,8 @@ class GuardsStatePickler(FunctionPicklerBase):
                 continue
             if id(attr) in self._whole_compared_values:
                 continue
-            self.missing_values[id(attr)] = attr
+            unguarded[name] = attr
+        return unguarded
 
 
 _PORTABLE_IDENTITY_GUARD_TYPES = frozenset(
@@ -5421,6 +5438,9 @@ def _resolves_by_reference(value: object) -> bool:
         )
     if _is_nested_named_tuple_type(value):
         # GuardsStatePickler.reducer_override rebuilds it as a fresh class.
+        return False
+    if isinstance(value, type) and type(value).__qualname__ != type(value).__name__:
+        # GuardsStatePickler.reducer_override refuses a nested or local metaclass.
         return False
     if isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
         return FunctionPicklerBase._fqn_resolves(value)  # type: ignore[arg-type]
