@@ -3810,6 +3810,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                 variables.DefaultDictVariable,
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
+                variables.PropertyVariable,
                 variables.ExceptionVariable,
                 variables.TracebackVariable,
                 variables.DequeVariable,
