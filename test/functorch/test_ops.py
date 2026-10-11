@@ -360,39 +360,12 @@ vjp_fail = {
     decorate("nn.functional.scaled_dot_product_attention", decorator=skipIfRocm),
 }
 
-# These segfault under functorch transforms, so they take the whole worker down
-# rather than failing the single test.
-# https://github.com/intel/torch-xpu-ops/issues/4953
-xpu_fft_stft_crash = {
-    skip("fft.fft", device_type="xpu"),
-    skip("fft.fft2", device_type="xpu"),
-    skip("fft.fftn", device_type="xpu"),
-    skip("fft.ifft", device_type="xpu"),
-    skip("fft.ifft2", device_type="xpu"),
-    skip("fft.ifftn", device_type="xpu"),
-    skip("fft.rfft", device_type="xpu"),
-    skip("fft.rfft2", device_type="xpu"),
-    skip("fft.rfftn", device_type="xpu"),
-    skip("fft.irfft", device_type="xpu"),
-    skip("fft.irfft2", device_type="xpu"),
-    skip("fft.irfftn", device_type="xpu"),
-    skip("fft.hfft", device_type="xpu"),
-    skip("fft.hfft2", device_type="xpu"),
-    skip("fft.hfftn", device_type="xpu"),
-    skip("fft.ihfft", device_type="xpu"),
-    skip("fft.ihfft2", device_type="xpu"),
-    skip("fft.ihfftn", device_type="xpu"),
-    skip("stft", device_type="xpu"),
-}
-
 # torch-xpu-ops does not implement 5-D bicubic grid_sample yet; only those samples
 # fail. The xfail is op-wide, so it also hides XPU regressions in the 2-D, bilinear
 # and nearest paths. A per-sample xfailIf won't work: it needs the test to call
 # sample_inputs(..., use_subtests=True), and these tests don't.
 # https://github.com/intel/torch-xpu-ops/issues/5542
-xpu_grid_sample_bicubic_5d = {xfail("nn.functional.grid_sample", device_type="xpu")}
-
-xpu_unsupported = xpu_fft_stft_crash | xpu_grid_sample_bicubic_5d
+xpu_unsupported = {xfail("nn.functional.grid_sample", device_type="xpu")}
 
 aliasing_ops = {
     "T",
