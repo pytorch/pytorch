@@ -232,12 +232,6 @@ def triton_config_from_flat_dict(config: dict[str, Any]) -> Config:
     return Config(config, **_pop_triton_config_kwargs(config))
 
 
-def triton_config_from_dict(config: dict[str, Any]) -> Config:
-    if _is_namespaced_triton_config(config):
-        return triton_config_from_namespaced_dict(config)
-    return triton_config_from_flat_dict(config)
-
-
 def _pop_triton_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
     popped = {}
     for key in (

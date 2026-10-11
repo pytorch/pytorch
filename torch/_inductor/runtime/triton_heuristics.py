@@ -81,8 +81,8 @@ from .runtime_utils import (
     get_num_bytes,
     next_power_of_2,
     triton_cache_dir,
-    triton_config_from_dict as config_from_dict,
     triton_config_from_flat_dict as config_from_flat_dict,
+    triton_config_from_namespaced_dict as config_from_namespaced_dict,
     triton_config_kwargs_from_dict as config_kwargs_from_dict,
     triton_config_to_dict as config_to_dict,
     triton_config_to_hashable,
@@ -5338,7 +5338,11 @@ def user_autotune(
     if len(configs) == 0:
         configs = [triton.Config({})]
     else:
-        decoder = config_from_dict if configs_are_namespaced else config_from_flat_dict
+        decoder = (
+            config_from_namespaced_dict
+            if configs_are_namespaced
+            else config_from_flat_dict
+        )
         configs = [*map(decoder, configs)]
     return cached_autotune(
         None,

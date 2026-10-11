@@ -7297,7 +7297,8 @@ class TestAutotuneCacheExtraOptions(TestCase):
         from triton import Config
 
         from torch._inductor.runtime.triton_heuristics import (
-            config_from_dict,
+            config_from_flat_dict,
+            config_from_namespaced_dict,
             config_to_dict,
         )
 
@@ -7307,7 +7308,7 @@ class TestAutotuneCacheExtraOptions(TestCase):
         config.ctas_per_cga = (2, 1, 1)
 
         serialized = config_to_dict(config)
-        loaded = config_from_dict(serialized)
+        loaded = config_from_namespaced_dict(serialized)
 
         self.assertEqual(serialized["kwargs"]["num_ctas"], 7)
         self.assertEqual(serialized["compile_options"]["num_ctas"], 2)
@@ -7317,17 +7318,14 @@ class TestAutotuneCacheExtraOptions(TestCase):
         self.assertEqual(loaded.extra_options, {"backend_option": "value"})
         self.assertEqual(loaded.ctas_per_cga, (2, 1, 1))
 
-        legacy = config_from_dict(
+        legacy = config_from_flat_dict(
             {"BLOCK": 64, "version": 1, "num_warps": 4, "num_stages": 2}
         )
         self.assertEqual(legacy.kwargs["version"], 1)
 
     @requires_triton()
     def test_flat_config_preserves_namespaced_key_names(self):
-        from torch._inductor.runtime.runtime_utils import (
-            triton_config_from_dict,
-            triton_config_from_flat_dict,
-        )
+        from torch._inductor.runtime.runtime_utils import triton_config_from_flat_dict
         from torch._inductor.runtime.triton_heuristics import (
             fixed_config,
             user_autotune,
@@ -7339,7 +7337,7 @@ class TestAutotuneCacheExtraOptions(TestCase):
             "num_warps": 4,
             "num_stages": 1,
         }
-        config = triton_config_from_dict(flat_config)
+        config = triton_config_from_flat_dict(flat_config)
 
         self.assertEqual(config.kwargs, {"kwargs": 4, "compile_options": 8})
         self.assertEqual(config.num_warps, 4)
@@ -7357,6 +7355,15 @@ class TestAutotuneCacheExtraOptions(TestCase):
         self.assertEqual(config.kwargs, schema_shaped_flat_config)
         self.assertTrue(callable(fixed_config(schema_shaped_flat_config, None, {}, {})))
         self.assertTrue(callable(user_autotune([schema_shaped_flat_config], {})))
+
+    @requires_triton()
+    def test_namespaced_user_autotune_rejects_invalid_envelope(self):
+        from torch._inductor.runtime.triton_heuristics import user_autotune
+
+        invalid_config = {"version": 2, "kwargs": {}, "compile_options": {}}
+
+        with self.assertRaisesRegex(ValueError, "invalid namespaced Triton config"):
+            user_autotune([invalid_config], {}, configs_are_namespaced=True)
 
     @requires_triton()
     @parametrize(
