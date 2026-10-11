@@ -111,6 +111,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
+from .object_protocol import python_constant_repr_impl
 from .user_defined import (
     is_reconstructable_decorator_ctx_manager_clone,
     maybe_reconstruct_decorator_ctx_manager_clone,
@@ -2959,6 +2960,9 @@ class SkipFunctionVariable(VariableTracker):
             "Python codegen not implemented for sourceless SkipFunctionVariable"
         )
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
     def __init__(
@@ -3680,6 +3684,9 @@ class FunctoolsPartialVariable(VariableTracker):
             result.cache_hash = self.original_cache_hash  # type: ignore[missing-attribute]
         return result
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class PolyfilledFunctionVariable(VariableTracker):
     _nonvar_fields = {
@@ -3837,6 +3844,9 @@ class PolyfilledFunctionVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return self.fn
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class SysFunctionVariable(VariableTracker):
@@ -5168,6 +5178,9 @@ class StaticMethodVariable(VariableTracker):
         codegen(self.descriptor)
         codegen.extend_output(create_call_function(1, False))
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class ClassMethodVariable(VariableTracker):
     """classmethod descriptor wrapping a callable.
@@ -5277,6 +5290,9 @@ class ClassMethodVariable(VariableTracker):
         )
         codegen(self.descriptor)
         codegen.extend_output(create_call_function(1, False))
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class ClassAttrClassMethodVariable(ClassMethodVariable):
@@ -5760,3 +5776,6 @@ class TupleGetterVariable(VariableTracker):
         # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2665-L2673
         msg = "can't delete attribute" if value is None else "can't set attribute"
         raise_observed_exception(AttributeError, tx, args=[msg])
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)

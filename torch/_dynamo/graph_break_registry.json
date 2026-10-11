@@ -104,6 +104,16 @@
       ]
     }
   ],
+  "GB5828": [
+    {
+      "Gb_type": "repr() on object without a known value",
+      "Context": "{fn.__name__}() on {self}",
+      "Explanation": "Dynamo cannot compute {fn.__name__}() of {self.python_type_name()} because the underlying Python object is not known at trace time.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0005": [
     {
       "Gb_type": "Attempted to a str() method implemented in C/C++",

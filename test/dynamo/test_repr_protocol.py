@@ -7,13 +7,13 @@ import typing
 import unittest
 
 import torch
+import torch._dynamo.testing
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
-    subtest,
 )
 
 
@@ -103,6 +103,7 @@ class TpReprTests(TestCase):
         self.assertEqual(fn(x, obj), compiled(x, obj))
 
     def test_user_defined_default_object_repr(self):
+        # object_repr's address is a placeholder under Dynamo.
         class Plain:
             pass
 
@@ -112,7 +113,9 @@ class TpReprTests(TestCase):
         obj = Plain()
         x = torch.randn(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(x, obj), compiled(x, obj))
+        self.assertEqual(
+            compiled(x, obj), f"<{__name__}.{Plain.__qualname__} object at 0x...>"
+        )
 
     def test_object_dunder_repr_on_plain_instance(self):
         class Plain:
@@ -471,16 +474,9 @@ class TpReprTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=False)
         self.assertEqual(compiled(), fn())
 
-    # A sourceless set subclass built in the graph loses its type name on the
-    # outer repr: Dynamo prints {SetSubclass(...)} instead of SetSubclass({...}).
     @parametrize(
         "set_type",
-        (
-            set,
-            frozenset,
-            subtest(_SetSubclass, decorators=[unittest.expectedFailure]),
-            _FrozenSetSubclass,
-        ),
+        (set, frozenset, _SetSubclass, _FrozenSetSubclass),
         name_fn=lambda t: t.__name__.lstrip("_"),
     )
     def test_self_ref_set_repr(self, set_type):
@@ -533,6 +529,36 @@ class TpReprTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         _, is_digit = compiled(torch.randn(4))
         self.assertTrue(is_digit)
+
+    def test_object_repr_placeholder_address(self):
+        # Sourced and compile-time objects both get the placeholder address,
+        # so a new instance neither recompiles nor graph breaks.
+        class Plain:
+            pass
+
+        def fn(x, obj):
+            return x + 1, repr(obj), str(obj), repr(Plain())
+
+        expected = f"<{__name__}.{Plain.__qualname__} object at 0x...>"
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(4)
+        for obj in (Plain(), Plain()):
+            self.assertEqual(compiled(x, obj)[1:], (expected,) * 3)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_object_str_uses_tp_repr(self):
+        class ReprOnly:
+            def __repr__(self):
+                return "ReprOnly!"
+
+        def fn(x, obj):
+            return x + 1, str(obj)
+
+        obj = ReprOnly()
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, obj)[1], compiled(x, obj)[1])
 
 
 if __name__ == "__main__":

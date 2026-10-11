@@ -112,7 +112,7 @@ from .functions import (
     UserFunctionVariable,
 )
 from .lists import ListVariable, SizeVariable, TupleVariable
-from .object_protocol import pynumber_index, vt_is_iterable
+from .object_protocol import pynumber_index, python_constant_repr_impl, vt_is_iterable
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -673,6 +673,9 @@ class BaseTorchVariable(VariableTracker):
             return True
 
         return getattr(self.value, "__module__", None) in ("math", "cmath")
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class TorchCtxManagerClassVariable(BaseTorchVariable):
