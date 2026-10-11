@@ -547,7 +547,7 @@ def finished_after_kernel(
         *(node.get_buffer_names() for node in epilogue_nodes)
     )
     axes = (1,)
-    if not V.graph.sizevars.statically_known_geq(tile[1], n):
+    if not V.graph.sizevars.statically_known_geq(tile[1] * tile[2], n):
         axes = (0, 1)
     partials = [
         node
@@ -572,8 +572,7 @@ def tile_fits_reduction_epilogue(
     """Whether epilogue_nodes, including row or column reductions, can be
     generated over template output tiles of shape tile (rows, cols, subtiles).
     See TritonTemplateKernel.codegen_tile_reduction_epilogue."""
-    # Reducing across epilogue subtiles isn't supported yet.
-    if tile is None or tile[2] > 1:
+    if tile is None:
         return False
     m, n = template.get_size()
     produced = OrderedSet([template.get_name()])
@@ -619,6 +618,23 @@ def tile_fits_reduction_epilogue(
             return False
         if first_row == len(epilogue_nodes):
             return True
+    if tile[2] == 1 or not V.graph.sizevars.statically_known_geq(tile[1] * tile[2], n):
+        return True
+    # Across subtiles, a reduction is only complete after the last one, so
+    # nothing over (rows, cols) may read a reduction result.
+    after_reduction: OrderedSet[str] = OrderedSet()
+    for node in epilogue_nodes:
+        over_cols = node.group[1] != (m, sympy.S.One)
+        if over_cols and node.used_buffer_names() & after_reduction:
+            return False
+        # A looped multi-output reduction (e.g. welford) finishes with a
+        # multi-result tl.reduce, which automatic warp specialization rejects.
+        if isinstance(node.node, ir.ComputedBuffer) and isinstance(
+            node.node.data, ir.MultiOutputReduction
+        ):
+            return False
+        if node.is_reduction() or not over_cols:
+            after_reduction |= node.get_buffer_names()
     return True
 
 
