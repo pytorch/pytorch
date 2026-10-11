@@ -8,9 +8,11 @@ from types import SimpleNamespace
 import sympy
 
 import torch
-from torch._dynamo.source import ConstantSource
+from torch._dynamo.source import ConstantSource, LocalSource
+from torch._guards import tracing, TracingContext
 from torch._inductor import config
 from torch._inductor.codegen.cpp import cexpr
+from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
@@ -23,10 +25,14 @@ from torch._inductor.sizevars import (
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
+    expr_fits_within_32bit,
     run_and_get_code,
     run_and_get_kernels,
     run_and_get_triton_code,
 )
+from torch._inductor.virtualized import V
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -61,6 +67,92 @@ REDUCTION_INVARIANT_X_LOAD = r"tl\.load\([^\n]*\[XBLOCK, 1\]"
 REDUCTION_INVARIANT_YX_LOAD = r"tl\.load\([^\n]*\[YBLOCK, 1, 1\]"
 DENSE_X_INDEX_LOAD = r"tl\.load\([^\n]*tl\.broadcast_to\(x\d+, \[XBLOCK, R0_BLOCK\]\)"
 REDUCTION_DEPENDENT_LOAD = r"tl\.load\([^\n]*r0_"
+
+
+@instantiate_parametrized_tests
+class TestIndexingGuards(InductorTestCase):
+    def make_graph(self, *, unbacked=False):
+        shape_env = ShapeEnv()
+        if unbacked:
+            sym = shape_env.create_unbacked_symint()
+            expr = sym.node.expr
+        else:
+            source = LocalSource("n")
+            expr = shape_env.create_symbol(8, source, dynamic_dim=DimDynamic.DYNAMIC)
+            sym = shape_env.create_symintnode(expr, hint=8, source=source)
+        graph = SimpleNamespace(
+            sizevars=SizeVarAllocator(shape_env), is_backward=True, fx_wrapper=False
+        )
+        return graph, sym, expr
+
+    def test_backward_installs_dispatch_guard(self):
+        graph, sym, expr = self.make_graph()
+        shape_env = graph.sizevars.shape_env
+        with V.set_graph_handler(graph), V.set_aot_compilation(False):
+            self.assertTrue(SIMDScheduling.can_use_32bit_indexing(768 * expr, []))
+        self.assertTrue(shape_env.evaluate_guards_for_args([sym], [8]))
+        self.assertFalse(shape_env.evaluate_guards_for_args([sym], [3_200_000]))
+
+    def test_late_guard_cannot_justify_int32(self):
+        graph, _, expr = self.make_graph()
+        shape_env = graph.sizevars.shape_env
+        shape_env.freeze()
+        shape_env.guard_or_defer_runtime_assert(expr <= 1000, "late guard")
+        self.assertTrue(graph.sizevars.statically_known_true(768 * expr <= 2**31 - 1))
+        context = TracingContext(FakeTensorMode(shape_env=shape_env))
+        with tracing(context), V.set_graph_handler(graph):
+            self.assertFalse(SIMDScheduling.can_use_32bit_indexing(768 * expr, []))
+            shape_env.freeze()
+            self.assertFalse(SIMDScheduling.can_use_32bit_indexing(768 * expr, []))
+
+    def test_frozen_guard_covers_dominated_kernel(self):
+        graph, sym, expr = self.make_graph()
+        shape_env = graph.sizevars.shape_env
+        shape_env.guard_or_defer_runtime_assert(expr <= (2**31 - 1) // 768, "guard")
+        self.assertTrue(shape_env.evaluate_guards_for_args([sym], [8]))
+        self.assertFalse(shape_env.evaluate_guards_for_args([sym], [3_200_000]))
+        shape_env.freeze()
+        with V.set_graph_handler(graph):
+            self.assertTrue(
+                SIMDScheduling.can_use_32bit_indexing(12288 * FloorDiv(expr, 16), [])
+            )
+
+    @parametrize(
+        "assertion_config",
+        [
+            None,
+            "do_not_emit_runtime_assertions",
+            "scalar_asserts",
+            "unsafe_skip_scalar_range_asserts",
+        ],
+    )
+    def test_unbacked_bound_requires_runtime_assert(self, assertion_config):
+        graph, _, expr = self.make_graph(unbacked=True)
+        shape_env = graph.sizevars.shape_env
+        shape_env.guard_or_defer_runtime_assert(expr <= 1000, "bound")
+        patches = (
+            {assertion_config: assertion_config != "scalar_asserts"}
+            if assertion_config
+            else {}
+        )
+        with V.set_graph_handler(graph), config.patch(patches):
+            self.assertEqual(expr_fits_within_32bit(2 * expr), assertion_config is None)
+            self.assertTrue(expr_fits_within_32bit(ModularIndexing(expr, 1, 32)))
+            self.assertTrue(expr_fits_within_32bit(1000))
+
+    def test_suppressed_guards_cannot_specialize(self):
+        graph, _, expr = self.make_graph()
+        with V.set_graph_handler(graph), graph.sizevars.shape_env.suppress_guards():
+            self.assertFalse(expr_fits_within_32bit(768 * expr))
+
+    def test_aoti_cannot_use_unbounded_hint(self):
+        graph, _, expr = self.make_graph()
+        with V.set_graph_handler(graph), V.set_aot_compilation(True):
+            self.assertFalse(expr_fits_within_32bit(768 * expr))
+            graph.sizevars.shape_env.guard_or_defer_runtime_assert(
+                expr <= 1000, "bound"
+            )
+            self.assertTrue(expr_fits_within_32bit(768 * expr))
 
 
 class TestIndexingSimplification(InductorTestCase):
