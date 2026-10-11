@@ -225,7 +225,11 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     ``__module__`` and ``__qualname__`` lead back to, or a member of such an
     enum. A ``<locals>`` class, a module missing from ``sys.modules``, a
     ``functools.wraps`` wrapper and a NamedTuple class nested in a class (the
-    guard-state pickler rebuilds it as a fresh class) are still dropped.
+    guard-state pickler rebuilds it as a fresh class) are still dropped, and so
+    is a class whose metaclass is nested or local. An object defined in
+    ``__main__`` is kept like any other and resolves against the loading
+    process's ``__main__``: a serving script that does not define it fails the
+    load with an ``AttributeError`` rather than serving without the guard.
     A CLOSURE_MATCH on a plain function is kept when
     ``is_portable_function_guard`` finds that an importable module owns the
     function's globals: the save rewrites it into a FUNCTION_CODE_MATCH, which
