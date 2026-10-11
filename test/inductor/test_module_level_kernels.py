@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 from unittest import mock
 
 import torch
@@ -206,23 +207,51 @@ class TestModuleLevelKernels(TestCase):
         self.assertEqual(len(set(pooled.values())), len(kernels), pooled)
 
         # Anyone else's load of the module, such as running a copy of it, builds its
-        # kernels from the defs in it, so a hand edit there takes effect. They key the
-        # autotune cache on the same per-kernel name as the pool's kernels rather than
-        # on the module they share.
+        # kernels from the defs in it, so a hand edit there takes effect. They compile
+        # at async_compile.wait, and key the autotune cache on the same per-kernel name
+        # as the pool's kernels rather than on the module they share.
+        loaded_on = []
+        make_launchers = CachingAutotuner._make_launchers
+
+        def _record_thread(autotuner):
+            loaded_on.append(threading.current_thread())
+            make_launchers(autotuner)
+
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "module.py")
             with open(path, "w") as f:
                 f.write(code)
             ns = {"__file__": path, "__name__": "_module_level_kernels"}
-            exec(compile(code, path, "exec"), ns)
+            with mock.patch.object(CachingAutotuner, "_make_launchers", _record_thread):
+                exec(compile(code, path, "exec"), ns)
         for k in kernels:
             self.assertEqual(ns[k].fn.fn.__code__.co_filename, path)
+            self.assertTrue(ns[k].launchers, k)
             self.assertEqual(ns[k].kernel_hash, pooled[k])
-        with mock.patch.object(
-            CachingAutotuner, "_precompile_config", _compiled_in_this_process
-        ):
-            with self.assertRaisesRegex(Exception, "compiling process"):
-                ns["call"]([x])
+        # Only the Triton compile runs on the pool's threads.
+        self.assertEqual(set(loaded_on), {threading.main_thread()})
+        self.assertEqual(ns["call"]([x])[0], result)
+
+    @requires_cuda_and_triton
+    @parametrize("case", ["interpreter", "one_thread"])
+    def test_copied_module_kernels_stay_lazy(self, case):
+        # async_compile.wait leaves the defs' kernels uncompiled with compile_threads=1,
+        # and under the interpreter, which returns even string-form kernels uncompiled.
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(_softmax, x)
+        kernels = re.findall(r"^def (triton_\w+)\(", code, re.MULTILINE)
+        threads = 1 if case == "one_thread" else 2
+        env = {"TRITON_INTERPRET": "1"} if case == "interpreter" else {}
+        with config.patch(compile_threads=threads), mock.patch.dict(os.environ, env):
+            with tempfile.TemporaryDirectory() as d:
+                path = os.path.join(d, "module.py")
+                with open(path, "w") as f:
+                    f.write(code)
+                ns = {"__file__": path, "__name__": "_module_level_kernels"}
+                exec(compile(code, path, "exec"), ns)
+        self.assertTrue(kernels)
+        for k in kernels:
+            self.assertFalse(ns[k].launchers, k)
 
     @requires_cuda_and_triton
     @config.patch(compile_threads=2)
