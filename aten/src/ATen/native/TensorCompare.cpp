@@ -782,10 +782,6 @@ std::tuple<Tensor&, Tensor&> mode_out(
     Tensor& values,
     Tensor& indices) {
   TORCH_CHECK(
-      self.device().is_cpu() || self.is_cuda() || self.is_xpu(),
-      "mode only supports CPU, CUDA and XPU device type, got: ",
-      self.device().type());
-  TORCH_CHECK(
       self.layout() == Layout::Strided,
       "mode only supports strided layout, got: ",
       self.layout());
@@ -828,12 +824,19 @@ std::tuple<Tensor&, Tensor&> mode_out(
     AT_ASSERT(values.dim() == 0);
     indices.resize_({}).fill_(0);
     return std::forward_as_tuple(values, indices);
+  } else if (mode_stub.is_device_supported(self.device().type())) {
+    mode_stub(self.device().type(), values, indices, self, dim, keepdim);
+    return std::tuple<Tensor&, Tensor&>{values, indices};
   } else {
-    auto result = [&]() {
-      mode_stub(self.device().type(), values, indices, self, dim, keepdim);
-      return std::tuple<Tensor&, Tensor&>{values, indices};
-    }();
-    return result;
+    // No mode kernel for this device (e.g. an out-of-tree PrivateUse1 backend).
+    // Compute with the functional op, which reaches the backend's own kernel or
+    // its fallback, and write the result to the outputs.
+    auto [mode_values, mode_indices] = at::mode(self, dim, keepdim);
+    resize_output(values, mode_values.sizes());
+    resize_output(indices, mode_indices.sizes());
+    values.copy_(mode_values);
+    indices.copy_(mode_indices);
+    return std::tie(values, indices);
   }
 }
 
