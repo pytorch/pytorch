@@ -556,6 +556,48 @@ def get_overridable_functions() -> set[Callable[..., Any]]:
     return funcs
 
 
+@functools.cache
+def get_factory_requires_grad_functions() -> frozenset[Callable[..., Any]]:
+    # Factories that always return a fresh dense tensor, so `requires_grad=True`
+    # is equivalent to `requires_grad_()` on the result. Not included:
+    # `asarray` (may alias its input), `tensor`, nested / sparse constructors.
+    return frozenset(
+        {
+            torch.arange,
+            torch.bartlett_window,
+            torch.blackman_window,
+            torch.empty,
+            torch.empty_like,
+            torch.empty_permuted,
+            torch.empty_strided,
+            torch.eye,
+            torch.fft.fftfreq,
+            torch.fft.rfftfreq,
+            torch.full,
+            torch.full_like,
+            torch.hamming_window,
+            torch.hann_window,
+            torch.kaiser_window,
+            torch.linspace,
+            torch.logspace,
+            torch.ones,
+            torch.ones_like,
+            torch.rand,
+            torch.rand_like,
+            torch.randint,
+            torch.randint_like,
+            torch.randn,
+            torch.randn_like,
+            torch.randperm,
+            torch.range,
+            torch.tril_indices,
+            torch.triu_indices,
+            torch.zeros,
+            torch.zeros_like,
+        }
+    )
+
+
 class BaseTorchVariable(VariableTracker):
     """common base for all torch.* functions, classes, modules and other things"""
 
@@ -3766,6 +3808,49 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return ConstantVariable.create(member)
         return variables.GetAttrVariable(self, name, source=source)
 
+    def _graph_break_on_factory_requires_grad(
+        self, args: list[VariableTracker], kwargs: "dict[str, VariableTracker]"
+    ) -> NoReturn:
+        unimplemented(
+            gb_type="Attempted to use tensor creation function with requires_grad=True",
+            context=f"fn={self.value}, args={args}, kwargs={kwargs}",
+            explanation="Dynamo does not support this.",
+            hints=[
+                "Create the tensor outside the compiled region.",
+                "Do not set `requires_grad=True`.",
+                "If this is a tensor factory whose result is only used inside the compiled region, turn `torch._dynamo.config.graph_break_on_factory_requires_grad` off.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
+    def _call_factory_with_requires_grad(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: "dict[str, VariableTracker]",
+    ) -> VariableTracker:
+        # The Python bindings implement `factory(..., requires_grad=True)` as
+        # `factory(...)` followed by `set_requires_grad(True)`; trace it the
+        # same way, so the result is a `requires_grad_()` intermediate.
+        from .tensor import TensorVariable
+
+        kwargs_without = {k: v for k, v in kwargs.items() if k != "requires_grad"}
+        result = self.call_function(tx, args, kwargs_without)
+        # A result that already requires grad is tied to an input, e.g. `full`
+        # with a fill tensor that requires grad (which eager rejects).
+        if not isinstance(result, TensorVariable) or result.requires_grad:
+            self._graph_break_on_factory_requires_grad(args, kwargs)
+        if not (result.dtype.is_floating_point or result.dtype.is_complex):
+            raise_observed_exception(
+                RuntimeError,
+                tx,
+                args=[
+                    "Only Tensors of floating point and complex dtype can require gradients"
+                ],
+            )
+        result.call_method(tx, "requires_grad_", [], {})
+        return result
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -3863,6 +3948,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                             ],
                         )
             return self.call_tensor_method(tx, list(args), kwargs)
+
+        requires_grad = kwargs.get("requires_grad")
+        if (
+            not config.graph_break_on_factory_requires_grad
+            and requires_grad is not None
+            and requires_grad.is_python_constant()
+            and requires_grad.as_python_constant() is True
+            and self.value in get_factory_requires_grad_functions()
+            and "out" not in kwargs
+        ):
+            return self._call_factory_with_requires_grad(tx, args, kwargs)
 
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
@@ -3970,16 +4066,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             and "requires_grad" in kwargs
             and kwargs["requires_grad"].as_python_constant()
         ):
-            unimplemented(
-                gb_type="Attempted to use tensor creation function with requires_grad=True",
-                context=f"fn={self.value}, args={args}, kwargs={kwargs}",
-                explanation="Dynamo does not support this.",
-                hints=[
-                    "Create the tensor outside the compiled region.",
-                    "Do not set `requires_grad=True`.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
+            self._graph_break_on_factory_requires_grad(args, kwargs)
 
         # Handle e.g., `torch.add(a, b, out=result)`
         if saved_out_shapes is not None:

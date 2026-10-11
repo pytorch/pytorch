@@ -1869,5 +1869,228 @@ class GraphModule(torch.nn.Module):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
 
 
+@torch._dynamo.config.patch(graph_break_on_factory_requires_grad=False)
+@skipIfTorchDynamo()
+@instantiate_parametrized_tests
+class TestFactoryRequiresGradKwarg(TestCase):
+    """`factory(..., requires_grad=True)` traced as `factory()` + `requires_grad_()`
+    on the intermediate when `graph_break_on_factory_requires_grad` is off.
+
+    The class only patches `graph_break_on_factory_requires_grad`; the tests that
+    consume the gradient in-graph also patch `trace_autograd_ops`.
+    """
+
+    NON_DIFFERENTIABLE = (
+        "Only Tensors of floating point and complex dtype can require gradients"
+    )
+    FACTORY_GRAPH_BREAK = "tensor creation function with requires_grad=True"
+
+    def test_intermediate_single_graph(self):
+        def fn(x):
+            w = torch.ones(4, requires_grad=True)
+            return (x * w).sum().detach()
+
+        x = torch.randn(4)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+        self.assertEqual(compiled, fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_autograd_grad_on_intermediate_single_graph(self):
+        def fn(x):
+            strain = torch.zeros(3, 3, dtype=x.dtype, requires_grad=True)
+            pos = x @ (torch.eye(3, dtype=x.dtype) + strain)
+            return torch.autograd.grad(pos.pow(2).sum(), strain)[0].detach()
+
+        x = torch.randn(4, 3)
+        eager = fn(x)
+        backend = AotEagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)(x)
+        self.assertEqual(compiled, eager)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertExpectedInline(
+            empty_line_normalizer(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False))
+            ),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[4, 3]"):
+        l_x_ = L_x_
+        strain: "f32[3, 3]" = torch.zeros(3, 3, dtype = torch.float32)
+        set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
+        requires_grad_ = strain.requires_grad_();  requires_grad_ = None
+        set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
+        eye: "f32[3, 3]" = torch.eye(3, dtype = torch.float32)
+        add: "f32[3, 3]" = eye + strain;  eye = None
+        pos: "f32[4, 3]" = l_x_ @ add;  l_x_ = add = None
+        pow_1: "f32[4, 3]" = pos.pow(2);  pos = None
+        sum_1: "f32[]" = pow_1.sum();  pow_1 = None
+        grad = torch.autograd.grad(sum_1, strain);  sum_1 = strain = None
+        getitem: "f32[3, 3]" = grad[0];  grad = None
+        detach: "f32[3, 3]" = getitem.detach();  getitem = None
+        return (detach,)
+""",
+        )
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_backward_grad_readback(self):
+        def fn(x):
+            t = torch.zeros(3, requires_grad=True)
+            (x * t).sum().backward()
+            return t.grad
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+        self.assertEqual(compiled, fn(x))
+        self.assertEqual(compiled, x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_leaked_output_graph_breaks(self):
+        def fn(x):
+            x = x.sin()
+            w = torch.ones(4, requires_grad=True)
+            return x * w
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "returning intermediate with requires_grad_\\(\\)",
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        out = torch.compile(fn, backend=cnt)(x)
+        self.assertTrue(out.requires_grad)
+        self.assertEqual(out, fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("dtype", (torch.int64, torch.bool))
+    def test_non_differentiable_dtype_raises_like_eager(self, dtype):
+        def fn(x):
+            return torch.ones(4, dtype=dtype, requires_grad=True) + x
+
+        x = torch.ones(4, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, self.NON_DIFFERENTIABLE):
+            fn(x)
+        # Without fullgraph the observed exception reaches the caller as is;
+        # a failing fake call would surface as a Dynamo-internal error instead.
+        with self.assertRaisesRegex(RuntimeError, self.NON_DIFFERENTIABLE) as cm:
+            torch.compile(fn, backend="eager")(x)
+        self.assertIs(type(cm.exception), RuntimeError)
+
+    @parametrize("value", ("int", "symbool"))
+    def test_non_bool_requires_grad_is_an_eager_error(self, value):
+        # The factory arg parser only accepts a Python bool, in eager and in the
+        # fake call alike, so a non-bool (or symbolic) `requires_grad` never
+        # reaches the rewrite: nothing is stripped and Dynamo reports the eager
+        # TypeError through its usual fake-call graph break.
+        def fn(x):
+            requires_grad = 1 if value == "int" else x.shape[0] == 4
+            return torch.ones(4, requires_grad=requires_grad) * x
+
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0)
+        if value == "int":
+            with self.assertRaisesRegex(TypeError, "must be bool"):
+                fn(x)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "TypeError when making fake tensor call"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_full_tensor_fill_value(self):
+        # `full` with a tensor fill value is traced as `empty().fill_()`; the
+        # leaf must only start requiring grad after the in-place fill.
+        def fn(v):
+            w = torch.full((3,), v, requires_grad=True)
+            return torch.autograd.grad((w * w).sum(), w)[0].detach()
+
+        v = torch.tensor(1.5)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)(v)
+        self.assertEqual(compiled, fn(v))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_full_fill_value_requiring_grad_is_an_eager_error(self):
+        def fn(v):
+            return torch.full((3,), v, requires_grad=True)
+
+        v = torch.tensor(1.5, requires_grad=True)
+        with self.assertRaisesRegex(TypeError, "must be Number, not Tensor"):
+            fn(v)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, self.FACTORY_GRAPH_BREAK
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(v)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(TypeError, "must be Number, not Tensor"):
+            torch.compile(fn, backend="eager")(v)
+
+    def test_non_factory_kwarg_reaches_fake_call(self):
+        def fn(x):
+            return torch.sin(x, requires_grad=True)
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(TypeError, "unexpected keyword argument"):
+            fn(x)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "TypeError when making fake tensor call"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    @parametrize("case", ("allow_in_graph", "custom_op", "asarray", "out"))
+    def test_non_factory_call_keeps_graph_break(self, case):
+        # Only allowlisted factories without `out=` are rewritten; `asarray` may
+        # return its input. Everything else keeps the kwarg and the old break.
+        @torch._dynamo.allow_in_graph
+        def make(x, requires_grad=False):
+            return x.clone().requires_grad_(requires_grad)
+
+        fns = {
+            "allow_in_graph": lambda x: make(x, requires_grad=True) * 2,
+            "custom_op": lambda x: torch.ops.mylib.scale(x, requires_grad=True),
+            "asarray": lambda x: torch.asarray(x, requires_grad=True) * 2,
+            "out": lambda x: torch.zeros(4, out=torch.empty(4), requires_grad=True) + x,
+        }
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("scale(Tensor x, *, bool requires_grad=False) -> Tensor")
+            lib.impl(
+                "scale",
+                lambda x, *, requires_grad=False: x * (2 if requires_grad else 1),
+                "CompositeExplicitAutograd",
+            )
+            fn = fns[case]
+            x = torch.randn(4)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, self.FACTORY_GRAPH_BREAK
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x.clone())
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, backend="eager")(x.clone())
+            self.assertEqual(compiled, fn(x.clone()))
+
+    @torch._dynamo.config.patch(graph_break_on_factory_requires_grad=True)
+    def test_gated_graph_breaks(self):
+        def fn(x):
+            return torch.ones(4, requires_grad=True) * x
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            f"(?s){self.FACTORY_GRAPH_BREAK}.*graph_break_on_factory_requires_grad",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        out = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(out, fn(x))
+        self.assertTrue(out.requires_grad)
+
+
 if __name__ == "__main__":
     run_tests()

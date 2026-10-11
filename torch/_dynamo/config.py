@@ -780,6 +780,16 @@ enable_dynamo_decompositions = True
 # See https://github.com/pytorch/pytorch/issues/157452 for more context
 graph_break_on_nn_param_ctor = True
 
+# If True (default), a tensor factory called with `requires_grad=True` inside the
+# compiled region (e.g. `torch.zeros(3, requires_grad=True)`) graph breaks. If
+# False, Dynamo traces it as `factory(...)` followed by `requires_grad_()` on the
+# intermediate, so returning it while it still requires grad is a graph break.
+# Kept on until the bugs the old graph break was hiding are fixed:
+# https://github.com/pytorch/pytorch/issues/200443
+# https://github.com/pytorch/pytorch/issues/200444
+# https://github.com/pytorch/pytorch/issues/200445
+graph_break_on_factory_requires_grad = True
+
 # If True, enable calling torch.compile inside __torch_dispatch__ handlers.
 # When enabled:
 # 1. __torch_dispatch__ methods are automatically wrapped with torch._dynamo.disable
