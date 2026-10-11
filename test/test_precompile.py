@@ -7875,6 +7875,89 @@ class TestExportPython(TestCase):
             with torch.autocast(device_type, torch.float16):
                 torch.compiler.export_python(path=path, backend="eager")(fn)(x, x)
 
+    def test_cpu_vector_isa_is_stamped_and_refused_on_mismatch(self, device):
+        # Inductor bakes the capture host's vector width into a C++ loop's stride while
+        # the ISA is re-picked at compile time, so a narrower host leaves part of the
+        # output uninitialized -- no error, no warning, and no other stamp covers it.
+        if torch.device(device).type != "cpu":
+            self.skipTest("the stamp is about C++ kernels")
+        path = self._tmp_path("isa.py")
+
+        def fn(x, y):
+            return ((x * 2.0 + y).tanh() * x).sum(dim=0)
+
+        x = make_tensor((256, 256), device=device, dtype=torch.float32)
+        y = make_tensor((256, 256), device=device, dtype=torch.float32)
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.cpu_vec_isa import pick_vec_isa
+        from torch.compiler._export_python import _CPU_ISA_TAG
+
+        expected = torch.compiler.export_python(path=path)(fn)(x, y)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        stamp = next(l for l in source.splitlines() if l.startswith(_CPU_ISA_TAG))
+        isa = pick_vec_isa()
+        width, name = isa.bit_width(), str(isa)
+        self.assertEqual(stamp, f"{_CPU_ISA_TAG}{(width, name)!r}")
+        self.assertEqual(torch.compiler.export_python(path=path)(fn)(x, y), expected)
+
+        def load_with_stamp(captured):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(source.replace(stamp, f"{_CPU_ISA_TAG}{captured!r}"))
+            return torch.compiler.export_python(path=path)(fn)(x, y)
+
+        # Only the width is baked into the strides, so a host whose ISA adds features
+        # at the same width (AVX-512 -> AVX-512 VNNI) runs the artifact.
+        self.assertEqual(load_with_stamp((width, "")), expected)
+        # The refusal must come before the kernel is compiled under the wrong ISA.
+        compiled = AssertionError("compiled the C++ kernel")
+        with mock.patch.object(AsyncCompile, "cpp_pybinding", side_effect=compiled):
+            for captured in ((width * 2 or 128, name), (width, f"{name} amx_tile")):
+                with self.assertRaisesRegex(PrecompileError, "CPU vector ISA"):
+                    load_with_stamp(captured)
+
+    def test_a_cpu_isa_change_after_load_is_not_refused(self, device):
+        # The kernel's ISA is fixed when it compiles at load, so a later simdlen change
+        # cannot reach it and must not make the loaded artifact refuse to run.
+        if torch.device(device).type != "cpu":
+            self.skipTest("the stamp is about C++ kernels")
+        import torch._inductor.config as ind_config
+
+        path = self._tmp_path("isa_after_load.py")
+
+        def fn(x, y):
+            return ((x * 2.0 + y).tanh() * x).sum(dim=0)
+
+        x = make_tensor((256, 256), device=device, dtype=torch.float32)
+        y = make_tensor((256, 256), device=device, dtype=torch.float32)
+        expected = torch.compiler.export_python(path=path)(fn)(x, y)
+        loaded = torch.compiler.export_python(path=path)(fn)
+        self.assertEqual(loaded(x, y), expected)
+        with ind_config.patch({"cpp.simdlen": 0}):
+            self.assertEqual(loaded(x, y), expected)
+
+    def test_a_cuda_only_artifact_records_no_cpu_isa(self, device):
+        # A CUDA artifact must not start refusing to run, or warning, because it moved
+        # between two hosts whose CPUs differ in a way it never depended on.
+        if torch.device(device).type != "cuda":
+            self.skipTest("needs a graph with no C++ kernel")
+        path = self._tmp_path("cuda_isa.py")
+
+        def fn(x):
+            return (x * 2).relu()
+
+        x = make_tensor((1024,), device=device, dtype=torch.float32)
+        from torch.compiler._export_python import _CPU_ISA_TAG
+
+        torch.compiler.export_python(path=path)(fn)(x)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        self.assertIn(f"{_CPU_ISA_TAG}None", source)
+        # Every load logs the trusted-exec warning; nothing may complain about the stamp.
+        with self.assertLogs("torch.compiler._export_python", "WARNING") as logs:
+            torch.compiler.export_python(path=path)(fn)(x)
+        self.assertFalse([m for m in logs.output if "cpu-vec-isa" in m], logs.output)
+
     def test_loading_an_artifact_leaves_its_directory_alone(self, device):
         # Triton's autotune cache wrote a <hash>.best_config next to the artifact,
         # keyed on its basename, so two artifacts both called artifact.py shared one.
@@ -7892,6 +7975,39 @@ class TestExportPython(TestCase):
         torch.compiler.export_python(path=path)(fn)(x, w, b)
         torch.compiler.export_python(path=path)(fn)(x, w, b)
         self.assertEqual(sorted(os.listdir(directory)), ["artifact.py"])
+
+    def test_a_missing_or_malformed_cpu_isa_stamp_warns(self, device):
+        # The only checked stamp that raises must not go quiet when a hand-edit drops
+        # it, leaves it unparsable or changes its shape: it warns, once per load.
+        if torch.device(device).type != "cpu":
+            self.skipTest("the stamp is about C++ kernels")
+        from torch.compiler._export_python import _CPU_ISA_TAG
+
+        path = self._tmp_path("isa_missing.py")
+
+        def fn(x, y):
+            return ((x * 2.0 + y).tanh() * x).sum(dim=0)
+
+        x = make_tensor((256, 256), device=device, dtype=torch.float32)
+        y = make_tensor((256, 256), device=device, dtype=torch.float32)
+        expected = torch.compiler.export_python(path=path)(fn)(x, y)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        stamp = next(l for l in source.splitlines() if l.startswith(_CPU_ISA_TAG))
+        dropped = "\n".join(l for l in source.splitlines() if l != stamp)
+        unparsable = source.replace(stamp, f"{_CPU_ISA_TAG}avx512")
+        reshaped = source.replace(stamp, f"{_CPU_ISA_TAG}'avx512'")
+        for edited in (dropped, unparsable, reshaped):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(edited)
+            with self.assertLogs("torch.compiler._export_python", "WARNING") as logs:
+                self.assertEqual(
+                    torch.compiler.export_python(path=path)(fn)(x, y), expected
+                )
+            self.assertTrue(
+                any("no recorded cpu-vec-isa stamp" in m for m in logs.output),
+                logs.output,
+            )
 
 
 instantiate_device_type_tests(TestExportPython, globals())
