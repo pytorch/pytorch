@@ -14863,6 +14863,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn0, [torch.rand(10, 3, 10), torch.rand(3, 10, 10)])
         self.common(fn1, [torch.rand(3, 10, 10), torch.rand(3, 10, 10)])
 
+    def test_lerp_bf16_weight_cast(self):
+        def fn(x, y, w):
+            return x.lerp_(y, w.to(x.dtype))
+
+        x = torch.ones(8, dtype=torch.bfloat16)
+        self.common(fn, (x, torch.zeros_like(x), torch.tensor(0.95)))
+
+    def test_fp16_cast_log1p(self):
+        self.common(lambda x: x.half().log1p(), (torch.rand(8) * 1e-3,))
+
     @parametrize(
         "dtype",
         test_dtypes,
