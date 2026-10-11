@@ -3560,8 +3560,9 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0]
             if name in ("__eq__", "__ne__") and isinstance(obj, ConstDictVariable):
-                no_keywords(tx, f"dict.{name}", kwargs)
-                check_positional(tx, name, len(args), 2, 2)
+                no_keywords(tx, f"wrapper {name}", kwargs)
+                if len(args) != 2:
+                    raise_type_error(tx, f"expected 1 argument, got {len(args) - 1}")
                 return ConstDictVariable.tp_richcompare_impl(obj, tx, args[1], name)
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)

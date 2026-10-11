@@ -19,6 +19,7 @@ in sets.py.
 
 import collections
 import functools
+import operator
 import sys
 import types
 import weakref
@@ -26,7 +27,6 @@ from collections.abc import Callable, Iterator
 from typing import Any, cast, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
-import torch
 from torch.utils._pytree import MappingKey
 
 from .. import graph_break_hints, polyfills, variables
@@ -74,7 +74,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .hashable import HashableTracker, is_hashable, raise_unhashable
+from .hashable import HashableTracker, is_hashable
 from .object_protocol import (
     _is_method_type,
     generic_getitem,
@@ -499,7 +499,7 @@ class ConstDictVariable(VariableTracker):
         try:
             return HashableTracker(key)
         except ObservedTypeError:
-            if not torch._has_frozendict:
+            if sys.version_info < (3, 15):
                 raise
             error = tx.exn_vt_stack.get_raised_exception()
             message = generic_str(tx, error).as_python_constant()
@@ -640,16 +640,28 @@ class ConstDictVariable(VariableTracker):
         if not self.is_mutable():
             return None
         check_positional(tx, "pop", len(args), 1, 2)
-        if args[0] not in self:
+        if not self.items and not isinstance(self, OrderedDictVariable):
+            self.install_dict_keys_match_guard()
+            if len(args) == 1:
+                raise_observed_exception(KeyError, tx, args=[args[0]])
+            return args[1]
+        # OrderedDict.pop uses PyObject_Hash, including for an empty mapping.
+        key = (
+            HashableTracker(args[0])
+            if isinstance(self, OrderedDictVariable)
+            else self._lookup_key(tx, args[0])
+        )
+        value = self.items.get(key)
+        if value is None or isinstance(value, variables.DeletedVariable):
             # missing item, return the default value. Install no DICT_CONTAINS guard.
-            self.install_dict_contains_guard(tx, HashableTracker(args[0]))
+            self.install_dict_contains_guard(tx, key)
             if len(args) == 1:
                 # if default is not given, raise KeyError
                 raise_observed_exception(KeyError, tx, args=[args[0]])
             return args[1]
         self.should_reconstruct_all = True
         tx.output.side_effects.mutation(self)
-        return self.items.pop(HashableTracker(args[0]))
+        return self.items.pop(key)
 
     def dict_popitem(
         self,
@@ -750,8 +762,9 @@ class ConstDictVariable(VariableTracker):
             return None
         check_positional(tx, "setdefault", len(args), 1, 2)
         self.install_dict_keys_match_guard()
-        value = self.maybe_getitem_const(args[0])
-        if value is not None:
+        key = self._lookup_key(tx, args[0])
+        value = self.items.get(key)
+        if value is not None and not isinstance(value, variables.DeletedVariable):
             return value
         else:
             if len(args) == 1:
@@ -759,7 +772,10 @@ class ConstDictVariable(VariableTracker):
             else:
                 x = args[1]
             tx.output.side_effects.mutation(self)
-            self.items[HashableTracker(args[0])] = x
+            if isinstance(self, OrderedDictVariable):
+                # OrderedDict.setdefault looks up, then hashes again to insert.
+                key = HashableTracker(args[0])
+            self.items[key] = x
             return x
 
     def dict_reversed(
@@ -842,14 +858,16 @@ class ConstDictVariable(VariableTracker):
             return super().mp_ass_subscript_impl(tx, key, value)
 
         # value=None signals delete (CPython NULL sentinel).
-        if not is_hashable(key):
-            raise_unhashable(key, tx)
         self.install_dict_keys_match_guard()
-        hkey = HashableTracker(key)
+        hkey = (
+            HashableTracker(key)
+            if isinstance(self, OrderedDictVariable)
+            else self._lookup_key(tx, key)
+        )
         tx.output.side_effects.mutation(self)
         if value is None:
             if hkey not in self.items:
-                raise_observed_exception(KeyError, tx, args=[key.as_python_constant()])
+                raise_observed_exception(KeyError, tx, args=[key])
             self.should_reconstruct_all = True
             del self.items[hkey]
         else:
@@ -919,32 +937,33 @@ class ConstDictVariable(VariableTracker):
         if isinstance(self, ConstDictVariable) and self.source:
             # Value comparisons can have order-dependent side effects.
             tx.output.guard_on_key_order.add(self.source)
-        try:
-            for key, value in self.items.items():
-                # Native equality reuses each key's insertion-time hash.
-                other_value = other.items.get(key)
-                if other_value is None:
-                    if isinstance(other, ConstDictVariable):
-                        other.install_dict_contains_guard(tx, key)
-                    return ConstantVariable.create(op == "__ne__")
-                equal = generic_richcompare_bool(tx, value, other_value, "__eq__")
-                if not specialize_symnode(
-                    generic_is_true(tx, equal)
-                ).as_python_constant():
-                    return ConstantVariable.create(op == "__ne__")
-        except RuntimeError as error:
-            if type(error) is not RuntimeError or str(error) not in (
-                "dictionary changed size during iteration",
-                "dictionary keys changed during iteration",
-                "OrderedDict mutated during iteration",
+        items = iter(self.items.items())
+        while True:
+            # Only iterator advancement detects storage mutation; user comparisons
+            # run outside this handler and retain their own exception behavior.
+            try:
+                key, value = next(items)
+            except StopIteration:
+                break
+            except RuntimeError as error:
+                unimplemented(
+                    gb_type="Dictionary mutated during comparison",
+                    context=str(error),
+                    explanation="Dynamo cannot trace dictionary comparison that changes its keys.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            # Native equality reuses each key's insertion-time hash.
+            other_value = other.items.get(key)
+            if other_value is None or isinstance(
+                other_value, variables.DeletedVariable
             ):
-                raise
-            unimplemented(
-                gb_type="Dictionary mutated during comparison",
-                context=str(error),
-                explanation="Dynamo cannot trace dictionary comparison that changes its keys.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+                if isinstance(other, ConstDictVariable):
+                    # Keep the missing-key hint in recompile diagnostics.
+                    other.install_dict_contains_guard(tx, key)
+                return ConstantVariable.create(op == "__ne__")
+            equal = generic_richcompare_bool(tx, value, other_value, "__eq__")
+            if not specialize_symnode(generic_is_true(tx, equal)).as_python_constant():
+                return ConstantVariable.create(op == "__ne__")
         return ConstantVariable.create(op == "__eq__")
 
     def tp_getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
@@ -977,25 +996,22 @@ class OrderedDictVariable(ConstDictVariable):
         for mapping in (self, other):
             if mapping.source:
                 install_guard(mapping.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
-        try:
-            for left, right in zip(self.items, other.items):
-                equal = generic_richcompare_bool(tx, left.vt, right.vt, "__eq__")
-                if not specialize_symnode(
-                    generic_is_true(tx, equal)
-                ).as_python_constant():
-                    return ConstantVariable.create(op == "__ne__")
-        except RuntimeError as error:
-            if (
-                type(error) is not RuntimeError
-                or str(error) != "OrderedDict mutated during iteration"
-            ):
-                raise
-            unimplemented(
-                gb_type="Dictionary mutated during comparison",
-                context=str(error),
-                explanation="Dynamo cannot trace dictionary comparison that changes its keys.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+        keys = zip(self.items, other.items)
+        while True:
+            try:
+                left, right = next(keys)
+            except StopIteration:
+                break
+            except RuntimeError as error:
+                unimplemented(
+                    gb_type="Dictionary mutated during comparison",
+                    context=str(error),
+                    explanation="Dynamo cannot trace dictionary comparison that changes its keys.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            equal = generic_richcompare_bool(tx, left.vt, right.vt, "__eq__")
+            if not specialize_symnode(generic_is_true(tx, equal)).as_python_constant():
+                return ConstantVariable.create(op == "__ne__")
         return ConstantVariable.create(op == "__eq__")
 
     # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
@@ -1010,17 +1026,26 @@ class OrderedDictVariable(ConstDictVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self.install_dict_keys_match_guard()
-        tx.output.side_effects.mutation(self)
-        if args[0] not in self:
-            raise_observed_exception(KeyError, tx)
+        if not self.items:
+            raise_observed_exception(KeyError, tx, args=[args[0]])
 
         last = True
-        if len(args) == 2 and args[0].is_python_constant():
+        if len(args) == 2 and args[1].is_python_constant():
             last = args[1].as_python_constant()
         if "last" in kwargs and kwargs["last"].is_python_constant():
             last = kwargs["last"].as_python_constant()
 
-        self.items.move_to_end(HashableTracker(args[0]), last=last)
+        endpoint = next(reversed(self.items) if last else iter(self.items))
+        same_key = variables.BuiltinVariable(operator.is_).call_function(
+            tx, [args[0], endpoint.vt], {}
+        )
+        if same_key.as_python_constant():
+            return ConstantVariable.create(None)
+        key = HashableTracker(args[0])
+        if key not in self.items:
+            raise_observed_exception(KeyError, tx, args=[args[0]])
+        tx.output.side_effects.mutation(self)
+        self.items.move_to_end(key, last=last)
         return ConstantVariable.create(None)
 
     def popitem(
@@ -1094,19 +1119,19 @@ class OrderedDictVariable(ConstDictVariable):
         # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L327-L339
         if not pydict_check(other):
             return ConstantVariable.create(NotImplemented)
-        # Merge via the internal helper, bypassing a subclass's overridden
-        # copy/update while preserving the OrderedDict subclass type.
-        if reverse:
-            if self.python_type() is collections.OrderedDict:
-                new = OrderedDictVariable({}, mutation_type=ValueMutationNew())
-                ConstDictVariable.dict_update(new, tx, [other], {})
-            else:
-                cls = VariableTracker.build(tx, type).call_function(tx, [self], {})
-                new = cast(ConstDictVariable, cls.call_function(tx, [other], {}))
-            ConstDictVariable.dict_update(new, tx, [self], {})
+        # CPython's odict_or calls the subclass constructor, then merges via
+        # its internal helper without calling overridden copy/update methods.
+        left, right = (other, self) if reverse else (self, other)
+        owner = (
+            left if issubclass(left.python_type(), collections.OrderedDict) else self
+        )
+        if owner.python_type() is collections.OrderedDict:
+            new = OrderedDictVariable({}, mutation_type=ValueMutationNew())
+            ConstDictVariable.dict_update(new, tx, [left], {})
         else:
-            new = cast(ConstDictVariable, ConstDictVariable.dict_copy(self, tx, [], {}))
-            ConstDictVariable.dict_update(new, tx, [other], {})
+            cls = VariableTracker.build(tx, type).call_function(tx, [owner], {})
+            new = cast(ConstDictVariable, cls.call_function(tx, [left], {}))
+        ConstDictVariable.dict_update(new, tx, [right], {})
         return new
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
