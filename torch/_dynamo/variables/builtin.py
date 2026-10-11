@@ -3521,12 +3521,13 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         check_positional(tx, "fromkeys", len(args), 1, 2)
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
         if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
+            if isinstance(args[0], ConstDictVariable):
+                args[0].install_dict_keys_match_guard()
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
-            return ConstDictVariable(
-                dict.fromkeys(args[0].items.keys(), value),  # type: ignore[arg-type]
-                mutation_type=ValueMutationNew(),
-            )
-        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args, **kwargs)
+            result = ConstDictVariable({}, mutation_type=ValueMutationNew())
+            result.items.update(dict.fromkeys(args[0].items.keys(), value))
+            return result
+        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args)
 
     tp_methods = {
         "fromkeys": Method(fromkeys),
@@ -3558,6 +3559,10 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0]
+            if name in ("__eq__", "__ne__") and isinstance(obj, ConstDictVariable):
+                no_keywords(tx, f"dict.{name}", kwargs)
+                check_positional(tx, name, len(args), 2, 2)
+                return ConstDictVariable.tp_richcompare_impl(obj, tx, args[1], name)
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)
             return obj.call_method(tx, name, args[1:], kwargs)
@@ -3585,12 +3590,11 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         user_cls: VariableTracker,
         /,
         *args: VariableTracker,
-        **kwargs: VariableTracker,
     ) -> VariableTracker:
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.dict_fromkeys),
             [user_cls, *args],
-            kwargs,
+            {},
         )
 
 
