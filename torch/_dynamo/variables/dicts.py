@@ -27,7 +27,7 @@ from typing import Any, cast, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
 import torch
-from torch.utils._pytree import MappingKey
+from torch.utils._pytree import GetAttrKey, MappingKey, SequenceKey
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
@@ -57,7 +57,9 @@ from ..utils import (
     dict_items,
     dict_keys,
     dict_values,
+    get_fake_value,
     istype,
+    set_example_value,
     specialize_symnode,
     tracked_repr,
     unpack_iterable,
@@ -105,6 +107,27 @@ def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
 
 def pydict_checkexact(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
     return obj.python_type() is dict
+
+
+# Mirrors PyFrozenDict_Check and PyAnyDict_Check in Include/cpython/dictobject.h.
+def pyfrozendict_check(obj: VariableTracker) -> TypeIs["FrozenDictVariable"]:
+    return torch._has_frozendict and issubclass(obj.python_type(), torch._frozendict)
+
+
+def pyfrozendict_checkexact(obj: VariableTracker) -> TypeIs["FrozenDictVariable"]:
+    return torch._has_frozendict and obj.python_type() is torch._frozendict
+
+
+def pyanydict_check(
+    obj: VariableTracker,
+) -> TypeIs["ConstDictVariable | FrozenDictVariable"]:
+    return pydict_check(obj) or pyfrozendict_check(obj)
+
+
+def pyanydict_checkexact(
+    obj: VariableTracker,
+) -> TypeIs["ConstDictVariable | FrozenDictVariable"]:
+    return pydict_checkexact(obj) or pyfrozendict_checkexact(obj)
 
 
 def _is_set_or_dictview(obj: VariableTracker) -> bool:
@@ -488,7 +511,7 @@ class ConstDictVariable(VariableTracker):
                 self.install_dict_keys_match_guard()
 
     def _lookup_key(
-        self,
+        self: "ConstDictVariable | FrozenDictVariable",
         tx: "InstructionTranslatorBase",
         key: VariableTracker,
         *,
@@ -505,7 +528,7 @@ class ConstDictVariable(VariableTracker):
             message = generic_str(tx, error).as_python_constant()
             handle_observed_exception(tx)
             if container_name is None:
-                container_name = "dict"
+                container_name = "frozendict" if pyfrozendict_check(self) else "dict"
             raise_type_error(
                 tx,
                 f"cannot use '{key.python_qualified_name()}' "
@@ -522,13 +545,14 @@ class ConstDictVariable(VariableTracker):
         return self.getitem_const_raise_exception_if_absent(tx, key)
 
     def sq_contains_impl(
-        self,
+        self: "ConstDictVariable | FrozenDictVariable",
         tx: "InstructionTranslatorBase",
         item: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
         key = self._lookup_key(tx, item)
-        self.install_dict_contains_guard(tx, key)
+        if isinstance(self, ConstDictVariable):
+            self.install_dict_contains_guard(tx, key)
         value = self.items.get(key)
         contains = value is not None and not isinstance(
             value, variables.DeletedVariable
@@ -614,7 +638,7 @@ class ConstDictVariable(VariableTracker):
         return self._new_dict(self.items.copy())
 
     def dict_get(
-        self,
+        self: "ConstDictVariable | FrozenDictVariable",
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -623,7 +647,8 @@ class ConstDictVariable(VariableTracker):
         key = self._lookup_key(tx, args[0])
         value = self.items.get(key)
         if value is None or isinstance(value, variables.DeletedVariable):
-            self.install_dict_contains_guard(tx, key)
+            if isinstance(self, ConstDictVariable):
+                self.install_dict_contains_guard(tx, key)
             if len(args) == 1:
                 # if default is not given, return None
                 return ConstantVariable.create(None)
@@ -690,6 +715,8 @@ class ConstDictVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
+        *,
+        container_name: str | None = None,
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
@@ -703,11 +730,15 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
         if args:
             other = args[0]
-            if (
-                isinstance(other, ConstDictVariable)
-                and other.python_type().__iter__ is dict.__iter__
+            if isinstance(other, (ConstDictVariable, FrozenDictVariable)) and (
+                other.python_type().__iter__ is dict.__iter__
+                or (
+                    torch._has_frozendict
+                    and other.python_type().__iter__ is torch._frozendict.__iter__
+                )
             ):
-                other.install_dict_keys_match_guard()
+                if isinstance(other, ConstDictVariable):
+                    other.install_dict_keys_match_guard()
                 self.items.update(other.items)
             elif (
                 isinstance(
@@ -716,13 +747,16 @@ class ConstDictVariable(VariableTracker):
                         variables.UserDefinedObjectVariable,
                         ConstDictVariable,
                         MappingProxyVariable,
+                        FrozenDictVariable,
                     ),
                 )
                 and other.call_obj_hasattr(tx, "keys").as_python_constant()
             ):
                 keys = other.call_method(tx, "keys", [], {})
                 for key in unpack_iterable(tx, keys):
-                    self.items[HashableTracker(key)] = generic_getitem(tx, other, key)
+                    value = generic_getitem(tx, other, key)
+                    hkey = self._lookup_key(tx, key, container_name=container_name)
+                    self.items[hkey] = value
             else:
                 for idx, item in enumerate(unpack_iterable(tx, other)):
                     pair = unpack_iterable(tx, item)
@@ -735,9 +769,13 @@ class ConstDictVariable(VariableTracker):
                                 f"#{idx} has length {len(pair)}; 2 is required"
                             ],
                         )
-                    self.items[HashableTracker(pair[0])] = pair[1]
+                    hkey = self._lookup_key(tx, pair[0], container_name=container_name)
+                    self.items[hkey] = pair[1]
         for k, v in kwargs.items():
-            self.items[HashableTracker(VariableTracker.build(tx, k))] = v
+            hkey = self._lookup_key(
+                tx, VariableTracker.build(tx, k), container_name=container_name
+            )
+            self.items[hkey] = v
         return ConstantVariable.create(None)
 
     def dict_setdefault(
@@ -808,6 +846,8 @@ class ConstDictVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        if isinstance(other, FrozenDictVariable):
+            return FrozenDictVariable.nb_or_impl(other, tx, self, not reverse)
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4643-L4658
         self_, other_ = (other, self) if reverse else (self, other)
         if pydict_check(self_) and pydict_check(other_):
@@ -902,6 +942,8 @@ class ConstDictVariable(VariableTracker):
         other: VariableTracker,
         op: str,
     ) -> VariableTracker:
+        if pyfrozendict_check(other):
+            return FrozenDictVariable.tp_richcompare_impl(self, tx, other, op)
         if op not in ("__eq__", "__ne__") or not pydict_check(other):
             return ConstantVariable.create(NotImplemented)
         if not isinstance(other, ConstDictVariable):
@@ -1145,14 +1187,264 @@ class OrderedDictVariable(ConstDictVariable):
         raise NotImplementedError
 
 
+class FrozenDictVariable(VariableTracker):
+    # Keep immutable containers separate from the mutable dict fast paths.
+    if torch._has_frozendict:
+        _cpython_type = torch._frozendict
+
+    def __init__(
+        self,
+        items: dict[VariableTracker, VariableTracker]
+        | dict[HashableTracker, VariableTracker]
+        | None = None,
+        *,
+        storage: ConstDictVariable | None = None,
+        reconstruction_unsafe: bool | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.storage = (
+            storage if storage is not None else ConstDictVariable(items or {})
+        )
+        self.reconstruction_unsafe = (
+            self._has_user_hash([key.vt for key in self.items])
+            if reconstruction_unsafe is None
+            else reconstruction_unsafe
+        )
+
+    @staticmethod
+    def _has_unsafe_hash(value: Any) -> bool:
+        value_type = type(value)
+        if value_type is MappingKey:
+            return not ConstantVariable.is_literal(
+                value.key
+            ) or FrozenDictVariable._has_unsafe_hash(value.key)
+        if value_type is SequenceKey:
+            return not ConstantVariable.is_literal(
+                value.idx
+            ) or FrozenDictVariable._has_unsafe_hash(value.idx)
+        if value_type is GetAttrKey:
+            return not ConstantVariable.is_literal(
+                value.name
+            ) or FrozenDictVariable._has_unsafe_hash(value.name)
+        if (
+            ConstantVariable.is_base_literal(value)
+            or value_type.__hash__ in (None, object.__hash__)
+            or isinstance(value, torch.Tensor)
+            and value_type.__hash__ is torch.Tensor.__hash__
+        ):
+            return False
+        if isinstance(value, tuple) and value_type.__hash__ is tuple.__hash__:
+            return any(
+                FrozenDictVariable._has_unsafe_hash(v) for v in tuple.__iter__(value)
+            )
+        if isinstance(value, frozenset) and value_type.__hash__ is frozenset.__hash__:
+            return any(
+                FrozenDictVariable._has_unsafe_hash(v)
+                for v in frozenset.__iter__(value)
+            )
+        if torch._has_frozendict:
+            if (
+                isinstance(value, torch._frozendict)
+                and value_type.__hash__ is torch._frozendict.__hash__
+            ):
+                return any(
+                    FrozenDictVariable._has_unsafe_hash(v)
+                    for pair in torch._frozendict.items(value)
+                    for v in pair
+                )
+        return True
+
+    @staticmethod
+    def _has_user_hash(value: Any) -> bool:
+        found = False
+
+        def visit(item: VariableTracker) -> None:
+            nonlocal found
+            item = item.realize()
+            if isinstance(item, variables.UserDefinedObjectVariable):
+                hash_fn = item.python_type().__hash__
+                frozen_type = cast(type, FrozenDictVariable._cpython_type)
+                found |= hash_fn not in (None, object.__hash__, frozen_type.__hash__)
+            elif isinstance(item, ConstantVariable):
+                found |= FrozenDictVariable._has_unsafe_hash(item.value)
+
+        VariableTracker.visit(visit, value)
+        return found
+
+    def check_reconstruction(self) -> None:
+        if self.reconstruction_unsafe:
+            unimplemented(
+                gb_type="Reconstructing frozendict with user-defined hashes",
+                context=self.python_type_name(),
+                explanation="Reconstruction cannot preserve stored key hashes or a cached container hash involving user-defined hash functions.",
+                hints=["Keep this frozendict inside the compiled region."],
+                skip_frame=True,
+            )
+
+    @property
+    def items(self) -> dict[HashableTracker, VariableTracker]:
+        return self.storage.items
+
+    def python_type(self) -> type:
+        return cast(type, self._cpython_type)
+
+    def is_python_constant(self) -> bool:
+        return self.storage.is_python_constant()
+
+    def as_python_constant(self) -> Any:
+        return self.python_type()(self.storage.as_python_constant())
+
+    def as_proxy(self) -> Any:
+        from ..symbolic_convert import InstructionTranslator
+
+        self.check_reconstruction()
+        tx = InstructionTranslator.current_tx()
+        # FX cannot traverse frozendict aggregates; expose their dependencies as tuples.
+        items = tuple(
+            (key.vt.as_proxy(), value.as_proxy()) for key, value in self.items.items()
+        )
+        proxy = tx.output.create_proxy(
+            "call_function", self.python_type(), (items,), {}
+        )
+        set_example_value(proxy.node, get_fake_value(proxy.node, tx))
+        return proxy
+
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
+        return [key.vt for key in self.items]
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        self.check_reconstruction()
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", "frozendict")
+        )
+        codegen(self.storage)
+        codegen.extend_output(create_call_function(1, False))
+
+    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return ConstantVariable.create(len(self.items))
+
+    _lookup_key = ConstDictVariable._lookup_key
+
+    def mp_subscript_impl(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> VariableTracker:
+        hashed = self._lookup_key(tx, key)
+        value = self.items.get(hashed)
+        if value is None:
+            raise_observed_exception(KeyError, tx, args=[key])
+        return value
+
+    sq_contains_impl = ConstDictVariable.sq_contains_impl
+
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.storage.tp_iter_impl(tx)
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return ConstantVariable.create(None)
+
+    def frozen_keys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return DictKeysVariable(self)
+
+    def frozen_values(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return DictValuesVariable(self)
+
+    def frozen_items(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return DictItemsVariable(self)
+
+    def frozen_reversed(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.storage.dict_reversed(tx, args, kwargs)
+
+    def frozen_deferred_operator(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="frozendict operators",
+            context="copy/fromkeys/union",
+            explanation="Dynamo does not yet support these frozendict operators.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self.frozen_deferred_operator(tx, [], {})
+
+    tp_methods = {
+        "copy": Method(frozen_deferred_operator),
+        "fromkeys": Method(frozen_deferred_operator),
+        "get": Method(ConstDictVariable.dict_get),
+        "keys": Method(frozen_keys),
+        "values": Method(frozen_values),
+        "items": Method(frozen_items),
+        "__reversed__": Method(frozen_reversed),
+    }
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        unimplemented(
+            gb_type="frozendict hashing",
+            context="hash(frozendict)",
+            explanation="Dynamo does not yet support frozendict hashing.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def tp_richcompare_impl(
+        self: "FrozenDictVariable | ConstDictVariable",
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="frozendict comparison",
+            context=op,
+            explanation="Dynamo does not yet support frozendict comparisons.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+
 class MappingProxyVariable(VariableTracker):
     # PyDictProxy_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c#L1995
     _cpython_type = types.MappingProxyType
 
     # proxies to the original dict_vt
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
+    def __init__(
+        self, dv_dict: ConstDictVariable | FrozenDictVariable, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
-        if not isinstance(dv_dict, ConstDictVariable):
+        if not isinstance(dv_dict, (ConstDictVariable, FrozenDictVariable)):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
 
@@ -1288,13 +1580,15 @@ class DictViewVariable(VariableTracker):
 
     kv: str | None = None
 
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
+    def __init__(
+        self, dv_dict: ConstDictVariable | FrozenDictVariable, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         if self.kv not in ("keys", "values", "items"):
             raise AssertionError(
                 f"Expected kv to be 'keys', 'values', or 'items', got {self.kv!r}"
             )
-        if not isinstance(dv_dict, ConstDictVariable):
+        if not isinstance(dv_dict, (ConstDictVariable, FrozenDictVariable)):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
 
@@ -1326,7 +1620,9 @@ class DictViewVariable(VariableTracker):
             raise AssertionError("kv must not be None for reconstruct")
 
         def load_method() -> None:
-            if isinstance(self.dv_dict, OrderedDictVariable):
+            if isinstance(self.dv_dict, FrozenDictVariable):
+                codegen.load_import_from("builtins", "frozendict")
+            elif isinstance(self.dv_dict, OrderedDictVariable):
                 codegen.load_import_from("collections", "OrderedDict")
             else:
                 codegen.load_import_from("builtins", "dict")
@@ -1373,7 +1669,11 @@ class DictViewVariable(VariableTracker):
     ) -> VariableTracker:
         # dict_keys/values/items __reversed__: reverse insertion order.
         # Not a C-level slot, so it lives in tp_methods rather than call_method.
-        if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
+        if (
+            isinstance(self.dv_dict, ConstDictVariable)
+            and self.dv_dict.source
+            and not is_constant_source(self.dv_dict.source)
+        ):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return variables.ListIteratorVariable(
             list(reversed(self.view_items_vt)),
@@ -1456,7 +1756,11 @@ class DictKeysVariable(DictViewVariable):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictKeysIterator
 
-        if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
+        if (
+            isinstance(self.dv_dict, ConstDictVariable)
+            and self.dv_dict.source
+            and not is_constant_source(self.dv_dict.source)
+        ):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictKeysIterator(self.dv_dict.items)
 
@@ -1550,7 +1854,11 @@ class DictValuesVariable(DictViewVariable):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictValuesIterator
 
-        if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
+        if (
+            isinstance(self.dv_dict, ConstDictVariable)
+            and self.dv_dict.source
+            and not is_constant_source(self.dv_dict.source)
+        ):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictValuesIterator(self.dv_dict.items)
 
@@ -1645,7 +1953,11 @@ class DictItemsVariable(DictViewVariable):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictItemsIterator
 
-        if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
+        if (
+            isinstance(self.dv_dict, ConstDictVariable)
+            and self.dv_dict.source
+            and not is_constant_source(self.dv_dict.source)
+        ):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictItemsIterator(self.dv_dict.items)
 
