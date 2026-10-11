@@ -209,20 +209,29 @@ struct MediumRadixSort {
     TORCH_INTERNAL_ASSERT(ceilPowerOf2 <= 4096);
 #ifdef USE_ROCM
     constexpr int default_ipt = 8;
+    // fixed_size_sort derives block = sort_size / items_per_thread, so halving
+    // this doubles the block. 4 measures faster than 8 up to sort_size 2048,
+    // but at 4096 the resulting 1024-thread block regresses; hence the split
+    // rather than a replaced constant. ROCm blocks: 4096 -> 512 (unchanged),
+    // 2048 -> 512 (was 256), 1024 -> 256 (was 128).
+    constexpr int small_ipt = 4;
 #else
     constexpr int default_ipt = 32;
+    // Equal by construction, so every HANDLE_CASE below instantiates the same
+    // templates as before on CUDA.
+    constexpr int small_ipt = default_ipt;
 #endif
     switch (ceilPowerOf2) {
       case 4096:
         HANDLE_CASE(4096, default_ipt);
         break;
       case 2048:
-        HANDLE_CASE(2048, default_ipt);
+        HANDLE_CASE(2048, small_ipt);
         break;
       case 1024:
       case 512:
       case 256:
-        HANDLE_CASE(1024, default_ipt);
+        HANDLE_CASE(1024, small_ipt);
         break;
       case 128:
       case 64:
