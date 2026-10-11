@@ -688,6 +688,13 @@ def _load_cached_autotuning(
     # namespaced representation without an explicit version field.
     if "version" not in cached_config:
         cached_config = {"version": 1, **cached_config}
+    if cached_config.get("version") != 1 or not set(cached_config) <= {
+        "version",
+        "kwargs",
+        "compile_options",
+        "extra_options",
+    }:
+        return None
     config_kwargs = cached_config.get("kwargs")
     compile_options = cached_config.get("compile_options")
     if not isinstance(config_kwargs, dict) or not isinstance(compile_options, dict):

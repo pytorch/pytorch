@@ -81,7 +81,6 @@ from .runtime_utils import (
     get_num_bytes,
     next_power_of_2,
     triton_cache_dir,
-    triton_config_compile_options_from_dict as config_compile_options_from_dict,
     triton_config_from_dict as config_from_dict,
     triton_config_kwargs_from_dict as config_kwargs_from_dict,
     triton_config_to_dict as config_to_dict,
@@ -5316,12 +5315,7 @@ def fixed_config(
     """
     return cached_autotune(
         None,
-        [
-            triton.Config(
-                config_kwargs_from_dict(config),
-                **config_compile_options_from_dict(config),
-            )
-        ],
+        [config_from_dict(config)],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.FIXED,

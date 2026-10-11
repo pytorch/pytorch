@@ -1714,6 +1714,28 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
         self.assertIsNone(result)
 
+    def test_load_cached_autotuning_rejects_unsupported_config_version(self):
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        original_configs = [triton_config({"x": 1}, 16, num_stages=1)]
+        configs_hash = hash_configs(original_configs)
+        result = _load_cached_autotuning(
+            {
+                "configs_hash": configs_hash,
+                "triton_config": {
+                    "version": 2,
+                    "kwargs": {"x": 1},
+                    "compile_options": {"num_warps": 16, "num_stages": 1},
+                },
+            },
+            configs_hash,
+            original_configs,
+            {},
+        )
+
+        self.assertIsNone(result)
+
     @skipIfRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_bundle_winners_are_scoped_per_autotuner(self):
