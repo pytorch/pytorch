@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import dataclasses
 import functools
 import gc
 import importlib
@@ -20,7 +21,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
@@ -147,6 +148,72 @@ class _DescriptorCodeOwner:
         return 2
 
 
+class _RaisingClassAttribute:
+    def __get__(self, obj, owner=None):
+        raise RuntimeError("not available on the class")
+
+
+class _ClassWithRaisingAttribute:
+    # Visited by the module search before _ExecGeneratedCodeOwner.
+    value = _RaisingClassAttribute()
+
+
+@dataclasses.dataclass
+class _ExecGeneratedCodeOwner:
+    x: int = 0
+
+    @property
+    def doubled(self):
+        return self.x * 2
+
+
+def _exec_without_renaming():
+    namespace = {}
+    exec(
+        "def __create_fn__():\n    def f(self):\n        return 1\n    return f\n",
+        globals(),
+        namespace,
+    )
+    return namespace["__create_fn__"]()
+
+
+class _UnrenamedExecOwner:
+    # exec()'d like a dataclass __init__, but its __qualname__ is left as
+    # "__create_fn__.<locals>.f", which is not a path from this module.
+    f = _exec_without_renaming()
+
+
+def _exec_function():
+    namespace = {}
+    exec("def g(self):\n    return 1\n", globals(), namespace)
+    return namespace["g"]
+
+
+def _closureless():
+    return None
+
+
+def _hold(fn):
+    def holder():
+        return fn
+
+    # Found through holder's closure, but the recorded qualname leads to a
+    # function with no closure, so replaying the path raises PackageError.
+    holder.__qualname__ = "_closureless"
+    return holder
+
+
+_mislabeled_holder = _hold(_exec_function())
+
+
+@dataclasses.dataclass
+class _GraphBreakingDataclass:
+    x: torch.Tensor
+
+    def __post_init__(self):
+        torch._dynamo.graph_break()
+
+
 # A dynamic dim on a module-level tensor is what makes a SHAPE_ENV guard read a
 # global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
 PKG_DYN_ROWS = torch.randn(4, 3)
@@ -250,6 +317,91 @@ print(eval(f"bbmod.{name}.{path}") is code)
             with package.code_context(code):
                 pass
             self.assertIs(_lookup_code(package._codes[code]), code)
+
+    def test_code_source_resolves_exec_generated_code_from_globals(self):
+        # dataclasses exec() __init__, so its code names no source file and its
+        # co_qualname is synthetic; only the frame's globals name its module.
+        init = _ExecGeneratedCodeOwner.__init__
+        code = init.__code__
+        self.assertIsNone(inspect.getmodule(code))
+        package = CompilePackage(None)
+        with package.code_context(code, init.__globals__):
+            pass
+        entry = package._codes[code]
+        self.assertIs(sys.modules[entry.python_module], inspect.getmodule(init))
+        self.assertIs(_lookup_code(entry), code)
+
+    def test_code_source_refuses_exec_generated_code_it_cannot_replay(self):
+        fn = _UnrenamedExecOwner.f
+        self.assertIsNone(inspect.getmodule(fn.__code__))
+        package = CompilePackage(None)
+        with self.assertRaisesRegex(PackageError, "Cannot resolve"):
+            with package.code_context(fn.__code__, fn.__globals__):
+                pass
+        self.assertNotIn(fn.__code__, package._codes)
+
+    def test_code_source_refuses_a_path_whose_replay_raises(self):
+        fn = _mislabeled_holder()
+        self.assertIsNone(inspect.getmodule(fn.__code__))
+        package = CompilePackage(None)
+        with self.assertRaisesRegex(
+            PackageError, r"_closureless.*fails with PackageError"
+        ) as cm:
+            with package.code_context(fn.__code__, fn.__globals__):
+                pass
+        self.assertIsInstance(cm.exception.__cause__, PackageError)
+        self.assertNotIn(fn.__code__, package._codes)
+
+    def test_code_source_keeps_the_codes_own_module_over_its_globals(self):
+        code = _closureless.__code__
+        package = CompilePackage(None)
+        with package.code_context(code, vars(functools)):
+            pass
+        entry = package._codes[code]
+        self.assertEqual(entry.python_module, __name__)
+        self.assertIs(_lookup_code(entry), code)
+
+    def test_code_source_search_skips_class_attributes_that_raise(self):
+        with self.assertRaises(RuntimeError):
+            _ClassWithRaisingAttribute.value
+        init = _ExecGeneratedCodeOwner.__init__
+        package = CompilePackage(None)
+        with package.code_context(init.__code__, init.__globals__):
+            pass
+        self.assertIs(_lookup_code(package._codes[init.__code__]), init.__code__)
+
+    def test_dataclass_init_frame_saves_and_loads(self):
+        # The graph break under the constructor makes the exec()'d __init__ a
+        # frame of its own, which convert_frame records with its globals.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return _GraphBreakingDataclass(x + 1).x * 2
+
+        def guard_filter_fn(guards):
+            # Identity guards on the globals are beside the point here.
+            unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            return [guard.guard_type not in unsupported for guard in guards]
+
+        x = torch.randn(3)
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(
+            "eager", package=package, guard_filter_fn=guard_filter_fn
+        )(fn)
+        expected = compiled_fn(x)
+        self.assertIn(_GraphBreakingDataclass.__init__.__code__, package._codes)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(
+                package=package, guard_filter_fn=guard_filter_fn
+            )(fn)
+            package.install(backends)
+            self.assertEqual(expected, compiled_fn(x))
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
