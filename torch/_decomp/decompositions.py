@@ -6086,7 +6086,18 @@ def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
         return mask[0 : elements.numel()].reshape(elements.shape)
     else:
         sorted_test_elements, _ = torch.sort(test_elements_flat)
-        idx = torch.searchsorted(sorted_test_elements, elements_flat)
+        # sort places nan after inf, and nan compares false against everything, so
+        # searchsorted can step past it and miss a present inf. Search a copy with
+        # nan mapped to inf, but compare against the original values so that a nan
+        # in test_elements never matches an inf element.
+        search_elements = sorted_test_elements
+        if sorted_test_elements.is_floating_point():
+            search_elements = torch.where(
+                torch.isnan(sorted_test_elements),
+                float("inf"),
+                sorted_test_elements,
+            )
+        idx = torch.searchsorted(search_elements, elements_flat)
         test_idx = torch.where(idx < sorted_test_elements.numel(), idx, 0)
         cmp = sorted_test_elements[test_idx] == elements_flat
         cmp = cmp.logical_not() if invert else cmp
