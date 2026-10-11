@@ -52,7 +52,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, debug as inductor_debug, ir
-from ..codecache import output_code_log
+from ..codecache import get_hash, output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
@@ -4136,6 +4136,7 @@ class PythonWrapperCodegen(CodeGen):
         # can start on it now, as it does for a string kernel. It gets the source the
         # string form would have compiled, so both forms share every compile cache.
         self.kernel_sources[kernel_name] = (subs_name, src_code)
+        kernel_file = f"{get_hash(src_code.strip())}.py"
         if async_compile.AsyncCompile.use_process_pool():
             async_compile.AsyncCompile().triton(subs_name, src_code)
         autotune_body = (
@@ -4151,6 +4152,14 @@ class PythonWrapperCodegen(CodeGen):
             src_code = src_code[: harness.start()]
         if "if __name__ == '__main__':" in src_code:
             raise AssertionError(f"kernel {kernel_name} kept its benchmark harness")
+        # The string form passes filename=__file__ from its own module, which is named by
+        # the hash of this source, and the autotune cache keys on that basename. Here
+        # __file__ is the wrapper, which every kernel shares, so name the module the
+        # string form would have used, in the wrapper's directory.
+        if "filename=__file__" in src_code:
+            path = f"os.path.join(os.path.dirname(__file__), {kernel_file!r})"
+            src_code = src_code.replace("filename=__file__", f"filename={path}")
+            src_code = f"import os\n{src_code}"
         # src_code is already a complete module: the triton imports, the
         # @triton_heuristics.* decorator that builds the CachingAutotuner, and the
         # @triton.jit def. Spliced at module level it binds kernel_name to the same
