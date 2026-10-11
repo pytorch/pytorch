@@ -13374,6 +13374,173 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_scalar_fake_quant_forward_ad(self, device, dtype):
+        values = (
+            torch.tensor(
+                [
+                    -3.0,
+                    -2.25,
+                    -2.0,
+                    -1.75,
+                    -0.25,
+                    0.0,
+                    0.25,
+                    0.5,
+                    1.0,
+                    1.75,
+                    2.0,
+                    2.25,
+                    2.5,
+                    3.0,
+                ],
+                device=device,
+                dtype=dtype,
+            )
+            .reshape(2, 7)
+            .t()
+        )
+        tangent = torch.arange(1, 15, device=device, dtype=dtype).reshape(2, 7).t()
+        self.assertFalse(values.is_contiguous())
+        self.assertFalse(tangent.is_contiguous())
+        for scale, zero_point, quant_min, quant_max in (
+            (0.5, 0, -4, 4),
+            (0.25, 3, 0, 7),
+        ):
+            with self.subTest(scale=scale, zero_point=zero_point):
+
+                def fn(x):
+                    return torch.fake_quantize_per_tensor_affine(
+                        x, scale, zero_point, quant_min, quant_max
+                    )
+
+                x = values.detach().requires_grad_()
+                expected = fn(x)
+                # Quantization uses a straight-through estimator, not the
+                # numerical derivative of rounding. Compare its existing VJP.
+                expected_tangent = torch.autograd.grad(expected, x, tangent)[0]
+                primal, actual_tangent = torch.func.jvp(fn, (values,), (tangent,))
+                self.assertEqual(primal, expected)
+                self.assertEqual(actual_tangent, expected_tangent)
+                with torch.autograd.forward_ad.dual_level():
+                    dual = torch.autograd.forward_ad.make_dual(values, tangent)
+                    output, mask = (
+                        torch.ops.aten.fake_quantize_per_tensor_affine_cachemask(
+                            dual, scale, zero_point, quant_min, quant_max
+                        )
+                    )
+                    self.assertEqual(
+                        torch.autograd.forward_ad.unpack_dual(output).tangent,
+                        expected_tangent,
+                    )
+                    self.assertIsNone(
+                        torch.autograd.forward_ad.unpack_dual(mask).tangent
+                    )
+                    self.assertFalse(mask.requires_grad)
+                    self.assertEqual(mask.dtype, torch.bool)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("shape", [(), (0,), (2, 0)])
+    def test_scalar_fake_quant_forward_ad_shapes(self, device, dtype, shape):
+        x = torch.full(shape, 0.5, device=device, dtype=dtype)
+        tangent = torch.full_like(x, 2.0)
+
+        def fn(x):
+            return torch.fake_quantize_per_tensor_affine(x, 0.25, 0, -4, 4)
+
+        primal, actual_tangent = torch.func.jvp(fn, (x,), (tangent,))
+        self.assertEqual(primal, fn(x))
+        self.assertEqual(actual_tangent, tangent)
+        self.assertEqual(actual_tangent.shape, x.shape)
+
+    @dtypes(torch.float32, torch.float64)
+    def test_scalar_fake_quant_forward_ad_nonfinite(self, device, dtype):
+        x = torch.tensor(
+            [-torch.inf, -2, 0, 2, torch.inf, torch.nan], device=device, dtype=dtype
+        )
+        tangent = torch.tensor(
+            [1, torch.inf, 0, -torch.inf, 2, torch.nan], device=device, dtype=dtype
+        )
+
+        def fn(x):
+            return torch.fake_quantize_per_tensor_affine(x, 0.25, 0, -4, 4)
+
+        reference = x.detach().requires_grad_()
+        expected_tangent = torch.autograd.grad(fn(reference), reference, tangent)[0]
+        primal, actual_tangent = torch.func.jvp(fn, (x,), (tangent,))
+        self.assertEqual(primal, fn(x))
+        self.assertEqual(actual_tangent, expected_tangent)
+        # Explicit zero tangents remain distinct from missing tangents.
+        self.assertEqual(
+            torch.func.jvp(fn, (x,), (torch.zeros_like(x),))[1], torch.zeros_like(x)
+        )
+        with torch.autograd.forward_ad.dual_level():
+            self.assertIsNone(torch.autograd.forward_ad.unpack_dual(fn(x)).tangent)
+
+    @dtypes(torch.float32, torch.float64)
+    def test_scalar_fake_quant_forward_ad_higher_order(self, device, dtype):
+        x = torch.tensor([-3, -0.5, 0.5, 3], device=device, dtype=dtype)
+        tangent = torch.tensor([2, 3, 4, 5], device=device, dtype=dtype)
+
+        def fn(x):
+            return torch.fake_quantize_per_tensor_affine(x, 0.25, 0, -4, 4)
+
+        jacobian = torch.func.jacrev(fn)(x)
+        self.assertEqual(torch.func.jacfwd(fn)(x), jacobian)
+
+        def loss(x):
+            return fn(x).square().sum()
+
+        expected_hessian = torch.func.jacrev(torch.func.grad(loss))(x)
+        self.assertEqual(torch.func.hessian(loss)(x), expected_hessian)
+        _, actual_hvp = torch.func.jvp(torch.func.grad(loss), (x,), (tangent,))
+        self.assertEqual(actual_hvp, expected_hessian @ tangent)
+        _, tangent_grad = torch.func.jvp(fn, (x,), (tangent.requires_grad_(),))
+        self.assertEqual(
+            torch.autograd.grad(tangent_grad.sum(), tangent)[0], jacobian.sum(0)
+        )
+
+    @dtypes(torch.float32, torch.float64)
+    def test_scalar_fake_quant_forward_ad_zero_tensor(self, device, dtype):
+        x = torch.tensor([-3.0, 0.5, 3.0], device=device, dtype=dtype)
+        tangent = torch._efficientzerotensor(x.shape, device=device, dtype=dtype)
+        with torch.autograd.forward_ad.dual_level():
+            dual = torch.autograd.forward_ad.make_dual(x, tangent)
+            output = torch.fake_quantize_per_tensor_affine(dual, 0.25, 0, -4, 4)
+            actual_tangent = torch.autograd.forward_ad.unpack_dual(output).tangent
+            self.assertEqual(actual_tangent, torch.zeros_like(x))
+            self.assertTrue(tangent._is_zerotensor())
+
+    @dtypes(torch.float32)
+    def test_scalar_fake_quant_forward_ad_unsupported_qparams(self, device, dtype):
+        x = torch.ones(3, device=device, dtype=dtype)
+        scale = torch.tensor(0.25, device=device, dtype=dtype)
+        zero_point = torch.tensor(0, device=device)
+        with self.assertRaisesRegex(NotImplementedError, "cachemask_tensor_qparams"):
+            torch.func.jvp(
+                lambda x: torch.fake_quantize_per_tensor_affine(
+                    x, scale, zero_point, -4, 4
+                ),
+                (x,),
+                (torch.ones_like(x),),
+            )
+        with self.assertRaisesRegex(NotImplementedError, "cachemask_tensor_qparams"):
+            torch.func.jvp(
+                lambda scale: torch.fake_quantize_per_tensor_affine(
+                    x, scale, zero_point, -4, 4
+                ),
+                (scale,),
+                (torch.ones_like(scale),),
+            )
+        with self.assertRaisesRegex(NotImplementedError, "learnable_per_tensor"):
+            torch.func.jvp(
+                lambda x: torch._fake_quantize_learnable_per_tensor_affine(
+                    x, scale.reshape(1), zero_point.to(dtype).reshape(1), -4, 4
+                ),
+                (x,),
+                (torch.ones_like(x),),
+            )
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
