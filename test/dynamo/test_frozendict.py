@@ -210,6 +210,36 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize("construct", [False, True])
+    @parametrize(
+        "name,args",
+        [
+            ("get", ("a",)),
+            ("keys", ()),
+            ("values", ()),
+            ("items", ()),
+            ("__getitem__", ("a",)),
+            ("__len__", ()),
+        ],
+    )
+    def test_dict_descriptor_rejects_frozen_receiver(self, construct, name, args):
+        def fn(x, mapping):
+            if construct:
+                mapping = builtins.frozendict(a=x)
+            try:
+                getattr(dict, name)(mapping, *args)
+            except TypeError as error:
+                return x + 1, str(error)
+            return x - 1, "missing error"
+
+        x = torch.ones(1)
+        mapping = builtins.frozendict(a=x)
+        expected = fn(x, mapping)
+        self.assertEqual(expected[0], x + 1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping), expected
+        )
+
+    @parametrize("construct", [False, True])
     def test_reads_and_reconstruction(self, construct):
         def fn(x, mapping):
             if construct:

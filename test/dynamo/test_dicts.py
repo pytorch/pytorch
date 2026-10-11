@@ -157,6 +157,38 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize("operation", [operator.eq, operator.ne])
+    def test_dict_comparison_reordered_inputs(self, operation):
+        class State:
+            calls = 0
+
+        class Value:
+            def __init__(self, state, equal):
+                self.state = state
+                self.equal = equal
+
+            def __eq__(self, other):
+                self.state.calls += 1
+                return self.equal
+
+        def fn(x, left, right, state):
+            state.calls = 0
+            result = operation(left, right)
+            return x + state.calls, result
+
+        state = State()
+        left = {"a": Value(state, False), "b": Value(state, True)}
+        right = {"a": Value(state, True), "b": Value(state, True)}
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for count in (1, 2):
+            expected = fn(x, left, right, state)
+            self.assertEqual(expected, (x + count, operation is operator.ne))
+            self.assertEqual(compiled(x, left, right, state), expected)
+            self.assertEqual(counter.frame_count, count)
+            left["a"] = left.pop("a")
+
+    @parametrize("operation", [operator.eq, operator.ne])
     def test_ordered_dict_comparison_reordered_inputs(self, operation):
         def fn(x, left, right):
             return x + operation(left, right)
@@ -2642,6 +2674,30 @@ class DictTests(torch._dynamo.test_case.TestCase):
         obj.__dict__["x"] = 5
         self.assertEqual(opt_fn(obj, t), torch.tensor(5.0))
         self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("use_vars", [False, True])
+    @parametrize("delete_attribute", [False, True])
+    def test_dunder_dict_getitem_deleted(self, use_vars, delete_attribute):
+        class Obj:
+            pass
+
+        def fn(x):
+            obj = Obj()
+            obj.a = 1
+            if delete_attribute:
+                del obj.a
+            else:
+                del obj.__dict__["a"]
+            mapping = vars(obj) if use_vars else obj.__dict__
+            try:
+                mapping["a"]
+            except KeyError:
+                return x + 1
+            return x - 1
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), x + 1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_dunder_dict_get_with_property(self):
         class Obj:
