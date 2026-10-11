@@ -1639,6 +1639,18 @@ class BuiltinVariable(BaseBuiltinVariable):
             raise_observed_exception(TypeError, tx)
         return self._call_frame_locals_snapshot(tx)
 
+    def call_globals(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        if args or kwargs:
+            raise_observed_exception(TypeError, tx)
+        from .dicts import globals_dict_variable
+
+        return globals_dict_variable(tx, tx.f_globals)
+
     @staticmethod
     def _call_frame_locals_snapshot(tx: "InstructionTranslatorBase") -> VariableTracker:
         from .builder import VariableBuilder
@@ -3804,12 +3816,20 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker | None:
-        if isinstance(
+        if isinstance(obj, variables.BaseUserFunctionVariable):
+            if name_var.is_python_constant():
+                name = name_var.as_python_constant()
+                if isinstance(name, str):
+                    member = obj.lookup_tp_getset_member(name)
+                    if member is not None:
+                        member.setter(obj, tx, val)
+                        return ConstantVariable.create(None)
+            return obj.call_method(tx, "__setattr__", [name_var, val], {})
+        elif isinstance(
             obj,
             (
                 variables.DefaultDictVariable,
                 variables.UserDefinedObjectVariable,
-                variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
                 variables.TracebackVariable,
                 variables.DequeVariable,
