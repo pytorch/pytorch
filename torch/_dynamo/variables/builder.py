@@ -1084,6 +1084,8 @@ class VariableBuilder:
                     else GuardBuilder.ID_MATCH
                 )
             )
+            # Preserve sources and aliases for arbitrary keys. HashableTracker
+            # specializes numeric keys even when scalar specialization is disabled.
             key_var = VariableBuilder(self.tx, key_source)(key)
             value_var = LazyVariableTracker.create(
                 value_item, GetItemSource(pair_source, 1), tx=self.tx
