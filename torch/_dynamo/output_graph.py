@@ -2129,6 +2129,16 @@ class OutputGraph(OutputGraphCommon):
 
             cur_tx = cur_tx.parent
 
+        # Read before prune_dead_object_new drops the .grad stores of
+        # source-less leaves that do not escape; the .grad tensor still can.
+        leaf_grad_set = any(
+            not v.source
+            and self.side_effects.has_pending_mutation_of_attr(v, "grad")
+            and not self.side_effects.load_attr(
+                v, "grad", deleted_ok=True
+            ).is_constant_none()
+            for v in self.leaf_var_creation_order
+        )
         # "Garbage collect the heap".
         self.side_effects.prune_dead_object_new(tx)
 
@@ -2255,7 +2265,7 @@ class OutputGraph(OutputGraphCommon):
             cell_cg = PyCodegen(self.root_tx)
             self.codegen_cells(tx, cell_cg)
             instructions, pycode = self.compile_and_call_fx_graph(
-                tx, list(reversed(stack_values_flat)), root
+                tx, list(reversed(stack_values_flat)), root, leaf_grad_set
             )
             self.add_output_instructions(
                 [
@@ -2375,7 +2385,7 @@ class OutputGraph(OutputGraphCommon):
             subgraph_pycode = None
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 instructions, subgraph_pycode = self.compile_and_call_fx_graph(
-                    tx, pass2.graph_output_vars(), root
+                    tx, pass2.graph_output_vars(), root, leaf_grad_set
                 )
                 output.extend(instructions)
 
@@ -2783,16 +2793,47 @@ class OutputGraph(OutputGraphCommon):
                 restart_reason="autograd.grad consumed grad_fns of returned tensors"
             )
 
+    def _requires_grad_input_edges(self) -> set[torch.autograd.graph.Node]:
+        """Autograd nodes of the graph inputs that require grad.
+
+        A graph input is a placeholder or a get_attr tensor (e.g. parameters
+        installed with install_free_tensors). For a leaf input the node is its
+        AccumulateGrad, for a non-leaf input it is its grad_fn. These are the
+        nodes AOTAutograd differentiates the compiled function against.
+        """
+        edges: set[torch.autograd.graph.Node] = set()
+        for node in self.graph.nodes:
+            if node.op not in ("placeholder", "get_attr"):
+                continue
+            example_value = node.meta.get("example_value")
+            if isinstance(example_value, torch.Tensor) and example_value.requires_grad:
+                edges.add(torch.autograd.graph._get_grad_fn_or_grad_acc(example_value))
+        return edges
+
     def _check_requires_grad_intermediate_outputs(
-        self, rv: list["VariableTracker"], tx: "InstructionTranslatorBase"
+        self,
+        rv: list["VariableTracker"],
+        tx: "InstructionTranslatorBase",
+        leaf_grad_set: bool,
     ) -> None:
         """Skip frame if a source-less requires_grad_() intermediate leaks as output.
 
         AOTAutograd's functionalization drops requires_grad_() on intermediates,
-        so returning them (or tensors derived from them) produces wrong results.
-        We detect this via FX graph reachability: find the requires_grad_() nodes
-        for source-less intermediates, then check if any output is downstream.
+        so an output whose only autograd ancestry is such a leaf comes back with
+        requires_grad=False, where eager returns True. We detect this via FX
+        graph reachability: find the requires_grad_() nodes for source-less
+        intermediates, then check if any output is downstream.
+
+        A downstream output that also reaches a requires-grad graph input stays
+        differentiable and its backward into the graph inputs matches eager;
+        only the gradient edge into the leaf is dropped. That is allowed (e.g.
+        ``energy -> autograd.grad(create_graph=True) -> force`` returned for a
+        force loss) unless the dropped edge is observable: through a backward
+        hook on a tainted tensor, or through a .grad set on the leaf
+        (leaf_grad_set), into which eager would later accumulate in place.
         """
+        from torch._higher_order_ops.register_hook import register_hook_op
+
         from .variables.tensor import TensorVariable
 
         # Collect FX nodes for source-less requires_grad_() intermediates
@@ -2811,6 +2852,8 @@ class OutputGraph(OutputGraphCommon):
             if any(inp in tainted_nodes for inp in node.all_input_nodes):
                 tainted_nodes.add(node)
 
+        input_edges: set[torch.autograd.graph.Node] | None = None
+
         # Check leaked outputs: tainted + requires_grad means the output
         # carries autograd state that AOTAutograd would silently drop.
         # Detached outputs (requires_grad=False) are fine — no autograd to lose.
@@ -2820,6 +2863,20 @@ class OutputGraph(OutputGraphCommon):
                 and var.requires_grad
                 and var.as_proxy().node in tainted_nodes
             ):
+                if input_edges is None:
+                    hooked = any(
+                        n.meta.get("has_backward_hook") or n.target is register_hook_op
+                        for n in tainted_nodes
+                    )
+                    observable = leaf_grad_set or hooked
+                    input_edges = (
+                        set() if observable else self._requires_grad_input_edges()
+                    )
+                fake_tensor = var.as_proxy().node.meta["example_value"]
+                if input_edges and (
+                    collect_reachable_grad_fns([(fake_tensor, None)]) & input_edges
+                ):
+                    continue
                 msg = (
                     "An intermediate tensor that had requires_grad_() called "
                     "on it (or a tensor derived from it) is being returned "
@@ -2852,6 +2909,7 @@ class OutputGraph(OutputGraphCommon):
         tx: "InstructionTranslatorBase",
         rv: list[VariableTracker],
         root: FakeRootModule,
+        leaf_grad_set: bool,
     ) -> tuple[list[Instruction], list[str] | None]:
         """
         Generate code from self.graph and return the Instruction()s to
@@ -2886,7 +2944,7 @@ class OutputGraph(OutputGraphCommon):
             # Error on source-less requires_grad_() outputs.
             # Must run before autograd validation since detaching resolves the
             # "consumed grad_fn" conflict for backward-consumed intermediates.
-            self._check_requires_grad_intermediate_outputs(rv, tx)
+            self._check_requires_grad_intermediate_outputs(rv, tx, leaf_grad_set)
 
             # Check if autograd.grad is used with outputs that require grad
             # This would cause double backward issues in aot_autograd

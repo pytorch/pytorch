@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import contextlib
 import copy
 import re
 import sys
@@ -14,6 +15,7 @@ from torch._dynamo.testing import (
     empty_line_normalizer,
     normalize_gm,
 )
+from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -39,27 +41,31 @@ class TestForwardLossBackward(TestCase):
         self.assertEqual(eager_result, compiled_result)
         self.assertEqual(backend.frame_count, frame_count)
 
-    def _run_backward_test(self, fn, mod, x, backend=None):
+    def _run_backward_test(self, fn, mod, x, backend=None, call_backward=False):
         """
         Shared utility for running backward tests.
 
         Runs the function in both eager and compiled mode, verifies results match,
         and returns the normalized graph for assertExpectedInline verification.
+        With call_backward=True, fn returns a loss that is backpropagated outside
+        the compiled region.
         """
         if backend is None:
             backend = AotEagerAndRecordGraphs()
         compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
 
         # Save eager grads
-        for p in mod.parameters():
-            p.grad = None
+        mod.zero_grad()
         eager_result = fn(x)
+        if call_backward:
+            eager_result.backward()
         eager_grads = {name: p.grad.clone() for name, p in mod.named_parameters()}
 
         # Run compiled
-        for p in mod.parameters():
-            p.grad = None
+        mod.zero_grad()
         compiled_result = compiled_fn(x)
+        if call_backward:
+            compiled_result.backward()
 
         self.assertEqual(eager_result, compiled_result)
         for name, p in mod.named_parameters():
@@ -1798,38 +1804,357 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(compiled, eager)
         self.assertEqual(cnt.frame_count, 1)
 
-    def test_requires_grad_setattr_leaked_output_graph_breaks(self):
+    def _compile_with_requires_grad_leak_graph_break(
+        self, fn, *args, ctx=contextlib.nullcontext
+    ):
+        """Assert fn is refused under fullgraph, then compile it without
+        fullgraph, check it graph-breaks once at requires_grad_(), and return
+        its result."""
+        with (
+            ctx(),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "returning intermediate with requires_grad_\\(\\)",
+            ),
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(*args)
+
+        torch._dynamo.reset()
+        counters.clear()
+        cnt = CompileCounterWithBackend("aot_eager")
+        with ctx():
+            result = torch.compile(fn, backend=cnt)(*args)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertIn(
+            "requires_grad_() intermediate leaked as output",
+            next(iter(counters["graph_break"])),
+        )
+        return result
+
+    @parametrize("via", ("setattr", "method"))
+    def test_requires_grad_output_differentiable_wrt_params_single_graph(self, via):
+        # The loss derives from a source-less requires_grad_() intermediate,
+        # but it is also differentiable w.r.t. the parameters.
         mod = torch.nn.Linear(4, 4)
 
         def fn(x):
             y = x.detach()
-            y.requires_grad = True
+            if via == "setattr":
+                y.requires_grad = True
+            else:
+                y.requires_grad_()
+            return mod(y).sum()
+
+        self._run_backward_test(fn, mod, torch.randn(2, 4), call_backward=True)
+
+    @skipIfCrossRef
+    def test_requires_grad_intermediate_force_loss_single_graph(self):
+        # energy -> autograd.grad(create_graph=True) -> force, with a force
+        # loss backpropagated into the parameters.
+        mod = torch.nn.Linear(3, 1)
+
+        def loss_fn(x):
+            pos = x.detach().requires_grad_()
+            energy = mod(pos).pow(2).sum()
+            (grad,) = torch.autograd.grad(energy, pos, create_graph=True)
+            return energy + grad.pow(2).sum()
+
+        backend = AotEagerAndRecordGraphs()
+        graph = self._run_backward_test(
+            loss_fn, mod, torch.randn(4, 3), backend, call_backward=True
+        )
+        self.assertExpectedInline(
+            empty_line_normalizer(graph),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[4, 3]", L_mod_parameters_weight_: "f32[1, 3]", L_mod_parameters_bias_: "f32[1]"):
+        l_x_ = L_x_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
+        l_mod_parameters_bias_ = L_mod_parameters_bias_
+        pos: "f32[4, 3]" = l_x_.detach();  l_x_ = None
+        set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
+        requires_grad_ = pos.requires_grad_();  requires_grad_ = None
+        set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
+        linear: "f32[4, 1]" = torch._C._nn.linear(pos, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+        pow_1: "f32[4, 1]" = linear.pow(2);  linear = None
+        energy: "f32[]" = pow_1.sum();  pow_1 = None
+        grad = torch.autograd.grad(energy, pos, create_graph = True);  pos = None
+        grad_1: "f32[4, 3]" = grad[0];  grad = None
+        pow_2: "f32[4, 3]" = grad_1.pow(2);  grad_1 = None
+        sum_2: "f32[]" = pow_2.sum();  pow_2 = None
+        add: "f32[]" = energy + sum_2;  energy = sum_2 = None
+        return (add,)
+""",
+        )
+        self.assertExpectedInline(
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[4, 3]", primals_2: "f32[1, 3]", primals_3: "f32[1]"):
+        detach: "f32[4, 3]" = torch.ops.aten.detach.default(primals_1);  primals_1 = None
+
+        t: "f32[3, 1]" = torch.ops.aten.t.default(primals_2)
+        addmm: "f32[4, 1]" = torch.ops.aten.addmm.default(primals_3, detach, t);  primals_3 = None
+        pow_1: "f32[4, 1]" = torch.ops.aten.pow.Tensor_Scalar(addmm, 2)
+        sum_1: "f32[]" = torch.ops.aten.sum.default(pow_1);  pow_1 = None
+
+        ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
+        expand: "f32[4, 1]" = torch.ops.aten.expand.default(ones_like, [4, 1])
+        pow_2: "f32[4, 1]" = torch.ops.aten.pow.Tensor_Scalar(addmm, 1.0)
+        mul: "f32[4, 1]" = torch.ops.aten.mul.Scalar(pow_2, 2.0);  pow_2 = None
+        mul_1: "f32[4, 1]" = torch.ops.aten.mul.Tensor(expand, mul);  expand = mul = None
+        t_1: "f32[1, 3]" = torch.ops.aten.t.default(t);  t = None
+        mm: "f32[4, 3]" = torch.ops.aten.mm.default(mul_1, t_1);  t_1 = None
+
+        pow_3: "f32[4, 3]" = torch.ops.aten.pow.Tensor_Scalar(mm, 2)
+        sum_2: "f32[]" = torch.ops.aten.sum.default(pow_3);  pow_3 = None
+        add: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+
+        t_2: "f32[1, 4]" = torch.ops.aten.t.default(mul_1);  mul_1 = None
+        return (add, primals_2, detach, addmm, ones_like, mm, t_2)
+""",
+        )
+        self.assertExpectedInline(
+            normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_2: "f32[1, 3]", detach: "f32[4, 3]", addmm: "f32[4, 1]", ones_like: "f32[]", mm: "f32[4, 3]", t_2: "f32[1, 4]", tangents_1: "f32[]"):
+        expand_1: "f32[4, 3]" = torch.ops.aten.expand.default(tangents_1, [4, 3])
+        pow_4: "f32[4, 3]" = torch.ops.aten.pow.Tensor_Scalar(mm, 1.0);  mm = None
+        mul_2: "f32[4, 3]" = torch.ops.aten.mul.Scalar(pow_4, 2.0);  pow_4 = None
+        mul_3: "f32[4, 3]" = torch.ops.aten.mul.Tensor(expand_1, mul_2);  expand_1 = mul_2 = None
+
+        mm_1: "f32[1, 3]" = torch.ops.aten.mm.default(t_2, mul_3);  t_2 = None
+
+        t: "f32[3, 1]" = torch.ops.aten.t.default(primals_2);  primals_2 = None
+
+        t_1: "f32[1, 3]" = torch.ops.aten.t.default(t);  t = None
+        t_3: "f32[3, 1]" = torch.ops.aten.t.default(t_1);  t_1 = None
+        mm_2: "f32[4, 1]" = torch.ops.aten.mm.default(mul_3, t_3);  mul_3 = t_3 = None
+        t_4: "f32[3, 1]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
+        expand: "f32[4, 1]" = torch.ops.aten.expand.default(ones_like, [4, 1]);  ones_like = None
+        mul_4: "f32[4, 1]" = torch.ops.aten.mul.Tensor(mm_2, expand);  mm_2 = expand = None
+        mul_5: "f32[4, 1]" = torch.ops.aten.mul.Scalar(mul_4, 2.0);  mul_4 = None
+        pow_5: "f32[4, 1]" = torch.ops.aten.pow.Tensor_Scalar(addmm, 0.0)
+        mul_6: "f32[4, 1]" = torch.ops.aten.mul.Scalar(pow_5, 1.0);  pow_5 = None
+        mul_7: "f32[4, 1]" = torch.ops.aten.mul.Tensor(mul_5, mul_6);  mul_5 = mul_6 = None
+
+        expand_2: "f32[4, 1]" = torch.ops.aten.expand.default(tangents_1, [4, 1]);  tangents_1 = None
+
+        pow_2: "f32[4, 1]" = torch.ops.aten.pow.Tensor_Scalar(addmm, 1.0);  addmm = None
+        mul: "f32[4, 1]" = torch.ops.aten.mul.Scalar(pow_2, 2.0);  pow_2 = None
+
+        mul_9: "f32[4, 1]" = torch.ops.aten.mul.Tensor(expand_2, mul);  expand_2 = mul = None
+        add_1: "f32[4, 1]" = torch.ops.aten.add.Tensor(mul_7, mul_9);  mul_7 = mul_9 = None
+        t_5: "f32[1, 4]" = torch.ops.aten.t.default(add_1)
+        mm_3: "f32[1, 3]" = torch.ops.aten.mm.default(t_5, detach);  t_5 = detach = None
+        t_6: "f32[3, 1]" = torch.ops.aten.t.default(mm_3);  mm_3 = None
+        sum_3: "f32[1, 1]" = torch.ops.aten.sum.dim_IntList(add_1, [0], True);  add_1 = None
+        view: "f32[1]" = torch.ops.aten.view.default(sum_3, [1]);  sum_3 = None
+        add_2: "f32[3, 1]" = torch.ops.aten.add.Tensor(t_4, t_6);  t_4 = t_6 = None
+        t_7: "f32[1, 3]" = torch.ops.aten.t.default(add_2);  add_2 = None
+        return (None, t_7, view)
+""",
+        )
+
+    def test_requires_grad_intermediate_force_output_backward_outside(self):
+        # The force is returned with requires_grad=True and its loss is
+        # backpropagated outside the compiled region.
+        mod = torch.nn.Linear(3, 1)
+
+        def energy_and_force(x):
+            pos = x.detach().requires_grad_()
+            energy = mod(pos).pow(2).sum()
+            (grad,) = torch.autograd.grad(energy, pos, create_graph=True)
+            return energy.detach(), -grad
+
+        x = torch.randn(4, 3)
+        eager_energy, eager_force = energy_and_force(x)
+        eager_force.pow(2).sum().backward()
+        eager_grads = {name: p.grad.clone() for name, p in mod.named_parameters()}
+
+        mod.zero_grad()
+        cnt = CompileCounterWithBackend("aot_eager")
+        energy, force = torch.compile(energy_and_force, backend=cnt, fullgraph=True)(x)
+        self.assertTrue(force.requires_grad)
+        force.pow(2).sum().backward()
+
+        self.assertEqual(energy, eager_energy)
+        self.assertEqual(force, eager_force)
+        for name, p in mod.named_parameters():
+            self.assertEqual(eager_grads[name], p.grad)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_requires_grad_intermediate_output_differentiable_wrt_nonleaf_input(self):
+        # w is a non-leaf graph input, so the output reaches its grad_fn
+        # rather than an AccumulateGrad.
+        def fn(x, w):
+            y = x.detach().requires_grad_()
+            return (y * w).sum()
+
+        x = torch.randn(4)
+        w0 = torch.randn(4, requires_grad=True)
+        fn(x, w0 * 2).backward()
+        eager_grad = w0.grad
+
+        w0.grad = None
+        cnt = CompileCounterWithBackend("aot_eager")
+        torch.compile(fn, backend=cnt, fullgraph=True)(x, w0 * 2).backward()
+        self.assertEqual(w0.grad, eager_grad)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(install_free_tensors=True)
+    def test_requires_grad_intermediate_output_differentiable_wrt_get_attr(self):
+        # With install_free_tensors the parameters are get_attr nodes.
+        mod = torch.nn.Linear(4, 4)
+
+        def fn(x):
+            y = x.detach().requires_grad_()
+            return mod(y).sum()
+
+        backend = AotEagerAndRecordGraphs()
+        self._run_backward_test(fn, mod, torch.randn(2, 4), backend, call_backward=True)
+        get_attrs = backend.graphs[0].graph.find_nodes(op="get_attr")
+        self.assertEqual(len(get_attrs), 2)
+
+    @parametrize("via", ("setattr", "method"))
+    def test_requires_grad_intermediate_leaked_output_graph_breaks(self, via):
+        # y * 2 depends only on the source-less intermediate: AOTAutograd
+        # would return it with requires_grad=False.
+        mod = torch.nn.Linear(4, 4)
+
+        def fn(x):
+            h = mod(x)
+            y = h.detach()
+            if via == "setattr":
+                y.requires_grad = True
+            else:
+                y.requires_grad_()
+            return h.sum(), y * 2
+
+        x = torch.randn(2, 4)
+        eager_loss, eager_leaked = fn(x)
+        eager_loss.backward()
+        eager_grads = {name: p.grad.clone() for name, p in mod.named_parameters()}
+
+        mod.zero_grad()
+        loss, leaked = self._compile_with_requires_grad_leak_graph_break(fn, x)
+        self.assertTrue(leaked.requires_grad)
+        loss.backward()
+
+        self.assertEqual(loss, eager_loss)
+        self.assertEqual(leaked, eager_leaked)
+        for name, p in mod.named_parameters():
+            self.assertEqual(eager_grads[name], p.grad)
+
+    @parametrize("via", ("setattr", "method"))
+    def test_requires_grad_intermediate_leaked_output_unrelated_input_graph_breaks(
+        self, via
+    ):
+        # A requires-grad input elsewhere in the graph must not let through an
+        # output that reaches no graph input.
+        def fn(x, w):
+            y = x.detach()
+            if via == "setattr":
+                y.requires_grad = True
+            else:
+                y.requires_grad_()
+            return y * 2, (w * 2).sum()
+
+        x = torch.randn(4)
+        w = torch.randn(4, requires_grad=True)
+        eager_leaked, eager_loss = fn(x, w)
+        eager_loss.backward()
+        eager_grad = w.grad
+
+        w.grad = None
+        leaked, loss = self._compile_with_requires_grad_leak_graph_break(fn, x, w)
+        self.assertTrue(leaked.requires_grad)
+        loss.backward()
+
+        self.assertEqual(leaked, eager_leaked)
+        self.assertEqual(w.grad, eager_grad)
+
+    @parametrize("compiled_autograd", (False, True))
+    def test_requires_grad_intermediate_hook_graph_breaks(self, compiled_autograd):
+        # The compiled backward never computes the gradient into the
+        # source-less leaf, so a hook registered on it would not fire. Without
+        # compiled autograd the hook must be side-effect free to be traced.
+        mod = torch.nn.Linear(4, 1)
+        hook_grads = []
+
+        def hook(g):
+            if compiled_autograd:
+                hook_grads.append(g)
+            return g * 2
+
+        def fn(x):
+            y = x.detach().requires_grad_()
+            y.register_hook(hook)
             return mod(y).sum()
 
         x = torch.randn(2, 4)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "returning intermediate with requires_grad_\\(\\)",
-        ):
-            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
-
-        torch._dynamo.reset()
-        for p in mod.parameters():
-            p.grad = None
-        eager_out = fn(x)
-        eager_out.backward()
+        fn(x).backward()
+        eager_hook_grads = list(hook_grads)
         eager_grads = {name: p.grad.clone() for name, p in mod.named_parameters()}
 
-        for p in mod.parameters():
-            p.grad = None
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        out = torch.compile(fn, backend=cnt)(x)
-        out.backward()
+        hook_grads.clear()
+        mod.zero_grad()
 
-        self.assertEqual(out, eager_out)
+        def ctx():
+            if not compiled_autograd:
+                return contextlib.nullcontext()
+            return torch._dynamo.compiled_autograd._enable(
+                torch.compile(backend="aot_eager")
+            )
+
+        out = self._compile_with_requires_grad_leak_graph_break(fn, x, ctx=ctx)
+        with ctx():
+            out.backward()
+
+        if compiled_autograd:
+            self.assertEqual(len(eager_hook_grads), 1)
+            self.assertEqual(hook_grads, eager_hook_grads)
         for name, p in mod.named_parameters():
             self.assertEqual(eager_grads[name], p.grad)
-        self.assertEqual(cnt.frame_count, 2)
+
+    def test_requires_grad_intermediate_leaf_grad_assigned_graph_breaks(self):
+        # g is assigned as the leaf's .grad. In eager a later backward of the
+        # output accumulates into g in place.
+        mod = torch.nn.Linear(4, 1)
+
+        def fn(x, g):
+            y = x.detach().requires_grad_()
+            y.grad = g
+            return mod(y).sum()
+
+        x = torch.randn(1, 4)
+        eager_g = torch.zeros(1, 4)
+        fn(x, eager_g).backward()
+
+        g = torch.zeros(1, 4)
+        self._compile_with_requires_grad_leak_graph_break(fn, x, g).backward()
+        self.assertEqual(g, eager_g)
+
+    @skipIfCrossRef
+    def test_requires_grad_intermediate_leaf_grad_escapes_graph_breaks(self):
+        # y.grad, accumulated by an in-graph backward(), escapes. In eager a
+        # later backward of the first output accumulates into it in place.
+        mod = torch.nn.Linear(4, 1)
+
+        def fn(x):
+            y = x.detach().requires_grad_()
+            mod(y).sum().backward()
+            return mod(y).sum(), y.grad
+
+        x = torch.randn(2, 4)
+        eager_out, eager_grad = fn(x)
+        eager_out.backward()
+
+        out, grad = self._compile_with_requires_grad_leak_graph_break(fn, x)
+        out.backward()
+        self.assertEqual(grad, eager_grad)
 
     def test_requires_grad_setattr_graph_input_graph_breaks(self):
         def fn(x):
