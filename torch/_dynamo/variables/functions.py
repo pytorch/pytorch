@@ -5222,7 +5222,14 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
                 f"'{self.descriptor.__objclass__.__name__}' needs a type, not a "
                 f"'{owner_type.__name__}' as arg 2",
             )
-        owner_value = owner.as_python_constant()
+        owner_value = owner.get_real_python_backed_value()
+        if not isinstance(owner_value, type):
+            unimplemented(
+                gb_type="Unresolved classmethod descriptor owner",
+                context=f"{self} owner={owner}",
+                explanation="Dynamo cannot resolve the class this classmethod descriptor is bound to.",
+                hints=[*graph_break_hints.DYNAMO_BUG],
+            )
         if not issubclass(owner_value, self.descriptor.__objclass__):
             raise_type_error(
                 tx,
