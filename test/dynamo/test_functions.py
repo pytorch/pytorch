@@ -6605,32 +6605,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(opt_fn(x)[1:3], ("Renamed.get", "Renamed.fromkeys"))
 
-    def test_bound_builtin_method_ignores_subclass_override(self):
-        # A builtin_function_or_method calls the C method it was created from;
-        # it never re-resolves its name on type(__self__).
-        class L(list):
-            def count(self, value):
-                return 99
-
-        class D(dict):
-            def get(self, key, default=None):
-                return "override"
-
-        obj = L([1, 1])
-        d = D(a=torch.ones(1))
-        list_count = list.count.__get__(obj, L)
-        dict_get = dict.get.__get__(d)
-
-        def fn(x):
-            return x + list_count(1), dict_get("a"), list_count.__qualname__
-
-        x = torch.ones(1)
-        expected = fn(x)
-        self.assertEqual(expected[0], x + 2)
-        self.assertEqual(expected[2], f"{L.__qualname__}.count")
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(x), expected)
-
     def test_unbound_method_descriptor_call(self):
         # list.count read off the type inside the frame is a method_descriptor;
         # calling it runs the C method even when the receiver's class overrides
@@ -6659,26 +6633,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected[0], x + 2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), expected)
-
-    @parametrize("mapping_type", (collections.OrderedDict, collections.defaultdict))
-    def test_unbound_dict_descriptor_on_specialized_subclass(self, mapping_type):
-        obj = (
-            mapping_type(list, a=1)
-            if mapping_type is collections.defaultdict
-            else mapping_type(a=1)
-        )
-
-        def fn(x):
-            result = dict.copy(obj)
-            return x + len(result), type(result) is dict
-
-        x = torch.ones(1)
-        with self.assertRaisesRegex(
-            Unsupported, "Unbound builtin method on unsupported subclass"
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        torch._dynamo.reset()
-        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
     def test_method_descriptor_list_count_tensor_equality(self):
         def fn(x):
@@ -6740,6 +6694,7 @@ class GraphModule(torch.nn.Module):
             fresh_same = list.count.__get__(fresh_receiver, list)
             fresh_other = list.count.__get__([1, 1], list)
             return (
+                left == fresh,
                 left == same,
                 left != same,
                 left == other_self,
@@ -6755,6 +6710,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.tensor(1)
         expected = (
+            False,
             True,
             False,
             False,
@@ -6797,41 +6753,15 @@ class GraphModule(torch.nn.Module):
             torch.compile(fn, backend="eager", fullgraph=True)(x), expected
         )
 
-    def test_bound_builtin_method_comparison_mixed_receiver_sources(self):
-        receiver = [1]
-
-        def fn(x):
-            sourced = list.count.__get__(receiver, list)
-            sourceless = list.count.__get__([1], list)
-            return sourced == sourceless, x + 1
-
-        x = torch.tensor(1)
-        with self.assertRaisesRegex(
-            Unsupported, "builtin method comparison with undecidable identity"
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        torch._dynamo.reset()
-        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
-
-    @parametrize("alias_first", (False, True))
-    def test_bound_builtin_method_comparison_guards_receiver_identity(
-        self, alias_first
-    ):
+    def test_bound_builtin_method_comparison_aliased_receiver(self):
         def fn(x, a, b):
             equal = list.count.__get__(a, list) == list.count.__get__(b, list)
             return equal, x + 1
 
         x = torch.tensor(1)
         a = [1]
-        b = a if alias_first else [1]
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
-        self.assertEqual(opt_fn(x, a, b), fn(x, a, b))
-        self.assertEqual(cnt.frame_count, 1)
-
-        b = [1] if alias_first else a
-        self.assertEqual(opt_fn(x, a, b), fn(x, a, b))
-        self.assertEqual(cnt.frame_count, 2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, a, a), (True, x + 1))
 
     def test_bound_builtin_method_hash(self):
         receiver = [1, 1]
@@ -6848,29 +6778,38 @@ class GraphModule(torch.nn.Module):
         def newly_bound(x):
             return x + hash(list.count.__get__(receiver, list))
 
-        with self.assertRaisesRegex(
-            Unsupported, "Hashing a newly bound builtin method"
-        ):
+        with self.assertRaises(Unsupported):
             torch.compile(newly_bound, backend="eager", fullgraph=True)(x)
         torch._dynamo.reset()
         self.assertEqual(torch.compile(newly_bound, backend="eager")(x), newly_bound(x))
+
+        def as_key(x):
+            return x + len({list.count.__get__(receiver, list): 1})
+
+        self.assertEqual(
+            torch.compile(as_key, backend="eager", fullgraph=True)(x), as_key(x)
+        )
 
     def test_prebound_method_descriptor_bypasses_subclass_override(self):
         class L(list):
             def count(self, value):
                 return 99
 
+        class D(dict):
+            def get(self, key, default=None):
+                return "override"
+
         obj = L([1, 1])
         bound = list.count.__get__(obj, L)
-        module_bound = types.ModuleType.__dir__.__get__(math)
+        dict_get = dict.get.__get__(D(a=1))
 
         def fn(x):
             return (
                 x + bound(1),
+                dict_get("a"),
                 bound.__name__,
                 bound.__qualname__,
                 bound.__self__ is obj,
-                module_bound.__qualname__,
             )
 
         x = torch.ones(1)

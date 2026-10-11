@@ -1690,12 +1690,16 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         self.assertEqual(actual, expected)
         self.assertIsInstance(actual, S)
 
+    @parametrize("override", (False, True))
     @parametrize("prebound", (False, True))
-    def test_raw_tensor_inplace_view_descriptor_unsupported(self, prebound):
+    def test_raw_tensor_inplace_view_descriptor_unsupported(self, prebound, override):
         class S(torch.Tensor):
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
                 return super().__torch_function__(func, types, args, kwargs or {})
+
+        if override:
+            S.unsqueeze_ = lambda self, dim: self
 
         descriptor = torch.Tensor.unsqueeze_
 
