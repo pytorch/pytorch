@@ -4,7 +4,7 @@ import contextlib
 import warnings
 from collections.abc import Sequence
 from logging import getLogger
-from typing import Optional
+from typing import Callable, Optional
 
 import torch
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
@@ -20,15 +20,54 @@ __all__ = [
     "is_rng_supported_mesh",
     "manual_seed",
     "OffsetBasedRNGTracker",
+    "register_rng_tracker",
 ]
 
 _rng_tracker: Optional["_RNGStateTracker"] = None
 
+# Registry of RNG tracker factories per device type, populated by third-party
+# backends via ``register_rng_tracker``. Devices without an entry keep the
+# default ``OffsetBasedRNGTracker`` behavior.
+RNGTrackerFactory = Callable[[DeviceMesh, bool], "_RNGStateTracker"]
+_RNG_TRACKER_REGISTRY: dict[str, RNGTrackerFactory] = {}
+
+
+def register_rng_tracker(device_type: str, factory: RNGTrackerFactory) -> None:
+    """Register a factory that builds the DTensor RNG tracker for ``device_type``.
+
+    Third-party backends whose RNG does not follow the CUDA philox
+    counter/offset semantics of the default :class:`OffsetBasedRNGTracker`
+    can register a factory here. It is called as
+    ``factory(device_mesh, run_state_sync)`` at every DTensor RNG tracker
+    creation point. This follows the same registration pattern as
+    ``register_graphsafe_rng_dispatch`` in ``torch/_prims/rng_prims.py``.
+    """
+    _RNG_TRACKER_REGISTRY[device_type] = factory
+
+
+def _get_or_create_rng_tracker(
+    device_mesh: DeviceMesh, run_state_sync: bool
+) -> "_RNGStateTracker":
+    """Return the active RNG tracker, creating it if it does not exist yet.
+
+    Centralizes the DTensor RNG tracker creation points (``manual_seed``,
+    ``_dispatch.py`` and ``_api.py``): a device type without a registered
+    factory keeps the default :class:`OffsetBasedRNGTracker`.
+    """
+    global _rng_tracker
+    if not _rng_tracker:
+        factory = _RNG_TRACKER_REGISTRY.get(
+            device_mesh.device_type, OffsetBasedRNGTracker
+        )
+        _rng_tracker = factory(device_mesh, run_state_sync)
+    return _rng_tracker
+
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     """Checks if the current device of ``device_mesh`` supports DTensor's random APIs.
-    Currently DTensor Random APIs only supports cuda/cuda-like devices. We suggest
-    users call this API to test the availability before using our random APIs.
+    A device type with a tracker registered via :func:`register_rng_tracker` is
+    considered supported. We suggest users call this API to test the availability
+    before using our random APIs.
 
     Args:
         device_mesh (:class:`DeviceMesh`): The device mesh on which we check if the
@@ -38,8 +77,11 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
         A bool value. True if ``device_mesh`` supports DTensor Random APIs; False otherwise.
 
     .. warning::
-        Currently we only support correct RNG on cuda/cuda-like devices.
+        Without a registered tracker, correct RNG is only guaranteed on
+        cuda/cuda-like devices.
     """
+    if device_mesh.device_type in _RNG_TRACKER_REGISTRY:
+        return True
     device_handle = _get_device_handle(device_mesh.device_type)
     if device_handle and hasattr(device_handle, "set_rng_state"):
         return True
@@ -90,10 +132,9 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     # Note: we still need to ensure setting `run_state_sync=False` to support the pp case
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
-    # OffsetBasedRNGTracker to perform random operators.
-    global _rng_tracker
-    if not _rng_tracker:
-        _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
+    # OffsetBasedRNGTracker to perform random operators, unless the device
+    # type has a tracker registered via ``register_rng_tracker``.
+    _get_or_create_rng_tracker(device_mesh, run_state_sync=False)
 
     if device_mesh.get_coordinate() is None:
         raise RuntimeError(
