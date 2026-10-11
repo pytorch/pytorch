@@ -1736,10 +1736,13 @@ def _compile(
     # in the case of normal and exception code paths
     convert_frame_box: ConvertFrameBox | None = None,
 ) -> ConvertFrameReturn:
+    from torch.compiler._no_compile import check_compilation_allowed
     from torch.fx.experimental.validator import (
         BisectValidationException,
         ValidationException,
     )
+
+    check_compilation_allowed("Dynamo graph compilation")
 
     if isinstance(innermost_backend(compiler_fn), torch._TorchCompileInductorWrapper):
         # Overlap the one-time source hashing for Inductor's cache keys with
@@ -2448,6 +2451,15 @@ class ConvertFrame:
                 # eval_frame.py. But re-raising seems to work for now because exceptions from tracing
                 # a nested call that results in a top-level frame compile will be handled by the caller
                 # as an observed exception - we don't expect that exception to be suppressed.
+                raise
+
+            from torch._precompile import PrecompileError
+
+            # no_compilation() violations must surface even under
+            # suppress_errors, including one Inductor raised inside a backend.
+            if isinstance(e, PrecompileError) or isinstance(
+                getattr(e, "inner_exception", None), PrecompileError
+            ):
                 raise
 
             # These two exception types are "soft" failure, in the sense that
