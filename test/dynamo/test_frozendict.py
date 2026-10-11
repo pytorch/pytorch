@@ -37,6 +37,98 @@ parametrize_pytree_module = parametrize(
 @unittest.skipIf(not torch._has_frozendict, "requires builtins.frozendict")
 @instantiate_parametrized_tests
 class FrozenDictTests(torch._dynamo.test_case.TestCase):
+    @parametrize("mapping_input", [False, True])
+    @parametrize("key_error", ["unhashable", "custom", "subclass"])
+    def test_constructor_key_type_errors(self, mapping_input, key_error):
+        class KeyTypeError(TypeError):
+            pass
+
+        class Key:
+            def __hash__(self):
+                if key_error == "subclass":
+                    raise KeyTypeError("custom hash failed", 17)
+                raise TypeError("custom hash failed")
+
+        class Mapping:
+            def __init__(self, key, value):
+                self.key = key
+                self.value = value
+
+            def keys(self):
+                return [self.key]
+
+            def __getitem__(self, key):
+                return self.value
+
+        def fn(x):
+            key = [] if key_error == "unhashable" else Key()
+            source = Mapping(key, x) if mapping_input else [(key, x)]
+            try:
+                builtins.frozendict(source)
+            except TypeError as error:
+                return x + 1, type(error), error.args
+            return x - 1, None, ()
+
+        x = torch.randn(3)
+        expected = fn(x)
+        if key_error == "subclass":
+            self.assertIs(expected[1], KeyTypeError)
+            self.assertEqual(expected[2], ("custom hash failed", 17))
+        else:
+            self.assertIs(expected[1], TypeError)
+            self.assertIn("as a frozendict key", expected[2][0])
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
+    @parametrize("explicit_new", [False, True])
+    def test_constructor_preserves_key_comparisons(self, explicit_new):
+        class Key:
+            def __init__(self):
+                self.calls = 0
+
+            def __hash__(self):
+                return 42
+
+            def __eq__(self, other):
+                self.calls += 1
+                return self.calls > 1
+
+        def fn(x):
+            first, second = Key(), Key()
+            if explicit_new:
+                mapping = builtins.frozendict.__new__(
+                    builtins.frozendict, [(first, x), (second, x + 1)]
+                )
+            else:
+                mapping = builtins.frozendict([(first, x), (second, x + 1)])
+            return x + len(mapping), first.calls
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), (x + 2, 1))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_subscription_compares_key_once(self):
+        class Key:
+            def __init__(self):
+                self.calls = 0
+
+            def __hash__(self):
+                return 42
+
+            def __eq__(self, other):
+                self.calls += 1
+                return True
+
+        def fn(x):
+            stored, probe = Key(), Key()
+            mapping = builtins.frozendict([(stored, x)])
+            return mapping[probe] + 1, stored.calls
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), (x + 1, 1))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     @parametrize("backend", ["eager", "aot_eager"])
     @parametrize("construct", [False, True])
     def test_allowed_function_argument(self, backend, construct):
@@ -422,6 +514,17 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(
                 x, builtins.frozendict(x=edge)
             )
+
+    def test_missing_key_exception(self):
+        def fn(x):
+            mapping = builtins.frozendict(a=x)
+            try:
+                return mapping["missing"]
+            except KeyError as error:
+                return x + 1, error.args
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
 
 if __name__ == "__main__":
