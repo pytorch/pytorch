@@ -3475,10 +3475,20 @@ class BaseSchedulerNode:
                     if ms is None:
                         # NCCL estimations fail: fallback to in-tree algorithmic estimation.
                         ms = estimate_nccl_collective_runtime(self.node)
+                    if ms is None:
+                        # No calibrated cost model for this backend (a
+                        # non-CUDA accelerator without a registered
+                        # collective cost estimator): unknown cost.
+                        return 0
 
                     cache.set_value(cache_key, value=ms)
                     return ms
-                return estimate_nccl_collective_runtime(self.node)
+                ms = estimate_nccl_collective_runtime(self.node)
+                if ms is None:
+                    # No calibrated cost model for this backend: unknown
+                    # cost, same fallback as the ValueError path below.
+                    return 0
+                return ms
             except ValueError as e:
                 # We don't know how to estimate runtime for this collective,
                 # falling back to 0
