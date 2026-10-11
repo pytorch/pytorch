@@ -447,6 +447,7 @@ def mutable_mapping_update(
     /,
     **kwargs: Any,
 ) -> None:
+    # Unlike odict_update, this legacy constructor path still lacks mapping-like support.
     if isinstance(data, Mapping):
         # Merge standard mapping with PyMapping_Items
         for key, value in data.items():
@@ -482,7 +483,7 @@ def mutable_mapping_update(
 
 def odict_update(
     self: Any,
-    data: Mapping[T, U] | Iterable[tuple[T, U]] = (),
+    data: Any = (),
     /,
     **kwargs: Any,
 ) -> None:
