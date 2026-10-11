@@ -44,7 +44,12 @@ from ..exc import (
     UnspecializeRestartAnalysis,
     Unsupported,
 )
-from ..guards import GuardBuilder, install_guard, make_dupe_guard
+from ..guards import (
+    GuardBuilder,
+    install_guard,
+    install_not_in_instance_dict_guard,
+    make_dupe_guard,
+)
 from ..mutation_guard import GenerationTracker
 from ..source import (
     AttrSource,
@@ -519,6 +524,9 @@ class NNModuleVariable(VariableTracker):
                     base=base, tx=tx, name=name, obj_source=self.source
                 )
                 if result is not None:
+                    # __getattr__ only runs after the normal lookup misses, so a
+                    # later instance dict write would shadow what it returned.
+                    install_not_in_instance_dict_guard(self.source, name)
                     return result
                 # if we can't find a __getattr__, we can't parse this, raise attribute error
                 raise_observed_exception(
@@ -526,6 +534,10 @@ class NNModuleVariable(VariableTracker):
                     tx,
                     args=[f"'{type(base).__name__}' object has no attribute '{name}'"],
                 )
+
+        if object_member and name not in base_dict:
+            # A registered entry is only visible while the instance dict lacks it.
+            install_not_in_instance_dict_guard(self.source, name)
 
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
