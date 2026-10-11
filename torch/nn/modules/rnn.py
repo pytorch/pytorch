@@ -412,8 +412,8 @@ class RNNBase(Module):
         # If weights have been changed, update the _flat_weights in __getstate__ here.
         self._update_flat_weights()
         # Don't serialize the weight references.
-        state = self.__dict__.copy()
-        del state["_flat_weight_refs"]
+        state = super().__getstate__()
+        state.pop("_flat_weight_refs", None)
         return state
 
     def __setstate__(self, d):
