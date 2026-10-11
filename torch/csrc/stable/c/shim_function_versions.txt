@@ -141,3 +141,4 @@ torch_device_to_pyobject: TORCH_VERSION_2_15_0
 torch_dtype_from_pyobject: TORCH_VERSION_2_15_0
 torch_dtype_to_pyobject: TORCH_VERSION_2_15_0
 torch_is_tensor_pyobject: TORCH_VERSION_2_15_0
+torch_is_warn_always_enabled: TORCH_VERSION_2_16_0
