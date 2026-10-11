@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+import ast
 import dataclasses
+import tempfile
 import typing
 import unittest
 import unittest.mock
 from collections import defaultdict
+from pathlib import Path
 
 import yaml
 from tools.autograd import gen_autograd_functions, load_derivatives
-from tools.pyi.gen_pyi import generate_type_hints
+from tools.autograd.gen_python_functions import should_generate_py_binding
+from tools.pyi.gen_pyi import gen_pyi, generate_type_hints
 
 from torchgen import dest
-from torchgen.api.python import PythonSignatureGroup, signature
+from torchgen.api.python import (
+    argument_type_str_pyi,
+    PythonArgument,
+    PythonSignatureGroup,
+    signature,
+)
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager
 from torchgen.dest import native_functions as native_functions_dest
@@ -23,6 +32,7 @@ from torchgen.gen import (
     get_native_function_declarations,
     get_native_function_schema_registrations,
     LineLoader,
+    parse_native_yaml,
     static_dispatch,
 )
 from torchgen.model import (
@@ -33,13 +43,185 @@ from torchgen.model import (
     Location,
     NativeFunction,
     OperatorName,
+    Type,
+    Variant,
 )
 from torchgen.native_function_generation import add_generated_native_functions
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import Target
+from torchgen.utils import FileManager, Target
 
 
 class TestGenPyi(unittest.TestCase):
+    def test_native_module_stubs(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as output:
+            gen_pyi(
+                str(root / "aten/src/ATen/native/native_functions.yaml"),
+                str(root / "aten/src/ATen/native/tags.yaml"),
+                str(root / "tools/autograd/deprecated.yaml"),
+                FileManager(output, str(root), dry_run=False),
+            )
+            stubs = {}
+            for module in ("fft", "linalg", "special"):
+                path = Path(output) / "torch/_C" / f"_{module}.pyi"
+                self.assertTrue(path.exists(), f"Missing stub for {module}")
+                stubs[module] = path.read_text()
+                bindings = {
+                    node.name
+                    for node in ast.parse(stubs[module]).body
+                    if isinstance(node, ast.FunctionDef)
+                }
+                source = ast.parse(
+                    (root / "torch" / module / "__init__.py").read_text()
+                )
+                used = {
+                    node.attr
+                    for node in ast.walk(source)
+                    if isinstance(node, ast.Attribute)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == f"_{module}"
+                }
+                self.assertTrue(used)
+                self.assertLessEqual(used, bindings)
+
+            self.assertIn("tensors: Sequence[Tensor]", stubs["linalg"])
+            self.assertIn("dims: Sequence[_int | SymInt] | None", stubs["linalg"])
+            self.assertIn(
+                "dim: _int | SymInt | Sequence[_int | SymInt] | None", stubs["fft"]
+            )
+            self.assertIn("def linalg_det(A: Tensor", stubs["linalg"])
+            self.assertIn("-> torch.return_types.linalg_qr", stubs["linalg"])
+            returns = (Path(output) / "torch/return_types.pyi").read_text()
+            self.assertIn("class linalg_qr(", returns)
+            self.assertNotIn("QRResult", returns)
+            for name in (
+                "linalg_cholesky_ex",
+                "linalg_eig",
+                "linalg_eigh",
+                "linalg_inv_ex",
+                "linalg_ldl_factor",
+                "linalg_ldl_factor_ex",
+                "linalg_lstsq",
+                "linalg_lu",
+                "linalg_lu_factor",
+                "linalg_lu_factor_ex",
+                "linalg_polar",
+                "linalg_qr",
+                "linalg_slogdet",
+                "linalg_solve_ex",
+                "linalg_svd",
+            ):
+                with self.subTest(name=name):
+                    self.assertIn(f"class {name}_out(", returns)
+                    overloads = [
+                        node
+                        for node in ast.parse(stubs["linalg"]).body
+                        if isinstance(node, ast.FunctionDef) and node.name == name
+                    ]
+                    contracts = set()
+                    for overload in overloads:
+                        out_index = next(
+                            i
+                            for i, arg in enumerate(overload.args.kwonlyargs)
+                            if arg.arg == "out"
+                        )
+                        out_arg = overload.args.kwonlyargs[out_index]
+                        annotation = out_arg.annotation
+                        return_annotation = overload.returns
+                        if annotation is None or return_annotation is None:
+                            raise AssertionError(
+                                "Expected annotated out and return types"
+                            )
+                        contracts.add(
+                            (
+                                ast.unparse(annotation),
+                                overload.args.kw_defaults[out_index] is None,
+                                ast.unparse(return_annotation),
+                            )
+                        )
+                    self.assertEqual(
+                        contracts,
+                        {
+                            ("None", False, f"torch.return_types.{name}"),
+                            (
+                                "Sequence[Tensor]",
+                                True,
+                                f"torch.return_types.{name}_out",
+                            ),
+                        },
+                    )
+
+    def test_self_keyword_matches_parser(self) -> None:
+        for schema in ("Tensor", "Scalar"):
+            for method in (False, True):
+                for use_sequence in (False, True):
+                    with self.subTest(
+                        schema=schema, method=method, use_sequence=use_sequence
+                    ):
+                        arg = PythonArgument("self", Type.parse(schema), None, None)
+                        parser_name = arg.argument_str(method=method).rsplit(" ", 1)[1]
+                        stub_name = arg.argument_str_pyi(
+                            method=method, use_sequence=use_sequence
+                        ).split(":", 1)[0]
+                        self.assertEqual(stub_name, parser_name)
+
+    def test_native_parameter_names_match_parser(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        native_functions = parse_native_yaml(
+            str(root / "aten/src/ATen/native/native_functions.yaml"),
+            str(root / "aten/src/ATen/native/tags.yaml"),
+        ).native_functions
+        for native in native_functions:
+            if not should_generate_py_binding(native):
+                continue
+            for method, variant in ((False, Variant.function), (True, Variant.method)):
+                if variant not in native.variants:
+                    continue
+                parser_args = signature(native, method=method).arguments()
+                stub_args = signature(native, method=method, pyi=True).arguments()
+                self.assertEqual(len(parser_args), len(stub_args))
+                for parser_arg, stub_arg in zip(parser_args, stub_args):
+                    with self.subTest(
+                        function=str(native.func.name), method=method, arg=stub_arg.name
+                    ):
+                        parser_name = (
+                            parser_arg.argument_str(method=method)
+                            .split("=", 1)[0]
+                            .rsplit(" ", 1)[1]
+                        )
+                        # Python source must escape the reserved keyword "from".
+                        if parser_name == "from":
+                            parser_name = "from_"
+                        for use_sequence in (False, True):
+                            self.assertEqual(
+                                stub_arg.argument_str_pyi(
+                                    method=method, use_sequence=use_sequence
+                                ).split(":", 1)[0],
+                                parser_name,
+                            )
+
+    def test_native_module_symbolic_dimensions(self) -> None:
+        for schema, expected, legacy in (
+            ("int[]", "Sequence[_int | SymInt]", "_size"),
+            ("int[]?", "Sequence[_int | SymInt] | None", "_size | None"),
+            (
+                "int[1]?",
+                "_int | SymInt | Sequence[_int | SymInt] | None",
+                "_int | _size | None",
+            ),
+            (
+                "int[2]",
+                "_int | SymInt | Sequence[_int | SymInt]",
+                "_int | _size",
+            ),
+        ):
+            with self.subTest(schema=schema):
+                argument = Type.parse(schema)
+                self.assertEqual(
+                    argument_type_str_pyi(argument, use_sequence=True), expected
+                )
+                self.assertEqual(argument_type_str_pyi(argument), legacy)
+
     def test_inplace_foreach_returns_input_container(self) -> None:
         native_function, _ = NativeFunction.from_yaml(
             {
