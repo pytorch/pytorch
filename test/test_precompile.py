@@ -3458,6 +3458,83 @@ class TestPrecompile(TestCase):
         _precompile_pair(reseed_then_convert, torch.empty(4), backend="eager")
         self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
 
+    def test_capture_drawing_from_an_explicit_generator_rewinds_no_default(self):
+        # The named generator cannot be saved before capture names it, and rewinding
+        # its device's default generator instead would replay unrelated draws.
+        gen = torch.Generator().manual_seed(0)
+
+        def reseed_then_draw(a):
+            torch.random.default_generator.manual_seed(7)
+            return a + torch.rand(a.shape, generator=gen)
+
+        gen_before = gen.get_state()
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            _precompile_pair(reseed_then_draw, torch.empty(4), backend="eager")
+        self.assertTrue(any("explicit torch.Generator" in m for m in cm.output))
+        self.assertTrue(any("from a default generator" in m for m in cm.output))
+        self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
+        self.assertNotEqual(gen.get_state(), gen_before)
+
+    def test_capture_drawing_from_a_default_generator_by_name_restores_it(self):
+        torch.manual_seed(0)
+        before = torch.random.get_rng_state()
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(
+                lambda a: a + torch.rand(4, generator=torch.default_generator),
+                torch.empty(4),
+                backend="eager",
+            )
+        self.assertEqual(torch.random.get_rng_state(), before)
+
+    @unittest.skipUnless(TEST_CUDA, "needs CUDA")
+    def test_capture_drawing_from_a_cuda_generator_restores_only_the_default(self):
+        x = torch.empty(4, device="cuda")
+        torch.manual_seed(0)
+        before = torch.cuda.get_rng_state(0)
+        default = torch.cuda.default_generators[0]
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(
+                lambda a: a + torch.rand(4, device="cuda", generator=default),
+                x,
+                backend="eager",
+            )
+        self.assertEqual(torch.cuda.get_rng_state(0), before)
+
+        # torch.Generator("cuda") has no device index; a reseed of the default made
+        # during capture must stand.
+        gen = torch.Generator("cuda").manual_seed(0)
+        gen_before = gen.get_state()
+
+        def reseed_then_draw(a):
+            default.manual_seed(7)
+            return a + torch.rand(4, device="cuda", generator=gen)
+
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            _precompile_pair(reseed_then_draw, x, backend="eager")
+        self.assertTrue(any("explicit torch.Generator" in m for m in cm.output))
+        reseeded = torch.Generator("cuda").manual_seed(7).get_state()
+        self.assertEqual(torch.cuda.get_rng_state(0), reseeded)
+        self.assertNotEqual(gen.get_state(), gen_before)
+
+    def test_capture_drawing_from_explicit_and_default_generators(self):
+        gen = torch.Generator().manual_seed(0)
+        gen_before = gen.get_state()
+        torch.manual_seed(0)
+        before = torch.random.get_rng_state()
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            _precompile_pair(
+                lambda a: a + torch.rand(4, generator=gen) + torch.rand(4),
+                torch.empty(4),
+                backend="eager",
+            )
+        self.assertTrue(any("explicit torch.Generator" in m for m in cm.output))
+        self.assertEqual(torch.random.get_rng_state(), before)
+        self.assertNotEqual(gen.get_state(), gen_before)
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(
+                lambda a: torch.rand_like(a), torch.empty(4), backend="eager"
+            )
+
     def test_concurrent_captures_are_serialized(self):
         # Capture clears the example tensors' .grad and reparametrizes the example
         # module in place, so two captures of a shared model in flight at once would

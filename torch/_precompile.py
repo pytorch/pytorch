@@ -340,6 +340,16 @@ def _capture_rng_devices(args: tuple[object, ...]) -> list[torch.device]:
     return sorted(devices, key=str)
 
 
+def _node_arg(node: torch.fx.Node, name: str) -> object:
+    schema_args = cast("torch._ops.OpOverload", node.target)._schema.arguments
+    for index, arg in enumerate(schema_args):
+        if arg.name == name:
+            if name in node.kwargs:
+                return node.kwargs[name]
+            return node.args[index] if index < len(node.args) else arg.default_value
+    return None
+
+
 def _op_can_draw(node: torch.fx.Node) -> bool:
     target = node.target
     if not isinstance(target, torch._ops.OpOverload):
@@ -355,7 +365,7 @@ def _graph_rng_devices(gm: torch.fx.GraphModule) -> set[torch.device] | None:
     draws from a concurrent thread's, so it rewinds unrelated work. Per device rather
     than a single flag for the same reason: a graph that draws only on CUDA must not
     rewind the CPU generator a concurrent thread is drawing from. None means "could be
-    any of them".
+    any of them". A draw through an explicit generator is not a default generator's.
     """
     devices: set[torch.device] = set()
     for node in gm.graph.nodes:
@@ -371,7 +381,7 @@ def _graph_rng_devices(gm: torch.fx.GraphModule) -> set[torch.device] | None:
             # Fail closed: an opaque op (a custom op, or a HOP such as a user Triton
             # kernel) can draw inside its own kernel with nothing in the graph to say so.
             return None
-        if not _op_can_draw(node):
+        if not _op_can_draw(node) or _explicit_generator_draw(gm, node):
             continue
         val = node.meta.get("val")
         if isinstance(val, (tuple, list)):
@@ -385,6 +395,25 @@ def _graph_rng_devices(gm: torch.fx.GraphModule) -> set[torch.device] | None:
 def _rng_devices_indicate_a_draw(drawn: set[torch.device] | None) -> bool:
     """None means "could be any generator"; a non-empty set names them."""
     return drawn is None or bool(drawn)
+
+
+def _explicit_generator_draw(gm: torch.fx.GraphModule, node: torch.fx.Node) -> bool:
+    gen = _node_arg(node, "generator")
+    if isinstance(gen, torch.fx.Node):
+        if gen.op != "get_attr":
+            raise AssertionError(f"expected a get_attr generator, got {gen.op}")
+        gen = operator.attrgetter(cast(str, gen.target))(gm)
+    if not isinstance(gen, torch.Generator):
+        return gen is not None
+    # make_fx stashes a new wrapper of the caller's generator, so compare the generator
+    # it wraps: naming a device's default generator is a draw from that default.
+    if gen.device.type == "cpu":
+        default = torch.default_generator
+    elif gen.device.index is None:
+        return True
+    else:
+        default = torch._C._accelerator_getDefaultGenerator(gen.device.index)
+    return gen._cdata != default._cdata
 
 
 class _CaptureRngState:
@@ -455,9 +484,18 @@ class _CaptureRngState:
             # or another thread drew. Neither is the capture's to undo.
             log.warning(
                 "precompile: generator state changed during capture although the "
-                "captured graph does not draw (%s reseeded, or another thread drew), "
-                "so it was left as-is.",
+                "captured graph does not draw from a default generator (%s reseeded, "
+                "or another thread drew), so it was left as-is.",
                 getattr(fn, "__name__", "fn"),
+            )
+        if any(
+            _op_can_draw(n) and _explicit_generator_draw(gm, n) for n in gm.graph.nodes
+        ):
+            # Its state could not be saved before capture named it, and rewinding the
+            # default generator of its device instead would replay unrelated draws.
+            log.warning(
+                "precompile: the captured graph draws from an explicit "
+                "torch.Generator, which capture cannot save, so it was left advanced."
             )
 
     def _changed(self) -> bool:
@@ -596,16 +634,15 @@ class MakeFxTracer:
     counts as a draw on its output's device, even one configured not to draw, and an
     op that is not an aten or prims op (a custom op, a higher-order op) could draw
     from any generator, so every saved one is restored. A draw through an explicit
-    ``torch.Generator`` is attributed to its output's device, so that device's
-    default generator is restored and the named one is left advanced. When a restore
-    does happen it rewinds any draw a concurrent thread made while the trace ran, so
-    capture random computations before starting threads that share the default
-    generator. The restore happens once the graph is traced, so a capture rejected
-    after that still restores; one that fails mid-trace has no graph to attribute
-    draws to and restores nothing. The CPU generator is always saved; of the current
-    accelerator (CUDA, XPU, MPS, ...) only an already-initialized current device and
-    the devices reachable from the arguments are. A draw the graph shows on any other
-    device warns and is left as-is; one made inside an opaque op goes unnoticed.
+    ``torch.Generator`` is left advanced with a warning, and no default generator is
+    rewound for it. When a restore does happen it rewinds any draw a concurrent thread
+    made while the trace ran, so capture random computations before starting threads
+    that share the default generator. The restore happens once the graph is traced, so a
+    capture rejected after that still restores; one that fails mid-trace has no graph to
+    attribute draws to and restores nothing. The CPU generator is always saved; of the
+    current accelerator (CUDA, XPU, MPS, ...) only an already-initialized current device
+    and the devices reachable from the arguments are. A draw the graph shows on any
+    other device warns and is left as-is; one made inside an opaque op goes unnoticed.
     """
 
     decompositions: dict | None = None
