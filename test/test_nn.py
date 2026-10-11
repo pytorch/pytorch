@@ -2688,10 +2688,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         loss_nc = F.ctc_loss(lp_nc, targets_nc, input_lengths, target_lengths, reduction='sum')
         loss_c = F.ctc_loss(lp_c, targets_nc.contiguous(), input_lengths, target_lengths, reduction='sum')
         self.assertEqual(loss_nc, loss_c)
-        # ponytail: grad-value comparison runs single-threaded; CPU backward
-        # has a preexisting parallel_for race (grads nondeterministic at
-        # threads>1 even on unpatched HEAD; forward is unaffected), so any
-        # cross-run grad equality check is only meaningful at threads=1
+        # compare grads single-threaded so the check does not depend on scheduling
         num_threads = torch.get_num_threads()
         torch.set_num_threads(1)
         try:
