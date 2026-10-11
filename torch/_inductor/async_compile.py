@@ -227,6 +227,21 @@ def _process_pool_allowed() -> bool:
 
 
 @clear_on_fresh_cache
+class FrozenTritonKernels:
+    """
+    The precompile runtime cache's frozen Triton kernels. They outlive
+    CompiledTritonKernels.cache_clear(), which runs on every compile, and are
+    only dropped when fresh_cache() / clear_caches() resets Inductor's caches.
+    """
+
+    @staticmethod
+    def cache_clear() -> None:
+        from torch.compiler._runtime_cache import clear_triton_kernels
+
+        clear_triton_kernels()
+
+
+@clear_on_fresh_cache
 class CompiledTritonKernels:
     """
     In memory cache for storing compiled triton kernels.
@@ -571,12 +586,24 @@ class AsyncCompile:
             check_compilation_allowed,
             is_compilation_forbidden,
         )
+        from torch.compiler._runtime_cache import (
+            load_triton_kernel,
+            record_triton_kernel,
+        )
 
         is_parallel = not is_compilation_forbidden() and self.use_process_pool()
         set_feature_use("parallel_compile_post_warmup", is_parallel)
 
         compile_id = torch._guards.CompileContext.current_compile_id()
         is_backward = getattr(V.graph, "is_backward", False)
+
+        source_key = CompiledTritonKernels.key(source_code)
+        if (kernel := load_triton_kernel(source_key)) is not None:
+            counters["inductor"]["async_compile_cache_hit"] += 1
+            kernel.set_compile_info(compile_id, is_backward)
+            kernel._reload_kernel = reload_kernel_in_parent
+            record_triton_kernel(source_key, kernel)
+            return kernel
 
         if (future := CompiledTritonKernels.get(source_code)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
@@ -585,6 +612,7 @@ class AsyncCompile:
                 # Remove the future now that we've cache hit
                 CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
+                record_triton_kernel(source_key, future.static_autotuner)
             if is_parallel:
                 return future
             else:
@@ -673,6 +701,7 @@ class AsyncCompile:
                     reload_kernel=reload_kernel_in_parent,
                     static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                 )
+                record_triton_kernel(source_key, kernel)
                 _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                 return kernel
 
@@ -698,6 +727,7 @@ class AsyncCompile:
                         warm_cache_only=False,
                         static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                     )
+                    record_triton_kernel(source_key, kernel)
                     elapsed_us = (time_ns() - start_ns) // 1000
                     _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                     return kernel
