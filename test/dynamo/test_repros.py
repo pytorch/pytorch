@@ -4808,6 +4808,38 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x1.data, x2.data)
         self.assertEqual(y1, y2)
 
+    def test_set_stale_base_not_aliased(self):
+        # https://github.com/pytorch/pytorch/issues/199229
+        def fn(dest, src, storage):
+            dest.set_(src)
+            storage[0] = 10.0
+            return dest[0].clone()
+
+        def fresh():
+            storage = torch.arange(5, dtype=torch.float32)
+            return storage[:3], torch.full((3,), 7.0), storage
+
+        expected = fn(*fresh())
+        for backend in ["eager", "aot_eager", "inductor"]:
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
+
+    def test_set_new_base_stays_aliased(self):
+        # After dest.set_(src), dest must alias src, not its old base.
+        def fn(dest, src):
+            dest.set_(src)
+            src[0] = 42.0
+            return dest[0].clone()
+
+        def fresh():
+            storage = torch.arange(5, dtype=torch.float32)
+            return storage[:3], torch.full((3,), 7.0)
+
+        expected = fn(*fresh())
+        for backend in ["eager", "aot_eager", "inductor"]:
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
+
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:
             def __enter__(self):
