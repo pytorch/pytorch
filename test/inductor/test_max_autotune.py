@@ -467,6 +467,79 @@ class TestMaxAutotune(TestCase):
                 guard_or_false.assert_called_once_with(condition)
                 statically_known_true.assert_not_called()
 
+    @parametrize(
+        "dtype,k_hint,aot_mode,expected",
+        [
+            (torch.float16, 512, False, True),
+            (torch.float16, 513, False, False),
+            (torch.float8_e4m3fn, 64, False, True),
+            (torch.float8_e4m3fn, 16, False, False),
+            # AOTI does not check Inductor guards at runtime, so nothing is guarded.
+            (torch.float16, 512, True, False),
+        ],
+    )
+    def test_can_use_tma_guards_predicates_not_sizes(
+        self, dtype, k_hint, aot_mode, expected
+    ):
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.utils import can_use_tma
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        m = shape_env.create_symbol(1024, ConstantSource("m"))
+        k = shape_env.create_symbol(k_hint, ConstantSource("k"))
+        graph = GraphLowering(make_fx(lambda: torch.zeros(2, 3))(), shape_env=shape_env)
+        graph.aot_mode = aot_mode
+        mat = mock.Mock()
+        mat.get_size.return_value = [m, k]
+        mat.get_stride.return_value = [k, 1]
+        mat.get_dtype.return_value = dtype
+        mat.get_name.return_value = "buf0"
+        mat.get_device.return_value = torch.device(GPU_TYPE)
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch("torch.utils._triton.has_triton_tma_device", return_value=True),
+        ):
+            self.assertEqual(can_use_tma(mat, add_guards=True), expected)
+
+        # Neither dim is specialized, and a rejection leaves no guard behind.
+        self.assertNotIn(m, shape_env.replacements)
+        self.assertNotIn(k, shape_env.replacements)
+        self.assertEqual(bool(shape_env.guards), expected)
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
+    def test_max_autotune_persistent_tma_mark_dynamic(self):
+        def mm(a, b):
+            return a @ b
+
+        b = torch.randn(512, 512, dtype=torch.float16, device=GPU_TYPE)
+        a = torch.randn(1024, 512, dtype=torch.float16, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(a, 0)
+        counters.clear()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.native_matmul": False,
+                "test_configs.autotune_choice_name_regex": "persistent_tma",
+            }
+        ):
+            compiled = torch.compile(mm)
+            c, (code,) = run_and_get_code(compiled, a, b)
+            FileCheck().check("make_tensor_descriptor").run(code)
+            torch.testing.assert_close(c, mm(a, b), atol=0, rtol=0)
+
+            a = torch.randn(777, 512, dtype=torch.float16, device=GPU_TYPE)
+            torch.testing.assert_close(compiled(a, b), mm(a, b), atol=0, rtol=0)
+
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
