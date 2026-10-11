@@ -4237,7 +4237,9 @@ class SIMDScheduling(BaseScheduling):
         else:
             V.graph._current_kernel_module_fqn = None
 
-        return self._codegen_nodes(nodes, coalesce_analysis)  # type: ignore[arg-type]
+        result = self._codegen_nodes(nodes, coalesce_analysis)  # type: ignore[arg-type]
+        V.graph._current_kernel_module_fqn = None  # reset so non-simd kernels don't inherit stale FQN
+        return result
 
     @staticmethod
     def can_use_32bit_indexing(
