@@ -20,7 +20,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 def _code_for(fn, *args, dynamic=None, **config_kwargs):
@@ -79,7 +80,7 @@ class TestKernelConfigs(TestCase):
     """Under triton.autotune_at_compile_time, the module launches each kernel with the
     config the compile tuned it to."""
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize(
         "case",
         [
@@ -94,7 +95,7 @@ class TestKernelConfigs(TestCase):
     @config.patch(coordinate_descent_tuning=True, max_autotune_pointwise=True)
     def test_kernels_launch_with_their_compile_time_config(self, case):
         _, fn, shape = case
-        x = torch.randn(shape, device="cuda")
+        x = torch.randn(shape, device=GPU_TYPE)
         _, code = _code_for(fn, x)
         kernels = _kernels(code)
         self.assertTrue(kernels)
@@ -108,7 +109,7 @@ class TestKernelConfigs(TestCase):
             (launcher,) = ns[name].launchers
             self.assertEqual(config_to_dict(launcher.config), cfg, name)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("per_subkernel", [False, True])
     @config.patch(
         combo_kernels=True,
@@ -120,7 +121,7 @@ class TestKernelConfigs(TestCase):
         def fn(a, b):
             return a.relu(), b.sigmoid()
 
-        a, b = torch.randn(10, 10, device="cuda"), torch.randn(20, 20, device="cuda")
+        a, b = (torch.randn(n, n, device=GPU_TYPE) for n in (10, 20))
         _, code = _code_for(fn, a, b, combo_kernel_per_subkernel_blocks=per_subkernel)
         self.assertIn("combo_grid_meta", code)
         with _no_runtime_tuning():
@@ -132,18 +133,18 @@ class TestKernelConfigs(TestCase):
         if per_subkernel:
             self.assertIn("XBLOCK_1", cfg)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @config.patch(coordinate_descent_tuning=True)
     def test_dynamic_shape_kernel_keeps_its_config_at_every_size(self):
         # Tuned once on the size hints, it launches with that config at other sizes.
         def fn(x):
             return x.sum(-1)
 
-        _, code = _code_for(fn, torch.randn(64, 3000, device="cuda"), dynamic=True)
+        _, code = _code_for(fn, torch.randn(64, 3000, device=GPU_TYPE), dynamic=True)
         with _no_runtime_tuning():
             ns = _load_from_file(code)
             for shape in [(64, 3000), (17, 5000), (200, 129)]:
-                y = torch.randn(shape, device="cuda")
+                y = torch.randn(shape, device=GPU_TYPE)
                 out = ns["call"]([y, *shape])[0]
                 self.assertEqual(out, fn(y), atol=1e-3, rtol=1e-3)
         (cfg,) = ns["KERNEL_CONFIGS"].values()
@@ -151,11 +152,11 @@ class TestKernelConfigs(TestCase):
         (launcher,) = ns[kernel].launchers
         self.assertEqual(config_to_dict(launcher.config), cfg)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_template_keeps_its_one_config(self):
         if not is_big_gpu():
             self.skipTest("Triton GEMM templates need a big GPU")
-        a, b = torch.randn(64, 64, device="cuda"), torch.randn(64, 64, device="cuda")
+        a, b = (torch.randn(64, 64, device=GPU_TYPE) for _ in range(2))
         cfg = {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
         result, code = _code_for(lambda a, b: (a @ b).relu(), a, b, **cfg)
         (template,) = {k for k in _kernels(code) if k.startswith("triton_tem_")}
@@ -163,7 +164,7 @@ class TestKernelConfigs(TestCase):
         self.assertNotIn(template, ns.get("KERNEL_CONFIGS", {}))
         self.assertEqual(ns["call"]([a, b])[0], result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_user_defined_kernel_keeps_its_autotuning(self):
         import triton
         import triton.language as tl
@@ -184,7 +185,7 @@ class TestKernelConfigs(TestCase):
             add_one[lambda meta: (triton.cdiv(n, meta["BLOCK"]),)](x, out, n)
             return out.sin()
 
-        x = torch.randn(4096, device="cuda")
+        x = torch.randn(4096, device=GPU_TYPE)
         result, code = _code_for(fn, x)
         self.assertEqual(result, fn(x))
         (user_kernel,) = re.findall(r"^def (add_one\w*)\(", code, re.MULTILINE)
@@ -194,9 +195,9 @@ class TestKernelConfigs(TestCase):
         self.assertEqual(ns[user_kernel].heuristic_type, HeuristicType.USER_AUTOTUNE)
         self.assertEqual(ns["call"]([x])[0], result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_without_compile_time_autotuning_nothing_is_pinned(self):
-        x = torch.randn(64, 128, device="cuda")
+        x = torch.randn(64, 128, device=GPU_TYPE)
         cfg = {"triton.autotune_at_compile_time": None}
         result, code = _code_for(_softmax, x, **cfg)
         self.assertNotIn("KERNEL_CONFIGS", code)
