@@ -3326,7 +3326,9 @@ def load(
     eagerly, bypassing the installed entries; under ``"eager_on_recompile"`` the
     captured variants are served and any other call runs eagerly. An installed
     artifact refuses to load with ``torch._dynamo.config.compiled_autograd``
-    enabled, which would compile backward graphs outside it. A Dynamo artifact whose
+    enabled, which would compile backward graphs outside it, and with Dynamo
+    disabled (``TORCHDYNAMO_DISABLE=1`` or the ``enable_dynamo`` killswitch),
+    which it serves through. A Dynamo artifact whose
     capture graph-broke cannot load beside the live compile that captured it
     (the continuation names collide), and an installed artifact is refused
     wherever any frame it installs onto already has live Dynamo cache entries:
