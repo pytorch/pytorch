@@ -809,8 +809,7 @@ def _nll_loss_nd(
         return torch.sum(loss) / torch.sum(current_weight)
 
 
-@register_decomposition(aten.nll_loss)
-@out_wrapper()
+# CompositeImplicitAutograd - don't register decomp
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("input",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -838,20 +837,6 @@ def nll_loss(
     if size_average is not None or reduce is not None:
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
 
-    # The expected behavior when the target and input have zero elements:
-    #   reduction = 'none' --- tensor([])
-    #   reduction = 'sum'  --- tensor(0.)
-    #   reduction = 'mean' --- tensor(nan)
-    # Mean reduction on empty tensors produces NaN. See the discussion in
-    # https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
-    if input.numel() == 0 and target.numel() == 0:
-        if reduction == "none":
-            return torch.zeros_like(target)
-        elif reduction == "sum":
-            return torch.empty_like(target)
-        else:
-            return torch.full_like(target, float("nan"))
-
     # The _nll_loss_nd helper function handles the most common cases.
     # ndim == 1 (Single Example)
     #   => Batch Size: 1, Input: (C), Target: ()
@@ -877,9 +862,10 @@ def nll_loss(
     batch_size = input.shape[0]
     num_classes = input.shape[1]
     out_size = [batch_size] + list(target.shape[1:])
+    flattened_size = math.prod(target.shape[1:])
 
-    input = torch.reshape(input, [batch_size, num_classes, -1])
-    target = torch.reshape(target, [batch_size, -1])
+    input = torch.reshape(input, [batch_size, num_classes, flattened_size])
+    target = torch.reshape(target, [batch_size, flattened_size])
     if reduction != "none":
         return _nll_loss_nd(input, target, weight, reduction, ignore_index)
     else:
