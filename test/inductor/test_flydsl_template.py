@@ -777,6 +777,61 @@ class TestFlyDSLTemplate(TestCase):
                 shapes, strides, dtypes, flydsl_gpu_arch="gfx950"
             )
 
+    def test_flydsl_mxfp8_wgrad_precompile_fake_tensors(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        import flydsl.compiler as flyc
+        import flydsl.expr as fx
+        import jinja2
+
+        from torch._inductor.kernel.mm_common import load_kernel_template
+
+        namespace = dict(
+            torch=torch, flyc=flyc, fx=fx, GEMM_N=256, GEMM_K=384, GEMM_G=2, NUM_XCD=8
+        )
+        source = jinja2.Template(load_kernel_template("flydsl_mxfp8_wgrad")).render(
+            gen_defines=lambda: "",
+            def_kernel=lambda *names: (
+                f"def kernel_main({','.join(names)}, output, stream):"
+            ),
+            get_output=lambda: "output",
+            kernel_name="kernel",
+        )
+        exec(compile(source, "<flydsl wgrad precompile test>", "exec"), namespace)
+        shapes = {
+            "mat1": (256, 512),
+            "mat2": (512, 384),
+            "scale_a": (256, 16),
+            "scale_b": (384, 16),
+            "offs": (2,),
+            "output": (2, 256, 384),
+        }
+        strides = {
+            "mat1": (512, 1),
+            "mat2": (1, 512),
+            "scale_a": (16, 1),
+            "scale_b": (16, 1),
+            "offs": (1,),
+            "output": (256 * 384, 384, 1),
+        }
+        dtypes = {
+            "mat1": "float8_e4m3fn",
+            "mat2": "float8_e4m3fn",
+            "scale_a": "float8_e8m0fnu",
+            "scale_b": "float8_e8m0fnu",
+            "offs": "int32",
+            "output": "bfloat16",
+        }
+        # Metadata only: the compile must not query the device.
+        with mock.patch.object(
+            torch.cuda,
+            "get_device_properties",
+            side_effect=AssertionError("device queried"),
+        ):
+            namespace["kernel_precompile"](
+                shapes, strides, dtypes, flydsl_gpu_arch="gfx950"
+            )
+
     def test_flydsl_mxfp8_template_rejects_mismatched_scale_rows(self):
         """The lowering may serve a dynamic token dim without proving A and its
         scales agree, so the template checks it before launching."""
@@ -2036,6 +2091,437 @@ class TestFlyDSLTemplate(TestCase):
         ):
             module._compile_gfx950("jit", 1)
             compile_.assert_called_once_with("jit", 1)
+
+    @parametrize(
+        "case",
+        (
+            "static",
+            "static_sympy_sizes",
+            "dynamic_m",
+            "dynamic_m_separate_symbols",
+            "dynamic_m_independent_scale_symbols",
+            "dynamic_m_mismatched_b_rows",
+            "dynamic_m_mismatched_scale",
+            "b_not_m_major",
+            "m_not_multiple_of_128",
+            "offs_strided",
+        ),
+    )
+    def test_flydsl_mxfp8_wgrad_gate(self, case):
+        """M (the contraction, i.e. the token count) may be dynamic; N, K, G
+        may not. Cross-operand M relations are matched by hint here and
+        enforced by the template at launch."""
+        from torch._inductor.ir import FlexibleLayout
+        from torch._inductor.kernel import mm_grouped
+
+        n, k, g = 256, 384, 4
+        m = 512
+        # Token-dim symbols and the hints dynamo would give them for M = 512.
+        s0, s1, s2 = (
+            sympy.Symbol(f"s{i}", positive=True, integer=True) for i in range(3)
+        )
+        hints = {s0: m, s1: m, s2: m // 32}
+        m_a = m_b = m
+        m_sa = m_sb = m // 32
+        if case.startswith("dynamic_m"):
+            m_a = m_b = s0
+            m_sa = m_sb = s0 // 32
+        if case == "dynamic_m_separate_symbols":
+            m_b, m_sa, m_sb = s1, s1 // 32, s1 // 32
+        elif case == "dynamic_m_independent_scale_symbols":
+            # What dynamo produces: the scale dim is its own symbol, hinting M/32.
+            m_sa = m_sb = s2
+        elif case == "dynamic_m_mismatched_b_rows":
+            m_b = s0 + 128
+        elif case == "dynamic_m_mismatched_scale":
+            m_sb = s0 // 32 + 4
+        elif case == "m_not_multiple_of_128":
+            m_a = m_b = m + 32
+            m_sa = m_sb = (m + 32) // 32
+        if case == "static_sympy_sizes":
+            # Real IR sizes are sympy Integers, not ints.
+            n, k, g = sympy.Integer(n), sympy.Integer(k), sympy.Integer(g)
+
+        def node(size, stride, dtype, offset=0):
+            # A computed input: its layout is still flexible when the gate runs.
+            flexible = FlexibleLayout(torch.device("cuda", 1), dtype, size)
+            return SimpleNamespace(
+                get_size=lambda: size,
+                get_stride=lambda: stride,
+                get_dtype=lambda: dtype,
+                get_layout=lambda: flexible,
+                freeze_layout_with_exact_strides=mock.Mock(),
+            )
+
+        fp8 = torch.float8_e4m3fn
+        e8m0 = torch.float8_e8m0fnu
+        mat_a = node([n, m_a], [m_a, 1], fp8)
+        mat_b = node([m_b, k], [1, m_b], fp8)
+        if case == "b_not_m_major":
+            mat_b = node([m_b, k], [k, 1], fp8)
+        scale_a = node([n, m_sa], [m_sa, 1], e8m0)
+        scale_b = node([k, m_sb], [m_sb, 1], e8m0)
+        offs = node([g], [2 if case == "offs_strided" else 1], torch.int32)
+        # Not the current device, so the XCD count has to come from the layout.
+        device = torch.device("cuda", 1)
+        out_stride = [n * k, k, 1]
+        layout = SimpleNamespace(
+            stride=tuple(out_stride) if case == "static_sympy_sizes" else out_stride,
+            dtype=torch.bfloat16,
+            size=[g, n, k],
+            device=device,
+        )
+
+        def equals(x, y):
+            return sympy.simplify(sympy.sympify(x) - sympy.sympify(y)) == 0
+
+        sizevars = SimpleNamespace(
+            statically_known_equals=equals,
+            statically_known_list_equals=lambda xs, ys: (
+                len(xs) == len(ys) and all(equals(x, y) for x, y in zip(xs, ys))
+            ),
+            statically_known_multiple_of=lambda x, y: x % y == 0,
+            optimization_hint=lambda e: int(sympy.sympify(e).subs(hints)),
+        )
+        graph = SimpleNamespace(
+            sizevars=sizevars,
+            _shape_env=SimpleNamespace(
+                _maybe_evaluate_static=lambda e: e if e.is_number else None
+            ),
+        )
+        props = mock.Mock(return_value=SimpleNamespace(multi_processor_count=128))
+        with (
+            V.set_graph_handler(graph),
+            mock.patch.object(
+                mm_grouped, "use_flydsl_gemm_template", return_value=True
+            ),
+            mock.patch.object(mm_grouped, "is_unaligned", return_value=False),
+            mock.patch("torch.cuda.get_device_properties", props),
+        ):
+            kwargs = mm_grouped.get_flydsl_mxfp8_wgrad_template_kwargs(
+                mat_a, mat_b, scale_a, scale_b, offs, layout, True
+            )
+        operands = (mat_a, mat_b, scale_a, scale_b)
+        accepted = (
+            "static",
+            "static_sympy_sizes",
+            "dynamic_m",
+            "dynamic_m_separate_symbols",
+            "dynamic_m_independent_scale_symbols",
+        )
+        if case in accepted:
+            # A 128-CU partition has four of gfx950's 32-CU XCDs.
+            self.assertEqual(
+                kwargs, [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCD": 4}]
+            )
+            props.assert_called_once_with(device.index)
+            # The strides the kernel relies on are pinned exactly (no padding)
+            # once it is chosen.
+            for operand in operands:
+                operand.freeze_layout_with_exact_strides.assert_called_once_with(
+                    operand.get_stride()
+                )
+        else:
+            self.assertEqual(kwargs, [])
+            for operand in operands:
+                operand.freeze_layout_with_exact_strides.assert_not_called()
+
+    def test_flydsl_mxfp8_wgrad_launch_checks(self):
+        """The launcher refuses an int32-overflowing contraction and any
+        target but gfx950, before anything is compiled or dispatched."""
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        import importlib
+
+        module = importlib.import_module(
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels."
+            "mxfp8_wgrad_gfx950"
+        )
+        n, k, g = 7168, 2048, 8
+        param = module.make_mxfp8_wgrad_param(n, k, g, sc_pair=True)
+
+        def operands(m):
+            # Meta tensors: shapes only, nothing is allocated.
+            fp8, e8m0 = torch.float8_e4m3fn, torch.float8_e8m0fnu
+            return (
+                torch.empty(g, n, k, dtype=torch.bfloat16, device="meta"),
+                torch.empty(n, m, dtype=fp8, device="meta"),
+                torch.empty(k, m, dtype=fp8, device="meta"),
+                torch.empty(n, m // 32, dtype=e8m0, device="meta"),
+                torch.empty(k, m // 32, dtype=e8m0, device="meta"),
+                torch.empty(g, dtype=torch.int32, device="meta"),
+            )
+
+        with mock.patch.object(module, "run_cached_flydsl") as run:
+            # DeepSeek-V3 scale: ~1.1M tokens x N=7168 is past int32.
+            with self.assertRaisesRegex(NotImplementedError, "int32"):
+                module.launch_mxfp8_wgrad_gfx950(*operands(1_108_736), param, stream=0)
+            run.assert_not_called()
+        with (
+            mock.patch.object(module.flyc, "compile") as compile_,
+            mock.patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx942"}),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "requires gfx950"):
+                module.launch_mxfp8_wgrad_gfx950(
+                    *operands(1024), param, stream=0, compile_only=True
+                )
+            compile_.assert_not_called()
+
+    def test_flydsl_mxfp8_wgrad_template_rejects_mismatched_operands(self):
+        """With a dynamic token dim the lowering only matches hints, so the
+        template checks the operands agree on M before launching."""
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        import jinja2
+
+        from torch._inductor.kernel.mm_common import load_kernel_template
+
+        source = jinja2.Template(load_kernel_template("flydsl_mxfp8_wgrad")).render(
+            gen_defines=lambda: "",
+            def_kernel=lambda *names: (
+                f"def kernel_main({','.join(names)}, output, stream):"
+            ),
+            get_output=lambda: "output",
+            kernel_name="kernel",
+        )
+        namespace = dict(GEMM_N=256, GEMM_K=384, GEMM_G=2, NUM_XCD=8)
+        exec(compile(source, "<flydsl wgrad operands test>", "exec"), namespace)
+        namespace["launch_mxfp8_wgrad_gfx950"] = launch = mock.Mock()
+        n, k, m = 256, 384, 512
+        output = torch.empty(2, n, k)
+        mat1, offs = torch.empty(n, m), torch.empty(2)
+        mat2 = torch.empty(m, k)
+        scale_a, scale_b = torch.empty(n, m // 32), torch.empty(k, m // 32)
+        for bad in (
+            dict(mat2=torch.empty(m - 128, k)),
+            dict(scale_a=torch.empty(n, m // 32 - 4)),
+            dict(scale_b=torch.empty(k, m // 32 + 4)),
+        ):
+            args = dict(
+                mat1=mat1, mat2=mat2, scale_a=scale_a, scale_b=scale_b, offs=offs
+            )
+            args.update(bad)
+            with self.assertRaisesRegex(ValueError, "disagree on the contraction"):
+                namespace["kernel_main"](**args, output=output, stream=0)
+        launch.assert_not_called()
+        # No routed tokens: zeros, without handing FlyDSL empty operands.
+        output.fill_(1.0)
+        empty = (
+            torch.empty(n, 0),
+            torch.empty(0, k),
+            torch.empty(n, 0),
+            torch.empty(k, 0),
+        )
+        namespace["kernel_main"](*empty, offs, output, stream=0)
+        self.assertEqual(output, torch.zeros_like(output))
+        launch.assert_not_called()
+        namespace["kernel_main"](mat1, mat2, scale_a, scale_b, offs, output, stream=0)
+        launch.assert_called_once()
+
+    def test_flydsl_mxfp8_wgrad_order(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            make_mxfp8_wgrad_param,
+        )
+
+        small = make_mxfp8_wgrad_param(1408, 2048, 8, sc_pair=True)
+        self.assertEqual(small.order, "lpt")
+        self.assertEqual((small.xcd_count, small.group_r, small.group_c), (8, 2, 2))
+
+        large = make_mxfp8_wgrad_param(4096, 7168, 32, sc_pair=True)
+        self.assertEqual(large.order, "idsel")
+        self.assertEqual((large.xcd_count, large.group_r, large.group_c), (8, 2, 2))
+
+        # A 128-CU partition has 4 XCDs; the swizzle uses what it is given.
+        partitioned = make_mxfp8_wgrad_param(1408, 2048, 8, sc_pair=True, num_xcd=4)
+        self.assertEqual(partitioned.xcd_count, 4)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    @parametrize(
+        "group_sizes,n,k",
+        (
+            ([128, 256, 0, 384], 256, 384),
+            ([32, 96, 224, 160], 1408, 2048),
+        ),
+    )
+    def test_flydsl_mxfp8_wgrad_e2e(self, group_sizes, n, k):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
+        from torch._inductor.utils import run_and_get_code
+
+        a, b, a_scale, b_scale, offs, reference = self._make_mxfp8_wgrad_inputs(
+            group_sizes, n, k
+        )
+
+        def fn(a, b, a_scale, b_scale, offs):
+            return self._scaled_grouped_mm_mxfp8(a, b, a_scale, b_scale, offs)
+
+        result, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor"), a, b, a_scale, b_scale, offs
+        )
+        self.assertIn("mxfp8_wgrad_gfx950", code)
+        self.assertEqual(result.float(), reference, atol=6e-2, rtol=6e-2)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    def test_flydsl_mxfp8_wgrad_offs_view_e2e(self):
+        """Offsets that arrive as a view (here, group ends sliced off a [0, ...]
+        prefix-sum) are validated and passed as the realized node."""
+        from torch._inductor.utils import run_and_get_code
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
+        a, b, a_scale, b_scale, offs, reference = self._make_mxfp8_wgrad_inputs(
+            [128, 256, 0, 384], 256, 384
+        )
+
+        def fn(a, b, a_scale, b_scale, offs):
+            # Computed in the graph and then sliced: the gate sees a view node.
+            bounds = torch.cat([offs.new_zeros(1), offs])
+            return self._scaled_grouped_mm_mxfp8(a, b, a_scale, b_scale, bounds[1:])
+
+        result, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor"), a, b, a_scale, b_scale, offs
+        )
+        self.assertIn("mxfp8_wgrad_gfx950", code)
+        self.assertEqual(result.float(), reference, atol=6e-2, rtol=6e-2)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    def test_flydsl_mxfp8_wgrad_dynamic_m_e2e(self):
+        """The token count is the wgrad contraction. As it changes, automatic
+        dynamic shapes recompile once and one FlyDSL graph serves the rest."""
+        from torch._inductor.graph import GraphLowering
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
+        def fn(a, b, a_scale, b_scale, offs):
+            return self._scaled_grouped_mm_mxfp8(a, b, a_scale, b_scale, offs)
+
+        codes: list[str] = []
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="inductor")
+        n, k = 256, 384
+        token_counts = ([128, 256, 0, 384], [256, 128, 512, 128], [384, 0, 256, 256])
+        # run_and_get_code would reset dynamo between calls; capture directly.
+        with mock.patch.object(GraphLowering, "save_output_code", codes.append):
+            for step, group_sizes in enumerate(token_counts):
+                a, b, a_scale, b_scale, offs, reference = self._make_mxfp8_wgrad_inputs(
+                    group_sizes, n, k
+                )
+                with torch._dynamo.config.patch(error_on_recompile=step == 2):
+                    result = compiled(a, b, a_scale, b_scale, offs)
+                self.assertEqual(result.float(), reference, atol=6e-2, rtol=6e-2)
+        # One static graph, then one with a symbolic token dim, both FlyDSL.
+        self.assertEqual(len(codes), 2)
+        self.assertIn("mxfp8_wgrad_gfx950", codes[1])
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    def test_flydsl_mxfp8_wgrad_traps_on_invalid_offsets(self):
+        """Group offsets live on the device, so the kernel validates them: a
+        bound that splits a 32-element MX scale block, or one past M, aborts
+        the kernel instead of producing silently wrong gradients. The trap
+        takes the process down, so each case runs in its own subprocess."""
+        import subprocess
+        import sys
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
+        script = """
+import sys, torch
+import flydsl.compiler as flyc
+from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+    mxfp8_wgrad_gfx950 as W,
+)
+n, k, m = 256, 384, 512
+fp8, e8m0 = torch.float8_e4m3fn, torch.float8_e8m0fnu
+a = torch.zeros(n, m, device="cuda").to(fp8)
+b_t = torch.zeros(k, m, device="cuda").to(fp8)
+sa = torch.full((n, m // 32), 127, dtype=torch.uint8, device="cuda").view(e8m0)
+sb = torch.full((k, m // 32), 127, dtype=torch.uint8, device="cuda").view(e8m0)
+offs = torch.tensor(eval(sys.argv[1]), dtype=torch.int32, device="cuda")
+out = torch.empty(4, n, k, dtype=torch.bfloat16, device="cuda")
+param = W.make_mxfp8_wgrad_param(n, k, 4, sc_pair=True)
+W.launch_mxfp8_wgrad_gfx950(
+    out, a, b_t, sa, sb, offs, param, torch.cuda.current_stream(),
+    tensor_arg=lambda t: flyc.from_torch_tensor(t).mark_layout_dynamic(),
+)
+torch.cuda.synchronize()
+print("completed")
+"""
+
+        def run(offsets):
+            return subprocess.run(
+                [sys.executable, "-c", script, str(offsets)],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+
+        ok = run([128, 256, 384, 512])
+        self.assertEqual(ok.returncode, 0, ok.stderr[-2000:])
+        self.assertIn("completed", ok.stdout)
+        for bad in ([48, 256, 384, 512], [128, 256, 384, 640], [256, 128, 384, 512]):
+            proc = run(bad)
+            self.assertNotEqual(proc.returncode, 0, f"offsets {bad} did not trap")
+            self.assertNotIn("completed", proc.stdout)
+
+    @classmethod
+    def _make_mxfp8_wgrad_inputs(cls, group_sizes, n, k, device="cuda"):
+        """A[N, M] and B[M, K] (M contiguous) with groups along M, and the
+        per-group f32 dequantized reference out[G, N, K]."""
+        offs = torch.tensor(group_sizes, device=device, dtype=torch.int32).cumsum(0)
+        offs = offs.to(torch.int32)
+        m = sum(group_sizes)
+        a, a_scale, a_scale_f32 = cls._mxfp8_quantize(
+            torch.randn(n, m, device=device) * 0.5
+        )
+        b_t, b_scale, b_scale_f32 = cls._mxfp8_quantize(
+            torch.randn(k, m, device=device) * 0.5
+        )
+        a_deq = (a.float().reshape(n, m // 32, 32) * a_scale_f32.unsqueeze(-1)).reshape(
+            n, m
+        )
+        b_deq = (
+            b_t.float().reshape(k, m // 32, 32) * b_scale_f32.unsqueeze(-1)
+        ).reshape(k, m)
+        reference = torch.empty(len(group_sizes), n, k, device=device)
+        start = 0
+        for group, end in enumerate(offs.tolist()):
+            reference[group] = a_deq[:, start:end] @ b_deq[:, start:end].t()
+            start = end
+        return a, b_t.t(), a_scale, b_scale, offs, reference
 
 
 def _mxfp_case(mxfp_format, shape, device, a_is_transposed=False, b_is_transposed=True):
