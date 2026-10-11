@@ -1502,6 +1502,7 @@ _has_kleidiai: _bool
 _has_mps: _bool
 has_lapack: _bool
 _has_cuda: _bool
+_nccl_ep_requires_nccl4py: _bool
 _has_magma: _bool
 _has_xpu: _bool
 _has_mkldnn: _bool

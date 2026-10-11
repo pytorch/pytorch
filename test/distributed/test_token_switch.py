@@ -2,10 +2,15 @@
 
 
 import logging
+import os
+import subprocess
+import sys
+from unittest import mock
 
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
+import torch.distributed._token_switch as token_switch
 from torch.distributed._token_switch import _import_nccl_ep, TokenSwitchNCCL
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -16,6 +21,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TestCase,
 )
 
 
@@ -23,8 +29,8 @@ log = logging.getLogger(__name__)
 
 
 def _nccl_ep_available() -> bool:
-    # The torch._nccl_ep extension is built only with USE_NCCL_EP, and a
-    # USE_SYSTEM_NCCL=ON build additionally needs the nccl4py wheel at runtime.
+    # The torch._nccl_ep extension is built only with USE_NCCL_EP. Legacy
+    # dynamic builds additionally need the nccl4py wheel at runtime.
     # Actually importing it is the real check: find_spec would only locate the
     # extension without dlopening it, so it would miss a missing libnccl_ep.so.
     if not torch.cuda.is_available():
@@ -40,19 +46,63 @@ def _nccl_ep_available() -> bool:
 def requires_nccl_ep():
     return skip_but_pass_in_sandcastle_if(
         not _nccl_ep_available(),
-        "Test requires a USE_NCCL_EP build (plus nccl4py for USE_SYSTEM_NCCL=ON)",
+        "Test requires a USE_NCCL_EP build",
     )
+
+
+class NCCLEPImportTest(TestCase):
+    @parametrize("requires_nccl4py", [False, True])
+    def test_nccl4py_fallback_gate(self, requires_nccl4py):
+        with (
+            mock.patch.object(torch._C, "_nccl_ep_requires_nccl4py", requires_nccl4py),
+            mock.patch.object(token_switch, "_prepare_nccl4py") as prepare,
+            mock.patch("builtins.__import__", side_effect=ImportError("missing")),
+            self.assertRaises(ImportError),
+        ):
+            _import_nccl_ep()
+        self.assertEqual(prepare.call_count, int(requires_nccl4py))
+
+
+instantiate_parametrized_tests(NCCLEPImportTest)
+
+
+class NCCLEPJITHomeTest(TestCase):
+    def test_explicit_jit_home(self):
+        if not _nccl_ep_available():
+            self.skipTest("torch._nccl_ep is not available")
+
+        env = os.environ.copy()
+        env["NCCL_EP_HOME"] = "/explicit/nccl-ep"
+        env["NCCL_HOME"] = "/explicit/nccl"
+        output = subprocess.check_output(
+            [
+                sys.executable,
+                "-c",
+                "import ctypes; import torch._nccl_ep; "
+                "libc = ctypes.CDLL(None); libc.getenv.restype = ctypes.c_char_p; "
+                "print(libc.getenv(b'NCCL_EP_HOME').decode()); "
+                "print(libc.getenv(b'NCCL_HOME').decode())",
+            ],
+            env=env,
+            text=True,
+        )
+        self.assertEqual(output.splitlines(), ["/explicit/nccl-ep", "/explicit/nccl"])
+
+
+instantiate_parametrized_tests(NCCLEPJITHomeTest)
 
 
 NUM_TOKENS = 16
 TOP_K = 1
+NUM_LOCAL_EXPERTS = 2
 HIDDEN = 64
 TOKEN_SIZE_BYTES = HIDDEN * 2
 NUM_MULTI_ROUND_DISPATCH_COMBINE = 3
 
 
 def _generate_topk(rank, world_size, num_tokens, top_k, device):
-    remote_expert = (rank + 1) % world_size
+    remote_rank = (rank + 1) % world_size
+    remote_expert = remote_rank * NUM_LOCAL_EXPERTS
     topk_idx = torch.full(
         (num_tokens, top_k), remote_expert, dtype=torch.int64, device=device
     )
@@ -83,7 +133,11 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
             print(f"rank {rank} creating token switch")
             dist.barrier(pg)
             cls._cached_token_switch = TokenSwitchNCCL(
-                pg, world_size, NUM_TOKENS, world_size * NUM_TOKENS, TOKEN_SIZE_BYTES
+                pg,
+                world_size * NUM_LOCAL_EXPERTS,
+                NUM_TOKENS,
+                world_size * NUM_TOKENS,
+                TOKEN_SIZE_BYTES,
             )
         return cls._cached_token_switch
 
@@ -95,7 +149,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
     def test_create_routing(self):
         self._init()
         ts = self.get_token_switch()
-        num_experts = self.world_size
+        num_experts = self.world_size * NUM_LOCAL_EXPERTS
         num_local_experts = num_experts // self.world_size
         topk_idx, _topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
@@ -106,7 +160,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         ts.create_routing(topk_idx, per_expert_counts, layout="flat")
         self.assertEqual(per_expert_counts.dtype, torch.int32)
         self.assertEqual(per_expert_counts.numel(), num_local_experts)
-        self.assertEqual(per_expert_counts.item(), NUM_TOKENS)
+        self.assertEqual(per_expert_counts, [NUM_TOKENS, 0])
         torch.cuda.synchronize()
 
     @skip_if_lt_x_gpu(2)
@@ -119,7 +173,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
         per_expert_counts = torch.zeros(
-            self.world_size, dtype=torch.int32, device=self.device
+            NUM_LOCAL_EXPERTS, dtype=torch.int32, device=self.device
         )
         routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
 
@@ -150,9 +204,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         received = out_tokens[:NUM_TOKENS].float()
         self.assertTrue(
             received.eq(expected_val).all(),
-            lambda msg: (
-                f"{msg}\nrank {self.rank}: expected {expected_val}, got {received[0, 0].item()}"
-            ),
+            lambda msg: f"{msg}\nrank {self.rank}: expected {expected_val}, got {received[0, 0].item()}",
         )
 
     @skip_if_lt_x_gpu(2)
@@ -165,7 +217,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
         per_expert_counts = torch.zeros(
-            self.world_size, dtype=torch.int32, device=self.device
+            NUM_LOCAL_EXPERTS, dtype=torch.int32, device=self.device
         )
         routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
 
@@ -211,7 +263,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
         per_expert_counts = torch.zeros(
-            self.world_size, dtype=torch.int32, device=self.device
+            NUM_LOCAL_EXPERTS, dtype=torch.int32, device=self.device
         )
         routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
 
@@ -222,12 +274,12 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
             device=self.device,
             requires_grad=True,
         )
-        out_tokens, _out_weights, _out_idx = ts.dispatch(
+        out_tokens, _out_weights, out_idx = ts.dispatch(
             routing, tokens, topk_weights, num_recv_tokens
         )
+        self.assertEqual(out_idx.dtype, torch.int64)
         out_tokens.sum().backward()
         torch.cuda.synchronize()
-        self.assertEqual(_out_idx.dtype, torch.int64)
 
         # grad_out_tokens is all-ones; combine routes them back: each token gets 1.0 per top-k slot
         self.assertIsNotNone(tokens.grad)
@@ -243,7 +295,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
         per_expert_counts = torch.zeros(
-            self.world_size, dtype=torch.int32, device=self.device
+            NUM_LOCAL_EXPERTS, dtype=torch.int32, device=self.device
         )
         routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
 
@@ -292,7 +344,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
         per_expert_counts = torch.zeros(
-            self.world_size, dtype=torch.int32, device=self.device
+            NUM_LOCAL_EXPERTS, dtype=torch.int32, device=self.device
         )
         routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
 
@@ -326,7 +378,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
         per_expert_counts = torch.zeros(
-            self.world_size, dtype=torch.int32, device=self.device
+            NUM_LOCAL_EXPERTS, dtype=torch.int32, device=self.device
         )
         routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
 
