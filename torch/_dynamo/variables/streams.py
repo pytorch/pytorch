@@ -663,7 +663,9 @@ class StreamVariable(StreamContextVariable):
 
     @staticmethod
     def make_construct_in_graph_stream_fn(
-        args: TupleVariable, kwargs: ConstDictVariable
+        args: TupleVariable,
+        kwargs: ConstDictVariable,
+        stream_cls: type[torch.Stream] = torch.Stream,
     ) -> Callable[[int, "PyCodegen"], None]:
         def fn(index: int, codegen: "PyCodegen") -> None:
             codegen.add_push_null(
@@ -679,7 +681,8 @@ class StreamVariable(StreamContextVariable):
             )
             codegen(args)
             codegen(kwargs)
-            codegen.extend_output(create_call_function(2, False))
+            codegen.append_output(codegen.create_load_const(stream_cls))
+            codegen.extend_output(create_call_function(3, False))
             codegen.extend_output(create_call_function(1, False))
 
         return fn
@@ -880,7 +883,9 @@ class EventVariable(VariableTracker):
 
     @staticmethod
     def make_construct_in_graph_event_fn(
-        args: TupleVariable, kwargs: ConstDictVariable
+        args: TupleVariable,
+        kwargs: ConstDictVariable,
+        event_cls: type[torch.Event] = torch.Event,
     ) -> Callable[[int, "PyCodegen"], None]:
         def fn(index: int, codegen: "PyCodegen") -> None:
             codegen.add_push_null(
@@ -896,7 +901,8 @@ class EventVariable(VariableTracker):
             )
             codegen(args)
             codegen(kwargs)
-            codegen.extend_output(create_call_function(2, False))
+            codegen.append_output(codegen.create_load_const(event_cls))
+            codegen.extend_output(create_call_function(3, False))
             codegen.extend_output(create_call_function(1, False))
 
         return fn
