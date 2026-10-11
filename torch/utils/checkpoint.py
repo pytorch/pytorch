@@ -97,10 +97,19 @@ def check_backward_validity(inputs: Iterable[Any]) -> None:
         )
 
 
-def _get_device_module(device="cuda"):
+def _get_device_module(device: str | None = None):
+    if device is None:
+        device = DefaultDeviceType.get_device_type()
     if device == "meta":
         return torch.device("meta")
-    device_module = getattr(torch, device)
+    # getattr guard: an accelerator backend may not expose a torch.<name> module,
+    # so a bare getattr would raise AttributeError for valid accelerator types.
+    device_module = getattr(torch, device, None)
+    if device_module is None:
+        raise AttributeError(
+            f"torch.{device} module not found; the backend for device type {device!r} "
+            "must register a torch.<name> module or pass an explicit device."
+        )
     return device_module
 
 
@@ -109,7 +118,8 @@ class DefaultDeviceType:
     A class that manages the default device type for checkpointing.
 
     If no non-CPU tensors are present, the default device type will
-    be used. The default value is 'cuda'. The device type is used in
+    be used. The default value is the current accelerator, or 'cpu' if
+    there is none. The device type is used in
     the checkpointing process when determining which device states
     to save and restore for recomputation.
     """
@@ -152,13 +162,15 @@ def _infer_device_type(*args):
 
     device_types_set = set(device_types)
     if len(device_types_set) > 1:
+        # device_types is built in first-seen order; dedup preserves that order.
+        deduped_types = list(dict.fromkeys(device_types))
         warnings.warn(
             "Tensor arguments, excluding CPU tensors, are detected on at least two types of devices. "
             "Device state will only be saved for devices of a single device type, and the remaining "
             "devices will be ignored. Consequently, if any checkpointed functions involve randomness, "
             "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
             "detected, it will be prioritized; otherwise, the first device encountered will be selected.)"
-            f"\nDevice types: {sorted(device_types_set)} first device type: {device_types[0]}", stacklevel=2
+            f"\nDevice types: {deduped_types} first device type: {device_types[0]}", stacklevel=2
         )
     if len(device_types) == 0:
         return DefaultDeviceType.get_device_type()
@@ -216,7 +228,9 @@ def set_device_states(devices, states, *, device_type=None) -> None:
             device_module.set_rng_state(state)
 
 
-def _get_autocast_kwargs(device_type="cuda"):
+def _get_autocast_kwargs(device_type: str | None = None):
+    if device_type is None:
+        device_type = DefaultDeviceType.get_device_type()
     if torch.amp.is_autocast_available(device_type):
         device_autocast_kwargs = {
             "enabled": torch.is_autocast_enabled(device_type),

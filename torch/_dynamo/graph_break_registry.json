@@ -2701,6 +2701,16 @@
       ]
     }
   ],
+  "GB8943": [
+    {
+      "Gb_type": "Unsupported dictionary storage",
+      "Context": "str(type(other))",
+      "Explanation": "Dynamo cannot access this dictionary's stored keys and values.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB6956": [
     {
       "Gb_type": "Sourceless _DecoratorContextManager method reconstruction unsupported",
@@ -5977,6 +5987,16 @@
       "Explanation": "Dynamo cannot safely export COW-state-dependent control flow because COW state is not represented in the exported graph.",
       "Hints": [
         "Avoid checking COW state inside torch.export regions."
+      ]
+    }
+  ],
+  "GB4592": [
+    {
+      "Gb_type": "Dictionary mutated during comparison",
+      "Context": "str(error)",
+      "Explanation": "Dynamo cannot trace dictionary comparison that changes its keys.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

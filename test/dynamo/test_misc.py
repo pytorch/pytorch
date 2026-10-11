@@ -14526,6 +14526,42 @@ def ___make_guard_fn():
         self.assertEqual(list(actual), list(ref))
         self.assertEqual(result[3].maxlen, maxlen)
 
+    @parametrize("maxlen", [None, 0, 1, 2])
+    def test_deque_input_maxlen_mutation(self, maxlen):
+        def fn(q, x):
+            q.append(x)
+            after_append = x + sum(q)
+            q.appendleft(x + 1)
+            return after_append, x + sum(q), q
+
+        ref = collections.deque([1, 2], maxlen=maxlen)
+        actual = collections.deque([1, 2], maxlen=maxlen)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for x in (torch.ones(3), torch.full((3,), 3.0)):
+            expected = fn(ref, x)
+            result = compiled(actual, x)
+            self.assertEqual(result, expected)
+            self.assertEqual(actual, ref)
+            self.assertEqual(actual.maxlen, maxlen)
+            self.assertIs(result[2], actual)
+
+    @parametrize("maxlen", [None, 0, 1, 3])
+    def test_deque_input_reinit_maxlen(self, maxlen):
+        def fn(q, x):
+            q.__init__([x, x + 1, x + 2], maxlen)
+            q.appendleft(x + 3)
+            return x + sum(q), q
+
+        x = torch.ones(3)
+        ref = collections.deque([1, 2], maxlen=2)
+        actual = collections.deque([1, 2], maxlen=2)
+        expected = fn(ref, x)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(actual, x)
+        self.assertEqual(result, expected)
+        self.assertEqual(actual, ref)
+        self.assertEqual(actual.maxlen, maxlen)
+        self.assertIs(result[1], actual)
+
     def test_deque_input_maxlen_guards(self):
         def fn(q, x):
             result = q.copy()
