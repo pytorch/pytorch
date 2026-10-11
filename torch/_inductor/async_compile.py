@@ -67,7 +67,7 @@ from torch.utils._triton import has_triton_package
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from torch._inductor.runtime.hints import HalideMeta
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
@@ -1044,6 +1044,7 @@ class AsyncCompile:
                 waitcounter_name_override="compile_triton",
             ):
                 self._wait_futures(scope)
+                self._precompile_module_level_kernels(scope)
 
         if self._metal_sources:
             from torch._inductor.runtime.runtime_utils import compile_mps_shaders
@@ -1053,12 +1054,49 @@ class AsyncCompile:
 
         _compile_end()
 
+    def _precompile_module_level_kernels(self, scope: dict[str, Any]) -> None:
+        # A module-level kernel def builds an uncompiled CachingAutotuner when the wrapper
+        # runs outside the compile that produced it (e.g. `python wrapper.py`); compile
+        # those here, concurrently, rather than serially at each kernel's first launch.
+        # They compile in process, on threads: JITFunction.cache_key hashes the def's
+        # source and starting line, which a process worker compiling the kernel's own
+        # string-form module does not reproduce. As with _worker_compile_triton_thread,
+        # only the Triton compile runs on the threads; launchers load on this thread.
+        # The interpreter leaves even string-form kernels uncompiled; keep it that way.
+        if os.environ.get("TRITON_INTERPRET", "0") == "1":
+            return
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        pending = {
+            key: value
+            for key, value in scope.items()
+            if isinstance(value, CachingAutotuner)
+            and not value.compile_results
+            and not value.launchers
+        }
+        if not pending:
+            return
+        _set_triton_ptxas_path()
+        _set_triton_libdevice_path()
+        pool = self.thread_pool()
+        warm = partial(CachingAutotuner.precompile, warm_cache_only=True)
+        futures: dict[str, Future[Any] | CodeCacheFuture] = {
+            k: pool.submit(warm, v) for k, v in pending.items()
+        }
+        for key, _ in self._results(futures):
+            pending[key].precompile()
+
     def _wait_futures(self, scope: dict[str, Any]) -> None:
         kernels = {
             key: value
             for key, value in scope.items()
             if isinstance(value, (Future, CodeCacheFuture))
         }
+        scope.update(self._results(kernels))
+
+    def _results(
+        self, kernels: dict[str, Future[Any] | CodeCacheFuture]
+    ) -> Iterator[tuple[str, Any]]:
         pbar = tqdm(
             total=len(kernels),
             desc="Inductor Compilation",
@@ -1074,7 +1112,6 @@ class AsyncCompile:
                 pbar.set_postfix_str(key)
             try:
                 kernel = result.result(timeout=wait_timeout)
-                scope[key] = kernel
             except FuturesTimeoutError as e:
                 # concurrent.futures.TimeoutError became an alias of the
                 # builtin TimeoutError in Python 3.11; on 3.10 it is a
@@ -1092,6 +1129,7 @@ class AsyncCompile:
                     "to cause compilation to occur in the main process."
                 ) from e
             pbar.update(1)
+            yield key, kernel
 
 
 def maybe_warm_pool() -> None:
