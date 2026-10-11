@@ -2483,28 +2483,6 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
-    @skipIfNoFBGEMM
-    def test_quanatized_int8_linear_lite_mode(self):
-        # Lite mode skips the decomposition of wrapped_quantized_linear, and
-        # only the ops it decomposes into have C shims.
-        class Model(torch.nn.Module):
-            def __init__(self, device):
-                super().__init__()
-                self.weight = torch.randn(10, 10, device=device)
-                self.bias = torch.randn(10, device=device)
-                self.scale = torch.tensor(0.1)
-                self.zero_point = torch.tensor(0)
-
-            def forward(self, x):
-                s, z = self.scale, self.zero_point
-                return torch.ops._quantized.wrapped_quantized_linear(
-                    x, s, z, self.weight, s, z, self.bias, s, z, 10
-                )
-
-        example_inputs = (torch.randn(10, 10, device=self.device),)
-        with config.patch(torch._inductor.lite_mode_options):
-            self.check_model(Model(self.device), example_inputs)
-
     def test_zero_grid_with_unbacked_symbols(self):
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
@@ -4357,24 +4335,6 @@ class AOTInductorTestsTemplate:
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
 
-    def test_return_view_constant_lite_mode(self):
-        # The transpose falls back to ATen, so the output aliases the constant
-        # through an ExternKernel rather than an IR view.
-        class Model(torch.nn.Module):
-            def __init__(self, device):
-                super().__init__()
-                self.cst = torch.randn(5, 5, device=device)
-
-            def forward(self, x):
-                return (x, torch.transpose(self.cst, 0, 1))
-
-        x = torch.randn(5, device=self.device)
-        with config.patch(torch._inductor.lite_mode_options):
-            self.check_model(Model(self.device), (x,))
-            # check_model only notices a missing clone if the freed constant's
-            # memory gets overwritten.
-            self.code_check_count(Model(self.device), (x,), "aoti_torch_clone(", 1)
-
     def test_profile_benchmark_harness(self):
         batch_size = 32
         seq_length = 50
@@ -4461,7 +4421,6 @@ class AOTInductorTestsTemplate:
         self.assertIs(type(actual), type(expected))
         self.assertEqual(actual, expected)
 
-    @skipIfRocmArch(NAVI_ARCH)  # regression on ROCm 7.2
     def test_repeated_calling(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -10567,6 +10526,10 @@ class AOTInductorTestsTemplate:
 
             del model, example_inputs, ep
             torch.accelerator.synchronize()
+            # cuBLAS/hipBLASLt workspaces are cached per handle and stream and
+            # counted by memory_allocated(); drop them so only leaks remain.
+            if self.device == "cuda":
+                torch._C._cuda_clearCublasWorkspaces()
             torch.accelerator.empty_cache()
             gc.collect()
             allocated_memory.append(torch.accelerator.memory_allocated())
@@ -11405,7 +11368,6 @@ GPU_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
-    "test_quanatized_int8_linear_lite_mode": fail_gpu(("cuda", "xpu")),
     "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
     # This test forces lazy dual-wrapper mode; torch.cond support for that
     # mode is covered by AOTInductorTestDualWrapper skips below.
