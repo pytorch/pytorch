@@ -6182,6 +6182,151 @@ class TestExportPython(TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_same_path_concurrent_publish_has_one_winner(self, device):
+        # Two PROCESSES racing a fresh path is the real scenario (in one process,
+        # materialization is serialized by the capture lock, so the second caller just
+        # finds the file). Both must end up running the winner's artifact, never their
+        # own divergent source, and no temp file may be left beside it.
+        code = textwrap.dedent(
+            f"""
+            import os, sys, time, torch
+            import torch._precompile
+            path, marker, barrier_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+
+            class Fake:
+                def __init__(self, fn, **kwargs):
+                    pass
+
+                def _compile(self, args):
+                    # Rendezvous inside capture: both processes are past the presence
+                    # gate before either publishes.
+                    open(os.path.join(barrier_dir, marker), "w").close()
+                    deadline = time.monotonic() + 60
+                    while len(os.listdir(barrier_dir)) < 2:
+                        if time.monotonic() > deadline:
+                            sys.exit("the peer process never reached the rendezvous")
+                        time.sleep(0.01)
+
+                def to_python_code(self):
+                    return "def forward(x):\\n    return x + " + marker + "\\n"
+            torch._precompile.PrecompiledModule = Fake
+
+            @torch.compiler.export_python(path=path, backend="eager")
+            def run(inp):
+                return inp
+
+            print(int(run(torch.zeros(1, device={device!r})).item()))
+            """
+        )
+        path = self._tmp_path("publish.py")
+        barrier_dir = os.path.join(os.path.dirname(path), "barrier")
+        os.makedirs(barrier_dir, exist_ok=True)
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-c", code, path, marker, barrier_dir],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for marker in ("1", "2")
+        ]
+        outs = []
+        for proc in procs:
+            stdout, stderr = proc.communicate(timeout=180)
+            self.assertEqual(proc.returncode, 0, stderr)
+            outs.append(stdout.strip().splitlines()[-1])
+        # Same answer in both, and it is one of the two candidate artifacts.
+        self.assertEqual(outs[0], outs[1])
+        self.assertIn(outs[0], ("1", "2"))
+        self.assertEqual(
+            sorted(os.listdir(os.path.dirname(path))),
+            sorted(["barrier", os.path.basename(path)]),
+        )
+
+        # A third, later reader gets that same winner off disk.
+        @torch.compiler.export_python(path=path, backend="eager")
+        def fresh(inp):
+            return inp
+
+        self.assertEqual(int(fresh(torch.zeros(1, device=device)).item()), int(outs[0]))
+
+    @parametrize("err", ("EPERM", "EINVAL"))
+    def test_publish_falls_back_when_filesystem_has_no_hard_links(self, device, err):
+        from torch.compiler._export_python import _atomic_publish
+
+        path = self._tmp_path("nolink.py")
+        code = getattr(errno, err)
+
+        def no_link(src, dst):
+            raise OSError(code, os.strerror(code))
+
+        with mock.patch.object(os, "link", no_link):
+            with self.assertLogs("torch.compiler._export_python", "WARNING") as logs:
+                self.assertTrue(_atomic_publish(path, b"payload"))
+        # Assert on wording only the implementation supplies: the mock's strerror is
+        # interpolated into the same message and would satisfy a looser match.
+        self.assertTrue(any("last-writer-wins" in m for m in logs.output))
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"payload")
+        self.assertEqual(os.listdir(os.path.dirname(path)), [os.path.basename(path)])
+
+    def test_publish_does_not_swallow_real_io_errors(self, device):
+        # Only "this filesystem has no hard links" degrades to last-writer-wins; a full
+        # disk must surface rather than silently weaken first-publisher-wins.
+        from torch.compiler._export_python import _atomic_publish
+
+        path = self._tmp_path("enospc.py")
+
+        def full_disk(src, dst):
+            raise OSError(errno.ENOSPC, "no space left on device")
+
+        with mock.patch.object(os, "link", full_disk):
+            with self.assertRaises(OSError):
+                _atomic_publish(path, b"payload")
+        self.assertFalse(os.path.exists(path))
+        self.assertEqual(os.listdir(os.path.dirname(path)), [])
+
+    def test_publish_retries_when_the_winners_file_vanishes(self, device):
+        # A peer can win the link and then delete its file (to force a regenerate)
+        # before this loser reads it; the loser then publishes its own capture.
+        import torch.compiler._export_python as ep
+
+        path = self._tmp_path("vanish.py")
+        real_publish = ep._atomic_publish
+        calls = []
+
+        def lose_once(p, data):
+            calls.append(p)
+            return len(calls) > 1 and real_publish(p, data)
+
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        with mock.patch.object(ep, "_atomic_publish", lose_once):
+            self.assertEqual(run(x), x + 1)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(os.path.isfile(path))
+
+    @unittest.skipIf(sys.platform == "win32", "creating a symlink needs privileges")
+    def test_publish_through_a_dangling_symlink_creates_its_target(self, device):
+        path = self._tmp_path("link.py")
+        d = os.path.dirname(path)
+        target = os.path.join(d, "target.py")
+        os.symlink(target, path)
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        self.assertEqual(run(x), x + 1)
+        self.assertTrue(os.path.islink(path))
+        self.assertTrue(os.path.isfile(target))
+        self.assertEqual(sorted(os.listdir(d)), ["link.py", "target.py"])
+
     def test_clobbered_non_artifact_source_raises_clean_error(self, device):
         # A hand-edit that drops forward() names the path rather than raising a raw
         # KeyError.
