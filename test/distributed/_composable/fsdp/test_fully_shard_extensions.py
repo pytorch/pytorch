@@ -4,7 +4,9 @@ import contextlib
 import copy
 import functools
 import math
+import re
 import threading
+import weakref
 from typing import Any
 
 import torch
@@ -14,6 +16,11 @@ import torch.utils._pytree as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
+from torch.distributed.fsdp._fully_shard._fsdp_param import (
+    _get_all_gather_output_layouts,
+)
+from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -22,7 +29,7 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     MLP,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -266,6 +273,16 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             check_sharded_parity(self, ref_model, model)
+
+
+def _finish_post_all_gather(
+    weight: torch.Tensor, out: torch.Tensor | None
+) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
+    if out is None:
+        return weight, (weight,)
+    with _unsafe_preserve_version_counter(out):
+        out.copy_(weight)
+    return None
 
 
 class TestFullyShardAllGatherExtensionsMultiThread(
@@ -622,50 +639,416 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         self.assertEqual(tls.mesh.ndim, 1)
         self.assertEqual(tls.mesh.size(), shard_size)
 
-    @skip_if_lt_x_gpu(1)
-    def test_all_gather_extension_single_rank_byte_payload(self):
-        # A size-1 shard mesh skips the all-gather, so FSDP copies the payload
-        # directly, including a byte view into its typed cached output
-        mesh = init_device_mesh(
+    def _patch_all_gather_extension(self, module: nn.Module, pre_fn, post_fn):
+        local_weight = module.weight._local_tensor
+        local_weight.fsdp_pre_all_gather = pre_fn.__get__(local_weight)
+        local_weight.fsdp_post_all_gather = post_fn.__get__(local_weight)
+
+    def _init_hsdp_mesh(self, shard_world_size: int) -> DeviceMesh:
+        return init_device_mesh(
             device_type.type,
-            (self.world_size, 1),
+            (self.world_size // shard_world_size, shard_world_size),
             mesh_dim_names=("replicate", "shard"),
-        )["shard"]
-        byte_payload = False
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_single_rank_payloads(self):
+        # A size-1 shard mesh skips the all-gather, so FSDP copies each payload
+        # directly, including byte views into typed cached outputs
+        mesh = self._init_hsdp_mesh(1)["shard"]
+        byte_payloads = False
+        offset = 1
 
         def fsdp_pre_all_gather(
             local_tensor, mesh, outer_size, outer_stride, module, mp_policy
         ):
-            if byte_payload:
-                return (local_tensor.view(torch.uint8),), outer_size
-            return (local_tensor,), outer_size
+            payloads = (local_tensor, (local_tensor + offset).to(torch.bfloat16))
+            if byte_payloads:
+                payloads = tuple(t.view(torch.uint8) for t in payloads)
+            return payloads, outer_size
 
         @torch.no_grad()
         def fsdp_post_all_gather(
             local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
         ):
-            (weight,) = (t.view(metadata) for t in all_gather_outputs)
-            if out is not None:
-                with _unsafe_preserve_version_counter(out):
-                    out.copy_(weight)
-                return
-            return weight, (weight,)
+            # Typed outputs take the trailing dims of the byte payloads
+            weight, auxiliary = (t.view(metadata) for t in all_gather_outputs)
+            self.assertEqual(auxiliary, (weight + offset).to(torch.bfloat16))
+            return _finish_post_all_gather(weight, out)
 
         model = nn.Linear(16, 8, bias=False, device=device_type)
         ref_model = copy.deepcopy(model)
         fully_shard(model, mesh=mesh)
-        local_weight = model.weight._local_tensor
-        local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
-        local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
+        self._patch_all_gather_extension(
+            model, fsdp_pre_all_gather, fsdp_post_all_gather
+        )
         inp = torch.randn((2, 16), device=device_type)
         for iteration in range(2):
-            byte_payload = iteration == 1
+            # A new offset per iteration so that stale outputs fail the check
+            byte_payloads, offset = iteration == 1, iteration + 1
             output = model(inp)
             ref_output = ref_model(inp)
             self.assertEqual(output, ref_output)
             output.sum().backward()
             ref_output.sum().backward()
             check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_zero_size_trailing_dim(self):
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            empty = local_tensor.new_empty(local_tensor.size(0), 0)
+            return (local_tensor, empty), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            weight, empty = all_gather_outputs
+            self.assertEqual(empty.size(), (weight.size(0), 0))
+            return _finish_post_all_gather(weight, out)
+
+        model = nn.Linear(16, 8, bias=False, device=device_type)
+        # Seeding is per process, not per thread
+        dist.broadcast(model.weight.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model)
+        self._patch_all_gather_extension(
+            model, fsdp_pre_all_gather, fsdp_post_all_gather
+        )
+        inp = torch.randn((2, 16), device=device_type)
+        # The second all-gather reuses the outputs and passes out=
+        for _ in range(2):
+            output = model(inp)
+            self.assertEqual(output, ref_model(inp))
+            output.sum().backward()
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_errors_name_param(self):
+        num_payloads = 1
+
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            return (local_tensor,) * num_payloads, None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            return _finish_post_all_gather(all_gather_outputs[0], out)
+
+        model = nn.Sequential(nn.Linear(16, 8, bias=False, device=device_type))
+        fully_shard(model)
+        self._patch_all_gather_extension(
+            model[0], fsdp_pre_all_gather, fsdp_post_all_gather
+        )
+        inp = torch.randn((2, 16), device=device_type)
+        # The second all-gather caches the layouts, so the third must revalidate
+        for _ in range(2):
+            model(inp).sum().backward()
+        num_payloads = 2
+        with self.assertRaisesRegex(
+            ValueError,
+            "fsdp_pre_all_gather for 0.weight returned 2 inputs, but 1 on its first",
+        ):
+            model(inp)
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_uneven_sharding(self):
+        # A (9, 16) weight over 8 ranks pads every shard to (2, 16)
+        model = nn.Linear(16, 9, bias=False, device=device_type)
+        fully_shard(model)
+        fully_shard.state(model)._lazy_init()
+        (fsdp_param,) = fully_shard.state(model)._fsdp_param_group.fsdp_params
+        padded = fsdp_param._sharded_param_data.view(2, 16)
+
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            return (padded.view(-1),), None
+
+        def legacy_fsdp_pre_all_gather(local_tensor, mesh):
+            return (padded, torch.ones(1, device=padded.device)), None
+
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            raise AssertionError("not all-gathered")
+
+        # Flat inputs lack the padded size on every rank, so no rank enters the
+        # collective
+        self._patch_all_gather_extension(
+            model, fsdp_pre_all_gather, fsdp_post_all_gather
+        )
+        msg = "weight is unevenly sharded, so its Tensor all-gather inputs must have the padded sharded size (2, 16), but input 0 has size (32,)"
+        with self.assertRaisesRegex(ValueError, re.escape(msg)):
+            fsdp_param.all_gather_inputs
+        # The legacy hook has no outer_size to pad with, so FSDP does not check it
+        self._patch_all_gather_extension(
+            model, legacy_fsdp_pre_all_gather, fsdp_post_all_gather
+        )
+        self.assertEqual(len(fsdp_param.all_gather_inputs), 2)
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_input_layouts(self):
+        self.run_subtests(
+            {
+                "shard_world_size": [2, 1],
+            },
+            self._test_all_gather_input_layouts,
+        )
+
+    def _test_all_gather_input_layouts(self, shard_world_size: int):
+        mesh = self._init_hsdp_mesh(shard_world_size)
+        expected_weight = torch.arange(64, device=device_type).float().view(8, 8) / 64
+        tags = torch.arange(12, dtype=torch.bfloat16, device=device_type).view(2, 3, 2)
+        post_out_ids: list[int | None] = []
+        payload_refs: list[weakref.ReferenceType[torch.Tensor]] = []
+
+        def fsdp_pre_all_gather(
+            local_tensor,
+            mesh: DeviceMesh,
+            outer_size: torch.Size,
+            outer_stride: tuple[int, ...],
+            module: nn.Module,
+            mp_policy: MixedPrecisionPolicy,
+        ) -> tuple[tuple[AllGatherInput, ...], Any]:
+            del outer_stride, module, mp_policy
+            rank = mesh.get_local_rank()
+            payload_tags = tags + rank * 16
+            rank_tag = torch.tensor(rank, dtype=torch.int64, device=local_tensor.device)
+            payload_refs.extend((weakref.ref(payload_tags), weakref.ref(rank_tag)))
+            return (
+                AllGatherInput(local_tensor, dim=-1),
+                # Gathered along a dim with leading dims other than the shard dim
+                AllGatherInput(payload_tags, dim=2),
+                AllGatherInput(rank_tag),
+                # Tensor payloads follow the parameter's shard layout
+                local_tensor,
+            ), (outer_size, mesh.size())
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor,
+            all_gather_outputs: tuple[torch.Tensor, ...],
+            metadata: Any,
+            param_dtype: torch.dtype,
+            *,
+            out: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
+            del local_tensor
+            weight, gathered_tags, ranks, tensor_payload = all_gather_outputs
+            self.assertEqual(metadata, (torch.Size((8, 8)), shard_world_size))
+            self.assertEqual(weight.shape, (8, 8))
+            self.assertEqual(weight.dtype, param_dtype)
+            self.assertEqual(weight, expected_weight)
+            self.assertEqual(gathered_tags.shape, (2, 3, 2 * shard_world_size))
+            self.assertEqual(gathered_tags.dtype, torch.bfloat16)
+            expected_tags = [tags + rank * 16 for rank in range(shard_world_size)]
+            self.assertEqual(gathered_tags, torch.cat(expected_tags, dim=2))
+            self.assertEqual(ranks.shape, (shard_world_size,))
+            self.assertEqual(ranks.dtype, torch.int64)
+            self.assertEqual(ranks, torch.arange(shard_world_size, device=device_type))
+            self.assertEqual(tensor_payload.view(8, 8), expected_weight)
+            post_out_ids.append(None if out is None else id(out))
+            if out is not None:
+                with _unsafe_preserve_version_counter(out):
+                    out.copy_(weight)
+                return None
+            transformed = weight.clone()
+            return transformed, (transformed,)
+
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        ref_model = nn.Linear(8, 8, bias=False, device=device_type)
+        with torch.no_grad():
+            model.weight.copy_(expected_weight)
+            ref_model.weight.copy_(expected_weight)
+        fully_shard(
+            model,
+            mesh=mesh,
+            shard_placement_fn=lambda _: Shard(1),
+            reshard_after_forward=True,
+        )
+        self._patch_all_gather_extension(
+            model, fsdp_pre_all_gather, fsdp_post_all_gather
+        )
+        inp = torch.arange(16, device=device_type).float().view(2, 8) / 16
+        for _ in range(2):
+            model.zero_grad(set_to_none=True)
+            ref_model.zero_grad(set_to_none=True)
+            output = model(inp)
+            ref_output = ref_model(inp)
+            self.assertEqual(output, ref_output)
+            output.sum().backward()
+            ref_output.sum().backward()
+            check_sharded_parity(self, ref_model, model)
+
+        self.assertEqual(len(post_out_ids), 4)
+        self.assertIsNotNone(post_out_ids[1])
+        self.assertEqual(post_out_ids, [None] + [post_out_ids[1]] * 3)
+        # FSDP keeps no references to the payloads of the 4 all-gathers
+        self.assertEqual([ref() for ref in payload_refs], [None] * 8)
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_smaller_payload(self):
+        self.run_subtests(
+            {"shard_world_size": [2, 1]},
+            self._test_all_gather_extension_smaller_payload,
+        )
+
+    def _test_all_gather_extension_smaller_payload(self, shard_world_size: int):
+        # A Tensor payload of a Shard(0) parameter may shrink after its first
+        # call and then fills a prefix of its cached output, also when a size-1
+        # shard mesh copies it directly
+        mesh = self._init_hsdp_mesh(shard_world_size)
+        num_tags = 4
+
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            rank = mesh.get_local_rank()
+            tags = torch.arange(num_tags, device=local_tensor.device) + 10.0 * rank
+            return (local_tensor, tags), (outer_size, num_tags)
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            outer_size, num_rank_tags = metadata
+            weight, tags = all_gather_outputs
+            expected_tags = [
+                torch.arange(num_rank_tags, device=tags.device) + 10.0 * rank
+                for rank in range(shard_world_size)
+            ]
+            self.assertEqual(
+                tags[: num_rank_tags * shard_world_size], torch.cat(expected_tags)
+            )
+            return _finish_post_all_gather(weight.view(outer_size), out)
+
+        model = nn.Linear(8, 16, bias=False, device=device_type)
+        # Seeding is per process, not per thread
+        dist.broadcast(model.weight.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, mesh=mesh)
+        self._patch_all_gather_extension(
+            model, fsdp_pre_all_gather, fsdp_post_all_gather
+        )
+        inp = torch.randn((2, 8), device=device_type)
+        for num_tags in (4, 2):
+            output = model(inp)
+            self.assertEqual(output, ref_model(inp))
+            output.sum().backward()
+
+
+class TestAllGatherInputValidation(TestCase):
+    # Shard(0) of an (8, 4) parameter over 2 ranks, or Shard(1) of a (4, 8) one
+    # with shard_dim=1
+    padded_sharded_size = torch.Size((4, 4))
+
+    def _get_layouts(self, inputs, outputs=(), **kwargs):
+        kwargs = {
+            "shard_world_size": 2,
+            "shard_dim": 0,
+            "padded_sharded_size": self.padded_sharded_size,
+            "require_padded_size": False,
+            "param_name": "lin.weight",
+            **kwargs,
+        }
+        return _get_all_gather_output_layouts(inputs, list(outputs), **kwargs)
+
+    def test_dim_out_of_range(self):
+        for dim in (2, -3):
+            msg = f"AllGatherInput 0 of lin.weight has dim {dim}, which is invalid for size (4, 4)"
+            with self.assertRaisesRegex(ValueError, re.escape(msg)):
+                self._get_layouts([AllGatherInput(torch.ones(4, 4), dim=dim)])
+        # Scalars count as shape (1,)
+        self._get_layouts([AllGatherInput(torch.ones(()), dim=-1)])
+
+    def test_output_layouts(self):
+        inputs = [
+            AllGatherInput(torch.ones(2, 3, 4), dim=1),
+            AllGatherInput(torch.ones(())),
+            AllGatherInput(torch.ones(2, 0), dim=1),
+            torch.ones(4, 4),
+            torch.ones(4, 0),
+        ]
+        layouts = self._get_layouts(inputs, shard_dim=1)
+        self.assertEqual(
+            [tuple(layout) for layout in layouts],
+            [((2, 6, 4), 2), ((2,), 1), ((2, 0), 1), ((-1, 4), 4), ((8, 0), 1)],
+        )
+        # A single rank needs no reassembly
+        layouts = self._get_layouts(inputs, shard_dim=1, shard_world_size=1)
+        self.assertEqual([layout.outer_size for layout in layouts], [1] * 5)
+
+    def test_payload_count_change(self):
+        with self.assertRaisesRegex(
+            ValueError, "lin.weight returned 2 inputs, but 1 on its first call"
+        ):
+            self._get_layouts([torch.ones(4, 4)] * 2, [torch.empty(32)])
+
+    def test_records_keep_numel_and_dtype(self):
+        output = torch.empty(32)
+        for tensor in (torch.ones(4, 4), torch.ones(2, 8)):
+            self._get_layouts([AllGatherInput(tensor)], [output])
+        msg = "input 0 of lin.weight must match the size of its first call, 16 torch.float32 per rank, but has 8 torch.float32"
+        with self.assertRaisesRegex(ValueError, re.escape(msg)):
+            self._get_layouts([AllGatherInput(torch.ones(2, 4))], [output])
+        msg = "input 0 of lin.weight must keep the dtype torch.float32 of its first call, but has dtype torch.uint8"
+        with self.assertRaisesRegex(ValueError, re.escape(msg)):
+            byte_view = torch.ones(4, 4).view(torch.uint8)
+            self._get_layouts([AllGatherInput(byte_view)], [output])
+
+    def test_tensor_inputs_shrink_or_become_byte_views(self):
+        output = torch.empty(32)
+        byte_view = torch.ones(4, 4).view(torch.uint8)
+        for tensor in (torch.ones(2, 4), torch.ones(0, 4), byte_view):
+            self._get_layouts([tensor], [output])
+        with self.assertRaisesRegex(ValueError, "must fit in the size of its first"):
+            self._get_layouts([torch.ones(8, 4)], [output])
+        with self.assertRaisesRegex(ValueError, "must keep the dtype torch.float32"):
+            self._get_layouts([torch.ones(4, 4, dtype=torch.bfloat16)], [output])
+        # Only empty outputs can be viewed with a zero trailing dim
+        self._get_layouts([torch.ones(4, 0)], [torch.empty(0)])
+        with self.assertRaisesRegex(ValueError, "must match the size of its first"):
+            self._get_layouts([torch.ones(4, 0)], [output])
+        # fsdp_post_all_gather receives each output viewed as (-1, *size[1:])
+        msg = "input 0 of lin.weight has trailing dims (3,), which do not divide the 32 elements of its output"
+        with self.assertRaisesRegex(ValueError, re.escape(msg)):
+            self._get_layouts([torch.ones(2, 3)], [output])
+
+    def test_shard_dim_tensor_inputs_keep_rows(self):
+        # The copy-out reads Shard(1) Tensor inputs as rows of the padded sharded
+        # parameter, so they need its element count or leading dims, and cannot
+        # shrink
+        for tensor in (
+            torch.ones(16),
+            torch.ones(2, 8),
+            torch.ones(4, 4).view(torch.uint8),
+            torch.ones(4, 2, dtype=torch.uint8),  # e.g. packed 4-bit values
+            torch.ones(0, 4),
+        ):
+            self._get_layouts([tensor], shard_dim=1)
+        # e.g. bytes of a wrongly shaped payload, whose ranks would be mixed up
+        msg = "Tensor all-gather input 0 of lin.weight is gathered along its Shard(1) dim, so it must have the 16 elements of the padded sharded size (4, 4) or its dims (4,) before that dim, but has size (2, 16)"
+        with self.assertRaisesRegex(ValueError, re.escape(msg)):
+            self._get_layouts([torch.ones(2, 4).view(torch.uint8)], shard_dim=1)
+        # Bytes of a typed output are reassembled in the output's layout
+        output = torch.empty(32)
+        byte_view = torch.ones(4, 4).view(torch.uint8)
+        for tensor in (byte_view.view(-1), byte_view.view(2, 32)):
+            self._get_layouts([tensor], [output], shard_dim=1)
+        for tensor in (torch.ones(4, 2), torch.ones(4, 0)):
+            with self.assertRaisesRegex(ValueError, "must match the size of its"):
+                self._get_layouts([tensor], [output], shard_dim=1)
+
+    def test_uneven_tensor_inputs_keep_padded_size(self):
+        msg = "lin.weight is unevenly sharded, so its Tensor all-gather inputs must have the padded sharded size (4, 4), but input 0 has size (3, 4)"
+        with self.assertRaisesRegex(ValueError, re.escape(msg)):
+            self._get_layouts([torch.ones(3, 4)], require_padded_size=True)
+        self._get_layouts([AllGatherInput(torch.ones(3, 4))], require_padded_size=True)
 
 
 if __name__ == "__main__":
