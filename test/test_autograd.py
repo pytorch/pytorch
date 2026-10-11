@@ -9204,6 +9204,173 @@ for shape in [(1,), ()]:
         self.assertEqual(y.grad_fn.saved_tensors, ())
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
+    def test_custom_function_saved_intermediate_double_backward(self):
+        err_msg = (
+            "A custom autograd Function saved an intermediate tensor for backward and "
+            "does not support double backward through that tensor"
+        )
+
+        # Case A: Saved intermediate raises on double backward, passes first backward
+        class SaveIntermediate(Function):
+            @staticmethod
+            def forward(ctx, x):
+                intermediate = x.exp()
+                ctx.save_for_backward(x, intermediate)
+                return x * intermediate
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, intermediate = ctx.saved_tensors
+                return grad_output * intermediate * (x + 1)
+
+        x = torch.tensor(0.5, dtype=torch.double, requires_grad=True)
+        y = SaveIntermediate.apply(x)
+        expected_grad1 = torch.exp(x) * (x + 1)
+
+        # First backward passes and has exact value
+        grad1 = torch.autograd.grad(y, x, create_graph=True)[0]
+        self.assertEqual(grad1, expected_grad1)
+
+        # Double backward raises clear RuntimeError
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            torch.autograd.grad(grad1, x)
+
+        # Also via y.backward(create_graph=True) -> x.grad.backward()
+        x2 = torch.tensor(0.5, dtype=torch.double, requires_grad=True)
+        y2 = SaveIntermediate.apply(x2)
+        y2.backward(create_graph=True)
+        self.assertEqual(x2.grad, expected_grad1)
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            x2.grad.backward()
+
+        # Case B: Saving input only continues to work with double backward
+        class SaveInput(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * x
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                return 2 * grad_output * x
+
+        x_b = torch.tensor(3.0, requires_grad=True)
+        y_b = SaveInput.apply(x_b)
+        g1_b = torch.autograd.grad(y_b, x_b, create_graph=True)[0]
+        g2_b = torch.autograd.grad(g1_b, x_b)[0]
+        self.assertEqual(g1_b, 6.0)
+        self.assertEqual(g2_b, 2.0)
+
+        # Case C: Saving output only continues to work with double backward
+        class SaveOutput(Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x * x
+                ctx.save_for_backward(y)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (y,) = ctx.saved_tensors
+                return grad_output * y
+
+        x_c = torch.tensor(3.0, requires_grad=True)
+        y_c = SaveOutput.apply(x_c)
+        g1_c = torch.autograd.grad(y_c, x_c, create_graph=True)[0]
+        g2_c = torch.autograd.grad(g1_c, x_c)[0]
+        self.assertEqual(g1_c, 9.0)
+        self.assertEqual(g2_c, 6.0)
+
+        # Case D: saved_tensors_hooks
+        hook_packed = []
+        hook_unpacked = []
+
+        def pack_hook(t):
+            hook_packed.append(t)
+            return t
+
+        def unpack_hook(t):
+            hook_unpacked.append(t)
+            return t
+
+        x_d = torch.tensor(0.5, dtype=torch.double, requires_grad=True)
+        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+            y_d = SaveIntermediate.apply(x_d)
+            g1_d = torch.autograd.grad(y_d, x_d, create_graph=True)[0]
+        self.assertEqual(g1_d, expected_grad1)
+        self.assertTrue(len(hook_packed) > 0)
+        self.assertTrue(len(hook_unpacked) > 0)
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            torch.autograd.grad(g1_d, x_d)
+
+        # Case E: @once_differentiable remains unaffected
+        class OnceDiff(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            @torch.autograd.function.once_differentiable
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        x_e = torch.tensor(2.0, requires_grad=True)
+        y_e = OnceDiff.apply(x_e)
+        go = torch.ones_like(y_e, requires_grad=True)
+        g1_e = torch.autograd.grad(y_e, x_e, grad_outputs=go, create_graph=True)[0]
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "trying to differentiate twice a function that was marked with @once_differentiable",
+        ):
+            g1_e.backward()
+
+        # Case F: None and non-differentiable tensors handled without issue
+        class SaveNonDiff(Function):
+            @staticmethod
+            def forward(ctx, x, mask):
+                ctx.save_for_backward(x, mask, None)
+                return x * x * mask.float()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, mask, none_val = ctx.saved_tensors
+                self.assertIsNone(none_val)
+                return 2 * x * grad_output * mask.float(), None
+
+        x_f = torch.tensor(2.0, requires_grad=True)
+        mask = torch.tensor(1, dtype=torch.int64)
+        y_f = SaveNonDiff.apply(x_f, mask)
+        g1_f = torch.autograd.grad(y_f, x_f, create_graph=True)[0]
+        self.assertEqual(g1_f, 4.0)
+        g2_f = torch.autograd.grad(g1_f, x_f)[0]
+        self.assertEqual(g2_f, 2.0)
+
+        # Case G: setup_context pathway
+        class SaveIntermediateSetupContext(Function):
+            @staticmethod
+            def forward(x):
+                return x * x.exp()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                (x,) = inputs
+                intermediate = x.exp()
+                ctx.save_for_backward(x, intermediate)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, intermediate = ctx.saved_tensors
+                return grad_output * intermediate * (x + 1)
+
+        x_g = torch.tensor(0.5, dtype=torch.double, requires_grad=True)
+        y_g = SaveIntermediateSetupContext.apply(x_g)
+        g1_g = torch.autograd.grad(y_g, x_g, create_graph=True)[0]
+        self.assertEqual(g1_g, expected_grad1)
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            torch.autograd.grad(g1_g, x_g)
+
     @unittest.skipIf(
         TEST_WITH_ASAN or IS_LINUX, "https://github.com/pytorch/pytorch/issues/180489"
     )
