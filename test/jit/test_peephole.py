@@ -268,13 +268,13 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: List[int], y: List[int]):
             if len(x) != 4 or len(y) != 5:
-                raise Exception("")  # noqa: TRY002
+                raise RuntimeError("")
 
             return len(x) + len(y)
 
         run_peephole_and_check_const_value(foo.graph, "value=9")
         self.assertEqual(foo(gen_li(4), gen_li(5)), 9)
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             foo(2, 4)
 
         @torch.jit.script
@@ -282,33 +282,33 @@ class TestPeephole(JitTestCase):
             if len(x) == 4 and len(y) == 5:
                 pass
             else:
-                raise Exception("hi")  # noqa: TRY002
+                raise RuntimeError("hi")
 
             return len(x) + len(y)
 
         run_peephole_and_check_const_value(foo.graph, "value=9")
         self.assertEqual(foo(gen_li(4), gen_li(5)), 9)
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             foo(2, 4)
 
         @torch.jit.script
         def foo(x: List[int], y: List[int], z: List[int]):
             if len(x) != 4:
-                raise Exception("..")  # noqa: TRY002
+                raise RuntimeError("..")
             else:
                 if len(y) != 8:
-                    raise Exception("...")  # noqa: TRY002
+                    raise RuntimeError("...")
                 else:
                     if len(z) == 3:
                         pass
                     else:
-                        raise Exception("...")  # noqa: TRY002
+                        raise RuntimeError("...")
 
             return len(x) + len(y) * len(z)
 
         run_peephole_and_check_const_value(foo.graph, "value=28")
         self.assertEqual(foo(gen_li(4), gen_li(8), gen_li(3)), 28)
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             foo(1, 2, 3)
 
         # refinement should persist in second len(x) call
@@ -452,7 +452,7 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: int, y: int):
             if x != 4 or y != 5:
-                raise Exception("")  # noqa: TRY002
+                raise RuntimeError("")
 
             return x + y
 
@@ -463,7 +463,7 @@ class TestPeephole(JitTestCase):
 
         run_peephole_and_check_const_value(foo.graph, "value=9")
         self.assertEqual(foo(4, 5), 9)
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             foo(2, 4)
 
         @torch.jit.script
@@ -471,33 +471,33 @@ class TestPeephole(JitTestCase):
             if x == 4 and y == 5:
                 pass
             else:
-                raise Exception("hi")  # noqa: TRY002
+                raise RuntimeError("hi")
 
             return x + y
 
         run_peephole_and_check_const_value(foo.graph, "value=9")
         self.assertEqual(foo(4, 5), 9)
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             foo(2, 4)
 
         @torch.jit.script
         def foo(x: int, y: int, z: int):
             if x != 4:
-                raise Exception("..")  # noqa: TRY002
+                raise RuntimeError("..")
             else:
                 if y != 8:
-                    raise Exception("...")  # noqa: TRY002
+                    raise RuntimeError("...")
                 else:
                     if z == 3:
                         pass
                     else:
-                        raise Exception("...")  # noqa: TRY002
+                        raise RuntimeError("...")
 
             return x + y * z
 
         run_peephole_and_check_const_value(foo.graph, "value=28")
         self.assertEqual(foo(4, 8, 3), 28)
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             foo(1, 2, 3)
 
         # refinement should persist in second len(x) call

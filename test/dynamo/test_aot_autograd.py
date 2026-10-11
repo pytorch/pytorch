@@ -1264,9 +1264,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         x = torch.arange(6)
         x_opt = x.detach().clone()
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             fn(x)
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             opt_fn(x_opt)
 
     @torch._functorch.config.patch(donated_buffer=True)

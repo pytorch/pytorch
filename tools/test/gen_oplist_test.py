@@ -21,7 +21,7 @@ class GenOplistTest(unittest.TestCase):
         ]
 
         self.assertRaises(
-            Exception, throw_if_any_op_includes_overloads, selective_builder
+            RuntimeError, throw_if_any_op_includes_overloads, selective_builder
         )
 
         selective_builder.operators.items.return_value = [
