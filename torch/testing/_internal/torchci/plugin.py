@@ -7,9 +7,7 @@ from __future__ import annotations
 import contextlib
 import inspect
 import os
-import re
 import sys
-import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass
@@ -32,12 +30,6 @@ if TYPE_CHECKING:
 # Set where the test runs; xdist ships it to the controller with the report. Not
 # item.user_properties, which pytest also writes into the junit XML CI ingests.
 _TEST_ID = "_torchci_test_id"
-# pytest-cpp runs each gtest in a process of its own and reports a crash as an
-# ordinary failure.
-_GTEST_CRASH = re.compile(r"Internal Error: calling .+ failed \(returncode=(-\d+)\)")
-# Where run_test.py reads test/conftest.py's stepcurrent files; the report's path
-# and in-flight run (recovery.finish) are published next to them.
-STEPCURRENT_CACHE_DIR = "cache/stepcurrent"
 
 _disabled = False
 _writer: ReportWriter | None = None
@@ -65,10 +57,14 @@ def _guard() -> Iterator[None]:
         _disable(error)
 
 
-def identity(item: pytest.Item) -> report.TestId:
+def identity(item: pytest.Item) -> report.TestId | None:
+    """None for an item that is neither a Python test function nor a gtest."""
     if not isinstance(item, pytest.Function):
-        # A pytest-cpp gtest; its node id is <binary>::<suite>.<test>.
-        return report.nodeid_identity(item.nodeid)
+        # run_test.py runs C++ tests under pytest-cpp, only installed where they
+        # run, so its items are recognized by module rather than by class.
+        if type(item).__module__.startswith("pytest_cpp."):
+            return report.gtest_identity(str(item.path), item.name)
+        return None
     # originalname drops pytest parameters. Unwrapping the function recovers the
     # source name of PyTorch's generated device, dtype and parametrize variants.
     declared_case_name = item.originalname
@@ -104,12 +100,9 @@ class _Run:
     failed_phase: str = ""
     skipped: bool = False
     wasxfail: bool = False
-    crashed: bool = False
     outcome_summary: str = ""
 
     def outcome(self) -> str:
-        if self.crashed:
-            return "crashed"
         if self.failed_phase:
             return "failed" if self.failed_phase == "call" else "error"
         if self.skipped:
@@ -118,44 +111,26 @@ class _Run:
 
 
 class ReportWriter:
-    def __init__(self, path: str, report_uuid: str, config: Config) -> None:
-        # run_test.py reads the published path from another working directory.
-        self.path = os.path.abspath(path)
+    def __init__(self, path: str, report_uuid: str) -> None:
+        self.path = path
         self.report_uuid = report_uuid
-        self.config = config
         self.file: IO[str] | None = None
         # By node id and xdist worker (report.node, None without xdist), as junitxml
         # keys its test cases: flakefinder's copies of a test share a node id and can
         # run on two workers at once.
         self.runs: dict[tuple[str, Any], _Run] = {}
         self.rerun_numbers: Counter[str] = Counter()
-        self.tests: dict[str, report.TestId] = {}
-        # Only run_test.py's retries read what's published, and they never use xdist.
-        self.xdist = bool(config.getoption("numprocesses", default=None))
-        self.cache: Any = None
-        self.cache_dir = ""
-        # The test published as in flight, until its run line is written.
-        self.inflight_nodeid: str | None = None
-
-    def _publish(self, name: str, value: Any) -> None:
-        if self.cache is not None:
-            self.cache.set(f"{self.cache_dir}/{name}", value)
+        self.tests: dict[str, report.TestId | None] = {}
 
     def pytest_sessionstart(self, session: Session) -> None:
         if _disabled:
             return
         with _guard():
-            # Read here: test/conftest.py sets it from --sc/--rs in its pytest_configure.
-            key = self.config.getoption("stepcurrent", default=None)
-            if key and not self.xdist:
-                self.cache = getattr(self.config, "cache", None)
-                self.cache_dir = f"{STEPCURRENT_CACHE_DIR}/{key}"
             record = report.report_record(self.report_uuid, environment.capture())
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
             self.file = open(self.path, "w", encoding="utf-8", newline="\n")  # noqa: SIM115
             self.file.write(report.line(record))
             self.file.flush()
-            self._publish("report_path", self.path)
 
     def pytest_collection_finish(self, session: Session) -> None:
         if _disabled:
@@ -163,22 +138,6 @@ class ReportWriter:
         with _guard():
             # Empty on an xdist controller; workers send identities via makereport.
             self.tests = {item.nodeid: identity(item) for item in session.items}
-
-    def pytest_runtest_logstart(self, nodeid: str, location: Any) -> None:
-        if _disabled:
-            return
-        with _guard():
-            # Before setup, so run_test.py can record the test if the process dies.
-            test = self.tests.get(nodeid)
-            inflight = None
-            if test is not None:
-                inflight = {
-                    "test": test._asdict(),
-                    "started_at": time.time(),
-                    "rerun_number": self.rerun_numbers[nodeid],
-                }
-            self._publish("report_inflight", inflight)
-            self.inflight_nodeid = nodeid
 
     # Before test/conftest.py's LogXMLReruns rewrites skip longreprs.
     @pytest.hookimpl(tryfirst=True)
@@ -191,23 +150,12 @@ class ReportWriter:
     def _logreport(self, test_report: TestReport) -> None:
         nodeid = test_report.nodeid
         key = (nodeid, getattr(test_report, "node", None))
-        if test_report.when not in ("setup", "call", "teardown"):
-            # xdist's report for a test whose worker crashed: when "???", no times,
-            # and nothing else follows for this run. A worker that died before its
-            # setup report sent no identity or start time.
-            run = self.runs.setdefault(key, _Run(time.time(), None))
-            run.test = run.test or report.nodeid_identity(nodeid)
-            run.ended = time.time()
-            run.crashed = True
-            run.outcome_summary = str(test_report.longrepr)
-            self._finish(key, run)
-            return
         if test_report.when == "setup":
             test_id = getattr(test_report, _TEST_ID, None)
             test = report.TestId(**test_id) if test_id else self.tests.get(nodeid)
             self.runs[key] = _Run(test_report.start, test)
         run = self.runs.get(key)
-        if run is None:
+        if run is None or test_report.when not in ("setup", "call", "teardown"):
             return
         run.ended = test_report.stop
         # A failing pytest-subtests subtest fails the run.
@@ -216,9 +164,6 @@ class ReportWriter:
             if not run.failed_phase:
                 run.failed_phase = test_report.when
                 run.outcome_summary = _failure_summary(test_report)
-                if crash := _GTEST_CRASH.match(run.outcome_summary):
-                    run.crashed = True
-                    run.outcome_summary = report.exit_summary(int(crash.group(1)))
         elif test_report.skipped and not (subtest or run.skipped or run.failed_phase):
             from _pytest.terminal import _get_raw_skip_reason
 
@@ -233,10 +178,10 @@ class ReportWriter:
 
     def _finish(self, key: tuple[str, Any], run: _Run) -> None:
         del self.runs[key]
-        self.inflight_nodeid = None
         nodeid = key[0]
-        # No identity: under xdist, the worker's writer turned itself off and its
-        # setup report came without one.
+        # No identity: the item is neither a Python test function nor a gtest, or,
+        # under xdist, the worker's writer turned itself off and its setup report
+        # came without one.
         if self.file is not None and run.test is not None:
             record = report.run_record(
                 run.test,
@@ -254,18 +199,15 @@ class ReportWriter:
         if _disabled:
             return
         with _guard():
-            # xdist stops at -x/--maxfail right after the failing report, so that
-            # run's teardown never arrives; its outcome is already known.
+            # run_test.py runs C++ tests under xdist with -x, which stops right after
+            # the final failing report, so that run's teardown report never arrives;
+            # its outcome is already known.
             for key, run in list(self.runs.items()):
                 if run.failed_phase:
                     self._finish(key, run)
             if self.file is not None:
                 self.file.close()
                 self.file = None
-            # A test still in flight was interrupted, maybe before its setup report;
-            # run_test.py records it.
-            if self.inflight_nodeid is None:
-                self._publish("report_inflight", None)
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -275,8 +217,9 @@ def pytest_runtest_makereport(item: Any, call: Any) -> Generator[None, Any, None
     if _disabled or call.when != "setup" or outcome.excinfo is not None:
         return
     with _guard():
-        # A dict, which xdist can serialize.
-        setattr(outcome.get_result(), _TEST_ID, identity(item)._asdict())
+        if test := identity(item):
+            # A dict, which xdist can serialize.
+            setattr(outcome.get_result(), _TEST_ID, test._asdict())
 
 
 def pytest_addoption(parser: Parser) -> None:
@@ -298,5 +241,5 @@ def pytest_configure(config: Config) -> None:
         if prefix and not worker and not config.getoption("collectonly"):
             report_uuid = str(uuid.uuid4())
             path = report.report_path(prefix, report_uuid)
-            _writer = ReportWriter(path, report_uuid, config)
+            _writer = ReportWriter(path, report_uuid)
             config.pluginmanager.register(_writer, "torchci_report_writer")

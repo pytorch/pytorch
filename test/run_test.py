@@ -539,6 +539,14 @@ def _torchci_report_args(
     return ["-p", plugin, f"--torchci-report-prefix={prefix}"]
 
 
+def _torchci_reports_default() -> str | None:
+    # The CI jobs that write reports by default, widening until it's all of CI.
+    # upload-test-artifacts uploads this folder.
+    if IS_CI and os.environ.get("GITHUB_WORKFLOW") in ("trunk", "pull"):
+        return str(REPO_ROOT / "test/torchci-reports")
+    return None
+
+
 def run_test(
     test_module: ShardedTest,
     test_directory,
@@ -843,41 +851,20 @@ def run_test_retries(
         print(s, file=output, flush=True)
 
     num_failures = defaultdict(int)
-    cache_dir = REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
 
     def read_pytest_cache(key: str) -> Any:
+        cache_file = (
+            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
+        )
         try:
-            with open(cache_dir / key, encoding="utf-8") as f:
+            with open(cache_file) as f:
                 return f.read()
         except FileNotFoundError:
             return None
 
-    def finish_torchci_report(ret_code: int, elapsed: float) -> None:
-        # The report writer publishes its path and in-flight run here; a process
-        # that died left that run unrecorded.
-        if not HAS_TORCHCI_REPORTS:
-            return
-        try:
-            from torch.testing._internal.torchci import recovery
-
-            path = read_pytest_cache("report_path")
-            inflight = read_pytest_cache("report_inflight")
-            if path is not None:
-                inflight = json.loads(inflight) if inflight else None
-                exit_code = recovery.effective_exit_code(ret_code, elapsed, timeout)
-                recovery.finish(json.loads(path), inflight, exit_code)
-        except Exception as e:
-            # A broken report must not fail the test run or its retries.
-            print_to_file(f"Could not finish the test run report: {e}")
-        finally:
-            for key in ("report_path", "report_inflight"):
-                with contextlib.suppress(OSError):
-                    (cache_dir / key).unlink(missing_ok=True)
-
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
     while True:
-        started = time.monotonic()
         ret_code, _ = retry_shell(
             command + [sc_command] + print_items,
             test_directory,
@@ -888,14 +875,11 @@ def run_test_retries(
             retries=0,  # no retries here, we do it ourselves, this is because it handles timeout exceptions well
             label=test_label,
         )
-        elapsed = time.monotonic() - started
         ret_code = 0 if ret_code == 5 else ret_code
         if ret_code == 0 and not sc_command.startswith("--rs="):
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
-        if ret_code != 0:
-            finish_torchci_report(ret_code, elapsed)
 
         # Read what just failed/ran
         try:
@@ -1705,10 +1689,9 @@ def parse_args():
         "--save-torchci-reports",
         # Absolute, since tests run from test/.
         type=os.path.abspath,
-        # upload-test-artifacts uploads this folder.
-        default=str(REPO_ROOT / "test/torchci-reports") if IS_CI else None,
+        default=_torchci_reports_default(),
         metavar="DIR",
-        help="write test run reports to DIR (default in CI: test/torchci-reports)",
+        help="write test run reports to DIR (default in rolled-out CI jobs: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",

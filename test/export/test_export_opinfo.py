@@ -3,6 +3,7 @@
 # flake8: noqa
 
 import itertools
+import os
 import subprocess
 import sys
 import unittest
@@ -11,10 +12,10 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCUDA,
+    onlyAccelerator,
     ops,
-    skip,
     skipOps,
+    skipXPUIf,
     xfail,
 )
 from torch.testing._internal.common_methods_invocations import op_db
@@ -23,7 +24,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_WINDOWS,
     run_tests,
-    skipIfRocm,
     TestCase,
 )
 from torch.utils import _pytree as pytree
@@ -42,7 +42,7 @@ export_failures = {
     xfail("tensor_split"),
 }
 
-# following are failing fake export on cuda device
+# following are failing fake export on gpu device
 fake_export_failures = {
     xfail("histogram"),
     xfail("masked.amax"),
@@ -58,17 +58,35 @@ fake_export_failures = {
     xfail("masked.var"),
 }
 
-# These pass with CUDA enabled but still fail fake CUDA export on CPU-only builds.
+# following are failing fake export with no gpu device available
+fake_export_no_gpu_failures = {
+    xfail("geqrf"),
+    xfail("sparse.sampled_addmm"),
+    xfail("to_sparse"),
+    xfail("__getitem__"),
+    xfail("nn.functional.batch_norm"),
+    xfail("nn.functional.grid_sample"),
+    xfail("nn.functional.instance_norm"),
+    xfail("nn.functional.multi_margin_loss"),
+    xfail("nonzero"),
+}
+
+# CUDA-specific skip set generation
+fake_export_failures_cuda = fake_export_failures.copy()
 if not torch.backends.cuda.is_built():
-    fake_export_failures.add(xfail("geqrf"))
-    fake_export_failures.add(xfail("sparse.sampled_addmm"))
-    fake_export_failures.add(xfail("to_sparse"))
-    fake_export_failures.add(xfail("__getitem__"))
-    fake_export_failures.add(xfail("nn.functional.batch_norm"))
-    fake_export_failures.add(xfail("nn.functional.grid_sample"))
-    fake_export_failures.add(xfail("nn.functional.instance_norm"))
-    fake_export_failures.add(xfail("nn.functional.multi_margin_loss"))
-    fake_export_failures.add(xfail("nonzero"))
+    fake_export_failures_cuda |= fake_export_no_gpu_failures
+
+# XPU-specific skip set generation
+fake_export_failures_xpu = fake_export_failures.copy()
+if not torch.xpu._is_compiled():
+    fake_export_failures_xpu |= fake_export_no_gpu_failures
+    fake_export_failures_xpu |= {
+        # https://github.com/intel/torch-xpu-ops/issues/5256
+        xfail("nn.functional.max_unpool2d"),
+        xfail("nn.functional.max_unpool2d", "grad"),
+        # https://github.com/intel/torch-xpu-ops/issues/5277
+        xfail("nn.functional.scaled_dot_product_attention"),
+    }
 
 fake_decomposition_failures = {
     xfail("linalg.matrix_rank"),
@@ -80,11 +98,10 @@ fake_decomposition_failures = {
 }
 
 
-def _test_export_helper(self, dtype, op):
+def _test_export_helper(self, target_device, dtype, op):
     sample_inputs_itr = op.sample_inputs("cpu", dtype, requires_grad=False)
 
     mode = FakeTensorMode(allow_non_fake_inputs=True)
-    target_device = "cuda:0"
 
     def to_fake_device(x):
         return x.to(target_device)
@@ -127,10 +144,18 @@ class TestExportOpInfo(TestCase):
     hw_classification = HardwareClassification.CPU
 
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps(export_failures | fake_export_failures)
+    @skipOps(export_failures | fake_export_failures_cuda)
     @unittest.skipIf(IS_FBCODE, "tests broken with unexpected successes internally")
-    def test_fake_export(self, device, dtype, op):
-        _test_export_helper(self, dtype, op)
+    def test_fake_export_cuda(self, dtype, op):
+        target_device = "cuda:0"
+        _test_export_helper(self, target_device, dtype, op)
+
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipOps(export_failures | fake_export_failures_xpu)
+    @unittest.skipIf(IS_FBCODE, "tests broken with unexpected successes internally")
+    def test_fake_export_xpu(self, dtype, op):
+        target_device = "xpu:0"
+        _test_export_helper(self, target_device, dtype, op)
 
 
 instantiate_device_type_tests(TestExportOpInfo, globals(), only_for="cpu")
@@ -148,16 +173,28 @@ selected_ops = {
 selected_op_db = [op for op in op_db if op.name in selected_ops]
 
 
-class TestExportOnFakeCuda(TestCase):
-    hw_classification = HardwareClassification.CUDA
+def _get_env_by_device(device):
+    device_type = torch.device(device).type
+    if device_type == "cuda":
+        return {"CUDA_VISIBLE_DEVICES": ""}
+    elif device_type == "xpu":
+        return {**os.environ, "ONEAPI_DEVICE_SELECTOR": "*:cpu", "ZE_AFFINITY_MASK": ""}
+    raise AssertionError(
+        f"don't know how to hide {device_type} devices in a subprocess"
+    )
 
-    # In CI, this test runs on a CUDA machine with cuda build
-    # We set CUDA_VISIBLE_DEVICES="" to simulate a CPU machine with cuda build
+
+class TestExportOnFakeDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # In CI, this test runs on a GPU machine with gpu build
+    # We set device-specific env variable to simulate a CPU machine with gpu build
     # Running this on all ops in op_db is too slow, so we only run on a selected subset
-    @onlyCUDA
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5157")
     @unittest.skipIf(
         IS_WINDOWS,
-        'Subprocess with CUDA_VISIBLE_DEVICES="" imports op_db which triggers '
+        "Subprocess with simulated CPU machine imports op_db which triggers "
         "get_device_capability(); 0 devices raises Invalid device id on Windows.",
     )
     @ops(selected_op_db, allowed_dtypes=(torch.float,))
@@ -177,7 +214,7 @@ for op in ops:
 
     mode = FakeTensorMode(allow_non_fake_inputs=True)
 
-    target_device = "cuda:0"
+    target_device = "{device}"
 
     def to_fake_device(x):
         return x.to(target_device)
@@ -217,7 +254,7 @@ for op in ops:
             (
                 subprocess.check_output(
                     [sys.executable, "-c", test_script],
-                    env={"CUDA_VISIBLE_DEVICES": ""},
+                    env=_get_env_by_device(device),
                 )
             )
             .decode("ascii")
@@ -225,66 +262,67 @@ for op in ops:
         )
         self.assertEqual(r, "")
 
-    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    @onlyAccelerator
     @unittest.skipIf(
         IS_WINDOWS,
         "Failing on Windows, device_count() changes from 0 to 1 ",
     )
-    def test_preserve_original_behavior(self):
+    def test_preserve_original_behavior(self, device):
         test_script = f"""\
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
-def cuda_calls_behavior_unchanged():
+def accelerator_calls_behavior_unchanged():
+    device_module = torch.get_device_module("{device}")
     exception_count = 0
 
     try:
         cpu_x = torch.randn(2)
-        cuda_x = cpu_x.to("cuda")
+        accelerator_x = cpu_x.to("{device}")
     except Exception as e:
         exception_count += 1
 
     try:
-        torch.randn(2, device="cuda")
+        torch.randn(2, device="{device}")
     except Exception as e:
         exception_count += 1
 
     try:
-        torch.cuda.get_device_capability()
+        device_module.get_device_capability()
     except Exception as e:
         exception_count += 1
 
     try:
-        torch.cuda.set_device(1)
+        device_module.set_device(1)
     except Exception as e:
         exception_count += 1
 
     try:
-        torch.cuda.current_device()
+        device_module.current_device()
     except Exception as e:
         exception_count += 1
 
-    assert torch.cuda.is_available() == False
-    assert torch.cuda.device_count() == 0
+    assert device_module.is_available() == False
+    assert device_module.device_count() == 0
     assert exception_count == 5
 
-cuda_calls_behavior_unchanged()
+accelerator_calls_behavior_unchanged()
 
 cpu_x = torch.randn(2)
 with FakeTensorMode(allow_non_fake_inputs=True) as mode:
-    cuda_x = mode.from_tensor(cpu_x)
-    cuda_x.fake_device = torch.device("cuda")
-    cuda_y = cuda_x + cuda_x
-    assert cuda_y.device.type == "cuda"
+    accelerator_x = mode.from_tensor(cpu_x)
+    accelerator_x.fake_device = torch.device("{device}")
+    accelerator_y = accelerator_x + accelerator_x
+    assert accelerator_y.device.type == torch.device("{device}").type
 
 # should fail again after exiting the fake mode, with the identical error message
-cuda_calls_behavior_unchanged()
+accelerator_calls_behavior_unchanged()
 """
         r = (
             (
                 subprocess.check_output(
                     [sys.executable, "-c", test_script],
-                    env={"CUDA_VISIBLE_DEVICES": ""},
+                    env=_get_env_by_device(device),
                 )
             )
             .decode("ascii")
@@ -293,7 +331,9 @@ cuda_calls_behavior_unchanged()
         self.assertEqual(r, "")
 
 
-instantiate_device_type_tests(TestExportOnFakeCuda, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestExportOnFakeDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":

@@ -69,35 +69,20 @@ physical RAM; it is omitted where neither is available.
 | `language` | string | `python` or `cpp` |
 | `declared_case_name` | string | Source test name before generated device, dtype, op, or parameter suffixes |
 | `rerun_number` | int | Execution number within one process, starting at `0` |
-| `outcome` | string | `passed`, `failed`, `error`, `skipped`, `xfailed`, `xpassed`, `crashed`, or `timed_out` |
-| `outcome_summary` | string | Failure, skip, xfail, crash, or timeout summary; otherwise `""` |
+| `outcome` | string | `passed`, `failed`, `error`, `skipped`, `xfailed`, or `xpassed` |
+| `outcome_summary` | string | Failure, skip, or xfail summary; otherwise `""` |
 | `started_at` | int | Setup start as Unix epoch milliseconds |
 | `ended_at` | int | Last phase stop as Unix epoch milliseconds |
 | `properties` | object | Empty in version 0.1 |
 
 Pytest reruns and flakefinder repeats within one process count up
 `rerun_number`. A test's subtests share its run line, and a failing subtest fails
-it. For gtest value-parameterized tests, `declared_case_name` drops the `/N`
-suffix, and a gtest whose process crashed is `crashed`.
+it. For a value-parameterized gtest, `declared_case_name` drops the `/<param>`
+suffix. A gtest whose process crashed is `failed`, with pytest-cpp's message, as in
+junit.
 
 A test aliased under a longer name (`test_x_dynamic = TestX.test_x`) reports the
 original's `declared_case_name`, `test_x`.
-
-## Crash recording
-
-A process that dies can't record the test it was running, so whoever sees it die
-records that run as `crashed`, or `timed_out` after a timeout:
-
-| Process | Recorded by |
-|---|---|
-| xdist worker | The xdist controller, from xdist's crash report |
-| `run_test.py` retry process | `run_test.py`, from the in-flight run the writer publishes in the stepcurrent cache (`recovery.finish`) |
-| `run_tests --subprocess` child | The parent, in a report of its own (`recovery.record_dead_subprocess`) |
-
-Each retry process writes its own file, so its `rerun_number` starts at 0. A crash
-followed by a passing retry inside `retry_shell` isn't recorded. A timeout counts
-even when pytest exits in the SIGINT grace period that follows it (exit code 2,
-or -2 if the signal killed it).
 
 ## Versioning
 
@@ -114,19 +99,25 @@ replaced by dots (`distributed.test_c10d_nccl`). A relative `DIR` is relative to
 the cwd.
 
 In CI, `run_test.py` defaults to `test/torchci-reports`, which is uploaded as
-described below. `run_tests` has no default, so a test file run some other way
-writes no report.
+described below, in the jobs `_torchci_reports_default` selects: for now, the
+trunk and pull workflows' jobs. `run_tests` has no default, so a test file run
+some other way writes no report.
 
 ## Upload
 
-At job end, `.github/actions/upload-test-artifacts` zips `test/torchci-reports`
-into `torchci-reports-<file suffix>.report.zip`, with entries under
-`test/torchci-reports/`, and uploads it to
-`s3://gha-artifacts/<org>/<repo>/<run id>/<run attempt>/artifact/`, where the
-ingester picks it up. When S3 is skipped (ROCm) or the upload fails, the action
-uploads the GitHub artifact
-`torchci-reports-runattempt<N>-<file suffix>.report.zip` instead, which
-`tools/stats/upload_artifacts.py` copies to the same S3 key.
+At job end, `.github/actions/upload-test-artifacts` uploads each report as its own
+object:
+
+```
+s3://gha-artifacts/torchci-reports/<org>/<repo>/<run id>/<job id>/<file>-<report_uuid>.report.jsonl
+```
+
+The job id is `job.check_run_id`, which equals the job's id. When S3 is skipped
+(ROCm) or the junit upload fails, the action uploads the GitHub artifact
+`torchci-reports-runattempt<N>-<job id>.zip` instead, and
+`tools/stats/upload_artifacts.py` uploads each report in it to the same key. A row in
+the tests tables has its report's `github_workflow_job_id` and `report_uuid`: list
+its job's folder and take the name that ends with the uuid.
 
 ## Local check
 
