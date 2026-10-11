@@ -9,10 +9,12 @@ it directly instead of recompiling.
 """
 
 import copy
+import errno
 import functools
 import inspect
 import logging
 import os
+import secrets
 import threading
 from collections.abc import Callable, Sequence
 from typing import Any, cast, TypeVar
@@ -26,6 +28,64 @@ log = logging.getLogger(__name__)
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+
+
+# os.link failures that mean the filesystem cannot do hard links at all, as opposed to
+# a real I/O problem (a full disk, a bad permission) that must not be swallowed. EINVAL
+# is how Windows reports a volume without hard links (FAT, exFAT).
+_NO_HARDLINK_ERRNOS = frozenset(
+    getattr(errno, name)
+    for name in (
+        "EPERM",
+        "EOPNOTSUPP",
+        "ENOTSUP",
+        "EXDEV",
+        "EMLINK",
+        "ENOSYS",
+        "EINVAL",
+    )
+    if hasattr(errno, name)
+)
+
+
+def _atomic_publish(path: str, data: bytes) -> bool:
+    # Publish a fully-written file, never a partial one, and report whether this call
+    # is the writer that published it. A hard link is the no-replace publish: exactly
+    # one concurrent writer wins and every loser loads that winner rather than exec'ing
+    # its own divergent source. Only errnos that mean "this filesystem has no hard
+    # links" fall back to replace (last-writer-wins, still never partial); a full disk
+    # or a permissions problem must surface rather than silently weaken the guarantee.
+    dir_name = os.path.dirname(path) or "."
+    base = os.path.basename(path)
+    tmp = os.path.join(dir_name, f".{base}.{secrets.token_hex(8)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            return False
+        except OSError as e:
+            if e.errno not in _NO_HARDLINK_ERRNOS:
+                raise
+            log.warning(
+                "torch.compiler.export_python: %s has no hard links (%s), so %s is "
+                "published last-writer-wins; concurrent first writers may each run "
+                "their own generated source.",
+                dir_name,
+                e.strerror,
+                path,
+            )
+            os.replace(tmp, path)
+        return True
+    finally:
+        try:
+            os.remove(tmp)
+        except FileNotFoundError:
+            pass
 
 
 def _precompile_error(msg: str) -> Exception:
@@ -79,7 +139,7 @@ class ExportedPythonArtifact:
         # never matches a marker left by a thread it did not inherit.
         self._materializing: tuple[int, int] | None = None
 
-    def _precompile_and_save(self, args: tuple[Any, ...]) -> str:
+    def _precompile_and_save(self, args: tuple[Any, ...]) -> tuple[str, bool]:
         example = self._example_inputs
         if example is None:
             # Capture runs fn once on the example inputs (real-mode make_fx), which
@@ -115,9 +175,16 @@ class ExportedPythonArtifact:
         parent = os.path.dirname(self._path)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        with open(self._path, "w", encoding="utf-8") as f:
-            f.write(code)
-        return code
+        # os.link does not follow a symlink at its destination, so resolve one first: a
+        # dangling symlink at path would otherwise read as a lost race forever.
+        target, data = os.path.realpath(self._path), code.encode("utf-8")
+        while not _atomic_publish(target, data):
+            # Lost the publish race. If the winner's file is already gone (a peer
+            # deleting it to force a regenerate), publish again rather than fail.
+            winner = self._load_from_disk()
+            if winner is not None:
+                return winner, True
+        return code, False
 
     def _load_from_disk(self) -> str | None:
         # None means "not there after all" -- the presence gate raced a peer deleting
@@ -193,7 +260,7 @@ class ExportedPythonArtifact:
         code = self._load_from_disk() if os.path.exists(self._path) else None
         from_disk = code is not None
         if code is None:
-            code = self._precompile_and_save(args)
+            code, from_disk = self._precompile_and_save(args)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None
         self._decompositions = None
