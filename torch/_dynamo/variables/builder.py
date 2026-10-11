@@ -244,6 +244,7 @@ from .functions import (
     MemberDescriptorVariable,
     MethodWrapperVariable,
     PropertyVariable,
+    StaticMethodVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
@@ -5675,6 +5676,12 @@ class SourcelessBuilder:
         )
         handlers[types.MemberDescriptorType] = (
             lambda tx, value: MemberDescriptorVariable(value)
+        )
+        handlers[types.ClassMethodDescriptorType] = (
+            lambda tx, value: ClassMethodDescriptorVariable(value)
+        )
+        handlers[staticmethod] = lambda tx, value: StaticMethodVariable.from_descriptor(
+            tx, value
         )
         handlers[property] = lambda tx, value: PropertyVariable(value)
         handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(

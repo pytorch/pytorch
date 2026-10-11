@@ -53,6 +53,7 @@ from .base import (
     AttrMutationKind,
     maybe_get_python_type,
     NO_SUCH_SUBOBJ,
+    ValueMutationNew,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -100,7 +101,7 @@ def vt_identity_compare(
     from .dicts import ConstDictVariable
     from .exception import ExceptionVariable, TracebackVariable
     from .functions import UserMethodVariable
-    from .lists import ListVariable
+    from .lists import ListVariable, TupleVariable
     from .sets import (
         DictKeySetVariable,
         FrozensetVariable,
@@ -123,6 +124,16 @@ def vt_identity_compare(
             UserMethodVariable,
             CurrentDeviceVariable,
         ),
+    ):
+        return ConstantVariable.create(False)
+
+    # Distinct tuples allocated by traced bytecode cannot alias. Pre-existing
+    # sourceless tuples have no ValueMutationNew marker, so remain undecided.
+    if (
+        isinstance(left, TupleVariable)
+        and isinstance(right, TupleVariable)
+        and isinstance(left.mutation_type, ValueMutationNew)
+        and isinstance(right.mutation_type, ValueMutationNew)
     ):
         return ConstantVariable.create(False)
 
