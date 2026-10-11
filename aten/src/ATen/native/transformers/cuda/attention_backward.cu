@@ -588,6 +588,23 @@ _efficient_attention_backward(
         use_dropout ? philox_seed : at::zeros({}, at::dtype(at::kLong));
     const auto ck_philox_offset =
         use_dropout ? philox_offset : at::zeros({}, at::dtype(at::kLong));
+
+    // Mirror the handling in _flash_attention_backward and in the AOTriton
+    // branch below: honour torch.use_deterministic_algorithms() instead of
+    // unconditionally requesting the non-deterministic kernel.
+    bool ck_deterministic{false};
+    {
+      auto& ctx = at::globalContext();
+      if (ctx.deterministicAlgorithms()) {
+        if (ctx.deterministicAlgorithmsWarnOnly()) {
+          TORCH_WARN_ONCE(
+              "Memory Efficient attention defaults to a non-deterministic algorithm. ",
+              "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
+        } else {
+          ck_deterministic = true;
+        }
+      }
+    }
     auto
         [dQ,
          dK,
@@ -613,7 +630,7 @@ _efficient_attention_backward(
                      float(dropout_p),
                      my_softmax_scale,
                      custom_mask_type == 0 ? false : true, // is_causal
-                     false, // deterministic
+                     ck_deterministic, // deterministic
                      false, // zero_tensors
                      ck_philox_seed,
                      ck_philox_offset);
