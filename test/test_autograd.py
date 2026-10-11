@@ -13374,6 +13374,131 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("reduction", (0, 1, 2))
+    def test_huber_loss_backward_forward_ad(self, device, dtype, reduction):
+        x = torch.tensor(
+            [[-2.0, -0.5], [0.0, 0.5], [1.0, 3.0]], device=device, dtype=dtype
+        ).t()
+        target = torch.tensor([0.0, 0.25, 0.5], device=device, dtype=dtype)
+        grad_output = torch.randn(
+            (2, 1) if reduction == 0 else (), device=device, dtype=dtype
+        )
+        primals = (grad_output, x, target)
+        tangents = tuple(torch.randn_like(value) for value in primals)
+        for delta, mask in product((0.0, 0.5, 2.0), product((False, True), repeat=3)):
+            if not any(mask):
+                continue
+            with self.subTest(delta=delta, mask=mask):
+                with fwAD.dual_level():
+                    inputs = tuple(
+                        fwAD.make_dual(value, tangent) if active else value
+                        for value, tangent, active in zip(primals, tangents, mask)
+                    )
+                    result = torch.ops.aten.huber_loss_backward(
+                        *inputs, reduction, delta
+                    )
+                    actual = fwAD.unpack_dual(result)
+                difference = x - target
+                slope = torch.where(
+                    difference < -delta,
+                    -delta,
+                    torch.where(difference > delta, delta, difference),
+                )
+                curvature = (difference.abs() < delta).to(dtype)
+                grad_t, x_t, target_t = tuple(
+                    tangent if active else torch.zeros_like(value)
+                    for value, tangent, active in zip(primals, tangents, mask)
+                )
+                expected = grad_t * slope + grad_output * curvature * (x_t - target_t)
+                if reduction == 1:
+                    expected = expected / x.numel()
+                self.assertEqual(
+                    actual.primal,
+                    torch.ops.aten.huber_loss_backward(*primals, reduction, delta),
+                )
+                self.assertEqual(actual.tangent, expected)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("reduction", ("none", "mean", "sum"))
+    def test_huber_loss_hessian(self, device, dtype, reduction):
+        x = torch.tensor([-2.0, -0.5, 0.0, 0.75, 2.0], device=device, dtype=dtype)
+        target = torch.zeros_like(x)
+
+        def loss(x, target):
+            return torch.nn.functional.huber_loss(
+                x, target, reduction=reduction, delta=1.0
+            ).sum()
+
+        expected = torch.diag((x.abs() < 1.0).to(dtype))
+        if reduction == "mean":
+            expected = expected / x.numel()
+        self.assertEqual(torch.func.hessian(loss)(x, target), expected)
+
+        def nonlinear_loss(x, target):
+            return (
+                torch.nn.functional.huber_loss(
+                    x, target, reduction=reduction, delta=1.0
+                )
+                .sin()
+                .sum()
+            )
+
+        grad = torch.func.grad(nonlinear_loss, argnums=(0, 1))
+        self.assertEqual(
+            torch.func.jacfwd(grad, argnums=(0, 1))(x, target),
+            torch.func.jacrev(grad, argnums=(0, 1))(x, target),
+        )
+
+    @dtypes(torch.float64)
+    @parametrize("reduction", (0, 1, 2))
+    def test_huber_loss_backward_forward_ad_gradcheck(self, device, dtype, reduction):
+        x = torch.tensor([-2.0, -0.4, 0.2, 2.0], device=device, dtype=dtype)
+        target = torch.tensor([0.1], device=device, dtype=dtype)
+        grad_output = torch.randn(
+            x.shape if reduction == 0 else (), device=device, dtype=dtype
+        )
+        inputs = tuple(value.requires_grad_() for value in (grad_output, x, target))
+
+        def backward(grad_output, x, target):
+            return torch.ops.aten.huber_loss_backward(
+                grad_output, x, target, reduction, 0.7
+            )
+
+        gradcheck(
+            backward, inputs, check_forward_ad=True, check_batched_forward_grad=True
+        )
+        gradgradcheck(backward, inputs, check_fwd_over_rev=True)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("shape", ((), (0,), (2, 0)))
+    def test_huber_loss_backward_forward_ad_empty_scalar(self, device, dtype, shape):
+        x = torch.zeros(shape, device=device, dtype=dtype)
+        target = torch.ones_like(x)
+        for reduction in (0, 1, 2):
+            grad_output = torch.ones_like(x) if reduction == 0 else x.new_ones(())
+            primals = (grad_output, x, target)
+            tangents = tuple(torch.ones_like(value) for value in primals)
+            _, actual = torch.func.jvp(
+                lambda g, a, b: torch.ops.aten.huber_loss_backward(
+                    g, a, b, reduction, 0.5
+                ),
+                primals,
+                tangents,
+            )
+            self.assertEqual(
+                actual,
+                torch.ops.aten.huber_loss_backward(
+                    grad_output, x, target, reduction, 0.5
+                ),
+            )
+        with self.assertRaisesRegex(RuntimeError, "non-positive"):
+            torch.func.jvp(
+                lambda value: torch.nn.functional.huber_loss(value, target, delta=0),
+                (x,),
+                (x,),
+            )
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
