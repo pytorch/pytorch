@@ -146,6 +146,7 @@ dtensor_fails = {
     xfail("nn.functional.ctc_loss"),
     # 0-dim tensor edge cases: strategies don't handle scalar tensors
     xfail("transpose"),
+    xfail("polar"),
     # conv stride+padding: TP convolution rejects stride != 1 with padding
     xfail("nn.functional.conv1d"),
     xfail("nn.functional.conv2d"),
@@ -374,7 +375,6 @@ dtensor_fails_no_strategy = {
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.unfold"),
     xfail("nonzero"),
-    xfail("polar"),
     xfail("put"),
     xfail("renorm"),
     xfail("scatter_reduce", "amax"),
