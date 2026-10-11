@@ -14,6 +14,14 @@ from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import make_dynamo_test, run_tests
 
 
+class Indexable:
+    def __init__(self, value=0):
+        self.value = value
+
+    def __index__(self):
+        return self.value
+
+
 class ByteArrayTest(torch._dynamo.test_case.TestCase):
     """bytearray-specific tests, ported from CPython ByteArrayTest."""
 
@@ -368,6 +376,46 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b, self.type2test(b"abab"))
         b *= 0
         self.assertEqual(b, self.type2test())
+
+    @make_dynamo_test
+    def test_insert(self):
+        b = self.type2test(b"msssspp")
+        b.insert(1, ord("i"))
+        b.insert(4, ord("i"))
+        b.insert(-2, ord("i"))
+        b.insert(1000, ord("i"))
+        self.assertEqual(b, b"mississippi")
+        b.insert(Indexable(0), Indexable(ord("A")))
+        self.assertEqual(b, b"Amississippi")
+        self.assertRaises(TypeError, lambda: b.insert(0, b"1"))
+        self.assertRaises(TypeError, lambda: b.insert("0", 1))
+        self.assertRaises(ValueError, lambda: b.insert(0, 256))
+        self.assertRaises(TypeError, lambda: b.insert(0))
+        self.assertEqual(b, b"Amississippi")
+
+    @make_dynamo_test
+    def test_pop(self):
+        b = self.type2test(b"world")
+        self.assertEqual(b.pop(), ord("d"))
+        self.assertEqual(b.pop(0), ord("w"))
+        self.assertEqual(b.pop(Indexable(-2)), ord("r"))
+        self.assertEqual(b, b"ol")
+        self.assertRaises(IndexError, lambda: b.pop(10))
+        self.assertRaises(IndexError, lambda: self.type2test().pop())
+        self.assertRaises(TypeError, lambda: b.pop("0"))
+        self.assertEqual(self.type2test(b"\xff").pop(), 0xFF)
+
+    def test_insert_pop_arg_mutation(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(ba, x):
+            ba.insert(0, ord("a"))
+            return ba.pop(), x + 1
+
+        b = bytearray(b"bc")
+        out, out_y = f(b, torch.ones(1))
+        self.assertEqual(out, ord("c"))
+        self.assertEqual(b, bytearray(b"ab"))
+        self.assertEqual(out_y, torch.ones(1) + 1)
 
     def test_repr(self):
         @torch.compile(backend="eager")
