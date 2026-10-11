@@ -649,6 +649,19 @@ class TensorMetadataAndValues:
 
     tensor_metadata: TensorMetadata
     values: list[Any]
+    is_pinned: bool
+
+
+@dataclasses.dataclass
+class TensorMetadataAndPinned:
+    """
+    TensorMetadata plus pinned-ness, without values.
+    Used for hashing non-inlined frozen parameters, where only metadata
+    (now including pinned-ness) feeds the cache key.
+    """
+
+    tensor_metadata: TensorMetadata
+    is_pinned: bool
 
 
 def _ident(x: T) -> T:
@@ -672,6 +685,20 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
 
     return meta
+
+
+def _is_pinned_for_cache_key(t: Tensor) -> bool:
+    """
+    Probe a constant's pinned-ness for the FX-graph cache key. Falls back to
+    False if the tensor type cannot answer; this reproduces the historical
+    (pin-blind) key, so the worst case is a redundant entry rather than a
+    broken compile. All standard types answer without raising, making this
+    pure defense for exotic subclasses.
+    """
+    try:
+        return bool(t.is_pinned())
+    except Exception:
+        return False
 
 
 # Types that pickle handles natively via GLOBAL/INST opcodes even though their
@@ -835,7 +862,9 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_tensor(
         self, t: Tensor
-    ) -> tuple[Callable[[T], T], tuple[TensorMetadata | TensorMetadataAndValues]]:
+    ) -> tuple[
+        Callable[[T], T], tuple[TensorMetadataAndValues | TensorMetadataAndPinned]
+    ]:
         """
         Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
         stored as attributes on the GraphModule.
@@ -855,8 +884,9 @@ class FxGraphCachePickler(pickle.Pickler):
             )
 
         # If this is a non-inlined frozen parameter, we consider the metadata only.
+        is_pinned = _is_pinned_for_cache_key(t)
         if is_frozen_param(t) and not GraphLowering.can_inline_constant(t):
-            return (_ident, (metadata,))
+            return (_ident, (TensorMetadataAndPinned(metadata, is_pinned),))
 
         # Very large tensors will be expensive to copy to cpu and hash. Let's at least
         # report any slowness.
@@ -869,7 +899,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 "Please file an issue."
             )
 
-        return (_ident, (TensorMetadataAndValues(metadata, values),))
+        return (_ident, (TensorMetadataAndValues(metadata, values, is_pinned),))
 
     def _reduce_symint(self, s: SymInt) -> tuple[Callable[[T], T], tuple[str]]:
         """
