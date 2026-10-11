@@ -20,6 +20,7 @@ import dataclasses
 import functools
 import inspect
 import logging
+import operator
 import textwrap
 from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
@@ -2061,9 +2062,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
         op: str,
     ) -> VariableTracker:
-        """Per-VT tp_richcompare slot. Subclasses must override.
+        """Default tp_richcompare: object_richcompare.
 
-        Analogous to CPython's tp_richcompare function pointer on PyTypeObject.
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6263-L6305
+
         Returns ConstantVariable(NotImplemented) when the type does not handle
         the comparison (signaling do_richcompare to try the other operand).
 
@@ -2073,15 +2075,32 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         - generic_richcompare calls tp_richcompare_impl as part of the 4-step
           do_richcompare algorithm (subclass priority, forward, reflected,
           fallback).
+
+        VT subclasses override this for types with their own C tp_richcompare.
         """
-        unimplemented(
-            gb_type="Missing tp_richcompare_impl override",
-            context=f"tp_richcompare_impl {self} {op}",
-            explanation=f"{type(self).__name__} does not implement "
-            f"tp_richcompare_impl. Add a tp_richcompare_impl override to "
-            f"{type(self).__name__}.",
-            hints=[*graph_break_hints.DYNAMO_BUG],
+        from .constant import ConstantVariable
+        from .object_protocol import (
+            generic_is_true,
+            is_richcompare_not_implemented,
+            vt_identity_compare,
         )
+
+        if op == "__eq__":
+            identity = vt_identity_compare(self, other)
+            if identity is not None and identity.as_python_constant():
+                return ConstantVariable.create(True)
+            return ConstantVariable.create(NotImplemented)
+        if op == "__ne__":
+            # __ne__ delegates to Py_TYPE(self)->tp_richcompare(Py_EQ) and
+            # inverts the result, unless it is NotImplemented.
+            res = self.tp_richcompare_impl(tx, other, "__eq__")
+            if is_richcompare_not_implemented(res):
+                return res
+            ok = generic_is_true(tx, res)
+            if ok.is_python_constant():
+                return ConstantVariable.create(not ok.as_python_constant())
+            return VariableTracker.build(tx, operator.not_).call_function(tx, [ok], {})
+        return ConstantVariable.create(NotImplemented)
 
     def is_constant_match(self, *values: Any) -> bool:
         """
