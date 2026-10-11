@@ -44,12 +44,11 @@ inline std::string getRankPrefix(Comm* comm) {
 #define TC_LOG_WITH_PREFIX_BUILDER(level, comm) \
   LOG(level) << TC_LOG_METADATA(comm)
 #define TC_LOG_PLAIN(level) LOG(level) << "[TC] "
-#define TC_LOG_PICKER(x, level, comm, FUNC, ...) FUNC
-#define TC_LOG(...)                            \
-  TC_LOG_PICKER(                               \
-      ,                                        \
-      ##__VA_ARGS__,                           \
-      TC_LOG_WITH_PREFIX_BUILDER(__VA_ARGS__), \
-      TC_LOG_PLAIN(__VA_ARGS__))
+#define TC_LOG_PICKER(level, comm, FUNC, ...) FUNC
+#define TC_LOG(level, ...)                                              \
+  TC_LOG_PICKER(                                                        \
+      level __VA_OPT__(, ) __VA_ARGS__,                                 \
+      TC_LOG_WITH_PREFIX_BUILDER(level, __VA_ARGS__),                   \
+      TC_LOG_PLAIN(level))
 
 #endif // USE_C10D_NCCL
