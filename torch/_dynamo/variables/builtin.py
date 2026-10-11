@@ -102,8 +102,8 @@ from .dicts import (
     DictItemsVariable,
     DictKeysVariable,
     DictViewVariable,
+    pyanydict_checkexact,
     pydict_check,
-    pydict_checkexact,
     pyfrozendict_check,
     pyfrozendict_checkexact,
 )
@@ -3528,7 +3528,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         no_keywords(tx, "dict.fromkeys", kwargs)
         check_positional(tx, "fromkeys", len(args), 1, 2)
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
-        if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
+        if pyanydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
             if isinstance(args[0], ConstDictVariable):
                 args[0].install_dict_keys_match_guard()
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
@@ -3678,12 +3678,7 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
                 raise AssertionError(f"Expected FrozenDictVariable, got {type(result)}")
             return variables.FrozenDictVariable(storage=result.storage)
         if name == "fromkeys":
-            unimplemented(
-                gb_type="frozendict fromkeys",
-                context=name,
-                explanation="Dynamo does not yet support frozendict.fromkeys.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+            return self.fromkeys(tx, args, kwargs)
         if name in self._fn.__dict__ and callable(self._fn.__dict__[name]):
             check_positional(tx, name, len(args), 1, sys.maxsize)
             if not pyfrozendict_check(args[0]):
@@ -3694,6 +3689,20 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
                 )
             return args[0].call_method(tx, name, args[1:], kwargs)
         return super().call_method(tx, name, args, kwargs)
+
+    def fromkeys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        no_keywords(tx, "frozendict.fromkeys", kwargs)
+        check_positional(tx, "fromkeys", len(args), 1, 2)
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, polyfills.frozendict_fromkeys),
+            [self, *args],
+            kwargs,
+        )
 
 
 class IterBuiltinVariable(BaseBuiltinVariable):
