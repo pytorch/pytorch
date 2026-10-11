@@ -278,9 +278,13 @@ def stage_backward_input(
                 else:
                     inp.grad += dinput
 
-        # drop output side graph state we no longer need
+        # Drop output-side graph state we no longer need. A view cannot be
+        # detached in place (e.g. the output of an identity autograd.Function,
+        # such as an activation-checkpoint boundary); its graph is freed when
+        # the last reference to the output goes away, which for outputs the
+        # stage retains is after the weight backward.
         for stage_output in stage_outputs_or_loss:
-            if isinstance(stage_output, torch.Tensor):
+            if isinstance(stage_output, torch.Tensor) and not stage_output._is_view():
                 stage_output.detach_()
 
         return dinputs, param_groups

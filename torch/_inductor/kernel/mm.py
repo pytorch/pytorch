@@ -119,7 +119,7 @@ mm_template = TritonTemplate(
     # See more details in https://github.com/pytorch/pytorch/pull/146293
     else load_kernel_template("triton_mm_rocm"),
     cache_codegen_enabled_for_template=True,
-    prologue_loads_all_named_inputs=True,
+    prologue_loads_all_inputs=True,
 )
 
 persistent_tma_mm_template = TritonTemplate(
@@ -186,6 +186,12 @@ aten_mm_dtype = ExternKernelChoice(
 
 aten_addmm = ExternKernelChoice(
     torch.addmm, "at::addmm_out", op_overload=aten.addmm.out
+)
+aten_addmm_dtype = ExternKernelChoice(
+    torch.addmm,
+    "at::addmm_dtype_out",
+    name="addmm_dtype",
+    op_overload=aten.addmm.dtype_out,
 )
 
 aten__int_mm = ExternKernelChoice(
@@ -577,6 +583,29 @@ addmm_contiguous_subgraph_template = ContiguousTemplate(
 )
 
 
+def _check_mm_out_dtype(mat1, mat2, out_dtype: torch.dtype) -> None:
+    """Mirror the eager checks of ``aten.mm.dtype`` and ``aten.addmm.dtype``."""
+    input_dtype = mat1.get_dtype()
+    torch._check(
+        mat2.get_dtype() == input_dtype,
+        lambda: "input dtypes must be the same",
+    )
+    torch._check(
+        mat1.get_device().type in ("cuda", "xpu"),
+        lambda: "out_dtype is only supported for CUDA or XPU",
+    )
+    torch._check(
+        out_dtype == input_dtype
+        or (
+            out_dtype == torch.float32
+            and input_dtype in (torch.float16, torch.bfloat16)
+        ),
+        lambda: (
+            "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs"
+        ),
+    )
+
+
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     """
@@ -584,25 +613,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
     if out_dtype is not None:
-        input_dtype = mat1.get_dtype()
-        torch._check(
-            mat2.get_dtype() == input_dtype,
-            lambda: "input dtypes must be the same",
-        )
-        torch._check(
-            mat1.get_device().type in ("cuda", "xpu"),
-            lambda: "out_dtype is only supported for CUDA or XPU",
-        )
-        torch._check(
-            out_dtype == input_dtype
-            or (
-                out_dtype == torch.float32
-                and input_dtype in (torch.float16, torch.bfloat16)
-            ),
-            lambda: (
-                "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs"
-            ),
-        )
+        _check_mm_out_dtype(mat1, mat2, out_dtype)
 
     # Lower matmul-related operations (e.g., torch.matmul / torch.bmm / torch.addmm)
     # into native matmul IR using `ops.dot`. When we see a matmul pattern
@@ -925,11 +936,68 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     return node
 
 
+def _tuned_addmm_out_dtype(inp, mat1, mat2, out_dtype, *, alpha, beta, layout):
+    """Lowering for ``aten.addmm.dtype``, e.g. bf16 inputs accumulated into fp32.
+
+    Like ``tuned_mm`` with ``out_dtype``, only the ATen kernel is a candidate:
+    the Triton and other GEMM templates don't support ``out_dtype`` yet.
+    """
+    _check_mm_out_dtype(mat1, mat2, out_dtype)
+    torch._check(
+        inp.get_dtype() in (out_dtype, mat1.get_dtype()),
+        lambda: "self dtype must match either out_dtype or mat1 dtype",
+    )
+    # TODO: drop the cpp_wrapper fallback once aten.addmm.dtype_out has an AOTI
+    # C shim (torchgen/aoti/fallback_ops.py).
+    if V.graph.cpp_wrapper:
+        result = lowerings[aten.mm](mat1, mat2, out_dtype, layout=layout)
+        if alpha != 1:
+            result = lowerings[aten.mul](alpha, result)
+        # beta == 0 ignores inp, NaN and inf included.
+        if beta == 0:
+            return result
+        inp = lowerings[prims.convert_element_type](inp, out_dtype)
+        if beta != 1:
+            inp = lowerings[aten.mul](beta, inp)
+        return lowerings[aten.add](result, inp)
+
+    m, n, k, layout, mat1, mat2 = mm_args(
+        mat1, mat2, layout=layout, out_dtype=out_dtype
+    )
+    inp = realize_inputs(inp)
+    name = "addmm"
+    counters["aten_mm_info"][f"aten.addmm_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten.addmm.dtype: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat1.get_dtype(),
+        mat2.get_dtype(),
+        layout,
+    )
+    kernel_inputs = MMKernelInputs(
+        [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta), out_dtype=out_dtype
+    )
+    choices = V.choices.get_template_configs(
+        kernel_inputs,
+        [aten_addmm_dtype],
+        name,
+        kwarg_overrides={aten_addmm_dtype.uid: {"out_dtype": out_dtype}},
+    )
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
+
+
 @register_lowering(aten.addmm, type_promotion_kind=None)
-def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
+def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    if out_dtype is not None:
+        return _tuned_addmm_out_dtype(
+            inp, mat1, mat2, out_dtype, alpha=alpha, beta=beta, layout=layout
+        )
     use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
     template_inp = inp
     if not use_bf16x9 and beta == 0:
