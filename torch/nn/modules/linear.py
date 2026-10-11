@@ -313,6 +313,12 @@ class LazyLinear(LazyModuleMixin, Linear):
         if not self.has_uninitialized_params() and self.in_features != 0:
             super().reset_parameters()
 
+    def _initialize_parameters_from_state_dict(self):
+        if type(self).initialize_parameters is not LazyLinear.initialize_parameters:
+            return False
+        self.in_features = self.weight.shape[1]
+        return True
+
     def initialize_parameters(self, input) -> None:  # type: ignore[override]
         """
         Infers ``in_features`` based on ``input`` and initializes parameters.
