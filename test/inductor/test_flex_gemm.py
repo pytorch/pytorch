@@ -152,12 +152,14 @@ def nvfp4_e4m3_scale(amax: torch.Tensor, max_value: float = 6.0) -> torch.Tensor
 
 class TestFlexGemmRuntimeImport(TestCase):
     def test_import_does_not_load_vendored_quack(self):
-        for name in list(sys.modules):
-            if name == "torch._vendor.quack" or name.startswith("torch._vendor.quack."):
-                del sys.modules[name]
-        sys.modules.pop("torch._inductor.kernel.flex_gemm.runtime", None)
-        importlib.import_module("torch._inductor.kernel.flex_gemm.runtime")
-        self.assertNotIn("torch._vendor.quack", sys.modules)
+        script = (
+            "import importlib, sys\n"
+            "importlib.import_module('torch._inductor.kernel.flex_gemm.runtime')\n"
+            "quack = 'torch._vendor.quack'\n"
+            "if any(n == quack or n.startswith(quack + '.') for n in sys.modules):\n"
+            "    raise AssertionError('runtime imported vendored QuACK')\n"
+        )
+        subprocess.run([sys.executable, "-c", script], check=True, timeout=300)
 
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_quack_cache_fingerprint_covers_quack_ops_before_any_cache_use(self):
@@ -267,6 +269,18 @@ class TestFlexGemmOutputLayout(TestCase):
 
 @instantiate_parametrized_tests
 class TestFlexGemmRuntimeHelpers(TestCase):
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+    @parametrize("capacity", (10, 11))
+    def test_quack_config_space_includes_device_default(self, capacity):
+        from torch._vendor.quack.gemm_config import (
+            _default_config_for_cap,
+            get_all_configs,
+        )
+
+        configs = [c for c in get_all_configs() if c.device_capacity == capacity]
+        self.assertTrue(configs)
+        self.assertIn(_default_config_for_cap(capacity), configs)
+
     @recover_orig_fp32_precision
     def test_quack_fp32_operands_follow_matmul_precision(self):
         def operand(dtype, device="cuda"):
@@ -6625,7 +6639,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 pingpong=False,
                 cluster_m=2,
                 cluster_n=2,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability()[0],
             )
         )
 
@@ -6680,7 +6694,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 pingpong=False,
                 cluster_m=cluster_m,
                 cluster_n=cluster_n,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability()[0],
             )
         )
 
@@ -7937,7 +7951,7 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=False,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability()[0],
             )
         )
 
@@ -9223,7 +9237,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=False,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -9271,7 +9285,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=False,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -9319,7 +9333,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=False,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -9371,7 +9385,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=False,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -9452,7 +9466,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=False,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -9511,7 +9525,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                     cluster_m=2,
                     cluster_n=1,
                     swap_ab=swap_ab,
-                    device_capacity=10,
+                    device_capacity=torch.cuda.get_device_capability(device)[0],
                 )
             )
             return flex_gemm(
@@ -9647,7 +9661,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=True,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -9791,7 +9805,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             pingpong=False,
             cluster_m=2,
             cluster_n=1,
-            device_capacity=10,
+            device_capacity=torch.cuda.get_device_capability(device)[0],
         )
         config_key = self.quackConfigKey(expected_config)
         config = dict(config_key)
@@ -9880,7 +9894,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 is_dynamic_persistent=True,
                 cluster_m=2,
                 cluster_n=1,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -9939,7 +9953,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             pingpong=False,
             cluster_m=cluster_m,
             cluster_n=cluster_n,
-            device_capacity=10,
+            device_capacity=torch.cuda.get_device_capability(device)[0],
         )
         config_key = self.quackConfigKey(expected_config)
         config = dict(config_key)

@@ -188,13 +188,13 @@ def grouped_reduce_supports_config(config, axis: int, group: int) -> bool:
 
     ``axis`` is caller-oriented. Swap-at-trace transposes the accumulator, so
     legality is checked against the opposite physical CTA axis. Swapped grouped
-    sinks are initially SM100-only, matching the layout families covered by
+    sinks support SM100 and SM110, matching the layout families covered by
     forced-kernel tests.
     """
     if axis not in (0, 1) or group <= 0:
         return False
     if config.swap_ab:
-        if axis == 0 or getattr(config, "device_capacity", None) != 10:
+        if axis == 0 or getattr(config, "device_capacity", None) not in (10, 11):
             return False
         axis = 1 - axis
     if axis == 1 and config.device_capacity == 12:
