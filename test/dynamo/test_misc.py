@@ -7439,6 +7439,143 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(len(sub_of_foo_subclass_var_optim), 1)
         self.assertEqual(sub_of_foo_subclass_var_optim, sub_of_foo_subclass_var_reg)
 
+    def test_type_mro_method(self):
+        class Foo:
+            pass
+
+        class Bar(Foo):
+            pass
+
+        class Baz:
+            pass
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(cls, x):
+            return cls.mro(), x + 1
+
+        x = torch.ones(1)
+        self.assertEqual(fn(Bar, x)[0], [Bar, Foo, object])
+        self.assertEqual(fn(Baz, x)[0], [Baz, object])
+        self.assertEqual(fn(Bar, x)[0], [Bar, Foo, object])
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_type_mro_method_returns_new_list(self):
+        class Foo:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls):
+            mro = cls.mro()
+            mro.append(1)
+            return mro, cls.mro()
+
+        self.assertEqual(fn(Foo), ([Foo, object, 1], [Foo, object]))
+
+    def test_type_mro_method_not_cached_mro(self):
+        class Base:
+            pass
+
+        class Meta(type):
+            def mro(cls):
+                return [cls, object]
+
+        class Foo(Base, metaclass=Meta):
+            pass
+
+        del Meta.mro
+
+        @torch.compile(backend="eager")
+        def fn(cls, x):
+            return cls.mro(), x + 1
+
+        self.assertEqual(Foo.__mro__, (Foo, object))
+        self.assertEqual(fn(Foo, torch.ones(1))[0], [Foo, Base, object])
+
+    @parametrize("on_base", [False, True])
+    def test_type_mro_method_overridden_after_compile(self, on_base):
+        class Base:
+            pass
+
+        class Foo(Base):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls):
+            return cls.mro()
+
+        self.assertEqual(fn(Foo), [Foo, Base, object])
+        # The override must run exactly once, in the recompiled frame, and
+        # never inside a guard.
+        results = [[Foo, object], [Foo, object]]
+        (Base if on_base else Foo).mro = staticmethod(results.pop)
+        self.assertEqual(fn(Foo), [Foo, object])
+        self.assertEqual(len(results), 1)
+
+    def test_type_mro_method_after_bases_assignment(self):
+        class A:
+            pass
+
+        class B(A):
+            pass
+
+        class C(A):
+            pass
+
+        def fn(cls, base, x):
+            cls.__bases__ = (base,)
+            return x + len(cls.__mro__) + len(cls.mro())
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Write to unmodeled getset/member attribute"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(C, B, torch.ones(1))
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(C, B, torch.ones(1)), torch.full((1,), 9.0))
+
+    def test_type_mro_method_shared_base_after_bases_assignment(self):
+        class Base:
+            pass
+
+        class A(Base):
+            pass
+
+        class B(Base):
+            pass
+
+        class Other:
+            @classmethod
+            def mro(cls):
+                return [cls]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(a, b, x):
+            return x + 1, len(a.mro()), len(b.mro())
+
+        x = torch.zeros(1)
+        self.assertEqual(fn(A, B, x), (x + 1, 3, 3))
+        # Base is in both MROs, but only B's changes.
+        B.__bases__ = (Other,)
+        self.assertEqual(fn(A, B, x), (x + 1, 3, 1))
+
+    def test_type_mro_method_pending_base_override(self):
+        class Base:
+            pass
+
+        class Child(Base):
+            pass
+
+        def shadow():
+            return [Base]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls, base, x):
+            base.mro = shadow
+            return x + len(cls.mro())
+
+        self.assertEqual(fn(Child, Base, torch.ones(1)), torch.full((1,), 2.0))
+
     def test_builtin_str_on_user_defined_function(self):
         def another_fn():
             pass

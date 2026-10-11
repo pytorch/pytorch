@@ -3816,6 +3816,12 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
+        elif isinstance(
+            obj, variables.UserDefinedClassVariable
+        ) and name_var.is_constant_match("__bases__"):
+            # CPython recomputes the MRO of the class and its subclasses on this
+            # write; a pending store would leave later lookups on the old one.
+            unmodeled_setter(obj, tx, val)
         elif (
             not tx.output.side_effects.is_attribute_mutation(obj)
             and obj.source is not None
