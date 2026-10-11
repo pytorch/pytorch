@@ -71,6 +71,18 @@ def _act(x):
 _sigmoid = _act
 
 
+_RAW_DESCRIPTOR_TARGET = list.count
+_RAW_DESCRIPTOR_VALUES = [0, 0, 0, 1, 1, 1, 1, 1]
+
+
+def _call_raw_method_descriptor(x):
+    return x + _RAW_DESCRIPTOR_TARGET(_RAW_DESCRIPTOR_VALUES, 1)
+
+
+def _call_raw_classmethod_descriptor(x):
+    return x + len(_RAW_DESCRIPTOR_TARGET(dict, ("a", "b")))
+
+
 def _through_act(x):
     return _act(x) + 1
 
@@ -234,6 +246,34 @@ _RISKY_DROP_CASES = {
 
 
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
+    @parametrize("caching_precompile", (False, True))
+    @parametrize("descriptor_kind", ("method", "classmethod"))
+    def test_raw_descriptor_guard_survives_serialization(
+        self, caching_precompile, descriptor_kind
+    ):
+        if descriptor_kind == "method":
+            initial = list.count
+            replacement = list.index
+            fn = _call_raw_method_descriptor
+        else:
+            initial = dict.__dict__["fromkeys"]
+            replacement = int.__dict__["from_bytes"]
+            fn = _call_raw_classmethod_descriptor
+
+        module = sys.modules[__name__]
+        x = torch.tensor(0)
+        with mock.patch.object(module, "_RAW_DESCRIPTOR_TARGET", initial):
+            with torch._dynamo.config.patch(caching_precompile=caching_precompile):
+                compiled = _aot_compile(fn, x)
+                _, kept = _kept_types(compiled)
+                self.assertIn("BUILTIN_MATCH", kept)
+                data = AOTCompiledFunction.serialize(compiled).serialized_data
+            loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+            self.assertTrue(loaded.guard_check(x))
+            self.assertEqual(loaded(x), fn(x))
+            with mock.patch.object(module, "_RAW_DESCRIPTOR_TARGET", replacement):
+                self.assertFalse(loaded.guard_check(x))
+
     def test_default_guard_filter_drops_the_unserializable_types(self):
         filter_fn = precompile_package.default_guard_filter_fn
         unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES

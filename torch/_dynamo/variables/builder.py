@@ -163,6 +163,7 @@ from ..source import (
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
+    TypeDictSource,
     TypeMROSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
@@ -177,9 +178,11 @@ from ..utils import (
     common_constant_types,
     dict_keys,
     enumerate_items_with_dict_position,
+    find_bound_builtin_method_descriptor,
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
+    get_type_dict_no_user_code,
     is_frozen_dataclass,
     is_function,
     is_function_or_wrapper,
@@ -193,6 +196,7 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
+    iter_mro_static_attrs,
     list_reverseiterator,
     list_reverseiterator_backing_list,
     list_reverseiterator_len,
@@ -242,6 +246,7 @@ from .functions import (
     GetSetDescriptorVariable,
     LocalGeneratorFunctionVariable,
     MemberDescriptorVariable,
+    MethodDescriptorVariable,
     MethodWrapperVariable,
     PropertyVariable,
     SysFunctionVariable,
@@ -644,18 +649,20 @@ def bound_builtin_method_descriptor(value: Any) -> Any | None:
         return None
 
     method_self = value.__self__
+    method_self_type = type(method_self)
+    method_self_is_type = issubclass(method_self_type, type)
     # BuiltinMethodType also covers module-level C functions like len and
     # torch.add.  Keep those on the existing function/trace-rule path.
-    if method_self is None or isinstance(method_self, types.ModuleType):
+    if method_self is None or issubclass(method_self_type, types.ModuleType):
         return None
 
     # random.Random methods mutate RNG state.  Existing random handling either
     # records RandomValueSource calls from a RandomVariable, or graph-breaks for
     # pre-bound module helpers like random.random.
-    if isinstance(method_self, random.Random):
+    if not method_self_is_type and isinstance(method_self, random.Random):
         return None
 
-    owner = method_self if isinstance(method_self, type) else type(method_self)
+    owner = cast(type, method_self if method_self_is_type else method_self_type)
 
     # Torch-internal bound methods already have dedicated Dynamo paths. Do not
     # route them through the generic bound-builtin descriptor VT, which changes
@@ -663,10 +670,51 @@ def bound_builtin_method_descriptor(value: Any) -> Any | None:
     if is_torch_class(owner):
         return None
 
-    # BoundBuiltinMethodVariable needs the descriptor that created this bound
-    # method.  For class-bound methods, look on the class object itself (e.g.
-    # dict.fromkeys); for instance-bound methods, look on type(self).
-    return inspect.getattr_static(owner, value.__name__, None)
+    return find_bound_builtin_method_descriptor(value)
+
+
+def normalize_descriptor_source(
+    tx: "InstructionTranslatorBase",
+    source: Source,
+    descriptor: types.ClassMethodDescriptorType | types.MethodDescriptorType,
+) -> Source:
+    if not isinstance(source, (DictGetItemSource, GetItemSource)) or not isinstance(
+        source.index, str
+    ):
+        return source
+    name = source.index
+    if isinstance(source.base, TypeDictSource):
+        return DictGetItemSource(source.base, name)
+    if isinstance(source.base, AttrSource) and source.base.member == "__dict__":
+        cls = tx.output.resolve_source_value(source.base.base)
+        if issubclass(type(cls), type):
+            metacls = type(cls)
+            custom_getattribute = (
+                next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
+                is not type.__dict__["__getattribute__"]
+            )
+            custom_dict = (
+                next(iter_mro_static_attrs(metacls, "__dict__"), None)
+                is not type.__dict__["__dict__"]
+            )
+            if custom_getattribute or custom_dict:
+                unimplemented(
+                    gb_type="Unsupported descriptor source",
+                    context="class __dict__ source",
+                    explanation="Dynamo cannot safely guard a method descriptor "
+                    "returned by a custom metaclass __dict__.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if get_type_dict_no_user_code(cls).get(name) is descriptor:
+                return DictGetItemSource(TypeDictSource(source.base.base), name)
+            unimplemented(
+                gb_type="Unsupported descriptor source",
+                context="class __dict__ source",
+                explanation="Dynamo cannot safely guard a method descriptor "
+                "returned by a custom metaclass __dict__.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+    return source
 
 
 class _missing:
@@ -1864,7 +1912,9 @@ class VariableBuilder:
             elif inspect.isfunction(value):
                 self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
-        elif inspect.getattr_static(value, "__script_if_tracing_wrapper", False):
+        elif isinstance(value, types.FunctionType) and value.__dict__.get(
+            "__script_if_tracing_wrapper", False
+        ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(
                 value,
@@ -1898,11 +1948,42 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             return CollectionsNamedTupleFunction(value, source=self.source)
         elif (descriptor := bound_builtin_method_descriptor(value)) is not None:
-            self.install_guards(GuardBuilder.ID_MATCH)
             method_self = value.__self__
+            if isinstance(descriptor, types.ClassMethodDescriptorType) and issubclass(
+                type(method_self), type
+            ):
+                metacls = type(method_self)
+                custom_getattribute = (
+                    next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
+                    is not type.__dict__["__getattribute__"]
+                )
+                custom_dict = (
+                    next(iter_mro_static_attrs(metacls, "__dict__"), None)
+                    is not type.__dict__["__dict__"]
+                )
+                if custom_getattribute or custom_dict:
+                    unimplemented(
+                        gb_type="Bound builtin classmethod with custom metaclass",
+                        context=f"{descriptor.__qualname__} bound to a class with a custom metaclass",
+                        explanation="Dynamo cannot safely wrap the class receiver without invoking metaclass hooks.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+            self.install_guards(GuardBuilder.ID_MATCH)
             obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, method_self, obj_source)
-            return BoundBuiltinMethodVariable(descriptor, obj_vt, source=self.source)
+            return BoundBuiltinMethodVariable(
+                descriptor, obj_vt, value=value, source=self.source
+            )
+        elif isinstance(value, types.MethodDescriptorType) and not is_torch_class(
+            value.__objclass__
+        ):
+            # Torch method descriptors (e.g. torch.Tensor.add) keep their
+            # trace-rule path below.
+            source = normalize_descriptor_source(self.tx, self.get_source(), value)
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+            owner_source = source and AttrSource(source, "__objclass__")
+            owner = VariableTracker.build(self.tx, value.__objclass__, owner_source)
+            return MethodDescriptorVariable(value, owner=owner, source=source)
         elif is_function(value) and value in (float.fromhex, float.hex):
             self.install_guards(GuardBuilder.ID_MATCH)
             return GetAttrVariable(
@@ -1974,7 +2055,9 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, types.ClassMethodDescriptorType):
-            return ClassMethodDescriptorVariable(value, source=self.source)
+            source = normalize_descriptor_source(self.tx, self.get_source(), value)
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+            return ClassMethodDescriptorVariable(value, source=source)
         elif isinstance(value, types.GetSetDescriptorType):
             # GetSet descriptors are C functions attached to an attribute lookup
             # using PyGetSetDef. Python, on attribute lookup, can decide to
@@ -5672,6 +5755,22 @@ class SourcelessBuilder:
         )
         handlers[types.GetSetDescriptorType] = (
             lambda tx, value: GetSetDescriptorVariable(value)
+        )
+
+        def method_descriptor_handler(
+            tx: "InstructionTranslatorBase", value: types.MethodDescriptorType
+        ) -> VariableTracker:
+            # Torch method descriptors (e.g. torch.Tensor.add) keep their
+            # trace-rule path.
+            if is_torch_class(value.__objclass__):
+                # pyrefly: ignore[not-callable, bad-argument-count]
+                return trace_rules.lookup(value)(value)
+            owner = SourcelessBuilder.create(tx, value.__objclass__)
+            return MethodDescriptorVariable(value, owner=owner)
+
+        handlers[types.MethodDescriptorType] = method_descriptor_handler
+        handlers[types.ClassMethodDescriptorType] = (
+            lambda tx, value: ClassMethodDescriptorVariable(value)
         )
         handlers[types.MemberDescriptorType] = (
             lambda tx, value: MemberDescriptorVariable(value)

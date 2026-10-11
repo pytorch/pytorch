@@ -7,11 +7,13 @@ import enum
 import functools
 import io
 import itertools
+import os
 import pickle
 import sys
 import tempfile
 import threading
 import types
+import typing
 import unittest
 import weakref
 from collections.abc import Iterator
@@ -48,7 +50,13 @@ from torch._dynamo.symbolic_convert import (
     InstructionTranslator,
     SpeculationLog,
 )
-from torch._dynamo.utils import CleanupHook, dynamo_timed, get_metrics_context
+from torch._dynamo.utils import (
+    CleanupHook,
+    dynamo_timed,
+    get_metrics_context,
+    get_type_dict_no_user_code,
+    get_type_mro_no_user_code,
+)
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_utils import (
@@ -1243,6 +1251,47 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
     # directly rather than through a capture, so none of
     # TestGuardSerialization's setup applies.
+
+    def test_raw_descriptors_require_an_immutable_owner(self):
+        mutable = [os.DirEntry.is_file]
+        generic_class_getitem = typing.Generic.__dict__["__class_getitem__"]
+        if isinstance(generic_class_getitem, types.ClassMethodDescriptorType):
+            mutable.append(generic_class_getitem)
+        for descriptor in mutable:
+            with self.subTest(descriptor=descriptor):
+                with self.assertRaisesRegex(PackageError, "mutable owner"):
+                    GuardsStatePickler(
+                        {id(descriptor): descriptor}, {}, {}, {}, io.BytesIO()
+                    ).dump(descriptor)
+
+        immutable = (list.count, dict.__dict__["fromkeys"])
+        for descriptor in immutable:
+            with self.subTest(descriptor=descriptor):
+                buf = io.BytesIO()
+                GuardsStatePickler({id(descriptor): descriptor}, {}, {}, {}, buf).dump(
+                    descriptor
+                )
+                self.assertIs(load_guards_state(buf.getvalue()), descriptor)
+
+    def test_type_dict_helpers_bypass_metaclass_hooks(self):
+        calls = []
+        marker = object()
+
+        class Meta(type):
+            def __getattribute__(cls, name):
+                calls.append(name)
+                raise AssertionError(f"unexpected metaclass lookup: {name}")
+
+        class D(metaclass=Meta):
+            value = marker
+
+        self.assertIs(get_type_dict_no_user_code(D)["value"], marker)
+        mro = get_type_mro_no_user_code(D)
+        self.assertEqual(len(mro), 2)
+        self.assertIs(mro[0], D)
+        self.assertIs(mro[1], object)
+        self.assertIs(GuardsStatePickler._unpickle_type_dict_item(D, "value"), marker)
+        self.assertEqual(calls, [])
 
     def test_module_bookkeeping_containers_are_never_registered_as_pruned(self):
         # nn.Module.__getattr__ indexes _parameters/_buffers/_modules for every
