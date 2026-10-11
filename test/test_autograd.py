@@ -13374,6 +13374,257 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.double)
+    @dtypesIfMPS(torch.float32)
+    @parametrize("mode", ("sum", "mean", "max"))
+    @parametrize("index_dtype", (torch.int32, torch.int64))
+    def test_embedding_bag_forward_ad(self, device, dtype, mode, index_dtype):
+        # Ties in different columns must select the same entries as backward.
+        weight = (
+            torch.tensor(
+                [[3, 1, 2], [3, 4, 0], [1, 4, 2], [0, -1, 5], [99, 99, 99]],
+                dtype=dtype,
+                device=device,
+            )
+            .t()
+            .contiguous()
+            .t()
+        )
+        tangent = torch.arange(15, dtype=dtype, device=device).view(3, 5).t()
+        indices = torch.tensor([0, 1, 0, 4, 2, 3], dtype=index_dtype, device=device)
+        indices = torch.stack((indices, indices), dim=1)[:, 0]
+        offsets = torch.tensor(
+            [0, 0, 3, 5, 6], dtype=index_dtype, device=device
+        ).repeat_interleave(2)[::2]
+
+        def reference(w, bags):
+            outputs = []
+            for bag in bags:
+                bag = bag[bag != 4].long()
+                if bag.numel() == 0:
+                    outputs.append(w.sum(0) * 0)
+                else:
+                    entries = w.index_select(0, bag)
+                    if mode == "max":
+                        outputs.append(entries.max(0).values)
+                    else:
+                        outputs.append(getattr(entries, mode)(0))
+            return torch.stack(outputs)
+
+        for include_last_offset in (False, True):
+            with self.subTest(include_last_offset=include_last_offset):
+
+                def fn(w):
+                    return nn.functional.embedding_bag(
+                        indices,
+                        w,
+                        offsets,
+                        mode=mode,
+                        padding_idx=4,
+                        include_last_offset=include_last_offset,
+                    )
+
+                ends = offsets[1:].tolist()
+                if not include_last_offset:
+                    ends.append(indices.numel())
+                bags = [indices[start:end] for start, end in zip(offsets, ends)]
+                expected = torch.func.jvp(
+                    lambda w: reference(w, bags), (weight,), (tangent,)
+                )
+                self.assertEqual(torch.func.jvp(fn, (weight,), (tangent,)), expected)
+                # Compare the JVP against the existing reverse-mode convention,
+                # including tied maxima and padding.
+                w = weight.detach().requires_grad_()
+                cotangent = torch.randn_like(fn(w))
+                vjp = torch.autograd.grad(fn(w), w, cotangent)[0]
+                self.assertEqual((expected[1] * cotangent).sum(), (tangent * vjp).sum())
+
+        two_dimensional = indices.reshape(2, 3)
+
+        def fn(w):
+            return nn.functional.embedding_bag(
+                two_dimensional, w, mode=mode, padding_idx=4
+            )
+
+        self.assertEqual(
+            torch.func.jvp(fn, (weight,), (tangent,)),
+            torch.func.jvp(
+                lambda w: reference(w, two_dimensional), (weight,), (tangent,)
+            ),
+        )
+
+    @dtypes(torch.double)
+    @dtypesIfMPS(torch.float32)
+    @parametrize("differentiated", ("weight", "per_sample_weights", "both"))
+    def test_embedding_bag_forward_ad_per_sample_weights(
+        self, device, dtype, differentiated
+    ):
+        weight = torch.randn(3, 5, dtype=dtype, device=device).t()
+        tangent = torch.randn_like(weight)
+        sample_weights = torch.randn(12, dtype=dtype, device=device)[::2]
+        sample_tangent = torch.randn_like(sample_weights)
+        indices = torch.tensor([[0, 1, 4], [2, 0, 3]], device=device)
+
+        def fn(w, p):
+            return nn.functional.embedding_bag(
+                indices,
+                w,
+                mode="sum",
+                per_sample_weights=p.view_as(indices),
+                padding_idx=4,
+            )
+
+        def reference(w, p):
+            entries = w[indices] * p.view(2, 3, 1)
+            return entries.masked_fill((indices == 4).unsqueeze(-1), 0).sum(1)
+
+        if differentiated == "weight":
+
+            def wrapped(w):
+                return fn(w, sample_weights)
+
+            def expected(w):
+                return reference(w, sample_weights)
+
+            primals, tangents = (weight,), (tangent,)
+        elif differentiated == "per_sample_weights":
+            # Frozen weights must not select the forward-only native kernel.
+            def wrapped(p):
+                return fn(weight, p)
+
+            def expected(p):
+                return reference(weight, p)
+
+            primals, tangents = (sample_weights,), (sample_tangent,)
+        else:
+            wrapped, expected = fn, reference
+            primals, tangents = (weight, sample_weights), (tangent, sample_tangent)
+        self.assertEqual(
+            torch.func.jvp(wrapped, primals, tangents),
+            torch.func.jvp(expected, primals, tangents),
+        )
+        primals = tuple(p.detach().requires_grad_() for p in primals)
+        if dtype == torch.double:
+            self.assertTrue(
+                gradcheck(
+                    wrapped,
+                    primals,
+                    check_forward_ad=True,
+                    check_backward_ad=False,
+                    check_batched_grad=False,
+                )
+            )
+        self.assertEqual(
+            torch.func.jvp(
+                lambda *args: torch.func.jvp(wrapped, args, tangents)[1],
+                primals,
+                tangents,
+            ),
+            torch.func.jvp(
+                lambda *args: torch.func.jvp(expected, args, tangents)[1],
+                primals,
+                tangents,
+            ),
+        )
+        # The bilinear rule remains differentiable with respect to its primals.
+        actual_tangent = torch.func.jvp(wrapped, primals, tangents)[1]
+        expected_tangent = torch.func.jvp(expected, primals, tangents)[1]
+        if differentiated == "both":
+            self.assertEqual(
+                torch.autograd.grad(actual_tangent.sum(), primals),
+                torch.autograd.grad(expected_tangent.sum(), primals),
+            )
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float16, torch.float32)
+    @parametrize("mode", ("sum", "mean", "max"))
+    def test_embedding_bag_forward_ad_padding_and_dtypes(self, device, dtype, mode):
+        weight = torch.tensor(
+            [[float("nan"), float("nan")], [2, 4]], dtype=dtype, device=device
+        )
+        tangent = torch.tensor(
+            [[float("nan"), float("nan")], [3, 1]], dtype=dtype, device=device
+        )
+        indices = torch.tensor([0, 0, 1, 0, 1, 0], device=device)
+        offsets = torch.tensor([0, 2, 5, 6], device=device)
+
+        def fn(w):
+            return nn.functional.embedding_bag(
+                indices,
+                w,
+                offsets,
+                mode=mode,
+                padding_idx=0,
+                include_last_offset=True,
+            )
+
+        expected_primal = torch.zeros(3, 2, dtype=dtype, device=device)
+        expected_tangent = torch.zeros_like(expected_primal)
+        scale = 2 if mode == "sum" else 1
+        expected_primal[1] = weight[1] * scale
+        expected_tangent[1] = tangent[1] * scale
+        self.assertEqual(
+            torch.func.jvp(fn, (weight,), (tangent,)),
+            (expected_primal, expected_tangent),
+        )
+
+    @dtypes(torch.float32)
+    def test_embedding_bag_forward_ad_missing_tangent(self, device, dtype):
+        indices = torch.tensor([0, 1], device=device)
+        offsets = torch.tensor([0], device=device)
+        weight = torch.tensor([[2], [3]], dtype=dtype, device=device)
+        sample_weights = torch.tensor([4, 5], dtype=dtype, device=device)
+
+        def fn(w, p):
+            return nn.functional.embedding_bag(
+                indices, w, offsets, mode="sum", per_sample_weights=p
+            )
+
+        infinite_weight = weight.clone()
+        infinite_weight[0] = float("inf")
+        infinite_sample_weights = sample_weights.clone()
+        infinite_sample_weights[0] = float("inf")
+        _, tangent = torch.func.jvp(
+            lambda w: fn(w, sample_weights),
+            (infinite_weight,),
+            (torch.ones_like(weight),),
+        )
+        self.assertEqual(tangent, sample_weights.sum().view(1, 1))
+        _, tangent = torch.func.jvp(
+            lambda p: fn(weight, p),
+            (infinite_sample_weights,),
+            (torch.ones_like(sample_weights),),
+        )
+        self.assertEqual(tangent, weight.sum().view(1, 1))
+
+    @dtypes(torch.float32)
+    @parametrize("mode", (0, 1, 2))
+    def test_embedding_bag_forward_ad_empty_and_metadata(self, device, dtype, mode):
+        for rows, columns in ((0, 3), (2, 3), (2, 0)):
+            with self.subTest(rows=rows, columns=columns):
+                weight = torch.randn(rows, columns, dtype=dtype, device=device)
+                with fwAD.dual_level():
+                    dual = fwAD.make_dual(weight, torch.zeros_like(weight))
+                    result = torch.ops.aten._embedding_bag(
+                        dual,
+                        torch.tensor([], dtype=torch.long, device=device),
+                        torch.tensor([0, 0], device=device),
+                        False,
+                        mode,
+                        False,
+                        None,
+                        False,
+                        -1,
+                    )
+                    primal, tangent = fwAD.unpack_dual(result[0])
+                    self.assertEqual(
+                        primal,
+                        torch.zeros(2, columns, dtype=weight.dtype, device=device),
+                    )
+                    self.assertEqual(tangent, torch.zeros_like(primal))
+                    for metadata in result[1:]:
+                        self.assertIsNone(fwAD.unpack_dual(metadata).tangent)
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:

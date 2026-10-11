@@ -76,7 +76,7 @@ from torchgen.model import (
     SelfArgument,
     TensorOptionsArguments,
 )
-from torchgen.utils import FileManager, mapMaybe
+from torchgen.utils import FileManager, IDENT_REGEX, mapMaybe
 
 from .context import with_native_function_with_differentiability_info_and_key
 from .gen_inplace_or_view_type import (
@@ -1912,6 +1912,7 @@ def emit_body(
     def emit_any_has_forward_grad() -> list[str]:
         content: list[str] = []
         if not is_foreach:
+            tangent_availability: dict[str, list[str]] = {}
             for derivative in fw_derivatives:
                 requires_fw_grad = get_any_has_fw_grad_cond(derivative=derivative)
                 if info and info.output_differentiability_conditions:
@@ -1923,8 +1924,31 @@ def emit_body(
                 content.append(
                     f"[[maybe_unused]] auto {get_any_has_forward_grad_name(derivative.var_names)} = {requires_fw_grad};"
                 )
+                for inp in differentiable_inputs:
+                    if re.search(
+                        IDENT_REGEX.format(inp.name + "_t_defined"), derivative.formula
+                    ):
+                        tangent_availability.setdefault(inp.name, []).append(
+                            get_any_has_forward_grad_name(derivative.var_names)
+                        )
+            # Capture presence before an inplace operation can modify the input.
+            # Do not expose raw tangent tensors, which may alias inplace targets.
+            for inp_name, conditions in tangent_availability.items():
+                condition = " || ".join(conditions)
+                content.append(
+                    f"const bool {inp_name}_t_defined = ({condition}) && isFwGradDefined({inp_name});"
+                )
         else:
             for derivative in fw_derivatives:
+                if any(
+                    re.search(
+                        IDENT_REGEX.format(inp.name + "_t_defined"), derivative.formula
+                    )
+                    for inp in differentiable_inputs
+                ):
+                    raise RuntimeError(
+                        "Tangent availability is not supported for foreach formulas"
+                    )
                 bool_vector_name = get_any_has_forward_grad_name(derivative.var_names)
                 cur_derivative_conditions = []
                 for inp in differentiable_inputs:
