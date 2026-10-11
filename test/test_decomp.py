@@ -6,6 +6,7 @@ import re
 import unittest
 from collections import defaultdict
 from functools import partial
+from unittest import mock
 
 import torch._inductor.decomposition
 import torch.autograd
@@ -1237,6 +1238,14 @@ class DecompOneOffTests(TestCase):
 
         self.assertEqual(exp, exp_ref)
         self.assertFalse(exp.isinf().any())
+
+    def test_exponential_zero_uniform(self, device):
+        inp = torch.empty(1, device=device)
+        with mock.patch.object(torch, "rand_like", side_effect=torch.zeros_like):
+            result = torch._refs.exponential(inp)
+
+        expected = torch.full_like(inp, torch.finfo(inp.dtype).eps / 2)
+        self.assertEqual(result, expected, atol=0, rtol=0)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
