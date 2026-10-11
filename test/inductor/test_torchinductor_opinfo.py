@@ -1095,6 +1095,8 @@ inductor_skip_exact_stride = {
     "linalg.solve",
     "linalg.solve_ex",
     "linalg.qr",
+    "linalg.qr_piv",
+    "linalg.qr_piv.nondifferentiable",
     "lu",
     "matmul",
     "__rmatmul__",

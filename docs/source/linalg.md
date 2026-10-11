@@ -40,6 +40,7 @@ See {ref}`Linear Algebra Stability` for some common numerical edge-cases.
 
     cholesky
     qr
+    qr_piv
     polar
     lu
     lu_factor
