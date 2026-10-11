@@ -1000,6 +1000,8 @@ class ConstDictVariable(VariableTracker):
         return super().tp_getattro_impl(tx, name)
 
 
+# `OrderedDict` is a subclass of `dict` that can share most of its behavior,
+# but it also maintains the order of keys, which affects equality comparisons.
 class OrderedDictVariable(ConstDictVariable):
     _cpython_type = collections.OrderedDict
     # self.items is actually a collections.OrderedDict at runtime for this
@@ -1187,6 +1189,9 @@ class OrderedDictVariable(ConstDictVariable):
         raise NotImplementedError
 
 
+# `frozendict` and `dict` are disjoint types. `frozendict` is not a subclass of `dict`.
+# We cannot inherit from `ConstDictVariable` with overwrites to disable mutability.
+# We need a separate implementation for `frozendict` that does not rely on `dict` fast paths.
 class FrozenDictVariable(VariableTracker):
     # Keep immutable containers separate from the mutable dict fast paths.
     if torch._has_frozendict:
