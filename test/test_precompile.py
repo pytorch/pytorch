@@ -44,9 +44,11 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    set_default_dtype,
     skipIfCrossRef,
     skipIfTorchDynamo,
     TestCase,
@@ -7372,6 +7374,131 @@ class TestExportPython(TestCase):
             self.assertEqual(loaded(x), fn(x))
         self.assertTrue(any("produced by torch" in m for m in cm.output))
 
+    def test_capture_specializes_is_grad_enabled_to_true(self, device):
+        # Capture traces with grad enabled so a backward inside fn is built as graph ops,
+        # which specializes a fn that READS torch.is_grad_enabled() to the grad-on branch.
+        # That is deliberate and documented: tracing under the caller's ambient mode would
+        # bake a branch no stamp records, and grad mode is not stamped because capturing
+        # at the default and calling under no_grad is the ordinary inference pattern.
+        seen = []
+
+        def fn(inp):
+            seen.append(torch.is_grad_enabled())
+            return inp * 2
+
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+        with torch.no_grad():
+            torch.compiler.export_python(
+                path=self._tmp_path("gradmode.py"), backend="eager"
+            )(fn)(x)
+        self.assertEqual(seen, [True])
+
+        # And the pattern that must keep working: capture at the default, then call for
+        # inference under no_grad.
+        def plain(inp):
+            return inp.sin() + 1
+
+        run = torch.compiler.export_python(path=self._tmp_path("infer.py"))(plain)
+        run(x)
+        with torch.no_grad():
+            self.assertEqual(run(x), plain(x))
+
+    def test_global_state_stamp_survives_the_per_backend_fp32_api(self, device):
+        # torch.get_float32_matmul_precision() RAISES in a process that has used the
+        # per-backend fp32_precision API, so neither the stamp nor the per-call check may
+        # read it.
+        previous = torch.backends.cuda.matmul.fp32_precision
+        try:
+            torch.backends.cuda.matmul.fp32_precision = "tf32"
+            with self.assertRaises(RuntimeError):
+                torch.get_float32_matmul_precision()
+
+            def fn(inp):
+                return inp + torch.ones(4, device=device)
+
+            x = make_tensor((4,), device=device, dtype=torch.float32)
+            run = torch.compiler.export_python(path=self._tmp_path("fp32api.py"))(fn)
+            self.assertEqual(run(x), fn(x))
+            self.assertEqual(run(x), fn(x))
+        finally:
+            torch.backends.cuda.matmul.fp32_precision = previous
+
+    def test_malformed_global_state_stamp_degrades_to_a_warning(self, device):
+        # Anything but [key, value] string pairs is a hand-edit like a dropped stamp: the
+        # check turns off with the missing-stamp warning instead of raising or going silent.
+        path = self._tmp_path("mangled_state.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        def fn(inp):
+            return inp + 1
+
+        torch.compiler.export_python(path=path)(fn)(x)
+        with open(path, encoding="utf-8") as f:
+            original = f.read().splitlines(True)
+        for stamp in ("42", "[]", "['ab']", "[['deterministic', False]]"):
+            lines = [
+                f"# torch.compiler.export_python global-state: {stamp}\n"
+                if "global-state:" in line
+                else line
+                for line in original
+            ]
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("".join(lines))
+            with self.subTest(stamp=stamp):
+                with self.assertLogs(
+                    "torch.compiler._export_python", "WARNING"
+                ) as logs:
+                    self.assertEqual(
+                        torch.compiler.export_python(path=path)(fn)(x), fn(x)
+                    )
+                self.assertTrue(
+                    any("no recorded global-state stamp" in m for m in logs.output),
+                    logs.output,
+                )
+
+    def test_ambient_global_state_is_stamped_and_checked(self, device):
+        # The generated code resolves these once, at capture, and bakes the answer: a
+        # factory op with no dtype= takes the default dtype then, and inductor picks a
+        # deterministic or an atomic lowering (and its uninitialized-memory fill) from the
+        # determinism flags. The artifact never re-reads them, so changing one and
+        # replaying must raise.
+        def fn(inp):
+            return inp + torch.ones(4, device=device)
+
+        path = self._tmp_path("globals.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(fn)(x)
+
+        with self.assertRaisesRegex(PrecompileError, "default_dtype"):
+            with set_default_dtype(torch.float64):
+                torch.compiler.export_python(path=path)(fn)(x)
+        loaded = torch.compiler.export_python(path=path)(fn)
+        loaded(x)
+        with self.assertRaisesRegex(PrecompileError, "default_device"):
+            with torch.device("meta"):
+                loaded(x)
+
+        # Determinism is one-way: capture OFF and call ON means the artifact keeps a
+        # lowering the caller asked not to run, so that raises...
+        with self.assertRaisesRegex(PrecompileError, "deterministic"):
+            with DeterministicGuard(True):
+                torch.compiler.export_python(path=path)(fn)(x)
+
+        # ...while capture ON and call OFF is conservative and must be allowed.
+        strict_path = self._tmp_path("globals_strict.py")
+        with DeterministicGuard(True):
+            torch.compiler.export_python(path=strict_path)(fn)(x)
+        self.assertEqual(torch.compiler.export_python(path=strict_path)(fn)(x), fn(x))
+
+        # The fill under determinism is baked the same way and is one-way too.
+        nofill_path = self._tmp_path("globals_nofill.py")
+        with DeterministicGuard(True, fill_uninitialized_memory=False):
+            torch.compiler.export_python(path=nofill_path)(fn)(x)
+        with self.assertRaisesRegex(PrecompileError, "fill_uninitialized_memory"):
+            with DeterministicGuard(True):
+                torch.compiler.export_python(path=nofill_path)(fn)(x)
+        self.assertEqual(torch.compiler.export_python(path=nofill_path)(fn)(x), fn(x))
+
     def test_code_devices_reads_the_literal_device_forms(self, device):
         from torch.compiler._export_python import _code_devices
 
@@ -7660,6 +7787,7 @@ class TestExportPython(TestCase):
         for tag, name in (
             ("input-overlap:", "input-aliasing"),
             ("autocast:", "autocast"),
+            ("global-state:", "global-state"),
         ):
             path = self._tmp_path(f"drop_{name}.py")
 
