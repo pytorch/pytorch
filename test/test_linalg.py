@@ -4,6 +4,7 @@
 import torch
 import torch.autograd.forward_ad as fwAD
 import torch.nn.functional as F
+from torch._subclasses.fake_tensor import FakeTensorMode
 import numpy as np
 
 import unittest
@@ -3116,6 +3117,113 @@ class TestLinalg(TestCase):
 
                 S_s = torch.svd(A, compute_uv=False).S
                 self.assertEqual(S_s, S)
+
+    def _svd_driver_calls(self, A, driver):
+        return (
+            ("svd", partial(torch.linalg.svd, A, driver=driver)),
+            ("svd_out", partial(
+                torch.linalg.svd, A, driver=driver,
+                out=(A.new_empty(0), A.real.new_empty(0), A.new_empty(0)))),
+            ("svdvals", partial(torch.linalg.svdvals, A, driver=driver)),
+            ("svdvals_out", partial(
+                torch.linalg.svdvals, A, driver=driver, out=A.real.new_empty(0))),
+        )
+
+    def _assert_svd_driver_error(self, A, driver, msg):
+        for op, call in self._svd_driver_calls(A, driver):
+            with self.subTest(shape=A.shape, op=op):
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    call()
+
+    @onlyNativeDeviceTypes
+    @parametrize("mode", ("real", "fake", "meta"))
+    @parametrize("op", ("svd", "svd_out", "svdvals", "svdvals_out"))
+    def test_svd_driver_validation(self, device, mode, op):
+        with FakeTensorMode() if mode == "fake" else contextlib.nullcontext():
+            for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+                A = torch.empty(shape, device="meta" if mode == "meta" else device)
+                for driver in ("invalid", ""):
+                    with self.subTest(shape=shape, driver=driver):
+                        with self.assertRaisesRegex(RuntimeError, "torch.linalg.svd: unknown svd driver"):
+                            dict(self._svd_driver_calls(A, driver))[op]()
+
+    @onlyCPU
+    @parametrize("mode", ("fake", "meta"))
+    @dtypes(torch.float32, torch.complex64)
+    def test_svd_driver_meta(self, device, dtype, mode):
+        with FakeTensorMode() if mode == "fake" else contextlib.nullcontext():
+            for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+                A = torch.empty(shape, device="meta" if mode == "meta" else device, dtype=dtype)
+                expected = [call() for _, call in self._svd_driver_calls(A, None)]
+                for driver in ("gesvd", "gesvdj", "gesvda"):
+                    for (op, call), result in zip(self._svd_driver_calls(A, driver), expected):
+                        with self.subTest(shape=shape, driver=driver, op=op):
+                            actual = call()
+                            actual = actual if isinstance(actual, tuple) else (actual,)
+                            result = result if isinstance(result, tuple) else (result,)
+                            for tensor, reference in zip(actual, result):
+                                self.assertEqual(tensor.shape, reference.shape)
+                                self.assertEqual(tensor.dtype, reference.dtype)
+                                self.assertEqual(tensor.stride(), reference.stride())
+
+    @onlyCPU
+    def test_svd_driver_cpu(self, device):
+        msg = "keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend"
+
+        for driver in ("gesvd", "gesvdj", "gesvda"):
+            for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+                self._assert_svd_driver_error(
+                    torch.empty(shape, device=device), driver, msg)
+
+    @onlyCUDA
+    @skipIfRocm
+    @skipCUDAIf(not torch.cuda.has_magma, "requires MAGMA")
+    @setLinalgBackendsToDefaultFinally
+    def test_svd_driver_magma(self, device):
+        torch.backends.cuda.preferred_linalg_library("magma")
+        msg = "keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend"
+
+        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+            A = torch.empty(shape, device=device)
+            for driver in ("gesvd", "gesvdj", "gesvda"):
+                self._assert_svd_driver_error(A, driver, msg)
+            self._assert_svd_driver_error(A, "invalid", "torch.linalg.svd: unknown svd driver")
+
+    @onlyNativeDeviceTypes
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float32, torch.complex64)
+    def test_svd_driver_default(self, device, dtype):
+        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+            A = (torch.diag(torch.tensor([2.0, 1.0], device=device, dtype=dtype))
+                 if shape == (2, 2) else torch.empty(shape, device=device, dtype=dtype))
+            U, S, Vh = torch.linalg.svd(A)
+            k = min(shape[-2:])
+            self.assertEqual((U[..., :k] * S.unsqueeze(-2)) @ Vh[..., :k, :], A)
+            for op, call in self._svd_driver_calls(A, None):
+                self.assertNotWarn(lambda: self.assertEqual(call(), S if "svdvals" in op else (U, S, Vh)))
+
+    @onlyCUDA
+    @skipCUDAIfNoCusolver
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float32, torch.complex64)
+    def test_svd_driver_ignored_on_rocm(self, device, dtype):
+        # These convergent controls check warnings and ignored selection, not fallback execution.
+        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+            A = (torch.diag(torch.tensor([2.0, 1.0], device=device, dtype=dtype))
+                 if shape == (2, 2) else torch.empty(shape, device=device, dtype=dtype))
+            expected = []
+            for _, call in self._svd_driver_calls(A, None):
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    expected.append(call())
+                self.assertEqual(caught, [])
+            for driver in ("gesvd", "gesvdj", "gesvda"):
+                for (op, call), result in zip(self._svd_driver_calls(A, driver), expected):
+                    with self.subTest(shape=shape, driver=driver, op=op):
+                        with self.assertWarnsOnceRegex(UserWarning, ".*driver.*ignored on ROCm"):
+                            actual = call()
+                        self.assertEqual(actual, result)
 
     @skipCPUIfNoLapack
     @skipCUDAIf(
