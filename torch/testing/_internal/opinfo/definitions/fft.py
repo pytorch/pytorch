@@ -137,6 +137,7 @@ op_db: list[OpInfo] = [
         ref=np.fft.fft,
         ndimensional=SpectralFuncType.OneD,
         dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool, torch.half, torch.bfloat16, torch.complex32
@@ -157,6 +158,7 @@ op_db: list[OpInfo] = [
         decomp_aten_name="_fft_c2c",
         ndimensional=SpectralFuncType.TwoD,
         dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool, torch.half, torch.bfloat16, torch.complex32
@@ -188,6 +190,7 @@ op_db: list[OpInfo] = [
         ref=np.fft.fftn,
         ndimensional=SpectralFuncType.ND,
         dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
@@ -212,6 +215,7 @@ op_db: list[OpInfo] = [
         ref=np.fft.hfft,
         ndimensional=SpectralFuncType.OneD,
         dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
@@ -245,6 +249,7 @@ op_db: list[OpInfo] = [
         ref=scipy.fft.hfft2 if has_scipy_fft else None,
         ndimensional=SpectralFuncType.TwoD,
         dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
@@ -291,6 +296,7 @@ op_db: list[OpInfo] = [
         ref=scipy.fft.hfftn if has_scipy_fft else None,
         ndimensional=SpectralFuncType.ND,
         dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool, torch.half, torch.bfloat16, torch.complex32
@@ -327,6 +333,7 @@ op_db: list[OpInfo] = [
         ref=np.fft.rfft,
         ndimensional=SpectralFuncType.OneD,
         dtypes=all_types_and(torch.bool),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=1),
@@ -345,6 +352,7 @@ op_db: list[OpInfo] = [
         ref=np.fft.rfft2,
         ndimensional=SpectralFuncType.TwoD,
         dtypes=all_types_and(torch.bool),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
@@ -366,6 +374,7 @@ op_db: list[OpInfo] = [
         ref=np.fft.rfftn,
         ndimensional=SpectralFuncType.ND,
         dtypes=all_types_and(torch.bool),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
@@ -395,6 +404,7 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool, torch.half, torch.bfloat16, torch.complex32
@@ -415,6 +425,7 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool, torch.half, torch.bfloat16, torch.complex32
@@ -442,6 +453,7 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
@@ -470,6 +482,7 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         dtypes=all_types_and(torch.bool),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         check_batched_grad=False,
@@ -489,6 +502,7 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         dtypes=all_types_and(torch.bool),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         check_batched_grad=False,
@@ -519,6 +533,7 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         dtypes=all_types_and(torch.bool),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         check_batched_grad=False,
@@ -548,6 +563,7 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool, torch.half, torch.bfloat16, torch.complex32
@@ -569,6 +585,7 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool, torch.half, torch.bfloat16, torch.complex32
@@ -597,6 +614,7 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool, torch.half, torch.bfloat16, torch.complex32
@@ -661,54 +679,126 @@ python_ref_db: list[OpInfo] = [
         "_refs.fft.fftn",
         torch_opinfo_name="fft.fftn",
         decorators=[
+            # Note [FFT MPS fp16 ref tests]
+            # fp16 N-D FFT: aten applies the FFT normalization inside each
+            # kernel, while the _refs decomposition runs the prims unnormalized
+            # and applies one fused normalization multiply at the end. That
+            # extra fp16 rounding leaves the ref marginally farther from the
+            # fp64 reference than eager, tripping test_python_ref's "ref must be
+            # at least as accurate as eager" check. CUDA skips a subset of these
+            # fp16 cases (ihfftn, ihfft2) for the same reason; the more accurate
+            # MPS kernel trips more of the multi-dim ops.
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
             DecorateInfo(
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
         ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifftn",
         torch_opinfo_name="fft.ifftn",
         decorators=[
+            # See Note [FFT MPS fp16 ref tests]
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
             DecorateInfo(
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
         ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfftn",
         torch_opinfo_name="fft.rfftn",
+        decorators=[
+            # See Note [FFT MPS fp16 ref tests]
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfftn",
         torch_opinfo_name="fft.irfftn",
         decorators=[
+            # See Note [FFT MPS fp16 ref tests]
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
             DecorateInfo(
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
         ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfftn",
         torch_opinfo_name="fft.hfftn",
         decorators=[
+            # See Note [FFT MPS fp16 ref tests]
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
             DecorateInfo(
                 precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
         ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfftn",
         torch_opinfo_name="fft.ihfftn",
         decorators=[
+            # See Note [FFT MPS fp16 ref tests]
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
             DecorateInfo(
                 precisionOverride({torch.float: 2e-4}),
                 "TestFFT",
@@ -768,48 +858,100 @@ python_ref_db: list[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.fft2",
         torch_opinfo_name="fft.fft2",
+        decorators=[
+            # See Note [FFT MPS fp16 ref tests]
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifft2",
         torch_opinfo_name="fft.ifft2",
         decorators=[
+            # See Note [FFT MPS fp16 ref tests]
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
             DecorateInfo(
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
         ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfft2",
         torch_opinfo_name="fft.rfft2",
+        decorators=[
+            # See Note [FFT MPS fp16 ref tests]
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfft2",
         torch_opinfo_name="fft.irfft2",
         decorators=[
+            # See Note [FFT MPS fp16 ref tests]
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
             DecorateInfo(
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
         ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfft2",
         torch_opinfo_name="fft.hfft2",
         decorators=[
+            # See Note [FFT MPS fp16 ref tests]
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
             DecorateInfo(
                 precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
         ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfft2",
         torch_opinfo_name="fft.ihfft2",
         decorators=[
+            # See Note [FFT MPS fp16 ref tests]
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="mps",
+            ),
             DecorateInfo(
                 precisionOverride({torch.float: 2e-4}),
                 "TestFFT",
