@@ -57,6 +57,16 @@ const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
+#if defined(USE_ROCM)
+hipError_t unloadModule(CUmodule mod) {
+  return hipModuleUnload(mod);
+}
+#else
+CUresult unloadModule(CUmodule mod) {
+  return nvrtc().cuModuleUnload(mod);
+}
+#endif
+
 // 120 max args + 1 for global scratch size
 #define MAX_ARGS 121
 
@@ -173,12 +183,8 @@ std::pair<CUmodule, CUfunction> finishLoadingKernel(
     CUdevice device) {
   CUfunction func = nullptr;
   auto unload_module_on_error = c10::make_scope_exit([mod]() {
-  // Cleanup must not replace the original exception.
-#if defined(USE_ROCM)
-    hipModuleUnload(mod);
-#else
-    nvrtc().cuModuleUnload(mod);
-#endif
+    // Cleanup must not replace the original exception.
+    unloadModule(mod);
   });
 
 #if defined(USE_ROCM)
@@ -488,12 +494,8 @@ void ensureDeviceContext(CUdevice device) {
 PyObject* buildKernelResult(std::pair<CUmodule, CUfunction> loaded) {
   auto [mod, func] = loaded;
   auto unload_module_on_error = c10::make_scope_exit([mod]() {
-  // Keep ownership native until the Python tuple safely owns the handle.
-#if defined(USE_ROCM)
-    hipModuleUnload(mod);
-#else
-    nvrtc().cuModuleUnload(mod);
-#endif
+    // Keep ownership native until the Python tuple safely owns the handle.
+    unloadModule(mod);
   });
   int n_regs = 0;
   int n_spills = 0;
@@ -748,11 +750,7 @@ PyObject* unload_kernel(PyObject* self, PyObject* args) {
   CUmodule mod =
       reinterpret_cast<CUmodule>(mod_ptr); // NOLINT(performance-no-int-to-ptr)
   if (mod) {
-#if defined(USE_ROCM)
-    AT_CUDA_DRIVER_CHECK(hipModuleUnload(mod));
-#else
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleUnload(mod));
-#endif
+    AT_CUDA_DRIVER_CHECK(unloadModule(mod));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
