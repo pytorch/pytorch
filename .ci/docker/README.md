@@ -1,5 +1,7 @@
 # Docker images for GitHub CI and CD
 
+<!-- Tree-hash touch so this PR's manywheel builder tag misses Docker Hub and binary tests pull ECR. Drop before merge. -->
+
 This directory contains everything needed to build the Docker images
 that are used in our CI.
 
