@@ -181,7 +181,8 @@ def guard_to_detect_forward_monkeypatching(
     # To keep the guard overhead down, we just guard on the `forward` being
     # not present in the mod __dict__. The common case of patching forward
     # method adds `forward` in the instance __dict__, whereas the unpatched
-    # `forward` sits in the type(mod).__dict__
+    # `forward` sits in the type(mod).__dict__. Patching the class's forward is
+    # caught by a code guard on the type(mod).__dict__ source, once per class.
     if source:
         if "forward" in mod.__dict__ and callable(mod.__dict__["forward"]):
             # Monkeypatched forward method, guard on call-relevant structure.
@@ -1448,13 +1449,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 fn_vt = VariableTracker.build(tx, fn, source=source, realize=True)
                 return fn_vt.call_function(tx, [self] + list(args), kwargs)
             else:
-                # Ideally we would have just used VariableTracker.build(tx, fn,
-                # source=source) but that introduces guard on the
-                # `forward.__code__` object. Given that we already guard on the
-                # forward not present in generic dict, we don't need this guard.
-                return variables.UserFunctionVariable(fn, source=source).call_function(
-                    tx, [self] + list(args), kwargs
-                )
+                # forward skips _call_impl, so guard its __code__ here the way
+                # resolve_type_attr does for other methods; this catches
+                # class-level patching of forward.
+                if name == "forward" and source is not None:
+                    fn_vt = variables.UserFunctionVariable.create_with_source(
+                        fn, source
+                    )
+                else:
+                    fn_vt = variables.UserFunctionVariable(fn, source=source)
+                return fn_vt.call_function(tx, [self] + list(args), kwargs)
 
     def call_method(
         self,
