@@ -1707,7 +1707,6 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
     @parametrize(
         "cached_config_data",
         [
-            subtest(None, name="missing"),
             subtest(
                 {
                     "version": 2,
@@ -1740,10 +1739,20 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
         original_configs = [triton_config({"x": 1}, 16, num_stages=1)]
         configs_hash = hash_configs(original_configs)
-        data = {"configs_hash": configs_hash}
-        if cached_config_data is not None:
-            data["triton_config"] = cached_config_data
+        data = {"configs_hash": configs_hash, "triton_config": cached_config_data}
         result = _load_cached_autotuning(data, configs_hash, original_configs, {})
+
+        self.assertIsNone(result)
+
+    def test_load_cached_autotuning_rejects_missing_triton_config(self):
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        original_configs = [triton_config({"x": 1}, 16, num_stages=1)]
+        configs_hash = hash_configs(original_configs)
+        result = _load_cached_autotuning(
+            {"configs_hash": configs_hash}, configs_hash, original_configs, {}
+        )
 
         self.assertIsNone(result)
 
