@@ -2867,6 +2867,7 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
                 aten.clone.default,
                 aten._scaled_mm.default,
                 aten._scaled_mm_v2.default,
+                aten._scaled_grouped_mm_v2.default,
                 prims.convert_element_type.default,
             )
             or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
@@ -2887,6 +2888,9 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
             aten.clone.default,
             aten._scaled_mm.default,
             aten._scaled_mm_v2.default,
+            # MXFP8 grouped GEMM: the e8m0 scales are consumed by the kernel,
+            # never read arithmetically by generated Triton.
+            aten._scaled_grouped_mm_v2.default,
         ) or is_view(node.target):
             return False
         if node.target == torch.ops.prims.convert_element_type.default:
@@ -2914,6 +2918,15 @@ def unsupported_output_tensor(t: torch.Tensor, node=None):
 
 
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
+    # These wrappers must be decomposed regardless of tensor type. The resulting
+    # operators are checked independently for unsupported types during lowering.
+    if node.target in (
+        torch.ops.higher_order.auto_functionalized,
+        torch.ops.higher_order.auto_functionalized_v2,
+        torch.ops.higher_order.triton_kernel_wrapper_functional,
+    ):
+        return False
+
     # Custom fallback lowering
     if node.target is aten.view_as_complex.default:
         return False
@@ -4473,7 +4486,9 @@ def _full(fill_value, device, dtype, size):
     elif isinstance(value, sympy.Basic):
 
         def inner_fn(index):
-            return ops.index_expr(value, dtype)
+            if dtype in (torch.int32, torch.int64):
+                return ops.index_expr(value, dtype)
+            return ops.value_expr(value, dtype)
 
     else:
         if len(value.get_size()) != 0:
