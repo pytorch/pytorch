@@ -1840,36 +1840,6 @@ def slot_wrapper_iadd(
 is_richcompare_not_implemented = is_nb_not_implemented
 
 
-def object_richcompare(
-    self: VariableTracker,
-    tx: "InstructionTranslatorBase",
-    other: VariableTracker,
-    op: str,
-) -> VariableTracker:
-    """object's tp_richcompare.
-
-    https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6263-L6305
-    - __eq__: identity check, else NotImplemented
-    - __ne__: delegates to tp_richcompare(self, other, Py_EQ) and inverts
-    - ordering
-    """
-    if op == "__eq__":
-        identity = vt_identity_compare(self, other)
-        if identity is not None and identity.as_python_constant():
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(NotImplemented)
-    elif op == "__ne__":
-        # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6279-L6298
-        # Safe to call as_python_constant(): only identity-based types use
-        # object_richcompare, so eq_result is always True or NotImplemented.
-        eq_result = self.tp_richcompare_impl(tx, other, "__eq__")
-        if is_richcompare_not_implemented(eq_result):
-            return eq_result
-        return ConstantVariable.create(not eq_result.as_python_constant())
-    else:
-        return ConstantVariable.create(NotImplemented)
-
-
 def python_constant_richcompare_impl(
     self: VariableTracker,
     tx: "InstructionTranslatorBase",
