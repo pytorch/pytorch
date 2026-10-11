@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCUDA,
     skipMPS,
     TEST_WITH_ROCM,
 )
@@ -1075,6 +1076,136 @@ class TestOptimRenewed(TestCase):
             reference_optimizer.step()
             self.assertEqual(param, reference)
             self.assertEqual(step, torch.tensor(4, device=device, dtype=expected_dtype))
+
+    @onlyCUDA
+    @parametrize("amsgrad", [False, True])
+    @optims(
+        [o for o in optim_db if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW)],
+        dtypes=[torch.float32],
+    )
+    def test_fused_mixed_precision_step_dtype(self, device, dtype, optim_info, amsgrad):
+        params = [torch.ones(8, device=device, dtype=dtype) for _ in range(2)]
+        optimizers = [
+            optim_info.optim_cls([p], lr=0.01, fused=True, amsgrad=amsgrad)
+            for p in params
+        ]
+        for param, optimizer, step_dtype in zip(
+            params, optimizers, (torch.float32, torch.float64), strict=True
+        ):
+            param.grad = torch.full_like(param, 0.25)
+            _bf16_state_init_hook(optimizer, (), {})
+            optimizer.state[param]["step"] = torch.zeros(
+                (), device=device, dtype=step_dtype
+            )
+        for step in range(1, 4):
+            for optimizer in optimizers:
+                optimizer.step()
+            self.assertEqual(params[0], params[1])
+            for key in optimizers[0].state[params[0]]:
+                if key == "step":
+                    for param, optimizer in zip(params, optimizers, strict=True):
+                        self.assertEqual(optimizer.state[param][key].item(), step)
+                else:
+                    self.assertEqual(
+                        optimizers[0].state[params[0]][key],
+                        optimizers[1].state[params[1]][key],
+                    )
+
+    def _test_fused_step_metadata(self, device, dtype, optim_info, amsgrad, sizes):
+        kwargs = {"lr": 0.01}
+        if optim_info.optim_cls is torch.optim.Adagrad:
+            if amsgrad:
+                self.skipTest("Adagrad does not support AMSGrad")
+            kwargs["lr_decay"] = 0.1
+        else:
+            kwargs["amsgrad"] = amsgrad
+        params = [torch.ones(n, device=device, dtype=dtype) for n in sizes]
+        references = [torch.ones(1, device=device, dtype=dtype) for _ in sizes]
+        optimizer = optim_info.optim_cls(params, fused=True, **kwargs)
+        reference_optimizer = optim_info.optim_cls(references, fused=False, **kwargs)
+        for i, (param, reference) in enumerate(zip(params, references, strict=True)):
+            param.grad = torch.full_like(param, 0.25)
+            reference.grad = torch.full_like(reference, 0.25)
+            step_dtype = torch.float64 if i % 2 == 0 else torch.float32
+            for p, optim in ((param, optimizer), (reference, reference_optimizer)):
+                state = optim.state[p]
+                state["step"] = torch.tensor(i % 4 + 1, device=device, dtype=step_dtype)
+                if optim_info.optim_cls is torch.optim.Adagrad:
+                    state["sum"] = torch.zeros_like(p)
+                else:
+                    state["exp_avg"] = torch.zeros_like(p)
+                    state["exp_avg_sq"] = torch.zeros_like(p)
+                    if amsgrad:
+                        state["max_exp_avg_sq"] = torch.zeros_like(p)
+        optimizer.step()
+        reference_optimizer.step()
+        for param, reference in zip(params, references, strict=True):
+            self.assertEqual(param, reference.expand_as(param))
+            for key, actual in optimizer.state[param].items():
+                expected = reference_optimizer.state[reference][key]
+                self.assertEqual(actual, expected.expand_as(actual))
+
+    @onlyCUDA
+    @parametrize("amsgrad", [False, True])
+    @optims(
+        [
+            o
+            for o in optim_db
+            if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW, torch.optim.Adagrad)
+        ],
+        dtypes=[torch.float32],
+    )
+    def test_fused_mixed_step_dtypes(self, device, dtype, optim_info, amsgrad):
+        # Exceed the tensor metadata capacity for both CUDA argument-size limits.
+        self._test_fused_step_metadata(device, dtype, optim_info, amsgrad, [4] * 337)
+
+    @onlyCUDA
+    @largeTensorTest("6GB", "cuda")
+    @parametrize("amsgrad", [False, True])
+    @optims(
+        [
+            o
+            for o in optim_db
+            if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW, torch.optim.Adagrad)
+        ],
+        dtypes=[torch.float32],
+    )
+    def test_fused_step_dtype_chunk_rollover(self, device, dtype, optim_info, amsgrad):
+        large_args = not TEST_WITH_ROCM and int(torch.version.cuda.split(".")[0]) >= 13
+        max_blocks = 2240 if large_args else 320
+        # Carry the float64 step metadata into the next launch for the same tensor.
+        sizes = [(max_blocks + 1) * 65536, 4]
+        self._test_fused_step_metadata(device, dtype, optim_info, amsgrad, sizes)
+
+    @onlyCUDA
+    @optims(
+        [
+            o
+            for o in optim_db
+            if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW, torch.optim.Adagrad)
+        ],
+        dtypes=[torch.float32],
+    )
+    def test_fused_float64_step_large_counter(self, device, dtype, optim_info):
+        kwargs = (
+            {"lr_decay": 0.1} if optim_info.optim_cls is torch.optim.Adagrad else {}
+        )
+        param = torch.ones(8, device=device, dtype=dtype)
+        reference = param.clone()
+        with set_default_dtype(torch.float64):
+            optimizer = optim_info.optim_cls([param], fused=True, **kwargs)
+            reference_optimizer = optim_info.optim_cls(
+                [reference], fused=False, **kwargs
+            )
+            for p, optim in ((param, optimizer), (reference, reference_optimizer)):
+                p.grad = torch.full_like(p, 0.25)
+                optim.step()
+                optim.state[p]["step"].fill_(2**24)
+            for expected_step in (2**24 + 1, 2**24 + 2):
+                optimizer.step()
+                reference_optimizer.step()
+                self.assertEqual(optimizer.state[param]["step"].item(), expected_step)
+                self.assertEqual(param, reference)
 
     @skipMPS  # MPS does not support float64
     @onlyAccelerator
