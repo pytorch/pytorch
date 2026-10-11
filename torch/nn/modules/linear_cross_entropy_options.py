@@ -9,6 +9,27 @@ __all__ = ["LinearCrossEntropyOptions"]
 
 _VALID_ACC_POLICIES = ("auto", "accurate", "compact")
 
+# Device types on which the chunked path relies on each of two independent GEMM
+# capabilities. Leaving a device out is always correct: it takes the explicit
+# cast / scratch-buffer route. Listing one is a claim that the
+# test_linear_cross_entropy_mm_* tests in test/test_nn.py verify on that device.
+# Neither implies the other: out_dtype= fixes only the output dtype and says
+# nothing about the separate same-dtype addmm_ kernel's accumulator, and CPU
+# accumulates in fp32 without mm.dtype_out. Passing both does not make "compact"
+# a win on a device: _auto_acc_policy decides that on measured performance.
+#
+# mm(out_dtype=) writes an fp32 result from fp16/bf16 operands, so mixed-dtype
+# mm needs no staging casts. Registering aten::mm.dtype_out is necessary, not
+# sufficient.
+_MM_OUT_DTYPE_DEVICES = ("cuda",)
+# A same-dtype fp16/bf16 addmm_ accumulates in fp32 internally (under the default
+# matmul precision flags), so acc_policy="compact" accumulates the weight
+# gradient directly into grad_linear_weight instead of a (num_classes,
+# in_features) fp32 scratch. No registration or device query answers this, and a
+# wrong entry degrades gradients silently. The acc_policy docstring states this
+# membership to users; change both together.
+_MM_FP32_ACCUM_DEVICES = ("cuda",)
+
 
 def _auto_acc_policy(device_type: str | None, dtype: torch.dtype) -> str:
     """Resolve the ``acc_policy`` ``"auto"`` sentinel from device and dtype.
