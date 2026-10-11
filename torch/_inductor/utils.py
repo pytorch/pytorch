@@ -3245,6 +3245,15 @@ def _use_cutlass_for_op(op_name: str) -> bool:
 _IntLike: TypeAlias = int | sympy.Expr
 
 
+def decompose_k_supported_on_device() -> bool:
+    """CUDA is on. HIP is off for RDNA3."""
+    if torch.version.hip is None:
+        return True
+    if not rocm_gfx_arch():
+        return False
+    return not using_rocm_rdna3()
+
+
 @functools.cache
 def use_decompose_k_choice(
     m: _IntLike, n: _IntLike, k: _IntLike, threshold_multiple: int = 1
@@ -3263,6 +3272,7 @@ def use_decompose_k_choice(
         and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
         and not V.graph.cpp_wrapper
         and config.triton.num_decompose_k_splits > 0
+        and decompose_k_supported_on_device()
         # Callers rely on False to retain the regular MM fallback.
         and bool(get_k_splits(m, n, k))
     )
