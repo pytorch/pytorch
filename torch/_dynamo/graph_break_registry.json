@@ -790,6 +790,16 @@
       ]
     }
   ],
+  "GB1510": [
+    {
+      "Gb_type": "NumPy dtype with metadata",
+      "Context": "numpy dtype: {dtype}",
+      "Explanation": "torch.compile cannot preserve NumPy dtype metadata. This operation will execute eagerly.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0051": [
     {
       "Gb_type": "Exception with non-type expectation",
