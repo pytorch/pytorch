@@ -256,7 +256,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         self.curr_buffer_size -= biggest_size
         del self.buffer_elements[biggest_key]
 
-        return result_to_yield
+        return biggest_key, result_to_yield
 
     def __iter__(self):
         for x in self.datapipe:
@@ -274,7 +274,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
                 del self.buffer_elements[key]
 
             if self.curr_buffer_size == self.max_buffer_size:
-                result_to_yield = self._remove_biggest_key()
+                key, result_to_yield = self._remove_biggest_key()
                 if result_to_yield is not None:
                     result = self.wrapper_class(result_to_yield)
                     yield (key, result) if self.keep_key else result
