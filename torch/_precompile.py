@@ -2283,6 +2283,13 @@ def _build_multigraph_python_source(
     buf.writeline(
         f"RISKY_DROPPED_GUARDS = {[list(g) for g in summary.risky_dropped_guards]!r}"
     )
+    buf.writeline(
+        "# Kept by the filter but discarded by the invariance policy; likewise not"
+    )
+    buf.writeline("# checked at serve time.")
+    buf.writeline(
+        f"POLICY_DROPPED_GUARDS = {[list(g) for g in summary.policy_dropped_guards]!r}"
+    )
     buf.writeline("")
     buf.writeline("# What a dropped slot above actually checked, where it renders one.")
     buf.writeline(
