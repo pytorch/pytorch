@@ -164,6 +164,10 @@ def triton_config_from_compile_options(
         for key in forwarded_cuda_compile_options()
         if key in compile_options
     }
+    if compile_options:
+        raise ValueError(
+            f"unsupported Triton compile options: {sorted(compile_options)}"
+        )
     # pyrefly: ignore [bad-argument-count, unexpected-keyword]
     triton_config = Config(config_kwargs, **config_args)
     for key, value in {**warp_spec_options, **forwarded_options}.items():
@@ -212,10 +216,12 @@ def triton_config_compile_options_from_dict(
 
 
 def triton_config_from_dict(config: dict[str, Any]) -> Config:
-    if _is_namespaced_triton_config(config):
+    if {"kwargs", "compile_options"} <= set(config):
+        if not _is_namespaced_triton_config(config):
+            raise ValueError("invalid namespaced Triton config")
         return triton_config_from_compile_options(
-            triton_config_kwargs_from_dict(config),
-            triton_config_compile_options_from_dict(config),
+            {**config["kwargs"]},
+            {**config["compile_options"]},
             config.get("extra_options"),
         )
     from .triton_compat import Config

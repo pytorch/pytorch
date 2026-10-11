@@ -31,7 +31,7 @@ import os.path
 import re
 import threading
 import weakref
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -688,19 +688,8 @@ def _load_cached_autotuning(
     # namespaced representation without an explicit version field.
     if "version" not in cached_config:
         cached_config = {"version": 1, **cached_config}
-    if cached_config.get("version") != 1 or not set(cached_config) <= {
-        "version",
-        "kwargs",
-        "compile_options",
-        "extra_options",
-    }:
-        return None
-    config_kwargs = cached_config.get("kwargs")
-    compile_options = cached_config.get("compile_options")
-    if not isinstance(config_kwargs, dict) or not isinstance(compile_options, dict):
-        return None
     try:
-        triton_config = triton_config_from_dict(cast(dict[str, Any], cached_config))
+        triton_config = triton_config_from_dict(cached_config)
     except (KeyError, TypeError, ValueError):
         return None
     extra_options = triton_config.extra_options
