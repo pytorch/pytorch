@@ -188,6 +188,7 @@ class TestModuleLevelKernels(TestCase):
         self.assertTrue(AsyncCompile.wait_process_pool_ready())
         x = torch.randn(64, 128, device="cuda")
         counters.clear()
+        PyCodeCache.cache_clear()
         with mock.patch.object(
             CachingAutotuner, "_precompile_config", _compiled_in_this_process
         ):
@@ -196,15 +197,24 @@ class TestModuleLevelKernels(TestCase):
         kernels = re.findall(r"^def (triton_\w+)\(", code, re.MULTILINE)
         self.assertEqual(counters["inductor"]["async_compile_cache_hit"], len(kernels))
 
+        mods = PyCodeCache.modules
+        (loaded,) = [m for m in mods if hasattr(m, kernels[0]) and hasattr(m, "call")]
+        pooled = {k: getattr(loaded, k).kernel_hash for k in kernels}
+        self.assertEqual(len(set(pooled.values())), len(kernels), pooled)
+
         # Anyone else's load of the module, such as running a copy of it, builds its
-        # kernels from the defs in it, so a hand edit there takes effect.
+        # kernels from the defs in it, so a hand edit there takes effect. They key the
+        # autotune cache on the same per-kernel name as the pool's kernels rather than
+        # on the module they share.
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "module.py")
             with open(path, "w") as f:
                 f.write(code)
             ns = {"__file__": path, "__name__": "_module_level_kernels"}
             exec(compile(code, path, "exec"), ns)
-        self.assertTrue(all(isinstance(ns[k], CachingAutotuner) for k in kernels))
+        for k in kernels:
+            self.assertEqual(ns[k].fn.fn.__code__.co_filename, path)
+            self.assertEqual(ns[k].kernel_hash, pooled[k])
         with mock.patch.object(
             CachingAutotuner, "_precompile_config", _compiled_in_this_process
         ):
