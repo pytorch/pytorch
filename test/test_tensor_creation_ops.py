@@ -2429,7 +2429,6 @@ class TestTensorCreation(TestCase):
             self.assertEqual(t[steps - 1], a[steps - 1])
 
     @onlyAccelerator
-    @skipXPU
     @largeTensorTest('16GB')
     def test_range_factories_64bit_indexing(self, device):
         bigint = 2 ** 31 + 1
@@ -2452,7 +2451,7 @@ class TestTensorCreation(TestCase):
         # values wrap mod 2**32. N = 2**32 + 3 is used so that the expected
         # tail [0, 1, 2] differs from unwritten (zero) memory.
         for bigint in (2 ** 32 + 3, 2 ** 33 + 1):
-            free, _ = torch.cuda.mem_get_info(device)
+            free, _ = torch.accelerator.get_memory_info(device)
             if free < bigint * 4 + (3 << 30):
                 continue
             t = torch.arange(bigint, dtype=torch.int32, device=device)
