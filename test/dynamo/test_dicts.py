@@ -2597,6 +2597,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
             def update(self, *args, **kwargs):
                 raise AssertionError("update override called")
 
+            def __setitem__(self, key, value):
+                super().__setitem__(key, value + 10)
+
         def fn(x, source):
             other = {"b": 3, "c": 4}
             result = other | source if reverse else source | other
@@ -2612,17 +2615,48 @@ class DictTests(torch._dynamo.test_case.TestCase):
         actual = torch.compile(fn, backend="eager", fullgraph=True)(x, source)
         self.assertIs(type(actual[0]), Mapping)
         self.assertEqual(actual, expected)
+        offset = 10 if mapping_type is OrderedDict else 0
         self.assertEqual(
             list(actual[0].items()),
-            [("b", 2), ("c", 4), ("a", 1)]
+            [("b", 2 + 2 * offset), ("c", 4 + offset), ("a", 1 + 2 * offset)]
             if reverse
-            else [("a", 1), ("b", 3), ("c", 4)],
+            else [("a", 1 + 2 * offset), ("b", 3 + offset), ("c", 4 + offset)],
         )
         self.assertEqual(
-            actual[1], [("b", 3), ("c", 4)] if reverse else [("a", 1), ("b", 2)]
+            actual[1],
+            [("b", 3 + offset), ("c", 4 + offset)]
+            if reverse
+            else [("a", 1 + 2 * offset), ("b", 2 + 2 * offset)],
         )
         if mapping_type is defaultdict:
             self.assertIs(actual[0].default_factory, int)
+
+    @parametrize("reverse", [False, True])
+    def test_ordered_dict_union_mapping_overrides(self, reverse):
+        class Mapping(dict):
+            def keys(self):
+                return ["b"]
+
+            def __getitem__(self, key):
+                return super().__getitem__(key) + 10
+
+            def items(self):
+                raise AssertionError("items override called")
+
+        def fn(x, source):
+            mapping = OrderedDict()
+            # Call __ror__ explicitly: dict subclasses inherit dict.__or__,
+            # which handles the left operand without delegating to OrderedDict.
+            result = mapping.__ror__(source) if reverse else mapping | source
+            return tuple(result), x + result["b"]
+
+        x = torch.ones(1)
+        source = Mapping(a=1, b=2)
+        expected = (("b",), x + 12)
+        self.assertEqual(fn(x, source), expected)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, source), expected
+        )
 
     def test_range_as_dict_key(self):
         def fn(x):
@@ -3463,7 +3497,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         hop_node = graph.call_function(hop, (x, "subgraph_0", x))
         self.assertTrue(_is_safe_to_reorder(hop_node))
 
-    @unittest.skipIf(sys.version_info < (3, 15), "requires Python 3.15 key errors")
+    @unittest.skipIf(sys.version_info < (3, 14), "requires Python 3.14 key errors")
     @parametrize(
         "operation",
         [
@@ -3500,7 +3534,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x), expected
         )
 
-    @parametrize("mapping_type", [dict])
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
     def test_fromkeys_preserves_key_comparisons(self, mapping_type):
         class Key:
             def __init__(self):
@@ -3521,7 +3555,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             return x + len(result), first.calls
 
         x = torch.ones(1)
-        self.assertEqual(fn(x), (x + 2, 1))
+        self.assertEqual(fn(x), (x + 2, 2 if mapping_type is OrderedDict else 1))
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
