@@ -1350,6 +1350,10 @@ static bool is_random_op(const c10::OperatorHandle& op) {
       "randn_like",
       "uniform_",
       "bernoulli",
+      "exponential_",
+      "geometric_",
+      "log_normal_",
+      "multinomial",
   });
   std::string_view name_without_namespace(
       op_name.name.c_str() + aten_namespace_prefix_len,
