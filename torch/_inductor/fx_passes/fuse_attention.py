@@ -6,6 +6,7 @@ import logging
 import torch
 from torch.utils._ordered_set import OrderedSet
 
+from ..._dynamo.device_interface import DeviceInterface, get_interface_for_device
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,
@@ -20,6 +21,16 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 aten = torch.ops.aten
 
 _scaled_dot_product_attention = aten.scaled_dot_product_attention
+
+
+def _attention_iface(device_type: str) -> type[DeviceInterface]:
+    # Devices without a registered interface fall through to the base
+    # DeviceInterface defaults, matching the pre-routing `== "cuda"` behavior
+    # that silently skipped the CUDA-specific checks everywhere else.
+    try:
+        return get_interface_for_device(device_type)
+    except NotImplementedError:
+        return DeviceInterface
 
 
 _INFERENCE_ONLY_SFDP_PATTERNS = frozenset(
@@ -440,9 +451,8 @@ def _sfdp_replacement_16(query, key, value, attn_mask, inv_scale, dropout_p):
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)
-    if query.device.type == "cuda" and torch.version.hip is None:
-        # Keep the Bert CUDA pattern on its original math path; generic SDPA can
-        # pick fused backends whose scaling/dropout numerics fail tight checks.
+    iface = _attention_iface(query.device.type)
+    if iface.keep_attention_on_math_path():
         attn_weight = torch.matmul(query, key.transpose(-2, -1))
         attn_weight = attn_weight.div(inv_scale) + attn_mask
         attn_weight = attn_weight.softmax(dim=-1)
@@ -766,7 +776,7 @@ def _sfdp_replacement_25(query, key, value, attn_mask, dropout_p):
     query = query.permute(0, 2, 1, 3)
     key = key.permute(0, 2, 1, 3)
     value = value.permute(0, 2, 1, 3)
-    if attn_mask.device.type == "xpu":
+    if _attention_iface(attn_mask.device.type).needs_contiguous_attn_mask():
         attn_mask = attn_mask.contiguous()
     return _scaled_dot_product_attention(
         query,
@@ -800,7 +810,7 @@ def _sfdp_replacement_26(query, key, value, attn_mask, dropout_p):
     query = query.permute(0, 2, 1, 3)
     key = key.permute(0, 2, 1, 3)
     value = value.permute(0, 2, 1, 3)
-    if attn_mask.device.type == "xpu":
+    if _attention_iface(attn_mask.device.type).needs_contiguous_attn_mask():
         attn_mask = attn_mask.contiguous()
     return (
         _scaled_dot_product_attention(
@@ -931,12 +941,11 @@ def _sfdp_replacement_30(query, key, value, inv_scale):
 
 @functools.lru_cache(None)
 def _warn_tf32_disabled() -> None:
-    if torch.cuda.is_available() and torch.cuda.is_tf32_supported():
-        perf_hint_log.info(
-            "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
-            "Skipping pattern matching to fused flash-attention. "
-            "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
-        )
+    perf_hint_log.info(
+        "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
+        "Skipping pattern matching to fused flash-attention. "
+        "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
+    )
 
 
 def _is_supported_scale(scale) -> bool:
@@ -968,12 +977,9 @@ def _sfdp_params_check(match):
     ):
         return False
     # fused kernels use tf32
-    if (
-        query.device.type == "cuda"
-        and query.dtype == torch.float32
-        and torch.backends.cuda.matmul.fp32_precision != "tf32"
-    ):
-        if torch.backends.cuda.matmul.fp32_precision != "bfx9":
+    iface = _attention_iface(query.device.type)
+    if not iface.is_fp32_attention_fusion_safe(query.dtype):
+        if iface.should_warn_tf32_disabled():
             _warn_tf32_disabled()
         return False
 
@@ -1007,14 +1013,20 @@ def _sfdp_params_check(match):
     return True
 
 
-def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
+def _sfdp_extra_check(
+    scale_factor_op=None, fp32_upcast_softmax=False, math_path_only=False
+):
     def fn(match):
-        if (
-            disable_cuda
-            and "query" in match.kwargs
-            and "cuda" in str(match.kwargs["query"].meta["val"].device)
-        ):
-            return False
+        if math_path_only and "query" in match.kwargs:
+            query = match.kwargs["query"].meta["val"]
+            iface = _attention_iface(query.device.type)
+            if iface.keep_attention_on_math_path():
+                return False
+        if fp32_upcast_softmax and "query" in match.kwargs:
+            query = match.kwargs["query"].meta["val"]
+            iface = _attention_iface(query.device.type)
+            if not iface.is_fp32_softmax_attention_fusion_safe():
+                return False
         if scale_factor_op is not None:
             scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
             # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
@@ -1342,42 +1354,42 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_25,
                 [g(), g(), g(), m()],
                 d,
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_extra_check(fp32_upcast_softmax=True),
             ),
             (
                 _sfdp_pattern_25,
                 _sfdp_replacement_25,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1()],
                 d,
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_extra_check(fp32_upcast_softmax=True),
             ),
             (
                 _sfdp_pattern_26,
                 _sfdp_replacement_26,
                 [g(), g(), g(), m()],
                 d,
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_extra_check(fp32_upcast_softmax=True),
             ),
             (
                 _sfdp_pattern_26,
                 _sfdp_replacement_26,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1()],
                 d,
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_extra_check(fp32_upcast_softmax=True),
             ),
             (
                 _sfdp_pattern_27,
                 _sfdp_replacement_27,
                 [g(), g(), g()],
                 d,
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_extra_check(fp32_upcast_softmax=True),
             ),
             (
                 _sfdp_pattern_27,
                 _sfdp_replacement_27,
                 [g_bs1(), g_bs1(), g_bs1()],
                 d,
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_extra_check(fp32_upcast_softmax=True),
             ),
             (
                 _sfdp_pattern_28,
@@ -1424,9 +1436,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     _sfdp_replacement_16,
                     [g(), g(), g(), m_float(), c()],
                     d,
-                    _sfdp_extra_check(
-                        aten.div.Tensor, disable_cuda=torch.version.hip is None
-                    ),
+                    _sfdp_extra_check(aten.div.Tensor, math_path_only=True),
                 )
             )
             candidates.append(
@@ -1435,9 +1445,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     _sfdp_replacement_16,
                     [g_bs1(), g_bs1(), g_bs1(), m_bs1_float(), c()],
                     d,
-                    _sfdp_extra_check(
-                        aten.div.Tensor, disable_cuda=torch.version.hip is None
-                    ),
+                    _sfdp_extra_check(aten.div.Tensor, math_path_only=True),
                 )
             )
 
