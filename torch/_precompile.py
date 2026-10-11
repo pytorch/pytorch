@@ -3240,6 +3240,15 @@ def no_compilation() -> contextlib.AbstractContextManager[None]:
 
     Only kernels already in the in-process kernel cache may run.
 
+    Some kernels have nothing on disk that marks them as built, so no artifact
+    covers them in a fresh process: Metal shaders, which every module load
+    compiles, and CuTe DSL, FlyDSL, Pallas and NVIDIA Universal GEMM kernels,
+    which JIT on their first ``run()`` in each process whatever their backend's
+    own cache holds. A multi-kernel's choice is read from the local Inductor
+    cache, which the artifact does not carry, so a fresh host must benchmark
+    it, which the policy refuses. A model with such kernels must run them once
+    before entering the policy, or be served without it.
+
     Unlike ``precompile.serving()``, which is thread-local, the policy is
     process-wide. Nested and overlapping uses are depth-counted, so it stays
     active until the last owner exits; callers must drain work they dispatched
@@ -3642,7 +3651,9 @@ def load(
     eagerly, bypassing the installed entries; under ``"eager_on_recompile"`` the
     captured variants are served and any other call runs eagerly. An installed
     artifact refuses to load with ``torch._dynamo.config.compiled_autograd``
-    enabled, which would compile backward graphs outside it. A Dynamo artifact whose
+    enabled, which would compile backward graphs outside it, and with Dynamo
+    disabled (``TORCHDYNAMO_DISABLE=1`` or the ``enable_dynamo`` killswitch),
+    which it serves through. A Dynamo artifact whose
     capture graph-broke cannot load beside the live compile that captured it
     (the continuation names collide), and an installed artifact is refused
     wherever any frame it installs onto already has live Dynamo cache entries:
