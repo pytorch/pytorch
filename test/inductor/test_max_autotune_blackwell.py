@@ -1923,6 +1923,118 @@ class TestBlackwellTMALoadFusion(TestCase):
         self.assertIn("sum", kernels[0])
         self.assertTrue(kernels[1].startswith("triton_per"), kernels)
 
+    @staticmethod
+    def _two_pass_layer_norm(a, b):
+        # The variance reads the mean back per row, as in a two-pass layer norm.
+        c = (out := a @ b).float()
+        d = c - c.mean(-1, keepdim=True)
+        return out, d * torch.rsqrt((d * d).mean(-1, keepdim=True) + 1e-5)
+
+    @staticmethod
+    def _two_pass_layer_norm_stats(a, b):
+        # Returning the mean makes its division a node of its own that the
+        # variance reads back.
+        c = (out := a @ b).float()
+        d = c - (mean := c.mean(-1, keepdim=True))
+        rstd = torch.rsqrt((d * d).mean(-1, keepdim=True) + 1e-5)
+        return out, mean, rstd, d * rstd
+
+    @staticmethod
+    def _rms_norm_backward_dx(grad):
+        # RMSNorm backward with the forward recomputed: the dx row reduction
+        # reads back the rstd of the same rows.
+        def fn(a, b):
+            c = (a @ b).float()
+            rstd = torch.rsqrt(c.pow(2).mean(-1, keepdim=True) + 1e-6)
+            xhat = c * rstd
+            g = grad.float()
+            return rstd * (g - xhat * (g * xhat).mean(-1, keepdim=True))
+
+        return fn
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize(
+        "op",
+        ("layer_norm", "layer_norm_stats", "variance", "centered_sum", "rms_norm_bwd"),
+    )
+    @parametrize("shape", ((1024, 128, 128), (1000, 128, 120)))
+    def test_blackwell_mm_reduction_epilogue_two_pass(
+        self, op: str, shape: tuple[int, int, int]
+    ):
+        """A row reduction that reads a per-row result of the epilogue back,
+        e.g. the variance of a two-pass layer norm reading the mean, fuses
+        when the tile spans the output's columns."""
+        M, K, N = shape
+        fn = {
+            "layer_norm": self._two_pass_layer_norm,
+            "layer_norm_stats": self._two_pass_layer_norm_stats,
+            "variance": lambda a, b: (
+                (d := (c := (a @ b).float()) - c.mean(1, keepdim=True)) * d
+            ).mean(1),
+            "centered_sum": lambda a, b: (
+                (c := (a @ b).float()) - c.amax(1, keepdim=True)
+            ).sum(1),
+        }.get(op) or self._rms_norm_backward_dx(
+            torch.randint(-1, 2, (M, N), device=GPU_TYPE).bfloat16()
+        )
+        kernels, _ = self._run_reduction(
+            fn,
+            M,
+            K,
+            N,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            tol=0 if op == "centered_sum" else 1e-5,
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertEqual([k.split("_fused")[0] for k in kernels], ["triton_tem"])
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize(
+        "case",
+        ("stat_by_column", "stat_shifted_row", "wide_n", "wide_n_stats", "subtiled"),
+    )
+    def test_blackwell_mm_reduction_epilogue_two_pass_not_fused(self, case: str):
+        """A row reduction can't read a row result back at a column index of a
+        square output or at another row, nor before the result is complete,
+        i.e. when the tile doesn't span the output's columns or splits them
+        into subtiles."""
+        if case == "subtiled" and meta_ws_enabled():
+            self.skipTest(
+                "covered by test_blackwell_mm_reduction_epilogue_not_fused_meta_ws"
+            )
+        fn = {
+            "stat_by_column": lambda a, b: (
+                (c := (a @ b).float()) - c.sum(1)[None, :]
+            ).sum(1),
+            "stat_shifted_row": lambda a, b: (
+                (c := (a @ b).float()) - c.sum(1).roll(1)[:, None]
+            ).sum(1),
+            "wide_n_stats": self._two_pass_layer_norm_stats,
+        }.get(case, self._two_pass_layer_norm)
+        N = 128 if case == "subtiled" else 256
+        test_config = {
+            "stat_by_column": BlackwellGPUGemmConfig(128, 256, 64, 3, 8),
+            "subtiled": BlackwellGPUGemmConfig(128, 128, 64, 3, 8, epilogue_subtile=2),
+        }.get(case, BlackwellGPUGemmConfig(128, 128, 64, 3, 8))
+        kernels, _ = self._run_reduction(
+            fn,
+            256,
+            128,
+            N,
+            test_config,
+            tol=0 if case.startswith("stat_") else 1e-5,
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertTrue(
+            any(k.startswith(("triton_red", "triton_per")) for k in kernels), kernels
+        )
+
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
