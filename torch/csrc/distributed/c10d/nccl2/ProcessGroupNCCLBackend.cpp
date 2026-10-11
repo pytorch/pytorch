@@ -13,6 +13,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
@@ -131,6 +132,20 @@ ProcessGroupNCCL::ProcessGroupNCCL(
                                             : options_c10d_->group_name;
 
   setGroupUid(options_c10d_->group_name);
+
+  // Recovery needs coordination even when an idle peer has no work to time out.
+  // Reconfigurable groups keep their existing revoke protocol.
+  if (!options_c10d_->enable_reconfigure) {
+    lifecycle_store_ = store_->clone();
+    const auto underlyingStore = [](const c10::intrusive_ptr<Store>& store) {
+      auto* prefix = dynamic_cast<PrefixStore*>(store.get());
+      return prefix ? prefix->getUnderlyingNonPrefixStore() : store;
+    };
+    // HashStore clones share the original object and need no network timeout.
+    if (underlyingStore(lifecycle_store_) != underlyingStore(store_)) {
+      lifecycle_store_->setTimeout(options_c10d_->timeout);
+    }
+  }
 
   if (options_c10d_->config.blocking == NCCL_CONFIG_UNDEF_INT) {
     auto nonblocking = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
@@ -321,15 +336,16 @@ void ProcessGroupNCCL::unregisterCompletionHook(int64_t hook_id) {
 
 void ProcessGroupNCCL::shutdown() {
   // Called by destroy_process_group(). Drain in-flight work and close the comm
-  // gracefully. Idempotent: finalize-on-already-finalized throws, so swallow.
-  if (init_state_ != InitializationState::INITIALIZED) {
+  // gracefully when every rank is healthy, otherwise abort it.
+  const auto state = init_state_.load();
+  if (state == InitializationState::UNINITIALIZED ||
+      state == InitializationState::FINALIZED) {
     return;
   }
   try {
     finalize();
   } catch (const std::exception& e) {
-    TC_LOG(WARNING) << "ProcessGroupNCCL::shutdown: finalize() raised, "
-                    << "treating as no-op: " << e.what();
+    TC_LOG(WARNING) << "ProcessGroupNCCL::shutdown: " << e.what();
   }
 }
 

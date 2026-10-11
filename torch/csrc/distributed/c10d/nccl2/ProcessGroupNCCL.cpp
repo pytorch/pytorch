@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -16,11 +17,13 @@
 #include <ATen/Context.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/env.h>
 #include <fmt/core.h>
 #include <nccl.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/NCCLCommRegistrationHook.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
@@ -181,6 +184,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
     // Open-coded rather than abortNcclComm() so a failure cannot throw out of
     // the destructor (abortNcclComm() throws on a failed or timed-out abort).
     if (nccl_comm_) {
+      publishFailure();
       // Drop our symmetric-memory registration while nccl_comm_ is still valid
       // (it is nulled below, before detachMemoryHook runs).
       retireComm();
@@ -288,6 +292,12 @@ void ProcessGroupNCCL::initNcclResources() {
       nccl_api_->commCount(nccl_comm_, &comm_size_),
       "NCCL Count failed");
 
+  if (lifecycle_store_) {
+    lifecycle_store_ = c10::make_intrusive<PrefixStore>(
+        c10::str("nccl2_lifecycle/", name_, "/", bootstrap_generation_),
+        std::move(lifecycle_store_));
+  }
+
   if (!blocking_wait_ && !shutdown_) {
     timeout_thread_ = std::thread(&ProcessGroupNCCL::timeoutWatchdog, this);
   }
@@ -380,6 +390,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   // once, members with their color and non-members with NCCL_SPLIT_NOCOLOR.
   c10::cuda::CUDAGuard gpuGuard(device_);
   ncclComm_t new_comm = nullptr;
+  const auto childGeneration = split_generation_++;
   const int key = newRank >= 0 ? newRank : getRank();
   auto splitStatus =
       nccl_api_->commSplit(nccl_comm_, color, key, &new_comm, &config);
@@ -436,13 +447,23 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   }
   childOpts->global_ranks_in_group = std::move(childRanks);
 
+  const auto childPrefix = fmt::format(
+      "nccl2_split/{}/{}/{}/{}",
+      name_,
+      bootstrap_generation_,
+      childGeneration,
+      color);
   auto child = c10::make_intrusive<ProcessGroupNCCL>(
-      store, newRank, static_cast<int>(ranks.size()), childOpts);
+      c10::make_intrusive<PrefixStore>(childPrefix, store),
+      newRank,
+      static_cast<int>(ranks.size()),
+      childOpts);
   child->initFromComm(new_comm, device_, nccl_api_);
   return c10::static_intrusive_pointer_cast<::c10d::Backend>(child);
 }
 
 void ProcessGroupNCCL::abort() {
+  std::lock_guard finalizeLock(finalize_mutex_);
   // User-initiated (backend.abort() / _abort_process_group()): tear the
   // communicator down and return. Never terminates the process, whatever
   // TORCH_NCCL_ASYNC_ERROR_HANDLING says -- that gate only covers failures the
@@ -461,6 +482,7 @@ void ProcessGroupNCCL::abort() {
     // teardown, so work in flight reports it instead of completing.
     stopWatchdog();
     comm_state_ = CommState::ERROR;
+    publishFailure();
     abortNcclComm();
   }
 }
@@ -517,54 +539,82 @@ std::unordered_map<std::string, uint64_t> ProcessGroupNCCL::getMemoryStats() {
 }
 
 void ProcessGroupNCCL::finalize() {
+  std::lock_guard finalizeLock(finalize_mutex_);
   TORCH_CHECK(
       init_state_ != InitializationState::UNINITIALIZED,
       "ProcessGroupNCCL not initialized");
   TORCH_CHECK(
       init_state_ != InitializationState::FINALIZED,
       "ProcessGroupNCCL already finalized");
-  init_state_ = InitializationState::FINALIZED;
-
+  init_state_ = InitializationState::FINALIZING;
+  auto restoreOnFailure = c10::make_scope_exit([this] {
+    if (init_state_ == InitializationState::FINALIZING) {
+      comm_state_ = CommState::ERROR;
+      publishFailure();
+      init_state_ = InitializationState::INITIALIZED;
+    }
+  });
   // Stop the watchdog first: draining the work queue below may surface a
   // timeout, which is a teardown result to report to the caller, not a reason
   // to terminate the process.
   stopWatchdog();
   drainRetiredGraphWork();
 
-  // Wait for all pending work objects to complete and get final status
-  auto work_status = workq_.finalize();
-
-  TORCH_CHECK(
-      work_status != WorkNCCL::WorkStatus::NOT_STARTED &&
-          work_status != WorkNCCL::WorkStatus::INPROGRESS,
-      "WorkQ finalize returned in progress or not started state");
-
-  // Update comm_state_ based on the work status
-  if (work_status == WorkNCCL::WorkStatus::TIMEDOUT) {
-    comm_state_ = CommState::TIMEOUT;
-    abortNcclComm();
-    TORCH_CHECK(false, "Work timed out during finalize");
-  } else if (work_status == WorkNCCL::WorkStatus::ERROR) {
-    comm_state_ = CommState::ERROR;
-    TORCH_CHECK(
-        nccl_comm_, "NCCL communicator was aborted after a previous error");
-    ncclResult_t asyncErr{};
-    NCCL_CHECK(
-        nccl_api_,
-        nccl_comm_,
-        nccl_api_->commGetAsyncError(nccl_comm_, &asyncErr),
-        "failed to get async error");
-    NCCLException ncclException(
-        *nccl_api_, "NCCL Async Error", asyncErr, nccl_comm_);
-    abortNcclComm();
-    // The constructor reads the communicator for getLastError(), and
-    // abortNcclComm() has just set nccl_comm_ to nullptr, so the exception has
-    // to be built first. A check macro would raise before the cleanup ran.
-    // @allow-raw-throw: abortNcclComm() nulls the comm it reads
-    throw std::move(ncclException);
+  const auto deadline =
+      std::chrono::steady_clock::now() + options_c10d_->timeout;
+  while (comm_state_ == CommState::NORMAL) {
+    auto status = workq_.garbageCollect();
+    if (status == WorkNCCL::WorkStatus::TIMEDOUT ||
+        status == WorkNCCL::WorkStatus::ERROR) {
+      comm_state_ = status == WorkNCCL::WorkStatus::TIMEDOUT
+          ? CommState::TIMEOUT
+          : CommState::ERROR;
+      publishFailure();
+      runAbortHooks();
+      break;
+    }
+    if (checkRemoteFailure() || status == WorkNCCL::WorkStatus::COMPLETED) {
+      break;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      comm_state_ = CommState::TIMEOUT;
+      publishFailure();
+      runAbortHooks();
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
-  if (memPool_) {
+  ncclResult_t asyncError = ncclSuccess;
+  {
+    std::lock_guard teardownLock(nccl_teardown_mutex_);
+    if (comm_state_ == CommState::NORMAL && nccl_comm_) {
+      const auto status = nccl_api_->commGetAsyncError(nccl_comm_, &asyncError);
+      if (status != ncclSuccess) {
+        asyncError = status;
+      }
+    }
+  }
+  if (asyncError != ncclSuccess && asyncError != ncclInProgress) {
+    comm_state_ = CommState::ERROR;
+    publishFailure();
+    TC_LOG(ERROR, this) << "NCCL error during finalize: "
+                        << nccl_api_->getErrorString(asyncError);
+    runAbortHooks();
+  }
+
+  std::exception_ptr cleanupError;
+  if (!coordinateShutdown(deadline)) {
+    try {
+      abortNcclComm();
+    } catch (...) {
+      cleanupError = std::current_exception();
+    }
+  }
+  workq_.finalize();
+
+  std::lock_guard teardownLock(nccl_teardown_mutex_);
+  if (memPool_ && nccl_comm_ && !cleanupError) {
     try {
       deregisterMemPool(memPool_.get());
     } catch (const std::exception& error) {
@@ -583,7 +633,7 @@ void ProcessGroupNCCL::finalize() {
   // Destroy NCCL communicator
   // Note: If abortNcclComm() was called, nccl_comm_ is already nullptr and this
   // is skipped. We must not call commDestroy after commAbort per NCCL docs.
-  if (nccl_comm_) {
+  if (nccl_comm_ && !cleanupError) {
     detachMemoryHook();
     retireComm();
     // Deregister comm from the CachingAllocator
@@ -595,9 +645,20 @@ void ProcessGroupNCCL::finalize() {
         "NCCL Destroy failed");
     nccl_comm_ = nullptr;
   }
+  if (cleanupError) {
+    std::rethrow_exception(cleanupError);
+  }
+  init_state_ = InitializationState::FINALIZED;
+  TORCH_CHECK(
+      comm_state_ != CommState::TIMEOUT, "Work timed out during finalize");
+  TORCH_CHECK(
+      comm_state_ != CommState::ERROR,
+      "NCCL communicator failed during finalize");
 }
 
 void ProcessGroupNCCL::abortNcclComm() {
+  publishFailure();
+  std::lock_guard teardownLock(nccl_teardown_mutex_);
   detachMemoryHook();
   retireComm();
   if (nccl_comm_) {
@@ -612,6 +673,7 @@ void ProcessGroupNCCL::abortNcclComm() {
 }
 
 void ProcessGroupNCCL::stopWatchdog() {
+  std::lock_guard joinLock(watchdog_join_mutex_);
   shutdown_ = true;
   {
     std::lock_guard<std::mutex> lock(timeout_mutex_);
@@ -648,15 +710,101 @@ void ProcessGroupNCCL::abortProcess(const std::string& reason) {
   ::abort();
 }
 
-void ProcessGroupNCCL::handleWatchdogFailure(const std::string& reason) {
+void ProcessGroupNCCL::publishFailure() {
+  if (!lifecycle_store_) {
+    return;
+  }
+  try {
+    lifecycle_store_->compareSet("decision", "", "abort");
+  } catch (const std::exception& error) {
+    TC_LOG(ERROR, this) << "Failed to publish communicator failure: "
+                        << error.what();
+  }
+}
+
+bool ProcessGroupNCCL::checkRemoteFailure() {
+  if (!lifecycle_store_) {
+    return false;
+  }
+  if (comm_state_ != CommState::NORMAL) {
+    return true;
+  }
+  try {
+    if (!lifecycle_store_->check({"decision"}) ||
+        lifecycle_store_->get_to_str("decision") != "abort") {
+      return false;
+    }
+    auto expected = CommState::NORMAL;
+    if (comm_state_.compare_exchange_strong(expected, CommState::ERROR)) {
+      TC_LOG(ERROR, this) << "A peer reported a communicator failure";
+    }
+  } catch (const std::exception& error) {
+    auto expected = CommState::NORMAL;
+    comm_state_.compare_exchange_strong(expected, CommState::ERROR);
+    TC_LOG(ERROR, this) << "Failed to check communicator failure: "
+                        << error.what();
+  }
+  return true;
+}
+
+bool ProcessGroupNCCL::coordinateShutdown(
+    std::chrono::steady_clock::time_point deadline) {
+  if (comm_state_ != CommState::NORMAL) {
+    publishFailure();
+    return false;
+  }
+  if (!lifecycle_store_) {
+    return true;
+  }
+  try {
+    // Every rank drains its work before agreeing to graceful destruction.
+    // An idle rank must not enter blocking NCCL teardown while a peer can fail.
+    lifecycle_store_->set(c10::str("ready/", rank_), "1");
+    std::vector<std::string> keys;
+    for (int rank = 0; rank < comm_size_; ++rank) {
+      keys.push_back(c10::str("ready/", rank));
+    }
+    while (true) {
+      auto decision = lifecycle_store_->compareSet("decision", "", "");
+      if (decision.empty()) {
+        // Commit one decision so a deadline cannot race another rank's ready
+        // check and select abort while that rank enters blocking destruction.
+        if (lifecycle_store_->check(keys)) {
+          decision = lifecycle_store_->compareSet("decision", "", "healthy");
+        } else if (std::chrono::steady_clock::now() >= deadline) {
+          decision = lifecycle_store_->compareSet("decision", "", "abort");
+        }
+      }
+      if (!decision.empty()) {
+        if (decision == "healthy") {
+          return true;
+        }
+        auto expected = CommState::NORMAL;
+        comm_state_.compare_exchange_strong(expected, CommState::ERROR);
+        return false;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  } catch (const std::exception& error) {
+    comm_state_ = CommState::ERROR;
+    TC_LOG(ERROR, this) << "Failed to coordinate communicator shutdown: "
+                        << error.what();
+  }
+  publishFailure();
+  return false;
+}
+
+void ProcessGroupNCCL::handleWatchdogFailure(
+    const std::string& reason,
+    bool from_watchdog) {
+  publishFailure();
   if (options_c10d_->enable_reconfigure) {
     revokeNcclComm();
     return;
   }
 
   if (SHOULD_CLEAN_UP(async_error_handling_)) {
-    if (timeout_thread_.joinable() &&
-        std::this_thread::get_id() == timeout_thread_.get_id()) {
+    if (from_watchdog) {
       shutdown_ = true;
       timeout_cv_.notify_all();
     } else {
@@ -683,6 +831,7 @@ void ProcessGroupNCCL::handleBlockingWaitFailure(
   }
   comm_state_ = status == WorkNCCL::WorkStatus::TIMEDOUT ? CommState::TIMEOUT
                                                          : CommState::ERROR;
+  publishFailure();
   if (options_c10d_->enable_reconfigure) {
     revokeNcclComm();
   } else {
@@ -701,6 +850,7 @@ void ProcessGroupNCCL::revokeNcclComm() {
   }
   TC_LOG(INFO, this) << "Calling abort hooks before commRevoke.";
   runAbortHooks();
+  std::lock_guard teardownLock(nccl_teardown_mutex_);
   detachMemoryHook();
   retireComm();
   if (nccl_comm_) {

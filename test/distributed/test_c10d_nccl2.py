@@ -792,6 +792,81 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
         self._check_all_reduce()
 
 
+class ProcessGroupNCCL2ShutdownTest(_ProcessGroupNCCL2SubgroupTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("error_handling", [0, 2])
+    @parametrize("pending_work", [False, True])
+    def test_timeout_during_peer_shutdown(
+        self, device, error_handling, pending_work
+    ) -> None:
+        env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": str(error_handling)}
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=20))
+        backend = pg._get_backend(self.device)
+        self._check_all_reduce(pg)
+        work = None
+        if pending_work:
+            # Establish P2P connections before issuing an unmatched receive;
+            # first-use connection setup can block on the host before enqueue.
+            tensor = torch.ones(4, device=self.device)
+            if self.rank == 0:
+                ops = [
+                    dist.P2POp(dist.isend, tensor, rank, group=pg)
+                    for rank in range(1, self.world_size)
+                ]
+            else:
+                ops = [dist.P2POp(dist.irecv, tensor, 0, group=pg)]
+            for warmup in dist.batch_isend_irecv(ops):
+                warmup.wait()
+            torch.cuda.synchronize(self.device)
+            self._check_all_reduce(pg)
+
+        if self.rank == 0:
+            # Peers start shutdown while this rank can still enqueue failing work.
+            time.sleep(2)
+            opts = dist.AllreduceOptions()
+            opts.timeout = timedelta(seconds=5)
+            pg.allreduce([torch.ones(1024, device=self.device)], opts)
+            deadline = time.monotonic() + 60
+            while backend.get_error() == ErrorType.SUCCESS:
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(0.1)
+            self.assertEqual(backend.get_error(), ErrorType.TIMEOUT)
+        elif pending_work:
+            work = dist.irecv(tensor, src=0, group=pg)
+
+        dist.destroy_process_group(pg)
+        if work is not None:
+            self.assertTrue(work.is_completed())
+            with self.assertRaises(RuntimeError):
+                work.wait()
+        self.assertEqual(
+            backend.get_error(),
+            ErrorType.TIMEOUT if self.rank == 0 else ErrorType.COMM_ERROR,
+        )
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("error_handling", [0, 1, 2, 3])
+    def test_shutdown_drains_pending_work(self, device, error_handling) -> None:
+        env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": str(error_handling)}
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup()
+        tensor = torch.ones(4, device=self.device)
+        work = dist.all_reduce(tensor, group=pg, async_op=True)
+
+        dist.destroy_process_group(pg)
+
+        self.assertTrue(work.is_completed())
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+        self._check_all_reduce()
+
+
+instantiate_device_type_tests(ProcessGroupNCCL2ShutdownTest, globals(), only_for="cuda")
+
+
 class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:
