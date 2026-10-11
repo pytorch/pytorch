@@ -1,11 +1,14 @@
 # Owner(s): ["module: hub"]
 
 import os
+import shutil
 import tempfile
 import unittest
 import warnings
 import zipfile
+from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlparse, urlunparse
 
 import torch
 import torch.hub as hub
@@ -321,6 +324,108 @@ class TestHub(TestCase):
         with zipfile.ZipFile(filename, "w") as zf:
             # Create a single entry with malicious path for legacy format
             zf.writestr(malicious_path, b"malicious content")
+
+    def test_load_state_dict_from_url_keeps_file_name_inside_model_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_dir = os.path.join(tmpdir, "models")
+            os.makedirs(model_dir)
+            payload = os.path.join(tmpdir, "payload.pth")
+            torch.save({"w": torch.tensor([1.0])}, payload)
+
+            def fake_download(url, dst, hash_prefix=None, progress=True):
+                shutil.copy(payload, dst)
+
+            outside = os.path.join(tmpdir, "escaped.pth")
+            with patch.object(hub, "download_url_to_file", side_effect=fake_download):
+                loaded = hub.load_state_dict_from_url(
+                    TORCHHUB_EXAMPLE_RELEASE_URL,
+                    model_dir=model_dir,
+                    file_name="../escaped.pth",
+                    progress=False,
+                    weights_only=True,
+                )
+            self.assertEqual(loaded["w"], torch.tensor([1.0]))
+            self.assertFalse(os.path.exists(outside))
+            self.assertTrue(os.path.exists(os.path.join(model_dir, "escaped.pth")))
+
+            absolute_name = os.path.join(tmpdir, "abs_escaped.pth")
+            with patch.object(hub, "download_url_to_file", side_effect=fake_download):
+                loaded = hub.load_state_dict_from_url(
+                    TORCHHUB_EXAMPLE_RELEASE_URL,
+                    model_dir=model_dir,
+                    file_name=absolute_name,
+                    progress=False,
+                    weights_only=True,
+                )
+            self.assertEqual(loaded["w"], torch.tensor([1.0]))
+            self.assertFalse(os.path.exists(absolute_name))
+            base = os.path.basename(absolute_name)
+            self.assertTrue(os.path.exists(os.path.join(model_dir, base)))
+
+            cached_name = "plain_name.pth"
+            shutil.copy(payload, os.path.join(model_dir, cached_name))
+            loaded = hub.load_state_dict_from_url(
+                TORCHHUB_EXAMPLE_RELEASE_URL,
+                model_dir=model_dir,
+                file_name=cached_name,
+                progress=False,
+                weights_only=True,
+            )
+            self.assertEqual(loaded["w"], torch.tensor([1.0]))
+
+            # file_name is omitted, so the cache name is the URL path's last component.
+            dotdot_url = urlunparse(
+                urlparse(TORCHHUB_EXAMPLE_RELEASE_URL)._replace(path="/..")
+            )
+            with patch.object(
+                hub, "download_url_to_file", side_effect=fake_download
+            ) as mocked:
+                with self.assertRaisesRegex(ValueError, "Invalid checkpoint file name"):
+                    hub.load_state_dict_from_url(
+                        TORCHHUB_EXAMPLE_RELEASE_URL,
+                        model_dir=model_dir,
+                        file_name="..",
+                        progress=False,
+                        weights_only=True,
+                    )
+                with self.assertRaisesRegex(ValueError, "Invalid checkpoint file name"):
+                    hub.load_state_dict_from_url(
+                        dotdot_url,
+                        model_dir=model_dir,
+                        progress=False,
+                        weights_only=True,
+                    )
+                mocked.assert_not_called()
+
+    def test_download_url_to_file_rejects_file_scheme(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src = os.path.join(tmpdir, "secret.txt")
+            with open(src, "w") as f:
+                f.write("SECRET")
+            dst = os.path.join(tmpdir, "out.bin")
+            with self.assertRaisesRegex(ValueError, "Unsupported URL scheme"):
+                hub.download_url_to_file(Path(src).as_uri(), dst, progress=False)
+            self.assertFalse(os.path.exists(dst))
+            left = os.listdir(tmpdir)
+            if left != ["secret.txt"]:
+                raise AssertionError(f"Unexpected files left behind: {left}")
+
+            model_dir = os.path.join(tmpdir, "models")
+            os.makedirs(model_dir)
+            payload = os.path.join(tmpdir, "payload.pth")
+            torch.save({"w": torch.tensor([1.0])}, payload)
+            outside = os.path.join(tmpdir, "escaped.pth")
+            with self.assertRaisesRegex(ValueError, "Unsupported URL scheme"):
+                hub.load_state_dict_from_url(
+                    Path(payload).as_uri(),
+                    model_dir=model_dir,
+                    file_name="../escaped.pth",
+                    progress=False,
+                    weights_only=True,
+                )
+            self.assertFalse(os.path.exists(outside))
+            if os.listdir(model_dir):
+                raise AssertionError(f"model_dir was written: {os.listdir(model_dir)}")
 
     def test_safe_extract_zip_blocks_directory_traversal(self):
         """Test that _safe_extract_zip blocks directory traversal attacks."""
