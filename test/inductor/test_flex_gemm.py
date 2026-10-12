@@ -246,6 +246,13 @@ class TestFlexGemmOutputLayout(TestCase):
             BLOCKED_128X4.validate_carrier_fn(torch.empty(4, 4).t())
 
 
+def _skip_unless_quack_cutlass(test):
+    # The vendored QuACK imports cutlass.utils.block_copy, which older
+    # nvidia-cutlass-dsl releases (e.g. fbcode's default) do not provide.
+    if not hasattr(importlib.import_module("cutlass.utils"), "block_copy"):
+        test.skipTest("vendored QuACK needs a newer nvidia-cutlass-dsl")
+
+
 @instantiate_parametrized_tests
 class TestFlexGemmRuntimeHelpers(TestCase):
     @recover_orig_fp32_precision
@@ -763,6 +770,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_quack_feed_main_host_guards_match_runtime_contract(self):
+        _skip_unless_quack_cutlass(self)
         from torch._inductor.kernel.flex_gemm.constraints import (
             LOCAL_REDUCE_FRAGMENT_WIDTH,
         )
@@ -774,6 +782,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_grouped_n_reduce_rejects_sm120_config(self):
+        _skip_unless_quack_cutlass(self)
         from torch._inductor.kernel.flex_gemm.quack_ops.grouped_reduce import (
             grouped_reduce_supports_config,
         )
