@@ -19,6 +19,7 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import compiled_autograd
+from torch._dynamo.graph_bytecode_inputs import install_active_registry
 from torch._dynamo.utils import (
     CompileEventLogger,
     dynamo_timed,
@@ -537,6 +538,10 @@ def create_aot_state(
     python_dispatcher_mode = (
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
+
+    # Tracing runs the graph's get_external_object_by_index calls, and the
+    # backend may have run other compiled functions since Dynamo traced it.
+    install_active_registry()
 
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     # If any saved tensor hooks are active, we **don't** want to trace them.
