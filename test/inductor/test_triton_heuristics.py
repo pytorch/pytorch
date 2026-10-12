@@ -394,7 +394,7 @@ class TestTritonHeuristics(TestCase):
     def test_cached_autotune_uses_cache_for_single_dsr_reduction_config(self):
         cfg = triton.Config({"XBLOCK": 1, "R0_BLOCK": 2048}, num_warps=16)
         fake_cache = MagicMock()
-        fake_cache.read_best.return_value = None
+        fake_cache.read_best.return_value = (None, False)
 
         autotuner, create = self._run_single_dsr_reduction_cached_autotune(
             [cfg], fake_cache
@@ -410,7 +410,7 @@ class TestTritonHeuristics(TestCase):
         dynamic_cfg = triton.Config({"XBLOCK": 1, "R0_BLOCK": 1024}, num_warps=16)
 
         fake_cache = MagicMock()
-        fake_cache.read_best.return_value = dynamic_cfg
+        fake_cache.read_best.return_value = (dynamic_cfg, False)
 
         autotuner, _ = self._run_single_dsr_reduction_cached_autotune(
             [original_cfg], fake_cache

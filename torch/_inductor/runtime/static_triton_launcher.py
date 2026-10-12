@@ -235,6 +235,7 @@ class StaticallyLaunchedTritonKernel:
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: int | None = None  # Loaded by load_kernel(on the parent process)
         self.module: int | None = None  # Owns the HIP/CUDA module loaded for function
+        self.module_device: int | None = None
         # compile-on-one-rank: a device-agnostic kernel (no baked device index) can be
         # launched on more than one device within a single process. A loaded module/
         # function is bound to a single device, so when device_agnostic is set we keep
@@ -323,25 +324,31 @@ class StaticallyLaunchedTritonKernel:
             self.module, self.function, self.n_regs, self.n_spills = (
                 self._loaded_kernel_parts(self._load_kernel_for_device(device))
             )
+            if self.module is not None:
+                self.module_device = device
             self.cubin_path = None
             self.cubin_raw = None
 
     def _current_device(self) -> int:
         raise NotImplementedError
 
+    def _unload_kernel(self, module: int, device: int | None) -> None:
+        self.C_impl._unload_kernel(module)
+
     def close(self) -> None:
         with self._load_lock:
             # Clear Python-visible handles first so repeated cleanup is harmless even
             # if the driver reports an error while unloading.
-            modules = list(self.modules.values())
+            modules = list(self.modules.items())
             if self.module is not None:
-                modules.append(self.module)
+                modules.append((getattr(self, "module_device", None), self.module))
             self.module = None
+            self.module_device = None
             self.function = None
             self.modules = {}
             self.functions = {}
-        for mod in modules:
-            self.C_impl._unload_kernel(mod)
+        for device, module in modules:
+            self._unload_kernel(module, device)
 
     def __del__(self) -> None:
         try:
@@ -609,6 +616,15 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
         import torch
 
         return torch.cuda.current_device()
+
+    def _unload_kernel(self, module: int, device: int | None) -> None:
+        import torch
+
+        if device is None:
+            self.C_impl._unload_kernel(module)
+        else:
+            with torch.cuda.device(device):
+                self.C_impl._unload_kernel(module)
 
 
 class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):

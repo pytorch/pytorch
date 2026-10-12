@@ -5,7 +5,6 @@ import os
 import shutil
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._utils_internal import justknobs_check
@@ -14,10 +13,6 @@ from torch.utils._ordered_set import OrderedSet
 
 from .runtime.runtime_utils import triton_cache_dir
 from .utils import _IS_WINDOWS, GPU_KERNEL_BIN_EXTS
-
-
-if TYPE_CHECKING:
-    from .runtime.triton_heuristics import StaticTritonCompileResult
 
 
 log = logging.getLogger(__name__)
@@ -215,10 +210,7 @@ class TritonBundler:
     """
 
     _entries: list[TritonBundleEntry] | None = None
-    _static_autotuners: list[StaticallyLaunchedAutotuner] | None = None
-    _static_compile_results: dict[object, list["StaticTritonCompileResult"]] | None = (
-        None
-    )
+    _static_autotuners: dict[object, StaticallyLaunchedAutotuner] | None = None
     _winners: dict[object, OrderedSet[str]] | None = None
     _omitted_groups: dict[object, OrderedSet[_TritonCacheGroup]] | None = None
 
@@ -258,8 +250,7 @@ class TritonBundler:
                 "expected cls._entries to be None"
             )
         cls._entries = []
-        cls._static_autotuners = []
-        cls._static_compile_results = {}
+        cls._static_autotuners = {}
         cls._winners = {}
         cls._omitted_groups = {}
 
@@ -272,7 +263,6 @@ class TritonBundler:
         log.debug("TritonBundler.end_compile is called")
         cls._entries = None
         cls._static_autotuners = None
-        cls._static_compile_results = None
         cls._winners = None
         cls._omitted_groups = None
 
@@ -319,16 +309,11 @@ class TritonBundler:
             new_kernel.prepare_for_caching()
             new_kernel._reload_kernel = None
 
-            entries.append(
-                StaticallyLaunchedAutotuner(
-                    key,
-                    new_kernel.inductor_meta.get("kernel_name", "unknown_kernel"),
-                    new_kernel,
-                )
+            entries[kernel] = StaticallyLaunchedAutotuner(
+                key,
+                new_kernel.inductor_meta.get("kernel_name", "unknown_kernel"),
+                new_kernel,
             )
-            if cls._static_compile_results is None:
-                raise AssertionError("expected active static compile results")
-            cls._static_compile_results[kernel] = new_kernel.compile_results
 
             # Put the values back since we need it to use now
             kernel.restore_after_unpickle(old_values)
@@ -344,9 +329,10 @@ class TritonBundler:
                 "Saving %d statically launchable CachingAutotuners",
                 len(cls._static_autotuners),
             )
-            static_autotuner_names = [i.kernel_name for i in cls._static_autotuners]
+            static_autotuners = list(cls._static_autotuners.values())
+            static_autotuner_names = [i.kernel_name for i in static_autotuners]
             counters["inductor"]["triton_bundler_save_static_autotuner"] += 1
-            return cls._static_autotuners, static_autotuner_names
+            return static_autotuners, static_autotuner_names
 
     @classmethod
     def load_autotuners(
@@ -482,10 +468,14 @@ class TritonBundler:
                     path = os.path.join(entry.directory, entry.kernel_hash)
                     if not os.path.exists(path):
                         continue
+                    static_autotuner = (
+                        cls._static_autotuners.get(entry.autotuner)
+                        if config.use_static_triton_launcher and cls._static_autotuners
+                        else None
+                    )
                     compile_results = (
-                        cls._static_compile_results.get(entry.autotuner)
-                        if config.use_static_triton_launcher
-                        and cls._static_compile_results
+                        static_autotuner.kernel.compile_results
+                        if static_autotuner is not None
                         else None
                     )
                     trusted = True

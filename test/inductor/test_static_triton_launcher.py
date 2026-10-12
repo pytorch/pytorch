@@ -239,6 +239,34 @@ class TestStaticTritonLauncherUnit(TestCase):
             )
         )
 
+    def test_device_agnostic_modules_unload_on_owning_device(self):
+        unloaded_modules = []
+
+        class FakeImpl:
+            @staticmethod
+            def _unload_kernel(module):
+                unloaded_modules.append(module)
+
+        kernel = object.__new__(StaticallyLaunchedCudaKernel)
+        kernel.module = None
+        kernel.module_device = None
+        kernel.function = None
+        kernel.functions = {0: 0xF00D, 1: 0xF00E}
+        kernel.modules = {0: 0xC0FFEE, 1: 0xC0FFEF}
+        kernel._load_lock = threading.Lock()
+        kernel.C_impl = FakeImpl
+
+        with mock.patch("torch.cuda.device") as device_guard:
+            kernel.close()
+
+        self.assertEqual(device_guard.call_count, 2)
+        self.assertEqual(
+            [call.args for call in device_guard.call_args_list], [(0,), (1,)]
+        )
+        self.assertEqual(unloaded_modules, [0xC0FFEE, 0xC0FFEF])
+        self.assertEqual(kernel.modules, {})
+        self.assertEqual(kernel.functions, {})
+
 
 @requires_gpu_and_triton
 class TestStaticTritonLauncher(TestCase):
@@ -780,6 +808,9 @@ def kernel_many_args(out_tensor, {decl}):
 
             def close(self):
                 return StaticallyLaunchedCudaKernel.close(self)
+
+            def _unload_kernel(self, module, device):
+                return StaticallyLaunchedCudaKernel._unload_kernel(self, module, device)
 
             def run(self, *_args, **_kwargs):
                 return None
