@@ -3608,24 +3608,30 @@ class TestDistributions(DistributionsTestCase):
 
         self._check_log_prob(Laplace(loc, scale), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @set_default_dtype_if_supported(torch.double)
     def test_laplace_icdf_small_tail(self):
         # icdf must not lose precision for small probabilities
-        d = Laplace(torch.tensor(0.0, dtype=torch.double), torch.tensor(1.0, dtype=torch.double))
+        d = Laplace(
+            torch.tensor(0.0, dtype=torch.double), torch.tensor(1.0, dtype=torch.double)
+        )
         p = torch.tensor([1e-12, 1e-6, 0.25], dtype=torch.double)
         self.assertEqual(d.icdf(p), torch.log(2 * p), atol=0, rtol=1e-12)
         self.assertEqual(d.icdf(1 - p), -torch.log(2 * p), atol=1e-6, rtol=1e-6)
-        self.assertTrue(torch.isfinite(Laplace(0.0, 1.0).icdf(torch.tensor([1e-9]))).all())
+        self.assertTrue(
+            torch.isfinite(Laplace(0.0, 1.0).icdf(torch.tensor([1e-9]))).all()
+        )
 
     def test_gumbel_cdf_icdf_tails(self):
         # cdf must be defined on the whole real line (the support of Gumbel)
-        d = Gumbel(torch.tensor(0.0, dtype=torch.double), torch.tensor(1.0, dtype=torch.double))
+        d = Gumbel(
+            torch.tensor(0.0, dtype=torch.double), torch.tensor(1.0, dtype=torch.double)
+        )
         x = torch.tensor([-10.0, -1.0, 0.0, 3.0, 100.0], dtype=torch.double)
         expected = torch.exp(-torch.exp(-x))
         self.assertEqual(d.cdf(x), expected)
         self.assertEqual(d.icdf(d.cdf(x[1:4])), x[1:4])
-        self.assertEqual(Gumbel(0.0, 1.0).cdf(torch.tensor([-10.0, 100.0])), torch.tensor([0.0, 1.0]))
+        self.assertEqual(
+            Gumbel(0.0, 1.0).cdf(torch.tensor([-10.0, 100.0])), torch.tensor([0.0, 1.0])
+        )
 
     def test_generalized_pareto_float64(self):
         t = lambda v: torch.tensor(v, dtype=torch.double)  # noqa: E731
@@ -3637,6 +3643,8 @@ class TestDistributions(DistributionsTestCase):
             self.assertEqual(sf.dtype, torch.double)
             self.assertTrue(torch.isfinite(lp) and torch.isfinite(sf))
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @set_default_dtype_if_supported(torch.double)
     def test_laplace_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
