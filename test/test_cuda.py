@@ -13738,6 +13738,72 @@ class TestCompileKernel(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaDeviceParametrized(TestCase):
+    @onlyCUDA
+    @skipIfRocm
+    @skipCUDAIf(
+        not TEST_BF16 or (torch.backends.cudnn.version() or 0) < 91300,
+        "BF16 RNNs require BF16 hardware support and cuDNN >= 9.13",
+    )
+    @parametrize("kind,proj_size", (("RNN", 0), ("GRU", 0), ("LSTM", 0), ("LSTM", 4)))
+    @parametrize("layout", ("seq_first", "batch_first", "packed"))
+    @parametrize("weight_dtype", (torch.float32, torch.float16, torch.bfloat16))
+    @parametrize("nonpreflattened", (False, True))
+    @parametrize("bias", (False, True))
+    def test_autocast_rnn_bfloat16(
+        self, device, kind, proj_size, layout, weight_dtype, nonpreflattened, bias
+    ):
+        batch_first = layout == "batch_first"
+        shape = (4, 3, 5) if batch_first else (3, 4, 5)
+        x = torch.randn(shape, device=device, requires_grad=True)
+        kwargs = dict(
+            num_layers=2, bidirectional=True, batch_first=batch_first, bias=bias
+        )
+        if kind == "LSTM":
+            kwargs["proj_size"] = proj_size
+        rnn = getattr(nn, kind)(5, 6, device=device, dtype=weight_dtype, **kwargs)
+        if nonpreflattened:
+            with torch.no_grad():
+                for p in rnn.parameters():
+                    p.set_(p.clone())
+        control = deepcopy(rnn).to(dtype=torch.bfloat16)
+        x_ref = x.detach().to(torch.bfloat16).requires_grad_()
+        hshape = (4, 4, proj_size or 6)
+        states = [torch.randn(hshape, device=device, requires_grad=True)]
+        if kind == "LSTM":
+            states.append(torch.randn((4, 4, 6), device=device, requires_grad=True))
+        states_ref = [t.detach().to(torch.bfloat16).requires_grad_() for t in states]
+        h = tuple(states) if kind == "LSTM" else states[0]
+        h_ref = tuple(states_ref) if kind == "LSTM" else states_ref[0]
+        if layout == "packed":
+            pack = nn.utils.rnn.pack_padded_sequence
+            x_input = pack(x, (3, 2, 1, 3), enforce_sorted=False)
+            x_ref_input = pack(x_ref, (3, 2, 1, 3), enforce_sorted=False)
+        else:
+            x_input, x_ref_input = x, x_ref
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                out, hidden = rnn(x_input, h)
+            out_control, hidden_control = control(x_ref_input, h_ref)
+            if layout == "packed":
+                out, out_control = out.data, out_control.data
+            self.assertEqual(out.dtype, torch.bfloat16)
+            self.assertEqual(out.grad_fn.name(), "CudnnRnnBackward0")
+            self.assertEqual(out, out_control, atol=0, rtol=0)
+            hidden = hidden if kind == "LSTM" else (hidden,)
+            hidden_control = hidden_control if kind == "LSTM" else (hidden_control,)
+            for actual, expected in zip(hidden, hidden_control):
+                self.assertEqual(actual.dtype, torch.bfloat16)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+            out.float().sum().backward()
+            out_control.float().sum().backward()
+        tensors = [x, *states, *rnn.parameters()]
+        tensors_control = [x_ref, *states_ref, *control.parameters()]
+        for actual, expected in zip(tensors, tensors_control):
+            self.assertIsNotNone(actual.grad)
+            self.assertIsNotNone(expected.grad)
+            grad = expected.grad.to(actual.dtype)
+            self.assertEqual(actual.grad, grad, atol=0, rtol=0)
+
     @skipIfRocmVersionLessThan((7, 0))
     @skipCUDAIf(
         not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
