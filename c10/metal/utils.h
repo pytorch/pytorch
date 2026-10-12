@@ -406,7 +406,11 @@ template <
 inline float remainder(const T x, const U y) {
   const auto x_f = static_cast<float>(x);
   const auto y_f = static_cast<float>(y);
-  return x_f - y_f * floor_divide(x_f, y_f);
+  auto mod = ::metal::fmod(x_f, y_f);
+  if (mod != 0 && (y_f < 0) != (mod < 0)) {
+    mod += y_f;
+  }
+  return mod;
 }
 
 template <
@@ -457,9 +461,9 @@ inline float2 pow(T a, U b) {
   // Use explicit computation instead of length() due to numerical issues
   const auto r = ::metal::precise::sqrt(a.x * a.x + a.y * a.y);
 
-  // Special case: if r is 0, return 0
+  // Special case: 0^b is 0 if Re(b) > 0, undefined otherwise
   if (r == 0.0) {
-    return float2(0.0, 0.0);
+    return b.x > 0 ? float2(0.0, 0.0) : float2(NAN, NAN);
   }
 
   const auto theta = ::metal::precise::atan2(a.y, a.x);
