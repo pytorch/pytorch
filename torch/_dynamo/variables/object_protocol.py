@@ -47,7 +47,7 @@ from ..source import (
     TypeMROSource,
     TypeSource,
 )
-from ..utils import specialize_symnode
+from ..utils import dict_items, dict_keys, dict_values, specialize_symnode
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
@@ -2452,11 +2452,12 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # Before Python 3.15, builtin types can expose distinct wrappers for the
-    # same PyObject_GenericGetAttr slot. Fixed-layout objects with that slot
-    # cannot have extra attributes, unless __getattr__ supplies them.
+    # Mapping construction probes iterable inputs for keys(). Fixed-layout
+    # iterables cannot have extra attributes unless __getattr__ supplies them.
+    # Before Python 3.15, builtins can expose distinct wrappers for the same slot.
     if (
-        not py_type.__dictoffset__
+        (obj.tp_iter is not None or obj.tp_as_sequence.sq_item is not None)
+        and not py_type.__dictoffset__
         and mro_lookup(py_type, "__getattr__") is NO_SUCH_SUBOBJ
         and any(
             mro_lookup(py_type, "__getattribute__") is cls.__getattribute__
@@ -2465,6 +2466,9 @@ def object_generic_getattr(
                 list,
                 tuple,
                 dict,
+                dict_keys,
+                dict_values,
+                dict_items,
                 set,
                 frozenset,
                 int,
