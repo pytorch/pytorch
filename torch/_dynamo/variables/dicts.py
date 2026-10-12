@@ -463,7 +463,11 @@ class ConstDictVariable(VariableTracker):
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
 
     def install_dict_contains_guard(
-        self, tx: "InstructionTranslatorBase", key: HashableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        key: HashableTracker,
+        *,
+        key_present: bool | None = None,
     ) -> None:
         # Key guarding - These are the cases to consider
         # 1) The dict has been mutated. In this case, we would have already
@@ -473,9 +477,9 @@ class ConstDictVariable(VariableTracker):
         # have to insert the DICT_CONTAINS guard.
         #
         # 3) key.vt.source is not None. This can happen for non-const VTs.
-        #   3a) contains=True. In this case, we can access the lazyVT from
+        #   3a) key_present=True. In this case, we can access the lazyVT from
         #   original_items and selectively realize it.
-        #   3b) contains=False. There is no easy way to selectively apply this
+        #   3b) key_present=False. There is no easy way to selectively apply this
         #   DICT_NOT_CONTAINS guard because our guard are represented via trees.
         #   Be conservative and add DICT_KEYS_MATCH guard.
 
@@ -485,14 +489,19 @@ class ConstDictVariable(VariableTracker):
         if tx.output.side_effects.is_modified(self):
             return
 
+        # Reuse a previous lookup result to avoid repeating key comparisons.
+        # None means the caller has not looked up the key yet.
         arg = key.vt
-        value = self.items.get(key)
-        contains = value is not None and not isinstance(
-            value, variables.DeletedVariable
-        )
+        if key_present is None:
+            value = self.items.get(key)
+            key_present = value is not None and not isinstance(
+                value, variables.DeletedVariable
+            )
         if arg.source is None and arg.is_python_constant():
             guard_fn = (
-                type(self).CONTAINS_GUARD if contains else type(self).NOT_CONTAINS_GUARD
+                type(self).CONTAINS_GUARD
+                if key_present
+                else type(self).NOT_CONTAINS_GUARD
             )
             install_guard(
                 self.make_guard(
@@ -503,7 +512,7 @@ class ConstDictVariable(VariableTracker):
                 )
             )
         elif arg.source:
-            if contains:
+            if key_present:
                 self.realize_key_vt(key)
             else:
                 self.install_dict_keys_match_guard()
@@ -956,8 +965,8 @@ class ConstDictVariable(VariableTracker):
             if other_value is None or isinstance(
                 other_value, variables.DeletedVariable
             ):
-                # Keep the missing-key hint in recompile diagnostics.
-                other.install_dict_contains_guard(tx, key)
+                # Keep the missing-key hint without repeating key comparisons.
+                other.install_dict_contains_guard(tx, key, key_present=False)
                 return ConstantVariable.create(op == "__ne__")
             equal = generic_richcompare_bool(tx, value, other_value, "__eq__")
             if not specialize_symnode(generic_is_true(tx, equal)).as_python_constant():
@@ -1295,7 +1304,11 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
         pass
 
     def install_dict_contains_guard(
-        self, tx: "InstructionTranslatorBase", key: HashableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        key: HashableTracker,
+        *,
+        key_present: bool | None = None,
     ) -> None:
         pass
 
@@ -1949,6 +1962,10 @@ class DunderDictVariable(ConstDictVariable):
         pass
 
     def install_dict_contains_guard(
-        self, tx: "InstructionTranslatorBase", key: HashableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        key: HashableTracker,
+        *,
+        key_present: bool | None = None,
     ) -> None:
         pass
