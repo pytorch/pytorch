@@ -62,9 +62,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git unzip
 
-      - name: Ack Git cache ownership
+      # The runner's workspace uid may differ from the CI image's jenkins user
+      # (e.g. DGX hosts). Same fix as setup-linux's "Fix workspace permissions".
+      - name: Fix workspace permissions
         shell: bash
         run: |
+          if sudo -n true 2>/dev/null; then
+            sudo chmod -R 777 "$GITHUB_WORKSPACE"
+          fi
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout PyTorch
