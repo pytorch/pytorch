@@ -3762,6 +3762,9 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
+    """Scheduler node for an ir.ExternKernel, a call to an op that Inductor
+    does not generate a kernel for (e.g. a cuBLAS mm or a fallback op)."""
+
     def __init__(self, scheduler: Scheduler, node: ir.Operation) -> None:
         super().__init__(scheduler)
         self._init_from_node(node)
