@@ -81,20 +81,25 @@ def _dump_launch_params(value: str):
 
 if HAS_GPU:
     import triton
+    import triton as alias_triton
+    import triton.language as alias_tl
     from triton import language as tl
 
     if HAS_CUDA_AND_TRITON:
         try:
+            from triton.language.extra import libdevice as alias_libdevice
             from triton.language.extra.libdevice import (  # @manual
                 fast_dividef,
                 fast_dividef as my_fast_dividef,
             )
         except ImportError:
+            from triton.language.extra.cuda import libdevice as alias_libdevice
             from triton.language.extra.cuda.libdevice import (  # @manual
                 fast_dividef,
                 fast_dividef as my_fast_dividef,
             )
     elif HAS_XPU_AND_TRITON:
+        from triton.language.extra.intel import libdevice as alias_libdevice
         from triton.language.extra.intel.libdevice import (  # @manual
             fast_dividef,
             fast_dividef as my_fast_dividef,
@@ -2083,6 +2088,91 @@ def forward(self, x_1, output_1):
         if not triton_version_uses_attrs_dict():
             self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
         self.assertEqual(compiled_out, eager_out)
+
+    @requires_gpu
+    def test_triton_kernel_with_imported_module(self):
+        @triton.jit
+        def add_kernel_with_imported_module(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = alias_triton.language.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + alias_tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = alias_tl.load(in_ptr0 + offsets, mask=mask)
+            y = alias_tl.load(in_ptr1 + offsets, mask=mask)
+            alias_tl.store(out_ptr + offsets, x + y, mask=mask)
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_with_imported_module[grid](x, y, out, n_elements, BLOCK_SIZE=16)
+            return out
+
+        x = torch.randn(33, device=GPU_TYPE)
+        y = torch.randn_like(x)
+        eager_out = f(x, y)
+        compiled_out = torch.compile(f, fullgraph=True)(x, y)
+
+        self.assertEqual(eager_out, x + y)
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_gpu
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON,
+        "requires CUDA or XPU libdevice",
+    )
+    def test_triton_kernel_with_imported_submodule(self):
+        @triton.jit
+        def divide_kernel_with_imported_submodule(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = alias_libdevice.fast_dividef(x, 3.14)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            divide_kernel_with_imported_submodule[grid](
+                x, out, n_elements, BLOCK_SIZE=16
+            )
+            return out
+
+        x = torch.randn(33, device=GPU_TYPE)
+        eager_out = f(x)
+        compiled_out = torch.compile(f, fullgraph=True)(x)
+
+        self.assertEqual(eager_out, x / 3.14)
+        self.assertEqual(compiled_out, eager_out)
+
+    @unittest.skipIf(not has_triton_package(), "requires triton")
+    def test_triton_kernel_source_ignores_unrelated_module(self):
+        import triton
+
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        # This synthetic fixture is only inspected, never compiled or launched.
+        @triton.jit
+        def kernel():
+            return sys.maxsize
+
+        source = user_defined_triton_kernel_transitive_closure_source_code(kernel)
+        self.assertNotIn("import sys", source)
+        self.assertNotIn("from sys", source)
 
     @requires_gpu
     def test_triton_kernel_with_imported_symbol(self):
