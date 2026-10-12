@@ -2429,6 +2429,7 @@ def cat(inputs, dim=0):
             # producer, which is cheaper than re-reading it in a pointwise cat.
             return not (
                 isinstance(storage.data, ir.ComputedBuffer)
+                and not storage.data.is_no_op()
                 and V.graph.sizevars.statically_known_equals(
                     x.get_numel(), storage.get_numel()
                 )
