@@ -551,9 +551,9 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
           *nccl_api_, shrinkGrow, newSize, newRank, uniqueId, config, timeout);
     }
   } catch (...) {
-    comm_state_ = CommState::ERROR;
     nccl_comm_ = nullptr;
     init_state_ = InitializationState::UNINITIALIZED;
+    recordFailure(CommState::ERROR);
     throw;
   }
 

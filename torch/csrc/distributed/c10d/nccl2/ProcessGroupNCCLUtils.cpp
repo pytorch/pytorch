@@ -238,42 +238,29 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
   }
 }
 
-void ProcessGroupNCCL::checkWorkQueue() {
+WorkNCCL::WorkStatus ProcessGroupNCCL::checkWorkQueue() {
   drainRetiredGraphWork();
   WorkNCCL::WorkStatus status = workq_.garbageCollect();
 
-  // Abort hooks run where a failure is DETECTED, not only where the process is
-  // torn down, because the teardown paths run no hook at all in the
-  // configurations where the process survives the failure and a post-mortem is
-  // worth the most: abortProcess() returns early when
-  // abort_process_on_timeout_or_error_ is off or reconfigure is on. So despite
-  // the name, a hook may run here with no abort following it. That matches what
-  // the hooks are for (capture debug info about the failure, e.g.
-  // c10d::FlightRecorderHook writes its trace) and callers must tolerate being
-  // called more than once per failure, since the teardown paths still fire.
   switch (status) {
     case WorkNCCL::WorkStatus::TIMEDOUT:
-      comm_state_ = CommState::TIMEOUT;
-      publishFailure();
-      runAbortHooks();
+      recordFailure(CommState::TIMEOUT);
       break;
     case WorkNCCL::WorkStatus::ERROR:
-      comm_state_ = CommState::ERROR;
-      publishFailure();
-      runAbortHooks();
+      recordFailure(CommState::ERROR);
       break;
     default:
       // For COMPLETED, NOT_STARTED, and INPROGRESS, no state change needed
       break;
   }
+  return status;
 }
 
 // Retire completed work and graph states and check for timeouts.
 void ProcessGroupNCCL::timeoutWatchdog() noexcept {
   TC_LOG(INFO, this) << "Timeout thread starting for rank: " << rank_;
 
-  // Honor the noexcept contract: the loop issues NCCL probes (NCCL_CHECK) and
-  // abort paths that can throw; swallow here so nothing escapes this thread.
+  // Honor the noexcept contract: work checks and abort paths can throw.
   try {
     // A new thread defaults to device 0; even setting capture mode can create
     // a CUDA context, so bind the communicator device first.
@@ -310,50 +297,27 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
         break;
       }
       checkRemoteFailure();
+
+      // Detect a communicator-level async error while the comm is still
+      // healthy.
+      if (comm_state_ == CommState::NORMAL) {
+        ncclResult_t asyncErr{};
+        const auto status = nccl_api_->commGetAsyncError(nccl_comm_, &asyncErr);
+        if (status != ncclSuccess) {
+          asyncErr = status;
+        }
+        if (asyncErr != ncclSuccess && asyncErr != ncclInProgress) {
+          recordFailure(CommState::ERROR);
+          TC_LOG(ERROR, this) << "nccl hit async error on rank " << rank_
+                              << ": " << nccl_api_->getErrorString(asyncErr);
+        }
+      }
       if (comm_state_ != CommState::NORMAL) {
         handleWatchdogFailure(
             comm_state_ == CommState::TIMEOUT
                 ? "timeout - timeout watchdog detected operation timeout"
                 : "error - timeout watchdog detected operation error",
             true);
-      }
-
-      // Detect a communicator-level async error while the comm is still
-      // healthy.
-      if (comm_state_ == CommState::NORMAL) {
-        ncclResult_t asyncErr{};
-        {
-          std::lock_guard teardownLock(nccl_teardown_mutex_);
-          if (!nccl_comm_ || shutdown_) {
-            break;
-          }
-          NCCL_CHECK(
-              nccl_api_,
-              nccl_comm_,
-              nccl_api_->commGetAsyncError(nccl_comm_, &asyncErr),
-              "failed to get async error");
-        }
-        if (asyncErr != ncclSuccess && asyncErr != ncclInProgress) {
-          comm_state_ = CommState::ERROR;
-          publishFailure();
-          // Detected here rather than through the work queue, so this needs its
-          // own notification; see checkWorkQueue() for why detection and not
-          // just teardown.
-          runAbortHooks();
-          if (!options_c10d_->enable_reconfigure) {
-            TC_LOG(ERROR, this) << "nccl hit async error on rank " << rank_
-                                << ": " << ncclGetErrorString(asyncErr);
-          } else {
-            // Revoked below by the reconfigurable-mode handler.
-            TC_LOG(ERROR, this)
-                << "Async error on rank " << rank_ << ": "
-                << ncclGetErrorString(asyncErr) << " (reconfigurable mode)";
-          }
-          handleWatchdogFailure(
-              std::string("error - nccl hit async error: ") +
-                  ncclGetErrorString(asyncErr),
-              true);
-        }
       }
     }
   } catch (const std::exception& e) {
@@ -383,6 +347,12 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
   // First, check work queue status
   checkWorkQueue();
 
+  // Join before reading or tearing down a failed communicator. The watchdog
+  // may already be aborting it in CleanUpOnly mode.
+  if (comm_state_ != CommState::NORMAL && !options_c10d_->enable_reconfigure) {
+    stopWatchdog();
+  }
+
   if (comm_state_ == CommState::TIMEOUT) {
     if (options_c10d_->enable_reconfigure) {
       revokeNcclComm();
@@ -394,19 +364,16 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
   } else if (comm_state_ == CommState::ERROR) {
     // CleanUpOnly may have already removed the communicator on the watchdog
     // thread, so a later collective cannot query the original NCCL error.
-    auto ncclException = [&] {
-      std::lock_guard teardownLock(nccl_teardown_mutex_);
-      TORCH_CHECK(
-          nccl_comm_, "NCCL communicator was aborted after a previous error");
-      ncclResult_t asyncErr{};
-      NCCL_CHECK(
-          nccl_api_,
-          nccl_comm_,
-          nccl_api_->commGetAsyncError(nccl_comm_, &asyncErr),
-          "failed to get async error");
-      return NCCLException(
-          *nccl_api_, "NCCL Async Error", asyncErr, nccl_comm_);
-    }();
+    TORCH_CHECK(
+        nccl_comm_, "NCCL communicator was aborted after a previous error");
+    ncclResult_t asyncErr{};
+    NCCL_CHECK(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->commGetAsyncError(nccl_comm_, &asyncErr),
+        "failed to get async error");
+    NCCLException ncclException(
+        *nccl_api_, "NCCL Async Error", asyncErr, nccl_comm_);
     if (options_c10d_->enable_reconfigure) {
       // In reconfigurable mode we never abort the process: revoke the comm so
       // it can be reconfigured and surface the error to the caller.
