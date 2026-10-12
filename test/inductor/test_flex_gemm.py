@@ -525,7 +525,13 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         self.assertEqual(flex_gemm_default_config(legal, varlen=True), varlen_default)
         self.assertEqual(
             flex_gemm_search_space(legal, varlen=True),
-            (varlen_default, key(256, 256, 2, 2, False), key(128, 128, 2, 1, False)),
+            (
+                varlen_default,
+                key(256, 256, 2, 2, False),
+                key(128, 128, 2, 1, False),
+                quack_default,
+                key(128, 256, 2, 1, True),
+            ),
         )
         with inductor_config.patch(max_autotune_gemm_search_space="EXHAUSTIVE"):
             self.assertEqual(flex_gemm_search_space(legal, varlen=True), legal)
@@ -533,11 +539,11 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 flex_gemm_default_config(legal, varlen=True), varlen_default
             )
         # Legal sets without a ranked varlen config keep QuACK's default first.
-        unranked = (quack_default, key(128, 32, 1, 1, True))
-        self.assertEqual(flex_gemm_default_config(unranked, varlen=True), quack_default)
+        unranked = (key(256, 192, 2, 1, True), key(128, 32, 1, 1, True))
+        self.assertEqual(flex_gemm_default_config(unranked, varlen=True), unranked[0])
         self.assertEqual(flex_gemm_search_space(unranked, varlen=True), unranked)
         # Grouped-main stores only accept cluster_n == 1 configs (tile_m 128 needs
-        # cluster_m 1); the varlen table ranks two of them after the others.
+        # cluster_m 1); the varlen table ranks three of them after the others.
         output_contraction_legal = (
             quack_default,
             key(128, 128, 1, 1, False),
@@ -550,7 +556,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
         self.assertEqual(
             flex_gemm_search_space(output_contraction_legal, varlen=True),
-            (key(128, 128, 1, 1, True), key(256, 128, 2, 1, True)),
+            (key(128, 128, 1, 1, True), key(256, 128, 2, 1, True), quack_default),
         )
 
     @parametrize(
