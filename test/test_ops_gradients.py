@@ -101,7 +101,7 @@ class TestBwdGradients(TestGradients):
             for sample in op.sample_inputs(device, dtype, requires_grad=True):
                 if sample.broadcasts_input:
                     continue
-                with self.assertRaises(Exception):
+                with self.assertRaises(Exception):  # noqa: B017 - supports_inplace_autograd guard, exception varies per op
                     result = inplace(sample)
                     result.sum().backward()
         else:

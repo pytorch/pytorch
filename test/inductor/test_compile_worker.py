@@ -71,7 +71,7 @@ class TestCompileWorker(TestCase):
     def test_crash(self):
         pool = self.make_pool(2)
         try:
-            with self.assertRaises(Exception):
+            with self.assertRaises(SubprocException):
                 a = pool.submit(os._exit, 1)
                 a.result()
 

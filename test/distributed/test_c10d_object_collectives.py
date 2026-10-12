@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import pickle
 import sys
 from functools import partial, wraps
 
@@ -123,7 +124,7 @@ class TestObjectCollectives(DistributedTestBase):
     def test_weights_only_rejects_unsafe_object(self):
         # An arbitrary function is not deserializable under weights_only=True
         output = [None] * dist.get_world_size()
-        with self.assertRaises(Exception):
+        with self.assertRaises(pickle.UnpicklingError):
             dist.all_gather_object(
                 object_list=output, obj=with_comms, weights_only=True
             )
