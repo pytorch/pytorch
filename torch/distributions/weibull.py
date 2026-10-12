@@ -75,11 +75,10 @@ class Weibull(TransformedDistribution):
 
     @property
     def mode(self) -> Tensor:
-        return (
-            self.scale
-            * ((self.concentration - 1) / self.concentration)
-            ** self.concentration.reciprocal()
-        )
+        # The density is monotonically decreasing for concentration <= 1, so the
+        # mode is at 0.
+        ratio = ((self.concentration - 1) / self.concentration).clamp(min=0)
+        return self.scale * ratio ** self.concentration.reciprocal()
 
     @property
     def variance(self) -> Tensor:
