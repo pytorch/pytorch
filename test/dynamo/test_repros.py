@@ -7943,6 +7943,7 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
             torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
 
     @expectedFailureDynamic
+    @torch._dynamo.testing.lru_cache_reordering(True)
     def test_dynamo_default_lru_cache_behavior(self):
         @torch.compile(backend="eager")
         def fn(x):
@@ -8025,11 +8026,8 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
             self.assertEqual(c[0], static_shapes_cache_entry)
             self.assertEqual(c[1], dynamic_shapes_cache_entry)
 
-        try:
-            torch._C._dynamo.eval_frame._set_lru_cache(False)
+        with torch._dynamo.testing.lru_cache_reordering(False):
             run()
-        finally:
-            torch._C._dynamo.eval_frame._set_lru_cache(True)
 
     def test_patch_track_step_called_skipped(self):
         # Regression test for patch_track_step_called being ignored by dynamo
