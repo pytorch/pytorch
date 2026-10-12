@@ -232,6 +232,8 @@ class PartialColumns:
             else:
                 for f in cutlass.range_constexpr(self.nouts):
                     outs[f][col] = outs[f].element_type(result[f])
+
+
 class _OrderedColReduce:
     """Preserve the row inner-tree DAG while coalescing adjacent column loads."""
 
@@ -262,10 +264,7 @@ class _OrderedColReduce:
         if column_pack not in (1, 2, 4):
             raise ValueError("column_pack must be one of 1, 2, 4")
         if column_pack > 1 and (
-            trait.nfields != 1
-            or trait.acc.width != 32
-            or nouts != 1
-            or C % column_pack
+            trait.nfields != 1 or trait.acc.width != 32 or nouts != 1 or C % column_pack
         ):
             raise ValueError("column packing requires complete single-field outputs")
         self.trait = trait
@@ -730,7 +729,7 @@ def reduce_ordered_col(
     )
     fake_in = _L.fake_compact(
         torch2cute[kernel_x.dtype],
-        (_L.sym_int64(),),
+        (cute.sym_int64(),),
         align=column_pack * x.element_size() if column_pack > 1 else None,
     )
     fake_outs = [
@@ -1027,7 +1026,10 @@ def _reduce_col_tile(
         )
         build2 = lambda: _compile(  # noqa: E731
             op2,
-            [_L.fake_compact(torch2cute[pp.dtype], (_L.sym_int64(),)) for pp in parts],
+            [
+                _L.fake_compact(torch2cute[pp.dtype], (cute.sym_int64(),))
+                for pp in parts
+            ],
             [
                 _L.fake_compact(torch2cute[out.dtype], (_L.sym(),))
                 for out in kernel_outs
