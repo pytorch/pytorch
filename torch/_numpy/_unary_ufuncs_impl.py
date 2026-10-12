@@ -35,7 +35,6 @@ from torch import (  # noqa: F401
     rad2deg,
     rad2deg as degrees,
     reciprocal,
-    trunc as fix,
     round as rint,
     sign,
     signbit,
@@ -46,6 +45,7 @@ from torch import (  # noqa: F401
     tan,
     tanh,
     trunc,
+    trunc as fix,
 )
 
 
