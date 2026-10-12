@@ -56,6 +56,7 @@ class _ZesDeviceInfo:
     device_handle: c_void_p
     subdevice_id: int | None = None
     is_integrated: bool = False
+    uuid: bytes | None = None
     temperature_handle: c_void_p | None = None
     frequency_handle: c_void_p | None = None
     power_handle: c_void_p | None = None
@@ -221,16 +222,39 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
         # Tiled dGPUs in FLAT/COMBINED mode expose each sub-device as a
         # separate logical device; everything else counts as one slot.
         tiled = not is_integrated and props.numSubdevices > 0 and expose_subdevices
-        num_slots = props.numSubdevices if tiled else 1
 
-        for slot in range(num_slots):
+        if not tiled:
             _cached_zes_device_infos.append(
                 _ZesDeviceInfo(
                     device_handle=device,
-                    subdevice_id=slot if tiled else None,
+                    subdevice_id=None,
                     is_integrated=is_integrated,
+                    uuid=bytes(ext_props.uuid.id),
                 )
             )
+        else:
+            sub_ext_props = (
+                pyzes.zes_subdevice_exp_properties_t * props.numSubdevices
+            )()
+            for sub_ext_prop in sub_ext_props:
+                sub_ext_prop.stype = pyzes.ZES_STRUCTURE_TYPE_SUBDEVICE_EXP_PROPERTIES
+            if _zes_check_warn(
+                pyzes.zesDeviceGetSubDevicePropertiesExp(
+                    device, byref(c_uint32(props.numSubdevices)), sub_ext_props
+                ),
+                "Can't get Level Zero Sysman subdevice properties",
+            ):
+                return -1
+
+            for sub_ext_prop in sub_ext_props:
+                _cached_zes_device_infos.append(
+                    _ZesDeviceInfo(
+                        device_handle=device,
+                        subdevice_id=sub_ext_prop.subdeviceId,
+                        is_integrated=is_integrated,
+                        uuid=bytes(sub_ext_prop.uuid.id),
+                    )
+                )
 
     # Sort iGPUs to the end, then count only the visible ordinals.
     _cached_zes_device_infos.sort(key=lambda info: info.is_integrated)
