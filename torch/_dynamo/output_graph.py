@@ -70,7 +70,11 @@ from torch._guards import (
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
-from torch._subclasses.fake_tensor import maybe_get_item_memo
+from torch._subclasses.fake_tensor import (
+    maybe_get_fake_device,
+    maybe_get_item_memo,
+    maybe_set_fake_device,
+)
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
@@ -3045,7 +3049,10 @@ class OutputGraph(OutputGraphCommon):
                 for node, snapshot in self._shallow_copy_placeholder_snapshots.items():
                     node.meta["example_value"] = snapshot
                     idx = placeholder_to_idx[node]
-                    example_inputs[idx].fake_device = snapshot.fake_device  # type: ignore[union-attr]
+                    snapshot_device = maybe_get_fake_device(snapshot)
+                    if snapshot_device is None:
+                        raise AssertionError("expected a fake tensor device")
+                    maybe_set_fake_device(example_inputs[idx], snapshot_device)
 
             gm.graph.lint()
             if is_noop_graph(gm):
