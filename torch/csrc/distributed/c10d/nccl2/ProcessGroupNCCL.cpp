@@ -105,8 +105,14 @@ void waitForNcclChildComm(
         deadline - now);
   };
   try {
+    // A nonblocking split/shrink returns ncclSuccess while the child is still
+    // initializing; its failure is only reported via the parent's async error.
     waitForNcclCompletion(
-        nccl_api, parent_comm, status, remaining(), operation);
+        nccl_api,
+        parent_comm,
+        status == ncclSuccess ? ncclInProgress : status,
+        remaining(),
+        operation);
     if (!expect_child) {
       return;
     }
@@ -523,6 +529,7 @@ void ProcessGroupNCCL::finalize() {
   // timeout, which is a teardown result to report to the caller, not a reason
   // to terminate the process.
   stopWatchdog();
+  drainRetiredGraphWork();
 
   // Wait for all pending work objects to complete and get final status
   auto work_status = workq_.finalize();
@@ -631,6 +638,13 @@ void ProcessGroupNCCL::abortProcess(const std::string& reason) {
   TC_LOG(ERROR, this) << "Aborting process on rank " << rank_ << " due to "
                       << reason;
   runAbortHooks();
+  const auto waitMs =
+      getCvarInt(::c10d::TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000);
+  TC_LOG(ERROR, this)
+      << "Waiting " << waitMs
+      << "ms for health check and flight recorder dump before aborting";
+  // NOLINTNEXTLINE(facebook-hte-BadCall-sleep_for)
+  std::this_thread::sleep_for(std::chrono::milliseconds(waitMs));
   ::abort();
 }
 
@@ -672,6 +686,7 @@ void ProcessGroupNCCL::handleBlockingWaitFailure(
   if (options_c10d_->enable_reconfigure) {
     revokeNcclComm();
   } else {
+    runAbortHooks();
     abortNcclComm();
   }
 }
@@ -689,10 +704,19 @@ void ProcessGroupNCCL::revokeNcclComm() {
   detachMemoryHook();
   retireComm();
   if (nccl_comm_) {
-    // Best-effort: this may run on the timeout watchdog thread, so log instead
-    // of throwing on failure (the communicator is already being torn down).
-    NCCL_CHECK_IGNORE(
-        nccl_api_, nccl_api_->commRevoke(nccl_comm_), "NCCL Revoke failed");
+    try {
+      waitForNcclCompletion(
+          *nccl_api_,
+          nccl_comm_,
+          nccl_api_->commRevoke(nccl_comm_),
+          options_c10d_->timeout,
+          "NCCL Revoke failed");
+    } catch (const std::exception& e) {
+      TC_LOG(ERROR, this) << "commRevoke failed or did not complete within "
+                          << options_c10d_->timeout.count() << "ms on rank "
+                          << rank_ << "; continuing teardown (best-effort): "
+                          << e.what();
+    }
   }
 }
 
