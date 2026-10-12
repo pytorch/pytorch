@@ -2405,24 +2405,14 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        # upper(), lower() and title() take no arguments. Convert any passed
-        # args/kwargs to constants so the real method raises the exact
-        # CPython TypeError; decline (graph break) when they are not
-        # constants instead of inlining the C method descriptor
-        # (same as bytearray_hex/decode/find above).
-        try:
-            const_args = [arg.as_python_constant() for arg in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-        except AsPythonConstantNotImplementedError:
-            return None
-        try:
-            result = getattr(self.data, method_name)(*const_args, **const_kwargs)
-        except TypeError as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
+        # upper(), lower() and title() are METH_NOARGS: Method.__call__
+        # enforces arity before this handler runs, so args/kwargs are
+        # always empty here (same no-arg pattern as list_copy).
+        result = getattr(self.data, method_name)()
         return ByteArrayVariable(
             result,
             source=None,
-            mutation_type=ValueMutationNew() if self.mutation_type else None,
+            mutation_type=ValueMutationNew(),
         )
 
     def bytearray_upper(
