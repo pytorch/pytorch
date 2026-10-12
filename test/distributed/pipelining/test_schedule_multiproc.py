@@ -397,6 +397,108 @@ def create_packed_document_block_mask(
 class ScheduleTest(MultiProcContinuousTest):
     world_size = 4
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_fsdp_train_eval_cuda_graph_lifetimes(self):
+        torch.cuda.set_device(self.rank)
+        device = torch.device("cuda", self.rank)
+        mesh = init_device_mesh("cuda", (2, 2), mesh_dim_names=("pp", "dp"))
+        pp_mesh, dp_mesh = mesh["pp"], mesh["dp"]
+        pp_rank = pp_mesh.get_local_rank()
+        torch.manual_seed(42)
+        modules = [torch.nn.Linear(8, 8, device=device) for _ in range(4)]
+        inputs = torch.randn(16, 8, device=device)
+        target = torch.randn(16, 8, device=device)
+        example = torch.empty(4, 8, device=device)
+        hidden_example = example.detach().requires_grad_()
+        stages = []
+        for index in (pp_rank, pp_rank + 2):
+            module = modules[index]
+            fully_shard(module, mesh=dp_mesh, reshard_after_forward=False)
+            stages.append(
+                PipelineStage(
+                    module,
+                    index,
+                    4,
+                    device,
+                    group=pp_mesh.get_group(),
+                    input_args=example if index == 0 else hidden_example,
+                    output_args=hidden_example,
+                    input_grads=(None,) if index == 0 else (example,),
+                    output_grads=(None,) if index == 3 else (example,),
+                )
+            )
+        schedule = ScheduleInterleaved1F1B(
+            stages, 4, loss_fn=MSELoss(), scale_grads=False
+        )
+
+        def train_step():
+            for stage in stages:
+                stage.submod.zero_grad(set_to_none=False)
+            schedule.step(
+                *((inputs,) if pp_rank == 0 else ()),
+                target=target if pp_rank == 1 else None,
+                return_outputs=False,
+            )
+
+        def eval_step():
+            with torch.no_grad():
+                schedule.eval(
+                    *((inputs,) if pp_rank == 0 else ()), return_outputs=False
+                )
+
+        warmup_stream = torch.cuda.Stream()
+        warmup_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(warmup_stream):
+            for _ in range(2):
+                train_step()
+                eval_step()
+            train_step()
+        torch.cuda.current_stream().wait_stream(warmup_stream)
+        expected = [
+            parameter.grad.to_local().clone()
+            for stage in stages
+            for parameter in stage.submod.parameters()
+        ]
+        self.assertTrue(any(gradient.abs().sum().item() > 0 for gradient in expected))
+        train_graph, eval_graph = torch.cuda.CUDAGraph(), torch.cuda.CUDAGraph()
+        with torch.cuda.graph(train_graph):
+            train_step()
+        with torch.cuda.graph(eval_graph):
+            eval_step()
+        for stage in stages:
+            self.assertFalse(stage._forward_chunk_states)
+            self.assertFalse(stage.output_chunks)
+            self.assertIsNone(stage.submod._get_fsdp_state()._comm_ctx.all_gather_state)
+        trace_dir = os.environ.get("PIPELINE_TEST_TRACE_DIR")
+        profile_context = (
+            torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ]
+            )
+            if trace_dir
+            else nullcontext()
+        )
+        with profile_context as profiler:
+            for _ in range(3):
+                train_graph.replay()
+                eval_graph.replay()
+            torch.cuda.synchronize()
+        if trace_dir:
+            os.makedirs(trace_dir, exist_ok=True)
+            profiler.export_chrome_trace(
+                os.path.join(trace_dir, f"rank{self.rank}.json")
+            )
+        actual = [
+            parameter.grad.to_local()
+            for stage in stages
+            for parameter in stage.submod.parameters()
+        ]
+        for gradient, reference in zip(actual, expected, strict=True):
+            self.assertEqual(gradient, reference)
+
     @classmethod
     def backend_str(cls) -> str:
         # Testing with NCCL backend
