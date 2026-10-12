@@ -5,7 +5,7 @@ import contextlib
 import functools
 import logging
 from dataclasses import dataclass
-from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
+from typing import Any, Literal, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
 
 import torch
@@ -237,6 +237,9 @@ class FSDPParamGroup:
         ]
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
+        # Mesh of the current post-forward shards, which the next all-gather uses
+        # even if set_reshard_after_forward replaced post_forward_mesh_info
+        self._sharded_post_forward_mesh_info: FSDPMeshInfo | None = None
         self.device = device
         self.device_handle = _get_device_handle(device.type)
         self.offload_policy = offload_policy
@@ -1152,6 +1155,7 @@ class FSDPParamGroup:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded_post_forward()
             self._sharded_state = ShardedState.SHARDED_POST_FORWARD
+            self._sharded_post_forward_mesh_info = self.post_forward_mesh_info
             self._free_all_gather_buffers()
 
     def _free_all_gather_buffers(self) -> None:
@@ -1250,7 +1254,7 @@ class FSDPParamGroup:
     @property
     def _all_gather_process_group(self) -> dist.ProcessGroup:
         mesh_info = (
-            cast(FSDPMeshInfo, self.post_forward_mesh_info)
+            self._sharded_post_forward_mesh_info
             if self.is_sharded_post_forward
             else self.mesh_info
         )

@@ -272,8 +272,14 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_all_gather_shard_dim1_post_forward(self):
         # Shard(1) needs even sharding over 128 ranks, and its post-forward shards
-        # chunk dim 0 over 8 ranks; the 1D parameter keeps Shard(0)
-        param_sizes = [torch.Size([8, 256]), torch.Size([16, 128, 3]), torch.Size([24])]
+        # chunk dim 0 over 8 ranks, except for the empty parameter; the 1D
+        # parameter keeps Shard(0)
+        param_sizes = [
+            torch.Size([8, 256]),
+            torch.Size([16, 128, 3]),
+            torch.Size([3, 0]),
+            torch.Size([24]),
+        ]
         stream = device_module.Stream()
 
         def shard_placement_fn(param: nn.Parameter) -> Shard | None:
@@ -721,9 +727,8 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
                 )
 
         model.set_all_gather_layout(DefaultAllGatherLayout(all_gather_output_fn))
-        fully_shard.state(
-            model
-        )._fsdp_param_group._prepare_reduce_scatter_inputs = reduce_scatter_input_fn
+        group = fully_shard.state(model)._fsdp_param_group
+        group._prepare_reduce_scatter_inputs = reduce_scatter_input_fn
         model.set_custom_reduce_scatter(CountingReduceScatter())
         inp = torch.randn((2, 8), device=device_type)
         model(inp).sum().backward()
@@ -738,6 +743,13 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         # FSDP frees the copy-in, and with it the gradient copies, before the
         # reduce-scatter
         self.assertEqual(num_alive_grads, [0])
+        # A callback with the earlier (fsdp_params, unsharded_grads, world_size)
+        # signature fails instead of misreading its arguments
+        group._prepare_reduce_scatter_inputs = (
+            lambda fsdp_params, unsharded_grads, world_size: None
+        )
+        with self.assertRaisesRegex(TypeError, "unexpected keyword argument"):
+            model(inp).sum().backward()
 
     @skip_if_lt_x_gpu(1)
     def test_post_forward_shard_dim1_needs_divisible_dim0(self):
@@ -768,6 +780,22 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         model = init_model()
         model.set_reshard_after_forward(True)
         model(inp).sum().backward()
+
+    @skip_if_lt_x_gpu(1)
+    def test_post_forward_shards_keep_their_mesh(self):
+        # Post-forward shards are all-gathered over the mesh they were resharded
+        # to, even after set_reshard_after_forward changes it
+        inp = torch.randn((2, 8), device=device_type)
+        for reshard_after_forward in (True, False):
+            model = nn.Linear(8, 8, device=device_type)
+            for param in model.parameters():
+                dist.broadcast(param.detach(), src=0)
+            ref_model = copy.deepcopy(model)
+            fully_shard(model, reshard_after_forward=2)
+            with torch.no_grad():
+                model(inp)
+            model.set_reshard_after_forward(reshard_after_forward)
+            self.assertEqual(model(inp), ref_model(inp))
 
 
 class TestFullyShardCustomAllocation(FSDPTestMultiThread):
