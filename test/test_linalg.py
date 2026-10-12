@@ -9753,7 +9753,6 @@ class TestLinalgSVD(TestCase):
     @skipCUDAIfNoCusolver
     @skipIfRocm
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_svd_ill_conditioned(self, device, dtype):
         # Small columns must still undergo Jacobi rotations: skipping them at
         # an absolute epsilon cutoff breaks orthogonality and inflates sigma.
