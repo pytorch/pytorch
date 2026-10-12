@@ -7310,12 +7310,14 @@ def quantize_tensor(
           Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
         swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
           Currently supported values: ``SwizzleType.NO_SWIZZLE`` and
-          ``SwizzleType.SWIZZLE_32_4_4``.
+          ``SwizzleType.SWIZZLE_32_4_4``. If the input is not contiguous, currently
+          only ``SwizzleType.SWIZZLE_32_4_4`` is supported.
         scaling_type_use_square_block_size (bool, optional): When ``True``,
           modify the size of the local region corresponding to a single scale
           value to be a square (for example, modify ``1x32`` to be ``32x32``).
           Note that the output scale size is still controlled by ``scaling_type``
-          and ``swizzle_type``.
+          and ``swizzle_type``. If this flag is ``True``, currently
+          ``SwizzleType.SWIZZLE_32_4_4`` and a contiguous input are required.
           Default: ``False``.
         qdata_rounding_mode (RoundingMode, optional): Round qdata to nearest,
           ties to even (``RTNE``), or use stochastic rounding (``STOCHASTIC``).
@@ -7425,7 +7427,7 @@ def quantize_tensor_dual(
           modify the size of the local region corresponding to a single scale
           value to be a square (for example, modify ``1x32`` to be ``32x32``).
           Note that the output scale size is still controlled by ``scaling_type``
-          and ``swizzle_type``.
+          and ``swizzle_type``. Note: currently only ``False`` is supported.
           Default: ``False``.
         qdata_rounding_mode (RoundingMode, optional): Round qdata to nearest,
           ties to even (``RTNE``), or use stochastic rounding (``STOCHASTIC``).

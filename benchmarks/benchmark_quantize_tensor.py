@@ -1,4 +1,5 @@
 import argparse
+import csv
 import os
 import sys
 
@@ -176,6 +177,7 @@ def main():
         default="tb_s",
         help="comma-separated gpu_time_ms,tb_s",
     )
+    parser.add_argument("--csv_filename", default="", help="save results as CSV")
     parser.add_argument("--dtype", choices=tuple(_DTYPES), default="bfloat16")
     args = parser.parse_args()
 
@@ -207,10 +209,17 @@ def main():
         profiler_scratch.zero_, warmup=2, rep=2, is_vetted_benchmarking=True
     )
 
+    csv_rows = []
     for index, kernel in enumerate(kernels):
         results = {
             (m, k): _benchmark_one(kernel, m, k, _DTYPES[args.dtype]) for m, k in shapes
         }
+        if args.csv_filename:
+            for m, k in shapes:
+                gpu_time_ms, gbps = results[(m, k)]
+                csv_rows.append(
+                    (kernel, args.dtype, device, m, k, gpu_time_ms, gbps / 1000)
+                )
         if index:
             print()
         print(f"kernel: {kernel}  dtype: {args.dtype}")
@@ -236,6 +245,14 @@ def main():
                 ]
                 _print_table(("M \\ K", *k_values), rows)
         sys.stdout.flush()
+
+    if args.csv_filename:
+        with open(args.csv_filename, "w", newline="") as csv_file:
+            writer = csv.writer(csv_file, lineterminator="\n")
+            writer.writerow(
+                ("kernel", "dtype", "device", "M", "K", "gpu_time_ms", "tb_s")
+            )
+            writer.writerows(csv_rows)
 
 
 if __name__ == "__main__":
