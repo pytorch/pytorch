@@ -124,6 +124,7 @@ from .dicts import (
     FrozenDictVariable,
     OrderedDictVariable,
     pyanydict_check,
+    pyodict_check,
 )
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
@@ -1178,12 +1179,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
             "items",
             "update",
         ):
-            return cast(
-                VariableTracker,
-                OrderedDictVariable.tp_methods[name](
-                    args[0], tx, name, args[1:], kwargs
-                ),
-            )
+            obj = args[0].realize()
+            if not pyodict_check(obj):
+                raise_type_error(
+                    tx,
+                    f"descriptor '{name}' for 'collections.OrderedDict' objects "
+                    f"doesn't apply to a '{obj.python_type_name()}' object",
+                )
+            if isinstance(obj, OrderedDictVariable):
+                result = OrderedDictVariable.tp_methods[name](
+                    obj, tx, name, args[1:], kwargs
+                )
+                if result is not None:
+                    return result
+            return super().call_method(tx, name, args, kwargs)
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif (

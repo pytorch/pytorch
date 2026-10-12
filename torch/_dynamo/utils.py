@@ -3293,7 +3293,8 @@ def enumerate_items_with_dict_position(
     with PyDict_Next / C++ DictGuardManager.
     """
     items = get_items_from_dict(obj)
-    if issubclass(type(obj), OrderedDict):
+    # Compare MRO entries by identity without invoking metaclass equality.
+    if any(cls is OrderedDict for cls in type(obj).__mro__):
         key_to_pos = {k: i for i, k in enumerate(dict.keys(obj))}
         return ((key_to_pos[k], k, v) for k, v in items)
     return ((i, k, v) for i, (k, v) in enumerate(items))
