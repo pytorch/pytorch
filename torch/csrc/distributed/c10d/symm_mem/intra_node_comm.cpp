@@ -4,9 +4,11 @@
 
 #if defined(USE_ROCM)
 #include <amd_smi/amdsmi.h>
+#include <string>
+#if ROCM_VERSION < 71400
 #include <dlfcn.h>
 #include <cstdlib>
-#include <string>
+#endif
 #endif
 
 namespace c10d::intra_node_comm {
@@ -38,8 +40,6 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
   }
   return nvlMesh;
 #else
-  // Load libamd_smi at runtime to avoid linking it into torch_hip (double-load
-  // with Python amdsmi causes bus errors). Types/constants from amdsmi.h only.
   struct AmdsmiApi {
     amdsmi_status_t (*init)(uint64_t);
     amdsmi_status_t (*get_socket_handles)(uint32_t*, amdsmi_socket_handle*);
@@ -52,6 +52,17 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
         amdsmi_processor_handle,
         bool*);
   };
+#if ROCM_VERSION >= 71400
+  // amd_smi is linked into torch_hip at build time, so bind the entry points
+  // directly. Types/constants from amdsmi.h only.
+  static const AmdsmiApi amdsmi = {
+      amdsmi_init,
+      amdsmi_get_socket_handles,
+      amdsmi_get_processor_handles,
+      amdsmi_is_P2P_accessible};
+#else
+  // Load libamd_smi at runtime to avoid linking it into torch_hip (double-load
+  // with Python amdsmi causes bus errors). Types/constants from amdsmi.h only.
   static void* amdsmi_handle = nullptr;
   static AmdsmiApi amdsmi = {};
   static bool amdsmi_resolved = false;
@@ -87,6 +98,7 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
       return {};
     }
   }
+#endif
 
   NvlMesh nvlMesh = {};
   const auto worldSize = rankToDeviceIdx.size();

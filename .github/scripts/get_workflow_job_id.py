@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from email.message import Message
 
 
 def parse_json_and_links(conn: Any) -> tuple[Any, dict[str, dict[str, str]]]:
@@ -44,6 +45,23 @@ def parse_json_and_links(conn: Any) -> tuple[Any, dict[str, dict[str, str]]]:
     return json.load(conn), links
 
 
+def retry_delay(
+    status_code: int, response_headers: Message, backoff_timeout: float
+) -> float:
+    # Secondary rate limits carry Retry-After, and asking again before it elapses
+    # is what escalates them, so never wait less than it asks. Only GitHub's own
+    # rate-limit statuses count: proxies attach the header to 503s that the short
+    # backoff can legitimately clear.
+    if status_code not in (403, 429):
+        return backoff_timeout
+    # isdecimal rather than isdigit: headers arrive latin-1 decoded, and the
+    # superscript digits in that range satisfy isdigit but raise in float.
+    retry_after = response_headers.get("Retry-After", "").strip()
+    if retry_after.isdecimal():
+        return max(backoff_timeout, float(retry_after))
+    return backoff_timeout
+
+
 def fetch_url(
     url: str,
     *,
@@ -58,13 +76,21 @@ def fetch_url(
         with urlopen(Request(url, headers=headers)) as conn:
             return reader(conn)
     except urllib.error.HTTPError as err:
-        if isinstance(retries, (int, float)) and retries > 0:
-            time.sleep(backoff_timeout)
+        # A depleted core quota resets on GitHub's schedule, up to an hour out, so
+        # retrying inside the backoff cannot succeed and only multiplies the burn
+        # against a limit every concurrent job in the repo shares.
+        quota_depleted = err.headers.get("X-RateLimit-Remaining", "").strip() == "0"
+        if not quota_depleted and isinstance(retries, (int, float)) and retries > 0:
+            delay = retry_delay(err.code, err.headers, backoff_timeout)
+            time.sleep(delay)
             return fetch_url(
                 url,
                 headers=headers,
                 reader=reader,
-                retries=retries - 1,
+                # Waiting out a Retry-After already gave GitHub the pause it asked
+                # for; repeating it would multiply a minute-scale stall by the retry
+                # count inside a step that cannot time itself out.
+                retries=0 if delay > backoff_timeout else retries - 1,
                 backoff_timeout=backoff_timeout,
             )
         exception_message = (

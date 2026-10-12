@@ -219,6 +219,25 @@ def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     )
 
 
+def should_reinplace_index_put(node: torch.fx.Node) -> bool:
+    """
+    index_put_(inp, indices, values) reads indices and values while writing inp,
+    so it can't be used if either of them shares inp's storage. For example,
+    torch.put(x, x, x) decomposes to index_put(x.flatten(), [x], x), and
+    reinplaced into index_put_ the op would read the x it is writing.
+    """
+    inp = node.args[0]
+    if not isinstance(inp, torch.fx.Node):
+        return True
+    inp_storage = get_node_storage(inp)
+    if inp_storage is None:
+        return True
+    return not any(
+        isinstance(arg, torch.fx.Node) and get_node_storage(arg) == inp_storage
+        for arg in pytree.tree_leaves((node.args[1:], node.kwargs))
+    )
+
+
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -227,7 +246,15 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     input and output would have been realized anyway.
 
     """
-    inp, _src, _view_ops = node.args
+    inp, src, _view_ops = node.args
+
+    # The mutating decomposition is view(inp).copy_(src). If src is itself a
+    # view of inp's storage (x[1:] = x[:-1].clone(), once the clone has been
+    # removed as a no-op), that copy reads what it is overwriting.
+    if isinstance(inp, torch.fx.Node) and isinstance(src, torch.fx.Node):
+        inp_storage = get_node_storage(inp)
+        if inp_storage is not None and inp_storage == get_node_storage(src):
+            return False
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
@@ -245,6 +272,19 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
 
     # Otherwise, assume fusions will make functional variants profitable
     return False
+
+
+def should_reinplace_all_reduce(node: torch.fx.Node) -> bool:
+    """
+    The symmetric-memory one-shot all-reduce lowering is out-of-place, so
+    reinplacing an all_reduce it may pick only adds a copy back into the input.
+    """
+    if not config._collective.auto_select:
+        return True
+    from torch.distributed._symmetric_memory import is_symm_mem_enabled_for_group
+
+    group_name = cast("torch.distributed.distributed_c10d.GroupName", node.args[2])
+    return not is_symm_mem_enabled_for_group(group_name)
 
 
 def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
@@ -377,8 +417,13 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
 
 
 inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
-    aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
-    aten._unsafe_index_put.default: InplaceableOp(inductor_prims._unsafe_index_put_, 0),
+    aten._scaled_addmm.default: InplaceableOp(aten._scaled_addmm_.default, 0),
+    aten.index_put.default: InplaceableOp(
+        aten.index_put_.default, 0, extra_check=should_reinplace_index_put
+    ),
+    aten._unsafe_index_put.default: InplaceableOp(
+        inductor_prims._unsafe_index_put_, 0, extra_check=should_reinplace_index_put
+    ),
     _generalized_scatter: InplaceableOp(
         _inplace_generalized_scatter,
         0,
@@ -396,7 +441,9 @@ try:
     c10d_functional = torch.ops._c10d_functional
     inplaceable_collective_ops: dict[Callable[..., Any], InplaceableOp] = {
         c10d_functional.all_reduce.default: InplaceableOp(
-            c10d_functional.all_reduce_.default, 0
+            c10d_functional.all_reduce_.default,
+            0,
+            extra_check=should_reinplace_all_reduce,
         ),
         c10d_functional.all_reduce_coalesced.default: InplaceableOp(
             c10d_functional.all_reduce_coalesced_.default, 0

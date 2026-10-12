@@ -310,6 +310,7 @@ class GuardManager:
         user_stack: traceback.StackSummary | None,
         ptype: Any,
         dispatch_keys: Any,
+        device_index_is_current: bool = False,
     ) -> None: ...
     def add_dimension_marking_guard(
         self,
@@ -366,11 +367,13 @@ class GuardManager:
     ) -> None: ...
     def add_float_is_nan_guard(
         self,
+        value: float,
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
     def add_complex_is_nan_guard(
         self,
+        value: complex,
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
@@ -410,6 +413,7 @@ class RootGuardManager(GuardManager):
         self, clone_filter_fn: Callable[[GuardManager], bool]
     ) -> RootGuardManager: ...
     def attach_compile_id(self, compile_id: str) -> None: ...
+    def set_compile_on_one_rank(self, value: bool) -> None: ...
     def get_local_state(self) -> LocalState: ...
     def set_local_state(self, local_state: LocalState) -> None: ...
 

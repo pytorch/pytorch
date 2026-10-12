@@ -30,7 +30,7 @@ requires_prepacked_linear = unittest.skipIf(
 )
 
 
-class _ConverterCheckMixin:
+class _ConverterTestMixin:
     def _check_equal_ts_ep_converter(
         self,
         M,
@@ -111,7 +111,7 @@ class _ConverterCheckMixin:
                 self.assertEqual(x, y)
 
 
-class TestConverter(_ConverterCheckMixin, TestCase):
+class TestConverter(_ConverterTestMixin, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
@@ -123,9 +123,6 @@ class TestConverter(_ConverterCheckMixin, TestCase):
             torch.ops._TorchScriptTesting.queue_push,
             torch.ops._TorchScriptTesting.queue_size,
         ]
-
-    def tearDown(self):
-        return
 
     def test_ts2ep_converter_basic(self):
         class MSingle(torch.nn.Module):
@@ -380,15 +377,6 @@ class TestConverter(_ConverterCheckMixin, TestCase):
                 return d_int[0], d_str["0"], d_bool[True], d_float[0.1]
 
         inp = (torch.rand((3, 2)),)
-        self._check_equal_ts_ep_converter(Module(), inp)
-
-    def test_prim_device(self):
-        class Module(torch.nn.Module):
-            def forward(self, x):
-                device = x.device
-                return torch.ones(2, 3, device=device)
-
-        inp = (torch.rand(3, 4),)
         self._check_equal_ts_ep_converter(Module(), inp)
 
     def test_prim_dtype(self):
@@ -1505,7 +1493,7 @@ class TestConverter(_ConverterCheckMixin, TestCase):
         self._check_equal_ts_ep_converter(m, inp, ["script"])
 
 
-class TestConverterPrimDevice(_ConverterCheckMixin, TestCase):
+class TestConverterDevice(_ConverterTestMixin, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_prim_device(self, device):
@@ -1518,7 +1506,12 @@ class TestConverterPrimDevice(_ConverterCheckMixin, TestCase):
         self._check_equal_ts_ep_converter(Module(), inp)
 
 
-instantiate_device_type_tests(TestConverterPrimDevice, globals(), except_for="cpu")
+# Default bases keep CPU and privateuse1; allow_xpu keeps the XPU class from #197113.
+instantiate_device_type_tests(
+    TestConverterDevice,
+    globals(),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

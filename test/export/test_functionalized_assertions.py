@@ -1,9 +1,15 @@
 # Owner(s): ["oncall: export"]
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestFuntionalAssertions(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_functional_assert_async_msg(self) -> None:
         dep_token = torch.ops.aten._make_dep_token()
         self.assertEqual(

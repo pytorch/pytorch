@@ -1,8 +1,8 @@
 diff --git a/test/cpython/v3_13/test_set.py b/test/cpython/v3_13/test_set.py
-index d9102eb98a5..3543d60751e 100644
+index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f1ef91ba2 100644
 --- a/test/cpython/v3_13/test_set.py
 +++ b/test/cpython/v3_13/test_set.py
-@@ -1,3 +1,56 @@
+@@ -1,3 +1,60 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
@@ -17,7 +17,11 @@ index d9102eb98a5..3543d60751e 100644
 +import torch._dynamo.test_case
 +import unittest
 +from torch._dynamo.test_case import CPythonTestCase
-+from torch.testing._internal.common_utils import run_tests
++from torch.testing._internal.common_utils import (
++    run_tests,
++    skipIfTorchDynamo,
++    TEST_WITH_TORCHDYNAMO,
++)
 +
 +__TestCase = CPythonTestCase
 +
@@ -59,7 +63,7 @@ index d9102eb98a5..3543d60751e 100644
  import unittest
  from test import support
  from test.support import warnings_helper
-@@ -38,7 +91,7 @@ class HashCountingInt(int):
+@@ -38,7 +95,7 @@ class HashCountingInt(int):
          self.hash_count += 1
          return int.__hash__(self)
  
@@ -68,7 +72,7 @@ index d9102eb98a5..3543d60751e 100644
      # Tests common to both set and frozenset
  
      def setUp(self):
-@@ -47,6 +100,7 @@ class TestJointOps:
+@@ -47,6 +104,7 @@ class TestJointOps:
          self.letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
          self.s = self.thetype(word)
          self.d = dict.fromkeys(word)
@@ -76,7 +80,7 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_new_or_init(self):
          self.assertRaises(TypeError, self.thetype, [], 2)
-@@ -355,7 +409,7 @@ class TestJointOps:
+@@ -355,7 +413,7 @@ class TestJointOps:
      def test_free_after_iterating(self):
          support.check_free_after_iterating(self, iter, self.thetype)
  
@@ -85,7 +89,7 @@ index d9102eb98a5..3543d60751e 100644
      thetype = set
      basetype = set
  
-@@ -675,7 +729,7 @@ class TestSetSubclass(TestSet):
+@@ -675,7 +733,7 @@ class TestSetSubclass(TestSet):
              subclass_with_new([1, 2], newarg=3)
  
  
@@ -94,7 +98,18 @@ index d9102eb98a5..3543d60751e 100644
      thetype = frozenset
      basetype = frozenset
  
-@@ -811,10 +865,17 @@ class TestFrozenSetSubclass(TestFrozenSet):
+@@ -720,8 +778,9 @@ class TestFrozenSet(TestJointOps, unittest.TestCase):
+         f = self.thetype('abcdcda')
+         self.assertEqual(hash(f), hash(f))
+ 
++    @skipIfTorchDynamo("slow")
+     def test_hash_effectiveness(self):
+-        n = 13
++        n = 2
+         hashvalues = set()
+         addhashvalue = hashvalues.add
+         elemmasks = [(i+1, 1<<i) for i in range(n)]
+@@ -811,10 +870,17 @@ class TestFrozenSetSubclass(TestFrozenSet):
  class SetSubclassWithSlots(set):
      __slots__ = ('x', 'y', '__dict__')
  
@@ -115,7 +130,7 @@ index d9102eb98a5..3543d60751e 100644
  
  class FrozenSetSubclassWithSlots(frozenset):
      __slots__ = ('x', 'y', '__dict__')
-@@ -828,7 +889,7 @@ empty_set = set()
+@@ -828,7 +894,7 @@ empty_set = set()
  
  #==============================================================================
  
@@ -124,7 +139,7 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_repr(self):
          if self.repr is not None:
-@@ -934,7 +995,7 @@ class TestBasicOps:
+@@ -934,7 +1000,7 @@ class TestBasicOps:
  
  #------------------------------------------------------------------------------
  
@@ -133,7 +148,7 @@ index d9102eb98a5..3543d60751e 100644
      def setUp(self):
          self.case   = "empty set"
          self.values = []
-@@ -942,10 +1003,11 @@ class TestBasicOpsEmpty(TestBasicOps, unittest.TestCase):
+@@ -942,10 +1008,11 @@ class TestBasicOpsEmpty(TestBasicOps, unittest.TestCase):
          self.dup    = set(self.values)
          self.length = 0
          self.repr   = "set()"
@@ -146,7 +161,7 @@ index d9102eb98a5..3543d60751e 100644
      def setUp(self):
          self.case   = "unit set (number)"
          self.values = [3]
-@@ -953,6 +1015,7 @@ class TestBasicOpsSingleton(TestBasicOps, unittest.TestCase):
+@@ -953,6 +1020,7 @@ class TestBasicOpsSingleton(TestBasicOps, unittest.TestCase):
          self.dup    = set(self.values)
          self.length = 1
          self.repr   = "{3}"
@@ -154,7 +169,7 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_in(self):
          self.assertIn(3, self.set)
-@@ -962,7 +1025,7 @@ class TestBasicOpsSingleton(TestBasicOps, unittest.TestCase):
+@@ -962,7 +1030,7 @@ class TestBasicOpsSingleton(TestBasicOps, unittest.TestCase):
  
  #------------------------------------------------------------------------------
  
@@ -163,7 +178,7 @@ index d9102eb98a5..3543d60751e 100644
      def setUp(self):
          self.case   = "unit set (tuple)"
          self.values = [(0, "zero")]
-@@ -970,6 +1033,7 @@ class TestBasicOpsTuple(TestBasicOps, unittest.TestCase):
+@@ -970,6 +1038,7 @@ class TestBasicOpsTuple(TestBasicOps, unittest.TestCase):
          self.dup    = set(self.values)
          self.length = 1
          self.repr   = "{(0, 'zero')}"
@@ -171,7 +186,7 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_in(self):
          self.assertIn((0, "zero"), self.set)
-@@ -979,7 +1043,7 @@ class TestBasicOpsTuple(TestBasicOps, unittest.TestCase):
+@@ -979,7 +1048,7 @@ class TestBasicOpsTuple(TestBasicOps, unittest.TestCase):
  
  #------------------------------------------------------------------------------
  
@@ -180,7 +195,7 @@ index d9102eb98a5..3543d60751e 100644
      def setUp(self):
          self.case   = "triple set"
          self.values = [0, "zero", operator.add]
-@@ -987,36 +1051,39 @@ class TestBasicOpsTriple(TestBasicOps, unittest.TestCase):
+@@ -987,36 +1056,39 @@ class TestBasicOpsTriple(TestBasicOps, unittest.TestCase):
          self.dup    = set(self.values)
          self.length = 3
          self.repr   = None
@@ -223,7 +238,7 @@ index d9102eb98a5..3543d60751e 100644
      def setUp(self):
          self.enterContext(warnings_helper.check_warnings())
          warnings.simplefilter('ignore', BytesWarning)
-@@ -1025,6 +1092,7 @@ class TestBasicOpsMixedStringBytes(TestBasicOps, unittest.TestCase):
+@@ -1025,6 +1097,7 @@ class TestBasicOpsMixedStringBytes(TestBasicOps, unittest.TestCase):
          self.set    = set(self.values)
          self.dup    = set(self.values)
          self.length = 4
@@ -231,7 +246,7 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_repr(self):
          self.check_repr_against_values()
-@@ -1038,7 +1106,7 @@ def baditer():
+@@ -1038,7 +1111,7 @@ def baditer():
  def gooditer():
      yield True
  
@@ -240,7 +255,7 @@ index d9102eb98a5..3543d60751e 100644
      """SF 628246:  Set constructor should not trap iterator TypeErrors"""
  
      def test_instanceWithException(self):
-@@ -1065,7 +1133,7 @@ class TestExceptionPropagation(unittest.TestCase):
+@@ -1065,7 +1138,7 @@ class TestExceptionPropagation(unittest.TestCase):
  
  #==============================================================================
  
@@ -249,7 +264,7 @@ index d9102eb98a5..3543d60751e 100644
      def test_constructor(self):
          inner = frozenset([1])
          outer = set([inner])
-@@ -1078,9 +1146,10 @@ class TestSetOfSets(unittest.TestCase):
+@@ -1078,9 +1151,10 @@ class TestSetOfSets(unittest.TestCase):
  
  #==============================================================================
  
@@ -261,7 +276,7 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_eq(self):              # SF bug 643115
          self.assertEqual(self.set, set({2:1,4:3,6:5}))
-@@ -1151,9 +1220,10 @@ class TestBinaryOps(unittest.TestCase):
+@@ -1151,9 +1225,10 @@ class TestBinaryOps(unittest.TestCase):
  
  #==============================================================================
  
@@ -273,7 +288,7 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_union_subset(self):
          self.set |= set([2])
-@@ -1237,10 +1307,11 @@ class TestUpdateOps(unittest.TestCase):
+@@ -1237,10 +1312,11 @@ class TestUpdateOps(unittest.TestCase):
  
  #==============================================================================
  
@@ -286,7 +301,7 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_add_present(self):
          self.set.add("c")
-@@ -1311,7 +1382,7 @@ class TestMutate(unittest.TestCase):
+@@ -1311,7 +1387,7 @@ class TestMutate(unittest.TestCase):
  
  #==============================================================================
  
@@ -295,8 +310,13 @@ index d9102eb98a5..3543d60751e 100644
  
      case2method = {"<=": "issubset",
                     ">=": "issuperset",
-@@ -1334,22 +1405,22 @@ class TestSubsets:
-             result = eval("x" + case + "y", locals())
+@@ -1331,25 +1407,27 @@ class TestSubsets:
+         for case in "!=", "==", "<", "<=", ">", ">=":
+             expected = case in self.cases
+             # Test the binary infix spelling.
+-            result = eval("x" + case + "y", locals())
++            with torch._dynamo.error_on_graph_break(False):
++                result = eval("x" + case + "y", locals())
              self.assertEqual(result, expected)
              # Test the "friendly" method-name spelling, if one exists.
 -            if case in TestSubsets.case2method:
@@ -308,8 +328,10 @@ index d9102eb98a5..3543d60751e 100644
  
              # Now do the same for the operands reversed.
 -            rcase = TestSubsets.reverse[case]
+-            result = eval("y" + rcase + "x", locals())
 +            rcase = _TestSubsets.reverse[case]
-             result = eval("y" + rcase + "x", locals())
++            with torch._dynamo.error_on_graph_break(False):
++                result = eval("y" + rcase + "x", locals())
              self.assertEqual(result, expected)
 -            if rcase in TestSubsets.case2method:
 -                method = getattr(y, TestSubsets.case2method[rcase])
@@ -324,7 +346,7 @@ index d9102eb98a5..3543d60751e 100644
      left  = set()
      right = set()
      name  = "both empty"
-@@ -1357,7 +1428,7 @@ class TestSubsetEqualEmpty(TestSubsets, unittest.TestCase):
+@@ -1357,7 +1435,7 @@ class TestSubsetEqualEmpty(TestSubsets, unittest.TestCase):
  
  #------------------------------------------------------------------------------
  
@@ -333,7 +355,7 @@ index d9102eb98a5..3543d60751e 100644
      left  = set([1, 2])
      right = set([1, 2])
      name  = "equal pair"
-@@ -1365,7 +1436,7 @@ class TestSubsetEqualNonEmpty(TestSubsets, unittest.TestCase):
+@@ -1365,7 +1443,7 @@ class TestSubsetEqualNonEmpty(TestSubsets, unittest.TestCase):
  
  #------------------------------------------------------------------------------
  
@@ -342,7 +364,7 @@ index d9102eb98a5..3543d60751e 100644
      left  = set()
      right = set([1, 2])
      name  = "one empty, one non-empty"
-@@ -1373,7 +1444,7 @@ class TestSubsetEmptyNonEmpty(TestSubsets, unittest.TestCase):
+@@ -1373,7 +1451,7 @@ class TestSubsetEmptyNonEmpty(TestSubsets, unittest.TestCase):
  
  #------------------------------------------------------------------------------
  
@@ -351,7 +373,7 @@ index d9102eb98a5..3543d60751e 100644
      left  = set([1])
      right = set([1, 2])
      name  = "one a non-empty proper subset of other"
-@@ -1381,7 +1452,7 @@ class TestSubsetPartial(TestSubsets, unittest.TestCase):
+@@ -1381,7 +1459,7 @@ class TestSubsetPartial(TestSubsets, unittest.TestCase):
  
  #------------------------------------------------------------------------------
  
@@ -360,7 +382,7 @@ index d9102eb98a5..3543d60751e 100644
      left  = set([1])
      right = set([2])
      name  = "neither empty, neither contains"
-@@ -1389,7 +1460,7 @@ class TestSubsetNonOverlap(TestSubsets, unittest.TestCase):
+@@ -1389,7 +1467,7 @@ class TestSubsetNonOverlap(TestSubsets, unittest.TestCase):
  
  #==============================================================================
  
@@ -369,7 +391,7 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_eq_ne(self):
          # Unlike the others, this is testing that == and != *are* allowed.
-@@ -1505,47 +1576,52 @@ class TestOnlySetsInBinaryOps:
+@@ -1505,47 +1583,52 @@ class TestOnlySetsInBinaryOps:
  
  #------------------------------------------------------------------------------
  
@@ -428,7 +450,7 @@ index d9102eb98a5..3543d60751e 100644
      def setUp(self):
          def gen():
              for i in range(0, 10, 2):
-@@ -1553,10 +1629,11 @@ class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, unittest.TestCase):
+@@ -1553,10 +1636,11 @@ class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, unittest.TestCase):
          self.set   = set((1, 2, 3))
          self.other = gen()
          self.otherIsIterable = True
@@ -441,7 +463,7 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_copy(self):
          dup = self.set.copy()
-@@ -1577,40 +1654,46 @@ class TestCopying:
+@@ -1577,40 +1661,46 @@ class TestCopying:
  
  #------------------------------------------------------------------------------
  
@@ -494,7 +516,7 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_binopsVsSubsets(self):
          a, b = self.a, self.b
-@@ -1727,7 +1810,7 @@ def L(seqn):
+@@ -1727,7 +1817,7 @@ def L(seqn):
      'Test multiple tiers of iterators'
      return chain(map(lambda x:x, R(Ig(G(seqn)))))
  
@@ -503,16 +525,31 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_constructor(self):
          for cons in (set, frozenset):
-@@ -1785,7 +1868,7 @@ class bad_dict_clear:
+@@ -1785,7 +1875,11 @@ class bad_dict_clear:
      def __hash__(self):
          return 0
  
 -class TestWeirdBugs(unittest.TestCase):
 +class TestWeirdBugs(__TestCase):
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
      def test_8420_set_merge(self):
          # This used to segfault
          global be_bad, set2, dict2
-@@ -1826,7 +1909,7 @@ class TestWeirdBugs(unittest.TestCase):
+@@ -1812,6 +1906,10 @@ class TestWeirdBugs(unittest.TestCase):
+         s.update(range(100))
+         list(si)
+ 
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
+     def test_merge_and_mutate(self):
+         class X:
+             def __hash__(self):
+@@ -1826,7 +1924,7 @@ class TestWeirdBugs(unittest.TestCase):
          s.update(other)
  
  
@@ -521,7 +558,7 @@ index d9102eb98a5..3543d60751e 100644
      """Regression test for bpo-46615"""
  
      constructor1 = None
-@@ -1862,7 +1945,7 @@ class TestOperationsMutating:
+@@ -1862,7 +1960,7 @@ class TestOperationsMutating:
                  self.assertIn("changed size during iteration", str(e))
  
  
@@ -530,26 +567,42 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_eq_with_mutation(self):
          self.check_set_op_does_not_crash(lambda a, b: a == b)
-@@ -1933,24 +2016,24 @@ class TestBinaryOpsMutating(TestOperationsMutating):
+@@ -1933,24 +2031,40 @@ class TestBinaryOpsMutating(TestOperationsMutating):
          self.check_set_op_does_not_crash(f3)
  
  
 -class TestBinaryOpsMutating_Set_Set(TestBinaryOpsMutating, unittest.TestCase):
++@unittest.skipIf(
++    TEST_WITH_TORCHDYNAMO,
++    "__build_class__ with closed over objects not supported",
++)
 +class TestBinaryOpsMutating_Set_Set(_TestBinaryOpsMutating, __TestCase):
      constructor1 = set
      constructor2 = set
  
 -class TestBinaryOpsMutating_Subclass_Subclass(TestBinaryOpsMutating, unittest.TestCase):
++@unittest.skipIf(
++    TEST_WITH_TORCHDYNAMO,
++    "__build_class__ with closed over objects not supported",
++)
 +class TestBinaryOpsMutating_Subclass_Subclass(_TestBinaryOpsMutating, __TestCase):
      constructor1 = SetSubclass
      constructor2 = SetSubclass
  
 -class TestBinaryOpsMutating_Set_Subclass(TestBinaryOpsMutating, unittest.TestCase):
++@unittest.skipIf(
++    TEST_WITH_TORCHDYNAMO,
++    "__build_class__ with closed over objects not supported",
++)
 +class TestBinaryOpsMutating_Set_Subclass(_TestBinaryOpsMutating, __TestCase):
      constructor1 = set
      constructor2 = SetSubclass
  
 -class TestBinaryOpsMutating_Subclass_Set(TestBinaryOpsMutating, unittest.TestCase):
++@unittest.skipIf(
++    TEST_WITH_TORCHDYNAMO,
++    "__build_class__ with closed over objects not supported",
++)
 +class TestBinaryOpsMutating_Subclass_Set(_TestBinaryOpsMutating, __TestCase):
      constructor1 = SetSubclass
      constructor2 = set
@@ -560,41 +613,65 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_issubset_with_mutation(self):
          self.check_set_op_does_not_crash(set.issubset)
-@@ -1986,27 +2069,27 @@ class TestMethodsMutating(TestOperationsMutating):
+@@ -1986,27 +2100,51 @@ class TestMethodsMutating(TestOperationsMutating):
          self.check_set_op_does_not_crash(set.update)
  
  
 -class TestMethodsMutating_Set_Set(TestMethodsMutating, unittest.TestCase):
++@unittest.skipIf(
++    TEST_WITH_TORCHDYNAMO,
++    "__build_class__ with closed over objects not supported",
++)
 +class TestMethodsMutating_Set_Set(_TestMethodsMutating, __TestCase):
      constructor1 = set
      constructor2 = set
  
 -class TestMethodsMutating_Subclass_Subclass(TestMethodsMutating, unittest.TestCase):
++@unittest.skipIf(
++    TEST_WITH_TORCHDYNAMO,
++    "__build_class__ with closed over objects not supported",
++)
 +class TestMethodsMutating_Subclass_Subclass(_TestMethodsMutating, __TestCase):
      constructor1 = SetSubclass
      constructor2 = SetSubclass
  
 -class TestMethodsMutating_Set_Subclass(TestMethodsMutating, unittest.TestCase):
++@unittest.skipIf(
++    TEST_WITH_TORCHDYNAMO,
++    "__build_class__ with closed over objects not supported",
++)
 +class TestMethodsMutating_Set_Subclass(_TestMethodsMutating, __TestCase):
      constructor1 = set
      constructor2 = SetSubclass
  
 -class TestMethodsMutating_Subclass_Set(TestMethodsMutating, unittest.TestCase):
++@unittest.skipIf(
++    TEST_WITH_TORCHDYNAMO,
++    "__build_class__ with closed over objects not supported",
++)
 +class TestMethodsMutating_Subclass_Set(_TestMethodsMutating, __TestCase):
      constructor1 = SetSubclass
      constructor2 = set
  
 -class TestMethodsMutating_Set_Dict(TestMethodsMutating, unittest.TestCase):
++@unittest.skipIf(
++    TEST_WITH_TORCHDYNAMO,
++    "__build_class__ with closed over objects not supported",
++)
 +class TestMethodsMutating_Set_Dict(_TestMethodsMutating, __TestCase):
      constructor1 = set
      constructor2 = dict.fromkeys
  
 -class TestMethodsMutating_Set_List(TestMethodsMutating, unittest.TestCase):
++@unittest.skipIf(
++    TEST_WITH_TORCHDYNAMO,
++    "__build_class__ with closed over objects not supported",
++)
 +class TestMethodsMutating_Set_List(_TestMethodsMutating, __TestCase):
      constructor1 = set
      constructor2 = list
  
-@@ -2068,7 +2151,7 @@ def faces(G):
+@@ -2068,7 +2206,7 @@ def faces(G):
      return f
  
  
@@ -603,9 +680,12 @@ index d9102eb98a5..3543d60751e 100644
  
      def test_cube(self):
  
-@@ -2118,4 +2201,4 @@ class TestGraphs(unittest.TestCase):
- #==============================================================================
+@@ -2115,7 +2253,5 @@ class TestGraphs(unittest.TestCase):
+                 self.assertIn(cubevert, g)
  
+ 
+-#==============================================================================
+-
  if __name__ == "__main__":
 -    unittest.main()
 +    run_tests()

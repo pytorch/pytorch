@@ -19,10 +19,6 @@
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/cuda/cuBlasCommonArgs.h>
-#include <ATen/native/cuda/RowwiseScaledMM.h>
-#include <ATen/native/cuda/ScaledGroupMM.h>
-#include <ATen/native/cuda/GroupMM.h>
-#include <ATen/ceil_div.h>
 
 #ifdef USE_MSLK
 #include <mslk/gemm/gemm_torch.h>
@@ -35,8 +31,6 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_int_mm_native.h>
-#include <ATen/ops/_scaled_mm_native.h>
-#include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
@@ -957,7 +951,7 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
       [&] {
         Tensor result = at::empty({}, self.options());
 
-        auto handle = at::cuda::getCurrentCUDABlasHandle();
+        auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
         at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
         at::cuda::blas::dot<scalar_t>(
             handle,
@@ -1004,7 +998,7 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
     Tensor result = at::empty({}, self.options());
 
-    auto handle = at::cuda::getCurrentCUDABlasHandle();
+    auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
     at::cuda::blas::PointerModeGuard pointerModeGuard(
         handle, CUBLAS_POINTER_MODE_DEVICE);
     at::cuda::blas::vdot<scalar_t>(

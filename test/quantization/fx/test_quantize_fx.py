@@ -1792,6 +1792,77 @@ class TestQuantizeFx(QuantizationTestCase):
                     m = convert_fn(m)
                     self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+    @skipIfNoFBGEMM
+    def test_fold_weight_preserves_external_weight_users(self):
+        """fold_weight keeps a weight get_attr alive when a non-prepack user
+        (here x.to(self.weight.dtype)) still consumes it.
+        """
+        with override_quantized_engine('fbgemm'):
+            class Linear(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.weight = torch.nn.Parameter(torch.rand(10, 5))
+
+                def forward(self, x):
+                    return F.linear(x.to(self.weight.dtype), self.weight)
+
+            inputs = (torch.rand(8, 5, dtype=torch.float64),)
+            model = Linear().eval()
+            expected = model(*inputs)
+            qconfig_mapping = QConfigMapping().set_object_type(
+                F.linear, float16_dynamic_qconfig
+            )
+            prepared = prepare_fx(model, qconfig_mapping, example_inputs=inputs)
+            converted = convert_fx(prepared, keep_original_weights=True)
+
+            actual = converted(*inputs)
+            torch.testing.assert_close(actual, expected, rtol=1e-3, atol=1e-3)
+            self.checkGraphModuleNodes(
+                converted,
+                expected_node_occurrence={
+                    ns.call_function(torch.ops.quantized.linear_dynamic_fp16): 1,
+                    ns.call_function(torch.ops.quantized.linear_prepack_fp16): 0,
+                },
+            )
+            self.assertIn('weight', converted.state_dict())
+            self.assertIn('_packed_weight_0', converted.state_dict())
+
+    @skipIfNoFBGEMM
+    def test_fold_weight_removes_exclusively_used_weight(self):
+        """fold_weight still drops a weight get_attr shared by several linears
+        once every one of its users has been folded into a packed weight.
+        """
+        with override_quantized_engine('fbgemm'):
+            class Linear(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.weight = torch.nn.Parameter(torch.rand(10, 5))
+
+                def forward(self, x):
+                    return F.linear(x, self.weight) + F.linear(x, self.weight)
+
+            inputs = (torch.rand(8, 5),)
+            model = Linear().eval()
+            qconfig_mapping = QConfigMapping().set_object_type(
+                F.linear, float16_dynamic_qconfig
+            )
+            prepared = prepare_fx(model, qconfig_mapping, example_inputs=inputs)
+            converted = convert_fx(prepared)
+
+            state_dict = converted.state_dict()
+            self.assertNotIn('weight', state_dict)
+            self.assertEqual(
+                2,
+                len([key for key in state_dict if key.startswith('_packed_weight_')]),
+            )
+            self.checkGraphModuleNodes(
+                converted,
+                expected_node_occurrence={
+                    ns.call_function(torch.ops.quantized.linear_dynamic_fp16): 2,
+                    ns.call_function(torch.ops.quantized.linear_prepack_fp16): 0,
+                },
+            )
+
 
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
