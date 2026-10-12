@@ -428,18 +428,26 @@ class ScheduleTest(MultiProcContinuousTest):
                     output_grads=(None,) if index == 3 else (example,),
                 )
             )
+
+        def loss_fn(output, target):
+            loss = torch.nn.functional.mse_loss(output, target)
+            return {"loss": loss, "metrics": {"loss_mean": loss}}
+
         schedule = ScheduleInterleaved1F1B(
-            stages, 4, loss_fn=MSELoss(), scale_grads=False
+            stages, 4, loss_fn=loss_fn, scale_grads=False
         )
 
         def train_step():
+            loss_results = [] if pp_rank == 1 else None
             for stage in stages:
                 stage.submod.zero_grad(set_to_none=False)
             schedule.step(
                 *((inputs,) if pp_rank == 0 else ()),
                 target=target if pp_rank == 1 else None,
+                loss_results=loss_results,
                 return_outputs=False,
             )
+            return loss_results
 
         def eval_step():
             with torch.no_grad():
@@ -453,7 +461,7 @@ class ScheduleTest(MultiProcContinuousTest):
             for _ in range(2):
                 train_step()
                 eval_step()
-            train_step()
+            eager_results = train_step()
         torch.cuda.current_stream().wait_stream(warmup_stream)
         expected = [
             parameter.grad.to_local().clone()
@@ -461,9 +469,16 @@ class ScheduleTest(MultiProcContinuousTest):
             for parameter in stage.submod.parameters()
         ]
         self.assertTrue(any(gradient.abs().sum().item() > 0 for gradient in expected))
+        if pp_rank == 1:
+            self.assertEqual(len(eager_results), 4)
+            for result in eager_results:
+                self.assertIsInstance(result, dict)
+                self.assertEqual(result["loss"], result["metrics"]["loss_mean"])
+                self.assertIsNone(result["loss"].grad_fn)
+                self.assertIsNone(result["metrics"]["loss_mean"].grad_fn)
         train_graph, eval_graph = torch.cuda.CUDAGraph(), torch.cuda.CUDAGraph()
         with torch.cuda.graph(train_graph):
-            train_step()
+            captured_results = train_step()
         with torch.cuda.graph(eval_graph):
             eval_step()
         for stage in stages:
@@ -498,6 +513,11 @@ class ScheduleTest(MultiProcContinuousTest):
         ]
         for gradient, reference in zip(actual, expected, strict=True):
             self.assertEqual(gradient, reference)
+        if pp_rank == 1:
+            self.assertEqual(len(captured_results), 4)
+            for result, reference in zip(captured_results, eager_results, strict=True):
+                self.assertEqual(result["loss"], reference["loss"])
+                self.assertIsNone(result["metrics"]["loss_mean"].grad_fn)
 
     @classmethod
     def backend_str(cls) -> str:
