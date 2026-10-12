@@ -256,10 +256,36 @@ class TestSetGuards(LoggingTestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "set.__contains__")
-        self.assertIn(
-            """set.__contains__(s, 'PyTorch')""",
-            munge_exc(record.getMessage()),
+        message = munge_exc(record.getMessage())
+        self.assertIn("set.__contains__(s, 'PyTorch')", message)
+        expected = (
+            "(HINT: Set s must contain item 'PyTorch'; Dynamo specialized the "
+            "compiled code on this item being present."
         )
+        self.assertIn(expected, message)
+
+    def test_not_in_guard_message(self):
+        failures = []
+
+        def fn(x, s):
+            if "PyTorch" not in s:
+                return x.sin()
+            return x.cos()
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.randn(2)
+        compiled_fn(x, set())
+        compiled_fn(x, {"PyTorch"})
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("not set.__contains__(s, 'PyTorch')", failures[0])
+        expected = (
+            "(HINT: Set s must not contain item 'PyTorch'; Dynamo specialized the "
+            "compiled code on this item being absent."
+        )
+        self.assertIn(expected, failures[0])
 
     def test_set_with_tensors(self):
         s = {
@@ -1857,6 +1883,48 @@ class DictKeySetHierarchyTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled({1, 2}), fn({1, 2}))
+
+
+class SetSubclassSideEffectTests(torch._dynamo.test_case.TestCase):
+    def test_set_subclass_input_mutation(self):
+        def fn(s, x):
+            s.add(9)
+            s.discard(1)
+            s.attr = len(s)
+            return x * len(s)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = SetSubclass([1, 2]), SetSubclass([1, 2])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(ref, res)
+        self.assertEqual(sorted(res), [2, 9])
+        self.assertEqual(res.attr, ref.attr)
+
+    def test_set_subclass_replay_skips_overridden_methods(self):
+        # The replay must reach the builtin set slots, not whatever the subclass
+        # put in front of them.
+        calls = []
+
+        class LoudSet(set):
+            def update(self, *args):
+                calls.append("update")
+                return super().update(*args)
+
+            def clear(self):
+                calls.append("clear")
+                return super().clear()
+
+        def fn(s, x):
+            s.add(9)
+            return x * len(s)
+
+        x = torch.randn(4)
+        res = LoudSet([1, 2])
+        torch.compile(fn, backend="eager", fullgraph=True)(res, x)
+        self.assertEqual(sorted(res), [1, 2, 9])
+        self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

@@ -54,6 +54,46 @@ REGISTER_ALL_CLAMP_OPS(float);
 REGISTER_ALL_CLAMP_OPS(half);
 REGISTER_ALL_CLAMP_OPS(bfloat);
 
+struct where_functor {
+  template <typename T>
+  inline T operator()(const T cond, const T a, const T b) {
+    return c10::metal::cast_to<bool>(cond) ? a : b;
+  }
+};
+
+#define REGISTER_WHERE_OP(T)                                      \
+  template [[host_name("where_dense_" #T "_bool")]] kernel void   \
+  c10::metal::ternary_dense<T, where_functor, T, bool>(           \
+      device T*, constant bool*, constant T*, constant T*, uint); \
+  template [[host_name("where_strided_" #T "_bool")]] kernel void \
+  c10::metal::ternary_strided<T, where_functor, T, bool>(         \
+      device void*,                                               \
+      constant void*,                                             \
+      constant void*,                                             \
+      constant void*,                                             \
+      constant long*,                                             \
+      constant long*,                                             \
+      constant long*,                                             \
+      constant long*,                                             \
+      constant long*,                                             \
+      constant uint&,                                             \
+      uint3)
+
+REGISTER_WHERE_OP(bool);
+REGISTER_WHERE_OP(uchar);
+REGISTER_WHERE_OP(char);
+REGISTER_WHERE_OP(short);
+REGISTER_WHERE_OP(ushort);
+REGISTER_WHERE_OP(int);
+REGISTER_WHERE_OP(uint);
+REGISTER_WHERE_OP(long);
+REGISTER_WHERE_OP(ulong);
+REGISTER_WHERE_OP(half);
+REGISTER_WHERE_OP(bfloat);
+REGISTER_WHERE_OP(float);
+REGISTER_WHERE_OP(half2);
+REGISTER_WHERE_OP(float2);
+
 struct isposinf_functor {
   template <typename T>
   inline bool operator()(const T x) {

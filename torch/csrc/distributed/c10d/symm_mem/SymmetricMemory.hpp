@@ -48,7 +48,13 @@ inline void check_rank(int rank, int world_size) {
 // different purposes. Without the concept of channels, we cannot guarantee the
 // correctness of the barriers since signals issued from barrier on stream A
 // can be received by the barrier on stream B. By specifying different channels
-// for these two barriers, they can operate correctly in parallel.
+// for these two barriers, their signals stay separate.
+//
+// NOTE [symmetric memory stream ordering]
+// The built-in operations that touch the signal pad are ordered across CUDA
+// streams per process group by GroupStreamGuard, so different channels do not
+// give them concurrency across streams. User kernels launched on a raw
+// get_signal_pad() tensor are not covered.
 class TORCH_API SymmetricMemory : public torch::CustomClassHolder {
  public:
   ~SymmetricMemory() override = default;
@@ -93,6 +99,10 @@ class TORCH_API SymmetricMemory : public torch::CustomClassHolder {
   virtual int get_rank() = 0;
   virtual int get_world_size() = 0;
   virtual c10::Device get_device() = 0;
+  // The name of the process group this handle was rendezvoused on.
+  virtual std::string get_group_name() {
+    TORCH_CHECK(false, "NYI");
+  }
 
   virtual const std::vector<int>& get_rank_to_global_rank() {
     TORCH_CHECK(false, "NYI");
