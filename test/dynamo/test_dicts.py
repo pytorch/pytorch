@@ -72,6 +72,62 @@ class DictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    @parametrize("operation", [operator.eq, operator.ne])
+    def test_input_comparison_compares_missing_key_once(self, mapping_type, operation):
+        class Key:
+            def __init__(self):
+                self.calls = 0
+
+            def __hash__(self):
+                return 42
+
+            def __eq__(self, other):
+                self.calls += 1
+                return False
+
+        def fn(x, left, right, stored):
+            stored.calls = 0
+            result = operation(left, right)
+            return x + stored.calls, result
+
+        stored, probe = Key(), Key()
+        left, right = mapping_type(), mapping_type()
+        left[probe] = right[stored] = 1
+        x = torch.ones(1)
+        expected = (x + 1, operation is operator.ne)
+        self.assertEqual(fn(x, left, right, stored), expected)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, left, right, stored),
+            expected,
+        )
+
+    @parametrize(
+        "make_iter",
+        [
+            zip,
+            lambda keys, values: map(tuple, zip(keys, values)),
+            lambda keys, values: filter(None, zip(keys, values)),
+            lambda keys, values: itertools.chain(zip(keys, values)),
+        ],
+    )
+    @parametrize("update", [False, True])
+    def test_ordered_dict_from_iterator(self, make_iter, update):
+        def fn(x):
+            pairs = make_iter(("a", "b"), (x, x + 1))
+            if update:
+                result = OrderedDict()
+                result.update(pairs)
+            else:
+                result = OrderedDict(pairs)
+            return result
+
+        x = torch.randn(3)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual), OrderedDict)
+        self.assertEqual(list(actual.items()), list(expected.items()))
+
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
     def test_subscription_compares_key_once(self, mapping_type):
         class Key:
             def __init__(self):
@@ -255,6 +311,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(expected, (x + 50, 3))
         else:
             self.assertEqual(expected, (x + (operation is operator.ne), 3))
+        with self.assertRaisesRegex(
+            Unsupported, "Dictionary mutated during comparison"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(torch.compile(fn, backend="eager")(x), expected)
 
     @parametrize("operation", [operator.eq, operator.ne])
@@ -275,7 +335,26 @@ class DictTests(torch._dynamo.test_case.TestCase):
             return x + operation(left, right), len(left)
 
         x = torch.randn(3)
+        with self.assertRaisesRegex(
+            Unsupported, "Dictionary mutated during comparison"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    @parametrize("name", ["__eq__", "__ne__"])
+    def test_comparison_unsupported_dictionary_storage(self, name):
+        class Mapping(dict):
+            def __new__(cls, *args, **kwargs):
+                return super().__new__(cls)
+
+        def fn(x, mapping):
+            return x + getattr(dict, name)({"a": 1}, mapping)
+
+        x = torch.randn(3)
+        mapping = Mapping(a=1)
+        with self.assertRaisesRegex(Unsupported, "Unsupported dictionary storage"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
 
     @parametrize("operation", [operator.eq, operator.ne])
     @parametrize("reverse", [False, True])
@@ -3501,7 +3580,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         hop_node = graph.call_function(hop, (x, "subgraph_0", x))
         self.assertTrue(_is_safe_to_reorder(hop_node))
 
-    @unittest.skipIf(sys.version_info < (3, 14), "requires Python 3.14 key errors")
     @parametrize(
         "operation",
         [
@@ -3533,7 +3611,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         expected = fn(x)
-        self.assertIn("cannot use", expected[1])
+        if sys.version_info >= (3, 14):
+            self.assertIn("cannot use", expected[1])
         self.assertEqual(
             torch.compile(fn, backend="eager", fullgraph=True)(x), expected
         )
