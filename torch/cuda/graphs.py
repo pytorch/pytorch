@@ -27,10 +27,10 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    # importing _POOL_HANDLE at runtime toplevel causes an import cycle
-    from torch.cuda import _POOL_HANDLE, MemPool
     from contextlib import AbstractContextManager
 
+    # importing _POOL_HANDLE at runtime toplevel causes an import cycle
+    from torch.cuda import _POOL_HANDLE, MemPool
     from torch.distributed._collective_annotations import (
         CollectiveAnnotationHandle,
         CollectiveMetadata,
