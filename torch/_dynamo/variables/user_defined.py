@@ -3210,6 +3210,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 and method.__name__ in ("keys", "values", "items", "update")
             ):
                 # Honor the defining dictionary type for aliased builtin descriptors.
+                if method.__objclass__ is collections.OrderedDict and not pyodict_check(
+                    self
+                ):
+                    raise_type_error(
+                        tx,
+                        f"descriptor '{method.__name__}' for 'collections.OrderedDict' objects "
+                        f"doesn't apply to a '{self.python_type_name()}' object",
+                    )
                 owner = (
                     OrderedDictVariable
                     if method.__objclass__ is collections.OrderedDict
