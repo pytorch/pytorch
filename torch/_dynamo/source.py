@@ -814,6 +814,7 @@ class ConstDictKeySource(ChainedSource):
     index: int
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.tx.output.guard_on_key_order.add(self.base)
         codegen.add_push_null(
             lambda: codegen.load_import_from(utils.__name__, "dict_keys_getitem")
         )
