@@ -11,10 +11,10 @@ from cutlass import Int32
 import torch
 
 from ...cutedsl import hw_caps as _hw, launch as _L
-from ...cutedsl.dtypes import cute2torch, torch2cute
+from ...cutedsl.dtypes import torch2cute
 from ...cutedsl.plan_cache import cached_plan
-from . import _storage, tile
-from .kernel_general import _launch, ReduceBlock
+from . import tile
+from .kernel_general import _launch, _PART_TORCH, ReduceBlock
 
 
 _compile = _L.compile_kernel
@@ -211,8 +211,8 @@ def _reduce_col_tile(
         torch.empty(out_shape, device=x.device, dtype=dtype)
         for dtype in out_dtypes[:nouts]
     ]
-    kernel_x = _storage.row_view(rows)
-    kernel_outs = [_storage.flat_view(out) for out in outs]
+    kernel_x = rows
+    kernel_outs = [out.reshape(-1) for out in outs]
     total = B * C
     nchunks = Int32(total // vec)
     batch_chunks = Int32(C // vec) if x.dim() == 3 else None
@@ -239,13 +239,13 @@ def _reduce_col_tile(
             torch.empty(
                 total * npar,
                 device=x.device,
-                dtype=cute2torch[trait.fdtypes[f]],
+                dtype=_PART_TORCH[trait.fdtypes[f]],
             )
             for f in range(trait.nfields)
         ]
     )
     dsts = outs if single else parts
-    kernel_dsts = [_storage.flat_view(dst) for dst in dsts]
+    kernel_dsts = [dst.reshape(-1) for dst in dsts]
 
     def _fake():
         # Dynamic descriptors require vec divisibility; None avoids a 1.27x unused argument.
@@ -253,7 +253,7 @@ def _reduce_col_tile(
             [
                 _L.fake_compact(
                     torch2cute[kernel_x.dtype],
-                    (_L.sym(), _L.sym(vec * (2 if x.is_complex() else 1))),
+                    (_L.sym(), _L.sym(vec)),
                     stride_order=(1, 0),
                     align=align,
                 )
