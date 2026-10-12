@@ -12278,8 +12278,10 @@ op_db: list[OpInfo] = [
                #   return (%25)
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, torch.complex64, torch.complex128)),
 
-               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+                DecorateInfo(unittest.skip("Skipped"), 'TestCommon', 'test_out_warning', device_type='xpu',
+                             dtypes=(torch.complex64, torch.complex128)),
 
                 # torch-xpu-ops/issues/4321
                 DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
@@ -12288,6 +12290,12 @@ op_db: list[OpInfo] = [
                 DecorateInfo(unittest.skip("Skipped"), 'TestCommon', 'test_python_ref', device_type='xpu',
                              dtypes=(torch.complex64, torch.complex128)),
                 DecorateInfo(unittest.skip("Skipped"), 'TestCommon', 'test_python_ref_torch_fallback', device_type='xpu',
+                             dtypes=(torch.complex64, torch.complex128)),
+                DecorateInfo(unittest.skip("Skipped"), 'TestCommon', 'test_noncontiguous_samples', device_type='xpu',
+                             dtypes=(torch.complex64, torch.complex128)),
+                DecorateInfo(unittest.skip("Skipped"), 'TestCommon', 'test_out_requires_grad_error', device_type='xpu',
+                             dtypes=(torch.complex64, torch.complex128)),
+                DecorateInfo(unittest.skip("Skipped"), 'TestFakeTensor', 'test_strided_layout', device_type='xpu',
                              dtypes=(torch.complex64, torch.complex128)),
 
                 # MPS arange does not support complex dtypes yet
@@ -23746,7 +23754,7 @@ python_ref_db = [
                           dtypes=(torch.complex64, torch.complex128)),
              DecorateInfo(unittest.skip("Skipped"), 'TestCommon', 'test_python_ref_torch_fallback', device_type='xpu',
                           dtypes=(torch.complex64, torch.complex128)),
-             DecorateInfo(unittest.skip("Skipped"), 'TestTorchFunctionRedispatchOpsDeviceXPU', 'test_redispatch',
+             DecorateInfo(unittest.skip("Skipped"), 'TestTorchFunctionRedispatchOpsDevice', 'test_redispatch',
                           device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
             # Tests that assume input is a tensor or sequence of tensors
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
