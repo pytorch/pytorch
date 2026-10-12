@@ -3,6 +3,7 @@
 import functools
 import math
 import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -1819,6 +1820,21 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
     @skipIfRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_static_snapshot_validates_collected_binary(self):
+        subprocess_marker = "PYTORCH_TEST_STATIC_SNAPSHOT_COLLECT"
+        if os.environ.get(subprocess_marker) != "1":
+            env = os.environ.copy()
+            env[subprocess_marker] = "1"
+            subprocess.run(
+                [
+                    sys.executable,
+                    __file__,
+                    f"{type(self).__name__}.{self._testMethodName}",
+                ],
+                check=True,
+                env=env,
+            )
+            return
+
         from torch._inductor.runtime.triton_heuristics import triton_hash_to_path_key
         from torch._inductor.triton_bundler import TritonBundler
 
