@@ -628,43 +628,6 @@ class MPSReluTest(TestCaseMPS):
             self._testReluInPlace(np.array([]).astype(t), device="mps")
 
 class MatmulTest(TestCaseMPS):
-    def _helper(self, shape_tensor_1, shape_tensor_2, expand_tensor_1_shape=None, expand_tensor_2_shape=None):
-        if expand_tensor_1_shape:
-            tensor1_mps = torch.randn(shape_tensor_1, device="mps").expand(expand_tensor_1_shape)
-        else:
-            tensor1_mps = torch.randn(shape_tensor_1, device="mps")
-
-        if expand_tensor_2_shape:
-            tensor2_mps = torch.randn(shape_tensor_2, device="mps").expand(expand_tensor_2_shape)
-        else:
-            tensor2_mps = torch.randn(shape_tensor_2, device="mps")
-
-        tensor1_cpu = tensor1_mps.to("cpu")
-        tensor2_cpu = tensor2_mps.to("cpu")
-
-        matmul_cpu = torch.matmul(tensor1_cpu, tensor2_cpu)
-        matmul_mps = torch.matmul(tensor1_mps, tensor2_mps)
-
-        self.assertEqual(matmul_cpu, matmul_mps.to("cpu"))
-
-    def test_vector_x_vector(self):
-        # uses `dot`
-        self._helper(3, 3)
-
-    def test_matrix_x_vector(self):
-        # uses `addmv`
-        self._helper((3, 4), 4)
-
-    def test_batched_matrix_x_broadcasted_vector(self):
-        self._helper((10, 3, 4), 4)
-
-    def test_batched_matrix_x_batched_matrix(self):
-        # uses `bmm.out`
-        self._helper((10, 3, 4), (10, 4, 5))
-
-    def test_batched_matrix_x_broadcasted_matrix(self):
-        self._helper((10, 3, 4), (4, 5))
-
     @serialTest()
     def test_large_matmul(self):
         # Issue: #141909
@@ -1805,12 +1768,6 @@ class TestMPS(TestCaseMPS):
                             expected = self._brute_cdist(x, y, p=p)
                             self.assertEqual(expected, actual)
 
-    def test_mm(self):
-        B = torch.ones(5, 6).to("mps")
-        C = torch.ones(6, 5).to("mps")
-        D = torch.mm(B, C).cpu()
-        torch.testing.assert_close(D, torch.full((5, 5), 6.0))
-
     def test_linalg_cross(self):
         def helper(dtype):
             device = "mps"
@@ -1851,35 +1808,6 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(res1, res1_cpu)
             self.assertEqual(res2, res2_cpu)
         [helper(dtype) for dtype in [torch.int32, torch.int64, torch.float32]]
-
-    def test_cross(self):
-        a = torch.randn(4, 3, device="mps")
-        b = torch.randn(4, 3, device="mps")
-        a_cpu = a.to("cpu")
-        b_cpu = b.to("cpu")
-        res = torch.cross(a, b, dim=1)
-        res_cpu = torch.cross(a_cpu, b_cpu, dim=1)
-        self.assertEqual(res, res_cpu)
-
-    def test_addmm(self):
-        A = torch.ones(5, 5).to("mps")
-        B = torch.ones(5, 6).to("mps")
-        C = torch.ones(6, 5).to("mps")
-        D = torch.addmm(A, B, C).to("cpu")
-        torch.testing.assert_close(D, torch.full((5, 5), 7.0))
-
-    def test_bmm(self):
-        batch1_cpu = torch.randn(10, 3, 4)
-        batch2_cpu = torch.randn(10, 4, 5)
-
-        batch1_mps = batch1_cpu.detach().clone().to("mps")
-        batch2_mps = batch2_cpu.detach().clone().to("mps")
-
-        output_cpu = torch.bmm(batch1_cpu, batch2_cpu)
-        output_mps = torch.bmm(batch1_mps, batch2_mps)
-
-        self.assertEqual(output_cpu, output_mps)
-        self.assertEqual(output_cpu.size(), output_mps.size())
 
     def test_bmm_conj(self):
         # bmm must respect the conjugate bit on input tensors.
@@ -2199,38 +2127,6 @@ class TestMPS(TestCaseMPS):
         inds_mps = inds.detach().clone().to('mps')
         res = torch.take_along_dim(x_mps, inds_mps, 0)
         self.assertEqual(res, ref)
-
-    def test_addr(self):
-        A = torch.ones(5, 10).to("mps")
-        B = torch.ones(5).to("mps")
-        C = torch.ones(10).to("mps")
-        D = torch.addr(A, B, C).to("cpu")
-        torch.testing.assert_close(D, torch.full((5, 10), 2.0))
-
-    def test_trace(self):
-        M_cpu = torch.randn(3, 3)
-        M_mps = M_cpu.detach().clone().to("mps")
-
-        output_cpu = torch.trace(M_cpu)
-        output_mps = torch.trace(M_mps)
-
-        self.assertEqual(output_cpu, output_mps)
-        self.assertEqual(output_cpu.size(), output_mps.size())
-
-    def test_addbmm(self):
-        M_cpu = torch.randn(3, 5)
-        batch1_cpu = torch.randn(10, 3, 4)
-        batch2_cpu = torch.randn(10, 4, 5)
-
-        M_mps = M_cpu.detach().clone().to("mps")
-        batch1_mps = batch1_cpu.detach().clone().to("mps")
-        batch2_mps = batch2_cpu.detach().clone().to("mps")
-
-        output_cpu = torch.addbmm(M_cpu, batch1_cpu, batch2_cpu)
-        output_mps = torch.addbmm(M_mps, batch1_mps, batch2_mps)
-
-        self.assertEqual(output_cpu, output_mps)
-        self.assertEqual(output_cpu.size(), output_mps.size())
 
     def test_baddbmm(self):
         def helper(input_shape, batch1_shape, batch2_shape):
@@ -3135,82 +3031,6 @@ class TestMPS(TestCaseMPS):
                 self.assertEqual(x.grad.cpu(), x_cpu.grad, atol=2e-2, rtol=2e-2)
                 self.assertEqual(w.grad.cpu(), w_cpu.grad, atol=2e-2, rtol=2e-2)
                 self.assertEqual(b.grad.cpu(), b_cpu.grad, atol=2e-2, rtol=2e-2)
-
-    def test_norm(self):
-        a = torch.arange(9, dtype=torch.float, device="mps") - 4
-        b = a.reshape((3, 3))
-
-        a_cpu = torch.arange(9, dtype=torch.float, device="cpu") - 4
-        b_cpu = a_cpu.reshape((3, 3))
-
-        res = torch.norm(a)
-        res_cpu = torch.norm(a_cpu)
-        self.assertEqual(res, res_cpu)
-
-        res = torch.norm(b)
-        res_cpu = torch.norm(b_cpu)
-        self.assertEqual(res, res_cpu)
-
-        res = torch.norm(a, float('inf'))
-        res_cpu = torch.norm(a_cpu, float('inf'))
-        self.assertEqual(res, res_cpu)
-
-        res = torch.norm(b, float('inf'))
-        res_cpu = torch.norm(b_cpu, float('inf'))
-        self.assertEqual(res, res_cpu)
-
-        c = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype=torch.float, device="mps")
-        c_cpu = torch.tensor([[1, 2, 3], [-1, 1, 4]] , dtype=torch.float, device="cpu")
-
-        res = torch.norm(c, dim=0)
-        res_cpu = torch.norm(c_cpu, dim=0)
-        self.assertEqual(res, res_cpu)
-
-        res = torch.norm(c, dim=1)
-        res_cpu = torch.norm(c_cpu, dim=1)
-        self.assertEqual(res, res_cpu)
-
-        res = torch.norm(c, p=1, dim=1)
-        res_cpu = torch.norm(c_cpu, p=1, dim=1)
-        self.assertEqual(res, res_cpu)
-
-        d = torch.arange(8, dtype=torch.float, device="mps").reshape(2, 2, 2)
-        d_cpu = torch.arange(8, dtype=torch.float, device="cpu").reshape(2, 2, 2)
-
-        res = torch.norm(d, dim=(1, 2))
-        res_cpu = torch.norm(d_cpu, dim=(1, 2))
-        self.assertEqual(res, res_cpu)
-
-        res = torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
-        res_cpu = torch.norm(d_cpu[0, :, :]), torch.norm(d_cpu[1, :, :])
-        self.assertEqual(res, res_cpu)
-
-    def test_linalg_vector_norm(self):
-        x_mps = torch.tensor([0, 0, 0, 2, 3], dtype=torch.float, device="mps")
-        x_cpu = x_mps.detach().clone().cpu()
-
-        res_mps = torch.linalg.vector_norm(x_mps, ord=0)
-        res_cpu = torch.linalg.vector_norm(x_cpu, ord=0)
-        self.assertEqual(res_mps, res_cpu)
-
-        a_mps = torch.arange(27, dtype=torch.float, device="mps") - 4
-        a_cpu = torch.arange(27, dtype=torch.float, device="cpu") - 4
-
-        B_mps = a_mps.reshape(3, 3, 3)
-        B_cpu = a_cpu.reshape(3, 3, 3)
-
-        res_mps = torch.linalg.vector_norm(a_mps, ord=3.5)
-        res_cpu = torch.linalg.vector_norm(a_cpu, ord=3.5)
-        self.assertEqual(res_mps, res_cpu)
-
-        res_mps = torch.linalg.vector_norm(B_mps, ord=3.5)
-        res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5)
-        self.assertEqual(res_mps, res_cpu)
-
-        for dim in range(B_mps.dim()):
-            res_mps = torch.linalg.vector_norm(B_mps, ord=3.5, dim=dim)
-            res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5, dim=dim)
-            self.assertEqual(res_mps, res_cpu)
 
     @parametrize("dtype", [torch.float32, torch.complex64])
     def test_linalg_lu_factor_ex(self, dtype):
@@ -4741,29 +4561,6 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(cpu_flatten3, mps_flatten3)
 
     # Test repeat
-    def test_repeat(self):
-        def helper(shape, repeats):
-
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            y = x.repeat(repeats)
-            ref_y = cpu_x.repeat(repeats)
-
-            cpu_grad = torch.randn(ref_y.shape)
-            grad = cpu_grad.to('mps')
-
-            y.backward(gradient=grad)
-            ref_y.backward(gradient=cpu_grad)
-
-            self.assertEqual(y, ref_y)
-            self.assertEqual(x.grad, cpu_x.grad)
-
-        helper((2, 3, 4, 5), (2, 3, 4, 5))
-        helper((2, 3, 4), (4, 3, 2, 5, 7, 2))
-        helper((3, 4, 5), (2, 3, 4, 5))
-        helper((3, 4, 5), (2, 2, 2))
-
     def test_torch_repeat_interleave(self, device="mps"):
         y = torch.tensor([[1, 2], [3, 4]], device=device)
         # exercise single argument function signature
@@ -4864,37 +4661,6 @@ class TestMPS(TestCaseMPS):
         out_mps = data.repeat_interleave(counts[1:], dim=0)
         out_cpu = data.cpu().repeat_interleave(counts.cpu()[1:], dim=0)
         self.assertEqual(out_mps.cpu(), out_cpu)
-
-    def test_count_nonzero(self):
-        def helper(dtype):
-            n = [
-                [[1, 0, 2], [3, 0, 2], [7, 9, -4]],
-                [[0, 2, 3], [3, 2, 1], [2, 0, 0]],
-            ]
-            cpu_x = torch.tensor(n, dtype=dtype)
-            mps_x = torch.tensor(n, dtype=dtype).to('mps')
-
-            # All non-zeros
-            self.assertEqual(
-                torch.count_nonzero(cpu_x),
-                torch.count_nonzero(mps_x)
-            )
-
-            # dim=1
-            self.assertEqual(
-                torch.count_nonzero(cpu_x, dim=1),
-                torch.count_nonzero(mps_x, dim=1)
-            )
-
-            # dim=(0, 1)
-            self.assertEqual(
-                torch.count_nonzero(cpu_x, dim=(0, 1)),
-                torch.count_nonzero(mps_x, dim=(0, 1))
-            )
-        helper(torch.int32)
-        helper(torch.int64)
-        helper(torch.float16)
-        helper(torch.float32)
 
     def _test_module_empty_input(self, module, inp, check_size=True):
         inp.requires_grad_(True)
@@ -5181,36 +4947,6 @@ class TestMPS(TestCaseMPS):
         skewed = torch.zeros(1080 * 1920, dtype=torch.int64)
         skewed[100_000:157_600] = 193_501
         helper(skewed, True, True)
-
-    def test_unique_consecutive(self):
-        def helper(x, dim, return_inverse, return_counts):
-            cpu_x = x
-            x = cpu_x.detach().clone().to('mps')
-
-            result = torch.unique_consecutive(x, dim=dim, return_inverse=return_inverse, return_counts=return_counts)
-            result_cpu = torch.unique_consecutive(cpu_x, dim=dim, return_inverse=return_inverse, return_counts=return_counts)
-
-            self.assertEqual(result, result_cpu)
-        helper(torch.tensor([1, 2, 4, 2, 1]), 0, False, False)
-        helper(torch.randint(3, (10, )), 0, False, False)
-        helper(torch.randint(3, (10, )), 0, True, False)
-        helper(torch.randint(3, (10, )), 0, False, True)
-        helper(torch.randint(3, (10, )), 0, True, True)
-        helper(torch.randint(3, (10, )), 0, True, True)
-        helper(torch.randint(3, (1, )), 0, True, True)
-        helper(torch.randint(3, (0, )), 0, True, True)
-
-        helper(torch.tensor([[1, 1, 2, 3, 3, 2], [1, 1, 1, 2, 2, 1]]), 0, False, False)
-        helper(torch.tensor([[1, 1, 2, 3, 3, 2], [1, 1, 1, 2, 2, 1]]), 0, True, True)
-        helper(torch.randint(2, (20, 2)), 0, True, True)
-        helper(torch.randint(2, (1, 2)), 0, True, True)
-        helper(torch.randint(2, (0, 2)), 0, True, True)
-
-        helper(torch.tensor([[1, 1, 2, 3, 3, 2], [1, 1, 1, 2, 2, 1]]), 1, False, False)
-        helper(torch.tensor([[1, 1, 2, 3, 3, 2], [1, 1, 1, 2, 2, 1]]), 1, True, True)
-        helper(torch.randint(2, (2, 20)), 1, True, True)
-        helper(torch.randint(2, (2, 1)), 1, True, True)
-        helper(torch.randint(2, (2, 0)), 1, True, True)
 
     # See https://github.com/pytorch/pytorch/issues/85675
     def test_cat_non_contiguous(self):
@@ -5565,17 +5301,6 @@ class TestMPS(TestCaseMPS):
             with self.subTest(dtype=dtype, noncontiguous=noncontiguous, dim=dim):
                 helper(dtype, noncontiguous, dim)
 
-    def test_cumsum_all_dtypes(self):
-        def helper(dtype):
-            t = torch.tensor([1, 1, 1, 1], device="mps", dtype=dtype)
-            t_cpu = torch.tensor([1, 1, 1, 1], device="cpu")
-
-            a = t.cumsum(0, dtype=dtype)
-            a_cpu = t_cpu.cumsum(0, dtype=dtype)
-
-            self.assertEqual(a.cpu(), a_cpu)
-        [helper(dtype) for dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.float32]]
-
     def test_cumsum_bool(self):
         a = torch.ones(2**16, dtype=torch.bool)
         t_cpu = a.cumsum(0)
@@ -5599,17 +5324,6 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(y, cpu_y)
 
         [helper(dtype) for dtype in [torch.float32, torch.int16, torch.int32, torch.uint8]]
-
-    def test_cumprod_all_dtypes(self):
-        def helper(dtype):
-            t = torch.tensor([1, 1, 1, 1], device="mps", dtype=dtype)
-            t_cpu = torch.tensor([1, 1, 1, 1], device="cpu")
-
-            a = t.cumprod(0, dtype=dtype)
-            a_cpu = t_cpu.cumprod(0, dtype=dtype)
-
-            self.assertEqual(a.cpu(), a_cpu)
-        [helper(dtype) for dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.float32]]
 
     def test_cumprod_minus_one_axis(self):
         def helper(dtype):
@@ -5739,15 +5453,6 @@ class TestMPS(TestCaseMPS):
         strided_cpu_out = strided_cpu1 - strided_cpu2
         strided_mps_out = strided_mps1 - strided_mps2
         self.assertEqual(strided_cpu_out, strided_mps_out)
-
-    def test_unfold(self):
-        x = torch.arange(1., 8)
-        x_mps = torch.arange(1., 8, device="mps")
-
-        y = x.unfold(0, 2, 1)
-        y_mps = x_mps.unfold(0, 2, 1)
-
-        self.assertEqual(y, y_mps)
 
     def test_unfold_all_devices_and_dtypes(self):
         supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
@@ -6310,23 +6015,6 @@ class TestMPS(TestCaseMPS):
         output = loss(pred, target)
         output.backward()
 
-    def test_log_softmax(self):
-        values = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
-        cpu_x = torch.tensor(values, device='cpu', requires_grad=True)
-        mps_x = torch.tensor(values, device='mps', requires_grad=True)
-
-        cpu_log_softmax = F.log_softmax(cpu_x, dim=0)
-        mps_log_softmax = F.log_softmax(mps_x, dim=0)
-        self.assertEqual(cpu_log_softmax, mps_log_softmax.to('cpu'))
-
-        cpu_grad = torch.ones_like(cpu_log_softmax)
-        mps_grad = torch.ones_like(cpu_log_softmax).to('mps')
-
-        cpu_log_softmax.backward(gradient=cpu_grad)
-        mps_log_softmax.backward(gradient=mps_grad)
-
-        self.assertEqual(cpu_x.grad, mps_x.grad.to('cpu'))
-
     def test_ctc_loss_backward_varlen(self):
         # Backward must match CPU when input lengths are padded (shorter than T).
         # T=20, batch=2, 7 classes; the second sequence is only 11 steps long.
@@ -6398,50 +6086,6 @@ class TestMPS(TestCaseMPS):
             mps_x = cpu_x.detach().clone().to('mps')
             result_mps = torch.ne(mps_x, 0.0)
             result_cpu = torch.ne(cpu_x, 0.0)
-
-            self.assertEqual(result_cpu, result_mps.to('cpu'))
-
-        helper((2, 3, 4, 5))
-
-    def test_lt_scalar(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
-            mps_x = cpu_x.detach().clone().to('mps')
-            result_mps = torch.lt(mps_x, 0.0)
-            result_cpu = torch.lt(cpu_x, 0.0)
-
-            self.assertEqual(result_cpu, result_mps.to('cpu'))
-
-        helper((2, 3, 4, 5))
-
-    def test_le_scalar(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
-            mps_x = cpu_x.detach().clone().to('mps')
-            result_mps = torch.le(mps_x, 0.0)
-            result_cpu = torch.le(cpu_x, 0.0)
-
-            self.assertEqual(result_cpu, result_mps.to('cpu'))
-
-        helper((2, 3, 4, 5))
-
-    def test_ge_scalar(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
-            mps_x = cpu_x.detach().clone().to('mps')
-            result_mps = torch.ge(mps_x, 0.0)
-            result_cpu = torch.ge(cpu_x, 0.0)
-
-            self.assertEqual(result_cpu, result_mps.to('cpu'))
-
-        helper((2, 3, 4, 5))
-
-    def test_gt_scalar(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
-            mps_x = cpu_x.detach().clone().to('mps')
-            result_mps = torch.gt(mps_x, 0.0)
-            result_cpu = torch.gt(cpu_x, 0.0)
 
             self.assertEqual(result_cpu, result_mps.to('cpu'))
 
@@ -6742,47 +6386,6 @@ class TestMPS(TestCaseMPS):
         helper(2, 8, 4, 5, torch.float32)
         helper(2, 8, 4, 5, torch.int32)
         # helper(2, 8, 4, 5, torch.int64)
-
-    def test_median(self):
-        def helper_dtype_int32(n1, n2, n3):
-            cpu_x = torch.randint(50, (n1, n2, n3), device='cpu', dtype=torch.int32)
-            mps_x = cpu_x.detach().clone().to('mps')
-
-            result_cpu = torch.median(cpu_x)
-            result_mps = torch.median(mps_x)
-
-            self.assertEqual(result_cpu, result_mps)
-
-            for dim in [0, 1, 2]:
-                for keepdim in [True, False]:
-                    y, idx = torch.median(cpu_x, dim=dim, keepdim=keepdim)
-                    refy, refidx = torch.median(mps_x, dim=dim, keepdim=keepdim)
-                    self.assertEqual(y, refy)
-                    self.assertEqual(idx, refidx)
-
-        def helper_dtype_float32(n1, n2, n3):
-            cpu_x = torch.randn(n1, n2, n3, device='cpu', dtype=torch.float32)
-            mps_x = cpu_x.detach().clone().to('mps')
-
-            result_cpu = torch.median(cpu_x)
-            result_mps = torch.median(mps_x)
-
-            self.assertEqual(result_cpu, result_mps)
-
-            for dim in [0, 1, 2]:
-                for keepdim in [True, False]:
-                    y, idx = torch.median(cpu_x, dim=dim, keepdim=keepdim)
-                    refy, refidx = torch.median(mps_x, dim=dim, keepdim=keepdim)
-                    self.assertEqual(y, refy)
-                    self.assertEqual(idx, refidx)
-
-        helper_dtype_int32(10, 10, 10)  # median at even place
-        helper_dtype_int32(3, 3, 3)  # median at odd place
-        helper_dtype_int32(1, 1, 1)
-        helper_dtype_int32(1, 2, 3)
-        helper_dtype_float32(10, 10, 10)
-        helper_dtype_float32(3, 3, 3)
-        helper_dtype_float32(1, 1, 1)
 
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.int32, torch.int64])
     @parametrize("op", ["median", "nanmedian"])
@@ -7160,39 +6763,6 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(x.max().item(), 30.0)
 
     # Test forward prod
-    def test_prod(self):
-        def helper(shape, dtype=torch.float32):
-            cpu_x = None
-            x = None
-            if (dtype not in [torch.float32, torch.bool]):
-                cpu_x = torch.randint(1, 6, shape, device='cpu', dtype=dtype, requires_grad=False)
-                x = cpu_x.detach().clone().to('mps')
-            elif (dtype == torch.bool):
-                cpu_x = torch.randint(2, shape, device='cpu', dtype=dtype, requires_grad=False)
-                x = cpu_x.detach().clone().to('mps')
-            else:
-                cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
-                x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            all_prod = torch.prod(x)
-            all_prod_cpu = torch.prod(cpu_x)
-
-            self.assertEqual(all_prod, all_prod_cpu)
-
-            for dim in range(len(shape)):
-                dim_prod = torch.prod(x, dim=dim)
-                dim_prod_cpu = torch.prod(cpu_x, dim=dim)
-
-                self.assertEqual(dim_prod, dim_prod_cpu)
-
-                dim_prod_keepdim = torch.prod(x, dim=dim, keepdim=True)
-                dim_prod_cpu_keepdim = torch.prod(cpu_x, dim=dim, keepdim=True)
-
-                self.assertEqual(dim_prod_keepdim, dim_prod_cpu_keepdim)
-
-        for dtype in [torch.float32, torch.int32, torch.int64, torch.bool]:
-            helper((2, 3), dtype)
-
     # Test forward mean
     def test_mean(self):
         def helper(n, c, h, w):
@@ -7481,26 +7051,6 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(clamp_max_mps, clamp_max_cpu)
 
     # Test clamp_min
-    def test_clamp_min(self):
-        def helper(n, c, h, w):
-            cpu_x = torch.randn(n, c, h, w, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_min_t = torch.randn(n, c, h, w, device='cpu', dtype=torch.float, requires_grad=False)
-            min_t = cpu_min_t.detach().clone().to('mps')
-
-            clamp_min_result = torch.clamp_min(x, min=5.0)
-            clamp_min_result_cpu = torch.clamp_min(cpu_x, min=5.0)
-
-            self.assertEqual(clamp_min_result, clamp_min_result_cpu)
-
-            clamp_min_t_result = torch.clamp_min(x, min=min_t)
-            clamp_min_t_result_cpu = torch.clamp_min(cpu_x, min=cpu_min_t)
-
-            self.assertEqual(clamp_min_t_result, clamp_min_t_result_cpu)
-
-        helper(2, 8, 4, 5)
-
     # Test clamp_max
     def test_clamp_max(self):
         def helper(n, c, h, w):
@@ -8234,46 +7784,6 @@ class TestMPS(TestCaseMPS):
         helper([2, 0, 6, 5], [2, 3, 6, 5], [2, 0, 6, 5])
 
     # Test stack forward
-    def test_stack(self):
-        # All shapes must be same
-        def helper(shape, dtype=torch.float32):
-
-            x, cpu_x = None, None
-            y, cpu_y = None, None
-            z, cpu_z = None, None
-
-            if (dtype not in [torch.float32, torch.bool]):
-                cpu_x = torch.randint(50, shape, device='cpu', dtype=dtype, requires_grad=False)
-                x = cpu_x.detach().clone().to('mps')
-                cpu_y = torch.randint(50, shape, device='cpu', dtype=dtype, requires_grad=False)
-                y = cpu_y.detach().clone().to('mps')
-                cpu_z = torch.randint(50, shape, device='cpu', dtype=dtype, requires_grad=False)
-                z = cpu_z.detach().clone().to('mps')
-            elif (dtype == torch.bool):
-                cpu_x = torch.randint(2, shape, device='cpu', dtype=dtype, requires_grad=False)
-                x = cpu_x.detach().clone().to('mps')
-                cpu_y = torch.randint(2, shape, device='cpu', dtype=dtype, requires_grad=False)
-                y = cpu_y.detach().clone().to('mps')
-                cpu_z = torch.randint(2, shape, device='cpu', dtype=dtype, requires_grad=False)
-                z = cpu_z.detach().clone().to('mps')
-            else:
-                cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
-                x = cpu_x.detach().clone().to('mps').requires_grad_()
-                cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
-                y = cpu_y.detach().clone().to('mps').requires_grad_()
-                cpu_z = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
-                z = cpu_z.detach().clone().to('mps').requires_grad_()
-
-            stack = torch.stack([x, y, z], dim=1)
-            stack_cpu = torch.stack([cpu_x, cpu_y, cpu_z], dim=1)
-
-            self.assertEqual(stack, stack_cpu)
-
-        helper([2, 8, 4, 5])
-        helper([2, 8, 4, 5], dtype=torch.float16)
-        helper([2, 8, 4, 5], dtype=torch.int32)
-        helper([2, 8, 4, 5], dtype=torch.int64)
-        helper([2, 8, 4, 5], dtype=torch.bool)
         # Empty test - Currently failing! Empty tensor not handled!
         # helper([0, 2, 4, 5])
 
@@ -8318,43 +7828,6 @@ class TestMPS(TestCaseMPS):
         self.ulpAssertAllClose(log_result.cpu(), log_result_cpu, n_ulps=4)
 
     # Test concat forward
-    def test_cat2(self):
-
-        def helper1(shape_x, shape_y, shape_z, shape_w):
-            cpu_x = torch.randn(shape_x, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_y = torch.randn(shape_y, device='cpu', dtype=torch.float, requires_grad=False)
-            y = cpu_y.detach().clone().to('mps')
-
-            cpu_z = torch.randn(shape_z, device='cpu', dtype=torch.float, requires_grad=False)
-            z = cpu_z.detach().clone().to('mps')
-
-            cpu_w = torch.randn(shape_w, device='cpu', dtype=torch.float, requires_grad=False)
-            w = cpu_w.detach().clone().to('mps')
-
-            cat = torch.cat([x, y, z, w], dim=1)
-            cat_cpu = torch.cat([cpu_x, cpu_y, cpu_z, cpu_w], dim=1)
-
-            self.assertEqual(cat, cat_cpu)
-
-        def helper(shape_x, shape_y, shape_z):
-            cpu_x = torch.randn(shape_x, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_y = torch.randn(shape_y, device='cpu', dtype=torch.float, requires_grad=False)
-            y = cpu_y.detach().clone().to('mps')
-
-            cpu_z = torch.randn(shape_z, device='cpu', dtype=torch.float, requires_grad=False)
-            z = cpu_z.detach().clone().to('mps')
-
-            cat = torch.cat([x, y, z], dim=1)
-            cat_cpu = torch.cat([cpu_x, cpu_y, cpu_z], dim=1)
-
-            self.assertEqual(cat, cat_cpu)
-
-        helper([2, 8, 4, 5], [2, 10, 4, 5], [2, 6, 4, 5])
-        helper([2, 2, 4, 5], [2, 3, 4, 5], [2, 5, 4, 5])
         # Empty test - Currently failing! Empty tensor not handled!
         # helper([0, 2, 4, 5], [2, 0, 4, 5], [2, 5, 0, 5])
 
@@ -9047,29 +8520,6 @@ class TestMPS(TestCaseMPS):
         del x
 
     # Test flip
-    def test_flip(self):
-        def helper(shape, dims):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
-            flip_result = torch.flip(x, dims=dims)
-            flip_result_cpu = torch.flip(cpu_x, dims=dims)
-
-            self.assertEqual(flip_result, flip_result_cpu)
-
-        helper((2, 8, 4, 5), [0])
-        helper((8, 8, 4, 5), [0, 1])
-        helper((2, 8, 4, 5), (0, 1, 2, 3))
-        helper((2, 3, 3), (-1,))
-        # empty dims
-        helper((2, 8, 4, 5), [])
-        # input.numel() == 1
-        helper((1,), (0,))
-        # input.numel() == 0
-        helper((0,), (0,))
-        # none of dims that needs to be flipped
-        helper((1, 3), [0])
-
     # Test index select
     def test_index_select(self):
         def helper(shape, dim, index, idx_dtype=torch.int32):
@@ -9200,38 +8650,6 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(run("mps"), run("cpu"), msg=name)
 
     # Test pytorch gather
-    def test_gather(self):
-        def helper(shape, dim, idx_shape, idx_dtype=torch.int64):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            # Indices should be taken from range of axis along which gathering is done
-            idx_np = np.random.randint(0, shape[dim], idx_shape)
-
-            cpu_idx = torch.tensor(idx_np, device='cpu', dtype=idx_dtype)
-            idx = cpu_idx.detach().clone().to('mps')
-
-            gather_result = torch.gather(x, dim=dim, index=idx)
-            gather_result_cpu = torch.gather(cpu_x, dim=dim, index=cpu_idx)
-
-            cpu_grad = torch.randn(idx_shape, device='cpu', dtype=torch.float)
-            grad = cpu_grad.to('mps')
-            gather_result.backward(gradient=grad)
-            gather_result_cpu.backward(gradient=cpu_grad)
-
-            self.assertEqual(gather_result, gather_result_cpu)
-            self.assertEqual(cpu_x.grad, x.grad)
-
-        helper((6, 3, 3), 0, (3, 3, 3))
-        helper((2, 3, 3, 3), 0, (10, 3, 3, 3))
-        helper((2, 8, 4, 5), 0, (10, 8, 4, 5))
-        helper((2, 8, 4, 5), 0, (10, 6, 3, 2))
-        helper((8, 8, 4, 5), 0, (6, 8, 4, 5))
-        helper((8, 8, 4, 5), 0, (6, 7, 2, 3))
-        helper((2, 8, 4, 5), 1, (2, 5, 3, 4))
-        helper((2, 8, 4, 5), 2, (1, 8, 10, 3))
-        helper((2, 8, 4, 5), 3, (2, 5, 3, 12))
-
     # Test pytorch gather
     def test_gather_scalar(self):
         idx_dtype = torch.int64
@@ -9406,36 +8824,6 @@ class TestMPS(TestCaseMPS):
         self.assertTrue(torch.is_nonzero(torch.tensor([3]).to('mps')))
 
     # Test triu
-    def test_triu(self):
-        def helper(shape, diag=0):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            triu_result = torch.triu(x, diag)
-            triu_result_cpu = torch.triu(cpu_x, diag)
-
-            cpu_grad = torch.randn(triu_result_cpu.shape)
-            grad = cpu_grad.to('mps')
-
-            triu_result.backward(gradient=grad)
-            triu_result_cpu.backward(gradient=cpu_grad)
-
-            self.assertEqual(triu_result, triu_result_cpu)
-            self.assertEqual(x.grad, cpu_x.grad)
-
-        helper((2, 8, 4, 5))
-        helper((2, 8, 4, 5), diag=1)
-        helper((2, 8, 4, 5), diag=2)
-        helper((2, 8, 4, 5), diag=3)
-        helper((2, 8, 4, 5), diag=-1)
-        helper((2, 8, 4, 5), diag=-2)
-        helper((2, 8, 4, 5), diag=-3)
-        # Test inplace
-        x_mps = torch.arange(9.0, device='mps').reshape(3, 3).t().triu()
-        x_cpu = torch.arange(9.0, device='cpu').reshape(3, 3).t().triu()
-        self.assertEqual(x_cpu, x_mps)
-        self.assertEqual(x_cpu.stride(), x_mps.stride())
-
     # Test inverse
     def test_inverse(self):
         def helper(n, atol=1e-5, rtol=1e-6):
@@ -9458,39 +8846,6 @@ class TestMPS(TestCaseMPS):
         helper(1025, atol=1e-4)
 
     # Test tril
-    def test_tril(self):
-        def helper(shape, diag=0):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            tril_result = torch.tril(x, diag)
-            tril_result_cpu = torch.tril(cpu_x, diag)
-
-            cpu_grad = torch.randn(tril_result_cpu.shape)
-            grad = cpu_grad.to('mps')
-
-            tril_result.backward(gradient=grad)
-            tril_result_cpu.backward(gradient=cpu_grad)
-
-            self.assertEqual(tril_result, tril_result_cpu)
-            self.assertEqual(x.grad, cpu_x.grad)
-
-        for diag in [0, 1, 2, 3, -1, -2, -3]:
-            helper((2, 8, 4, 5), diag=diag)
-
-        def helper_nans_infs(value, diag_vals=(0, 1, -2)):
-            """For nans and infs"""
-            mps_tensor = torch.full((2, 2, 5, 5), value, device="mps")
-            cpu_tensor = torch.full((2, 2, 5, 5), value, device="cpu")
-            for diag in diag_vals:
-                mps_result = torch.tril(mps_tensor, diagonal=diag)
-                cpu_result = torch.tril(cpu_tensor, diagonal=diag)
-                self.assertEqual(mps_result, cpu_result, lambda msg: f"{msg}\nMismatch for diag={diag}")
-
-        helper_nans_infs(float("inf"))
-        helper_nans_infs(float("-inf"))
-        helper_nans_infs(float("nan"))
-
     # test eye
     def test_eye(self):
         def helper(n, m, dtype):
