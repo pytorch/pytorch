@@ -974,8 +974,17 @@ if(USE_LLVM_BOLT)
   # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
   set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
   file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
-  file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
+  file(ARCHIVE_EXTRACT INPUT "${PROJECT_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
        DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
+
+  add_custom_target(bolt_profile_quality_summary ALL
+    COMMAND "${Python_EXECUTABLE}"
+      "${PROJECT_SOURCE_DIR}/tools/bolt_profile_quality.py"
+      "${CMAKE_BINARY_DIR}/logs"
+    COMMENT "Summarizing BOLT profile quality"
+    VERBATIM
+    USES_TERMINAL
+  )
 endif()
 
 # Build libtorch mobile library, which contains ATen/TH ops and native support
@@ -1381,6 +1390,11 @@ if(NOT MSVC)
   if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
+  endif()
+  if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
+    # Suppress GCC's warning without changing the value of
+    # std::hardware_destructive_interference_size in public headers.
+    append_cxx_flag_if_supported("-Wno-interference-size" CMAKE_CXX_FLAGS)
   endif()
   # needed for compat with newer versions of clang that use C++20 mangling rules
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18)
