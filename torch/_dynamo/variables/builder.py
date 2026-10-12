@@ -5528,6 +5528,12 @@ class SourcelessBuilder:
             return UserDefinedObjectVariable(value)
         elif isinstance(value, (re.Pattern, re.Match)):
             return ConstantLikeVariable(value)
+        elif type(value) is types.DynamicClassAttribute:
+            # DynamicClassAttribute is a pure-Python descriptor. Instances created
+            # while tracing (for example in a class body) are ephemeral and need no
+            # source-backed reconstruction; model them as ordinary user objects so
+            # raw __dict__ descriptor reads can follow their Python attributes.
+            return UserDefinedObjectVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             try:
                 return ConstantVariable.create(str(value))
