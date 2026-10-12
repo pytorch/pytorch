@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import inspect
+import threading
 import time
 from collections.abc import Callable, Iterator
 from functools import cached_property, wraps
@@ -19,7 +20,6 @@ from torch.utils._ordered_set import OrderedSet
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
-GPU_BENCHMARK_DEVICE_TYPES = ("cuda", "xpu", "mtia")
 _CALLABLE_PROFILE_EVENT_NAME = "_CALLABLE"
 
 
@@ -30,16 +30,9 @@ T = TypeVar("T")
 
 
 def _get_default_gpu_device_type() -> str:
-    avail_gpus = [
-        device_type
-        for device_type in GPU_BENCHMARK_DEVICE_TYPES
-        if getattr(torch, device_type).is_available()
-    ]
-    if len(avail_gpus) > 1:
-        raise AssertionError(
-            f"expected at most one available GPU type, got {avail_gpus}"
-        )
-    return "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    from torch._inductor.utils import get_gpu_type
+
+    return get_gpu_type()
 
 
 def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
@@ -201,10 +194,17 @@ class Benchmarker:
     inductor generated callables.
     """
 
-    # Set only while timing a captured graph's replay, so benchmark_gpu does not
-    # graph-capture the replay. Benchmarks nested in the warmup (e.g. a callable
-    # autotuning on first launch) still take the graph path.
-    _in_cudagraph_benchmark: bool = False
+    def __init__(self: Self) -> None:
+        # Depth is nonzero only while timing a captured graph's replay, so
+        # benchmark_gpu does not graph-capture the replay. Benchmarks nested in
+        # the warmup (e.g. a callable autotuning on first launch) still take the
+        # graph path. Thread-local because parallel tuning threads share the
+        # benchmarker.
+        self._cudagraph_benchmark_state = threading.local()
+
+    @property
+    def _in_cudagraph_benchmark(self: Self) -> bool:
+        return getattr(self._cudagraph_benchmark_state, "depth", 0) > 0
 
     def infer_device(self, *fn_args: Any, **fn_kwargs: Any) -> torch.device:
         inferred_device: torch.device | None = None
@@ -364,6 +364,7 @@ class Benchmarker:
         self: Self,
         _callable: Callable[[], Any],
         grad_to_none: list[torch.Tensor] | None = None,
+        cudagraph_unroll: int | None = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark a GPU callable using CUDA graph capture and replay.
@@ -378,7 +379,15 @@ class Benchmarker:
                 for x in grad_to_none:
                     x.grad = None
 
-        n_iters = max(1, inductor_config.autotune_cudagraph_benchmarking_iters)
+        if cudagraph_unroll is None:
+            # Preserve the historical config behavior: invalid global values
+            # fall back to one replay. Per-call overrides are a stricter API
+            # and reject invalid values below.
+            n_iters = max(1, inductor_config.autotune_cudagraph_benchmarking_iters)
+        else:
+            n_iters = cudagraph_unroll
+            if n_iters < 1:
+                raise ValueError("cudagraph_unroll must be at least 1")
 
         # Warmup
         torch.cuda.synchronize()
@@ -405,11 +414,12 @@ class Benchmarker:
         torch.cuda.synchronize()
 
         # grad clearing is captured in the graph, don't pass it through.
-        self._in_cudagraph_benchmark = True
+        previous_depth = getattr(self._cudagraph_benchmark_state, "depth", 0)
+        self._cudagraph_benchmark_state.depth = previous_depth + 1
         try:
             result = self.benchmark_gpu(cuda_graph.replay, **kwargs)
         finally:
-            self._in_cudagraph_benchmark = False
+            self._cudagraph_benchmark_state.depth = previous_depth
         if isinstance(result, list):
             return [t / n_iters for t in result]  # type: ignore[return-value]
         return result / n_iters

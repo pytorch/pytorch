@@ -3792,7 +3792,7 @@ class TestSparseCompressedTritonKernels(TestCase):
         with self.assertRaisesRegex(ValueError, "on the same GPU device"):
             bsr_dense_mm(lhs, rhs.cpu())
         if torch.accelerator.device_count() > 1:
-            with self.assertRaisesRegex(ValueError, "on the same accelerator"):
+            with self.assertRaisesRegex(ValueError, "on the same GPU device"):
                 device_type = device.split(":")[0]
                 bsr_dense_mm(lhs.to(f"{device_type}:0"), rhs.to(f"{device_type}:1"))
         with self.assertRaisesRegex(ValueError, "all inputs are expected to be of the same dtype"):
