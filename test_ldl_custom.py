@@ -830,6 +830,118 @@ class TestLDLCustomKernel(TestCase):
         self.assertTrue(torch.equal(piv_v, piv_c))
         self.assertEqual(LD_v, LD_c)
 
+    @parametrize("n", [33, 65])
+    @dtypes(torch.float64, torch.complex128)
+    def test_batched_leading_dimension(self, device, dtype, n):
+        torch.manual_seed(n)
+        big = indefinite(n + 47, (3,), dtype, device)
+        view = big[:, :n, :n]
+        LD_v, piv_v, _ = torch.linalg.ldl_factor_ex(view, hermitian=True)
+        LD_c, piv_c, _ = torch.linalg.ldl_factor_ex(view.contiguous(), hermitian=True)
+        self.assertTrue(torch.equal(piv_v, piv_c))
+        self.assertEqual(LD_v, LD_c)
+
+    @parametrize("n", [33, 150])
+    @dtypes(torch.float64, torch.complex128)
+    def test_noncontiguous_batch(self, device, dtype, n):
+        """Batch dims that are strided or permuted, not just the matrix dims."""
+        torch.manual_seed(n)
+        A = indefinite(n, (4, 6), dtype, device)
+        for name, view in (("strided", A[::2]), ("transposed", A.transpose(0, 1)), ("both", A[::2, ::3])):
+            with self.subTest(view=name):
+                self.assertFalse(view.is_contiguous())
+                LD_v, piv_v, info_v = torch.linalg.ldl_factor_ex(view, hermitian=True)
+                LD_c, piv_c, info_c = torch.linalg.ldl_factor_ex(view.contiguous(), hermitian=True)
+                self.assertTrue(torch.equal(piv_v, piv_c))
+                self.assertTrue(torch.equal(info_v, info_c))
+                self.assertEqual(LD_v, LD_c)
+
+    @parametrize("kind", ["column", "single", "all"])
+    @parametrize("bad", [float("nan"), float("inf")])
+    @parametrize("n", [5, 40, 300, 4100])
+    @dtypes(*floating_and_complex_types())
+    def test_nonfinite_input(self, device, dtype, n, bad, kind):
+        """NaN/Inf in the input must neither crash nor leave pivots unwritten. An
+        all-NaN column once made the pivot search return index -1, which was used
+        as a column index and read off the front of the buffer."""
+        torch.manual_seed(n)
+        A = indefinite(n, (), dtype, device)
+        if kind == "column":
+            A[1:, 0] = bad
+            A[0, 1:] = bad
+        elif kind == "single":
+            A[n // 2, 1] = bad
+            A[1, n // 2] = bad
+        else:
+            A.fill_(bad)
+        _, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        piv, info = piv.cpu(), info.item()
+        self.assertTrue((piv.abs() >= 1).all(), f"pivot with |p| < 1: {piv}")
+        self.assertTrue((piv.abs() <= n).all(), f"pivot out of range: {piv}")
+        self.assertTrue(0 <= info <= n)
+
+    @onlyCUDA
+    @parametrize("n", [33, 4100])
+    @dtypes(torch.float64, torch.complex128)
+    def test_non_default_stream(self, device, dtype, n):
+        torch.manual_seed(n)
+        A = indefinite(n, (), dtype, device)
+        ref_LD, ref_piv, _ = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        side = torch.cuda.Stream()
+        side.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(side):
+            LD, piv, _ = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        side.synchronize()
+        self.assertTrue(torch.equal(piv, ref_piv))
+        self.assertTrue(torch.equal(LD, ref_LD))
+
+    @onlyCUDA
+    @parametrize("n", [33, 4100])
+    @dtypes(torch.float64, torch.complex128)
+    def test_other_device(self, device, dtype, n):
+        """The input lives on another GPU than the current one."""
+        if torch.cuda.device_count() < 2:
+            self.skipTest("needs two GPUs")
+        torch.manual_seed(n)
+        A = indefinite(n, (), dtype, "cuda:0")
+        ref_LD, ref_piv, _ = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        with torch.cuda.device(0):
+            LD, piv, _ = torch.linalg.ldl_factor_ex(A.to("cuda:1"), hermitian=True)
+        self.assertTrue(torch.equal(piv.cpu(), ref_piv.cpu()))
+        self.assertTrue(torch.equal(LD.cpu(), ref_LD.cpu()))
+
+    @onlyCUDA
+    @parametrize("n", [33, 4100])
+    @dtypes(torch.float64)
+    def test_cuda_graph_capture(self, device, dtype, n):
+        """The panel loop reads the step back to the host, so capture is not
+        expected to work. It has to fail cleanly, leaving the device usable, or
+        else reproduce the eager result."""
+        torch.manual_seed(n)
+        A = indefinite(n, (), dtype, device)
+        ref_LD, ref_piv, _ = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        static = A.clone()
+        side = torch.cuda.Stream()
+        side.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(side):
+            torch.linalg.ldl_factor_ex(static, hermitian=True)
+        torch.cuda.current_stream().wait_stream(side)
+        graph = torch.cuda.CUDAGraph()
+        try:
+            with torch.cuda.graph(graph):
+                out = torch.linalg.ldl_factor_ex(static, hermitian=True)
+        except RuntimeError:
+            out = None
+        torch.cuda.synchronize()
+        if out is not None:
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertTrue(torch.equal(out.pivots, ref_piv))
+            self.assertTrue(torch.equal(out.LD, ref_LD))
+        LD, piv, _ = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertTrue(torch.equal(piv, ref_piv))
+        self.assertTrue(torch.equal(LD, ref_LD))
+
     @parametrize("batch", [(16,), (64,), (4, 8)])
     @dtypes(torch.complex128)
     def test_large_batch(self, device, dtype, batch):

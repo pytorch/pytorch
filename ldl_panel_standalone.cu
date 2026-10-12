@@ -338,7 +338,12 @@ ldl_diagonal_panel_fused_kernel(
         }
       }
     }
-    // Update info if singular and if detected for the first time
+    // Update info if singular and if detected for the first time.
+    // Not guaranteed to fire for a singular input, even one with an exactly zero
+    // row/col: interchanges move data but not Lprev/Uprev, so a moved column is
+    // updated with the factors of its new position, and the exact zero survives
+    // only if the undo above and the trailing GEMM cancel bit for bit, which
+    // they do not. LAPACK keeps the zero exact, as the factors travel with the data.
     if (D_is_singular && gtid == 0 && *dinfo == 0) {
       *dinfo = curr_step + 1;
     }

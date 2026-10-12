@@ -20,6 +20,6 @@ if [[ "${SANITIZE:-0}" == "1" ]]; then
   for tool in racecheck synccheck; do
     echo "== compute-sanitizer --tool $tool"
     compute-sanitizer --tool "$tool" --error-exitcode 1 \
-      python test_ldl_custom.py -k block_boundary -k far_blocks -k nonfinite_column
+      python test_ldl_custom.py -k '*invariance_nb_32_structure_indefinite_n_300_cuda_float64' -k '*pivot_across_blocks_placement_block_boundary_cuda_float64'
   done
 fi
