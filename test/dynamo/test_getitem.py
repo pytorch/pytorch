@@ -1172,6 +1172,16 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
 
+    def test_new_tuple_identity(self):
+        def fn(x):
+            items = (x, x + 1)
+            alias = tuple(items)
+            distinct = (x, x + 1)
+            return alias is items, distinct is items
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
     def test_tuple_constructor_converts_torch_size_to_tuple(self):
         def fn():
             size = torch.Size([2, 3])

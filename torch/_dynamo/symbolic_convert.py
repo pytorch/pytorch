@@ -4228,7 +4228,7 @@ class InstructionTranslatorBase(
 
     def BUILD_TUPLE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
-        self.push(TupleVariable(items))
+        self.push(TupleVariable(items, mutation_type=ValueMutationNew()))
 
     def BUILD_SLICE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
