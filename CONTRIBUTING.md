@@ -231,6 +231,46 @@ Issues and PRs should be closed with a comment giving the reason (see [Current s
 
 Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
 
+Common build options can also be passed as typed PEP 517 config-settings:
+
+```bash
+python -m pip install -e . -v --no-build-isolation \
+  -Ctorch.cuda=false -Ctorch.build-test=false -Ctorch.debug=true
+```
+
+Use `scikit-build settings list` to discover the available settings and their help.
+For `--no-build-isolation`, install `requirements-build.txt` first; these aliases
+require scikit-build-core 1.1 or newer.
+
+| Config-setting | Existing environment variable |
+| --- | --- |
+| `torch.debug` | `DEBUG` |
+| `torch.rel-with-deb-info` | `REL_WITH_DEB_INFO` |
+| `torch.cuda` | `USE_CUDA` |
+| `torch.rocm` | `USE_ROCM` |
+| `torch.xpu` | `USE_XPU` |
+| `torch.distributed` | `USE_DISTRIBUTED` |
+| `torch.build-test` | `BUILD_TEST` |
+| `torch.cuda-arch-list` | `TORCH_CUDA_ARCH_LIST` |
+| `torch.blas` | `BLAS` |
+| `torch.cmake-fresh` | `CMAKE_FRESH` |
+
+Boolean settings accept `true`/`false`, `on`/`off`, or `1`/`0`. The bound environment
+variable takes precedence over the corresponding `torch.*` setting. Unset settings
+preserve the existing CMake defaults. As before, `REL_WITH_DEB_INFO` takes priority
+over `DEBUG` when both are enabled.
+
+Quote CUDA architecture lists, for example `-Ctorch.cuda-arch-list="8.0;9.0"`.
+Other CMake options remain available through `-Ccmake.define.NAME=value`.
+The backend's `-Ccmake.build-type=Debug` can select a build type directly,
+`-Cbuild.verbose=true` enables verbose compilation, and `-Cbuild.tool-args=-j8`
+passes a job limit to Ninja or Make. `MAX_JOBS` remains supported.
+Use `-Ctorch.cmake-fresh=true` (or `CMAKE_FRESH=1`, or the backend option
+`-Ccmake.fresh=true`) to discard cached CMake configuration while retaining the
+build tree; this does not remove all compiled artifacts. There is no configure-only
+alias for the former `CMAKE_ONLY` option. Split libtorch/Python wheels continue to
+use `BUILD_LIBTORCH_WHL` and `BUILD_PYTHON_ONLY`; these also affect wheel metadata.
+
 ### Tips and Debugging
 
 * If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.

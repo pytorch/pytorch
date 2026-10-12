@@ -5,10 +5,9 @@ requires = [
     "numpy",
     "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
     "pyyaml",
-    # 1.0 is required for [[tool.dynamic-metadata]], the [tool.scikit-build.env]
-    # table, and native CMAKE_BUILD_TYPE env handling used below. CI pins the
+    # 1.1 is required for the custom config-setting declarations below. CI pins the
     # exact patch we test against in .ci/docker/requirements-ci.txt.
-    "scikit-build-core>=1.0",
+    "scikit-build-core>=1.1",
     # Imported by torchgen at build time (cmake/Codegen.cmake runs
     # `python -m torchgen.gen`, and torchgen/utils.py uses `Self` /
     # `assert_never`). Currently also pulled in transitively through
@@ -24,10 +23,71 @@ requires = [
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
-# Track the build-system.requires floor (scikit-build-core>=1.0) so the schema
+# Track the build-system.requires floor (scikit-build-core>=1.1) so the schema
 # and defaults are pinned to the version we build against.
 minimum-version = "build-system.requires"
 build-dir = "build"
+
+# Optional aliases for common build knobs; unset values leave CMake defaults intact.
+
+[tool.scikit-build.config-setting."torch.debug"]
+type = "bool"
+env = "DEBUG"
+help = "Build with debug information and no optimization."
+
+[tool.scikit-build.config-setting."torch.rel-with-deb-info"]
+type = "bool"
+env = "REL_WITH_DEB_INFO"
+help = "Build with optimization and debug information."
+
+[tool.scikit-build.config-setting."torch.cuda"]
+type = "bool"
+env = "USE_CUDA"
+help = "Build CUDA support."
+
+[tool.scikit-build.config-setting."torch.rocm"]
+type = "bool"
+env = "USE_ROCM"
+help = "Build ROCm support."
+
+[tool.scikit-build.config-setting."torch.xpu"]
+type = "bool"
+env = "USE_XPU"
+help = "Build Intel XPU support."
+
+[tool.scikit-build.config-setting."torch.distributed"]
+type = "bool"
+env = "USE_DISTRIBUTED"
+help = "Build distributed support."
+
+[tool.scikit-build.config-setting."torch.build-test"]
+type = "bool"
+env = "BUILD_TEST"
+help = "Build C++ tests."
+
+[tool.scikit-build.config-setting."torch.cuda-arch-list"]
+type = "str"
+env = "TORCH_CUDA_ARCH_LIST"
+help = "CUDA architectures to build, separated by semicolons."
+
+[tool.scikit-build.config-setting."torch.blas"]
+type = "str"
+env = "BLAS"
+help = "BLAS implementation to use, such as MKL or OpenBLAS."
+
+[tool.scikit-build.config-setting."torch.cmake-fresh"]
+type = "bool"
+env = "CMAKE_FRESH"
+help = "Discard cached CMake configuration before building."
+
+[tool.scikit-build.cmake.define]
+USE_CUDA = { config-setting = "torch.cuda" }
+USE_ROCM = { config-setting = "torch.rocm" }
+USE_XPU = { config-setting = "torch.xpu" }
+USE_DISTRIBUTED = { config-setting = "torch.distributed" }
+BUILD_TEST = { config-setting = "torch.build-test" }
+TORCH_CUDA_ARCH_LIST = { config-setting = "torch.cuda-arch-list" }
+BLAS = { config-setting = "torch.blas" }
 
 [tool.scikit-build.env]
 # MAX_JOBS is PyTorch's umbrella parallelism knob (also read by
@@ -50,12 +110,16 @@ CXX = { env = "CXX" }
 # multi-config generators (Visual Studio) the resolved type is passed as
 # --config to cmake --build and cmake --install, ensuring they match.
 [[tool.scikit-build.overrides]]
-if.env.DEBUG = true
+if.config-setting."torch.debug" = true
 cmake.build-type = "Debug"
 
 [[tool.scikit-build.overrides]]
-if.env.REL_WITH_DEB_INFO = true
+if.config-setting."torch.rel-with-deb-info" = true
 cmake.build-type = "RelWithDebInfo"
+
+[[tool.scikit-build.overrides]]
+if.config-setting."torch.cmake-fresh" = true
+cmake.fresh = true
 
 [[tool.scikit-build.overrides]]
 # Force the Ninja generator on Windows. scikit-build-core otherwise defaults to
@@ -78,9 +142,8 @@ cmake.define.CMAKE_GENERATOR = "Ninja"
 env.CC = "cl"
 env.CXX = "cl"
 
-# Other than CMAKE_GENERATOR above (win32), cmake.define is intentionally absent
-# -- all BUILD_*/USE_* env vars and additional passthrough variables are
-# forwarded by cmake/EnvVarForwarding.cmake so there is a single source of truth.
+# Additional BUILD_*/USE_* env vars and passthrough variables are forwarded
+# by cmake/EnvVarForwarding.cmake. Bound env vars take precedence over aliases.
 
 [[tool.dynamic-metadata]]
 # Delegates to tools/generate_torch_version.py which resolves the version from
@@ -314,7 +377,7 @@ dev = [
     # in PyTorch root until the project fully migrates to pyproject.toml
     # after which this can be removed as it is already specified in the
     # [build-system] section
-    "scikit-build-core>=1.0",
+    "scikit-build-core>=1.1",
     "setuptools>=77.0.0,<82",  # 77.0 is the first release with PEP 639 license-files support
     "spin",
     "cmake>=3.27",
