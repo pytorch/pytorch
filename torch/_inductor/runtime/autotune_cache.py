@@ -666,22 +666,15 @@ def _load_cached_autotuning(
 ) -> Config | None:
     if best_config is None:
         return None
-    best_config = best_config.copy()
-    if best_config.pop("configs_hash", None) != configs_hash:
+    if best_config.get("configs_hash") != configs_hash:
         return None
 
-    # Remove time taken for comparison
-    best_config.pop("time_taken_ms", None)
-
-    best_config.pop("triton_cache_hash", None)
-
-    cached_found_by_coordesc = best_config.pop("found_by_coordesc", False)
+    cached_found_by_coordesc = best_config.get("found_by_coordesc", False)
     found_by_coordesc = bool(
         inductor_meta.get("coordinate_descent_tuning") and cached_found_by_coordesc
     )
-    best_config.pop("found_by_combo_autotune", None)
 
-    cached_config = best_config.pop(_TRITON_CONFIG_KEY, None)
+    cached_config = best_config.get(_TRITON_CONFIG_KEY)
     if not isinstance(cached_config, dict):
         return None
     # Cache entries written before the shared schema was versioned used the same
