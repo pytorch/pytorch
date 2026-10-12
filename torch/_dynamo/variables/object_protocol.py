@@ -2452,6 +2452,17 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
+    # Fixed-layout objects with generic attribute access cannot have extra attributes.
+    if (
+        not py_type.__dictoffset__
+        and mro_lookup(py_type, "__getattribute__") is object.__getattribute__
+    ):
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[f"'{py_type.__name__}' object has no attribute '{name}'"],
+        )
+
     # Step 7: Attribute not found -- signal to caller to fall back.
     raise _UnhandledDescriptorError(
         f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"

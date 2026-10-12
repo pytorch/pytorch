@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib
 import sys as py_sys
 import types
-from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
 from operator import eq, ge, gt, le, lt, ne
@@ -361,28 +360,6 @@ def list_cmp(
     return op(left_len, right_len)
 
 
-def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
-    # dict_equal reads the C struct (ma_used, dk_entries, _Py_dict_lookup), so
-    # every access below goes through the unbound dict methods -- a dict
-    # subclass overriding __len__ / keys / __getitem__ must not be consulted.
-    # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
-    if (dict.__len__(d) != dict.__len__(other)) or (dict.keys(d) != dict.keys(other)):
-        return False
-
-    if all(isinstance(a, OrderedDict) for a in (d, other)):
-        return list(dict.items(d)) == list(dict.items(other))
-
-    # CPython's dict_equal uses PyObject_RichCompareBool for value
-    # comparison, which has an identity shortcut (if v is w, eq is True).
-    # This matters for NaN: {k: nan} == {k: nan} is True when same nan.
-    for k, v in dict.items(d):
-        ov = dict.__getitem__(other, k)
-        if v is not ov and v != ov:
-            return False
-
-    return True
-
-
 def dictview_richcompare(
     op: Callable[[Any, Any], bool], self: Iterable[T], other: Iterable[T]
 ) -> bool:
@@ -470,6 +447,7 @@ def mutable_mapping_update(
     /,
     **kwargs: Any,
 ) -> None:
+    # Unlike odict_update, this legacy constructor path still lacks mapping-like support.
     if isinstance(data, Mapping):
         # Merge standard mapping with PyMapping_Items
         for key, value in data.items():
@@ -503,6 +481,36 @@ def mutable_mapping_update(
             self[key] = value
 
 
+def odict_update(
+    self: Any,
+    data: Any = (),
+    /,
+    **kwargs: Any,
+) -> None:
+    # CPython's mutablemapping_update_arg in Objects/odictobject.c snapshots
+    # exact dicts, but dispatches keys/__getitem__ and destination __setitem__.
+    if type(data) is dict:
+        data = list(data.items())
+    else:
+        try:
+            keys = data.keys
+        except AttributeError:
+            try:
+                items = data.items
+            except AttributeError:
+                pass
+            else:
+                data = items()
+        else:
+            for key in keys():
+                self[key] = data[key]
+            data = ()
+    for key, value in data:
+        self[key] = value
+    for key, value in kwargs.items():
+        self[key] = value
+
+
 # Used with something like dict(obj)
 def construct_dict(
     cls: type[T],
@@ -515,12 +523,21 @@ def construct_dict(
     return self
 
 
-def dict_fromkeys(cls: Any, /, iterable: Iterable[Any], value: Any = None) -> Any:
+def dict_fromkeys(
+    cls: Callable[..., C], iterable: Iterable[T], value: U | None = None, /
+) -> C:
     # Mirrors the subclass path in CPython's _PyDict_FromKeys.
-    result = cls()
+    result: Any = cls()
     for key in iterable:
         result[key] = value
     return result
+
+
+# OrderedDict.fromkeys allows keyword arguments
+def odict_fromkeys(
+    cls: Callable[..., C], /, iterable: Iterable[T], value: U | None = None
+) -> C:
+    return dict_fromkeys(cls, iterable, value)
 
 
 def foreach_map_fn(*args: Any) -> Any:
