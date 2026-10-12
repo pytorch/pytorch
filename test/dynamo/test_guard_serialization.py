@@ -3817,6 +3817,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
     def test_ordered_dict_keys_match(self):
         def fn(x, mapping):
             mapping["layer.0.weight"] = x + 1
+            mapping.move_to_end("layer.0.weight", last=False)
             return x + 2
 
         keys = ("layer.0.weight", "layer.1.weight")

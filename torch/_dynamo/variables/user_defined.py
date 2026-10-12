@@ -119,7 +119,12 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .dicts import ConstDictVariable, OrderedDictVariable, pyanydict_check, pyodict_check
+from .dicts import (
+    ConstDictVariable,
+    OrderedDictVariable,
+    pyanydict_check,
+    pyodict_check,
+)
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
@@ -3215,6 +3220,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 and method.__name__ in ("keys", "values", "items", "update")
             ):
                 # Honor the defining dictionary type for aliased builtin descriptors.
+                if method.__objclass__ is collections.OrderedDict and not pyodict_check(
+                    self
+                ):
+                    raise_type_error(
+                        tx,
+                        f"descriptor '{method.__name__}' for 'collections.OrderedDict' objects "
+                        f"doesn't apply to a '{self.python_type_name()}' object",
+                    )
                 owner = (
                     OrderedDictVariable
                     if method.__objclass__ is collections.OrderedDict
