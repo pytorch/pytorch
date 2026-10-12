@@ -706,11 +706,6 @@ inline bool supportedFloatingOrComplexType(const TensorBase& t) {
   return supportedFloatingOrComplexType(t.scalar_type());
 }
 
-inline bool needsGather(const TensorBase& t) {
-  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
-  return !is_macOS_15_0_or_newer && (!t.is_contiguous() || t.storage_offset());
-}
-
 template <typename T>
 void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
                                                        const std::string& name,
