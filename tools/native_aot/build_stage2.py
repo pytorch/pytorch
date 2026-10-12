@@ -22,8 +22,8 @@ and with CONTRIBUTING.md, which states them for users:
   * the interpreter has no published DSL wheel and none is installed
   * a static torch_cuda, which cannot take the version script
   * nothing declares kernels (no torch/_native/ops/*/aot.py)
-  * TORCH_CUDA_ARCH_LIST names no exportable arch (export.EXPORTABLE_ARCHES);
-    with it unset, on-device export runs if a supported GPU is present
+  * TORCH_CUDA_ARCH_LIST matches no target declared by an op; with it unset,
+    on-device export runs if the local GPU matches a declared target
 
 Two modes, split by the skip list.
 
@@ -274,7 +274,7 @@ def _opted_out() -> bool:
 
 
 # The oldest CUDA major that gets embedded kernels. CUDA 12 tops out at sm_90
-# (.ci/manywheel/build_env_setup.py's arch table) and every 13.x config builds
+# (.ci/wheel/linux/build_env_setup.py's arch table) and every 13.x config builds
 # sm_90 too, so a 12.x export is a strict subset of what the 13.x wheels already
 # ship. In should_run() rather than per-toolchain because the CI shells install
 # the DSL wheels only when it says RUN, so 12.x also skips the ~440MB install.
@@ -315,12 +315,12 @@ def _dsl_runtime_archive() -> str | None:
     """The DSL dialect runtime archive the CuTeDSL kernel objects need, preferring
     this build's CUDA major.
 
-    4.5.x shipped one archive at <root>/lib/; 4.6.x splits it per major (cu12/lib/,
-    cu13/lib/) and only cu12 is a hard dependency, so a CUDA 13 environment often
-    holds cu12 alone. A mismatch warns rather than failing: in 4.6.2 the archives
-    are the same objects (`ar p | md5sum` equal, differing only in ar timestamps)
-    and a CUDA 13.2 build linked against cu12 passed the AOT suite. Still preferred
-    and reported, since the per-major split says they may diverge."""
+    4.5.x shipped one archive at <root>/lib/; 4.6 and later split it per major
+    (cu12/lib/, cu13/lib/) and only cu12 is a hard dependency, so a CUDA 13
+    environment often holds cu12 alone. A mismatch warns rather than failing:
+    in 4.6.2 the archives were the same objects (`ar p | md5sum` equal, differing
+    only in ar timestamps), and a CUDA 13.2 build linked against cu12 passed the
+    AOT suite. Still preferred and reported, since newer archives may diverge."""
     import importlib.util
 
     spec = importlib.util.find_spec("nvidia_cutlass_dsl")
@@ -411,8 +411,8 @@ def should_run() -> bool:
             return False
 
     # Also "not applicable": the DSL wheels are cp-tagged and do not exist for
-    # every interpreter the release matrix builds. For the pinned 4.6.2 the
-    # -libs-* packages publish cp310-cp314 plus cp314t, manylinux only, no sdist,
+    # every interpreter the release matrix builds. For the pinned 4.8.0 the
+    # -libs-* packages publish cp310-cp314 plus cp314t on Linux, with no sdist,
     # while the matrix also builds 3.13t/3.15/3.15t. Those wheels keep the JIT
     # path; demanding an unresolvable tag would fail the build on nothing anyone
     # can fix.
@@ -467,29 +467,39 @@ def should_run() -> bool:
         if not archs:
             _report(
                 f"skipped (TORCH_CUDA_ARCH_LIST={arch_list!r} has no "
-                f"exportable arch; exportable: "
-                f"{' '.join(export_mod.EXPORTABLE_ARCHES)})"
+                f"compatible native-AOT declaration target)"
             )
             return False
         if len(archs) > 1:
-            # Supported (export nests one tree per arch and the generated stub
-            # selects per capability); reported because it multiplies embedded
-            # bytes, one full set per arch.
-            _report(f"multi-arch: {' '.join(archs)}")
+            # Export nests one tree per selected target and the generated stub
+            # selects among them at runtime; report when several trees are embedded.
+            _report(f"multi-target: {' '.join(archs)}")
     elif not _torch_probe("torch.cuda.is_available()"):
         _report("skipped (no TORCH_CUDA_ARCH_LIST and no local GPU to detect from)")
         return False
     else:
-        # On-device export compiles for whatever GPU is present, so check it
-        # BEFORE committing: a dev box outside EXPORTABLE_ARCHES exported for its
-        # own arch and then failed in generation, after a successful build.
+        # Check the detected device before committing to stage 2: a device matching
+        # no declaration would export nothing after a successful main build.
         # Through a subprocess, not export._detected_arch(), which would
         # initialize CUDA here -- what _torch_probe exists to avoid.
+        from torchgen import native_aot_decl as decl
+
         local = _torch_value("'sm_%d%d' % torch.cuda.get_device_capability()")
-        if local not in export_mod.EXPORTABLE_ARCHES:
+        try:
+            local_cc = decl.cc_of(local) if local else None
+        except RuntimeError:
+            local_cc = None
+        if local_cc not in decl.known_device_capabilities():
             _report(
-                f"skipped (local GPU is {local or 'undetectable'}; exportable: "
-                f"{' '.join(export_mod.EXPORTABLE_ARCHES)})"
+                f"skipped (local GPU is {local or 'undetectable'}; native-AOT "
+                f"does not know that device capability)"
+            )
+            return False
+        targets = export_mod.targets_for_arches([local]) if local else []
+        if not targets:
+            _report(
+                f"skipped (local GPU is {local or 'undetectable'}; no compatible "
+                f"native-AOT declaration target)"
             )
             return False
 
@@ -524,9 +534,10 @@ def require_runtimes() -> None:
         raise RuntimeError(
             f"native-AOT stage 2: this {backend} build has AOT toolchains whose "
             f"runtimes are not installed ({detail}). Install the distributions "
-            f"that provide them -- {', '.join(dists)} -- as "
-            f"install_cutlass_dsl in .ci/pytorch/common_utils.sh does (it holds "
-            f"the pinned versions), or set TORCH_NATIVE_AOT=0 to build without "
+            f"that provide them -- {', '.join(dists)} -- using "
+            f"install_cutlass_dsl in .ci/pytorch/common_utils.sh and "
+            f"scripts/install_triton_wheel.sh for the pinned versions, or set "
+            f"TORCH_NATIVE_AOT=0 to build without "
             f"embedded DSL kernels."
         )
 
@@ -537,58 +548,54 @@ def _backend() -> str:
     return "rocm" if _torch_probe("torch.version.hip is not None") else "cuda"
 
 
-def _cache_entries() -> dict[str, tuple[str, str]]:
-    """This build's cache as name -> (TYPE=value, the doc line above it).
+# Written by cmake/EnvVarForwarding.cmake at the end of configure: NAME=<effective value>
+# for every variable it forwarded from the environment.
+ENV_FORWARDED_FILE = "env_forwarded.txt"
 
-    Last assignment wins, as in _cmake_cache_value. The doc line names the source of an
-    entry EnvVarForwarding wrote ("From environment", "From env <NAME>").
+
+def _forwarded_settings() -> dict[str, str] | None:
+    """The forwarded variables' EFFECTIVE values, or None if this build wrote none.
+
+    Effective rather than cached, because CMakeCache.txt does not record what a build
+    used: when a dependent option loses availability CMake keeps the stale value there
+    (retyped INTERNAL) and shadows it with the force value, so comparing cache lines
+    reports a change that did not happen and misses one that did.
     """
-    entries: dict[str, tuple[str, str]] = {}
-    doc = ""
     try:
-        with open(os.path.join(BUILD_DIR, "CMakeCache.txt"), errors="replace") as f:
-            for line in f:
-                line = line.rstrip("\n")
-                if line.startswith("//"):
-                    doc = line[2:]
-                    continue
-                key, sep, value = line.partition("=")
-                if sep and not line.startswith("#") and ":" in key:
-                    name, _, kind = key.partition(":")
-                    entries[name] = (f"{kind}={value}", doc)
-                doc = ""
+        with open(os.path.join(BUILD_DIR, ENV_FORWARDED_FILE), errors="replace") as f:
+            lines = [l.rstrip("\n") for l in f]
     except OSError:
-        return {}
-    return entries
+        return None
+    return {n: v for n, _, v in (l.partition("=") for l in lines if "=" in l)}
 
 
-# The doc lines EnvVarForwarding writes above an entry it sourced from the environment.
-_ENV_SOURCED = ("From environment", "From env ")
+def _refuse_settings_drift(before: dict[str, str] | None) -> None:
+    """Refuse a reconfigure that changed a setting the environment forwards.
 
-
-def _refuse_cache_drift(before: dict[str, tuple[str, str]]) -> None:
-    """Refuse a reconfigure that changed this build's configuration.
-
-    EnvVarForwarding writes every BUILD_*/USE_*/CMAKE_* environment variable (and the
-    names in its alias lists, TORCH_CUDA_ARCH_LIST among them) into the cache when it
-    differs from the cached value, so a stage-2 run in another environment than the
-    build silently relinks torch_cuda against other settings. It CREATES the entry when
-    the build had none, so an added env-sourced one is drift too; additions CMake makes
-    itself are not.
+    EnvVarForwarding FORCEs every BUILD_*/USE_*/CMAKE_* environment variable (and the
+    names in its alias lists, TORCH_CUDA_ARCH_LIST among them) into the cache, so a
+    stage-2 run in another environment than the build silently relinks torch_cuda
+    against other settings. Those variables are the whole surface: nothing else here
+    can change the configuration.
     """
-    drift = []
-    for name, (value, doc) in _cache_entries().items():
-        if name in before:
-            if before[name][0] != value:
-                drift.append((name, before[name][0], value, doc))
-        elif doc.startswith(_ENV_SOURCED):
-            drift.append((name, "absent", value, doc))
+    after = _forwarded_settings()
+    if after is None:
+        raise RuntimeError(
+            f"native-AOT stage 2: reconfiguring {BUILD_DIR} left no "
+            f"{ENV_FORWARDED_FILE}, so the settings it built with cannot be compared "
+            f"with the ones it would relink against. Re-run the build."
+        )
+    if before is None:
+        _report(f"no {ENV_FORWARDED_FILE} from the build; settings drift unchecked")
+        return
+    drift = [
+        (name, before.get(name, "absent"), after.get(name, "absent"))
+        for name in sorted(set(before) | set(after))
+        if before.get(name, "absent") != after.get(name, "absent")
+    ]
     if not drift:
         return
-    changed = "\n".join(
-        f"  {name}: {old} -> {new}" + (f" ({doc})" if doc else "")
-        for name, old, new, doc in drift
-    )
+    changed = "\n".join(f"  {name}: {old} -> {new}" for name, old, new in drift)
     raise RuntimeError(
         f"native-AOT stage 2: reconfiguring {BUILD_DIR} changed this build's "
         f"configuration, so torch_cuda would be relinked against different settings "
@@ -835,7 +842,7 @@ def _invalidate_stale_include() -> None:
     """Stop this build tree from embedding what a PREVIOUS run wired up.
 
     caffe2/CMakeLists.txt include()s the generated file unconditionally, and
-    .ci/manywheel/build_all.sh shares one build/ across eight interpreters. OVERWRITTEN
+    .ci/wheel/linux/build_all.sh shares one build/ across eight interpreters. OVERWRITTEN
     rather than deleted: CMake registers an include()d file as a configure dependency
     only if it existed at configure time."""
     from tools.native_aot.gen_aot_lib import CMAKE_INCLUDE, write_nothing_to_embed
@@ -908,24 +915,25 @@ def main(argv: list[str] | None = None) -> int:
     # The archive the generator names in the CMake it emits.
     if archive := _dsl_runtime_archive():
         gen += ["--dsl-runtime", archive]
-    # Name the arches THIS build targets, so a tree left by a build with a different
-    # TORCH_CUDA_ARCH_LIST is ignored. Omitted for an on-device export.
+    # Name the AOT targets selected for THIS build, so a tree left by a build with a
+    # different TORCH_CUDA_ARCH_LIST is ignored. Omitted for an on-device export.
     if arch_list:
         from tools.native_aot import export as export_mod
 
-        # Both: --archs filters the trees, --arch-list is the raw value recorded
-        # in the emitted CMake. Only this caller knows they are one request.
+        # Both: --archs is a coarse tree filter, while --arch-list selects targets
+        # per declaration and is recorded in the emitted CMake. Only this caller
+        # knows they are one request.
         gen += ["--archs", *export_mod.archs_from_cuda_arch_list(arch_list)]
         gen += ["--arch-list", arch_list]
     _run_child(gen, "generating stub sources", cwd=REPO)
-    # Nothing generated is legitimate: no declaration ships kernels for this arch.
+    # Nothing generated is legitimate: no declaration ships kernels for this build.
     # Stop rather than relink unchanged and then assert kernels are in it.
     sources = glob.glob(os.path.join(art, "*", "aot_*.cpp"))
     if not sources:
         _report("no declaration ships kernels for this build; nothing embedded")
         return 0
     # The count, and the size delta after the relink, rather than parsing the generated
-    # CMake: these bytes scale with declarations x precompile points x arches.
+    # CMake: these bytes scale with declarations x precompile points x targets.
     _report(f"embedding kernels from {len(sources)} generated source(s)")
     # Reconfigure explicitly: the generated file registers itself in
     # CMAKE_CONFIGURE_DEPENDS only from the reconfigure that first reads it.
@@ -940,9 +948,9 @@ def main(argv: list[str] | None = None) -> int:
         )
     _report("reconfiguring to pick up the generated CMake")
     # The cmake that configured this tree, and its cache as it stands, so the
-    # reconfigure can be held to both (see _refuse_cache_drift).
+    # reconfigure can be held to both (see _refuse_settings_drift).
     cmake_exe = _cmake_for_this_build()
-    cache_before = _cache_entries()
+    settings_before = _forwarded_settings()
     # Captured because CMake prints its failure context on stdout, and the STATUS line
     # the generated file emits is the only pre-relink evidence that it will embed.
     # --log-level, because that marker is a message(STATUS) and a cached
@@ -960,7 +968,7 @@ def main(argv: list[str] | None = None) -> int:
             f"{configure.returncode}, output above)."
         )
     # Ahead of the relink, so a drifting configure cannot reach the installed torch.
-    _refuse_cache_drift(cache_before)
+    _refuse_settings_drift(settings_before)
     from tools.native_aot.gen_aot_lib import EMBED_STATUS
 
     if EMBED_STATUS not in configure.stdout:

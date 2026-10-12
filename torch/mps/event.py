@@ -21,11 +21,15 @@ class Event:
             torch._C._mps_releaseEvent(self.__eventId)
 
     def record(self) -> None:
-        r"""Records the event in the default stream."""
+        r"""Records the event in the current stream."""
+        if torch.mps.current_stream() != torch.mps.default_stream():
+            raise NotImplementedError("Non-default streams are not yet supported.")
         torch._C._mps_recordEvent(self.__eventId)
 
     def wait(self) -> None:
-        r"""Makes all future work submitted to the default stream wait for this event."""
+        r"""Makes all future work submitted to the current stream wait for this event."""
+        if torch.mps.current_stream() != torch.mps.default_stream():
+            raise NotImplementedError("Non-default streams are not yet supported.")
         torch._C._mps_waitForEvent(self.__eventId)
 
     def query(self) -> bool:
