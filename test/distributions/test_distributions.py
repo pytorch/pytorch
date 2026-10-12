@@ -1955,7 +1955,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         entropy = dist.entropy()
         self.assertEqual(entropy.dtype, torch.double)
         expected = torch.tensor(
-            scipy.stats.multinomial.entropy(total_count, p.numpy()), dtype=torch.double
+            scipy.stats.multinomial.entropy(total_count, p.cpu().numpy()),
+            dtype=torch.double,
         )
         self.assertEqual(entropy, expected)
         self.assertEqual(dist.expand((2,)).entropy(), expected.expand(2))
