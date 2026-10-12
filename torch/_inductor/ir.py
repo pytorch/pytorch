@@ -121,6 +121,7 @@ from .utils import (
     ceildiv,
     convert_shape_to_inductor,
     convert_shape_to_symint,
+    DataDependentRange,
     developer_warning,
     do_bench_using_profiling,
     dtype_from_size,
@@ -1094,6 +1095,8 @@ class Loops(IRNode):
     dtype: torch.dtype
     inner_fn: Callable[..., Any]
     ranges: Sequence[_IntLike]
+    flat_size: Sequence[_IntLike] | None = None
+    output_indexer: Callable[[Sequence[Expr]], Any] | None = None
 
     @cache_on_self_and_args("Loops")
     def get_free_symbol_uses(
@@ -1208,21 +1211,28 @@ class Loops(IRNode):
     def get_reads(self) -> OrderedSet[Dep]:
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
-                return extract_read_writes(
+                reads = extract_read_writes(
                     self.make_loader(),
                     self.get_size(),
                     self.get_reduction_size(),
                 ).reads
             else:
-                return extract_read_writes(
+                reads = extract_read_writes(
                     self.make_loader(),
                     self.get_size(),
                 ).reads
+            if self.flat_size is not None and self.output_indexer is not None:
+                reads |= extract_read_writes(self.output_indexer, self.get_size()).reads
+            return reads
 
     def get_read_names(self) -> OrderedSet[str]:
+        if self.flat_size is not None:
+            return OrderedSet(dep.name for dep in self.get_reads())
         return OrderedSet(self.inner_fn_opcount().read_buffers)
 
     def num_reads(self) -> int:
+        if self.flat_size is not None:
+            return len(self.get_read_names())
         return len(self.inner_fn_opcount().read_buffers)
 
     def get_reduction_size(self) -> Sequence[Expr]:
@@ -1275,7 +1285,13 @@ class Pointwise(Loops):
         vars: Sequence[Expr],
     ) -> None:
         loader = self.make_loader()
-        return ops.store(output_name or "unnamed", indexer(vars), loader(vars))
+        if self.output_indexer is None:
+            return ops.store(output_name or "unnamed", indexer(vars), loader(vars))
+        value = loader(vars)
+        addr = self.output_indexer(vars)
+        if isinstance(addr, OpsValue):
+            addr = ops.indirect_indexing(addr, self.flat_size[0], wrap_neg=False)
+        return ops.store(output_name or "unnamed", addr, value)
 
     def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
@@ -1286,6 +1302,8 @@ class Pointwise(Loops):
             dtype=self.dtype,
             inner_fn=loader,
             ranges=self.ranges,
+            flat_size=self.flat_size,
+            output_indexer=self.output_indexer,
         )
 
 
@@ -1496,6 +1514,8 @@ class Reduction(Loops):
             dtype=self.dtype,
             inner_fn=loader,
             ranges=self.ranges,
+            flat_size=self.flat_size,
+            output_indexer=self.output_indexer,
             reduction_ranges=self.reduction_ranges,
             reduction_type=self.reduction_type,
             src_dtype=self.src_dtype,
@@ -5777,6 +5797,7 @@ class ComputedBuffer(OperationBuffer):
             and self.name not in V.graph.mutated_buffers
             and self.num_reads() == 0
             and not self._force_realize
+            and self.data.flat_size is None
         ):
             # inline this op rather than generating ops.load()
             return self.data.make_loader()
@@ -5837,6 +5858,8 @@ class ComputedBuffer(OperationBuffer):
         return None
 
     def decide_layout(self) -> None:
+        if self.data.flat_size is not None:
+            self.freeze_layout()
         if isinstance(self.layout, FlexibleLayout):
             order = self.get_fill_order()
             if order:
@@ -5852,7 +5875,15 @@ class ComputedBuffer(OperationBuffer):
         LoopBody,
         tuple[list[Expr], list[Expr]],
     ]:
-        args, var_ranges = dependencies.index_vars_squeeze(
+        index_vars_fn = dependencies.index_vars_squeeze
+        if any(
+            isinstance(size, DataDependentRange)
+            for size in itertools.chain(
+                self.get_pointwise_size(), self.get_reduction_size()
+            )
+        ):
+            index_vars_fn = dependencies.index_vars_no_squeeze
+        args, var_ranges = index_vars_fn(
             self.get_pointwise_size(), self.get_reduction_size(), prefix="q"
         )
         with patch.object(ConstantBuffer, "override_device", self.get_device()):
@@ -5906,6 +5937,12 @@ class ComputedBuffer(OperationBuffer):
             body,
             (index_vars, reduce_vars),
         ) = self.get_default_sizes_body()
+
+        if any(
+            isinstance(size, DataDependentRange)
+            for size in itertools.chain(index_size, reduce_size)
+        ):
+            return (index_size, reduce_size), body
 
         if recompute_sizes_body_func:
             (
@@ -11166,7 +11203,11 @@ class StorageBox(MutableBox):
             layout=FlexibleLayout(
                 device=device,
                 dtype=self.data.get_dtype(),
-                size=self.data.get_size(),
+                size=(
+                    self.data.get_size()
+                    if self.data.flat_size is None
+                    else self.data.flat_size
+                ),
                 is_pinned=False,
             ),
             data=self.data,

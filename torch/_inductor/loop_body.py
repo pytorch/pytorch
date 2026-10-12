@@ -22,6 +22,7 @@ from .ops_handler import DefaultHandler, OpsHandler, WrapperHandler
 from .optimize_loop_body import eliminate_redundant_lowp_round_trips
 from .utils import (
     cache_on_self,
+    DataDependentRange,
     decompose_index,
     flatten_index,
     reduction_num_outputs,
@@ -216,6 +217,9 @@ class LoopBody:
         """
         Merge both iteration and reduction loops and return a new LoopBody.
         """
+        if any(isinstance(s, DataDependentRange) for s in self.var_ranges.values()):
+            return self
+
         old_body = self
         old_sizes = self.sizes
         old_iter_vars, old_reduce_vars = old_body.vars
@@ -897,6 +901,12 @@ class CaptureIndexing(WrapperHandler):
             {},
         )
         return var
+
+    def register_datadep_range(self, value, symbol):
+        # FX passes the SymPy token through the existing index registry.
+        symbol_arg = self._add_index(symbol, MemoryUsageType.INDEX_EXPR)
+        self._inner.register_datadep_range(value, symbol_arg)
+        return symbol
 
     def output(self, *result):
         self.tracer.create_proxy("output", "output", result, {})

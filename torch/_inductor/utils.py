@@ -111,6 +111,24 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+class DataDependentRange(sympy.Dummy):
+    """A loop extent whose value is registered by its inner_fn.
+
+    For ranges=[M, jb], inner_fn registers lengths[i] for jb:
+
+        for i in range(M):
+            for j in range(lengths[i]):
+                compute(i, j)
+
+    The token identifies the extent; it is not a tensor shape.
+    """
+
+    def __new__(cls, name, dummy_index=None, **assumptions):
+        return super().__new__(
+            cls, name, dummy_index, **{**assumptions, "integer": True, "nonnegative": True}
+        )
+
+
 # Defined before the torch._dynamo import below to avoid a circular import
 # when pulled in from dynamo; hence the lazy registry imports in the bodies.
 def _gpu_types() -> list[str]:
