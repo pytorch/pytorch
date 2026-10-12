@@ -71,6 +71,7 @@ from .variables.base import (
     ValueMutationNew,
     VariableTracker,
 )
+from .variables.dicts import _contains_nan
 from .variables.user_defined import FrozenDataClassVariable
 
 
@@ -190,9 +191,13 @@ def _manual_list_update(list_from: list[Any], list_to: list[Any]) -> None:
 def _manual_ordered_dict_update(
     target: collections.OrderedDict[Any, Any],
     items: tuple[tuple[Any, Any], ...],
-    keys: tuple[Any, ...],
+    keys: tuple[Any, ...] | None,
     has_deleted_keys: bool,
 ) -> None:
+    if keys is None:
+        for key, value in items:
+            collections.OrderedDict.__setitem__(target, key, value)
+        return
     # A pure reorder must not clear/reinsert the underlying dict entries.
     previous = tuple(dict.items(target))
     if (
@@ -1815,8 +1820,12 @@ def _codegen_ordered_dict_mutation(ctx: SideEffectReplayContext) -> None:
     var = ctx.var
     if not isinstance(var, variables.OrderedDictVariable):
         raise AssertionError(type(var))
-    if var.source and isinstance(
-        var.mutation_type, (ValueMutationExisting, AttributeMutationExisting)
+    if (
+        var.should_reconstruct_all
+        and var.source
+        and isinstance(
+            var.mutation_type, (ValueMutationExisting, AttributeMutationExisting)
+        )
     ):
         # Replay specializes on both storage order and linked-list iteration order.
         cg.tx.output.guard_on_key_order.add(var.source)
@@ -1827,14 +1836,31 @@ def _codegen_ordered_dict_mutation(ctx: SideEffectReplayContext) -> None:
     )
     cg(var.source)
     # Build tuples explicitly so constant folding cannot discard key sources.
+    num_items = 0
     for key, value in dict.items(var.items):
-        cg(key.vt)
+        key_vt = key.vt
+        if not var.should_reconstruct_all:
+            original_value = var.original_items.get(key_vt)
+            if not var.is_new_item(original_value, value):
+                continue
+            # Update lookups preserve existing key objects without positional sources.
+            if original_value is not None and key_vt.is_python_constant():
+                key_value = key_vt.as_python_constant()
+                if variables.ConstantVariable.is_literal(
+                    key_value
+                ) and not _contains_nan(key_value):
+                    key_vt = variables.ConstantVariable.create(key_value)
+        cg(key_vt)
         cg(value)
         cg.append_output(create_instruction("BUILD_TUPLE", arg=2))
-    cg.append_output(create_instruction("BUILD_TUPLE", arg=len(var.items)))
-    for key in var.items:
-        cg(key.vt)
-    cg.append_output(create_instruction("BUILD_TUPLE", arg=len(var.items)))
+        num_items += 1
+    cg.append_output(create_instruction("BUILD_TUPLE", arg=num_items))
+    if var.should_reconstruct_all:
+        for key in var.items:
+            cg(key.vt)
+        cg.append_output(create_instruction("BUILD_TUPLE", arg=len(var.items)))
+    else:
+        cg(variables.ConstantVariable.create(None))
     cg(variables.ConstantVariable.create(var.has_deleted_keys))
     ctx.suffixes.append(
         [*create_call_function(4, False), create_instruction("POP_TOP")]
