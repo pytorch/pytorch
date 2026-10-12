@@ -129,7 +129,9 @@ def any(
     where: NotImplementedType = None,
 ) -> torch.Tensor:
     axis = _util.allow_only_single_axis(axis)
-    return torch.any(a) if axis is None else torch.any(a, dim=axis)
+    # torch.any returns uint8 for uint8 inputs; NumPy always returns bool
+    result = torch.any(a) if axis is None else torch.any(a, dim=axis)
+    return result.bool()
 
 
 @_deco_axis_expand
@@ -142,7 +144,9 @@ def all(
     where: NotImplementedType = None,
 ) -> torch.Tensor:
     axis = _util.allow_only_single_axis(axis)
-    return torch.all(a) if axis is None else torch.all(a, dim=axis)
+    # torch.all returns uint8 for uint8 inputs; NumPy always returns bool
+    result = torch.all(a) if axis is None else torch.all(a, dim=axis)
+    return result.bool()
 
 
 @_deco_axis_expand
@@ -421,7 +425,9 @@ def quantile(
 
     if axis is None:
         a = a.flatten()
-        q = q.flatten()
+        # Keep a scalar q 0-D so the result is 0-D, as in NumPy
+        if q.ndim > 1:
+            q = q.flatten()
         axis = (0,)
     else:
         axis = _util.normalize_axis_tuple(axis, a.ndim)
@@ -433,7 +439,12 @@ def quantile(
 
     q = _util.cast_if_needed(q, a.dtype)
 
-    return torch.quantile(a, q, axis, interpolation=method)
+    result = torch.quantile(a, q, axis, interpolation=method)
+
+    # NumPy assigns into `out` with broadcasting, e.g. a 0-D result into shape (1,)
+    if out is not None and not keepdims and result.shape != out.shape:
+        result = torch.broadcast_to(result, out.shape)
+    return result
 
 
 def percentile(
@@ -456,6 +467,7 @@ def percentile(
         a,
         qq,
         axis=axis,
+        out=out,
         overwrite_input=overwrite_input,
         method=method,
         keepdims=keepdims,
