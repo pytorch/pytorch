@@ -1284,13 +1284,16 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            all_const = all(ConstantVariable.is_literal(k) for k in value)
+            # OrderedDict replay needs the original key objects, even for literals.
+            use_const_keys = not istype(value, collections.OrderedDict) and all(
+                ConstantVariable.is_literal(k) for k in value
+            )
 
-            # For all_const, we don't have to guard on anything yet. We guard on
+            # For use_const_keys, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
             # For cases where we need to guard on all keys, we lazily put guards
             # during the dict call_method (check dicts.py)
-            if not all_const:
+            if not use_const_keys:
                 # Guard on the key order
                 # This is not ideal, i.e., there is no need to guard on the key
                 # order. But we guard on the key order because of the complexity
@@ -1315,7 +1318,7 @@ class VariableBuilder:
                 i: int, k: object, v: object
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
-                if all_const:
+                if use_const_keys:
                     key = ConstantVariable.create(k)
                     source_key = k
                 else:
@@ -2284,7 +2287,7 @@ class VariableBuilder:
 
             kv_items = _build_dict_items(value, build_key_value)
 
-            if isinstance(value, collections.defaultdict):
+            if issubclass(type(value), collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
                 result = UserDefinedDefaultDictVariable(
                     value,
@@ -2297,7 +2300,7 @@ class VariableBuilder:
             else:
                 udf_cls = (
                     UserDefinedOrderedDictVariable
-                    if isinstance(value, collections.OrderedDict)
+                    if issubclass(type(value), collections.OrderedDict)
                     else UserDefinedDictVariable
                 )
                 result = udf_cls(value, items=kv_items, source=self.source)
