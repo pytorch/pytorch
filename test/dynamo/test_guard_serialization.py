@@ -1274,7 +1274,11 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # recorded that tensor's dispatch keys, whereas _dispatch_keys(fake)
         # reports the Python keys of the fake itself, and empty_like(fake)
         # returns another fake (mode active or not) that drags the mode along.
-        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+            is_fake_tensor,
+            maybe_get_fake_dispatch_keys,
+        )
 
         real = torch.randn(2)
         mode = FakeTensorMode()
@@ -1289,7 +1293,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             torch._C._dispatch_keys(real),
         )
         without_keys = mode.from_tensor(real)
-        self.assertIsNone(without_keys.dispatch_keys)
+        self.assertIsNone(maybe_get_fake_dispatch_keys(without_keys))
         for fake in (with_keys, without_keys):
             buf = io.BytesIO()
             pickler = GuardsStatePickler({id(fake): fake}, {}, {}, {}, buf)
@@ -1298,18 +1302,42 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             # mode and its converters pickled along).
             _, args = pickler.reducer_override(fake)
             self.assertIs(type(args[0]), torch.Tensor)
+            self.assertFalse(is_fake_tensor(args[0]))
             pickler.dump({"t": fake})
             self.assertNotIn(b"FakeTensorMode", buf.getvalue())
             out = load_guards_state(buf.getvalue())["t"]
-            self.assertIsInstance(out, FakeTensor)
+            self.assertTrue(is_fake_tensor(out))
             self.assertEqual(out.shape, real.shape)
         buf = io.BytesIO()
         GuardsStatePickler({id(with_keys): with_keys}, {}, {}, {}, buf).dump(
             {"t": with_keys}
         )
-        self.assertEqual(
-            load_guards_state(buf.getvalue())["t"].dispatch_keys.raw_repr(), real_keys
+        out = load_guards_state(buf.getvalue())["t"]
+        self.assertEqual(maybe_get_fake_dispatch_keys(out).raw_repr(), real_keys)
+
+    def test_fake_tensor_round_trip_keeps_the_real_tensors_dispatch_keys(self):
+        # The conj/neg bits are dispatch keys that the meta template does not
+        # carry, so a loaded fake only keeps them through the recorded keys.
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+            maybe_get_fake_dispatch_keys,
         )
+
+        # The keys of the fake itself, masked at guard check time.
+        fake_keys = (
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
+            .add(torch._C.DispatchKey.Python)
+            .add(torch._C.DispatchKey.PythonTLSSnapshot)
+        )
+        conj = torch.randn(2, dtype=torch.cfloat).conj()
+        for real in (conj, conj.imag):
+            fake = FakeTensorMode().from_tensor(real)
+            buf = io.BytesIO()
+            GuardsStatePickler({id(fake): fake}, {}, {}, {}, buf).dump({"t": fake})
+            out = load_guards_state(buf.getvalue())["t"]
+            keys = maybe_get_fake_dispatch_keys(out)
+            self.assertIsNotNone(keys)
+            self.assertEqual(keys - fake_keys, torch._C._dispatch_keys(real))
 
     def test_retained_grad_non_leaf_survives_pickle(self):
         # A plain non-leaf's .grad is None (and reading it warns), but a
@@ -2913,6 +2941,71 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": torch.randn(2, dtype=torch.float64)}, False
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    def test_tensor_match_current_device(self):
+        # The relative-device decision must survive a load on a rank whose current
+        # device differs from the saving one. The derivation ignores the saved
+        # tensor's index -- the one piece of the artifact that is rank-specific --
+        # and reads compile_on_one_rank off the saved graph state rather than the
+        # loading process's config, so the guard that is rebuilt is the one that
+        # was saved.
+        from torch._dynamo.package import load_guard_manager, load_guards_state
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        with torch.cuda.device(0):
+            ref, _ = self._test_serialization(
+                "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
+            )
+
+        with mock.patch("torch.accelerator.current_device_index", return_value=1):
+            state = load_guards_state(self._cached_guards_state)
+            loaded = load_guard_manager(state, self._cached_f_code, f.__globals__)
+
+        self.assertIn("device=current", "\n".join(loaded.code_parts))
+
+        with torch.cuda.device(0):
+            inputs = {"x": torch.randn(4, device="cuda:0")}
+            self._test_check_fn(ref, loaded, inputs, True)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_tensor_match_current_device_survives_config_change_on_load(self):
+        # Whether the index is pinned or relative belongs to the saved guard, not to
+        # the loading process. Rebuilding from the loader's own compile_on_one_rank
+        # would flip the guard either way: a relaxed one reloaded without CooR would
+        # be rebuilt pinned and reject the device it was saved to accept, and a
+        # pinned one reloaded with CooR on would be rebuilt relaxed and accept one it
+        # was saved to reject.
+        from torch._dynamo.package import load_guard_manager, load_guards_state
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        for saved_with_coor in (True, False):
+            with (
+                torch.compiler.config.patch(compile_on_one_rank=saved_with_coor),
+                torch.cuda.device(0),
+            ):
+                torch._dynamo.reset()
+                self._test_serialization(
+                    "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
+                )
+                saved_state = self._cached_guards_state
+                saved_code = self._cached_f_code
+
+            # Load under the opposite setting.
+            with torch.compiler.config.patch(compile_on_one_rank=not saved_with_coor):
+                state = load_guards_state(saved_state)
+                loaded = load_guard_manager(state, saved_code, f.__globals__)
+
+            code = "\n".join(loaded.code_parts)
+            if saved_with_coor:
+                self.assertIn("device=current", code)
+            else:
+                self.assertNotIn("device=current", code)
 
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):

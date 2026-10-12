@@ -405,6 +405,54 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
 
         dist.barrier()
 
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_ROCM, "graph capture over rocshmem not supported yet"
+    )
+    def test_cuda_graph_collective(self) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+
+        # nvshmem_malloc barriers, so allocation cannot happen under capture; a
+        # first rendezvous cannot either, since its team split barriers too.
+        inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        out = torch.empty(numel, dtype=dtype, device=self.device)
+        symm_mem.rendezvous(inp, group=group_name)
+
+        # Replays re-run the captured kernels against whatever is in memory, so
+        # the input is driven by a device-side value updated between replays.
+        rank_val = torch.empty((), dtype=dtype, device=self.device)
+
+        def expected(offset: int) -> float:
+            return float(
+                self.world_size * offset + self.world_size * (self.world_size - 1) / 2
+            )
+
+        stream = device_module.Stream(device=self.device)
+        # Warm up on the stream that will be captured.
+        with device_module.stream(stream):
+            rank_val.fill_(self.rank)
+            inp.fill_(rank_val)
+            torch.ops.symm_mem.one_shot_all_reduce_out(inp, "sum", group_name, out)
+            self.assertEqual(out, torch.full_like(out, expected(0)))
+        stream.synchronize()
+        dist.barrier()
+
+        graph = device_module.CUDAGraph()
+        with device_module.graph(graph, stream=stream):
+            inp.fill_(rank_val)
+            torch.ops.symm_mem.one_shot_all_reduce_out(inp, "sum", group_name, out)
+
+        for offset in range(1, 4):
+            rank_val.fill_(self.rank + offset)
+            out.fill_(-1)
+            graph.replay()
+            self.assertEqual(out, torch.full_like(out, expected(offset)))
+
+        dist.barrier()
+
 
 # Negative tests for barrier/put_signal/wait_signal. They use
 # MultiProcessTestCase rather than MultiProcContinuousTest: a device-side
@@ -1005,6 +1053,57 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
         dispatch_then_combine(self.device, align=8, group=subgroup)
 
 
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class NVSHMEMTeamPoolTest(MultiProcContinuousTest):
+    def _init_device(self) -> None:
+        # TODO: relieve this (seems to hang if without)
+        device_module.set_device(self.device)
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    @requires_nvls()
+    def test_team_pool_released_on_process_group_destroy(self) -> None:
+        self._init_device()
+        ranks = list(range(self.world_size))
+        # Keep allocations alive across groups so this tests team reuse without
+        # interleaving the allocator's collective nvshmem_free with tile kernels.
+        full_inp = symm_mem.empty(
+            1024, 1024, dtype=torch.float, device=self.device
+        ).fill_(self.rank)
+        full_out = symm_mem.empty(1024, 1024, dtype=torch.float, device=self.device)
+        expected = torch.zeros_like(full_out)
+        if self.rank == 0:
+            expected[:512, :512].fill_(self.world_size * (self.world_size - 1) / 2)
+
+        # Use fresh workers: the tile tests keep a 24-team WORLD pool live, and
+        # NVSHMEM's internal duplicate teams can make a second pool exceed the
+        # limit even without a leak. Only one pool is live here at a time.
+        for _ in range(32):
+            group = dist.new_group(ranks)
+            try:
+                group_name = group.group_name
+                full_out.zero_()
+                # Populate the host pool first, including on the reuse path.
+                # get_n_teams must still initialize its new device array.
+                symm_mem.rendezvous(full_inp, group)
+                torch.ops.symm_mem.tile_reduce(
+                    full_inp[:512, :512],
+                    full_out[:512, :512],
+                    0,
+                    group_name,
+                )
+                self.assertEqual(full_out, expected)
+                device_module.synchronize()
+                dist.barrier()
+            finally:
+                dist.destroy_process_group(group)
+
+
 @instantiate_parametrized_tests
 @requires_nvshmem()
 @requires_cuda_p2p_access()
@@ -1012,7 +1111,6 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
-        # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
 
     @property
