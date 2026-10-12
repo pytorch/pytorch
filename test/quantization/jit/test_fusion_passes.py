@@ -4,10 +4,15 @@
 import torch
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import QuantizationTestCase
-from torch.testing._internal.common_utils import raise_on_run_directly
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+)
 
 
 class TestFusionPasses(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_quantized_add_relu_fusion(self):
         class MAdd(torch.nn.Module):
             def forward(self, x, y):

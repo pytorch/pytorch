@@ -2583,6 +2583,12 @@ class TestFlexFlash(InductorTestCase):
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
 
 
+requires_flash_aux_scalars = unittest.skipUnless(
+    flash_supports_aux_scalars(),
+    "Flash attention (CUTE) scalar capture support is not available",
+)
+
+
 @unittest.skipIf(
     not ensure_flash_available(), "Flash attention (CUTE) library is not available"
 )
@@ -2642,6 +2648,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
         self._run_dynamic_test(seq_lens=[128, 256, 512], score_mod=alibi_score_mod)
 
+    @requires_flash_aux_scalars
     def test_dynamic_captured_table_negative_index_wrap(self):
         """Rel-pos table gather with a shape-dependent offset (#188871).
 
@@ -2779,6 +2786,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
                 q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
             )
 
+    @requires_flash_aux_scalars
     def test_captured_int_works_with_dynamic(self):
         """Captured Python int should work with dynamic=True."""
         val = 2
@@ -2805,6 +2813,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         )
         self.assertEqual(out.shape, q.shape)
 
+    @requires_flash_aux_scalars
     @xfailIfSM120OrLater
     def test_dynamic_mask_from_input_lengths_single_graph(self):
         """Dynamic mask creation driven by input lengths should stay single-graph."""
@@ -2854,6 +2863,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             lambda msg: f"{msg}\nExpected 1 graph, got {counter.frame_count}",
         )
 
+    @requires_flash_aux_scalars
     @xfailIfSM120OrLater
     def test_dynamic_free_symbol_mask_single_graph(self):
         """Free-symbol dense mask under dynamic=True should not recompile."""
@@ -2920,6 +2930,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         )
         self.assertEqual(out.shape, q.shape)
 
+    @requires_flash_aux_scalars
     @xfailIfSM120OrLater
     def test_dynamic_captured_buffer_varying_heads(self):
         """Dynamic head_count with captured tensor buffer under FLASH/TRITON parity."""
@@ -2999,6 +3010,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
         return fn
 
+    @requires_flash_aux_scalars
     def test_dynamic_multiple_scalar_closures_in_score_mod_codegen(self):
         fn = self._dynamic_multiple_scalar_closures_fn()
         q, k, v = create_test_tensors(seq_len=128, device="cuda", dtype=torch.float16)
@@ -3021,6 +3033,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         unittest.expectedFailure,
         lambda params: IS_SM90,
     )
+    @requires_flash_aux_scalars
     def test_dynamic_multiple_scalar_closures_with_max_autotune(self):
         fn = self._dynamic_multiple_scalar_closures_fn()
         q, k, v = create_test_tensors(seq_len=128, device="cuda", dtype=torch.float16)
@@ -3154,6 +3167,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         for actual, expected in zip(grads_flash, grads_triton):
             self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
 
+    @requires_flash_aux_scalars
     @xfailIfSM120OrLater
     def test_dynamic_symbol_closure_in_score_mod_backward(self):
         """Captured SymInt in score_mod should propagate through FLASH backward."""
@@ -3161,6 +3175,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             lambda batch: lambda score, _b, _h, _q, _kv: score * (batch + 1)
         )
 
+    @requires_flash_aux_scalars
     @xfailIfSM120OrLater
     def test_dynamic_symfloat_closure_in_score_mod_backward(self):
         """SymFloat expressions in score_mod should lower inside FLASH backward."""
