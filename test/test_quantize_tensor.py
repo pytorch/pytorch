@@ -235,7 +235,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
             tuple(scales.shape),
             _get_scale_shape(shape, SwizzleType.SWIZZLE_32_4_4),
         )
-        self.assertEqual(scales.flatten(), scales_ref.flatten())
+        self.assertEqual(
+            scales.flatten(), scales_ref.view(torch.float8_e8m0fnu).flatten()
+        )
 
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     @skipIfNoCuteDSL
@@ -252,7 +254,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
             scaling_type_use_square_block_size=True,
         )
         self.assertEqual(qdata, qdata_ref)
-        self.assertEqual(scales.flatten(), scales_ref.flatten())
+        self.assertEqual(
+            scales.flatten(), scales_ref.view(torch.float8_e8m0fnu).flatten()
+        )
         expected_nan = torch.zeros((64, 64), device=device, dtype=torch.bool)
         expected_nan[:32, :32] = True
         self.assertEqual(torch.isnan(qdata), expected_nan)
