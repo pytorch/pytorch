@@ -32,6 +32,12 @@ class CppWrapperMps(CppWrapperGpu):
     ) -> "CppWrapperMps":
         return CppWrapperMps()
 
+    def _codegen_jit_stream_declarations(self) -> None:
+        # Metal kernels are dispatched through aoti_torch_mps_run_command_block
+        # and never take a raw stream, and the MPS device overrides have no
+        # stream type to declare.
+        pass
+
     def _generate_kernel_call_helper(
         self,
         kernel_name: str,

@@ -427,6 +427,8 @@ class TestReplacementMacro(unittest.TestCase):
             # Matched by suffix, not substring: only this one header.
             "torch/csrc/utils/generated_serialization_types.h": "STD_TORCH_CHECK",
             "torch/csrc/utils/tensor_new.cpp": "TORCH_CHECK",
+            "test/cpp/aoti_abi_check/cuda/test_kernel_utils.cu": "STD_TORCH_CHECK",
+            "test/cpp/c10d/TestUtils.hpp": "TORCH_CHECK",
         }
         for path, macro in cases.items():
             with self.subTest(path=path):
