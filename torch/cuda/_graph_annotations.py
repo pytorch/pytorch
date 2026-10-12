@@ -1406,7 +1406,7 @@ def remove_kernel_annotations(graph_ids: Iterable[int]) -> None:
 
 def register_fqn_annotation_hooks(
     model: torch.nn.Module,
-) -> None:
+) -> list[Any]:
     """Register forward hooks that annotate CUDA graph kernels with module FQNs.
 
     For use with standalone CUDA graphs (without Inductor).  Each module's
@@ -1419,12 +1419,14 @@ def register_fqn_annotation_hooks(
     the root module is ``L`` and submodules use dotted paths, e.g.
     ``L.networks.0.conv``.
 
-    Must be called before ``torch.cuda.graph()`` capture.  The hooks only fire
-    during Python forward passes, not during graph replay, so no cleanup is
-    needed after capture.
+    Must be called before ``torch.cuda.graph()`` capture.  Remove the returned
+    hook handles after capture.
 
     Args:
         model: The ``nn.Module`` to annotate.
+
+    Returns:
+        The hook handles; call ``h.remove()`` on each after capture.
 
     Example::
 
@@ -1434,14 +1436,18 @@ def register_fqn_annotation_hooks(
         )
 
         clear_kernel_annotations()
-        register_fqn_annotation_hooks(model)
+        handles = register_fqn_annotation_hooks(model)
 
         g = torch.cuda.CUDAGraph()
         with torch.cuda.graph(g, enable_annotations=True):
             output = model(x)
+
+        for h in handles:
+            h.remove()
     """
     # Stack per module to handle re-entrant calls (e.g. same module used twice).
     active_cms: dict[int, list[Any]] = defaultdict(list)
+    handles: list[Any] = []
 
     for name, module in model.named_modules():
         fqn = f"L.{name}" if name else "L"
@@ -1457,8 +1463,9 @@ def register_fqn_annotation_hooks(
                 cm = stack.pop()
                 cm.__exit__(None, None, None)
 
-        module.register_forward_pre_hook(pre_hook)
-        module.register_forward_hook(post_hook)
+        handles.append(module.register_forward_pre_hook(pre_hook))
+        handles.append(module.register_forward_hook(post_hook, always_call=True))
+    return handles
 
 
 # Counter-based stream ID registry. IDs start at 60 (above the highest

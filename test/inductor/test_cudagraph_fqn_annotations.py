@@ -330,10 +330,12 @@ class TestCudagraphFqnAnnotations(TestCase):
         torch.cuda.current_stream().wait_stream(s)
         torch.cuda.synchronize()
 
-        register_fqn_annotation_hooks(model)
+        handles = register_fqn_annotation_hooks(model)
         g = torch.cuda.CUDAGraph()
         with torch.cuda.graph(g, enable_annotations=True):
             static_output = model(static_input)
+        for h in handles:
+            h.remove()
 
         for _ in range(3):
             g.replay()
