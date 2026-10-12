@@ -268,6 +268,13 @@ struct laguerre_polynomial_l_functor {
   }
 };
 
+struct heaviside_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return a == 0 ? b : static_cast<T>(a > 0);
+  }
+};
+
 struct nextafter_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
@@ -617,6 +624,12 @@ struct logical_xor_functor {
   REGISTER_BINARY_CASTOUT_OP(NAME, uchar, bool);  \
   REGISTER_BINARY_OP(NAME, char, bool);           \
   REGISTER_BINARY_CASTOUT_OP(NAME, char, bool);   \
+  REGISTER_BINARY_OP(NAME, ushort, bool);         \
+  REGISTER_BINARY_CASTOUT_OP(NAME, ushort, bool); \
+  REGISTER_BINARY_OP(NAME, uint, bool);           \
+  REGISTER_BINARY_CASTOUT_OP(NAME, uint, bool);   \
+  REGISTER_BINARY_OP(NAME, ulong, bool);          \
+  REGISTER_BINARY_CASTOUT_OP(NAME, ulong, bool);  \
   REGISTER_BINARY_OP(NAME, bool, bool);           \
   REGISTER_BINARY_CASTOUT_OP(NAME, bool, bool)
 
@@ -702,6 +715,8 @@ REGISTER_OPMATH_FLOAT_BINARY_OP(igamma);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igammac);
 REGISTER_INTEGER_BINARY_OP(gcd);
 REGISTER_INTEGER_BINARY_OP(lcm);
+REGISTER_FLOAT_BINARY_OP(heaviside);
+REGISTER_INTEGER_BINARY_OP(heaviside);
 REGISTER_INTEGER_BINARY_OP(bitwise_and);
 REGISTER_INTEGER_BINARY_OP(bitwise_or);
 REGISTER_INTEGER_BINARY_OP(bitwise_xor);

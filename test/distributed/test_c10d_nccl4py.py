@@ -7,10 +7,11 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
 
 
 try:
@@ -22,7 +23,9 @@ try:
 except ImportError:
     HAS_NCCL4PY = False
 
-HAS_CUDA = torch.cuda.is_available()
+# nccl4py imports cleanly on ROCm but dlopens libnccl.so.2 on first use, which
+# only NVIDIA ships.
+HAS_CUDA = torch.cuda.is_available() and not TEST_WITH_ROCM
 
 
 def skip_unless_nccl4py(func):
@@ -37,9 +40,13 @@ class TestNCCL4PyBackendUnit(TestCase):
 
     def test_registration(self):
         dist.Backend.register_backend(
-            "nccl4py_test", _create_nccl4py_backend, devices=["cuda"]
+            "nccl4py_test",
+            _create_nccl4py_backend,
+            extended_api=True,
+            devices=["cuda"],
         )
         self.assertIn("nccl4py_test", dist.Backend.backend_list)
+        self.assertTrue(dist.Backend._plugins["NCCL4PY_TEST"].extended_api)
 
     def test_backend_name(self):
         store = dist.HashStore()
@@ -55,53 +62,39 @@ class TestNCCL4PyBackendUnit(TestCase):
 
 
 @skip_unless_nccl4py
-class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
-    def setUp(self):
-        super().setUp()
-        self._spawn_processes()
+@unittest.skipIf(torch.cuda.device_count() < 2, "2 CUDA GPUs required")
+class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
+    world_size = 2
+    timeout = dist.default_pg_timeout
 
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
-    @property
-    def world_size(self):
-        return 2
-
-    def _init_pg(self, device_id=None):
+    @classmethod
+    def backend_str(cls):
         dist.Backend.register_backend(
-            "nccl4py", _create_nccl4py_backend, devices=["cuda"]
-        )
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
             "nccl4py",
-            store=store,
-            rank=self.rank,
-            world_size=self.world_size,
-            device_id=device_id,
+            _create_nccl4py_backend,
+            extended_api=True,
+            devices=["cuda"],
         )
-
-    def _destroy_pg(self):
-        dist.destroy_process_group()
+        return "nccl4py"
 
     @skip_if_lt_x_gpu(2)
     def test_allreduce(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
+        pg = dist.distributed_c10d._get_default_group()
+        backend = pg._get_backend(device)
+        self.assertEqual(
+            backend.options.group_name,
+            dist.distributed_c10d._get_process_group_name(pg),
+        )
         t = torch.ones(4, device=device) * (self.rank + 1)
         dist.all_reduce(t)
         # SUM of [1,1,1,1] and [2,2,2,2] = [3,3,3,3]
         expected = torch.full((4,), 3.0, device=device)
         torch.cuda.synchronize(device)
         self.assertEqual(t, expected)
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_allreduce_async(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         t = torch.ones(4, device=device) * (self.rank + 1)
         work = dist.all_reduce(t, async_op=True)
@@ -110,22 +103,18 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         expected = torch.full((4,), 3.0, device=device)
         torch.cuda.synchronize(device)
         self.assertEqual(t, expected)
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_broadcast(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         t = torch.ones(4, device=device) * (self.rank + 1)
         dist.broadcast(t, src=0)
         expected = torch.ones(4, device=device)
         torch.cuda.synchronize(device)
         self.assertEqual(t, expected)
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_reduce(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         t = torch.ones(4, device=device) * (self.rank + 1)
         dist.reduce(t, dst=0)
@@ -133,11 +122,9 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         if self.rank == 0:
             expected = torch.full((4,), 3.0, device=device)
             self.assertEqual(t, expected)
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_allgather(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         inp = torch.ones(4, device=device) * (self.rank + 1)
         out = [torch.zeros(4, device=device) for _ in range(self.world_size)]
@@ -145,11 +132,9 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         torch.cuda.synchronize(device)
         self.assertEqual(out[0], torch.ones(4, device=device))
         self.assertEqual(out[1], torch.full((4,), 2.0, device=device))
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_all_gather_into_tensor(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         inp = torch.ones(4, device=device) * (self.rank + 1)
         out = torch.zeros(8, device=device)
@@ -159,11 +144,9 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
             [torch.ones(4, device=device), torch.full((4,), 2.0, device=device)]
         )
         self.assertEqual(out, expected)
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_tensor(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         inp = torch.ones(8, device=device) * (self.rank + 1)
         out = torch.zeros(4, device=device)
@@ -172,11 +155,9 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         # SUM: each rank gets chunk of (1+2)=3
         expected = torch.full((4,), 3.0, device=device)
         self.assertEqual(out, expected)
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_scatter(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         out = torch.zeros(4, device=device)
         if self.rank == 0:
@@ -190,11 +171,9 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         torch.cuda.synchronize(device)
         expected = torch.full((4,), float(self.rank + 1), device=device)
         self.assertEqual(out, expected)
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_gather(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         inp = torch.ones(4, device=device) * (self.rank + 1)
         if self.rank == 0:
@@ -206,11 +185,9 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         if self.rank == 0:
             self.assertEqual(out[0], torch.ones(4, device=device))
             self.assertEqual(out[1], torch.full((4,), 2.0, device=device))
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_all_to_all_single(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         inp = torch.ones(8, device=device) * (self.rank + 1)
         out = torch.zeros(8, device=device)
@@ -220,11 +197,9 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
             [torch.ones(4, device=device), torch.full((4,), 2.0, device=device)]
         )
         self.assertEqual(out, expected)
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_send_recv(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         peer = (self.rank + 1) % self.world_size
         send_t = torch.ones(4, device=device) * (self.rank + 1)
@@ -241,17 +216,13 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         torch.cuda.synchronize(device)
         expected = torch.full((4,), float(peer + 1), device=device)
         self.assertEqual(recv_t, expected)
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_barrier(self):
-        self._init_pg()
         dist.barrier()
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_alltoall(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         inp = [
             torch.full((4,), float(self.rank + 1), device=device)
@@ -262,11 +233,9 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         torch.cuda.synchronize(device)
         for i in range(self.world_size):
             self.assertEqual(out[i], torch.full((4,), float(i + 1), device=device))
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         inp = [
             torch.ones(4, device=device) * (self.rank + 1)
@@ -277,11 +246,9 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         torch.cuda.synchronize(device)
         expected = torch.full((4,), 3.0, device=device)
         self.assertEqual(out, expected)
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_all_to_all_single_uneven(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         if self.rank == 0:
             inp = torch.tensor([1.0, 2.0, 3.0], device=device)
@@ -299,11 +266,9 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
             self.assertEqual(out, torch.tensor([1.0, 4.0], device=device))
         else:
             self.assertEqual(out, torch.tensor([2.0, 3.0, 5.0, 6.0], device=device))
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_coalescing(self):
-        self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         pg = dist.distributed_c10d._get_default_group()
         backend = pg._get_backend(torch.device(device))
@@ -317,7 +282,54 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         torch.cuda.synchronize(device)
         self.assertEqual(t1, torch.full((4,), 3.0, device=device))
         self.assertEqual(t2, torch.full((4,), 30.0, device=device))
-        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
+    def test_get_future(self):
+        device = torch.device(f"cuda:{self.rank}")
+        t = torch.ones(4, device=device) * (self.rank + 1)
+        work = dist.all_reduce(t, async_op=True)
+        fut = work.get_future()
+        fut.wait()
+        torch.cuda.synchronize(device)
+        expected = torch.full((4,), 3.0, device=device)
+        self.assertEqual(t, expected)
+
+
+@skip_unless_nccl4py
+class TestNCCL4PyBackendLifecycle(MultiProcessTestCase):
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def world_size(self):
+        return 2
+
+    def _init_pg(self, device_id=None):
+        dist.Backend.register_backend(
+            "nccl4py",
+            _create_nccl4py_backend,
+            extended_api=True,
+            devices=["cuda"],
+        )
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl4py",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=device_id,
+        )
+
+    def _destroy_pg(self):
+        dist.destroy_process_group()
 
     @skip_if_lt_x_gpu(2)
     def test_split(self):
@@ -335,10 +347,10 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
 
     @skip_if_lt_x_gpu(2)
     def test_subgroup_preserves_device(self):
-        # Subgroup {1}: the backend creator only sees the group-local rank (0),
-        # which differs from this process's physical device (cuda:1). The
-        # communicator must be created on cuda:1, not cuda:(group_rank), or the
-        # collective runs against a comm on the wrong GPU.
+        # Subgroup {1} has group-local rank 0 on physical device cuda:1. The
+        # extended creator must preserve the device bound by the default group
+        # when it splits the communicator, or the collective runs against a
+        # comm on the wrong GPU.
         self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         subgroup = dist.new_group([1])
@@ -351,8 +363,6 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         self._destroy_pg()
 
     def _split_pg(self, device, timeout=None):
-        # new_group() builds a fresh backend through the creator function;
-        # split_group() is the only path that reaches Backend.split().
         self._init_pg(device_id=device)
         subgroup = dist.split_group(split_ranks=[[0, 1]], timeout=timeout)
         return subgroup, subgroup._get_backend(device)
@@ -364,6 +374,7 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         self.assertEqual(child.rank(), self.rank)
         self.assertEqual(child.size(), self.world_size)
         self.assertEqual(child._device, device)
+        self.assertEqual(child.options.global_ranks_in_group, [0, 1])
         t = torch.ones(4, device=device) * (self.rank + 1)
         dist.all_reduce(t, group=subgroup)
         torch.cuda.synchronize(device)
@@ -391,19 +402,6 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         device = torch.device(f"cuda:{self.rank}")
         _, child = self._split_pg(device, timeout=timeout)
         self.assertEqual(child.options._timeout, timeout)
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_get_future(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        t = torch.ones(4, device=device) * (self.rank + 1)
-        work = dist.all_reduce(t, async_op=True)
-        fut = work.get_future()
-        fut.wait()
-        torch.cuda.synchronize(device)
-        expected = torch.full((4,), 3.0, device=device)
-        self.assertEqual(t, expected)
         self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)

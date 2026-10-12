@@ -4,7 +4,6 @@
 
 import collections
 import sys
-import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -30,6 +29,21 @@ class UserDefinedTuple(tuple):
 
 class UserDefinedDeque(collections.deque):
     """User-defined deque subclass."""
+
+
+class UserDefinedDequeCustomInit(collections.deque):
+    """deque subclass with a Python __init__ (side effect + super().__init__)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.inited = True
+
+
+class UserDefinedDequeMaxlenInit(collections.deque):
+    """deque subclass whose __init__ forwards maxlen through super().__init__."""
+
+    def __init__(self, items):
+        super().__init__(items, maxlen=2)
 
 
 class UserDefinedSequence:
@@ -201,7 +215,6 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         result = UserDefinedList([1]) + UserDefinedList([2])
         self.assertIs(type(result), list)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_user_defined_list_inplace_concat(self):
         # in-place C sq_inplace_concat mutates and returns self: subclass
@@ -260,6 +273,22 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
     @make_dynamo_test
     def test_user_defined_deque_maxlen(self):
         d = UserDefinedDeque([1, 2, 3], maxlen=2)
+        self.assertEqual(list(d), [2, 3])
+        self.assertEqual(d.maxlen, 2)
+
+    @make_dynamo_test
+    def test_user_defined_deque_custom_init(self):
+        # A Python __init__ override is traced; its side effects apply and the
+        # inherited deque storage is still populated via super().__init__.
+        d = UserDefinedDequeCustomInit([1, 2, 3])
+        self.assertEqual(list(d), [1, 2, 3])
+        self.assertTrue(d.inited)
+
+    @make_dynamo_test
+    def test_user_defined_deque_custom_init_maxlen(self):
+        # A custom __init__ that forwards maxlen through super().__init__ must
+        # land maxlen (and its truncation) on the object itself.
+        d = UserDefinedDequeMaxlenInit([1, 2, 3])
         self.assertEqual(list(d), [2, 3])
         self.assertEqual(d.maxlen, 2)
 
@@ -1461,6 +1490,139 @@ class TestRangeUserIndex(torch._dynamo.test_case.TestCase):
                 return "type_error"
 
         self.assertEqual(fn(), "type_error")
+
+
+@instantiate_parametrized_tests
+class TestRangeIndex(torch._dynamo.test_case.TestCase):
+    @parametrize("value", [True, 1.0, 1 + 0j])
+    def test_numeric_equality_returns_int(self, value):
+        def fn():
+            return range(3).index(value)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 1)
+        self.assertIs(type(result), int)
+
+    @parametrize(
+        "bounds,expected",
+        [((1, 8, 2), (1, [1, 3])), ((7, 0, -2), (2, [7, 5, 3]))],
+    )
+    def test_custom_equality_stops_at_first_match(self, bounds, expected):
+        seen = []
+
+        class Match:
+            def __eq__(self, other):
+                seen.append(other)
+                return other % 3 == 0
+
+            def __index__(self):
+                raise AssertionError("index() must use equality, not __index__")
+
+        def fn():
+            return range(*bounds).index(Match()), seen
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), expected)
+
+    def test_int_subclass_uses_overridden_equality(self):
+        class Match(int):
+            def __eq__(self, other):
+                return other == 2
+
+        def fn():
+            return range(5).index(Match(99))
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), 2)
+
+    def test_int_subclass_uses_inherited_equality(self):
+        class IntSubclass(int):
+            pass
+
+        def fn():
+            return range(3).index(IntSubclass(1))
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), 1)
+
+    def test_symbolic_integer_needle(self):
+        def fn(x):
+            return x + range(10).index(x.shape[0])
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        for size in (3, 4):
+            x = torch.zeros(size)
+            self.assertEqual(compiled(x), fn(x))
+
+    def test_comparison_exception_propagates(self):
+        seen = []
+
+        class Match:
+            def __eq__(self, other):
+                seen.append(other)
+                if other == 2:
+                    raise RuntimeError("comparison failed")
+                return False
+
+        def fn():
+            try:
+                range(5).index(Match())
+            except RuntimeError:
+                return seen
+            return None
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), [0, 1, 2]
+        )
+
+    @parametrize("stop", [0, 3])
+    def test_missing_value_does_not_format_needle(self, stop):
+        seen = []
+
+        class Missing:
+            def __eq__(self, other):
+                seen.append(other)
+                return False
+
+            def __repr__(self):
+                raise RuntimeError("index() must not format the missing value")
+
+        def fn():
+            try:
+                range(stop).index(Missing())
+            except ValueError:
+                return seen
+            return None
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), list(range(stop))
+        )
+
+    def test_large_range_non_integer_match(self):
+        def fn():
+            return range(2**100).index(1 + 0j)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), 1)
+
+    def test_recompiles_for_changed_bounds_and_search_value(self):
+        class EqualTo:
+            def __init__(self, target):
+                self.target = target
+
+            def __eq__(self, other):
+                return other == self.target
+
+        def fn(x, values, needle):
+            return x + values.index(needle)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        x = torch.zeros(3)
+        needle = EqualTo(3)
+        self.assertEqual(compiled(x, range(-1, 8, 2), needle), x + 2)
+        self.assertEqual(counter.frame_count, 1)
+        needle.target = 5
+        self.assertEqual(compiled(x, range(-1, 8, 2), needle), x + 3)
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(compiled(x, range(9, -2, -2), needle), x + 2)
+        self.assertEqual(counter.frame_count, 3)
 
 
 class TestRangeIteratorSetstate(torch._dynamo.test_case.TestCase):

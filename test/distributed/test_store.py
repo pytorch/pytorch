@@ -33,6 +33,8 @@ from torch.testing._internal.common_distributed import (
     tp_transports,
 )
 from torch.testing._internal.common_utils import (
+    _restore_fp32_precision,
+    _snapshot_fp32_precision,
     ADDRESS_IN_USE,
     CONNECT_TIMEOUT,
     HardwareClassification,
@@ -55,21 +57,21 @@ else:
 DEFAULT_HOSTNAME = "localhost"
 
 
-_PRIOR_FP32_PRECISION: str | None = None
+_PRIOR_FP32_PRECISION: tuple[str, ...] | None = None
 
 
 def setUpModule():
     global _PRIOR_FP32_PRECISION
-    # Snapshot fp32_precision (not allow_tf32) so tearDownModule restores the
-    # exact original; writing allow_tf32 back can't reproduce the "none" default.
-    _PRIOR_FP32_PRECISION = torch.backends.cuda.matmul.fp32_precision
+    # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+    # backend-specific fp32_precision, so snapshot and restore all of it.
+    _PRIOR_FP32_PRECISION = _snapshot_fp32_precision()
     torch.backends.cuda.matmul.allow_tf32 = False
 
 
 def tearDownModule():
     global _PRIOR_FP32_PRECISION
     if _PRIOR_FP32_PRECISION is not None:
-        torch.backends.cuda.matmul.fp32_precision = _PRIOR_FP32_PRECISION
+        _restore_fp32_precision(_PRIOR_FP32_PRECISION)
         _PRIOR_FP32_PRECISION = None
 
 
@@ -135,7 +137,7 @@ class StoreTestBase:
 
     def _test_simple_wait(self, fs):
         with self.assertRaisesRegex(RuntimeError, "[t -i]imeout"):
-            fs.wait(["bad_key"], timedelta(seconds=0.25))
+            fs.wait(["bad_key"], timedelta(milliseconds=1))
         fs.add("good_key", 1)
         fs.wait(["good_key"])
 
@@ -545,9 +547,10 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(fs.num_keys(), 5)
         fs.delete_key("key")
         self.assertEqual(fs.num_keys(), 4)
-        fs.set_timeout(timedelta(seconds=2))
+        fs.set_timeout(timedelta(milliseconds=1))
         with self.assertRaises(RuntimeError):
             fs.get("key")
+        fs.set_timeout(timedelta(seconds=2))
         fs.delete_key("key0")
         fs.delete_key("key3")
         self.assertEqual(fs.num_keys(), 2)
@@ -696,7 +699,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_barrier_timeout_expires(self):
         store = self._create_store()
         with self.assertRaisesRegex(DistStoreError, "barrier timeout"):
-            store.barrier("test_barrier_fail", 2, timedelta(seconds=0.1))
+            store.barrier("test_barrier_fail", 2, timedelta(milliseconds=1))
 
     def test_barrier_multi_worker(self):
         server_store = self._create_store()

@@ -4,10 +4,16 @@ import ctypes
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_3
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 # These tests drive the real libcupti through _PyLibCupti, so they import its symbols;
@@ -19,9 +25,54 @@ if TEST_CUPTI:
 
 
 @unittest.skipIf(not TEST_CUPTI_V13_3, "requires a loaded libcupti >= 13.3")
+@instantiate_parametrized_tests
 class TestPyLibCupti(TestCase):
     def test_get_version(self):
         self.assertGreaterEqual(pylibcupti().get_version(), 130300)
+
+    @parametrize(
+        "runtime,outcome",
+        [
+            (120400, "unavailable"),
+            (130300, "warning"),
+            (130400, "ok"),
+            (130500, "ok"),
+            (140000, "unavailable"),
+        ],
+    )
+    def test_stub_version_compatibility(self, runtime, outcome):
+        from torch.profiler._cuspy import cupti_python
+        from torch.profiler._cuspy.observers.base import CuspyObserver
+
+        lib = pylibcupti()._lib
+        wrapper = cupti_python._PyLibCupti
+        with (
+            patch.object(cupti_python, "BUILD_CUPTI_API_VERSION", 130400),
+            patch.object(wrapper, "get_version", return_value=runtime),
+        ):
+            if outcome == "unavailable":
+                with (
+                    patch(
+                        "torch.profiler._cuspy.core.Cuspy",
+                        side_effect=lambda: wrapper(lib),
+                    ),
+                    self.assertLogs(
+                        "torch.profiler._cuspy.observers.base", level="WARNING"
+                    ) as logs,
+                ):
+                    obs = CuspyObserver([])
+                self.assertFalse(obs.available)
+                self.assertIn("requires CUPTI major version 13", logs.output[0])
+            elif outcome == "warning":
+                with self.assertLogs(cupti_python.logger, level="WARNING") as logs:
+                    wrapper(lib)
+                self.assertIn(
+                    f"CUPTI API version {runtime}, but its stubs were generated with CUPTI API version 130400",
+                    logs.output[0],
+                )
+            else:
+                with self.assertNoLogs(cupti_python.logger, level="WARNING"):
+                    wrapper(lib)
 
     def test_get_next_record_fn_address(self):
         # cuptiActivityGetNextRecord_v2 is present on >= 13.2, so its address (used

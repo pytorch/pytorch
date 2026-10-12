@@ -1148,7 +1148,8 @@ class HistogramObserver(UniformQuantizationObserverBase):
         beta = 1.0  # upper bound
         start_bin = 0
         end_bin = self.bins - 1
-        norm_min = float("inf")
+        # Score the untrimmed range so a trim is only accepted if it lowers the error.
+        norm_min = self._compute_quantization_error(start_bin, end_bin)
 
         while alpha < beta:
             # Find the next step
