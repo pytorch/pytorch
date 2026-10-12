@@ -1151,12 +1151,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
-        elif (
-            self.value in {collections.OrderedDict, collections.defaultdict}
-            and name == "fromkeys"
-        ):
+        elif name == "fromkeys" and issubclass(self.value, dict):
+            if not issubclass(self.value, collections.OrderedDict):
+                no_keywords(tx, f"{self.value.__name__}.fromkeys", kwargs)
+                check_positional(tx, "fromkeys", len(args), 1, 2)
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, self.value, *args, **kwargs
+                tx, self, *args, **kwargs
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
