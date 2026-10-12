@@ -34,9 +34,9 @@
 //
 //   "segment_unmap"  - Physical pages unmapped from an expandable segment via cuMemUnmap.
 //                      Virtual address range retained, physical memory returned to OS.
-//                      Only with expandable segments. Causes "pool_id unknown" for any
-//                      trace events whose addresses fall in the unmapped range, since
-//                      the segment no longer exists at snapshot time.
+//                      For legacy trace events without pool_id, addresses in the
+//                      unmapped range have unknown pool ownership because the segment
+//                      no longer exists at snapshot time.
 //                      Recorded in unmap_block() (CUDACachingAllocator.cpp:3790).
 //
 //   "snapshot"       - A call to torch.cuda.memory._snapshot(). Timestamp marker to
@@ -59,8 +59,9 @@
 //       alloc/free switch, but when include_private_inactive=true, segment events for
 //       private pools are captured separately (pool_segment_events) and used to drive
 //       pool envelope sizing based on reserved memory rather than active allocations.
-//     - The segments snapshot is used to resolve pool_id via find_pool_id() and to
-//       compute initial reserved memory per pool for envelope sizing.
+//     - The segments snapshot is used to resolve pool_id via find_pool_id() for
+//       legacy trace events and to compute initial reserved memory per pool for
+//       envelope sizing.
 //
 //   Segment-level view ("Active Cached Segment Timeline"):
 //     - process_alloc_data is called with plot_segments=true.
@@ -360,7 +361,7 @@ function format_frames(frames) {
  * @param {Object} snapshot - Memory snapshot from torch.cuda.memory._snapshot().
  * @param {Object[]} snapshot.segments - Current allocator segment state.
  * @param {Object[][]} snapshot.device_traces - Per-device arrays of trace events.
- *   Each event has {action, addr, size, frames, stream, segment_pool_id?, ...}.
+ *   Each event has {action, addr, size, frames, stream, pool_id?, ...}.
  * @param {string[]} snapshot.categories - Category names for color-coding.
  * @param {number} device - Device index into snapshot.device_traces.
  * @param {boolean} plot_segments - If true, plot segment-level (cudaMalloc)
@@ -379,10 +380,8 @@ function format_frames(frames) {
  *   elements_length: number,
  *   context_for_id: function(number): string
  * }}
- *   - max_size: peak total memory observed during the action replay (used for
- *     y-axis scaling). Note: this is only updated inside the action loop, so
- *     the initial state from initially_allocated may not be reflected here
- *     (use max_at_time for the true peak).
+ *   - max_size: peak total memory, including initial and summarized allocations
+ *     (used for y-axis scaling).
  *   - allocations_over_time: array of stacked-area data objects, each with
  *     {elem, timesteps[], offsets[], size, color}.
  *   - max_at_time: total memory at each timestep (for minimap rendering).
@@ -438,7 +437,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
   for (const e of snapshot.device_traces[device]) {
     switch (e.action) {
       case alloc:
-        elements.push(e);
+        elements.push({...e, annotations: [...(e.annotations ?? [])]});
         addr_to_alloc[e.addr] = elements.length - 1;
         actions.push(elements.length - 1);
         break;
@@ -460,7 +459,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
           // Unmatched free: alloc happened before recording (or was evicted
           // from the ring buffer). Create a new element from the free event;
           // its stack trace will show the free site, not the alloc site.
-          elements.push(e);
+          elements.push({...e, annotations: [...(e.annotations ?? [])]});
           initially_allocated.push(elements.length - 1);
           actions.push(elements.length - 1);
         }
@@ -471,7 +470,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     if (include_private_inactive &&
         (e.action === 'segment_alloc' || e.action === 'segment_free' ||
          e.action === 'segment_map' || e.action === 'segment_unmap')) {
-      const pid = find_pool_id(e.addr);
+      const pid = e.pool_id ?? e.segment_pool_id ?? find_pool_id(e.addr);
       if (isPrivatePoolId(pid)) {
         const is_add = e.action === 'segment_alloc' || e.action === 'segment_map';
         pool_segment_events.push({
@@ -522,10 +521,10 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     }
   }
 
-  // Resolve pool IDs for trace elements by looking up which segment they fall in
+  // Resolve pool IDs from trace events, with address lookup for legacy snapshots.
   for (const elem of elements) {
     if (!elem.segment_pool_id) {
-      elem.segment_pool_id = find_pool_id(elem.addr);
+      elem.segment_pool_id = elem.pool_id ?? find_pool_id(elem.addr);
     }
   }
 
@@ -551,7 +550,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
   const summarized_mem = {
     elem: 'summarized',
     timesteps: [],
-    offsets: [total_mem],
+    offsets: [],
     size: [],
     color: 0,
   };
@@ -559,12 +558,14 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
 
   // Record the current memory state and advance time by n steps
   function advance(n) {
+    const total = total_mem + total_summarized_mem;
+    max_size = Math.max(max_size, total);
     summarized_mem.timesteps.push(timestep);
     summarized_mem.offsets.push(total_mem);
     summarized_mem.size.push(total_summarized_mem);
     timestep += n;
     for (let i = 0; i < n; i++) {
-      max_at_time.push(total_mem + total_summarized_mem);
+      max_at_time.push(total);
     }
   }
 
@@ -887,7 +888,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         shift_above_pool_no_anim(pk, delta);
       }
     }
-    // Fix up pool stripe offsets again after reserved-based envelope growth
+    // Fix up pool stripe and summary offsets after reserved-based envelope growth.
     for (const pk in pools) {
       const p = pools[pk];
       if (!p.envelope_data) continue;
@@ -897,6 +898,9 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         for (let i = 0; i < s.offsets.length; i++) {
           s.offsets[i] = env_offset + block.inner_offset;
         }
+      }
+      if (p.summarized_data) {
+        p.summarized_data.offsets.fill(env_offset + p.drawn_active);
       }
     }
   }
@@ -1014,7 +1018,6 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         }
         delete pool_active_elems[elem];
       }
-      max_size = Math.max(total_mem + total_summarized_mem, max_size);
       continue;
     }
 
@@ -1052,7 +1055,6 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
       }
       total_mem -= size;
     }
-    max_size = Math.max(total_mem + total_summarized_mem, max_size);
   }
 
   // Process any remaining segment events after the last action
@@ -1063,7 +1065,6 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     if (pool.reserved > pool.max && pool.envelope_data) {
       grow_pool_envelope(pool, se.pool_key, pool.reserved);
     }
-    max_size = Math.max(total_mem + total_summarized_mem, max_size);
     seg_event_idx++;
   }
 
@@ -1088,6 +1089,9 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
       sd.size.push(sd.size.at(-1));
     }
   }
+  summarized_mem.timesteps.push(timestep);
+  summarized_mem.offsets.push(total_mem);
+  summarized_mem.size.push(total_summarized_mem);
   data.push(summarized_mem);
 
   return {
