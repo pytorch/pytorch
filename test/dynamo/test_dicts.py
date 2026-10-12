@@ -24,6 +24,11 @@ import torch.utils.checkpoint
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
+from torch._dynamo.variables import (
+    ConstDictVariable,
+    OrderedDictVariable,
+    VariableTracker,
+)
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -349,7 +354,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             fn(x, mapping),
         )
 
-    def test_unbound_dict_update_unsupported_receiver(self):
+    def test_unbound_dict_update_immutable_receiver(self):
         def identity(value):
             return value
 
@@ -359,10 +364,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         func = partial(identity, value=None)
-        with self.assertRaisesRegex(
-            Unsupported, "trace method `update` of class `type`"
-        ):
+        with self.assertRaises(Unsupported) as exc:
             torch.compile(fn, backend="eager", fullgraph=True)(x, func)
+        self.assertEqual(exc.exception.gb_type, "Unsupported method call")
         self.assertEqual(torch.compile(fn, backend="eager")(x, func), x + 2)
         self.assertEqual(func(), x + 1)
 
@@ -659,6 +663,53 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         self.assertEqual(fn(x), x + (operation is operator.ne))
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("name", ["__eq__", "__ne__"])
+    @parametrize("mapping_type", [ConstDictVariable, OrderedDictVariable])
+    def test_dict_comparison_unknown_python_type(self, name, mapping_type):
+        result = mapping_type({}).tp_richcompare_impl(None, VariableTracker(), name)
+        self.assertIs(result.as_python_constant(), NotImplemented)
+
+    @parametrize("operation", [operator.eq, operator.ne])
+    def test_hook_dict_self_comparison_no_recompile(self, operation):
+        def hook(module, args, output):
+            return output
+
+        def fn(x, module):
+            hooks = module._forward_hooks
+            return x + operation(hooks, hooks)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            module = torch.nn.Linear(2, 2)
+            module.register_forward_hook(hook)
+            self.assertEqual(compiled(x, module), fn(x, module))
+            self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("operation", [operator.eq, operator.ne])
+    def test_hook_dict_comparison_guards_keys(self, operation):
+        def hook(module, args, output):
+            return output
+
+        def fn(x, left, right):
+            return x + operation(left._forward_hooks, right._forward_hooks)
+
+        left = torch.nn.Linear(2, 2)
+        left.register_forward_hook(hook)
+        right = torch.nn.Linear(2, 2)
+        right._forward_hooks = left._forward_hooks.copy()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        self.assertEqual(compiled(x, left, right), fn(x, left, right))
+        self.assertEqual(counter.frame_count, 1)
+
+        right._forward_hooks.clear()
+        right.register_forward_hook(hook)
+        self.assertEqual(compiled(x, left, right), fn(x, left, right))
+        self.assertEqual(counter.frame_count, 2)
 
     @parametrize("name", ["__eq__", "__ne__"])
     def test_dict_comparison_unsupported_storage(self, name):
