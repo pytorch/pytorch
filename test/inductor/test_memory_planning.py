@@ -6,7 +6,12 @@ import unittest
 from types import SimpleNamespace
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU,
+    requires_gpu,
+)
 
 
 if IS_WINDOWS and IS_CI:
@@ -103,6 +108,136 @@ class TestMemoryPlanningOutputGroups(TestCase):
         group = self.compute_single_group(scheduler_buffers=scheduler_buffers)
         self.assertEqual(group.names, ["buf16", "buf48"])
         self.assertTrue(group.is_output)
+
+
+class TestMemoryPlanningStaticSizes(TestCase):
+    @staticmethod
+    def plan(groups):
+        """
+        Run MemoryPlanner.allocate_groups on uint8 buffers given as
+        (name, begin, end, nbytes) or (name, begin, end, nbytes, device).
+        """
+        from torch._inductor.codegen.memory_planning import (
+            BufferGroup,
+            LiveRange,
+            MemoryPlanner,
+        )
+        from torch._inductor.virtualized import V
+
+        def buffer(name, nbytes, device):
+            return SimpleNamespace(
+                get_name=lambda: name,
+                get_layout=lambda: SimpleNamespace(
+                    size=(), storage_size=lambda: nbytes
+                ),
+                get_dtype=lambda: torch.uint8,
+                get_device=lambda: device,
+            )
+
+        planner = MemoryPlanner(wrapper=None)
+        planner.buffer_groups = []
+        for name, begin, end, nbytes, *device in groups:
+            group = BufferGroup(buffer(name, nbytes, torch.device(*device or ["cpu"])))
+            group.live_range = LiveRange(begin, end)
+            planner.buffer_groups.append(group)
+        sizevars = SimpleNamespace(optimization_hint=lambda expr, fallback: expr)
+        with V.set_graph_handler(SimpleNamespace(sizevars=sizevars)):
+            planner.allocate_groups()
+        return planner
+
+    def assertNoClash(self, planner):
+        """Aligned, inside the pool, and no byte shared by two live buffers"""
+        blocks = [group.allocation for group in planner.buffer_groups]
+        for i, a in enumerate(blocks):
+            self.assertEqual(a.offset % 64, 0)
+            self.assertLessEqual(
+                a.offset + a.size_hint, a.pool.root.get_symbolic_size()
+            )
+            for b in blocks[:i]:
+                if (
+                    a.pool is b.pool
+                    and a.size_hint
+                    and b.size_hint
+                    and a.get_live_ranges().overlaps(b.get_live_ranges())
+                ):
+                    self.assertTrue(
+                        a.offset + a.size_hint <= b.offset
+                        or b.offset + b.size_hint <= a.offset
+                    )
+
+    def test_pool_reaches_max_live(self):
+        """
+        buf2 overlaps buf0 and buf1 in time, so a TemporalSplit appends it
+        above both. Beside them, where buf3 was, the pool is the 512 bytes
+        that buf0 and buf3 hold together, which no plan can go under.
+        """
+        planner = self.plan(
+            [
+                ("buf0", 2, 5, 256),
+                ("buf1", 5, 6, 256),
+                ("buf2", 3, 6, 192),
+                ("buf3", 1, 3, 256),
+            ]
+        )
+        (pool,) = planner.pools.device_to_pools[torch.device("cpu")]
+        self.assertEqual(pool.root.get_symbolic_size(), 512)
+        self.assertNoClash(planner)
+
+    def test_static_split_kept_per_device_only_when_smaller(self):
+        """
+        On cpu, StaticSplit needs 512 bytes and the tree 704. On the second
+        device, largest-first StaticSplit needs 704 bytes and the tree 576,
+        so that device keeps the tree.
+        """
+        planner = self.plan(
+            [
+                ("buf0", 2, 5, 256),
+                ("buf1", 5, 6, 256),
+                ("buf2", 3, 6, 192),
+                ("buf3", 1, 3, 256),
+                ("buf4", 1, 6, 128, "meta"),
+                ("buf5", 3, 5, 192, "meta"),
+                ("buf6", 5, 8, 256, "meta"),
+                ("buf7", 7, 9, 320, "meta"),
+                ("buf8", 2, 7, 192, "meta"),
+            ]
+        )
+        sizes = {
+            device: [pool.root.get_symbolic_size() for pool in pools]
+            for device, pools in planner.pools.device_to_pools.items()
+        }
+        self.assertEqual(
+            sizes, {torch.device("cpu"): [512], torch.device("meta"): [576]}
+        )
+        self.assertNoClash(planner)
+
+    def test_static_split_adversarial_lifetimes(self):
+        """
+        Sizes at the alignment boundary (0, 1, 63, 64, 65, 2**k - 1, 2**k,
+        2**k + 1), a staircase of nested lifetimes, and one 1 MiB buffer live
+        across many small ones. Three runs give one plan.
+        """
+        sizes = [0, 1, 63, 64, 65] + [
+            2**k + d for k in range(7, 17, 3) for d in (-1, 0, 1)
+        ]
+        groups = [(f"edge{i}", i, i + 4, n) for i, n in enumerate(sizes)]
+        groups += [
+            (f"stair{k}", 20 + k, 60 - k, 64 * (k + 1) + k % 3) for k in range(16)
+        ]
+        groups.append(("large", 60, 100, 1 << 20))
+        groups += [(f"small{t}", t, t + 1, 1 + t % 7) for t in range(61, 99)]
+        plans = []
+        for _ in range(3):
+            planner = self.plan(groups)
+            self.assertNoClash(planner)
+            plans.append(
+                [
+                    (g.allocation.pool.name, g.allocation.offset)
+                    for g in planner.buffer_groups
+                ]
+            )
+        self.assertEqual(plans[0], plans[1])
+        self.assertEqual(plans[0], plans[2])
 
 
 @requires_gpu()
@@ -425,5 +560,5 @@ class TestMemoryPlanning(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_GPU:
+    if HAS_CPU or HAS_GPU:
         run_tests()
