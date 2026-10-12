@@ -73,7 +73,6 @@ from ..utils import (
     sympy_product,
     sympy_subs,
     unique,
-    upcast_compute_type,
 )
 from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
@@ -2275,22 +2274,25 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         value: CSEVariable,
     ) -> CSEVariable:
         """Reshape the parent-full tile and reduce over the local reduction."""
+        from .triton import upcast_acc_dtype
+
         k = self._kernel
         value = self._layout.ensure_parent_tile_resolution(k, value)
         # The grouped-reduction reshape uses the grouped-axis named constants
         # from the reduced-output family, so emit the derived headers before
         # we materialize the reshape line.
         self._family.ensure_headers(k)
-        # Like TritonKernel.reduction, [b]float16 tiles reduce in float32.
-        reshaped = k.emit_reshape(
-            value, self._layout.reshape_shape, upcast_compute_type(src_dtype)
-        )
+        if value.dtype is None:
+            raise AssertionError("value must have a known dtype")
+        reshaped = k.emit_reshape(value, self._layout.reshape_shape, value.dtype)
         k.num_reduction += 1
+        # Like TritonKernel.reduction, the result has the accumulation type:
+        # [b]float16 reduces in float32, small signed integers in int32.
         return k.emit_reduce(
             reshaped,
             reduction_type,
             self._layout.reduce_axis,
-            upcast_compute_type(dtype),
+            upcast_acc_dtype(src_dtype),
             self._layout.output_shape,
         )
 
