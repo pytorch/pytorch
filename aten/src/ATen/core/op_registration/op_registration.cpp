@@ -4,7 +4,6 @@
 #include <ATen/core/op_registration/op_allowlist.h>
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #endif
 
 namespace c10 {

@@ -53,9 +53,21 @@ which will handle all the rough edges of the C API for the user.
 ### Python interop shims
 
 `torch/csrc/stable/pyobject.h` converts between Python objects and their
-`torch::stable` equivalents (for example `tensor_from_pyobject` / `tensor_to_pyobject` for
-converting between `torch::stable::Tensor` in C++ and `torch.Tensor` in Python). Like the
-rest of the stable ABI, an extension using them can just link `libtorch`.
+`torch::stable` equivalents:
+
+- `tensor_from_pyobject` / `tensor_to_pyobject`: `torch.Tensor` <-> `torch::stable::Tensor`
+- `dtype_from_pyobject` / `dtype_to_pyobject`: `torch.dtype` <-> `torch::headeronly::ScalarType`
+- `device_from_pyobject` / `device_to_pyobject`: `torch.device` <-> `torch::stable::Device`
+- `is_tensor_pyobject`: whether a Python object's actual type is `torch.Tensor`
+  or a subclass; overridden `__class__` attributes are ignored, as in
+  `tensor_from_pyobject`
+
+The dtype and device helpers translate through the stable enum mappings, which
+cover a subset of all dtypes and device types; converting a valid `torch.dtype`
+or `torch.device` outside that subset raises.
+
+Like the rest of the stable ABI, an extension using them can just link
+`libtorch`.
 
 Unlike the rest of the stable ABI, they require `libtorch_python` to be loaded at
 runtime and must be called with the GIL held. If you call them from a context that
@@ -265,6 +277,9 @@ Extensions can select the minimum abi version to be compatible with using:
 ```
 
 before including any stable headers or by passing the equivalent `-D` option to the compiler. Otherwise, the default will be the current `TORCH_ABI_VERSION`.
+
+You cannot target a newer ABI version than the libtorch you are compiling against. Setting `TORCH_TARGET_VERSION` above the torch version (`TORCH_ABI_VERSION`) you are
+building with will result in a compile error.
 
 The above ensures that if a user defines `TORCH_TARGET_VERSION` to be 0x0209000000000000 (2.9) and attempts to use a C shim API `foo` that was introduced in version 2.10, a compilation error will be raised. Similarly, the C++ wrapper APIs in `torch/csrc/stable` are compatible with older libtorch binaries up to the TORCH_ABI_VERSION they are exposed in and forward compatible with newer libtorch binaries.
 

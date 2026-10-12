@@ -81,13 +81,13 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
-  xpu-n-py3_10-inductor-benchmark-build:
-    name: xpu-n-py3.10-inductor-benchmark
+  xpu-n-py3_11-inductor-benchmark-build:
+    name: xpu-n-py3.11-inductor-benchmark
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "mt-"
-      build-environment: linux-noble-xpu-n-py3.10
+      build-environment: linux-noble-xpu-n-py3.11
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3-inductor-benchmarks
       runner: l-x86iavx512-48-384
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -113,19 +113,19 @@ jobs:
         ]}
     secrets: inherit
 
-  xpu-n-py3_10-inductor-benchmark-test-nightly:
+  xpu-n-py3_11-inductor-benchmark-test-nightly:
     permissions:
       id-token: write
       contents: read
     if: github.event_name != 'workflow_dispatch'
-    name: xpu-n-py3.10-inductor-benchmark
+    name: xpu-n-py3.11-inductor-benchmark
     uses: ./.github/workflows/_xpu-test.yml
-    needs: xpu-n-py3_10-inductor-benchmark-build
+    needs: xpu-n-py3_11-inductor-benchmark-build
     with:
-      build-environment: ${{ needs.xpu-n-py3_10-inductor-benchmark-build.outputs.build-environment }}
+      build-environment: ${{ needs.xpu-n-py3_11-inductor-benchmark-build.outputs.build-environment }}
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-false-cppwrapper-true-aotinductor-true-freezing_cudagraphs-false
-      docker-image: ${{ needs.xpu-n-py3_10-inductor-benchmark-build.outputs.docker-image }}
-      test-matrix: ${{ needs.xpu-n-py3_10-inductor-benchmark-build.outputs.test-matrix }}
+      docker-image: ${{ needs.xpu-n-py3_11-inductor-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.xpu-n-py3_11-inductor-benchmark-build.outputs.test-matrix }}
       timeout-minutes: 720
       # Disable monitor in perf tests for more investigation
       disable-monitor: true
@@ -133,19 +133,19 @@ jobs:
       monitor-data-collect-interval: 2
     secrets: inherit
 
-  xpu-n-py3_10-inductor-benchmark-test:
+  xpu-n-py3_11-inductor-benchmark-test:
     permissions:
       id-token: write
       contents: read
     if: github.event_name == 'workflow_dispatch'
-    name: xpu-n-py3.10-inductor-test
+    name: xpu-n-py3.11-inductor-test
     uses: ./.github/workflows/_xpu-test.yml
-    needs: xpu-n-py3_10-inductor-benchmark-build
+    needs: xpu-n-py3_11-inductor-benchmark-build
     with:
-      build-environment: ${{ needs.xpu-n-py3_10-inductor-benchmark-build.outputs.build-environment }}
+      build-environment: ${{ needs.xpu-n-py3_11-inductor-benchmark-build.outputs.build-environment }}
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}
-      docker-image: ${{ needs.xpu-n-py3_10-inductor-benchmark-build.outputs.docker-image }}
-      test-matrix: ${{ needs.xpu-n-py3_10-inductor-benchmark-build.outputs.test-matrix }}
+      docker-image: ${{ needs.xpu-n-py3_11-inductor-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.xpu-n-py3_11-inductor-benchmark-build.outputs.test-matrix }}
       timeout-minutes: 720
       disable-monitor: false
       monitor-log-interval: 15

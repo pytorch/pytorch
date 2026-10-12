@@ -33,7 +33,7 @@ __all__ = [
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
-# TODO: relax key type here; torch registrations should be possible to; but
+# TODO: relax key type here; torch registrations should be possible too; but
 # right now this type is accurate
 global_decomposition_table: dict[str, dict[torch._ops.OperatorBase, Callable]] = (
     defaultdict(dict)
@@ -311,7 +311,7 @@ def core_aten_decompositions() -> "CustomDecompTable":
 # See NOTE [Core ATen Ops]
 #
 # list was copied from torch/_inductor/decomposition.py
-# excluding decompositions that results in prim ops
+# excluding decompositions that result in prim ops
 # Resulting opset of decomposition is core aten ops
 def _core_aten_decompositions_post_autograd() -> dict[
     torch._ops.OperatorBase, Callable
@@ -348,6 +348,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.linalg_cross,
             aten.cudnn_batch_norm,
             aten.cudnn_batch_norm_backward,
+            aten.miopen_batch_norm,
             aten.miopen_batch_norm_backward,
             aten.deg2rad,
             aten.deg2rad_,

@@ -46,7 +46,7 @@ def defer_inlining() -> Generator[None, None, None]:
         _DEFER_INLINING = prior
 
 
-# Used to unwrap tensors classes like FunctionalTensor and Parameter
+# Used to unwrap tensor classes like FunctionalTensor and Parameter
 def _new_tensor(
     t: Any,
     new_shape: Sequence[int] | None = None,

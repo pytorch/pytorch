@@ -33,4 +33,8 @@ namespace torch::jit {
 // return true if graph is modified.
 TORCH_API bool PeepholeOptimizeDictIdioms(const std::shared_ptr<Graph>& graph);
 
+TORCH_API bool PeepholeOptimizeDictIdioms(
+    const std::shared_ptr<Graph>& graph,
+    const AliasDb& alias_db);
+
 } // namespace torch::jit
