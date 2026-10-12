@@ -29,6 +29,12 @@ except ImportError:
 if TYPE_CHECKING:
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
     from torch.cuda import _POOL_HANDLE, MemPool
+    from contextlib import AbstractContextManager
+
+    from torch.distributed._collective_annotations import (
+        CollectiveAnnotationHandle,
+        CollectiveMetadata,
+    )
     from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
     from torch.utils.hooks import RemovableHandle
 
@@ -1310,7 +1316,8 @@ class graph:
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
         self._enable_annotations = enable_annotations
-        self._collective_kernel_scopes: list[Any] = []
+        self._collective_kernel_scopes: list[AbstractContextManager[None]] = []
+        self._collective_hooks: CollectiveAnnotationHandle | None = None
         self.check_input_liveness = check_input_liveness
 
     def __enter__(self) -> None:
@@ -1449,11 +1456,14 @@ class graph:
                 backend = "edge_walk"
             _set_annotation_backend(backend)
             if self._enable_annotations and torch.distributed.is_available():
-                from torch.distributed.distributed_c10d import (
-                    _set_collective_annotation_hooks,
+                from torch.distributed._collective_annotations import (
+                    register_collective_annotation_hooks,
                 )
 
-                _set_collective_annotation_hooks(self)
+                self._collective_hooks = register_collective_annotation_hooks(
+                    self._push_collective_kernel_metadata,
+                    self._pop_collective_kernel_metadata,
+                )
         except BaseException:
             self._unset_collective_hooks()
             _graph_node_callbacks.disarm()
@@ -1466,7 +1476,7 @@ class graph:
             self.stream_ctx.__exit__(None, None, None)
             raise
 
-    def _push_collective_kernel_metadata(self, metadata: dict[str, Any]) -> None:
+    def _push_collective_kernel_metadata(self, metadata: CollectiveMetadata) -> None:
         from torch.cuda._graph_annotations import mark_kernels
 
         # Backward attribution would tag whatever autograd node launched the
@@ -1479,12 +1489,9 @@ class graph:
         self._collective_kernel_scopes.pop().__exit__(None, None, None)
 
     def _unset_collective_hooks(self) -> None:
-        if self._enable_annotations and torch.distributed.is_available():
-            from torch.distributed.distributed_c10d import (
-                _unset_collective_annotation_hooks,
-            )
-
-            _unset_collective_annotation_hooks(self)
+        if self._collective_hooks is not None:
+            self._collective_hooks.remove()
+            self._collective_hooks = None
 
     def __exit__(self, *args: object) -> None:
         from torch.cuda import _graph_node_callbacks

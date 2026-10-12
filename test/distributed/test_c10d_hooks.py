@@ -5,11 +5,10 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import HookOpName
-from torch.distributed.distributed_c10d import (
-    _get_default_group,
-    _set_collective_annotation_hooks,
-    _unset_collective_annotation_hooks,
+from torch.distributed._collective_annotations import (
+    register_collective_annotation_hooks,
 )
+from torch.distributed.distributed_c10d import _get_default_group
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
@@ -155,8 +154,8 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         seq = pg._get_sequence_number_for_group()
         ws = self.world_size
         peer = (self.rank + 1) % ws
-        annotator = mock.Mock()
-        _set_collective_annotation_hooks(annotator)
+        push, pop = mock.Mock(), mock.Mock()
+        handle = register_collective_annotation_hooks(push, pop)
         try:
             dist.all_reduce(torch.ones(3))
             dist.all_gather_into_tensor(torch.zeros(2 * ws), torch.ones(2))
@@ -165,10 +164,10 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
             else:
                 dist.recv(torch.zeros(2), src=peer)
         finally:
-            _unset_collective_annotation_hooks(annotator)
+            handle.remove()
 
-        pushes = annotator._push_collective_kernel_metadata.call_args_list
-        allreduce, allgather, p2p = (c.args[0] for c in pushes)
+        self.assertEqual(pop.call_count, push.call_count)
+        allreduce, allgather, p2p = (c.args[0] for c in push.call_args_list)
         self.assertEqual(
             allreduce,
             {
@@ -202,16 +201,14 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
 
     def test_collective_annotation_hooks(self):
         group = dist.new_group()
-        annotator = mock.Mock()
-        _set_collective_annotation_hooks(annotator)
+        calls = mock.Mock()
+        handle = register_collective_annotation_hooks(calls.push, calls.pop)
         dist.all_reduce(torch.ones(1), group=group)
-        _unset_collective_annotation_hooks(annotator)
+        handle.remove()
+        handle.remove()  # idempotent
         dist.all_reduce(torch.ones(1), group=group)
-        self.assertEqual(
-            [name for name, _, _ in annotator.mock_calls],
-            ["_push_collective_kernel_metadata", "_pop_collective_kernel_metadata"],
-        )
-        metadata = annotator._push_collective_kernel_metadata.call_args.args[0]
+        self.assertEqual([name for name, _, _ in calls.mock_calls], ["push", "pop"])
+        metadata = calls.push.call_args.args[0]
         self.assertEqual(metadata["Process Group Name"], group.group_name)
         dist.destroy_process_group(group)
 

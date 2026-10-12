@@ -57,6 +57,7 @@ class RecordingBackend(C10DBackend):
         self.time_estimate_started = False
         self.sequence_number = 0
         self.registered_hook = None
+        self.abort_hooks = {}
         self.wait_for_pending_works_count = 0
         self.collectives_timing_enabled = False
         self.eager_device = None
@@ -97,6 +98,10 @@ class RecordingBackend(C10DBackend):
         return True
 
     @property
+    def supports_abort_hooks(self):
+        return True
+
+    @property
     def options(self):
         return self._options
 
@@ -105,6 +110,19 @@ class RecordingBackend(C10DBackend):
 
     def set_timeout(self, timeout):
         self.calls.append(("set_timeout", timeout))
+
+    def _add_ephemeral_timeout(self, timeout):
+        self.calls.append(("_add_ephemeral_timeout", timeout))
+
+    def register_abort_hook(self, hook_id, hook):
+        self.abort_hooks[hook_id] = hook
+
+    def unregister_abort_hook(self, hook_id):
+        del self.abort_hooks[hook_id]
+
+    def custom_method(self, value):
+        self.calls.append(("custom_method", value))
+        return value + 1
 
     def _start_time_estimate(self):
         self.time_estimate_started = True
@@ -190,6 +208,11 @@ class RecordingBackend(C10DBackend):
             for output, input in zip(output_tensors[0], input_tensors):
                 output.copy_(input)
         return self._new_work(output_tensors)
+
+    def gather_single(self, output_tensor, input_tensor, opts):
+        self.calls.append(("gather_single", opts))
+        output_tensor.copy_(input_tensor)
+        return self._new_work(output_tensor)
 
     def scatter(self, output_tensors, input_tensors, opts):
         self.calls.append(("scatter", opts))
@@ -334,11 +357,13 @@ class TestPyBackend(TestCase):
             "supports_shrinking",
             "supports_reconfigure",
             "supports_window",
+            "supports_abort_hooks",
         ):
             self.assertTrue(getattr(backend, attr))
 
         self.assertTrue(group.supports_reconfigure)
         self.assertTrue(group.supports_window)
+        self.assertTrue(group.supports_abort_hooks)
         self.assertEqual(
             group._get_backend(torch.device("cpu")).options.backend, "python-backend"
         )
@@ -378,6 +403,12 @@ class TestPyBackend(TestCase):
         group.all_gather_single_coalesced(outputs, inputs).wait()
         self.assertEqual(outputs, inputs)
         self.assertEqual(backend.calls[-1][0], "all_gather_single_coalesced")
+
+        for gather_single in (group.gather_single, group.gather_into_tensor):
+            output = torch.zeros(2)
+            gather_single(output, input).wait()
+            self.assertEqual(output, input)
+            self.assertEqual(backend.calls[-1][0], "gather_single")
 
         rs_output = torch.zeros(2)
         rs_input = torch.arange(2.0)
@@ -438,6 +469,14 @@ class TestPyBackend(TestCase):
         timeout = timedelta(seconds=3)
         group.set_timeout(timeout)
         self.assertEqual(backend.calls[-1], ("set_timeout", timeout))
+
+        group._add_ephemeral_timeout(timeout)
+        self.assertEqual(backend.calls[-1], ("_add_ephemeral_timeout", timeout))
+
+        group.register_abort_hook(7, lambda: None)
+        self.assertIn(7, backend.abort_hooks)
+        group.unregister_abort_hook(7)
+        self.assertNotIn(7, backend.abort_hooks)
 
         shrunk = group._get_backend(torch.device("cpu")).shrink([1], 7, None)
         self.assertEqual(shrunk.name(), "shrunk-python-backend")
@@ -513,6 +552,18 @@ class TestPyBackend(TestCase):
         self.assertTrue(backend.aborted)
         self.assertTrue(backend.shut_down)
 
+    @requires_gloo()
+    def test_allocate_tensor_from_cpp(self) -> None:
+        # ProcessGroupWrapper forwards allocateTensor to the wrapped backend.
+        backend = RecordingBackend(0, 1)
+        wrapper = _ProcessGroupWrapper(backend, backend)
+        allocated = wrapper.allocate_tensor(
+            4, dtype=torch.float64, device=torch.device("cpu")
+        )
+        self.assertEqual(allocated.shape, (4,))
+        self.assertEqual(allocated.dtype, torch.float64)
+        self.assertEqual(backend.allocate_args, (4, torch.float64, torch.device("cpu")))
+
 
 CAPABILITY_PROPERTIES = (
     "supports_splitting",
@@ -521,6 +572,7 @@ CAPABILITY_PROPERTIES = (
     "supports_shrinking",
     "supports_reconfigure",
     "supports_window",
+    "supports_abort_hooks",
 )
 
 
@@ -563,6 +615,10 @@ class PropertyOverrideBackend(C10DBackend):
         return True
 
     @property
+    def supports_abort_hooks(self):
+        return True
+
+    @property
     def options(self):
         return self._options
 
@@ -574,6 +630,7 @@ class ClassAttributeOverrideBackend(C10DBackend):
     supports_shrinking = True
     supports_reconfigure = True
     supports_window = True
+    supports_abort_hooks = True
     options = C10DBackend.Options("class-attribute", timeout=timedelta(seconds=5))
 
 
@@ -588,6 +645,10 @@ class SuperDelegatingBackend(BareBackend):
     def supports_splitting(self):
         self.evaluations += 1
         return not super().supports_splitting
+
+    @property
+    def supports_abort_hooks(self):
+        return not super().supports_abort_hooks
 
     @property
     def options(self):
@@ -608,6 +669,7 @@ def cpp_property_values(backend):
         "supports_shrinking": wrapper.supports_shrinking,
         "supports_reconfigure": group.supports_reconfigure,
         "supports_window": group.supports_window,
+        "supports_abort_hooks": group.supports_abort_hooks,
     }, wrapper
 
 
@@ -665,6 +727,8 @@ class TestPyBackendPropertyOverrides(TestCase):
         values, wrapper = cpp_property_values(backend)
         self.assertTrue(values["supports_splitting"])
         self.assertEqual(backend.evaluations, 2)
+        self.assertTrue(backend.supports_abort_hooks)
+        self.assertTrue(values["supports_abort_hooks"])
         with self.assertRaisesRegex(
             RuntimeError, "does not implement getBackendOptions"
         ):
@@ -782,6 +846,13 @@ class TestPyBackendProcessGroup(MultiProcessTestCase):
         allreduce_tensor = torch.zeros(2)
         dist.all_reduce(allreduce_tensor)
         self.assertEqual(allreduce_tensor, torch.full((2,), 2.0))
+
+        # Non-standard methods are reached through the backend object.
+        backend_impl = dist.get_backend_impl()
+        self.assertIs(backend_impl, backend)
+        self.assertIs(dist.get_backend_impl(pg, torch.device("cpu")), backend)
+        self.assertEqual(backend_impl.custom_method(41), 42)
+        self.assertEqual(backend.calls[-1], ("custom_method", 41))
 
         sync_tensor = torch.zeros(2)
         dist.all_reduce(sync_tensor, async_op=False)

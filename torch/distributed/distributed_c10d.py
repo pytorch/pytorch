@@ -20,7 +20,6 @@ import warnings
 from collections.abc import Callable, Sequence
 from datetime import timedelta
 from typing import (
-    Any,
     cast,
     Final,
     Literal,
@@ -56,7 +55,6 @@ from torch._C._distributed_c10d import (
     HealthCheckHook,
     NanCheckHook,
     PrefixStore,
-    PreHookArgs,
     ProcessGroup,
     ReconfigureOptions,
     ReduceOp,
@@ -3007,7 +3005,13 @@ def _new_process_group_helper(
     # communicators in some backends, we have to be careful and only
     # split when we *know* the default PG has already started communicator initialization.
     # We know this if we have bound a device id to the default pg (eager initialized).
-    if is_initialized() and _get_default_group().bound_device_id:
+    # A lazy_init group is not created by splitting: splitting is eager and collective
+    # over the parent.
+    if (
+        is_initialized()
+        and _get_default_group().bound_device_id
+        and not getattr(backend_options, "lazy_init", False)
+    ):
         split_from = _get_split_source(_get_default_group(), backend)
     else:
         split_from = None
@@ -4127,7 +4131,7 @@ def all_reduce(
     Examples:
         >>> # xdoctest: +SKIP("no rank")
         >>> # All tensors below are of torch.int64 type.
-        >>> # We have 2 process groups, 2 ranks.
+        >>> # We have 2 ranks.
         >>> device = torch.device(f"cuda:{rank}")
         >>> tensor = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
         >>> tensor
@@ -4139,7 +4143,7 @@ def all_reduce(
         tensor([4, 6], device='cuda:1') # Rank 1
 
         >>> # All tensors below are of torch.cfloat type.
-        >>> # We have 2 process groups, 2 ranks.
+        >>> # We have 2 ranks.
         >>> tensor = torch.tensor(
         ...     [1 + 1j, 2 + 2j], dtype=torch.cfloat, device=device
         ... ) + 2 * rank * (1 + 1j)
@@ -5257,7 +5261,7 @@ def all_gather(
     Examples:
         >>> # xdoctest: +SKIP("need process group init")
         >>> # All tensors below are of torch.int64 dtype.
-        >>> # We have 2 process groups, 2 ranks.
+        >>> # We have 2 ranks.
         >>> device = torch.device(f"cuda:{rank}")
         >>> tensor_list = [
         ...     torch.zeros(2, dtype=torch.int64, device=device) for _ in range(2)
@@ -5275,7 +5279,7 @@ def all_gather(
         [tensor([1, 2], device='cuda:1'), tensor([3, 4], device='cuda:1')] # Rank 1
 
         >>> # All tensors below are of torch.cfloat dtype.
-        >>> # We have 2 process groups, 2 ranks.
+        >>> # We have 2 ranks.
         >>> tensor_list = [
         ...     torch.zeros(2, dtype=torch.cfloat, device=device) for _ in range(2)
         ... ]
@@ -5664,7 +5668,7 @@ def gather(
 
     Example::
         >>> # xdoctest: +SKIP("no rank")
-        >>> # We have 2 process groups, 2 ranks.
+        >>> # We have 2 ranks.
         >>> tensor_size = 2
         >>> device = torch.device(f'cuda:{rank}')
         >>> tensor = torch.ones(tensor_size, device=device) + rank
@@ -6026,6 +6030,40 @@ def reduce_scatter(
     Returns:
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group.
+
+    Examples:
+        >>> # xdoctest: +SKIP("need process group init")
+        >>> # All tensors below are of torch.int64 dtype.
+        >>> # We have 2 ranks.
+        >>> device = torch.device(f"cuda:{rank}")
+        >>> tensor_list = [
+        ...     torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank + i * 2
+        ...     for i in range(2)
+        ... ]
+        >>> tensor_list
+        [tensor([1, 2], device='cuda:0'), tensor([3, 4], device='cuda:0')] # Rank 0
+        [tensor([3, 4], device='cuda:1'), tensor([5, 6], device='cuda:1')] # Rank 1
+        >>> output = torch.zeros(2, dtype=torch.int64, device=device)
+        >>> dist.reduce_scatter(output, tensor_list)
+        >>> output
+        tensor([4, 6], device='cuda:0') # Rank 0 (1+3, 2+4)
+        tensor([8, 10], device='cuda:1') # Rank 1 (3+5, 4+6)
+
+        >>> # All tensors below are of torch.cfloat dtype.
+        >>> # We have 2 ranks.
+        >>> tensor_list = [
+        ...     torch.tensor([1 + 1j, 2 + 2j], dtype=torch.cfloat, device=device)
+        ...     + (2 * rank + i * 2) * (1 + 1j)
+        ...     for i in range(2)
+        ... ]
+        >>> tensor_list
+        [tensor([1.+1.j, 2.+2.j], device='cuda:0'), tensor([3.+3.j, 4.+4.j], device='cuda:0')] # Rank 0
+        [tensor([3.+3.j, 4.+4.j], device='cuda:1'), tensor([5.+5.j, 6.+6.j], device='cuda:1')] # Rank 1
+        >>> output = torch.zeros(2, dtype=torch.cfloat, device=device)
+        >>> dist.reduce_scatter(output, tensor_list)
+        >>> output
+        tensor([4.+4.j, 6.+6.j], device='cuda:0') # Rank 0
+        tensor([8.+8.j, 10.+10.j], device='cuda:1') # Rank 1
 
     """
     relevant_args = (output,)
@@ -8310,99 +8348,3 @@ def _new_window(
     """
     pg = group or _get_default_group()
     return pg.new_window(tensor)
-
-
-def _collective_metadata(group: ProcessGroup, args: PreHookArgs) -> dict[str, Any]:
-    """Mirrors the ``record_param_comms`` fields that ``saveNcclMeta`` in
-    torch/csrc/profiler/util.cpp writes for a collective, in the same format. Split
-    sizes, Comms Id, the p2p Seq and the global rank start/stride aren't available
-    from the hook."""
-    op = args.name.name
-    # The collective name ProcessGroupNCCL passes to record_param_comms, where it
-    # isn't the lowercased op.
-    name = {
-        "ALLGATHER": "all_gather",
-        "ALLTOALL": "all_to_all",
-        "ALLGATHER_BASE": "_allgather_base",
-        "REDUCE_SCATTER_BASE": "_reduce_scatter_base",
-        "ALLTOALL_BASE": "all_to_allv",
-    }.get(op, op.lower())
-    inputs = args.input_tensors
-    in_place = op in ("BROADCAST", "ALLREDUCE", "REDUCE", "ALLREDUCE_COALESCED")
-    outputs = inputs if in_place else args.output_tensors
-    ranks = get_process_group_ranks(group)
-    metadata: dict[str, Any] = {
-        "Collective name": name,
-        "In msg nelems": sum(t.numel() for t in inputs),
-        "Out msg nelems": sum(t.numel() for t in outputs),
-        "Group size": len(ranks),
-        "Process Group Name": group.group_name,
-    }
-    if group.group_desc:
-        metadata["Process Group Description"] = group.group_desc
-    # format_list in util.cpp truncates past 30 entries.
-    if len(ranks) > 30:
-        head = ", ".join(map(str, ranks[:29]))
-        metadata["Process Group Ranks"] = f"[{head}, ..., {ranks[-1]}]"
-    else:
-        metadata["Process Group Ranks"] = f"[{', '.join(map(str, ranks))}]"
-    metadata["Is asynchronized op"] = args.async_op
-    if inputs or outputs:
-        metadata["dtype"] = str((inputs or outputs)[0].dtype).removeprefix("torch.")
-    if op in ("SEND", "RECV"):
-        # P2P ops advance a separate counter the group does not expose, so no Seq.
-        # Like record_param_comms, "Rank" is the peer's group rank here.
-        metadata["Rank"] = args.root
-        if 0 <= args.root < len(ranks):
-            key = "Dst Rank" if op == "SEND" else "Src Rank"
-            metadata[key] = ranks[args.root]
-    else:
-        metadata["Rank"] = group.rank()
-        try:
-            # The hook fires before the backend bumps its counter.
-            metadata["Seq"] = (
-                group._get_sequence_number_for_group()  # pyrefly: ignore[missing-attribute]
-                + 1
-            )
-        except RuntimeError:
-            pass
-    return metadata
-
-
-def _set_collective_annotation_hooks(annotator: Any) -> None:
-    """Hook every existing process group so that each collective calls
-    ``annotator._push_collective_kernel_metadata(metadata)`` just before it
-    launches its kernels and ``annotator._pop_collective_kernel_metadata()`` just
-    after. The push must attach ``metadata`` to every kernel the calling thread
-    launches until the matching pop.
-
-    Kineto already copies ``record_param_comms`` onto eager kernels; this is for
-    replayed CUDA graphs, which have no CPU op to copy from, and Cuspy, which does not
-    see ``record_param_comms``. Groups created after this call are not hooked, and
-    collectives inside ``_coalescing_manager`` or a batched ``batch_isend_irecv`` are
-    not annotated: their kernels launch when the group ends, outside any hook.
-
-    The hooks are keyed by ``id(annotator)``, so different annotators can overlap.
-    c10d does not lock its hook maps, so set and unset while no other thread is
-    issuing collectives, e.g. between steps.
-    """
-    # If the push raises, c10d skips the collective and its post hook, so pushes and
-    # pops always pair up.
-    for group in _world.pg_names:
-        group.register_pre_hook(
-            id(annotator),
-            lambda args, group=group: annotator._push_collective_kernel_metadata(
-                _collective_metadata(group, args)
-            ),
-        )
-        group.register_post_hook(
-            id(annotator), lambda _: annotator._pop_collective_kernel_metadata()
-        )
-
-
-def _unset_collective_annotation_hooks(annotator: Any) -> None:
-    """Remove the hooks :func:`_set_collective_annotation_hooks` set for
-    ``annotator``."""
-    for group in _world.pg_names:
-        group.unregister_pre_hook(id(annotator))
-        group.unregister_post_hook(id(annotator))

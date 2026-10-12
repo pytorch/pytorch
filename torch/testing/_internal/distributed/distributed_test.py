@@ -550,7 +550,7 @@ class Barrier:
 
             if time.time() - start_time > timeout:
                 raise RuntimeError("barrier timeout")
-            time.sleep(0.1)
+            time.sleep(0.01)
 
 
 class TestDistBackend(MultiProcessTestCase):
@@ -561,6 +561,12 @@ class TestDistBackend(MultiProcessTestCase):
         super().setUpClass()
 
     def setUp(self):
+        # Decorators set `_skipped_reason` when every rank would skip; skip here
+        # to avoid spawning ranks. Sandcastle reports rank skips as passes, so
+        # leave those to the ranks.
+        reason = getattr(getattr(self, self._testMethodName), "_skipped_reason", None)
+        if reason is not None and not IS_SANDCASTLE:
+            self.skipTest(reason)
         super().setUp()
         # initialize temp directories
         initialize_temp_directories()

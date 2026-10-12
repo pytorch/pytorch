@@ -25,6 +25,7 @@ import torch
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from torch.distributed._collective_annotations import CollectiveMetadata
     from torch.utils.hooks import RemovableHandle
 
 
@@ -378,10 +379,11 @@ class CuspyObserver:
         finally:
             self.pop_annotation()
 
-    def _push_collective_kernel_metadata(self, metadata: dict[str, Any]) -> None:
+    def _push_collective_kernel_metadata(self, metadata: CollectiveMetadata) -> None:
         """Attach a collective's ``record_param_comms`` fields to the kernels it
         launches. Cuspy doesn't see ``record_param_comms``, so c10d calls this from a
-        pre-hook (see ``_set_collective_annotation_hooks``).
+        pre-hook (see ``register_collective_annotation_hooks`` in
+        ``torch.distributed._collective_annotations``).
 
         Pushes a new external correlation id and keys ``metadata`` on it, so the
         fields land on every kernel this thread launches until the matching
