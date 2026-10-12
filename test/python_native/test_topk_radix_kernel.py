@@ -82,12 +82,16 @@ class TestRadixKernelBuilder(TestCase):
         )
         self.assertEqual(b["prefix"], "topk_radix_f32_k1024_det_vdyn_tarch")
         self.assertEqual(b["fn"].min_blocks_per_mp, 2)
+        # Detect the cached target before the mock can force the sm_100a fallback
+        # and leave subsequent tests compiling for the wrong GPU.
+        cutlass_dsl.CuTeDSL._get_dsl().get_arch_enum()
         with mock.patch.object(
             cutlass_dsl.cuda_helpers,
             "get_device_attribute",
             side_effect=AssertionError("unexpected CUDA device query"),
-        ):
+        ) as get_device_attribute:
             cute.compile(b["fn"], *b["fake_args"])
+        get_device_attribute.assert_not_called()
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
