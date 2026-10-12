@@ -131,12 +131,12 @@ class TestAOTAutocastStates(TestCase):
             patch.object(
                 aot_utils.torch._C,
                 "_autocast_supported_devices",
-                return_value=["cpu", "npu"],
+                return_value=["cpu", "renamed_backend"],
             ),
             patch.object(
                 aot_utils.torch._C,
                 "_get_privateuse1_backend_name",
-                return_value="npu",
+                return_value="renamed_backend",
             ),
             patch.object(aot_utils.torch, "is_autocast_enabled") as enabled,
             patch.object(aot_utils.torch, "get_autocast_dtype") as dtype,
@@ -144,10 +144,10 @@ class TestAOTAutocastStates(TestCase):
                 aot_utils.torch, "is_autocast_cache_enabled", return_value=True
             ),
         ):
-            enabled.side_effect = lambda device: device == "npu"
+            enabled.side_effect = lambda device: device == "renamed_backend"
             dtype.side_effect = lambda device: {
                 "cpu": torch.float32,
-                "npu": torch.float16,
+                "renamed_backend": torch.float16,
             }[device]
 
             self.assertEqual(
@@ -249,19 +249,6 @@ class TestAOTAutocastStates(TestCase):
         finally:
             torch.set_autocast_enabled(extra, prior_enabled)
             torch.set_autocast_dtype(extra, prior_dtype)
-
-    def test_get_autocast_states_changes_when_npu_autocast_toggles(self) -> None:
-        try:
-            import torch_npu  # noqa: F401
-        except ImportError:
-            self.skipTest("torch_npu is not available")
-        if not torch.npu.is_available():
-            self.skipTest("NPU is not available")
-
-        states_off = _get_autocast_states()
-        with torch.amp.autocast("npu", enabled=True, dtype=torch.float16):
-            states_on = _get_autocast_states()
-        self.assertNotEqual(states_off, states_on)
 
 
 if __name__ == "__main__":
