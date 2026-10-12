@@ -3051,6 +3051,7 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "entry frame was BYPASSED"):
             _build_multigraph_artifact(entry, backends, summary, "eager", step)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_multigraph_artifact_installs_a_frame_the_entry_cannot_reach(self):
         # A graph break inside a child module's forward compiles that forward as
         # its own frame, entered by an ordinary call the standalone dispatcher
