@@ -277,7 +277,11 @@ class TestAmdSmiImport(TestCase):
                 loader_dir = os.path.join(tmpdir, "loader")
                 os.mkdir(loader_dir)
                 os.symlink(library_source, os.path.join(loader_dir, "libamd_smi.so"))
-                env_updates["LD_LIBRARY_PATH"] = loader_dir
+                env_updates["LD_LIBRARY_PATH"] = os.pathsep.join(
+                    path
+                    for path in (loader_dir, os.environ.get("LD_LIBRARY_PATH"))
+                    if path
+                )
                 env_updates["ROCM_HOME"] = ""
                 env_updates["ROCM_PATH"] = ""
             if provide_sdk_library:
@@ -8022,6 +8026,9 @@ class TestCudaAllocator(TestCase):
                 return torch.empty(311, 411, pin_memory=True)
 
             x = host_alloc()
+            nbytes = x.untyped_storage().nbytes()
+            block_size = 1 << (nbytes - 1).bit_length()
+            addr = x.untyped_storage().data_ptr()
 
             ss = torch.cuda.memory._snapshot()
 
@@ -8033,6 +8040,9 @@ class TestCudaAllocator(TestCase):
                 b = seg["blocks"][0]
                 if b["state"] == "active_allocated":
                     self.assertTrue("test_cuda" in b["frames"][0]["filename"])
+                    self.assertEqual(b["size"], block_size)
+                    self.assertEqual(b["requested_size"], nbytes)
+                    self.assertEqual(seg["requested_size"], nbytes)
                     found_it = True
             self.assertTrue(found_it)
 
@@ -8040,22 +8050,33 @@ class TestCudaAllocator(TestCase):
             text = json.dumps(ss)
             self.assertIn("host_alloc", text)
 
-            # Verify trace actions: segment_alloc then alloc
-            actions = [te["action"] for te in ss["host_traces"]]
-            self.assertIn("segment_alloc", actions)
-            self.assertIn("alloc", actions)
-
-            # Free and verify free traces
+            # A smaller request in the same power-of-two bucket reuses the cached block
             del x
-            ss = torch.cuda.memory._snapshot()
-            actions = [te["action"] for te in ss["host_traces"]]
-            self.assertIn("free_requested", actions)
-            self.assertIn("free_completed", actions)
-
-            # Empty cache and verify segment_free is the last action
+            y = torch.empty(300, 411, pin_memory=True)
+            self.assertEqual(y.untyped_storage().data_ptr(), addr)
+            reused_nbytes = y.untyped_storage().nbytes()
+            del y
             torch._C._host_emptyCache()
+
+            # Segment events carry the rounded block size; alloc and free events
+            # carry the requested size.
             ss = torch.cuda.memory._snapshot()
-            self.assertEqual(ss["host_traces"][-1]["action"], "segment_free")
+            trace = [
+                (te["action"], te["size"])
+                for te in ss["host_traces"]
+                if te["addr"] == addr
+            ]
+            expected = [
+                ("segment_alloc", block_size),
+                ("alloc", nbytes),
+                ("free_requested", nbytes),
+                ("free_completed", nbytes),
+                ("alloc", reused_nbytes),
+                ("free_requested", reused_nbytes),
+                ("free_completed", reused_nbytes),
+                ("segment_free", block_size),
+            ]
+            self.assertEqual(trace, expected)
 
         finally:
             torch.cuda.memory._record_memory_history(None)

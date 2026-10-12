@@ -2283,6 +2283,13 @@ def _build_multigraph_python_source(
     buf.writeline(
         f"RISKY_DROPPED_GUARDS = {[list(g) for g in summary.risky_dropped_guards]!r}"
     )
+    buf.writeline(
+        "# Kept by the filter but discarded by the invariance policy; likewise not"
+    )
+    buf.writeline("# checked at serve time.")
+    buf.writeline(
+        f"POLICY_DROPPED_GUARDS = {[list(g) for g in summary.policy_dropped_guards]!r}"
+    )
     buf.writeline("")
     buf.writeline("# What a dropped slot above actually checked, where it renders one.")
     buf.writeline(
@@ -3323,7 +3330,11 @@ def load(
     disabled (``TORCHDYNAMO_DISABLE=1`` or the ``enable_dynamo`` killswitch),
     which it serves through. A Dynamo artifact whose
     capture graph-broke cannot load beside the live compile that captured it
-    (the continuation names collide): load it in a fresh process.
+    (the continuation names collide), and an installed artifact is refused
+    wherever any frame it installs onto already has live Dynamo cache entries:
+    load it in a fresh process. That check runs only at load: compiling those
+    frames after load adds live entries that serve the calls the installed
+    ones miss.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
