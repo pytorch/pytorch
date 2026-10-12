@@ -43,9 +43,11 @@ kernel void constant_pad_nd_dense(
     const bool w_in_bounds =
         output_w_idx >= left_w && output_w_idx - left_w < input_w;
     const uint input_w_idx = w_in_bounds ? output_w_idx - left_w : 0;
+    // static_casts work around MacOS-15/26 Metal compiler bug, which rejects
+    // device vs constant operands of ?: on float8_e4m3fn as ambiguous
     output[output_base + output_w_idx] = outer_in_bounds && w_in_bounds
-        ? input[input_base + input_w_idx]
-        : fill_value;
+        ? static_cast<T>(input[input_base + input_w_idx])
+        : static_cast<T>(fill_value);
   }
 }
 
@@ -81,10 +83,12 @@ kernel void constant_pad_nd(
     const bool dim_in_bounds = output_idx >= params.left_pad[0] &&
         output_idx - params.left_pad[0] < params.input_sizes[0];
     const idx_t input_idx = dim_in_bounds ? output_idx - params.left_pad[0] : 0;
+    // static_casts work around MacOS-15/26 compiler bug, see above
     output[output_offset + output_idx * params.output_strides[0]] =
         outer_in_bounds && dim_in_bounds
-        ? input[input_offset + input_idx * params.input_strides[0]]
-        : fill_value;
+        ? static_cast<T>(
+              input[input_offset + input_idx * params.input_strides[0]])
+        : static_cast<T>(fill_value);
   }
 }
 
