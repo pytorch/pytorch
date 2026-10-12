@@ -37,6 +37,7 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -1462,6 +1463,19 @@ class DecompOneOffTests(TestCase):
             )
 
     @onlyAccelerator
+    @skipIfCrossRef
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_native_dropout_backward_opmath(self, device, dtype):
+        grad = torch.tensor([7 / 2048, -7 / 2048, 7 / 2048], device=device, dtype=dtype)
+        mask = torch.tensor([True, True, False], device=device)
+        scale = 1.0 / 0.9
+        expected = aten.native_dropout_backward.default(grad, mask, scale)
+        actual = decomposition_table[aten.native_dropout_backward.default](
+            grad, mask, scale
+        )
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
     @skipIfCrossRef
     def test_fused_dropout_decomposition_extreme_p(self, device):
         input_tensor = torch.randn(10, 10, dtype=torch.float32, device=device)
