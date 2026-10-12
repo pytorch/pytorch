@@ -70,10 +70,13 @@ def _get_collective_key(coll_node: fx.Node) -> str:
     return f"{coll_node.target} group_size:{group_size} group_name:{group_name} input_bytes:{tensor_bytes}"
 
 
-def _get_collective_estimations(coll_node: fx.Node) -> tuple[float, float]:
+def _get_collective_estimations(
+    coll_node: fx.Node,
+) -> tuple[float | None, float | None]:
     """Get NCCL and Inductor analytical estimations for a collective node.
 
-    Returns: (nccl_ms, inductor_ms)
+    Returns: (nccl_ms, inductor_ms); either is None when no calibrated cost
+    model is available for the current device type.
     """
     nccl_ms = (
         torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
@@ -414,6 +417,9 @@ def _log_collective_benchmarks(
             "Inductor Est(ms)",
         ]
 
+    def _fmt(value: float | None, spec: str) -> str:
+        return format(value, spec) if value is not None else "n/a"
+
     rows = []
     for i, coll_node in enumerate(collective_nodes):
         key = collective_keys[i] if collective_keys else _get_collective_key(coll_node)
@@ -421,26 +427,32 @@ def _log_collective_benchmarks(
 
         if benchmarked_medians is not None:
             benchmarked_ms = benchmarked_medians[i]
-            nccl_diff_pct = (nccl_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
+            nccl_diff_pct = (
+                (nccl_ms / benchmarked_ms)
+                if nccl_ms is not None and benchmarked_ms > 0
+                else None
+            )
             inductor_diff_pct = (
-                (inductor_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
+                (inductor_ms / benchmarked_ms)
+                if inductor_ms is not None and benchmarked_ms > 0
+                else None
             )
             rows.append(
                 [
                     key,
                     f"{benchmarked_ms:.4f}",
-                    f"{nccl_ms:.4f}",
-                    f"{inductor_ms:.4f}",
-                    f"{nccl_diff_pct:.2f}",
-                    f"{inductor_diff_pct:.2f}",
+                    _fmt(nccl_ms, ".4f"),
+                    _fmt(inductor_ms, ".4f"),
+                    _fmt(nccl_diff_pct, ".2f"),
+                    _fmt(inductor_diff_pct, ".2f"),
                 ]
             )
         else:
             rows.append(
                 [
                     key,
-                    f"{nccl_ms:.4f}",
-                    f"{inductor_ms:.4f}",
+                    _fmt(nccl_ms, ".4f"),
+                    _fmt(inductor_ms, ".4f"),
                 ]
             )
 

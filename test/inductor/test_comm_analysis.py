@@ -129,5 +129,105 @@ class TestNcclEstimateDeviceResolution(TestCase):
             self._destroy_pg()
 
 
+class TestCollectiveCostEstimatorRegistry(TestCase):
+    """Tests for backend-specific collective cost estimator registration."""
+
+    def test_registered_estimator_takes_precedence(self):
+        from torch._inductor.comm_analysis import (
+            NCCL_COLL,
+            estimate_nccl_collective_runtime_impl,
+            register_collective_cost_estimator,
+        )
+
+        register_collective_cost_estimator("cuda", lambda *args: 42.0)
+        try:
+            self.assertEqual(
+                estimate_nccl_collective_runtime_impl(
+                    1024, 8, NCCL_COLL.ALL_REDUCE, device_type="cuda"
+                ),
+                42.0,
+            )
+        finally:
+            register_collective_cost_estimator("cuda", None)
+        # After unregistering, the built-in analytical model is used again.
+        self.assertGreater(
+            estimate_nccl_collective_runtime_impl(
+                1024, 8, NCCL_COLL.ALL_REDUCE, device_type="cuda"
+            ),
+            0,
+        )
+
+    def test_trivial_inputs_short_circuit_before_registry(self):
+        # group_size <= 1 and UNSUPPORTED collectives return 0 without
+        # consulting the registry.
+        from torch._inductor.comm_analysis import (
+            NCCL_COLL,
+            estimate_nccl_collective_runtime_impl,
+            register_collective_cost_estimator,
+        )
+
+        calls = []
+
+        def estimator(tensor_storage_size_bytes, group_size, coll):  # type: ignore[no-untyped-def]
+            calls.append((tensor_storage_size_bytes, group_size, coll))
+            return 42.0
+
+        register_collective_cost_estimator("cuda", estimator)
+        try:
+            self.assertEqual(
+                estimate_nccl_collective_runtime_impl(
+                    1024, 1, NCCL_COLL.ALL_REDUCE, device_type="cuda"
+                ),
+                0,
+            )
+            self.assertEqual(
+                estimate_nccl_collective_runtime_impl(
+                    1024, 8, NCCL_COLL.UNSUPPORTED, device_type="cuda"
+                ),
+                0,
+            )
+        finally:
+            register_collective_cost_estimator("cuda", None)
+        self.assertEqual(calls, [])
+
+    def test_unregistered_non_cuda_is_unsupported(self):
+        # Device types without a registered estimator have no calibrated cost
+        # model: estimation returns None so callers can disable cost-based
+        # optimizations until a backend-specific estimator is registered.
+        from torch._inductor.comm_analysis import (
+            NCCL_COLL,
+            estimate_nccl_collective_runtime_impl,
+            has_collective_cost_model,
+        )
+
+        self.assertIsNone(
+            estimate_nccl_collective_runtime_impl(
+                1024, 8, NCCL_COLL.ALL_REDUCE, device_type="npu"
+            )
+        )
+        self.assertFalse(has_collective_cost_model("npu"))
+        # CUDA keeps the built-in NCCL-calibrated analytical model.
+        self.assertTrue(has_collective_cost_model("cuda"))
+        self.assertIsNotNone(
+            estimate_nccl_collective_runtime_impl(
+                1024, 8, NCCL_COLL.ALL_REDUCE, device_type="cuda"
+            )
+        )
+
+    def test_has_collective_cost_model_with_registered_estimator(self):
+        from torch._inductor.comm_analysis import (
+            has_collective_cost_model,
+            register_collective_cost_estimator,
+        )
+
+        self.assertFalse(has_collective_cost_model("npu"))
+        register_collective_cost_estimator("npu", lambda *args: 1.0)
+        try:
+            self.assertTrue(has_collective_cost_model("npu"))
+        finally:
+            register_collective_cost_estimator("npu", None)
+        self.assertFalse(has_collective_cost_model("npu"))
+
+
 if __name__ == "__main__":
     run_tests()
