@@ -329,6 +329,9 @@ class IteratorVariable(VariableTracker):
     ) -> "ConstantVariable":
         if name == "__iter__" or name == "__next__":
             return variables.ConstantVariable.create(True)
+        # Builtin iterators have no instance dictionary for additional attributes.
+        if not hasattr(self.python_type(), name):
+            return variables.ConstantVariable.create(False)
         return super().call_obj_hasattr(tx, name)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
