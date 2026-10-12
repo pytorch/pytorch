@@ -14,10 +14,10 @@ from cutlass import const_expr, Int32, Int64
 import torch
 
 from ...cutedsl import hw_caps as _hw, launch as _L
-from ...cutedsl.dtypes import cute2torch, torch2cute
+from ...cutedsl.dtypes import torch2cute
 from ...cutedsl.plan_cache import cached_plan
-from . import _storage, tile
-from .kernel_general import _flat, _launch, ReduceBlock
+from . import tile
+from .kernel_general import _flat, _launch, _PART_TORCH, ReduceBlock
 from .traits import WARP
 
 
@@ -105,9 +105,6 @@ class PartialColumns:
         self.threads = 128
         self.groups = self.threads // tile_columns
         self.nouts = nouts
-        self.output_widths = tuple(
-            getattr(trait, "output_widths", None) or (1,) * nouts
-        )
 
     @property
     def cache_sig(self):
@@ -117,7 +114,6 @@ class PartialColumns:
             self.rows,
             self.tile_columns,
             self.nouts,
-            self.output_widths,
         )
 
     @cute.jit
@@ -165,16 +161,10 @@ class PartialColumns:
         result = trait.project(acc, trait.acc(self.rows))
         if (group == Int32(0)) & (col < Int32(self.columns)):
             if const_expr(self.nouts == 1):
-                tile._store_reduction_value(
-                    outs[0], col, result, const_expr(self.output_widths[0])
-                )
+                outs[0][col] = outs[0].element_type(result)
             else:
                 for f in cutlass.range_constexpr(self.nouts):
-                    tile._store_reduction_value(
-                        outs[f], col, result[f], const_expr(self.output_widths[f])
-                    )
-
-
+                    outs[f][col] = outs[f].element_type(result[f])
 class _OrderedColReduce:
     """Preserve the row inner-tree DAG while coalescing adjacent column loads."""
 
@@ -195,8 +185,6 @@ class _OrderedColReduce:
         self.C = C
         self.B = B
         self.nouts = nouts
-        self.complex_input = getattr(trait, "complex_input", False)
-        self.output_widths = tuple(getattr(trait, "output_widths", (1,) * nouts))
         self.workers = (
             1 if plan.shape == "multirow" else min(_ORDERED_WORKER_WARPS, plan.wpr)
         )
@@ -214,7 +202,6 @@ class _OrderedColReduce:
             self.plan.depth,
             self.plan.batches,
             self.nouts,
-            self.output_widths,
         )
 
     @cute.jit
@@ -240,12 +227,7 @@ class _OrderedColReduce:
             + Int64(safe_red) * Int64(self.C)
             + Int64(col)
         )
-        got = trait.leaf(
-            tile._load_reduction_value(
-                trait, mIn, index, const_expr(self.complex_input)
-            ),
-            safe_red,
-        )
+        got = trait.leaf(trait.acc(mIn[index]), safe_red)
         ident = trait.init()
         return tuple(got[f] if valid else ident[f] for f in range(trait.nfields))
 
@@ -387,20 +369,10 @@ class _OrderedColReduce:
         projected = trait.project(final, trait.acc(self.R))
         if (Int32(ty) == Int32(0)) & active:
             if const_expr(self.nouts == 1):
-                tile._store_reduction_value(
-                    mOuts[0],
-                    output,
-                    projected,
-                    const_expr(self.output_widths[0]),
-                )
+                mOuts[0][output] = mOuts[0].element_type(projected)
             else:
                 for k in cutlass.range_constexpr(self.nouts):
-                    tile._store_reduction_value(
-                        mOuts[k],
-                        output,
-                        projected[k],
-                        const_expr(self.output_widths[k]),
-                    )
+                    mOuts[k][output] = mOuts[k].element_type(projected[k])
 
 
 def _split_p(R: int) -> int:
@@ -443,7 +415,7 @@ def reduce_ordered_col(
         for dtype in out_dtypes[:nouts]
     ]
     kernel_x = _flat(x)
-    kernel_outs = [_storage.flat_view(out) for out in outs]
+    kernel_outs = [out.reshape(-1) for out in outs]
     fake_in = _L.fake_compact(torch2cute[kernel_x.dtype], (_L.sym_int64(),))
     fake_outs = [
         _L.fake_compact(torch2cute[out.dtype], (_L.sym(),)) for out in kernel_outs
@@ -595,8 +567,8 @@ def _reduce_col_tile(
         torch.empty(out_shape, device=x.device, dtype=dtype)
         for dtype in out_dtypes[:nouts]
     ]
-    kernel_x = _storage.row_view(rows)
-    kernel_outs = [_storage.flat_view(out) for out in outs]
+    kernel_x = rows
+    kernel_outs = [out.reshape(-1) for out in outs]
     total = B * C
     nchunks = Int32(total // vec)
     batch_chunks = Int32(C // vec) if x.dim() == 3 else None
@@ -624,13 +596,13 @@ def _reduce_col_tile(
             torch.empty(
                 total * npar,
                 device=x.device,
-                dtype=cute2torch[trait.fdtypes[f]],
+                dtype=_PART_TORCH[trait.fdtypes[f]],
             )
             for f in range(trait.nfields)
         ]
     )
     dsts = outs if single else parts
-    kernel_dsts = [_storage.flat_view(dst) for dst in dsts]
+    kernel_dsts = [dst.reshape(-1) for dst in dsts]
 
     def _fake():
         # Dynamic descriptors require vec divisibility; None avoids a 1.27x unused argument.
@@ -638,7 +610,7 @@ def _reduce_col_tile(
             [
                 _L.fake_compact(
                     torch2cute[kernel_x.dtype],
-                    (_L.sym(), _L.sym(vec * (2 if x.is_complex() else 1))),
+                    (_L.sym(), _L.sym(vec)),
                     stride_order=(1, 0),
                     align=align,
                 )
