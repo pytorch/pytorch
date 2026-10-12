@@ -58,8 +58,12 @@ def _guard() -> Iterator[None]:
 
 
 def identity(item: pytest.Item) -> report.TestId | None:
-    """None for an item that isn't a Python test function."""
+    """None for an item that is neither a Python test function nor a gtest."""
     if not isinstance(item, pytest.Function):
+        # run_test.py runs C++ tests under pytest-cpp, only installed where they
+        # run, so its items are recognized by module rather than by class.
+        if type(item).__module__.startswith("pytest_cpp."):
+            return report.gtest_identity(str(item.path), item.name)
         return None
     # originalname drops pytest parameters. Unwrapping the function recovers the
     # source name of PyTorch's generated device, dtype and parametrize variants.
@@ -181,9 +185,9 @@ class ReportWriter:
     def _finish(self, key: tuple[str, Any], run: _Run) -> None:
         del self.runs[key]
         nodeid = key[0]
-        # No identity: the item isn't a Python test function, its setup report never
-        # arrived (the attempt was interrupted), or, under xdist, the worker's writer
-        # turned itself off and its setup report came without one.
+        # No identity: the item is neither a Python test function nor a gtest, its
+        # setup report never arrived (the attempt was interrupted), or, under xdist,
+        # the worker's writer turned itself off and its setup report came without one.
         if self.file is not None and run.test is not None:
             record = report.run_record(
                 run.test,
@@ -201,6 +205,12 @@ class ReportWriter:
         if _disabled:
             return
         with _guard():
+            # run_test.py runs C++ tests under xdist with -x, which stops right after
+            # the final failing report, so that run's teardown report never arrives;
+            # its outcome is already known.
+            for key, run in list(self.runs.items()):
+                if run.failed_phase:
+                    self._finish(key, run)
             if self.file is not None:
                 self.file.close()
                 self.file = None

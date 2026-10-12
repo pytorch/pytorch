@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any, NamedTuple
 
 
@@ -20,6 +21,19 @@ class TestId(NamedTuple):
     case_name: str
     language: str
     declared_case_name: str
+
+
+def gtest_identity(binary: str, name: str) -> TestId:
+    """A pytest-cpp gtest's identity, from its binary and gtest name.
+
+    pytest-cpp names a gtest ``<suite>.<test>`` from --gtest_list_tests. gtest
+    suite and test names are C++ identifiers, so neither contains ".", and the
+    split is exact. gtest adds an instantiation's ``Prefix/`` and a typed suite's
+    ``/N`` to the suite, and a value-parameterized test's ``/<param>`` to the test
+    name; the declared name drops that ``/<param>``."""
+    suite, _, case_name = name.partition(".")
+    declared = case_name.partition("/")[0]
+    return TestId(f"cpp/{Path(binary).stem}", suite, case_name, "cpp", declared)
 
 
 def report_path(prefix: str, report_uuid: str) -> str:

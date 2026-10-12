@@ -373,6 +373,28 @@ TestUnittest    | test_unittest            | test_unittest""",
             all(run["ended_at"] - run["started_at"] >= 300 for run in runs), runs
         )
 
+    def test_xdist_maxfail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # -x, as run_test.py passes for C++ tests, stops xdist after the last
+            # test's final failure, before its teardown report.
+            args = ["xdist_report.py", "-n", "1", "--reruns", "1", "-x"]
+            proc, report = _run_plugin(str(_REPORT_TESTDATA), args, Path(tmp) / "xdist")
+            runs = _runs(report)
+        # 2: xdist reports a session stopped by -x as interrupted.
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        # test_crash killed its worker. pytest-rerunfailures sends a test's reports
+        # only after each attempt, so the controller never got its identity, and
+        # the crash is left to junit and the log.
+        self.assertEqual(
+            [(run["case_name"], run["outcome"], run["rerun_number"]) for run in runs],
+            [
+                ("test_before", "passed", 0),
+                ("test_after", "passed", 0),
+                ("test_fail_last", "failed", 0),
+                ("test_fail_last", "failed", 1),
+            ],
+        )
+
 
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
 @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
@@ -500,13 +522,100 @@ class TestReportEnablement(TestCase):
         run_test_module = importlib.import_module("run_test")
         args = run_test_module._torchci_report_args
         with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", True):
-            self.assertEqual(args("/reports"), ["--save-torchci-reports=/reports"])
-            self.assertEqual(args(None), [])
+            self.assertEqual(
+                args("test_type_info", False, "/reports"),
+                ["--save-torchci-reports=/reports"],
+            )
+            # C++ tests don't go through run_tests, so they get the plugin itself.
+            self.assertEqual(
+                args("cpp/test_api", True, "/reports"),
+                [
+                    "-p",
+                    "torch.testing._internal.torchci.plugin",
+                    "--torchci-report-prefix=/reports/cpp.test_api",
+                ],
+            )
+            self.assertEqual(args("test_type_info", False, None), [])
+            self.assertEqual(args("cpp/test_api", True, None), [])
         with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", False):
-            self.assertEqual(args("/reports"), [])
+            self.assertEqual(args("test_type_info", False, "/reports"), [])
 
 
 class TestReportHelpers(TestCase):
+    @parametrize(
+        "binary, name, expected",
+        [
+            subtest(
+                (
+                    "build/bin/test_api",
+                    "ModulesTest.Linear",
+                    ("ModulesTest", "Linear", "Linear"),
+                ),
+                name="plain",
+            ),
+            subtest(
+                (
+                    "build/bin/test_api.exe",
+                    "ModulesTest.Linear",
+                    ("ModulesTest", "Linear", "Linear"),
+                ),
+                name="windows",
+            ),
+            subtest(
+                (
+                    "build/bin/test_api",
+                    "TypedTest/0.DoesBlah",
+                    ("TypedTest/0", "DoesBlah", "DoesBlah"),
+                ),
+                name="typed",
+            ),
+            subtest(
+                (
+                    "build/bin/test_api",
+                    "Inst/PrimeTest.Returns/1",
+                    ("Inst/PrimeTest", "Returns/1", "Returns"),
+                ),
+                name="value_parameterized",
+            ),
+            subtest(
+                (
+                    "build/bin/test_api",
+                    "Inst/PrimeTest.Returns/Small",
+                    ("Inst/PrimeTest", "Returns/Small", "Returns"),
+                ),
+                name="named_parameter",
+            ),
+            subtest(
+                (
+                    "build/bin/test_api",
+                    "Inst/TypedPTest/0.DoesBlah",
+                    ("Inst/TypedPTest/0", "DoesBlah", "DoesBlah"),
+                ),
+                name="typed_parameterized",
+            ),
+        ],
+    )
+    def test_gtest_identity(self, binary, name, expected) -> None:
+        suite, case_name, declared_case_name = expected
+        self.assertEqual(
+            torchci_report.gtest_identity(binary, name),
+            ("cpp/test_api", suite, case_name, "cpp", declared_case_name),
+        )
+
+    @unittest.skipIf(
+        importlib.util.find_spec("pytest_cpp") is None, "pytest-cpp isn't installed"
+    )
+    def test_gtest_item_identity(self) -> None:
+        from pytest_cpp.plugin import CppItem
+
+        plugin = importlib.import_module("torch.testing._internal.torchci.plugin")
+        # identity reads only the item's binary and gtest name.
+        item = object.__new__(CppItem)
+        item.path, item.name = Path("build/bin/test_api"), "Suite.Test"
+        self.assertEqual(
+            plugin.identity(item), ("cpp/test_api", "Suite", "Test", "cpp", "Test")
+        )
+
     def test_identity_survives_unwrap_errors(self):
         import pytest
 

@@ -526,10 +526,17 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
     return executable
 
 
-def _torchci_report_args(reports_dir: str | None) -> list[str]:
+def _torchci_report_args(
+    test_file: str, is_cpp_test: bool, reports_dir: str | None
+) -> list[str]:
     if not HAS_TORCHCI_REPORTS or not reports_dir:
         return []
-    return [f"--save-torchci-reports={reports_dir}"]
+    if not is_cpp_test:
+        return [f"--save-torchci-reports={reports_dir}"]
+    # C++ tests run under pytest-cpp, not run_tests, so register the plugin here.
+    prefix = Path(reports_dir) / sanitize_test_filename(test_file)
+    plugin = "torch.testing._internal.torchci.plugin"
+    return ["-p", plugin, f"--torchci-report-prefix={prefix}"]
 
 
 def run_test(
@@ -609,8 +616,8 @@ def run_test(
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
 
-    if not is_cpp_test:
-        unittest_args.extend(_torchci_report_args(options.save_torchci_reports))
+    reports_dir = options.save_torchci_reports
+    unittest_args += _torchci_report_args(test_file, is_cpp_test, reports_dir)
 
     if options.hw_classification:
         # forward hw classification filter to test subprocess
