@@ -71,7 +71,13 @@ class TestRecursiveLaneSplit(TestCase):
     @parametrize("factor", [2, 4, 8, 32, 64])
     @parametrize(
         "dtype",
-        [torch.int16, torch.float16, torch.bfloat16, torch.float32, *TRITON_FLOAT8_DTYPES],
+        [
+            torch.int16,
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            *TRITON_FLOAT8_DTYPES,
+        ],
     )
     def test_storage_bits(self, device, rank, factor, dtype, persistent):
         prefix = (4,) if rank == 2 else (2, 2)
