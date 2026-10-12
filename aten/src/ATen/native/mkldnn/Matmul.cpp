@@ -534,53 +534,17 @@ bool use_mkldnn_matmul(
       use_mkldnn_tf32_matmul(mat1, mat2, result));
 }
 
-static void _mkldnn_matmul_i8i8i32_with_primitive(
-    const Tensor &mat1,
-    const Tensor &mat2,
-    const Tensor &result) {
-  // Create ideep tensors for oneDNN computation
-  ideep::tensor::data_type src_dtype;
-  if (mat1.scalar_type() == at::kByte) {
-    src_dtype = ideep::tensor::data_type::u8;
-  } else {
-    src_dtype = ideep::tensor::data_type::s8;
+// How oneDNN's row-major gemm can read `t` in place: as itself ('N') or as its
+// transpose ('T'), with a leading dimension spanning a full row or column.
+static std::optional<std::pair<char, int64_t>> _blas_layout(const Tensor& t) {
+  const int64_t rows = t.size(0), cols = t.size(1);
+  if ((cols == 1 || t.stride(1) == 1) && (rows == 1 || t.stride(0) >= cols)) {
+    return std::make_pair('N', rows == 1 ? cols : t.stride(0));
   }
-  auto src = ideep::tensor(
-      {mat1.sizes().vec(),
-       src_dtype,
-       mat1.strides().vec()},
-      mat1.data_ptr());
-  auto wei = ideep::tensor(
-      {mat2.sizes().vec(),
-       ideep::tensor::data_type::s8,
-       mat2.strides().vec()},
-      mat2.data_ptr());
-  auto dst = ideep::tensor(
-      {result.sizes().vec(),
-       ideep::tensor::data_type::s32,
-       result.strides().vec()},
-      result.data_ptr());
-  // Create primitive desc
-  auto engine = ideep::engine::cpu_engine();
-  ideep::attr_t op_attr;
-  op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-  auto src_desc = src.get_desc();
-  auto wei_desc = wei.get_desc();
-  auto dst_desc = dst.get_desc();
-  auto prim_desc = dnnl::matmul::primitive_desc(
-      engine, src_desc, wei_desc, dst_desc, op_attr);
-  // Reorder mat2 if needed
-  auto expected_weight = wei.reorder_if_differ_in(prim_desc.weights_desc());
-  // Prepare args for primitive
-  ideep::tensor scratchpad(prim_desc.scratchpad_desc());
-  ideep::exec_args args;
-  args.insert({DNNL_ARG_SRC, src});
-  args.insert({DNNL_ARG_WEIGHTS, expected_weight});
-  args.insert({DNNL_ARG_DST, dst});
-  args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
-  // Create primitive and execute
-  auto primitive = dnnl::matmul(prim_desc);
-  primitive.execute(ideep::stream::default_stream(), args);
+  if ((rows == 1 || t.stride(0) == 1) && (cols == 1 || t.stride(1) >= rows)) {
+    return std::make_pair('T', cols == 1 ? rows : t.stride(1));
+  }
+  return std::nullopt;
 }
 
 template <typename a_type>
@@ -592,12 +556,9 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
     const int n = result.size(1);
     const int k = self.size(1);
 
-    const char transa = self.strides()[1] == 1 ? 'N' : 'T';
-    const char transb = mat2.strides()[1] == 1 ? 'N' : 'T';
+    const auto [transa, lda] = _blas_layout(self).value();
+    const auto [transb, ldb] = _blas_layout(mat2).value();
     const char offsetc = 'F';
-
-    const int lda = transa == 'T' ? (k > 1 ? self.stride(1) : m) : (m > 1 ? self.stride(0) : k);
-    const int ldb = transb == 'T' ? (n > 1 ? mat2.stride(1) : k) : (k > 1 ? mat2.stride(0) : n);
     const int ldc = n;
 
     const float alpha = 1;
@@ -639,18 +600,12 @@ void mkldnn_matmul_i8i8i32(
     const Tensor &result) {
   // x:u8 or s8 * w:s8 -> y:s32
   // both inputs should be 2d
-  // In most cases, using DNNL blas API is faster but it requires a/b contiguous along one dimentsion
-  bool a_is_contigous = (mat1.stride(0) == 1 || mat1.stride(1) == 1);
-  bool b_is_contigous = (mat2.stride(0) == 1 || mat2.stride(1) == 1);
-
-  if (a_is_contigous && b_is_contigous) {
-    if (mat1.scalar_type() == at::kByte) {
-      _mkldnn_gemm_i8i8i32_with_blas<uint8_t>(mat1, mat2, result);
-    } else {
-      _mkldnn_gemm_i8i8i32_with_blas<int8_t>(mat1, mat2, result);
-    }
+  const Tensor a = _blas_layout(mat1) ? mat1 : mat1.clone(at::MemoryFormat::Preserve);
+  const Tensor b = _blas_layout(mat2) ? mat2 : mat2.clone(at::MemoryFormat::Preserve);
+  if (a.scalar_type() == at::kByte) {
+    _mkldnn_gemm_i8i8i32_with_blas<uint8_t>(a, b, result);
   } else {
-    _mkldnn_matmul_i8i8i32_with_primitive(mat1, mat2, result);
+    _mkldnn_gemm_i8i8i32_with_blas<int8_t>(a, b, result);
   }
 }
 
