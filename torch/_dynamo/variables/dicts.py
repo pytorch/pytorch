@@ -99,6 +99,23 @@ if TYPE_CHECKING:
 # - Implement tp_richcompare_impl() for key equality
 
 
+def _get_literal_key(key: VariableTracker) -> Any:
+    # Inspect lazy keys without realizing classes or other nonliteral objects.
+    if isinstance(key, variables.LazyVariableTracker) and not key.is_realized():
+        value = key.original_value()
+    elif key.is_python_constant():
+        value = key.as_python_constant()
+    else:
+        return NO_SUCH_SUBOBJ
+    return value if ConstantVariable.is_literal(value) else NO_SUCH_SUBOBJ
+
+
+def _contains_nan(value: Any) -> bool:
+    if type(value) in (tuple, frozenset):
+        return any(_contains_nan(item) for item in value)
+    return type(value) in (float, complex) and value != value
+
+
 def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
     # This is a simplified version of the CPython's PyDict_Check function:
     return issubclass(obj.python_type(), dict)
@@ -483,8 +500,8 @@ class ConstDictVariable(VariableTracker):
             key_present = (
                 value is not None and type(value) is not variables.DeletedVariable
             )
-        if arg.is_python_constant() and (
-            arg.source is None or ConstantVariable.is_literal(arg.as_python_constant())
+        if _get_literal_key(arg) is not NO_SUCH_SUBOBJ or (
+            arg.source is None and arg.is_python_constant()
         ):
             guard_fn = (
                 type(self).CONTAINS_GUARD
@@ -510,6 +527,10 @@ class ConstDictVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         key: VariableTracker,
     ) -> HashableTracker:
+        # CONSTANT_MATCH accepts distinct NaNs, but dictionary lookups depend
+        # on their identity, including NaNs nested inside tuple keys.
+        if key.source and _contains_nan(_get_literal_key(key)):
+            install_guard(key.make_guard(GuardBuilder.ID_MATCH))
         try:
             return HashableTracker(key)
         except ObservedTypeError:

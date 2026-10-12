@@ -136,6 +136,32 @@ class DictTests(torch._dynamo.test_case.TestCase):
         for mapping in ({key: 1}, {"other": 1}, {key: 2}):
             self.assertEqual(compiled(x, mapping, key), fn(x, mapping, key))
 
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    @parametrize("operation", ["contains", "get"])
+    @parametrize(
+        "make_key",
+        [
+            subtest(lambda: float("nan"), name="float"),
+            subtest(lambda: complex(float("nan"), 0), name="complex_real"),
+            subtest(lambda: complex(0, float("nan")), name="complex_imag"),
+            subtest(lambda: (float("nan"),), name="tuple"),
+            subtest(lambda: (0, (float("nan"),)), name="nested_tuple"),
+        ],
+    )
+    def test_input_dict_nan_key_guard(self, mapping_type, operation, make_key):
+        def fn(x, mapping, key):
+            if operation == "contains":
+                return x + (key in mapping)
+            return x + mapping.get(key, 0)
+
+        absent, present = make_key(), make_key()
+        mapping = mapping_type()
+        mapping[present] = 1
+        x = torch.zeros(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for key in (absent, present, absent):
+            self.assertEqual(compiled(x, mapping, key), fn(x, mapping, key))
+
     @parametrize("present", [False, True])
     def test_ordered_dict_subclass_setdefault_dispatch(self, present):
         class Mapping(OrderedDict):
