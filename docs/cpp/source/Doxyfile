@@ -75,6 +75,7 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../torch/csrc/stable/tensor_struct.h \
                          ../../../torch/csrc/stable/device_struct.h \
                          ../../../torch/csrc/stable/accelerator.h \
+                         ../../../torch/csrc/stable/c10d.h \
                          ../../../torch/csrc/stable/macros.h \
                          ../../../torch/library.h \
                          ../../../torch/custom_class.h

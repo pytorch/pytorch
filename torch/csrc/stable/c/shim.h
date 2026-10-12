@@ -379,6 +379,77 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
+struct TorchProcessGroupOpaque;
+using TorchProcessGroupHandle = TorchProcessGroupOpaque*;
+struct TorchWorkOpaque;
+using TorchWorkHandle = TorchWorkOpaque*;
+
+// Stable reduction codes, independent of c10d's internal enum.
+// 0=SUM, 1=AVG, 2=PRODUCT, 3=MIN, 4=MAX, 5=BAND, 6=BOR, 7=BXOR.
+// Backend-specific unsupported reductions report an error.
+
+// Requires the GIL. Returns an owning reference to an existing Python group.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_process_group_from_pyobject(void* obj, TorchProcessGroupHandle* ret);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_process_group(TorchProcessGroupHandle group);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_process_group_rank(TorchProcessGroupHandle group, int64_t* ret);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_process_group_size(TorchProcessGroupHandle group, int64_t* ret);
+// Returns an owning StringHandle.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_process_group_backend(TorchProcessGroupHandle group, StringHandle* ret);
+
+// Tensor handles are borrowed; the returned Work owns the group and tensors.
+// Keep Work until completion and call wait to order consumers on the calling
+// stream. All ranks must call collectives in the same order.
+AOTI_TORCH_EXPORT AOTITorchError torch_process_group_allreduce(
+    TorchProcessGroupHandle group,
+    const AtenTensorHandle* tensors,
+    size_t count,
+    int32_t reduce_op,
+    TorchWorkHandle* ret);
+AOTI_TORCH_EXPORT AOTITorchError torch_process_group_allreduce_coalesced(
+    TorchProcessGroupHandle group,
+    const AtenTensorHandle* tensors,
+    size_t count,
+    int32_t reduce_op,
+    TorchWorkHandle* ret);
+AOTI_TORCH_EXPORT AOTITorchError torch_process_group_broadcast(
+    TorchProcessGroupHandle group,
+    const AtenTensorHandle* tensors,
+    size_t count,
+    int64_t root_rank,
+    int64_t root_tensor,
+    TorchWorkHandle* ret);
+// One input tensor and one output tensor per rank.
+AOTI_TORCH_EXPORT AOTITorchError torch_process_group_allgather(
+    TorchProcessGroupHandle group,
+    AtenTensorHandle input,
+    const AtenTensorHandle* outputs,
+    size_t count,
+    TorchWorkHandle* ret);
+AOTI_TORCH_EXPORT AOTITorchError torch_process_group_barrier(
+    TorchProcessGroupHandle group,
+    const int64_t* device_ids,
+    size_t count,
+    TorchWorkHandle* ret);
+
+// timeout_ms=0 uses the backend default. A successful CUDA wait orders the
+// calling stream; it need not block the CPU until GPU completion.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_work_wait(TorchWorkHandle work, int64_t timeout_ms, bool* ret);
+// Completion polling does not order another CUDA stream; call wait as well.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_work_is_completed(TorchWorkHandle work, bool* ret);
+// Releases ownership; does not implicitly wait or cancel the operation.
+AOTI_TORCH_EXPORT AOTITorchError torch_delete_work(TorchWorkHandle work);
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

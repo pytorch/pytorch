@@ -54,6 +54,7 @@ For more information on the stable ABI, see the
 - `torch/csrc/stable/tensor.h` - Stable tensor structures
 - `torch/csrc/stable/device.h` - Stable device structures
 - `torch/csrc/stable/accelerator.h` - Accelerator support
+- `torch/csrc/stable/c10d.h` - Process groups and collective work (2.16+)
 - `torch/csrc/stable/macros.h` - Stable API macros
 
 ## Stable API Categories

@@ -31,6 +31,7 @@ It consists of
 - torch/csrc/stable/accelerator.h: Provides a stable interface for device-generic objects and APIs
 (e.g. `getCurrentStream`, `DeviceGuard`).
 - torch/csrc/stable/pyobject.h: Provides conversions between Python objects and their `torch::stable` equivalents, such as `tensor_from_pyobject` / `tensor_to_pyobject` for a Python `torch.Tensor`. To access these APIs, you still need to only link `libtorch`, but `libtorch_python` must be loaded at runtime; see the Python interop shims section below.
+- torch/csrc/stable/c10d.h (2.16+): Provides owning process group and collective work wrappers. See [Process groups and collective work](https://docs.pytorch.org/cppdocs/api/stable/operators.html#process-groups-and-collective-work) for usage and synchronization requirements.
 
 We are continuing to improve coverage in our `torch/csrc/stable` APIs. Please file an issue if you'd like to see support for particular APIs in your custom extension.
 

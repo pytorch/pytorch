@@ -5,6 +5,10 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/python_stub.h>
 #include <torch/csrc/Export.h>
+#include <memory>
+#ifdef USE_DISTRIBUTED
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#endif
 
 // Indirection that lets the libtorch-only Python-interop stable shims call into
 // code that only libtorch_python can provide (THPVariable_* &co) without
@@ -38,6 +42,11 @@ struct TORCH_API PyObjectConversionInterface {
   // that want to type-check before tensor_from_pyobject (which errors on
   // non-tensors). The GIL must be held.
   virtual bool is_tensor_pyobject(PyObject* obj) const = 0;
+
+#ifdef USE_DISTRIBUTED
+  virtual std::shared_ptr<c10d::ProcessGroup> process_group_from_pyobject(
+      PyObject* obj) const = 0;
+#endif
 
   // Unpack a Python torch.Tensor (PyObject*) into an at::Tensor that shares the
   // underlying TensorImpl. The GIL must be held.
