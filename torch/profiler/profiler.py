@@ -28,6 +28,7 @@ from torch._environment import is_fbcode
 from torch._utils_internal import profiler_allow_cudagraph_cupti_lazy_reinit_cuda12
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
+from torch.profiler._trace_compression import _get_trace_file_opener
 
 
 if TYPE_CHECKING:
@@ -642,9 +643,20 @@ class _KinetoProfile:
         graph_lanes: str = "none",
         default_stream: int = 7,
     ):
-        """
+        r"""
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
+
+        Paths ending in ``.gz`` use gzip compression; paths ending in ``.zst``
+        use zstd compression at level 1 and require the optional ``zstandard``
+        package. Other paths are uncompressed (the ``cuspy`` backend defaults
+        to gzip). Zstd is supported for Chrome JSON, not Cuspy's Perfetto format.
+        Export and compression run synchronously on the calling thread unless
+        asynchronous export is enabled for the ``cuspy`` backend.
+
+        To periodically export zstd traces, pass a callback such as
+        ``on_trace_ready=lambda p: p.export_chrome_trace(f"trace.{p.step_num}.json.zst")``
+        to :class:`torch.profiler.profile`.
 
         ``cuda_graph_annotations`` bakes CUDA-graph kernel annotations into the trace:
         matching graphed work carries its annotation's fields in ``args``. Pass
@@ -670,6 +682,10 @@ class _KinetoProfile:
             raise AssertionError(
                 "Profiler must be initialized before exporting chrome trace"
             )
+        path = os.fspath(path)
+        if self._use_cuspy and path.endswith(".zst") and ".pftrace" in path:
+            raise ValueError("Zstd compression is only supported for Chrome JSON traces")
+        trace_file_opener = _get_trace_file_opener(path)
         if self._use_cuspy:
             obs = self._cuspy_profiler_observer
             if obs is None or not obs.available or self._cuspy_window_id is None:
@@ -715,11 +731,12 @@ class _KinetoProfile:
                 graph_lanes=graph_lanes,
                 default_stream=default_stream,
             )
-        elif path.endswith(".gz"):
-            with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
-                self.profiler.export_chrome_trace(fp.name, self._trace_metadata)
-                with open(fp.name, "rb") as fin, gzip.open(path, "wb") as fout:
-                    fout.writelines(fin)
+        elif path.endswith((".gz", ".zst")):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                trace_path = os.path.join(tmpdir, "trace.json")
+                self.profiler.export_chrome_trace(trace_path, self._trace_metadata)
+                with open(trace_path, "rb") as fin, trace_file_opener(path, "wb") as fout:
+                    shutil.copyfileobj(fin, fout)
         else:
             self.profiler.export_chrome_trace(path, self._trace_metadata)
 

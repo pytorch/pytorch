@@ -4023,6 +4023,35 @@ cuspy_core.enable_hes_early()
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated
+    def test_cuspy_zstd_export(self):
+        import tempfile
+
+        try:
+            import zstandard
+        except ImportError:
+            self.skipTest("requires zstandard")
+
+        cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cuspy"}')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace.json.zst")
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                experimental_config=cfg,
+            ) as prof:
+                a = torch.randn(128, 128, device="cuda")
+                (a @ a).relu().sum().item()
+                torch.cuda.synchronize()
+            prof.export_chrome_trace(path)
+            self.assertFalse(os.path.exists(path + ".gz"))
+            with zstandard.open(path, "rt") as f:
+                trace = json.load(f)
+            self.assertTrue(
+                any(e.get("cat") == "kernel" for e in trace["traceEvents"])
+            )
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @_isolated
     def test_cuspy_sync_export_default(self):
         # Default: the cuspy backend exports synchronously -- the merged file is
         # on disk when export_chrome_trace returns, wait_for_exports is a no-op, and no

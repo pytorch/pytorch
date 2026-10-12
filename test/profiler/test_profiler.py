@@ -4,6 +4,7 @@
 import collections
 import copy
 import gc
+import gzip
 import json
 import mmap
 import os
@@ -4679,6 +4680,149 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
 instantiate_device_type_tests(
     TestProfilerEventsParityCudaOnly, globals(), only_for=("cuda",)
 )
+
+
+@unittest.skipIf(not kineto_available(), "Kineto is required")
+@instantiate_parametrized_tests
+class TestProfilerTraceCompression(TestCase):
+    @parametrize("use_python_export", [False, True])
+    @parametrize(
+        "suffix",
+        [".json", ".json.gz", ".json.zst", "", ".unknown", ".zst.bak", ".gz.bak"],
+    )
+    def test_export(self, use_python_export, suffix):
+        if suffix.endswith(".zst"):
+            try:
+                import zstandard
+            except ImportError:
+                self.skipTest("requires zstandard")
+            opener = zstandard.open
+            magic = b"\x28\xb5\x2f\xfd"
+        elif suffix.endswith(".gz"):
+            opener = gzip.open
+            magic = b"\x1f\x8b"
+        else:
+            opener = open
+            magic = None
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = []
+            caller_thread = threading.get_ident()
+
+            def trace_handler(prof):
+                self.assertEqual(threading.get_ident(), caller_thread)
+                path = os.path.join(tmpdir, f"trace.{prof.step_num}{suffix}")
+                prof.export_chrome_trace(path, use_python_export=use_python_export)
+                paths.append(path)
+                if magic is not None:
+                    with open(path, "rb") as f:
+                        compressed = f.read()
+                    self.assertTrue(compressed.startswith(magic))
+                    if suffix.endswith(".zst"):
+                        decoder = zstandard.ZstdDecompressor().decompressobj()
+                        decoder.decompress(compressed)
+                        self.assertTrue(decoder.eof)
+                        self.assertEqual(decoder.unused_data, b"")
+                    else:
+                        self.assertEqual(compressed[8], 2)  # gzip level 9
+                with opener(path, "rt") as f:
+                    trace = json.load(f)
+                self.assertEqual(trace["compression_test"], "caf\u00e9")
+                events = trace["traceEvents"]
+                self.assertIsInstance(events, list)
+                markers = [e for e in events if e.get("name") == "compression_test"]
+                self.assertEqual(len(markers), 1)
+                self.assertEqual(markers[0]["ph"], "X")
+                for key in ("ts", "dur", "pid", "tid"):
+                    self.assertIn(key, markers[0])
+                self.assertTrue(any(e.get("name") == "aten::add" for e in events))
+
+            with profile(
+                activities=[ProfilerActivity.CPU],
+                schedule=torch.profiler.schedule(wait=0, warmup=1, active=1, repeat=2),
+                on_trace_ready=trace_handler,
+            ) as prof:
+                for _ in range(4):
+                    prof.add_metadata_json("compression_test", json.dumps("caf\u00e9"))
+                    with record_function("compression_test"):
+                        torch.ones(8) + 1
+                    prof.step()
+
+            self.assertEqual(len(paths), 2)
+            self.assertEqual(len(set(paths)), 2)
+            expected_files = sorted(os.path.basename(path) for path in paths)
+            self.assertEqual(sorted(os.listdir(tmpdir)), expected_files)
+
+    @parametrize("use_python_export", [False, True])
+    def test_zstd_unicode(self, use_python_export):
+        try:
+            import zstandard
+        except ImportError:
+            self.skipTest("requires zstandard")
+
+        value = "caf\u00e9 \u4e2d"
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            prof.add_metadata("unicode_metadata", value)
+            torch.ones(8) + 1
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace.\u4e2d.json.zst")
+            prof.export_chrome_trace(path, use_python_export=use_python_export)
+            with zstandard.open(path, "rt", encoding="utf-8") as f:
+                trace = json.load(f)
+            self.assertEqual(trace["unicode_metadata"], value)
+
+    @parametrize("use_python_export", [False, True])
+    def test_missing_zstandard(self, use_python_export):
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(8) + 1
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace.json.zst")
+            with patch.dict(sys.modules, {"zstandard": None}):
+                message = "zstandard.*pip install zstandard"
+                with self.assertRaisesRegex(ImportError, message):
+                    prof.export_chrome_trace(path, use_python_export=use_python_export)
+                self.assertFalse(os.path.exists(path))
+                # A missing dependency must not consume the native trace.
+                gzip_path = os.path.join(tmpdir, "trace.json.gz")
+                prof.export_chrome_trace(gzip_path, use_python_export=use_python_export)
+                with gzip.open(gzip_path, "rt") as f:
+                    self.assertIn("traceEvents", json.load(f))
+
+    @parametrize("suffix", [".gz", ".zst"])
+    @parametrize("fail_during_export", [False, True])
+    def test_compressed_export_cleans_up_on_error(self, suffix, fail_during_export):
+        if suffix == ".zst":
+            try:
+                import zstandard  # noqa: F401
+            except ImportError:
+                self.skipTest("requires zstandard")
+        prof = profile(activities=[ProfilerActivity.CPU])
+        prof.profiler = MagicMock()
+        trace_paths = []
+
+        def export_trace(path, metadata):
+            trace_paths.append(path)
+            with open(path, "w") as f:
+                json.dump({"traceEvents": []}, f)
+            if fail_during_export:
+                raise OSError("trace export failed")
+
+        prof.profiler.export_chrome_trace.side_effect = export_trace
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "missing", "trace.json" + suffix)
+            with self.assertRaises(OSError):
+                prof.export_chrome_trace(path)
+        self.assertEqual(len(trace_paths), 1)
+        self.assertFalse(os.path.exists(os.path.dirname(trace_paths[0])))
+
+    def test_cuspy_zstd_perfetto_rejected(self):
+        prof = profile(activities=[ProfilerActivity.CPU])
+        prof.profiler = MagicMock()
+        prof._use_cuspy = True
+        with self.assertRaisesRegex(ValueError, "only supported for Chrome JSON"):
+            prof.export_chrome_trace("trace.pftrace.zst")
+        prof.profiler.export_chrome_trace.assert_not_called()
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
