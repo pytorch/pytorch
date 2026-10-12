@@ -90,7 +90,6 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     load_tests,
     MI350_ARCH,
-    NAVI_ARCH,
     parametrize,
     recover_orig_fp32_precision,
     requires_cuda_python_bindings,
@@ -1021,6 +1020,43 @@ print("RECOVERED")
         y = torch.ones(10000000 - 1, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
+    def test_storage_copy_releases_gil_during_blocking_cuda_to_cpu(self):
+        # UntypedStorage.copy_ should release the GIL around the native copy,
+        # matching Tensor.copy_, so other Python threads can run while a
+        # blocking CUDA->CPU copy waits on prior GPU work. See #200410.
+        src = torch.ones(1, dtype=torch.uint8, device="cuda")
+        dst = torch.empty(1, dtype=torch.uint8)
+        torch.cuda.synchronize()
+
+        def count_heartbeats(copy_fn):
+            beats = []
+            stop = threading.Event()
+
+            def heartbeat():
+                while not stop.wait(0.001):
+                    beats.append(time.perf_counter())
+
+            thread = threading.Thread(target=heartbeat)
+            thread.start()
+            try:
+                torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+                start = time.perf_counter()
+                copy_fn()
+                end = time.perf_counter()
+            finally:
+                stop.set()
+                thread.join()
+            return sum(start < t < end for t in beats)
+
+        storage_beats = count_heartbeats(
+            lambda: dst.untyped_storage().copy_(src.untyped_storage(), False)
+        )
+        self.assertEqual(dst, src.cpu())
+        # With the GIL held, the issue repro saw ~1 heartbeat during the wait;
+        # with the GIL released, Tensor.copy_ saw ~18. Require several
+        # heartbeats so a regression to holding the GIL fails the test.
+        self.assertGreaterEqual(storage_beats, 5)
+
     def test_copy_non_blocking_type_conversion(self):
         a = torch.ones(1, device="cuda")
         b = torch.zeros(1, device="cpu", pin_memory=True)
@@ -1103,8 +1139,7 @@ print("RECOVERED")
                     archs.append("gfx950")
                 if ROCM_VERSION >= (7, 13):
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
-                if ROCM_VERSION >= (7, 14):
-                    archs.append("gfx1250")
+                archs.append("gfx1250")
                 # blasDefaultBackend() only prefers hipblaslt when every visible
                 # device matches, so device 0 alone is not enough.
                 gcn_arch_names = [
@@ -7562,7 +7597,6 @@ class TestCudaAllocator(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @skipIfRocmArch(NAVI_ARCH)
     def test_memory_profiler_viz(self):
         with torch.profiler.profile(
             with_stack=True, profile_memory=True, record_shapes=True
@@ -8667,6 +8701,24 @@ print(value, end="")
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
+    def test_power_draw_amdsmi_milliwatts(self):
+        """power_draw() converts AMD SMI socket power from watts to milliwatts."""
+        cases = (
+            # The average reading takes precedence over the current one.
+            ({"average_socket_power": 54, "current_socket_power": 60}, 54_000),
+            ({"average_socket_power": "N/A", "current_socket_power": 29}, 29_000),
+            ({"average_socket_power": "N/A", "current_socket_power": "N/A"}, 0),
+        )
+        for power_info, expected in cases:
+            with (
+                self.subTest(power_info=power_info),
+                patch.object(torch.cuda, "amdsmi", create=True) as amdsmi,
+                patch.object(torch.cuda, "_get_amdsmi_handler"),
+            ):
+                amdsmi.amdsmi_get_power_info.return_value = power_info
+                self.assertEqual(torch.cuda.power_draw(), expected)
 
     @skipIfRocmVersionAtLeast([10, 1])  # ROCM-30651
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
@@ -10190,7 +10242,7 @@ for args in ((a, b), (a, b, False)):
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
     @requires_cuda_python_bindings
     @serialTest()
-    def test_python_mempool_callback_lifetime_and_context(self):
+    def test_python_mempool_callback_lifetime_and_arguments(self):
         from cuda.bindings import runtime
 
         torch.cuda.empty_cache()
@@ -10199,21 +10251,19 @@ for args in ((a, b), (a, b, False)):
         callback_errors = []
 
         def make_pool():
-            def alloc(size):
-                device = torch.cuda.current_device()
-                stream = torch.cuda.current_stream().cuda_stream
+            def alloc(size, device, stream):
                 alloc_calls.append((size, device, stream))
-                err, ptr = runtime.cudaMalloc(size)
+                with torch.cuda.device(device):
+                    err, ptr = runtime.cudaMalloc(size)
                 if err != runtime.cudaError_t.cudaSuccess:
                     callback_errors.append(err)
                     return None
                 return int(ptr)
 
-            def free(ptr, size):
-                device = torch.cuda.current_device()
-                stream = torch.cuda.current_stream().cuda_stream
+            def free(ptr, size, device, stream):
                 free_calls.append((ptr, size, device, stream))
-                (err,) = runtime.cudaFree(ptr)
+                with torch.cuda.device(device):
+                    (err,) = runtime.cudaFree(ptr)
                 if err != runtime.cudaError_t.cudaSuccess:
                     callback_errors.append(err)
 
@@ -10263,34 +10313,43 @@ for args in ((a, b), (a, b, False)):
 
         alloc_streams = []
         free_streams = []
+        current_alloc_streams = []
+        current_free_streams = []
         callback_errors = []
 
-        def alloc(size):
-            alloc_streams.append(torch.cuda.current_stream().cuda_stream)
-            err, ptr = runtime.cudaMalloc(size)
+        def alloc(size, device, stream):
+            alloc_streams.append(stream)
+            current_alloc_streams.append(torch.cuda.current_stream().cuda_stream)
+            with torch.cuda.device(device):
+                err, ptr = runtime.cudaMalloc(size)
             if err != runtime.cudaError_t.cudaSuccess:
                 callback_errors.append(err)
                 return None
             return int(ptr)
 
-        def free(ptr, size):
-            free_streams.append(torch.cuda.current_stream().cuda_stream)
-            (err,) = runtime.cudaFree(ptr)
+        def free(ptr, size, device, stream):
+            free_streams.append(stream)
+            current_free_streams.append(torch.cuda.current_stream().cuda_stream)
+            with torch.cuda.device(device):
+                (err,) = runtime.cudaFree(ptr)
             if err != runtime.cudaError_t.cudaSuccess:
                 callback_errors.append(err)
 
         pool = torch.cuda.MemPool.from_py_allocator(alloc, free)
         explicit_stream = torch.cuda.Stream()
+        current_stream = torch.cuda.current_stream()
         with torch.cuda.use_mem_pool(pool):
             ptr = torch.cuda.caching_allocator_alloc(1, stream=explicit_stream)
 
         self.assertEqual(alloc_streams, [explicit_stream.cuda_stream])
+        self.assertEqual(current_alloc_streams, [current_stream.cuda_stream])
 
         torch.cuda.caching_allocator_delete(ptr)
         del pool
         gc.collect()
 
         self.assertEqual(free_streams, [explicit_stream.cuda_stream])
+        self.assertEqual(current_free_streams, [current_stream.cuda_stream])
         self.assertEqual(callback_errors, [])
 
     @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
@@ -10300,10 +10359,10 @@ for args in ((a, b), (a, b, False)):
     def test_python_mempool_alloc_exception_and_cross_pool_allocation(self):
         from cuda.bindings import runtime
 
-        def alloc_raises(size):
+        def alloc_raises(size, device, stream):
             raise ValueError("allocation sentinel")
 
-        def free_noop(ptr, size):
+        def free_noop(ptr, size, device, stream):
             pass
 
         pool = torch.cuda.MemPool.from_py_allocator(alloc_raises, free_noop)
@@ -10314,25 +10373,27 @@ for args in ((a, b), (a, b, False)):
 
         callback_errors = []
 
-        def cuda_alloc(size):
-            err, ptr = runtime.cudaMalloc(size)
+        def cuda_alloc(size, device, stream):
+            with torch.cuda.device(device):
+                err, ptr = runtime.cudaMalloc(size)
             if err != runtime.cudaError_t.cudaSuccess:
                 callback_errors.append(err)
                 return None
             return int(ptr)
 
-        def cuda_free(ptr, size):
-            (err,) = runtime.cudaFree(ptr)
+        def cuda_free(ptr, size, device, stream):
+            with torch.cuda.device(device):
+                (err,) = runtime.cudaFree(ptr)
             if err != runtime.cudaError_t.cudaSuccess:
                 callback_errors.append(err)
 
         inner_pools = [torch.cuda.MemPool.from_py_allocator(cuda_alloc, cuda_free)]
         inner_tensors = []
 
-        def alloc_from_different_pool(size):
+        def alloc_from_different_pool(size, device, stream):
             with torch.cuda.use_mem_pool(inner_pools[0]):
                 inner_tensors.append(torch.empty(1, dtype=torch.uint8, device="cuda"))
-            return cuda_alloc(size)
+            return cuda_alloc(size, device, stream)
 
         outer_pool = torch.cuda.MemPool.from_py_allocator(
             alloc_from_different_pool, cuda_free
@@ -10359,18 +10420,21 @@ for args in ((a, b), (a, b, False)):
         allocating_free_results = []
         allocation_callback_active = False
 
-        def cuda_alloc(size):
-            err, ptr = runtime.cudaMalloc(size)
+        def cuda_alloc(size, device, stream):
+            with torch.cuda.device(device):
+                err, ptr = runtime.cudaMalloc(size)
             if err != runtime.cudaError_t.cudaSuccess:
                 return None
             return int(ptr)
 
-        def reclaimable_free(ptr, size):
-            (err,) = runtime.cudaFree(ptr)
+        def reclaimable_free(ptr, size, device, stream):
+            with torch.cuda.device(device):
+                (err,) = runtime.cudaFree(ptr)
             reclaimable_free_results.append((allocation_callback_active, err))
 
-        def cuda_free(ptr, size):
-            (err,) = runtime.cudaFree(ptr)
+        def cuda_free(ptr, size, device, stream):
+            with torch.cuda.device(device):
+                (err,) = runtime.cudaFree(ptr)
             allocating_free_results.append(err)
 
         reclaimable_pool = torch.cuda.MemPool.from_py_allocator(
@@ -10389,14 +10453,14 @@ for args in ((a, b), (a, b, False)):
         del reclaimable
         self.assertEqual(reclaimable_free_results, [])
 
-        def alloc_after_reclaiming(size):
+        def alloc_after_reclaiming(size, device, stream):
             nonlocal allocation_callback_active
             # This drains reclaimable_pool while an allocation callback is
             # active on this thread. The free callback must still run.
             allocation_callback_active = True
             try:
                 torch.cuda.empty_cache()
-                return cuda_alloc(size)
+                return cuda_alloc(size, device, stream)
             finally:
                 allocation_callback_active = False
 
@@ -10430,7 +10494,7 @@ for args in ((a, b), (a, b, False)):
         tensors = []
         alloc_calls = 0
 
-        def alloc(size):
+        def alloc(size, device, stream):
             nonlocal alloc_calls
             alloc_calls += 1
             if alloc_calls == 1:
@@ -10441,14 +10505,16 @@ for args in ((a, b), (a, b, False)):
             else:
                 second_callback_entered.set()
 
-            err, ptr = runtime.cudaMalloc(size)
+            with torch.cuda.device(device):
+                err, ptr = runtime.cudaMalloc(size)
             if err != runtime.cudaError_t.cudaSuccess:
                 callback_errors.append(err)
                 return None
             return int(ptr)
 
-        def free(ptr, size):
-            (err,) = runtime.cudaFree(ptr)
+        def free(ptr, size, device, stream):
+            with torch.cuda.device(device):
+                (err,) = runtime.cudaFree(ptr)
             if err != runtime.cudaError_t.cudaSuccess:
                 callback_errors.append(err)
 
@@ -10501,29 +10567,18 @@ for args in ((a, b), (a, b, False)):
         free_calls = []
         free_results = []
 
-        def alloc(size):
-            alloc_calls.append(
-                (
-                    size,
-                    torch.cuda.current_device(),
-                    torch.cuda.current_stream().cuda_stream,
-                )
-            )
-            err, ptr = runtime.cudaMalloc(size)
+        def alloc(size, device, stream):
+            alloc_calls.append((size, device, stream))
+            with torch.cuda.device(device):
+                err, ptr = runtime.cudaMalloc(size)
             if err != runtime.cudaError_t.cudaSuccess:
                 return None
             return int(ptr)
 
-        def free(ptr, size):
-            free_calls.append(
-                (
-                    ptr,
-                    size,
-                    torch.cuda.current_device(),
-                    torch.cuda.current_stream().cuda_stream,
-                )
-            )
-            (err,) = runtime.cudaFree(ptr)
+        def free(ptr, size, device, stream):
+            free_calls.append((ptr, size, device, stream))
+            with torch.cuda.device(device):
+                (err,) = runtime.cudaFree(ptr)
             free_results.append(err)
 
         pool = torch.cuda.MemPool.from_py_allocator(alloc, free)
@@ -10561,15 +10616,17 @@ for args in ((a, b), (a, b, False)):
 
         callback_errors = []
 
-        def alloc(size):
-            err, ptr = runtime.cudaMalloc(size)
+        def alloc(size, device, stream):
+            with torch.cuda.device(device):
+                err, ptr = runtime.cudaMalloc(size)
             if err != runtime.cudaError_t.cudaSuccess:
                 callback_errors.append(err)
                 return None
             return int(ptr)
 
-        def free(ptr, size):
-            (err,) = runtime.cudaFree(ptr)
+        def free(ptr, size, device, stream):
+            with torch.cuda.device(device):
+                (err,) = runtime.cudaFree(ptr)
             if err != runtime.cudaError_t.cudaSuccess:
                 callback_errors.append(err)
 
@@ -10601,15 +10658,17 @@ for args in ((a, b), (a, b, False)):
         free_calls = []
         free_results = []
 
-        def alloc(size):
-            err, ptr = runtime.cudaMalloc(size)
+        def alloc(size, device, stream):
+            with torch.cuda.device(device):
+                err, ptr = runtime.cudaMalloc(size)
             if err != runtime.cudaError_t.cudaSuccess:
                 return None
             return int(ptr)
 
-        def free(ptr, size):
+        def free(ptr, size, device, stream):
             free_calls.append(ptr)
-            (err,) = runtime.cudaFree(ptr)
+            with torch.cuda.device(device):
+                (err,) = runtime.cudaFree(ptr)
             free_results.append(err)
             raise RuntimeError("free sentinel")
 
@@ -10624,10 +10683,12 @@ for args in ((a, b), (a, b, False)):
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
     def test_python_mempool_rejects_invalid_callbacks(self):
         with self.assertRaisesRegex(RuntimeError, "alloc_fn must be a Python callable"):
-            torch.cuda.MemPool.from_py_allocator(None, lambda ptr, size: None)
+            torch.cuda.MemPool.from_py_allocator(
+                None, lambda ptr, size, device, stream: None
+            )
         with self.assertRaisesRegex(RuntimeError, "free_fn must be a Python callable"):
             torch.cuda.MemPool.from_py_allocator(
-                lambda size: None,
+                lambda size, device, stream: None,
                 None,
             )
 
@@ -10652,10 +10713,9 @@ calls = []
 errors = []
 
 
-def alloc(size):
-    device = torch.cuda.current_device()
-    stream = torch.cuda.current_stream().cuda_stream
-    err, ptr = runtime.cudaMalloc(size)
+def alloc(size, device, stream):
+    with torch.cuda.device(device):
+        err, ptr = runtime.cudaMalloc(size)
     calls.append(("alloc", size, device, stream, threading.get_ident()))
     if err != runtime.cudaError_t.cudaSuccess:
         errors.append(int(err))
@@ -10663,10 +10723,9 @@ def alloc(size):
     return int(ptr)
 
 
-def free(ptr, size):
-    device = torch.cuda.current_device()
-    stream = torch.cuda.current_stream().cuda_stream
-    (err,) = runtime.cudaFree(ptr)
+def free(ptr, size, device, stream):
+    with torch.cuda.device(device):
+        (err,) = runtime.cudaFree(ptr)
     calls.append(("free", size, device, stream, threading.get_ident()))
     if err != runtime.cudaError_t.cudaSuccess:
         errors.append(int(err))

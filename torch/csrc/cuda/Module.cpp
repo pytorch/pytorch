@@ -1376,11 +1376,10 @@ void* callPythonAllocator(
   if (!Py_IsInitialized() || Py_IsFinalizing()) {
     return nullptr;
   }
-  c10::cuda::CUDAStreamGuard stream_guard(
-      c10::cuda::getStreamFromExternal(stream, device));
   py::gil_scoped_acquire gil;
-  py::object result = py::reinterpret_borrow<py::object>(
-      getPythonAllocatorCallback(state, 0))(size);
+  py::object result =
+      py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(state, 0))(
+          size, device, reinterpret_cast<uintptr_t>(stream));
   if (result.is_none()) {
     return nullptr;
   }
@@ -1411,12 +1410,13 @@ void callPythonDeallocator(
         message);
   };
   try {
-    c10::cuda::CUDAStreamGuard stream_guard(
-        c10::cuda::getStreamFromExternal(stream, device));
     py::gil_scoped_acquire gil;
     try {
       py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(state, 1))(
-          reinterpret_cast<uintptr_t>(ptr), size);
+          reinterpret_cast<uintptr_t>(ptr),
+          size,
+          device,
+          reinterpret_cast<uintptr_t>(stream));
     } catch (const std::exception& e) {
       // Report the Python error while the GIL is still held, but do not let a
       // cleanup callback throw through allocator teardown.

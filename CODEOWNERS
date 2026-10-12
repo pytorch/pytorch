@@ -359,6 +359,8 @@
 # /torch/csrc/Exceptions.cpp
 # /torch/csrc/Exceptions.h
 # /torch/csrc/Export.h
+# /torch/csrc/FakeTensorMode.cpp
+# /torch/csrc/FakeTensorMode.h
 # /torch/csrc/Generator.cpp
 # /torch/csrc/Generator.h
 # /torch/csrc/Layout.cpp
@@ -1144,6 +1146,7 @@
 # /test/test_utils.py
 # /test/test_utils_config_module.py
 # /test/test_utils_filelock.py
+# /test/torchci/
 # /tools/test/
 # /tools/testing/
 # /torch/_logging/

@@ -8903,6 +8903,7 @@ class TritonScheduling(SIMDScheduling):
         [
             BackendFeature.FOREACH,
             BackendFeature.BUCKETIZE,
+            BackendFeature.INDIRECT_INDEXING,
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
             BackendFeature.SCAN,

@@ -259,7 +259,8 @@ _COW_TENSOR_UNSUPPORTED = object()
 def _try_is_cow_tensor(value: object) -> bool | object:
     if not isinstance(value, torch.Tensor):
         return _COW_TENSOR_UNSUPPORTED
-    if torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python):
+    is_python = torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python)
+    if is_python or torch._subclasses.fake_tensor.is_fake_tensor(value):
         return _COW_TENSOR_UNSUPPORTED
     return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
 
@@ -780,24 +781,10 @@ class GuardManagerWrapper:
             return body.getvalue()
 
     def check(self, x: Any) -> bool:
-        # RootGuardManager::check_nopybind_template disables the TorchFunction
-        # TLS for its accessors and restores it on every exit but a throw, which
-        # would leave the calling thread disabled: put it back on that exit.
-        torch_function_state = torch._C._get_torch_function_state()
-        try:
-            return self.root.check(x)
-        except BaseException:
-            torch._C._set_torch_function_state(torch_function_state)
-            raise
+        return self.root.check(x)
 
     def check_verbose(self, x: Any) -> GuardDebugInfo:
-        # check_verbose_nopybind has the same non-RAII exit as check() above.
-        torch_function_state = torch._C._get_torch_function_state()
-        try:
-            return self.root.check_verbose(x)
-        except BaseException:
-            torch._C._set_torch_function_state(torch_function_state)
-            raise
+        return self.root.check_verbose(x)
 
     def populate_code_parts_for_debugging(self) -> None:
         # This should be called when the guard manager is fully populated

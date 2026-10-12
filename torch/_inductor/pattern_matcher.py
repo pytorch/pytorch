@@ -949,13 +949,24 @@ def _schema_defaults(op: torch._ops.OpOverload) -> dict[str, Any]:
     return defaults
 
 
+_AUTO_FUNCTIONALIZED = (
+    torch.ops.higher_order.auto_functionalized,
+    torch.ops.higher_order.auto_functionalized_v2,
+)
+
+
 def _has_undeclared_non_default_kwarg(
-    target: Any, kwargs: Mapping[str, Any], declared: Mapping[str, Any]
+    node: torch.fx.Node, declared: Mapping[str, Any]
 ) -> bool:
     # Patterns don't bind kwargs they don't declare, so matching a node that sets
     # one (e.g. add's alpha) would silently drop it from the replacement.
     # Patterns must declare any kwarg they accept (dtype, memory_format, ...).
-    undeclared = [(k, v) for k, v in kwargs.items() if k not in declared]
+    target = node.target
+    if target in _AUTO_FUNCTIONALIZED and node.args:
+        # functionalization passes every arg of the wrapped op as a kwarg,
+        # defaults included, so compare against the wrapped op's schema
+        target = node.args[0]
+    undeclared = [(k, v) for k, v in node.kwargs.items() if k not in declared]
     if not isinstance(target, torch._ops.OpOverload):
         # without a schema we can't tell which values are defaults
         return bool(undeclared)
@@ -1088,7 +1099,7 @@ class _TargetArgsExpr(_TargetExpr):
                 return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
         # raw kwargs, since normalization fills in every default
-        if _has_undeclared_non_default_kwarg(node.target, node.kwargs, self.kwargs):
+        if _has_undeclared_non_default_kwarg(node, self.kwargs):
             return FailedMatch("undeclared_kwarg: node={}, pattern={}", node, self)
         _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
 
@@ -1132,7 +1143,13 @@ class _TargetArgsExpr(_TargetExpr):
             return False
         if val.dtype != dtype or val.device != device or val.dim() != len(sizes):
             return False
-        return all(statically_known_true(a == b) for a, b in zip(val.shape, sizes))
+        # guard_or_false rather than statically_known_true: a rewrite can leave
+        # equal-at-runtime sizes that are not provably equal (e.g. s vs
+        # 2 * (s // 2) when the caller pads s to even outside the graph).
+        # Specializing (guarding) on backed symbols is allowed here; the only
+        # contract is to not specialize unbacked symbols, and guard_or_false
+        # returns False for those without installing a guard.
+        return all(guard_or_false(a == b) for a, b in zip(val.shape, sizes))
 
     def find_anchor_nodes(
         self, ctx: MatchContext, searched: OrderedSet[torch.fx.Node]
