@@ -106,6 +106,14 @@ class _Run:
         return "xpassed" if self.wasxfail else "passed"
 
 
+@dataclass(frozen=True)
+class _SubtestFailure:
+    """A failing subtest's phase and outcome summary, from its report."""
+
+    phase: str
+    summary: str
+
+
 class ReportWriter:
     def __init__(self, path: str, report_uuid: str) -> None:
         self.path = path
@@ -117,6 +125,12 @@ class ReportWriter:
         self.runs: dict[tuple[str, Any], _Run] = {}
         self.rerun_numbers: Counter[str] = Counter()
         self.tests: dict[str, report.TestId | None] = {}
+        # pytest-rerunfailures sends an attempt's setup, call and teardown reports
+        # only once the attempt ends, but pytest-subtests sends a subtest's report
+        # during the call, so a failing subtest can arrive before its run opens.
+        # Keyed like self.runs, it holds a test's first such failure until the
+        # test's setup report opens the run.
+        self.early_subtest_failures: dict[tuple[str, Any], _SubtestFailure] = {}
 
     def pytest_sessionstart(self, session: Session) -> None:
         if _disabled:
@@ -146,16 +160,24 @@ class ReportWriter:
     def _logreport(self, test_report: TestReport) -> None:
         nodeid = test_report.nodeid
         key = (nodeid, getattr(test_report, "node", None))
+        # A failing subtest fails the run. Both pytest-subtests' SubTestReport and
+        # pytest 9's built-in pytest.SubtestReport carry a context; only the latter
+        # is public.
+        subtest = getattr(test_report, "context", None) is not None
         if test_report.when == "setup":
             test_id = getattr(test_report, _TEST_ID, None)
             test = report.TestId(**test_id) if test_id else self.tests.get(nodeid)
-            self.runs[key] = _Run(test_report.start, test)
+            opened = self.runs[key] = _Run(test_report.start, test)
+            if failure := self.early_subtest_failures.pop(key, None):
+                opened.failed_phase = failure.phase
+                opened.outcome_summary = failure.summary
         run = self.runs.get(key)
+        if run is None and subtest and test_report.failed:
+            failure = _SubtestFailure(test_report.when, _failure_summary(test_report))
+            self.early_subtest_failures.setdefault(key, failure)
         if run is None or test_report.when not in ("setup", "call", "teardown"):
             return
         run.ended = test_report.stop
-        # A failing pytest-subtests subtest fails the run.
-        subtest = getattr(test_report, "context", None) is not None
         if test_report.failed or test_report.outcome == "rerun":
             if not run.failed_phase:
                 run.failed_phase = test_report.when

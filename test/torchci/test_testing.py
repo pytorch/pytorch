@@ -303,17 +303,23 @@ TestUnittest    | test_unittest            | test_unittest""",
         )
 
     def test_subtests(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            _, report = _run_plugin(
-                str(_REPORT_TESTDATA), ["subtests_report.py"], Path(tmp) / "subtests"
+        # With --reruns, as run_test.py passes, pytest-rerunfailures sends the
+        # test's setup report after its subtests' reports.
+        for args in ([], ["--reruns", "1"]):
+            with tempfile.TemporaryDirectory() as tmp:
+                _, report = _run_plugin(
+                    str(_REPORT_TESTDATA),
+                    ["subtests_report.py", *args],
+                    Path(tmp) / "subtests",
+                )
+                runs = _runs(report)
+            # One run per test, however many subtests it has.
+            self.assertEqual(
+                [(run["case_name"], run["outcome"]) for run in runs],
+                [("test_failing_subtest", "failed")],
+                args,
             )
-            runs = _runs(report)
-        # One run per test, however many subtests it has.
-        self.assertEqual(
-            [(run["case_name"], run["outcome"]) for run in runs],
-            [("test_failing_subtest", "failed")],
-        )
-        self.assertIn("1 != 0", runs[0]["outcome_summary"])
+            self.assertIn("1 != 0", runs[0]["outcome_summary"])
 
     def test_skip_after_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
