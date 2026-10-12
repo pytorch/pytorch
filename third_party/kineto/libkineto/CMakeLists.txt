@@ -42,6 +42,7 @@ set(LIBKINETO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(LIBKINETO_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(LIBKINETO_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 set(LIBKINETO_THIRDPARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+set(KINETO_PYTORCH_THIRDPARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 #We should default to a Release build
@@ -242,8 +243,8 @@ set(IPCFABRIC_INCLUDE_DIR "${DYNOLOG_INCLUDE_DIR}/dynolog/src/ipcfabric/")
 
 if(NOT TARGET fmt::fmt-header-only)
   if(NOT FMT_SOURCE_DIR)
-    set(FMT_SOURCE_DIR "${LIBKINETO_THIRDPARTY_DIR}/fmt"
-      CACHE STRING "fmt source directory from submodules")
+    set(FMT_SOURCE_DIR "${KINETO_PYTORCH_THIRDPARTY_DIR}/fmt"
+      CACHE STRING "fmt source directory")
   endif()
 
   # Build FMT.
@@ -339,7 +340,8 @@ if(KINETO_BUILD_TESTS)
     set(INSTALL_GTEST OFF)
     set(TMP_BUILD_SHARED_LIBS "${BUILD_SHARED_LIBS}")
     set(BUILD_SHARED_LIBS OFF)
-    add_subdirectory("${LIBKINETO_THIRDPARTY_DIR}/googletest")
+    add_subdirectory("${KINETO_PYTORCH_THIRDPARTY_DIR}/googletest"
+                     "${LIBKINETO_BINARY_DIR}/googletest")
     set(BUILD_SHARED_LIBS "${TMP_BUILD_SHARED_LIBS}")
     if(KINETO_BACKEND STREQUAL "xpu")
       set_property(TARGET gtest PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -349,7 +351,7 @@ if(KINETO_BUILD_TESTS)
     set(JSON_BuildTests OFF CACHE INTERNAL "")
     set(JSON_Install OFF CACHE INTERNAL "")
     add_subdirectory(
-      "${LIBKINETO_THIRDPARTY_DIR}/json"
+      "${KINETO_PYTORCH_THIRDPARTY_DIR}/nlohmann"
       "${LIBKINETO_BINARY_DIR}/json")
   endif()
   enable_testing()

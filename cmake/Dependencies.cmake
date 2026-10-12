@@ -1754,9 +1754,7 @@ if(USE_KINETO)
   set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
 
   # Kineto's unit tests need gtest, which only exists when BUILD_TEST is on.
-  # The xpu backend is excluded because its tests compile SYCL device code
-  # through an ExternalProject, which does not fit inside this build.
-  if(BUILD_TEST AND NOT KINETO_BACKEND STREQUAL "xpu")
+  if(BUILD_TEST)
     set(KINETO_BUILD_TESTS ON CACHE BOOL "" FORCE)
   else()
     set(KINETO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
