@@ -8,7 +8,7 @@ import torch
 
 class HWCaps:
     # Raw, portable device facts + a few derived quantities the heuristics want.
-    def __init__(self, device=None):
+    def __init__(self, device: torch.device | int | str | None = None) -> None:
         p = torch.cuda.get_device_properties(device)
         # --- raw, all architecture-portable ---
         self.name = p.name
@@ -23,18 +23,15 @@ class HWCaps:
         self.smem_per_block_optin = p.shared_memory_per_block_optin  # 228KB H, 232KB B
         self.smem_per_sm = p.shared_memory_per_multiprocessor
         self.l2_bytes = p.L2_cache_size
-        # Divide last to avoid truncating non-byte-multiple bus widths. memory_clock_rate
-        # queries the current device, so request the indexed property separately.
-        with torch.cuda.device(device):
-            mem_clock_khz = p.memory_clock_rate
-        self.peak_bw_bytes = p.memory_bus_width * mem_clock_khz * 1000 * 2 // 8
+        # Divide last to avoid truncating non-byte-multiple bus widths.
+        self.peak_bw_bytes = p.memory_bus_width * p.memory_clock_rate * 1000 * 2 // 8
 
     # --- derived quantities the launch heuristics reason in ---
     @property
-    def max_warps_per_sm(self):
+    def max_warps_per_sm(self) -> int:
         return self.max_threads_per_sm // self.warp
 
-    def blocks_per_sm(self, threads_per_block):
+    def blocks_per_sm(self, threads_per_block: int) -> int:
         # Thread-bound blocks per SM; callers handle register and smem limits. Reject invalid
         # block sizes, but floor oversized blocks at one to keep callers from dividing by zero.
         if threads_per_block <= 0:
@@ -43,12 +40,12 @@ class HWCaps:
             )
         return max(1, self.max_threads_per_sm // threads_per_block)
 
-    def waves(self, total_blocks, threads_per_block):
+    def waves(self, total_blocks: int, threads_per_block: int) -> float:
         # Grid size in occupancy waves; one wave runs the device's maximum concurrent blocks.
         concurrent = self.sm_count * self.blocks_per_sm(threads_per_block)
         return total_blocks / max(concurrent, 1)
 
-    def fill_blocks(self, threads_per_block, waves=1.0):
+    def fill_blocks(self, threads_per_block: int, waves: float = 1.0) -> int:
         # Number of blocks needed to fill the device to `waves` occupancy waves.
         return int(self.sm_count * self.blocks_per_sm(threads_per_block) * waves)
 
@@ -58,6 +55,6 @@ def _caps(index: int) -> "HWCaps":
     return HWCaps(index)
 
 
-def caps(device=None):
+def caps(device: torch.device | int | str | None = None) -> HWCaps:
     # Resolve before caching because caps(None) follows the mutable current device.
     return _caps(torch.cuda._utils._get_device_index(device, optional=True))
