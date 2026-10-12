@@ -558,6 +558,35 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), expected)
             self.assertEqual(calls, expected_calls)
 
+    def test_class_attribute_shadow_recompilation_message(self):
+        class Base:
+            scale = 2
+
+        class MyObj(Base):
+            pass
+
+        def fn(x, obj):
+            return x * obj.scale
+
+        failures = []
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.tensor(3.0)
+        obj = MyObj()
+        compiled_fn(x, obj)
+        obj.scale = 4
+        compiled_fn(x, obj)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("not ___dict_contains('scale', obj.__dict__)", failures[0])
+        expected = (
+            "(HINT: Object obj must not define instance attribute 'scale'; Dynamo "
+            "specialized the compiled code assuming this attribute comes from the "
+            "object's class."
+        )
+        self.assertIn(expected, failures[0])
+
     def test_staticmethod_descriptor(self):
         class MyObj:
             @staticmethod
