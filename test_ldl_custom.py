@@ -66,22 +66,26 @@ _GRID_VARIANTS = [(True, b, 256) for b in (1, 2, 3, 7)] + [(False, 1, 256), (Fal
 
 
 def _factor_panels(A, nb, panels, cooperative, nblocks, nthreads, hermitian):
-    """Runs the first `panels` panels of the standalone kernel on a column-major
-    copy of A, with the trailing update between them as the library does it."""
+    """Runs the first `panels` panels (all of them if None) of the standalone kernel
+    on a column-major copy of A, with the trailing update between them as the
+    library does it."""
     n = A.size(-1)
     LD = A.mT.contiguous().mT.clone()
     ipiv = torch.zeros(n, dtype=torch.int32, device=A.device)
     info = torch.zeros(1, dtype=torch.int32, device=A.device)
-    step = 0
-    for _ in range(panels):
+    step = done = 0
+    while step < n and (panels is None or done < panels):
         width = min(nb, n - step)
         new_step = _standalone_ext().panel(
             LD, ipiv, info, width, step, cooperative, nblocks, nthreads, hermitian
         )
+        if new_step == step:
+            raise RuntimeError(f"the panel at step {step} made no progress")
         end = step + width
         if end < n:
             LD[end:, end:] -= LD[end:, step:new_step] @ LD[step:new_step, end:]
         step = new_step
+        done += 1
     return LD, ipiv, info
 
 
@@ -110,6 +114,30 @@ def _spectrum(n, batch, s, dtype, device):
     x = torch.randn(*batch, n, n, dtype=dtype, device=device)
     q, _ = torch.linalg.qr(x)
     return (q * s.unsqueeze(-2).to(dtype)) @ q.mH
+
+
+def exact_last_zero_matrix(n, dtype, device, seed):
+    """Hermitian matrix whose last pivot is exactly zero, in exact arithmetic and in
+    floating point alike: an identity-like diagonal d_i = +-2^k with one coupling
+    v_i = 2^j * unit to the last index (|v_i| <= |d_i|, so no interchange), and
+    A[-1, -1] = sum |v_i|^2 / d_i. Everything is a small dyadic number, so the
+    updates reach exactly zero in whatever order they are applied, unlike a general
+    singular matrix, where rounding decides. The last entry is only ever touched
+    by the updates, never factored until the very end."""
+    g = torch.Generator().manual_seed(seed)
+    j = torch.randint(0, 2, (n - 1,), generator=g)
+    k = j + torch.randint(0, 2, (n - 1,), generator=g)
+    sign = torch.randint(0, 2, (n - 1,), generator=g) * 2 - 1
+    units = [1, 1j, -1, -1j] if dtype.is_complex else [1, -1]
+    u = torch.tensor([units[i] for i in torch.randint(0, len(units), (n - 1,), generator=g).tolist()], dtype=dtype)
+    v = (2.0 ** j).to(dtype) * u
+    d = sign * 2.0 ** k
+    A = torch.zeros(n, n, dtype=dtype)
+    A.diagonal()[:-1] = d.to(dtype)
+    A[:-1, -1] = v
+    A[-1, :-1] = v.conj()
+    A[-1, -1] = (v.abs() ** 2 / d).sum().to(dtype)
+    return A.to(device)
 
 
 # ---------------------------------------------------------------- structures
@@ -310,6 +338,19 @@ def pattern_from_pivots(pivots):
     return tuple(out)
 
 
+def _straddling_pattern(n, period):
+    """1x1 blocks, with a 2x2 across every boundary at a multiple of period."""
+    pattern, pos = [], 0
+    while pos < n:
+        if (pos + 1) % period == 0 and pos + 2 <= n:
+            pattern.append(2)
+            pos += 2
+        else:
+            pattern.append(1)
+            pos += 1
+    return tuple(pattern)
+
+
 def matrix_for_pattern(pattern, dtype, device, coupling=0.0):
     n = sum(pattern)
     a = torch.zeros(n, n, dtype=dtype, device=device)
@@ -490,6 +531,28 @@ class TestLDLCustomKernel(TestCase):
         torch.manual_seed(n)
         A = STRUCTURES[structure](n, (), dtype, device)
         self._check_grid_invariance(A, nb, hermitian=True)
+
+    # The runs above stop after a few panels. These go to the end, where the last column
+    # is handled by its own launch (or the panel that ends on it), with every grid.
+    @onlyCUDA
+    @parametrize("nb", [16, 32, 48])
+    @parametrize("n", [70, 300, 2100])
+    @dtypes(*floating_and_complex_types())
+    def test_panel_grid_size_invariance_to_completion(self, device, dtype, n, nb):
+        torch.manual_seed(n)
+        A = indefinite(n, (), dtype, device)
+        self._check_grid_invariance(A, nb, hermitian=True, panels=None)
+
+    @onlyCUDA
+    @parametrize("nb", [16, 32, 48])
+    @parametrize("n", [70, 300, 2100])
+    @dtypes(*floating_and_complex_types())
+    def test_panel_last_pivot_to_completion(self, device, dtype, n, nb):
+        A = exact_last_zero_matrix(n, dtype, device, seed=n)
+        for LD, ipiv, info in self._grid_variants(A, nb, hermitian=True, panels=None):
+            self.assertEqual(info.item(), n)
+            self.assertEqual(ipiv[-1].item(), n)
+            self.assertEqual(LD.diagonal().imag.abs().max().item() if dtype.is_complex else 0, 0)
 
     @onlyCUDA
     @parametrize("n", [300, 4100])
@@ -1067,6 +1130,22 @@ class TestLDLCustomKernel(TestCase):
         self.assertGreaterEqual(info.item(), 0)
         self.assertLessEqual(info.item(), n)
 
+    @parametrize("n", [2, 5, 33, 34, 65, 150, 2049, 4100])
+    @dtypes(*floating_and_complex_types())
+    def test_zero_last_pivot_from_updates(self, device, dtype, n):
+        """The last pivot is exactly zero only after every earlier column has
+        updated it, so it is stale when the last panel ends, and the check has to
+        run on the value after the final GEMM."""
+        for seed in range(3):
+            A = exact_last_zero_matrix(n, dtype, device, seed)
+            _, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+            self.assertEqual(info.item(), n)
+            self.assertEqual(piv.tolist(), list(range(1, n + 1)))
+            # nudging the last entry by an exactly representable amount must clear it
+            A[-1, -1] += 0.5
+            _, _, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+            self.assertEqual(info.item(), 0)
+
     @parametrize("n", [2, 3, 5, 32, 33, 34, 40, 65, 150, 2049, 4100])
     @dtypes(*floating_and_complex_types())
     def test_zero_last_pivot_sets_info(self, device, dtype, n):
@@ -1088,10 +1167,15 @@ class TestLDLCustomKernel(TestCase):
         "straddle_then_1x1": lambda n: (1,) * (NB - 1) + (2,) + (1,) * (n - NB - 1),
         "straddle_then_2x2": lambda n: (1,) * (NB - 1) + (2,) + (1,) * (n - NB - 3) + (2,),
         "2x2_before_last": lambda n: (1,) * (n - 3) + (2,) + (1,),
+        # a 2x2 block across every multiple of the period, which is where the panels of the
+        # various dtypes end (256 bytes worth of columns: 64, 32, 32 and 16)
+        "straddle_every_16": lambda n: _straddling_pattern(n, 16),
+        "straddle_every_32": lambda n: _straddling_pattern(n, 32),
+        "straddle_every_64": lambda n: _straddling_pattern(n, 64),
     }
 
     @parametrize("layout", list(_LAST_COLUMN_PATTERNS))
-    @parametrize("n", [34, 35, 36, 64, 65, 66, 97])
+    @parametrize("n", [34, 35, 36, 64, 65, 66, 97, 129, 2049, 2050, 4100])
     @dtypes(*floating_and_complex_types())
     def test_last_column_layouts(self, device, dtype, n, layout):
         pattern = self._LAST_COLUMN_PATTERNS[layout](n)
