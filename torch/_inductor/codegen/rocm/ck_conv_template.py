@@ -2,6 +2,7 @@
 import copy
 import logging
 import random
+from dataclasses import replace
 from typing import Any
 from typing_extensions import override
 
@@ -37,49 +38,47 @@ from torch._inductor.utils import IndentedBuffer
 log = logging.getLogger(__name__)
 
 
+# CK (input, weight, output) layout names, keyed by number of spatial dimensions.
+_CK_CONTIGUOUS_LAYOUTS = {
+    2: ("NGCHW", "GKCYX", "NGKHW"),
+    3: ("NGCDHW", "GKCZYX", "NGKDHW"),
+}
+
+_CK_CHANNELS_LAST_LAYOUTS = {
+    2: ("NHWGC", "GKYXC", "NHWGK"),
+    3: ("NDHWGC", "GKZYXC", "NDHWGK"),
+}
+
+
 def torch_layout_to_ck_layouts(torch_layout):
-    # logically, torch tensors are always NCHW,
-    # and channels-last memory layout is visible in the strides
-    if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
-        # when input or output is NCHW
-        # NB: torch.conv2d result is always NCHW
-        return ["NGCHW", "GKCYX", "NGKHW"]
-    elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
-        # when input or output or weight is channels-last
-        return ["NHWGC", "GKYXC", "NHWGK"]
-    else:
+    # torch tensors are logically always NC(D)HW; the memory format lives
+    # entirely in the strides.
+    n_dim_spatial = len(torch_layout.size) - 2
+    if n_dim_spatial not in _CK_CONTIGUOUS_LAYOUTS:
         return None
-
-
-def torch_layout_to_ck_input_layout(torch_layout):
     if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
-        return "NGCHW"
-    elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
-        return "NHWGC"
-    else:
-        return None
-
-
-def torch_layout_to_ck_weight_layout(torch_layout):
-    if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
-        return "GKCYX"
-    elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
-        return "GKYXC"
-    else:
-        return None
-
-
-def torch_layout_to_ck_output_layout(torch_layout):
-    if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
-        return "NGKHW"
-    elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
-        return "NHWGK"
+        return _CK_CONTIGUOUS_LAYOUTS[n_dim_spatial]
+    elif V.graph.sizevars.statically_known_equals(torch_layout.stride[1], 1):
+        # channels-last: the channel dim, always index 1, is fastest-varying
+        return _CK_CHANNELS_LAST_LAYOUTS[n_dim_spatial]
     else:
         return None
 
 
 class CKGroupedConvFwdTemplate(CKTemplate):
+    _SPATIAL_SIZE_ARG_NAMES = (
+        "FilterSize",
+        "InputSize",
+        "ConvolutionStrides",
+        "Dilations",
+        "LeftPads",
+        "RightPads",
+    )
+
     conv_template = r"""
+{%- macro spatial_args(name) -%}
+{% for i in range(n_dim_spatial) %}{{ name }}_{{ i }}{{ ", " if not loop.last }}{% endfor %}
+{%- endmacro %}
     {{headers}}
     {{globals}}
     {{instance_definition}}
@@ -92,12 +91,12 @@ class CKGroupedConvFwdTemplate(CKTemplate):
 
         constexpr index_t NumDTensor = {{n_d_tensors}};
         constexpr index_t NDimSpatial = {{n_dim_spatial}};
-        const std::vector<index_t> FilterSize = { FilterSize_0, FilterSize_1 };
-        const std::vector<index_t> InputSize = { InputSize_0, InputSize_1 };
-        const std::vector<index_t> ConvolutionStrides = { ConvolutionStrides_0, ConvolutionStrides_1 };
-        const std::vector<index_t> Dilations = { Dilations_0, Dilations_1 };
-        const std::vector<index_t> LeftPads = { LeftPads_0, LeftPads_1 };
-        const std::vector<index_t> RightPads = { RightPads_0, RightPads_1 };
+        const std::vector<index_t> FilterSize = { {{ spatial_args("FilterSize") }} };
+        const std::vector<index_t> InputSize = { {{ spatial_args("InputSize") }} };
+        const std::vector<index_t> ConvolutionStrides = { {{ spatial_args("ConvolutionStrides") }} };
+        const std::vector<index_t> Dilations = { {{ spatial_args("Dilations") }} };
+        const std::vector<index_t> LeftPads = { {{ spatial_args("LeftPads") }} };
+        const std::vector<index_t> RightPads = { {{ spatial_args("RightPads") }} };
 
 
         auto conv_param = ck::utils::conv::ConvParam {
@@ -448,12 +447,14 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         if op.e_element_dtype != self._TORCH_DTYPE_TO_CK[Y_meta.dtype]:
             return None
         # disable the instance if layouts don't match
-        if op.a_layout != torch_layout_to_ck_input_layout(X_meta):
-            return None
-        if op.b_layout != torch_layout_to_ck_weight_layout(W_meta):
-            return None
-        if op.e_layout != torch_layout_to_ck_output_layout(Y_meta):
-            return None
+        for op_layout, meta, tensor_idx in (
+            (op.a_layout, X_meta, 0),
+            (op.b_layout, W_meta, 1),
+            (op.e_layout, Y_meta, 2),
+        ):
+            ck_layouts = torch_layout_to_ck_layouts(meta)
+            if ck_layouts is None or op_layout != ck_layouts[tensor_idx]:
+                return None
         # disable the instance if number of spatial dimensions doesn't match
         if op.n_dim_spatial != self.n_spatial_dimensions:
             return None
@@ -464,8 +465,36 @@ class CKGroupedConvFwdTemplate(CKTemplate):
             return None
         return op
 
+    def gen_instances_for_rank(self):
+        instances = gen_conv_ops_library()
+        n_dim_spatial = self.n_spatial_dimensions
+        if n_dim_spatial == 2:
+            return instances
+        if n_dim_spatial not in _CK_CHANNELS_LAST_LAYOUTS:
+            return []
+        if self.groups != 1:
+            # support only non-grouped convolutions.
+            return []
+        # ck4inductor ships no 3D instances: gen_conv_ops_library() discards
+        # what it parsed and returns a hand-built list that hardcodes
+        # n_dim_spatial=2 and 2D layout names. CK's device ops are generic over
+        # NDimSpatial, so re-stamp those instances as 3D.
+        src_a_layout, _, src_e_layout = _CK_CHANNELS_LAST_LAYOUTS[2]
+        a_layout, b_layout, e_layout = _CK_CHANNELS_LAST_LAYOUTS[n_dim_spatial]
+        return [
+            replace(
+                instance,
+                n_dim_spatial=n_dim_spatial,
+                a_layout=a_layout,
+                b_layout=b_layout,
+                e_layout=e_layout,
+            )
+            for instance in instances
+            if instance.a_layout == src_a_layout and instance.e_layout == src_e_layout
+        ]
+
     def gen_ops(self):
-        unfiltered_instances = gen_conv_ops_library()
+        unfiltered_instances = self.gen_instances_for_rank()
 
         filtered_instances = list(
             filter(lambda op: self.filter_op(op), unfiltered_instances)
@@ -537,23 +566,10 @@ class CKGroupedConvFwdTemplate(CKTemplate):
 
         instance_definition, instance_type = self.emit_ck_instance(op)
 
-        size_arg_strs = [
-            "GroupCount",
-            "NBatch",
-            "NOutChannels",
-            "NInChannels",
-            "FilterSize_0",
-            "FilterSize_1",
-            "InputSize_0",
-            "InputSize_1",
-            "ConvolutionStrides_0",
-            "ConvolutionStrides_1",
-            "Dilations_0",
-            "Dilations_1",
-            "LeftPads_0",
-            "LeftPads_1",
-            "RightPads_0",
-            "RightPads_1",
+        size_arg_strs = ["GroupCount", "NBatch", "NOutChannels", "NInChannels"] + [
+            f"{name}_{i}"
+            for name in self._SPATIAL_SIZE_ARG_NAMES
+            for i in range(self.n_spatial_dimensions)
         ]
 
         return self._template_from_string(self.conv_template).render(
@@ -579,36 +595,19 @@ class CKGroupedConvFwdTemplate(CKTemplate):
     def size_args(self):
         x, w = self.input_nodes[0], self.input_nodes[1]
         y = self.output_node
-
-        group_count = self.groups
-        n_batch = x.shape[0]  # type: ignore[index]
-        n_out_channels = y.shape[1]  # type: ignore[index]
-        n_in_channels = x.shape[1]  # type: ignore[index]
-
-        filter_size_0, filter_size_1 = w.shape[2:4]  # type: ignore[index]
-        input_size_0, input_size_1 = x.shape[2:4]  # type: ignore[index]
-        convolution_strides_0, convolution_strides_1 = self.stride
-        dilations_0, dilations_1 = self.dilation
-        left_pads_0, left_pads_1 = self.padding
-        right_pads_0, right_pads_1 = self.padding
+        n = self.n_spatial_dimensions
 
         return (
-            group_count,
-            n_batch,
-            n_out_channels,
-            n_in_channels,
-            filter_size_0,
-            filter_size_1,
-            input_size_0,
-            input_size_1,
-            convolution_strides_0,
-            convolution_strides_1,
-            dilations_0,
-            dilations_1,
-            left_pads_0,
-            left_pads_1,
-            right_pads_0,
-            right_pads_1,
+            self.groups,
+            x.shape[0],  # type: ignore[index]
+            y.shape[1],  # type: ignore[index]
+            x.shape[1],  # type: ignore[index]
+            *w.shape[2 : 2 + n],  # type: ignore[index]
+            *x.shape[2 : 2 + n],  # type: ignore[index]
+            *self.stride,
+            *self.dilation,
+            *self.padding,
+            *self.padding,
         )
 
     @override
