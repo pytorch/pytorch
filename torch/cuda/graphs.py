@@ -1492,6 +1492,10 @@ class graph:
         if self._collective_hooks is not None:
             self._collective_hooks.remove()
             self._collective_hooks = None
+        # A collective that raised skipped its pop. Close its scope, innermost first,
+        # so it does not stay the ambient annotation for later captures.
+        while self._collective_kernel_scopes:
+            self._collective_kernel_scopes.pop().__exit__(None, None, None)
 
     def __exit__(self, *args: object) -> None:
         from torch.cuda import _graph_node_callbacks

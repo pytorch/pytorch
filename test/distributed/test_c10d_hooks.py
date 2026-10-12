@@ -155,7 +155,7 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         ws = self.world_size
         peer = (self.rank + 1) % ws
         push, pop = mock.Mock(), mock.Mock()
-        handle = register_collective_annotation_hooks(push, pop)
+        handle = register_collective_annotation_hooks(push, pop, _include_non_nccl=True)
         try:
             dist.all_reduce(torch.ones(3))
             dist.all_gather_into_tensor(torch.zeros(2 * ws), torch.ones(2))
@@ -180,7 +180,7 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
                 "Process Group Ranks": str(list(range(ws))),
                 "Is asynchronized op": False,
                 "Rank": self.rank,
-                "dtype": "float32",
+                "dtype": "Float",
                 "Seq": seq + 1,
             },
         )
@@ -202,7 +202,9 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
     def test_collective_annotation_hooks(self):
         group = dist.new_group()
         calls = mock.Mock()
-        handle = register_collective_annotation_hooks(calls.push, calls.pop)
+        handle = register_collective_annotation_hooks(
+            calls.push, calls.pop, _include_non_nccl=True
+        )
         dist.all_reduce(torch.ones(1), group=group)
         handle.remove()
         handle.remove()  # idempotent

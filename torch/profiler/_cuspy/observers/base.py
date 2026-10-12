@@ -15,6 +15,7 @@ import functools
 import json
 import logging
 import threading
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
@@ -387,35 +388,23 @@ class CuspyObserver:
 
         Pushes a new external correlation id and keys ``metadata`` on it, so the
         fields land on every kernel this thread launches until the matching
-        :meth:`_pop_collective_kernel_metadata`. The kernels also keep the name of
-        the innermost enclosing ``record_function`` scope.
+        :meth:`_pop_collective_kernel_metadata`. The kernels keep the name of their
+        enclosing ``record_function`` scope: name resolution walks up from the
+        unnamed collective id.
         """
         cuspy = self._cuspy
         if not self.available or cuspy is None:
             return
-        # Only record_function scopes are named, and the chain runs outermost to
-        # innermost.
-        record_function_scope = None
-        current_id = cuspy.current_external_correlation_id()
-        if current_id is not None:
-            with self._ann_lock:
-                for i in reversed(cuspy.external_id_chain(current_id)):
-                    if i in self._ext_names:
-                        record_function_scope = self._ext_names[i]
-                        break
         ext_id = cuspy.push_external_correlation_id()
         if ext_id is None:
-            raise AssertionError(
-                "Cuspy is not started, but a collective annotation hook is still set; "
-                "the hooks must be unset before the Cuspy observer is closed"
+            # Cuspy is not started; the matching pop no-ops too. A profiler problem
+            # must not fail the collective, so skip its annotation.
+            warnings.warn(
+                "Cuspy could not push an external correlation id; collective kernels "
+                "will not carry collective metadata",
+                stacklevel=2,
             )
-        # CUPTI tags a kernel with only the innermost external id, so carry the
-        # innermost record_function scope onto the new one.
-        if record_function_scope is not None:
-            with self._ann_lock:
-                self._ext_names[ext_id] = record_function_scope
-        # Keyed by ext_id rather than the current id: if CUPTI rejected the push, the
-        # current id is still the enclosing region's.
+            return
         torch._C._profiler._cuspy.metadata_put_external(json.dumps(metadata), ext_id)
 
     _pop_collective_kernel_metadata = pop_annotation
