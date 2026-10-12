@@ -898,6 +898,115 @@ the new backend.
 The support of third-party backend is experimental and subject to change.
 :::
 
+### Python backends
+
+A backend can also be written in Python by subclassing
+`torch._C._distributed_c10d.Backend`. Each overridden method is called from
+C++ in place of the corresponding `c10d::Backend` virtual, so the backend plugs
+into `torch.distributed`, `ProcessGroup` and `DeviceMesh` like a C++ backend.
+
+The example below sums CPU tensors through the store; run it with
+`torchrun --nproc-per-node 2 store_backend.py`.
+
+```python
+import torch
+import torch.distributed as dist
+from torch._C._distributed_c10d import _create_work_from_future, Backend
+
+
+class StoreBackend(Backend):
+    """Toy backend that sums CPU tensors through the c10d Store."""
+
+    def __init__(self, store, rank, world_size, timeout):
+        super().__init__(rank, world_size)
+        self._store = store
+        self._seq = 0
+
+    def getBackendName(self):
+        return "store"
+
+    def allreduce(self, tensors, opts):
+        if opts.reduceOp != dist.ReduceOp.SUM:
+            raise ValueError("StoreBackend only supports SUM")
+        key = f"allreduce/{self._seq}"
+        self._seq += 1
+        for i, t in enumerate(tensors):
+            self._store.set(f"{key}/{i}/{self.rank()}", t.numpy().tobytes())
+        for i, t in enumerate(tensors):
+            peers = [self._store.get(f"{key}/{i}/{r}") for r in range(self.size())]
+            t.copy_(sum(torch.frombuffer(bytearray(p), dtype=t.dtype).view_as(t) for p in peers))
+        future = torch.futures.Future()
+        future.set_result(tensors)
+        return _create_work_from_future(future)
+
+    def custom_method(self):
+        return self._seq
+
+
+dist.Backend.register_backend("store", StoreBackend, devices=["cpu"])
+
+dist.init_process_group("store")
+t = torch.ones(4) * (dist.get_rank() + 1)
+dist.all_reduce(t)  # tensor([3., 3., 3., 3.])
+dist.get_backend_impl().custom_method()  # 1
+dist.destroy_process_group()
+```
+
+The creator passed to {func}`~torch.distributed.Backend.register_backend` is
+called with `(store, group_rank, group_size, timeout)`, or with
+`(dist_backend_opts, pg_options)` when `extended_api=True`. It runs for every
+process group created with the backend, including subgroups from
+{func}`~torch.distributed.new_group`.
+
+**Methods.** Override the collectives the backend supports; the rest raise an
+error naming the backend. Arguments match the C++ virtuals, with options
+objects such as `AllreduceOptions`:
+
+| Method | Called by |
+| --- | --- |
+| `broadcast(tensors, opts)` | {func}`~torch.distributed.broadcast` |
+| `allreduce(tensors, opts)` | {func}`~torch.distributed.all_reduce` |
+| `allreduce_sparse(tensors, opts)` | {func}`~torch.distributed.all_reduce` on sparse tensors |
+| `allreduce_coalesced(tensors, opts)` | {func}`~torch.distributed.all_reduce_coalesced` |
+| `reduce(tensors, opts)` | {func}`~torch.distributed.reduce` |
+| `allgather(output_lists, inputs, opts)` | {func}`~torch.distributed.all_gather` |
+| `all_gather_single(output, input, opts)` | {func}`~torch.distributed.all_gather_single` |
+| `allgather_coalesced(output_lists, inputs, opts)`, `all_gather_single_coalesced(outputs, inputs, opts)` | coalesced all-gathers |
+| `gather(output_lists, inputs, opts)` | {func}`~torch.distributed.gather` |
+| `gather_single(output, input, opts)` | {func}`~torch.distributed.gather_single` |
+| `scatter(outputs, input_lists, opts)` | {func}`~torch.distributed.scatter` |
+| `reduce_scatter(outputs, input_lists, opts)` | {func}`~torch.distributed.reduce_scatter` |
+| `reduce_scatter_single(output, input, opts)` | {func}`~torch.distributed.reduce_scatter_single` |
+| `reduce_scatter_single_coalesced(outputs, inputs, opts)` | coalesced reduce-scatter |
+| `all_to_all_single(output, input, output_splits, input_splits, opts)` | {func}`~torch.distributed.all_to_all_single` |
+| `alltoall(outputs, inputs, opts)` | {func}`~torch.distributed.all_to_all` |
+| `send(tensors, dst, tag)`, `recv(tensors, src, tag)`, `recv_anysource(tensors, tag)` | point-to-point ops |
+| `barrier(opts)`, `monitored_barrier(opts, wait_all_ranks)` | {func}`~torch.distributed.barrier`, {func}`~torch.distributed.monitored_barrier` |
+
+**Work.** Collectives other than `monitored_barrier` return a `Work`. For a completed or future-backed
+operation, use `_create_work_from_future(future)`. For custom completion
+semantics, subclass `torch.distributed._Work` and override `wait(timeout)` and
+`get_future()`.
+
+**Capabilities.** Features are opted into with read-only properties, for
+example `supports_splitting`, `supports_coalescing` and `supports_shrinking`,
+paired with the corresponding methods (`split(store, ranks, opts)`,
+`start_coalescing()`/`end_coalescing()`,
+`shrink(ranks_to_exclude, shrink_flags, opts_override)`). `split` backs
+{func}`~torch.distributed.split_group` and returns the child backend, or `None`
+on ranks outside the new group. Define the `options` property if `split_group`
+is called without `pg_options`.
+
+**Name.** Override `getBackendName()`, not `name()`; C++ calls the former and
+`name()` returns it.
+
+**Custom methods.** Methods beyond the `Backend` interface are reached through
+{func}`~torch.distributed.get_backend_impl`, as with `custom_method` above.
+
+**Testing.** `test/distributed/c10d_backend_common.py` defines `python-gloo`, a
+Python backend that forwards to Gloo and runs the shared c10d suites. A new
+backend can be added to `C10D_BACKENDS` there to run the same tests.
+
 ## TorchComms backend
 
 [TorchComms](https://github.com/meta-pytorch/torchcomms) is an optional
