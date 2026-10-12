@@ -153,6 +153,8 @@ class ConstDictVariable(VariableTracker):
         self,
         items: dict[VariableTracker, VariableTracker]
         | dict[HashableTracker, VariableTracker],
+        *,
+        has_deleted_keys: bool = False,
         **kwargs: Any,
     ) -> None:
         # .clone() pass these arguments in kwargs but they're recreated a few
@@ -186,15 +188,28 @@ class ConstDictVariable(VariableTracker):
 
         items_cls = cast(type, self._cpython_type)
         storage_cls = dict if items_cls is collections.defaultdict else items_cls
-        self.items: dict[HashableTracker, VariableTracker] = storage_cls(
-            {make_hashable(x): v for x, v in items.items()}
-        )
+        self.items: dict[HashableTracker, VariableTracker]
+        if storage_cls is collections.OrderedDict and isinstance(
+            items, collections.OrderedDict
+        ):
+            # Normalizing tracker keys must preserve both orders without hashing twice.
+            keys = {id(key): make_hashable(key) for key in items}
+            storage = cast(dict[object, VariableTracker], items)
+            self.items = collections.OrderedDict(
+                (keys[id(key)], value) for key, value in dict.items(storage)
+            )
+            for key in items:
+                self.items.move_to_end(keys[id(key)])
+        else:
+            self.items = storage_cls({make_hashable(x): v for x, v in items.items()})
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = (
             not is_from_local_source(self.source) if self.source else True
         )
         self.original_items = {key.vt: value for key, value in self.items.items()}
+        # Reinserting deleted keys still invalidates existing OrderedDict iterators.
+        self.has_deleted_keys = has_deleted_keys
         # Re-entrancy guard for is_python_constant against self-referential
         # dicts. Both forms re-enter this same instance's is_python_constant, so
         # a per-instance flag suffices.
@@ -683,6 +698,7 @@ class ConstDictVariable(VariableTracker):
                 raise_observed_exception(KeyError, tx, args=[args[0]])
             return args[1]
         self.should_reconstruct_all = True
+        self.has_deleted_keys = True
         tx.output.side_effects.mutation(self)
         return self.items.pop(key)
 
@@ -706,6 +722,7 @@ class ConstDictVariable(VariableTracker):
             )
         k, v = self.items.popitem()
         self.should_reconstruct_all = True
+        self.has_deleted_keys = True
         tx.output.side_effects.mutation(self)
         return variables.TupleVariable([k.vt, v])
 
@@ -716,6 +733,7 @@ class ConstDictVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self.should_reconstruct_all = True
+        self.has_deleted_keys = self.has_deleted_keys or bool(self.items)
         tx.output.side_effects.mutation(self)
         self.items.clear()
         return ConstantVariable.create(None)
@@ -892,6 +910,7 @@ class ConstDictVariable(VariableTracker):
             if hkey not in self.items:
                 raise_observed_exception(KeyError, tx, args=[key])
             self.should_reconstruct_all = True
+            self.has_deleted_keys = True
             del self.items[hkey]
         else:
             self.items[hkey] = value
@@ -1031,6 +1050,9 @@ class OrderedDictVariable(ConstDictVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self.install_dict_keys_match_guard()
+        # The endpoint identity shortcut also depends on the input's key order.
+        if self.source:
+            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
         if not self.items:
             raise_observed_exception(KeyError, tx, args=[args[0]])
 
@@ -1051,6 +1073,7 @@ class OrderedDictVariable(ConstDictVariable):
             raise_observed_exception(KeyError, tx, args=[args[0]])
         tx.output.side_effects.mutation(self)
         self.items.move_to_end(key, last=last)
+        self.should_reconstruct_all = True
         return ConstantVariable.create(None)
 
     def popitem(
@@ -1072,6 +1095,7 @@ class OrderedDictVariable(ConstDictVariable):
 
         k, v = self.items.popitem(last=last)
         self.should_reconstruct_all = True
+        self.has_deleted_keys = True
         tx.output.side_effects.mutation(self)
         return variables.TupleVariable([k.vt, v])
 
