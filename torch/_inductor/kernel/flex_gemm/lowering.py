@@ -817,10 +817,13 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             logical_output_size,
         ),
     )
-    if grouped_mm and "tile" in epilogue_arg_kinds:
+    # Varlen-M tile captures load plain [total_m, N] rows, so rows past a group
+    # end only reach predicated stores; grouped reductions that would fold them
+    # are rejected above.
+    if varlen_axis == "k" and "tile" in epilogue_arg_kinds:
         raise NotImplementedError(
-            "FlexGEMM QUACK grouped_mm (varlen) does not yet support captured "
-            "tensors of the full output shape"
+            "FlexGEMM varlen-K does not yet support captured tensors of the full "
+            "output shape"
         )
     if gemm_args[mat1_index].get_device_or_error().type != "cuda":
         raise NotImplementedError("FlexGEMM QUACK backend requires CUDA tensors")

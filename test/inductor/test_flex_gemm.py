@@ -1986,15 +1986,15 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_grouped_mm_quack_pinned_config_rejects_varlen_gaps(self):
         x, w_t, offs = self.makeGroupedMm()
-        residual = torch.randn(x.shape[0], w_t.shape[-1], dtype=torch.bfloat16)
+        residual = torch.randn(offs.numel(), self.K, self.K, dtype=torch.bfloat16)
 
         def tile_capture(x, w_t, offs):
             return flex_gemm(
                 F.grouped_mm,
-                (x, w_t),
+                (x.mT, x),
                 lambda acc: acc + residual,
                 gemm_kwargs={"offs": offs},
-                kernel_options={"backend": "QUACK", "config": {"swap_ab": False}},
+                kernel_options={"backend": "QUACK"},
             )
 
         def grouped_reduce(x, w_t, offs):
@@ -2007,13 +2007,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             )
 
         for fn, error in (
-            (tile_capture, "captured tensors of the full"),
-            (grouped_reduce, "grouped reductions"),
+            (tile_capture, "varlen-K does not yet support captured tensors"),
+            (grouped_reduce, "grouped_mm \\(varlen\\) .*grouped reductions"),
         ):
             with self.subTest(fn=fn.__name__):
-                with self.assertRaisesRegex(
-                    Exception, f"grouped_mm \\(varlen\\) .*{error}"
-                ):
+                with self.assertRaisesRegex(Exception, error):
                     torch.compile(fn, backend="inductor", fullgraph=True)(x, w_t, offs)
 
     def test_fake_tensor_mode_tuple_aux_returns_fake_tensors(self):
@@ -8803,6 +8801,38 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         )
         self.assertGroupedMmMatches(aux, x, w_t, offs, lambda acc: epilogue_fn(acc)[1])
 
+    @parametrize(
+        "total_m", (None, 640), name_fn=lambda m: "ragged" if m is None else "tail_rows"
+    )
+    def test_grouped_mm_full_tile_captures_match_reference(self, device, total_m):
+        # SwiGLU-backward shape: gate/up are row-strided halves of one [T, 2N] tensor.
+        x, w_t, offs = self.makeGroupedMm((201, 0, 129, 182), device, total_m=total_m)
+        h = torch.randn(x.shape[0], 2 * self.N, device=device, dtype=torch.bfloat16)
+        gate, up = h[:, : self.N], h[:, self.N :]
+
+        def epilogue_fn(acc):
+            # References only see the rows offs covers; the kernel slice is a no-op.
+            g, u = gate[: acc.shape[0]].float(), up[: acc.shape[0]].float()
+            sig = torch.sigmoid(g)
+            d_gate = acc * u * sig * (1 + g * (1 - sig))
+            return d_gate.bfloat16(), (acc * g * sig).bfloat16()
+
+        def fn(x, w_t, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x, w_t),
+                epilogue_fn,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        outputs = torch.compile(fn, backend="inductor", fullgraph=True)(x, w_t, offs)
+
+        for index, actual in enumerate(outputs):
+            self.assertGroupedMmMatches(
+                actual, x, w_t, offs, lambda acc: epilogue_fn(acc)[index]
+            )
+
     def test_grouped_mm_tuned_matches_reference(self, device):
         x, w_t, offs = self.makeGroupedMm((200, 0, 130, 182), device)
 
@@ -8918,25 +8948,6 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
             code,
         )
         self.assertGroupedSwigluMatches(actual, x, w1, w3, offs)
-
-    def test_grouped_mm_tile_capture_rejected(self, device):
-        x, w_t, offs = self.makeGroupedMm((201, 0, 129, 182), device)
-        residual = self.makeTensor(x.shape[0], self.N, device=device)
-        gain = torch.rand(x.shape[0], device=device, dtype=torch.float32) + 0.5
-
-        def fn(x, w_t, offs):
-            return flex_gemm(
-                F.grouped_mm,
-                (x, w_t),
-                lambda acc: (acc * gain[:, None] + residual).relu(),
-                gemm_kwargs={"offs": offs},
-                kernel_options={"backend": "QUACK"},
-            )
-
-        with self.assertRaisesRegex(
-            InductorError, r"grouped_mm \(varlen\) .*captured tensors of the full"
-        ):
-            torch.compile(fn, backend="inductor", fullgraph=True)(x, w_t, offs)
 
 
 instantiate_device_type_tests(TestFlexGemmGroupedMmDevice, globals(), only_for="cuda")
