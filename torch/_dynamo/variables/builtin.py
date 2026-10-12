@@ -33,7 +33,7 @@ import sys
 import types
 import typing
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, cast, NoReturn, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
@@ -3531,6 +3531,8 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if pyanydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
             if isinstance(args[0], ConstDictVariable):
                 args[0].install_dict_keys_match_guard()
+                if args[0].source:
+                    tx.output.guard_on_key_order.add(args[0].source)
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
             result = ConstDictVariable({}, mutation_type=ValueMutationNew())
             result.items.update(dict.fromkeys(args[0].items.keys(), value))
@@ -3566,7 +3568,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
-            obj = args[0]
+            obj = args[0].realize()
             if not pydict_check(obj):
                 if isinstance(resolved_fn, types.WrapperDescriptorType):
                     raise_type_error(
@@ -3579,11 +3581,15 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     f"descriptor '{name}' for 'dict' objects doesn't apply "
                     f"to a '{obj.python_type_name()}' object",
                 )
-            if name in ("keys", "values", "items", "update"):
-                return cast(
-                    VariableTracker,
-                    ConstDictVariable.tp_methods[name](obj, tx, name, args[1:], kwargs),
+            if name in ("keys", "values", "items", "update") and isinstance(
+                obj, ConstDictVariable
+            ):
+                result = ConstDictVariable.tp_methods[name](
+                    obj, tx, name, args[1:], kwargs
                 )
+                if result is not None:
+                    return result
+                return super().call_method(tx, name, args, kwargs)
             if name in ("__eq__", "__ne__") and isinstance(obj, ConstDictVariable):
                 no_keywords(tx, f"wrapper {name}", kwargs)
                 if len(args) != 2:
