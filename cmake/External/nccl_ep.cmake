@@ -75,7 +75,7 @@ if(NOT __NCCL_EP_INCLUDED)
       ${__NCCL_EP_ARCH_ARG}
       -DNCCL_HOME=${__NCCL_EP_NCCL_HOME}
       -DNCCL_EP_BUILDDIR=${__NCCL_BUILD_DIR}
-      -DNCCL_EP_SOURCE_DIR=${PROJECT_SOURCE_DIR}/third_party/nccl_ep
+      -DNCCL_EP_SOURCE_DIR=${PROJECT_SOURCE_DIR}/third_party/nccl-extensions/nccl_ep
     BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/${__NCCL_EP_LIB}"
     INSTALL_COMMAND ""
     # In the static path NCCL (Makefile) must finish first; in the system path

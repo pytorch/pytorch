@@ -18,6 +18,44 @@ from torch.testing._internal.common_utils import (
 @unittest.skipIf(shutil.which("cmake") is None, "requires CMake")
 @instantiate_parametrized_tests
 class TestNcclEpBuild(TestCase):
+    @parametrize(
+        "submodule,entry",
+        [("nccl-extensions", "nccl_ep/CMakeLists.txt"), ("gloo", "CMakeLists.txt")],
+    )
+    @parametrize("populated", [False, True])
+    def test_submodule_verification(self, submodule, entry, populated):
+        repo = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".gitmodules").write_text(
+                f'[submodule "third_party/{submodule}"]\n'
+                f"    path = third_party/{submodule}\n"
+            )
+            asmjit = root / "third_party/fbgemm/external/asmjit"
+            asmjit.mkdir(parents=True)
+            (asmjit / "CMakeLists.txt").touch()
+            if populated:
+                expected = root / "third_party" / submodule / entry
+                expected.parent.mkdir(parents=True, exist_ok=True)
+                expected.touch()
+            (root / "CMakeLists.txt").write_text(
+                "cmake_minimum_required(VERSION 3.18)\n"
+                "project(submodule_verification NONE)\n"
+                "set(USE_SYSTEM_NCCL ON)\n"
+                f'include("{repo / "cmake/PreBuildSteps.cmake"}")\n'
+            )
+            result = subprocess.run(
+                ["cmake", "-S", str(root), "-B", str(root / "build")],
+                capture_output=True,
+                text=True,
+            )
+            output = result.stdout + result.stderr
+            if populated:
+                self.assertEqual(result.returncode, 0, output)
+            else:
+                self.assertNotEqual(result.returncode, 0, output)
+                self.assertRegex(output, r"appears\s+incomplete")
+
     @parametrize("system_nccl", [False, True])
     def test_source_and_linkage(self, system_nccl):
         repo = Path(__file__).resolve().parents[2]
@@ -73,7 +111,7 @@ file(WRITE "${CMAKE_BINARY_DIR}/ep_config.txt"
                 for line in (build / "ep_config.txt").read_text().splitlines()
             )
             self.assertIn(
-                f"-DNCCL_EP_SOURCE_DIR={repo / 'third_party/nccl_ep'}",
+                f"-DNCCL_EP_SOURCE_DIR={repo / 'third_party/nccl-extensions/nccl_ep'}",
                 config["args"].split(";"),
             )
             library = "libnccl_ep.so" if system_nccl else "libnccl_ep.a"
