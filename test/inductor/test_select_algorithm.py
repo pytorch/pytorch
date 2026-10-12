@@ -15,7 +15,10 @@ from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.autotune_process import (
+    BenchmarkRequest,
+    CUTLASSBenchmarkRequest,
     ExternKernelGPUBenchmarkRequest,
+    GPUDeviceBenchmarkMixin,
     TensorMeta,
     TritonBenchmarkRequest,
 )
@@ -83,6 +86,16 @@ def patches(fn):
 
 
 class TestAlgorithmSelectorChoiceTypes(TestCase):
+    @staticmethod
+    def _tensor_meta(device):
+        return TensorMeta(
+            device=torch.device(device),
+            dtype=torch.float32,
+            sizes=(1,),
+            strides=(1,),
+            offset=0,
+        )
+
     def _extern_kernel_caller(self, name):
         choice = ExternKernelChoice.lookup(name)
         if choice is None:
@@ -116,6 +129,21 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
                     expected,
                 )
 
+    def test_extern_kernel_caller_hash_includes_benchmark_policy(self):
+        choice = ExternKernelChoice.lookup("mm")
+        self.assertIsNotNone(choice)
+        with config.patch(autotune_cudagraph_benchmarking_iters=7):
+            default = choice.bind(input_nodes=[], layout=None)
+        unrolled = choice.bind(
+            input_nodes=[],
+            layout=None,
+            benchmark_request_kwargs={"cudagraph_unroll": 4},
+        )
+
+        self.assertEqual(default.bmreq.cudagraph_unroll, 7)
+        self.assertEqual(unrolled.bmreq.cudagraph_unroll, 4)
+        self.assertNotEqual(default.hash_key(), unrolled.hash_key())
+
     def test_realize_inputs_preserves_shape_constant(self):
         import sympy
 
@@ -123,6 +151,222 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
 
         self.assertIsInstance(out, ShapeAsConstantBuffer)
         self.assertEqual(out.expr, sympy.Integer(2048))
+
+    def test_benchmark_cache_key_includes_measurement_policy(self):
+        inputs_key = "inputs"
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=False,
+        ):
+            eager = select_algorithm.create_benchmark_cache_key(
+                inputs_key, "cuda", False
+            )
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=True,
+            autotune_cudagraph_benchmarking_iters=4,
+        ):
+            automatic = select_algorithm.create_benchmark_cache_key(
+                inputs_key, "cuda", False
+            )
+            required = select_algorithm.create_benchmark_cache_key(
+                inputs_key, "cuda", True
+            )
+            cpu = select_algorithm.create_benchmark_cache_key(inputs_key, "cpu", False)
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=True,
+            autotune_cudagraph_benchmarking_iters=8,
+        ):
+            differently_unrolled = select_algorithm.create_benchmark_cache_key(
+                inputs_key, "cuda", False
+            )
+
+        self.assertEqual(len({eager, automatic, required, differently_unrolled}), 4)
+        self.assertEqual(cpu, eager)
+
+    def test_benchmark_request_restores_serialized_cudagraph_policy(self):
+        import pickle
+
+        tensor_meta = self._tensor_meta(GPU_TYPE)
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=True,
+        ):
+            request = BenchmarkRequest("kernel", [tensor_meta], tensor_meta, ())
+        request = pickle.loads(pickle.dumps(request))
+
+        with config.patch(
+            max_autotune=False,
+            autotune_cudagraph_benchmarking=False,
+        ):
+            with request.apply_benchmark_config():
+                self.assertTrue(config.max_autotune)
+                self.assertTrue(config.autotune_cudagraph_benchmarking)
+
+            self.assertFalse(config.max_autotune)
+            self.assertFalse(config.autotune_cudagraph_benchmarking)
+
+    def test_benchmark_request_finds_gpu_after_cpu_auxiliary_input(self):
+        cpu_meta = self._tensor_meta("cpu")
+        gpu_meta = self._tensor_meta(GPU_TYPE)
+
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=True,
+        ):
+            request = BenchmarkRequest("kernel", [cpu_meta], gpu_meta, ())
+
+        self.assertEqual(request.config_cudagraph_benchmarking, GPU_TYPE == "cuda")
+
+    def test_benchmark_request_preserves_explicit_device_without_metadata(self):
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=True,
+        ):
+            request = ExternKernelGPUBenchmarkRequest(
+                kernel_name="mm",
+                input_tensor_meta=[],
+                output_tensor_meta=[],
+                extra_args=[],
+                callable_path="extern_kernels.mm",
+                benchmark_device_type="cuda",
+            )
+
+        self.assertTrue(request.config_cudagraph_benchmarking)
+
+    def test_benchmark_request_uses_automatic_cudagraph_policy(self):
+        class FakeBenchmarkRequest(BenchmarkRequest):
+            def do_bench(self, fn, *input_tensors, out=None):
+                return 2.0
+
+            def do_bench_with_cudagraphs(self, fn, *input_tensors, out=None):
+                return 1.0
+
+        tensor_meta = self._tensor_meta(GPU_TYPE)
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=True,
+        ):
+            request = FakeBenchmarkRequest("kernel", [tensor_meta], tensor_meta, ())
+
+        request.do_bench = unittest.mock.MagicMock(wraps=request.do_bench)
+        request.do_bench_with_cudagraphs = unittest.mock.MagicMock(
+            wraps=request.do_bench_with_cudagraphs
+        )
+
+        self.assertEqual(request.benchmark_run_fn(lambda: None), 1.0)
+        request.do_bench_with_cudagraphs.assert_called_once()
+        request.do_bench.assert_not_called()
+
+    def test_gpu_benchmark_device_uses_output_tensor_type(self):
+        request = GPUDeviceBenchmarkMixin()
+        out = torch.empty(1, device="meta")
+        device_interface = unittest.mock.MagicMock()
+        device_interface.current_device.return_value = 3
+
+        with (
+            patch(
+                "torch._inductor.autotune_process.is_gpu",
+                side_effect=lambda device_type: device_type == "meta",
+            ),
+            patch(
+                "torch._inductor.autotune_process.get_interface_for_device",
+                return_value=device_interface,
+            ) as get_interface,
+        ):
+            interface, device_type, device_idx = request._get_benchmark_device(out=out)
+
+        self.assertIs(interface, device_interface)
+        self.assertEqual(device_type, "meta")
+        self.assertEqual(device_idx, 3)
+        get_interface.assert_called_once_with("meta")
+
+    def test_automatic_cudagraph_policy_takes_precedence_over_profiler(self):
+        from torch._inductor.codegen.cutlass import kernel as cutlass_kernel
+
+        cases = (
+            ("triton", select_algorithm.TritonTemplateCaller, select_algorithm),
+            ("cutlass", cutlass_kernel.CUTLASSTemplateCaller, cutlass_kernel),
+            ("subgraph", select_algorithm.SubgraphChoiceCaller, None),
+        )
+        for kind, caller_type, profiler_module in cases:
+            with self.subTest(kind=kind):
+                caller = object.__new__(caller_type)
+                caller._benchmark_with_cudagraphs = False
+                if kind == "subgraph":
+                    caller._compiled_module = unittest.mock.MagicMock()
+                    caller._ensure_compiled = unittest.mock.MagicMock()
+                    caller.sym_input_values = []
+                    caller.layout = unittest.mock.MagicMock()
+                    caller.layout.device.type = "cuda"
+                    caller._bmreq = unittest.mock.MagicMock()
+                    caller._bmreq.config_cudagraph_benchmarking = True
+                    caller._bmreq.benchmark_run_fn.return_value = 1.25
+                    profiler_target = (
+                        "torch._inductor.codegen.subgraph.do_bench_using_profiling"
+                    )
+                else:
+                    caller.bmreq = unittest.mock.MagicMock()
+                    caller.bmreq.config_cudagraph_benchmarking = True
+                    caller.bmreq.benchmark.return_value = 1.25
+                    profiler_target = (
+                        f"{profiler_module.__name__}.do_bench_using_profiling"
+                    )
+
+                with (
+                    config.patch(profile_bandwidth_with_do_bench_using_profiling=True),
+                    patch(profiler_target) as profiler_bench,
+                ):
+                    result = caller.benchmark("input", out="output")
+
+                self.assertEqual(result, 1.25)
+                profiler_bench.assert_not_called()
+                if kind == "subgraph":
+                    caller._ensure_compiled.assert_called_once_with()
+                    caller._bmreq.benchmark_run_fn.assert_called_once()
+                    (run_fn,) = caller._bmreq.benchmark_run_fn.call_args.args
+                    self.assertTrue(callable(run_fn))
+                    self.assertEqual(
+                        caller._bmreq.benchmark_run_fn.call_args.kwargs,
+                        {"out": "output"},
+                    )
+                    self.assertFalse(caller._bmreq.benchmark_with_cudagraphs)
+                else:
+                    caller.bmreq.benchmark.assert_called_once_with(
+                        "input", out="output"
+                    )
+                if kind == "cutlass":
+                    self.assertFalse(caller.bmreq.benchmark_with_cudagraphs)
+
+    def test_cutlass_benchmark_resolves_stream_at_invocation(self):
+        request = object.__new__(CUTLASSBenchmarkRequest)
+        request.kernel_name = "kernel"
+        request.source_file = "source.cu"
+        request.hash_key = "hash"
+        request.extra_args = []
+        request.workspace_size = 0
+        request.workspace = None
+        request.ensure_dll_loaded = unittest.mock.Mock()
+        request.update_workspace_size = unittest.mock.Mock()
+        request.device_interface = unittest.mock.Mock()
+        request.device_interface.current_device.return_value = 0
+        request.device_interface.get_raw_stream.side_effect = [11, 22]
+
+        run_method = unittest.mock.Mock()
+        request.DLL = unittest.mock.Mock(kernel=run_method)
+        input_tensor = unittest.mock.Mock()
+        input_tensor.data_ptr.return_value = 1
+        out = unittest.mock.Mock()
+        out.data_ptr.return_value = 2
+        out.device = torch.device("cuda")
+
+        run_fn = request.make_run_fn(input_tensor, out=out)
+        run_fn()
+
+        self.assertEqual(run_method.call_count, 2)
+        self.assertEqual(run_method.call_args_list[0].args[-1].value, 11)
+        self.assertEqual(run_method.call_args_list[1].args[-1].value, 22)
 
 
 class TestSelectAlgorithm(TestCase):
@@ -822,6 +1066,65 @@ class TestSelectAlgorithmCleanup(TestCase):
 
 
 class TestExternKernelCaller(TestCase):
+    def test_extern_cudagraph_benchmark_rotates_selected_inputs(self):
+        from torch._inductor.runtime.benchmarking import benchmarker
+
+        input_meta, output_meta = self._mm_tensor_metas()
+        request = ExternKernelGPUBenchmarkRequest(
+            kernel_name="mm",
+            input_tensor_meta=input_meta,
+            output_tensor_meta=output_meta,
+            extra_args=[],
+            callable_path="extern_kernels.mm",
+            cudagraph_unroll=4,
+            cudagraph_cold_cache_input_indices=(1,),
+        )
+        inputs = tuple(torch.randn(64, 64) for _ in range(2))
+        out = torch.empty(64, 64)
+        run_fns = [unittest.mock.Mock(), unittest.mock.Mock()]
+        make_run_fn = unittest.mock.Mock(return_value=run_fns[1])
+        device_interface = unittest.mock.Mock()
+        device_interface.device.return_value = contextlib.nullcontext()
+        device_interface.get_device_properties.return_value.L2_cache_size = 1
+
+        def run_cudagraph_benchmark(fn, *, device_type, cudagraph_unroll):
+            self.assertEqual(device_type, "cuda")
+            self.assertEqual(cudagraph_unroll, 4)
+            for _ in range(cudagraph_unroll):
+                fn()
+            return 1.25
+
+        with (
+            patch.object(
+                request,
+                "_get_benchmark_device",
+                return_value=(device_interface, "cuda", 0),
+            ),
+            patch.object(request, "make_run_fn", new=make_run_fn),
+            patch.object(
+                benchmarker,
+                "benchmark_gpu_with_cuda_graph",
+                side_effect=run_cudagraph_benchmark,
+            ),
+        ):
+            self.assertEqual(
+                request.do_bench_with_cudagraphs(run_fns[0], *inputs, out=out),
+                1.25,
+            )
+
+        make_run_fn.assert_called_once()
+        rotated_inputs = make_run_fn.call_args.args
+        self.assertIs(rotated_inputs[0], inputs[0])
+        self.assertIsNot(rotated_inputs[1], inputs[1])
+        self.assertEqual(rotated_inputs[1], inputs[1])
+        rotated_out = make_run_fn.call_args.kwargs["out"]
+        self.assertIsNot(rotated_out, out)
+        self.assertEqual(rotated_out.size(), out.size())
+        self.assertEqual(rotated_out.stride(), out.stride())
+        for run_fn in run_fns:
+            self.assertEqual(run_fn.call_count, 2)
+        device_interface.synchronize.assert_called_once()
+
     @requires_gpu()
     @patches
     @torch._inductor.config.patch(max_autotune_gemm_backends="ATEN")
@@ -837,9 +1140,22 @@ class TestExternKernelCaller(TestCase):
 
         a = torch.randn(64, 64, device=GPU_TYPE)
         b = torch.randn(64, 64, device=GPU_TYPE)
+        benchmark_device_types = []
+        original_init = ExternKernelGPUBenchmarkRequest.__init__
 
-        with patch.object(
-            TensorMeta, "from_irnodes", side_effect=ValueError("Mocked failure")
+        def capture_request(request, *args, **kwargs):
+            benchmark_device_types.append(kwargs.get("benchmark_device_type"))
+            original_init(request, *args, **kwargs)
+
+        with (
+            patch.object(
+                TensorMeta, "from_irnodes", side_effect=ValueError("Mocked failure")
+            ),
+            patch.object(
+                ExternKernelGPUBenchmarkRequest,
+                "__init__",
+                capture_request,
+            ),
         ):
             with self.assertLogs(
                 "torch._inductor.select_algorithm", level="WARNING"
@@ -858,6 +1174,10 @@ class TestExternKernelCaller(TestCase):
 
         expected = torch.mm(a, b)
         torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
+        self.assertTrue(benchmark_device_types)
+        self.assertTrue(
+            all(device_type == a.device.type for device_type in benchmark_device_types)
+        )
 
     @patches
     def test_extern_kernel_caller_hash_key_deduplication(self):

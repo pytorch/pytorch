@@ -193,6 +193,15 @@ test_failures = {
     "test_tensor2_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor3_dynamic_shapes": TestFailure(("cpu",)),
     "test_to_device_constant_dynamic_shapes": TestFailure(("cpu",)),
+    "test_to_device_constant_view_size_2_view_reshape_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
+    "test_to_device_constant_view_size_64_view_slice_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
+    "test_to_device_constant_view_size_64_view_transpose_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),
     "test_upsample_nearest2d_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_views3_dynamic_shapes": TestFailure(("cpu",)),
     "test_views4_dynamic_shapes": TestFailure(("cpu",)),
