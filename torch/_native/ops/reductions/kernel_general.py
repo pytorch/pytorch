@@ -7,6 +7,7 @@ import math
 from collections.abc import Sequence
 from typing import Any, cast, Literal
 
+import cutlass.cute as cute
 from cutlass import Float32, Float64, Int32, Int64
 
 import torch
@@ -59,6 +60,9 @@ class ReduceBlock:
         self.wide_output = num_o >= _INT32_LIMIT
         self.wide_red = any(ext >= _INT32_LIMIT for ext, _ in self.red_pairs)
         self.wide_kept = any(ext >= _INT32_LIMIT for ext, _ in self.kept_pairs)
+        index_extent = limit if limit is not None else count
+        if getattr(trait, "has_index", False) and index_extent > _INT32_LIMIT:
+            raise ValueError("index reductions require indices representable in Int32")
         self.in_base = in_base  # flat input offset of output coordinate 0
         self.limit = limit if limit is not None else count  # ragged tail bound
         # Projection divisor: count normally, or original L when stage 2 folds G partials.
@@ -127,7 +131,7 @@ def _fakes(ts: Sequence[torch.Tensor], *, int64_extent: bool = False) -> list[An
     return [
         _L.fake_compact(
             torch2cute[t.dtype],
-            (_L.sym_int64() if int64_extent else _L.sym(),),
+            (cute.sym_int64() if int64_extent else _L.sym(),),
         )
         for t in ts
     ]
