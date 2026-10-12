@@ -476,7 +476,9 @@ def _preserve_bf16x9_matmul(arg_index, arg_name):
     return decorator
 
 
-@register_decomposition([aten.bmm])
+@register_decomposition(
+    [aten.bmm.default, aten.bmm.out, aten.bmm.dtype, aten.bmm.dtype_out]
+)
 @_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def bmm(
@@ -510,7 +512,9 @@ def bmm(
     return NotImplemented
 
 
-@register_decomposition([aten.addmm])
+@register_decomposition(
+    [aten.addmm.default, aten.addmm.out, aten.addmm.dtype, aten.addmm.dtype_out]
+)
 @_preserve_bf16x9_matmul(1, "mat1")
 @pw_cast_for_opmath
 def addmm(
@@ -567,7 +571,9 @@ def addmm(
     return NotImplemented
 
 
-@register_decomposition([aten.mm])
+@register_decomposition(
+    [aten.mm.default, aten.mm.out, aten.mm.dtype, aten.mm.dtype_out]
+)
 @_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def mm(

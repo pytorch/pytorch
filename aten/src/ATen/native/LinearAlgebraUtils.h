@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/strides.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
@@ -27,6 +28,25 @@
 #endif
 
 namespace at::native {
+
+// The compute_mode argument of the mm, addmm, bmm and baddbmm overloads: the
+// internal precision of an FP32 matmul for this call only, using the same names
+// as torch.backends.*.fp32_precision.
+inline Float32Precision matmul_compute_mode_to_precision(
+    std::string_view compute_mode,
+    const char* op_name) {
+  if (compute_mode == "ieee") {
+    return Float32Precision::IEEE;
+  } else if (compute_mode == "tf32") {
+    return Float32Precision::TF32;
+  } else if (compute_mode == "bf16") {
+    return Float32Precision::BF16;
+  } else if (compute_mode == "bfx9") {
+    return Float32Precision::BF16X9;
+  }
+  TORCH_CHECK_VALUE(false, op_name, ": unknown compute_mode '", compute_mode,
+      "', expected one of 'ieee', 'tf32', 'bf16' or 'bfx9'");
+}
 
 inline void check_mm_shapes(
     const Tensor& self,

@@ -109,6 +109,27 @@ Triton's `bf16x3` and `bf16x6` modes do not implement the full nine-product
 algorithm. Fused Triton kernels that cannot preserve `bfx9`, such as FP32
 FlexAttention, warn once and use IEEE precision instead.
 
+The precision of an individual FP32 matmul can be chosen with the
+`compute_mode` keyword of {func}`torch.mm`, {func}`torch.addmm`,
+{func}`torch.bmm` and {func}`torch.baddbmm`. It accepts the same strings as
+`fp32_precision` and overrides the global settings for that call only,
+including its backward:
+
+```python
+torch.mm(a, b, compute_mode="tf32")
+torch.addmm(bias, a, b, compute_mode="bfx9")
+```
+
+Unlike the global settings, which only allow a reduced precision, `compute_mode`
+requires it: if the kernel that runs the matmul cannot use the requested
+precision, it raises an error instead of silently using IEEE. On CUDA,
+`compute_mode` supports `ieee`, `tf32` (compute capability 8.0 or later) and
+`bfx9` (NVIDIA CUDA 12.9 or later, float32 only); on CPU, `ieee`, and `tf32`
+and `bf16` where oneDNN supports them on the CPU. It only affects float32 and
+complex64 inputs, and is ignored for other dtypes. It is implemented for CPU
+and CUDA tensors, and these calls do not use TunableOp. Under `torch.compile`,
+these calls are not decomposed or fused and run the ATen kernel.
+
 We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
 
 ```python

@@ -20,13 +20,22 @@
 
 namespace at::cuda::blas {
 
-inline bool useBF16x9() {
+// The internal precision of an FP32 matmul: the one requested for this call
+// (the compute_mode overloads of mm, addmm, bmm and baddbmm), or else the
+// global setting.
+inline at::Float32Precision fp32MatmulPrecision(
+    std::optional<at::Float32Precision> fp32_precision = std::nullopt) {
+  return fp32_precision ? *fp32_precision
+                        : at::globalContext().float32Precision(
+                              at::Float32Backend::CUDA, at::Float32Op::MATMUL);
+}
+
+inline bool useBF16x9(
+    std::optional<at::Float32Precision> fp32_precision = std::nullopt) {
   // NoTF32Guard is the existing force-IEEE override for CUDA FP32 matmul, so
   // it must also suppress other non-IEEE modes.
   return !at::NoTF32Guard::should_disable_fp32_reduced_precision() &&
-      at::globalContext().float32Precision(
-          at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
-      at::Float32Precision::BF16X9;
+      fp32MatmulPrecision(fp32_precision) == at::Float32Precision::BF16X9;
 }
 
 // RAII guard that sets the CuBLAS pointer mode and restores it to
@@ -109,6 +118,33 @@ void gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half,
 template<>
 void gemm_internal<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float));
 
+// gemm_internal with an explicit FP32 matmul precision; std::nullopt means the
+// global setting. Only float and complex<float> have it.
+template <typename Dtype>
+void gemm_internal_with_precision(CUDABLAS_GEMM_ARGTYPES(Dtype), std::optional<at::Float32Precision> fp32_precision);
+
+template <>
+void gemm_internal_with_precision<float>(CUDABLAS_GEMM_ARGTYPES(float), std::optional<at::Float32Precision> fp32_precision);
+template <>
+void gemm_internal_with_precision<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>), std::optional<at::Float32Precision> fp32_precision);
+
+// gemm with the FP32 matmul precision requested for this call (the compute_mode
+// overloads of mm, addmm and baddbmm); std::nullopt means the global setting,
+// as for the overloads above. Only float and complex<float> GEMMs read it. An
+// explicit precision skips TunableOp, whose results are keyed by the global
+// setting.
+template <typename Dtype, typename C_Dtype = Dtype>
+inline void gemm(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype), std::optional<at::Float32Precision> fp32_precision) {
+  if constexpr (std::is_same_v<Dtype, C_Dtype> &&
+                (std::is_same_v<Dtype, float> || std::is_same_v<Dtype, c10::complex<float>>)) {
+    if (fp32_precision) {
+      gemm_internal_with_precision<Dtype>(CUDABLAS_GEMM_ARGS(Dtype), fp32_precision);
+      return;
+    }
+  }
+  gemm<Dtype, C_Dtype>(CUDABLAS_GEMM_ARGS(Dtype));
+}
+
 enum GEMMAndBiasActivationEpilogue {
   None,
   RELU,
@@ -146,7 +182,10 @@ bool gemm_and_bias(
     // bias and the GEMM accumulates with beta == 0.
     const C_Dtype* c_ptr = nullptr,
     int64_t c_ld = 0,
-    at::opmath_type<Dtype> beta = 1);
+    at::opmath_type<Dtype> beta = 1,
+    // The FP32 matmul precision requested for this call; std::nullopt means
+    // the global setting.
+    std::optional<at::Float32Precision> fp32_precision = std::nullopt);
 
 void int8_gemm(
     bool transpose_mat1,
@@ -278,6 +317,28 @@ template<>
 void bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float));
 template<>
 void bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float));
+
+// bgemm_internal and bgemm with an explicit FP32 matmul precision, see
+// gemm_internal_with_precision and gemm above.
+template <typename Dtype>
+void bgemm_internal_with_precision(CUDABLAS_BGEMM_ARGTYPES(Dtype), std::optional<at::Float32Precision> fp32_precision);
+
+template <>
+void bgemm_internal_with_precision<float>(CUDABLAS_BGEMM_ARGTYPES(float), std::optional<at::Float32Precision> fp32_precision);
+template <>
+void bgemm_internal_with_precision<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>), std::optional<at::Float32Precision> fp32_precision);
+
+template <typename Dtype, typename C_Dtype = Dtype>
+inline void bgemm(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype), std::optional<at::Float32Precision> fp32_precision) {
+  if constexpr (std::is_same_v<Dtype, C_Dtype> &&
+                (std::is_same_v<Dtype, float> || std::is_same_v<Dtype, c10::complex<float>>)) {
+    if (fp32_precision) {
+      bgemm_internal_with_precision<Dtype>(CUDABLAS_BGEMM_ARGS(Dtype), fp32_precision);
+      return;
+    }
+  }
+  bgemm<Dtype, C_Dtype>(CUDABLAS_BGEMM_ARGS(Dtype));
+}
 
 #define CUDABLAS_TRSM_ARGTYPES(Dtype)                                  \
   cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, \

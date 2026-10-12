@@ -304,7 +304,8 @@ bool launchGemmAndBiasNonTunable(
     cublasCommonArgs& args,
     const scalar_t* self_ptr,
     const Scalar& alpha,
-    Activation activation) {
+    Activation activation,
+    std::optional<at::Float32Precision> compute_mode = std::nullopt) {
   return at::cuda::blas::gemm_and_bias<scalar_t, res_scalar_t>(
     args.transa == 't',
     args.transb == 't',
@@ -319,7 +320,11 @@ bool launchGemmAndBiasNonTunable(
     self_ptr,
     args.result->data_ptr<res_scalar_t>(),
     args.result_ld,
-    activation_to_gemm_and_blas_arg(activation));
+    activation_to_gemm_and_blas_arg(activation),
+    /*c_ptr=*/nullptr,
+    /*c_ld=*/0,
+    /*beta=*/1,
+    compute_mode);
 }
 
 // Returns true iff the TunableOp dispatch succeeded. On a total miss
@@ -390,7 +395,8 @@ bool launchGemmAndBiasCublasLt(
     cublasCommonArgs& args,
     const std::optional<Tensor>& self,
     const Scalar& alpha,
-    Activation activation = Activation::None
+    Activation activation = Activation::None,
+    std::optional<at::Float32Precision> compute_mode = std::nullopt
 ) {
   // We apply bias in the epilogue only when it is 1D,
   // or when it can be squeezed to 1D.
@@ -399,8 +405,10 @@ bool launchGemmAndBiasCublasLt(
   const auto* self_ptr = self.has_value() ? self.value().const_data_ptr<scalar_t>() : static_cast<const scalar_t*>(nullptr);
 
 
+  // TunableOp results are keyed by the global FP32 matmul precision, so a
+  // precision requested for this call skips it.
   const auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()) {
+  if (tuning_ctx->IsTunableOpEnabled() && !compute_mode) {
     if (launchTunableGemmAndBias<scalar_t>(
             args, alpha, self_ptr, activation_to_gemm_and_blas_arg(activation))) {
       return true;
@@ -418,7 +426,7 @@ bool launchGemmAndBiasCublasLt(
   }
 
   return launchGemmAndBiasNonTunable<scalar_t, res_scalar_t>(
-      args, self_ptr, alpha, activation);
+      args, self_ptr, alpha, activation, compute_mode);
 }
 
 template <typename scalar_t, typename res_scalar_t = scalar_t>
@@ -426,7 +434,8 @@ bool launchGemmCublas(
     // args contains result which is modified
     cublasCommonArgs& args,
     const Scalar& alpha,
-    const Scalar& beta
+    const Scalar& beta,
+    std::optional<at::Float32Precision> compute_mode = std::nullopt
 ) {
   // Re-push the mask remapped to BLAS frame so gemm_tunable (CUDABlas.cpp)
   // stamps it, since at::cuda::blas::gemm's ABI does not carry swapped_mn.
@@ -460,7 +469,8 @@ bool launchGemmCublas(
     args.ldb,
     beta.to<at::opmath_type<scalar_t>>(),
     args.result->data_ptr<res_scalar_t>(),
-    args.result_ld
+    args.result_ld,
+    compute_mode
   );
   return true; // success!
 }
@@ -470,7 +480,8 @@ bool launchGemmWithDistinctCAndDCublasLt(
     cublasCommonArgs& args,
     const Tensor& self,
     const Scalar& alpha,
-    const Scalar& beta) {
+    const Scalar& beta,
+    std::optional<at::Float32Precision> compute_mode) {
   // `self` is row-major (guarded), so its leading dimension is stride(0), which
   // is the same convention cublasCommonArgs uses to derive result_ld for the
   // row-major result this path requires.
@@ -492,11 +503,55 @@ bool launchGemmWithDistinctCAndDCublasLt(
     at::cuda::blas::GEMMAndBiasActivationEpilogue::None,
     self.const_data_ptr<scalar_t>(),
     self.stride(0),
-    beta.to<at::opmath_type<scalar_t>>()
+    beta.to<at::opmath_type<scalar_t>>(),
+    compute_mode
   );
 }
 
-Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false) {
+// The global FP32 matmul precision only permits a reduced precision: where the
+// cuBLAS paths cannot use it they silently compute in IEEE. A precision
+// requested for this call (the compute_mode overloads) is a requirement, so
+// raise if the cuBLAS paths cannot run it for `mat`. Call only when a matmul
+// will actually run.
+static void check_explicit_fp32_matmul_precision_cuda(const Tensor& mat, std::optional<at::Float32Precision> compute_mode) {
+  const auto& p = compute_mode;
+  const auto dtype = mat.scalar_type();
+  // NoTF32Guard forces IEEE for precision-sensitive internal matmuls and wins
+  // over compute_mode.
+  if (!p || *p == Float32Precision::IEEE ||
+      (dtype != kFloat && dtype != kComplexFloat) ||
+      NoTF32Guard::should_disable_fp32_reduced_precision()) {
+    return;
+  }
+  switch (*p) {
+    case Float32Precision::TF32: {
+#ifdef USE_ROCM
+      // Only the hipBLASLt path honors it, and whether that runs depends on
+      // the inputs.
+      TORCH_CHECK(false, "compute_mode 'tf32' is not supported on ROCm");
+#else
+      const auto* prop = at::cuda::getDeviceProperties(mat.device().index());
+      TORCH_CHECK(prop->major >= 8,
+          "compute_mode 'tf32' requires a GPU with compute capability 8.0 or later, but ",
+          mat.device(), " has ", prop->major, ".", prop->minor);
+#endif
+      return;
+    }
+    case Float32Precision::BF16X9:
+#if defined(USE_ROCM) || !defined(CUDA_VERSION) || CUDA_VERSION < 12090
+      TORCH_CHECK(false,
+          "compute_mode 'bfx9' is only supported on NVIDIA CUDA, with PyTorch built with CUDA 12.9 or later");
+#else
+      TORCH_CHECK(dtype == kFloat,
+          "compute_mode 'bfx9' is not supported for ", dtype, " matmuls");
+#endif
+      return;
+    default:
+      TORCH_CHECK(false, "compute_mode '", precision2str(*p), "' is not supported on CUDA");
+  }
+}
+
+Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false, std::optional<at::Float32Precision> compute_mode=std::nullopt) {
   // Shape checks {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
@@ -517,6 +572,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // NOLINTNEXTLINE(*c-array*)
   TensorArg targs[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, targs);
+
+  if (mat1.numel() != 0 && mat2.numel() != 0) {
+    check_explicit_fp32_matmul_precision_cuda(mat1, compute_mode);
+  }
 
   // Handle whether to use the Lt interface {
   static bool persistent_disable_addmm_cuda_lt = isGloballyDisabledAddmmCudaLt(self.device());
@@ -580,7 +639,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           "addmm_cuda_lt_distinct_c_and_d",
           [&] {
             distinct_c_and_d_lt_success = launchGemmWithDistinctCAndDCublasLt<scalar_t>(
-                args, self, alpha, beta);
+                args, self, alpha, beta, compute_mode);
           }
         );
         if (distinct_c_and_d_lt_success) {
@@ -648,14 +707,14 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
-          lt_success = launchGemmAndBiasCublasLt<scalar_t>(args, use_bias_ptr_lt ? std::make_optional(self) : std::nullopt, alpha, activation);
+          lt_success = launchGemmAndBiasCublasLt<scalar_t>(args, use_bias_ptr_lt ? std::make_optional(self) : std::nullopt, alpha, activation, compute_mode);
         }
       );
     } // end is_float_output_with_half_input
 
     if (!lt_success) {
     // lt path failed; recurse but disable lt path
-      return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
+      return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true, compute_mode);
     }
     // end Lt path
   } else {
@@ -675,7 +734,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda",
         [&] {
-          launchGemmCublas<scalar_t>(args, alpha, beta);
+          launchGemmCublas<scalar_t>(args, alpha, beta, compute_mode);
         }
       );
     }
@@ -710,7 +769,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   return result;
 }
 
-const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, std::optional<at::Float32Precision> compute_mode = std::nullopt) {
   // handle pathological cases that blas may not like
   if (result.numel() == 0) {
     return result;
@@ -721,6 +780,8 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
       return result.mul_(beta);
     }
   }
+
+  check_explicit_fp32_matmul_precision_cuda(batch1, compute_mode);
 
   bool transpose_result = false;
   c10::MaybeOwned<Tensor> result_;
@@ -830,7 +891,8 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
             batch1_ptr, lda,
             batch2_ptr, ldb,
             beta_val,
-            result_ptr, ldc);
+            result_ptr, ldc,
+            compute_mode);
       } else {
         at::cuda::blas::bgemm<scalar_t>(
           transa, transb,
@@ -840,7 +902,8 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
           batch2_ptr, ldb, batch2_->strides()[0],
           beta_val,
           result_ptr, ldc, result_->strides()[0],
-          num_batches
+          num_batches,
+          compute_mode
         );
       }
     });
@@ -880,6 +943,28 @@ TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, const 
   {
     baddbmm_out_cuda_impl(result, result, batch1, batch2, beta, alpha);
   }
+}
+
+TORCH_IMPL_FUNC(addmm_compute_mode_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha, Activation::None, false,
+      matmul_compute_mode_to_precision(compute_mode, "addmm"));
+}
+
+TORCH_IMPL_FUNC(mm_compute_mode_out_cuda)(const Tensor& self, const Tensor& mat2, std::string_view compute_mode, const Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  addmm_out_cuda_impl(const_cast<Tensor&>(result), result, self, mat2, 0, 1, Activation::None, false,
+      matmul_compute_mode_to_precision(compute_mode, "mm"));
+}
+
+TORCH_IMPL_FUNC(baddbmm_compute_mode_out_cuda)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+  baddbmm_out_cuda_impl(result, self, batch1, batch2, beta, alpha,
+      matmul_compute_mode_to_precision(compute_mode, "baddbmm"));
+}
+
+TORCH_IMPL_FUNC(bmm_compute_mode_out_cuda)(const Tensor& batch1, const Tensor& batch2, std::string_view compute_mode, const Tensor& result) {
+  baddbmm_out_cuda_impl(result, result, batch1, batch2, Scalar(0.0), Scalar(1.0),
+      matmul_compute_mode_to_precision(compute_mode, "bmm"));
 }
 
 namespace {
