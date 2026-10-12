@@ -665,6 +665,7 @@ class AsyncCompile:
             )
 
             def get_result() -> CachingAutotuner | Exception:
+                counters["inductor"]["async_compile_triton_get_result"] += 1
                 try:
                     kernel, elapsed_us = task.result()
                 except SubprocException as e:
@@ -702,7 +703,8 @@ class AsyncCompile:
                 _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                 return kernel
 
-            future = LambdaFuture(get_result, future=task)
+            # A multi-kernel and wait() can resolve the same future; precompile each kernel once.
+            future = LambdaFuture(functools.cache(get_result), future=task)
             CompiledTritonKernels.save(source_code, future)
             return future
         else:

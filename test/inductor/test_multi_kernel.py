@@ -17,6 +17,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -233,6 +234,53 @@ class MultiKernelTest(TestCase):
         # Otherwise a cache miss on the second compile would pass without restoring any sub-kernel.
         self.assertGreater(
             counters["inductor"]["triton_bundler_load_static_autotuner"], 0
+        )
+
+    @requires_triton()
+    @unittest.skipIf(not SM90OrLater, "requires TMA support")
+    @config.patch(
+        {
+            "assume_aligned_inputs": True,
+            "compile_threads": 2,
+            "max_autotune_pointwise": True,
+            "triton.autotune_tensor_descriptor": "auto",
+            "triton.cudagraphs": False,
+            "triton.multi_kernel": 0,
+            "triton.use_tensor_descriptor": True,
+        }
+    )
+    def test_multi_kernel_resolves_triton_futures_once(self):
+        from torch._inductor.async_compile import AsyncCompile
+
+        if not AsyncCompile.wait_process_pool_ready():
+            self.skipTest("requires the parallel compile pool")
+
+        def fn(x, weight):
+            scale = torch.rsqrt(x.float().pow(2).mean(-1, keepdim=True) + 1e-6)
+            return (x.float() * scale).to(x.dtype) * weight
+
+        # This decoder reduction shape reproduces duplicate resolution.
+        x = torch.randn(4096, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.ones(
+            4096, device=GPU_TYPE, dtype=torch.bfloat16, requires_grad=True
+        )
+        with torch.no_grad():
+            ref = fn(x, weight)
+        counters.clear()
+        actual = torch.compile(fn)(x, weight)
+        actual.float().pow(2).mean().backward()
+        self.assertEqual(actual, ref)
+
+        submitted = (
+            counters["inductor"]["async_compile_cache_miss"]
+            - counters["inductor"]["async_compile_cache_hit"]
+        )
+        # Forward and backward produce three two-choice pools.
+        self.assertEqual(submitted, 6)
+        self.assertEqual(
+            counters["inductor"]["async_compile_triton_get_result"],
+            submitted,
+            "Triton future resolved more than once",
         )
 
     @requires_triton()
