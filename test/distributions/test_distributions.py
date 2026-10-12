@@ -7394,37 +7394,21 @@ instantiate_device_type_tests(
     TestDistributionsDevice, globals(), allow_mps=True, allow_xpu=True
 )
 
-only_for = ("cpu", "xpu")
-instantiate_device_type_tests(
-    TestRsampleDevice, globals(), only_for=only_for, allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestDistributionShapesDevice, globals(), only_for=only_for, allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestKLDevice, globals(), only_for=only_for, allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestConstraintsDevice, globals(), only_for=only_for, allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestNumericalStabilityDevice, globals(), only_for=only_for, allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestLazyLogitsInitializationDevice, globals(), only_for=only_for, allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestAgainstScipyDevice, globals(), only_for=only_for, allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestFunctorsDevice, globals(), only_for=only_for, allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestValidationDevice, globals(), only_for=only_for, allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestJitDevice, globals(), only_for=only_for, allow_xpu=True
-)
+for _cls in (
+    TestRsampleDevice,
+    TestDistributionShapesDevice,
+    TestKLDevice,
+    TestConstraintsDevice,
+    TestNumericalStabilityDevice,
+    TestLazyLogitsInitializationDevice,
+    TestAgainstScipyDevice,
+    TestFunctorsDevice,
+    TestValidationDevice,
+    TestJitDevice,
+):
+    instantiate_device_type_tests(
+        _cls, globals(), only_for=("cpu", "xpu"), allow_xpu=True
+    )
 
 
 if __name__ == "__main__" and torch._C.has_lapack:
