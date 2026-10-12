@@ -3519,6 +3519,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._named_constants: dict[str, str] = {}
         self._named_constant_defs: IndentedBuffer = IndentedBuffer()
         self.outside_loop_vars = OrderedSet[Any]()
+        self.datadep_ranges: dict[sympy.Symbol, CSEVariable] = {}
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.block_ptr_to_buffer = dict[str, str]()
@@ -4056,6 +4057,29 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 # For looped reductions, indexing is deferred to the innermost loop.
                 self.codegen_reduction_indices(self.body)
+
+    def register_datadep_range(self, value, symbol):
+        if symbol in self.datadep_ranges:
+            return
+        self.datadep_ranges[symbol] = value
+        tree = next(tree for tree in self.range_trees if tree.numel == symbol)
+
+        # The bound is computed before entering its loop:
+        #
+        #     length = load(lengths + b)
+        #     for jstart in range(length):
+        #         compute(b, jstart)
+        #
+        # Keep each B lane's bound for masking inside the loop.
+        self.body.splice(self.indexing_code)
+        self.body.splice(self.loads)
+        self.body.splice(self.compute)
+        self.indexing_code.clear()
+        self.loads.clear()
+        self.compute.clear()
+        self.body.writeline(f"{tree.prefix}numel = {value}")
+        self.codegen_reduction_numels(self.body)
+        self.outside_loop_vars.add(value)
 
     def need_numel_args(self):
         """
@@ -7435,6 +7459,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     loop_end = (
                         "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
                     )
+                    if tree.numel in self.datadep_ranges:
+                        loop_end = f"tl.max(tl.where(xmask, {prefix}numel, 0))"
                     # Conditionalize pipelining on HIP for Triton due to
                     # reports of numerical inaccuracies on older Triton
                     if torch.version.hip and get_triton_version() > (3, 2):
@@ -9215,6 +9241,11 @@ class TritonScheduling(SIMDScheduling):
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs
         )
+        if kernel_features.reduction_numel.has(ir.DataDependentRange):
+            kernel_kwargs.update(
+                override_persistent_reduction=False,
+                override_cooperative_reduction=False,
+            )
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
         return self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
 

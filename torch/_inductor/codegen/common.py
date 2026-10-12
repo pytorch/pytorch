@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
     from ..shape_propagation import BlockShapeType
+    from .triton import TritonKernel
     from .wrapper import PythonWrapperCodegen
 
     _T = TypeVar("_T")
@@ -2922,6 +2923,9 @@ class CSEProxy(DefaultHandler):
         self.vr_analysis = ValueRangeAnalysis()
         self.kernel = kernel
         self.parent_handler = parent_handler
+
+    def register_datadep_range(self, value, symbol):
+        cast("TritonKernel", self.kernel).register_datadep_range(value, symbol)
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         bounds = self._bound_variable(name, *args, **kwargs)
