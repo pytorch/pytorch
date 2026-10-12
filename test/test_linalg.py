@@ -1082,39 +1082,64 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
-    @dtypes(torch.double)
-    def test_solve_forward_over_reverse_without_create_graph(self, device, dtype):
-        # Regression for #200600: with create_graph=False, linalg_solve_backward
-        # used the saved LU/pivots path and dropped A's forward-mode tangent,
-        # so forward-over-reverse through linalg.solve was silently wrong.
-        # X = B/A at A=2, B=1: d/dA(dX/dB) = -1/A^2 = -0.25,
-        #                      d/dA(dX/dA) = 2B/A^3 = 0.25.
-        def tangent_of_grad(solve, wrt, create_graph=False):
-            A0 = torch.tensor([[2.0]], dtype=dtype, device=device, requires_grad=True)
-            B0 = torch.tensor([[1.0]], dtype=dtype, device=device, requires_grad=True)
+    @dtypes(torch.double, torch.cdouble)
+    def test_solve_det_slogdet_forward_over_reverse_without_create_graph(
+        self, device, dtype
+    ):
+        # Regression for #200600: with create_graph=False, the saved-LU path in
+        # linalg_solve / det / slogdet backward drops A's forward-mode tangent.
+        # Compare create_graph=False against create_graph=True on well-conditioned
+        # random inputs (vector/matrix RHS, left, batched, real/complex).
+        gen = torch.Generator(device=device).manual_seed(0)
+
+        def well_conditioned(batch, n):
+            A = torch.randn(
+                *batch, n, n, generator=gen, device=device, dtype=dtype
+            )
+            return A + (n + 1) * torch.eye(n, device=device, dtype=dtype)
+
+        def tangent_of_grad(f, A0, V, create_graph):
             with fwAD.dual_level():
-                A = fwAD.make_dual(A0, torch.ones_like(A0))
-                X = solve(A, B0)
+                A = fwAD.make_dual(A0, V)
+                out = f(A)
                 g, = torch.autograd.grad(
-                    X.sum(), {"A": A0, "B": B0}[wrt], create_graph=create_graph
+                    out.sum(), A0, create_graph=create_graph
                 )
                 return fwAD.unpack_dual(g).tangent
 
-        def lu(A, B):
-            LU, piv = torch.linalg.lu_factor(A)
-            return torch.linalg.lu_solve(LU, piv, B)
+        def check(f, A0, V):
+            t_false = tangent_of_grad(f, A0, V, create_graph=False)
+            t_true = tangent_of_grad(f, A0, V, create_graph=True)
+            self.assertIsNotNone(t_false)
+            self.assertEqual(t_false, t_true)
 
-        expected_B = torch.tensor([[-0.25]], dtype=dtype, device=device)
-        expected_A = torch.tensor([[0.25]], dtype=dtype, device=device)
-        for solve in (
-            torch.linalg.solve,
-            lu,
-            lambda A, B: torch.linalg.inv(A) @ B,
+        # det / slogdet
+        for batch in ((), (2,)):
+            A0 = well_conditioned(batch, 3).requires_grad_()
+            V = torch.randn_like(A0)
+            check(torch.linalg.det, A0, V)
+            check(lambda X: torch.linalg.slogdet(X).logabsdet, A0, V)
+
+        # linalg.solve: left True/False, vector vs matrix B, batched.
+        # left=False with a vector RHS is not supported.
+        for batch, n, left, vector_b in product(
+            ((), (2,)), (3,), (True, False), (True, False)
         ):
-            self.assertEqual(tangent_of_grad(solve, "B"), expected_B)
-            self.assertEqual(tangent_of_grad(solve, "A"), expected_A)
-            self.assertEqual(tangent_of_grad(solve, "B", True), expected_B)
-            self.assertEqual(tangent_of_grad(solve, "A", True), expected_A)
+            if not left and vector_b:
+                continue
+            A0 = well_conditioned(batch, n).requires_grad_()
+            V = torch.randn_like(A0)
+            if vector_b:
+                B = torch.randn(*batch, n, generator=gen, device=device, dtype=dtype)
+            else:
+                B = torch.randn(
+                    *batch, n, 2, generator=gen, device=device, dtype=dtype
+                )
+            check(
+                lambda X, B=B, left=left: torch.linalg.solve(X, B, left=left),
+                A0,
+                V,
+            )
 
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
