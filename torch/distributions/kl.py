@@ -607,10 +607,11 @@ def _kl_continuous_bernoulli_normal(p, q):
 @register_kl(ContinuousBernoulli, Uniform)
 def _kl_continuous_bernoulli_uniform(p, q):
     result = -p.entropy() + (q.high - q.low).log()
+    # Infinite only if the support of p is not contained in the support of q.
     return torch.where(
         torch.max(
-            torch.ge(q.low, p.support.lower_bound),
-            torch.le(q.high, p.support.upper_bound),
+            torch.gt(q.low, p.support.lower_bound),
+            torch.lt(q.high, p.support.upper_bound),
         ),
         torch.ones_like(result) * inf,
         result,
@@ -876,10 +877,11 @@ def _kl_uniform_continuous_bernoulli(p, q):
         - torch.log1p(-q.probs)
         - q._cont_bern_log_norm()
     )
+    # Infinite only if the support of p is not contained in the support of q.
     return torch.where(
         torch.max(
-            torch.ge(p.high, q.support.upper_bound),
-            torch.le(p.low, q.support.lower_bound),
+            torch.gt(p.high, q.support.upper_bound),
+            torch.lt(p.low, q.support.lower_bound),
         ),
         torch.ones_like(result) * inf,
         result,

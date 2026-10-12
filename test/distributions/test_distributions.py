@@ -6209,6 +6209,32 @@ class TestKL(DistributionsTestCase):
                     ),
                 )
 
+    def test_kl_continuous_bernoulli_uniform_boundary(self):
+        # The KL is finite when supp(p) is contained in supp(q), including when
+        # the supports share a boundary, e.g. Uniform(0, 1) and ContinuousBernoulli.
+        cb = ContinuousBernoulli(torch.tensor(0.3))
+
+        def monte_carlo(p, q, n=200000):
+            x = p.sample((n,))
+            return (p.log_prob(x) - q.log_prob(x)).mean()
+
+        for low, high in [(0.0, 1.0), (-1.0, 1.0), (0.0, 2.0), (-1.0, 2.0)]:
+            u = Uniform(torch.tensor(low), torch.tensor(high))
+            actual = kl_divergence(cb, u)
+            self.assertTrue(torch.isfinite(actual))
+            self.assertEqual(actual, monte_carlo(cb, u), atol=0.02, rtol=0)
+        for low, high in [(0.0, 1.0), (0.0, 0.5), (0.2, 0.8)]:
+            u = Uniform(torch.tensor(low), torch.tensor(high))
+            actual = kl_divergence(u, cb)
+            self.assertTrue(torch.isfinite(actual))
+            self.assertEqual(actual, monte_carlo(u, cb), atol=0.02, rtol=0)
+        for low, high in [(0.1, 1.0), (-1.0, 0.9)]:
+            u = Uniform(torch.tensor(low), torch.tensor(high))
+            self.assertEqual(kl_divergence(cb, u), torch.tensor(inf))
+        for low, high in [(-0.1, 1.0), (0.0, 1.1)]:
+            u = Uniform(torch.tensor(low), torch.tensor(high))
+            self.assertEqual(kl_divergence(u, cb), torch.tensor(inf))
+
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:
             self.assertTrue(
