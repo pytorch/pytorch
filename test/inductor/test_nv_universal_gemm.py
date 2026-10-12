@@ -3,6 +3,7 @@
 
 import ast
 import inspect
+import math
 import textwrap
 import threading
 import unittest
@@ -15,15 +16,26 @@ import sympy
 import torch
 from torch._dynamo.utils import counters
 from torch._higher_order_ops import flex_gemm
-from torch._inductor import config
+from torch._inductor import config, ir
 from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
-from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
-    EPILOGUE_FN_NAME,
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import GemmVariant
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+    NVUniversalGemmKernel,
 )
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+    _nvgemm_benchmark_tensor_specs,
+    _nvgemm_precompile_input_metadata,
+    _render_nvgemm_benchmark_helpers,
+    EPILOGUE_FN_NAME,
+    NVGemmGeneratedSource,
+)
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.template.nv_universal_gemm import (
     HeuristicConfig,
     NVUniversalGemmHeuristics,
 )
+from torch._inductor.kernel.gemm_epilogue import GemmEpiloguePlan
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
@@ -2163,6 +2175,347 @@ class TestNVUniversalGemm(TestCase):
             self.assertFalse(torch.allclose(result_1, result_2))
 
 
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+class TestNVUniversalGemmScheduling(TestCase):
+    def setUp(self):
+        super().setUp()
+
+        def make_buffer(name, size, stride=None):
+            if stride is None:
+                stride = ir.FlexibleLayout.contiguous_strides(size)
+            layout = ir.FixedLayout(torch.device("cuda"), torch.bfloat16, size, stride)
+            return ir.InputBuffer(name=name, layout=layout)
+
+        storage = torch.empty(32768, device="cuda", dtype=torch.bfloat16)
+        bias_example = storage[30000:30016].view(4, 4)
+        shared_example = storage[:32]
+        fx_graph = torch.fx.Graph()
+        bias_input = fx_graph.placeholder("bias")
+        shared_input = fx_graph.placeholder("shared_storage")
+        fx_graph.output((bias_input, shared_input))
+        graph = GraphLowering(
+            torch.fx.GraphModule(torch.nn.Module(), fx_graph),
+            example_inputs=[bias_example, shared_example],
+        )
+        with V.set_graph_handler(graph):
+            graph.run(bias_example, shared_example)
+            constant_storage = torch.empty(64, device="cuda", dtype=torch.bfloat16)
+            constant_input = graph.add_tensor_constant(
+                constant_storage[1:17], name="constant_input"
+            ).data.data
+            constant_epilogue = graph.add_tensor_constant(
+                constant_storage[2:18], name="constant_epilogue"
+            ).data.data
+        self.graph = graph
+        self.bias = graph.graph_inputs["bias"].data.data
+        self.shared_storage = graph.graph_inputs["shared_storage"].data.data
+        self.constant_input = constant_input
+        self.constant_epilogue = constant_epilogue
+        self.assertEqual(graph.graph_input_storage_offsets["bias"], 30000)
+        self.assertEqual(graph.constants["constant_input"].storage_offset(), 1)
+        self.assertEqual(graph.constants["constant_epilogue"].storage_offset(), 2)
+        self.b = ir.Buffer(
+            name="b",
+            layout=ir.NonOwningLayout(
+                ir.ReinterpretView(
+                    data=self.shared_storage,
+                    layout=ir.FixedLayout(
+                        torch.device("cuda"),
+                        torch.bfloat16,
+                        [4, 4],
+                        [1, 4],
+                        offset=1,
+                    ),
+                )
+            ),
+        )
+        self.nested = ir.Buffer(
+            name="nested",
+            layout=ir.NonOwningLayout(
+                ir.ReinterpretView(
+                    data=ir.StorageBox(self.b),
+                    layout=ir.FixedLayout(
+                        torch.device("cuda"), torch.bfloat16, [2], [1], offset=2
+                    ),
+                )
+            ),
+        )
+        self.unnamed_nested = ir.Buffer(
+            name="unnamed_nested",
+            layout=ir.NonOwningLayout(
+                ir.ReinterpretView(
+                    data=ir.StorageBox(
+                        ir.ReinterpretView(
+                            data=ir.StorageBox(self.shared_storage),
+                            layout=ir.FixedLayout(
+                                torch.device("cuda"),
+                                torch.bfloat16,
+                                [2],
+                                [1],
+                                offset=9,
+                            ),
+                        )
+                    ),
+                    layout=ir.FixedLayout(
+                        torch.device("cuda"),
+                        torch.bfloat16,
+                        [2],
+                        [1],
+                        offset=4,
+                    ),
+                )
+            ),
+        )
+        self.equal_layout_nested = ir.Buffer(
+            name="equal_layout_nested",
+            layout=ir.NonOwningLayout(
+                ir.ReinterpretView(
+                    data=self.unnamed_nested.layout.view.data,
+                    layout=ir.FixedLayout(
+                        torch.device("cuda"), torch.bfloat16, [2], [1], offset=9
+                    ),
+                )
+            ),
+        )
+        self.out = make_buffer("out", [4, 4], [5, 1])
+        self.epilogue_input = ir.ReinterpretView(
+            data=self.shared_storage,
+            layout=ir.FixedLayout(
+                torch.device("cuda"), torch.bfloat16, [2], [1], offset=2
+            ),
+        )
+        self.adjacent_epilogue = ir.Buffer(
+            name="adjacent",
+            layout=ir.NonOwningLayout(
+                ir.ReinterpretView(
+                    data=self.shared_storage,
+                    layout=ir.FixedLayout(
+                        torch.device("cuda"), torch.bfloat16, [2], [1], offset=17
+                    ),
+                )
+            ),
+        )
+        self.large_stride_epilogue = make_buffer(
+            "large_stride_epilogue", [4, 1], [1_000_000_000, 1]
+        )
+        graph.name_to_buffer.update(
+            {
+                buf.get_name(): buf
+                for buf in (
+                    self.bias,
+                    self.b,
+                    self.nested,
+                    self.unnamed_nested,
+                    self.equal_layout_nested,
+                    self.out,
+                    self.epilogue_input,
+                    self.adjacent_epilogue,
+                    self.large_stride_epilogue,
+                )
+            }
+        )
+
+    def _make_benchmark_kernel(self, *, is_evt_fallback=False, workspace_size=4096):
+        with V.set_graph_handler(self.graph):
+            return NVUniversalGemmKernel(
+                kernel_name="nv_gemm_",
+                input_nodes=[self.bias, self.b, self.constant_input],
+                output_node=self.out,
+                kernel_metadata={"kernel_name": "fixture", "min_cc": 90},
+                accumulator_type=torch.float32,
+                variant=GemmVariant.GEMM,
+                workspace_size=workspace_size,
+                bias_node=self.bias,
+                epilogue=GemmEpiloguePlan(
+                    source=f"def {EPILOGUE_FN_NAME}(accum):\n    return accum",
+                    reads=(
+                        self.nested.get_name(),
+                        self.unnamed_nested.get_name(),
+                        self.equal_layout_nested.get_name(),
+                        self.epilogue_input.get_name(),
+                        self.adjacent_epilogue.get_name(),
+                        self.constant_input.get_name(),
+                        self.constant_epilogue.get_name(),
+                        self.large_stride_epilogue.get_name(),
+                    ),
+                    writes=(self.out.get_name(),),
+                    renames={"D": self.out.get_name()},
+                    is_evt_fallback=is_evt_fallback,
+                ),
+            )
+
+    def test_benchmark_storage_reconstruction(self):
+        kernel = self._make_benchmark_kernel()
+        with V.set_graph_handler(self.graph):
+            arguments = kernel.ordered_arguments()
+            parameter_names = ", ".join(argument.name for argument in arguments)
+            kernel_source = kernel.render()
+            self.assertIn(
+                f"def {kernel.kernel_name}_main({parameter_names}, stream=None):",
+                kernel_source,
+            )
+            self.assertIn("stream=stream, workspace=workspace,", kernel_source)
+            source = _render_nvgemm_benchmark_helpers(
+                NVGemmGeneratedSource(source="", kernel=kernel)
+            )
+            self.assertIn("nv_gemm__main(*args, stream=stream)", source)
+            self.graph.wrapper_code = PythonWrapperCodegen()
+            self.assertEqual(
+                self.equal_layout_nested.layout.view.codegen_reference(),
+                self.shared_storage.get_name(),
+            )
+        namespace = {}
+        exec(compile(source, "<nvgemm-benchmark>", "exec"), namespace)
+        args = namespace["get_args"]()
+        args_by_name = dict(
+            zip((argument.name for argument in arguments), args, strict=True)
+        )
+
+        self.assertEqual(
+            [
+                (argument.name, argument.buffer_name, argument.kind)
+                for argument in arguments
+            ],
+            [
+                ("in_ptr0", "bias", "input"),
+                ("in_ptr1", "b", "input"),
+                ("in_ptr2", "constant_input", "input"),
+                ("out_ptr0", "out", "output"),
+                ("nested", "nested", "epilogue"),
+                ("unnamed_nested", "unnamed_nested", "epilogue"),
+                ("equal_layout_nested", "equal_layout_nested", "epilogue"),
+                ("shared_storage", "shared_storage", "epilogue"),
+                ("adjacent", "adjacent", "epilogue"),
+                ("constant_input", "constant_input", "epilogue"),
+                ("constant_epilogue", "constant_epilogue", "epilogue"),
+                ("large_stride_epilogue", "large_stride_epilogue", "epilogue"),
+                ("bias", "bias", "epilogue"),
+                ("workspace", None, "workspace"),
+            ],
+        )
+        expected_layouts = {
+            "in_ptr0": ((4, 4), (4, 1), 0),
+            "in_ptr1": ((4, 4), (1, 4), 1),
+            "in_ptr2": ((16,), (1,), 1),
+            "out_ptr0": ((4, 4), (5, 1), 0),
+            "nested": ((2,), (1,), 3),
+            "unnamed_nested": ((2,), (1,), 4),
+            "equal_layout_nested": ((2,), (1,), 0),
+            "shared_storage": ((2,), (1,), 2),
+            "adjacent": ((2,), (1,), 17),
+            "constant_input": ((16,), (1,), 1),
+            "constant_epilogue": ((16,), (1,), 2),
+            "large_stride_epilogue": ((4, 1), (2, 1), 0),
+            "bias": ((4, 4), (4, 1), 0),
+        }
+        self.assertEqual(
+            {
+                name: (
+                    args_by_name[name].shape,
+                    args_by_name[name].stride(),
+                    args_by_name[name].storage_offset(),
+                )
+                for name in expected_layouts
+            },
+            expected_layouts,
+        )
+        self.assertTrue(
+            torch._C._is_alias_of(
+                args_by_name["in_ptr1"], args_by_name["shared_storage"]
+            )
+        )
+        self.assertTrue(
+            torch._C._is_alias_of(args_by_name["in_ptr1"], args_by_name["nested"])
+        )
+        self.assertTrue(
+            torch._C._is_alias_of(
+                args_by_name["in_ptr1"], args_by_name["unnamed_nested"]
+            )
+        )
+        self.assertTrue(
+            torch._C._is_alias_of(
+                args_by_name["equal_layout_nested"], args_by_name["shared_storage"]
+            )
+        )
+        self.assertTrue(
+            torch._C._is_alias_of(args_by_name["in_ptr1"], args_by_name["adjacent"])
+        )
+        self.assertEqual(args_by_name["in_ptr1"].data_ptr() % 16, 2)
+        self.assertEqual(args_by_name["nested"].data_ptr() % 16, 6)
+        self.assertEqual(
+            args_by_name["nested"].data_ptr() - args_by_name["in_ptr1"].data_ptr(), 4
+        )
+        self.assertEqual(args_by_name["shared_storage"].data_ptr() % 16, 4)
+        self.assertEqual(args_by_name["in_ptr2"].data_ptr() % 16, 2)
+        self.assertEqual(args_by_name["constant_epilogue"].data_ptr() % 16, 4)
+        self.assertTrue(
+            torch._C._is_alias_of(
+                args_by_name["in_ptr2"], args_by_name["constant_epilogue"]
+            )
+        )
+        self.assertIs(args_by_name["in_ptr2"], args_by_name["constant_input"])
+        self.assertEqual(args_by_name["in_ptr0"].untyped_storage().nbytes(), 32)
+        self.assertEqual(args_by_name["in_ptr1"].untyped_storage().nbytes(), 48)
+        self.assertEqual(args_by_name["in_ptr2"].untyped_storage().nbytes(), 48)
+        self.assertEqual(args_by_name["out_ptr0"].untyped_storage().nbytes(), 48)
+        self.assertFalse(args_by_name["large_stride_epilogue"].is_contiguous())
+        self.assertEqual(
+            args_by_name["large_stride_epilogue"].untyped_storage().nbytes(), 16
+        )
+        self.assertIs(args_by_name["in_ptr0"], args_by_name["bias"])
+        self.assertFalse(
+            torch._C._is_alias_of(args_by_name["in_ptr0"], args_by_name["in_ptr1"])
+        )
+        self.assertFalse(
+            torch._C._is_alias_of(args_by_name["out_ptr0"], args_by_name["in_ptr1"])
+        )
+        self.assertEqual(args_by_name["workspace"].shape, (4096,))
+        self.assertEqual(args_by_name["workspace"].dtype, torch.int8)
+
+    def test_kernel_without_workspace(self):
+        kernel = self._make_benchmark_kernel(workspace_size=0)
+        with V.set_graph_handler(self.graph):
+            arguments = kernel.ordered_arguments()
+            source = kernel.render()
+        self.assertFalse(any(argument.kind == "workspace" for argument in arguments))
+        self.assertIn("workspace=None", source)
+
+    def test_precompile_input_metadata_uses_ordered_arguments(self):
+        kernel = self._make_benchmark_kernel()
+        with V.set_graph_handler(self.graph):
+            shapes, strides, dtypes = _nvgemm_precompile_input_metadata(kernel)
+
+        self.assertEqual(
+            shapes,
+            {"in_ptr0": [4, 4], "in_ptr1": [4, 4], "in_ptr2": [16]},
+        )
+        self.assertEqual(
+            strides,
+            {"in_ptr0": [4, 1], "in_ptr1": [1, 4], "in_ptr2": [1]},
+        )
+        self.assertEqual(
+            dtypes,
+            {"in_ptr0": "bfloat16", "in_ptr1": "bfloat16", "in_ptr2": "bfloat16"},
+        )
+
+    def test_benchmark_evt_fallback_preserves_stride(self):
+        kernel = self._make_benchmark_kernel(is_evt_fallback=True)
+        with V.set_graph_handler(self.graph):
+            arguments = kernel.ordered_arguments()
+            specs = _nvgemm_benchmark_tensor_specs(kernel)
+
+        index = next(
+            i
+            for i, argument in enumerate(arguments)
+            if argument.name == "large_stride_epilogue"
+        )
+        spec = specs[index]
+        if spec is None:
+            raise AssertionError("expected fallback epilogue tensor metadata")
+        self.assertEqual(spec.stride, (1_000_000_000, 1))
+        self.assertGreater(spec.storage_size, 4)
+
+
 @instantiate_parametrized_tests
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
@@ -3922,8 +4275,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
     """Test cases for NVIDIA Universal GEMM epilogue fusion.
 
     Tests verify both correctness and that fusion actually occurs by examining
-    generated code for epilogue markers. Benchmarks are mocked to ensure
-    deterministic fusion decisions independent of GPU noise.
+    generated code for epilogue markers. Benchmarks are mocked to make fusion
+    decisions independent of GPU noise.
     """
 
     M, N, K = 512, 512, 512
@@ -5329,22 +5682,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = a.float() @ b.float()
         torch.testing.assert_close(out2.float(), expected, atol=1e-2, rtol=1e-2)
 
-    @unittest.skip(
-        "Disabled due to CI failures; see "
-        "https://github.com/pytorch/pytorch/issues/190234"
-    )
     def test_workspace_runtime_integration(self):
-        """End-to-end: mock the chosen kernel's workspace_size to non-zero and
-        actually let benchmark_codegened_module run, exercising the runtime
-        path that consumes the generated get_args()/call() helpers.
-
-        Without the workspace fix, the rendered call would TypeError on the
-        missing positional arg, _benchmark_nvgemm_module's broad except would
-        return inf, autotune would silently fall back to a non-EFC choice,
-        and a naive `assert_close` against eager would still pass. To actually
-        catch the regression we intercept _benchmark_nvgemm_module to record
-        every (ms, path) it returns and assert at least one finite-ms result —
-        i.e., at least one EFC choice with workspace did get benchmarked."""
+        """Exercise a fused NVGEMM's nonzero workspace through autotuning."""
         import cutlass.operators
         from cutlass.operators.workspace import AllocationRequirement
 
@@ -5383,20 +5722,18 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "NVGEMM",
                     "nvgemm_max_profiling_configs": 2,
+                    "benchmark_template_fusion": True,
                     "force_disable_caches": True,
                 }
             ),
         ):
             result = torch.compile(fn)(a, b)
-        torch.testing.assert_close(result, fn(a, b), atol=1e-2, rtol=1e-2)
+
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(bench_results, "_benchmark_nvgemm_module never invoked")
-        finite = [(ms, p) for ms, p in bench_results if ms != float("inf")]
         self.assertTrue(
-            finite,
-            lambda msg: (
-                f"{msg}\nAll NVGEMM benchmarks returned inf — workspace handling likely "
-                f"broken. Results: {bench_results}"
-            ),
+            any(math.isfinite(ms) for ms, _ in bench_results),
+            f"No finite NVGEMM benchmarks: {bench_results}",
         )
 
 
