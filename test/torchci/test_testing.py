@@ -259,8 +259,8 @@ test_no_rerun_needed      | 0            | passed  |""",
         self.assertEqual(flags["PYTORCH_CUDA_ALLOC_CONF"], "expandable_segments:True")
         self.assertEqual(flags["OPINFO_RESTRICT_TO_DSL"], "triton")
         self.assertEqual(flags["PYTORCH_TEST_WITH_INDUCTOR"], "")
+        self.assertEqual(flags["TEST_CONFIG"], "report-config")
         self.assertEqual(report["properties"]["build_environment"], "report-build")
-        self.assertEqual(report["properties"]["test_config"], "report-config")
         self.assertEqual(report["properties"]["runner_name"], "report-runner")
         for run in runs:
             _assert_run_line(self, run, self.t0_ms, self.t1_ms)
@@ -657,7 +657,6 @@ class TestReportHelpers(TestCase):
             "driver_version",
             "host_memory_mib",
             "build_environment",
-            "test_config",
             "runner_name",
         }
         self.assertTrue(set(captured.properties) <= property_names)
