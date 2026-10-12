@@ -1265,6 +1265,48 @@ t2.start()
         gc.collect()
         self.assertEqual(device_module.current_device(), 0)
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5680")
+    @deviceCountAtLeast(2)
+    def test_events_multi_gpu_elapsed_time(self, devices):
+        device_module = torch.get_device_module(devices[0])
+        d0 = torch.device(devices[0])
+        d1 = torch.device(devices[1])
+
+        with device_module.device(d0):
+            s0 = device_module.current_stream()
+            e0 = device_module.Event(enable_timing=True)
+            device_module._sleep(10)
+            s0.record_event(e0)
+
+        with device_module.device(d1):
+            s1 = device_module.current_stream()
+            e1 = device_module.Event(enable_timing=True)
+            device_module._sleep(FIFTY_MIL_CYCLES)
+            s1.record_event(e1)
+
+        e0.synchronize()
+        e1.synchronize()
+        with device_module.device(d0):
+            with self.assertRaises(RuntimeError):
+                self.assertGreater(e0.elapsed_time(e1), 0)
+
+        with device_module.device(d1):
+            with self.assertRaises(RuntimeError):
+                self.assertGreater(e0.elapsed_time(e1), 0)
+
+        with device_module.device(d0):
+            s0 = device_module.current_stream()
+            e2 = device_module.Event(enable_timing=True)
+            device_module._sleep(FIFTY_MIL_CYCLES)
+            s0.record_event(e2)
+            s0.synchronize()
+
+        self.assertGreater(e0.elapsed_time(e2), 0)
+
+        # deliberately calling from a different device
+        with device_module.device(d1):
+            self.assertGreater(e0.elapsed_time(e2), 0)
+
 
 @unittest.skipUnless(TEST_CUDA, "CUDA only tests!")
 class TestMultiGPUCUDA(TestCase):
@@ -1309,46 +1351,6 @@ class TestMultiGPUCUDA(TestCase):
             self.assertEqual(torch.cuda.FloatTensor(1).get_device(), 1)
             self.assertEqual(torch.cuda.FloatTensor(1, device=0).get_device(), 0)
             self.assertEqual(torch.cuda.FloatTensor(1, device=None).get_device(), 1)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_events_multi_gpu_elapsed_time(self):
-        d0 = torch.device("cuda:0")
-        d1 = torch.device("cuda:1")
-
-        with torch.cuda.device(d0):
-            s0 = torch.cuda.current_stream()
-            e0 = torch.cuda.Event(enable_timing=True)
-            torch.cuda._sleep(10)
-            s0.record_event(e0)
-
-        with torch.cuda.device(d1):
-            s1 = torch.cuda.current_stream()
-            e1 = torch.cuda.Event(enable_timing=True)
-            torch.cuda._sleep(FIFTY_MIL_CYCLES)
-            s1.record_event(e1)
-
-        e0.synchronize()
-        e1.synchronize()
-        with torch.cuda.device(d0):
-            with self.assertRaises(RuntimeError):
-                self.assertGreater(e0.elapsed_time(e1), 0)
-
-        with torch.cuda.device(d1):
-            with self.assertRaises(RuntimeError):
-                self.assertGreater(e0.elapsed_time(e1), 0)
-
-        with torch.cuda.device(d0):
-            s0 = torch.cuda.current_stream()
-            e2 = torch.cuda.Event(enable_timing=True)
-            torch.cuda._sleep(FIFTY_MIL_CYCLES)
-            s0.record_event(e2)
-            s0.synchronize()
-
-        self.assertGreater(e0.elapsed_time(e2), 0)
-
-        # deliberately calling from a different device
-        with torch.cuda.device(d1):
-            self.assertGreater(e0.elapsed_time(e2), 0)
 
     @contextlib.contextmanager
     def _get_external_stream(self, device):
