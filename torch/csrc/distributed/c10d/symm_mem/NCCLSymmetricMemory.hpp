@@ -8,6 +8,7 @@ namespace c10d {
 namespace symmetric_memory {
 
 class NCCLPeerAllocInfo;
+class SignalPad;
 
 // Host-side CFT (Compute Fabric Transport) logical-endpoint coordinates.
 // `(le_id, le_offset)` is exactly the pair that the device-side `ncclCft`
@@ -39,6 +40,10 @@ class TORCH_API NCCLSymmetricMemory : public SymmetricMemory {
   void** get_buffer_ptrs_dev() override;
 
   void** get_signal_pad_ptrs_dev() override;
+
+  void** get_group_signal_pad_ptrs_dev() override;
+
+  size_t get_group_signal_pad_size() override;
 
   size_t get_buffer_size() override;
 
@@ -80,6 +85,8 @@ class TORCH_API NCCLSymmetricMemory : public SymmetricMemory {
   size_t get_window_offset();
 
  private:
+  const SignalPad& group_signal_pad() const;
+
   c10::intrusive_ptr<NCCLPeerAllocInfo> pai_;
   size_t offset_;
   int rank_;

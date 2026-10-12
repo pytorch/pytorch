@@ -52,6 +52,10 @@ requires_symmetric_memory_device_API = requires_nccl_version(
     (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
 )
 
+# Bounds barrier() in tests whose failure is a missed or stolen signal, so it
+# traps instead of hanging until the test times out.
+_TIMEOUT_MS = 10000
+
 nGPUs = torch.cuda.device_count()
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
@@ -403,6 +407,31 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
             handle.barrier(channel=max_channel)
         handle.barrier(channel=max_channel - 1)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 29), "a buffer's first rendezvous is capturable from nccl 2.29"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_group_pad_created_under_capture(self):
+        """A buffer's first rendezvous may run under graph capture; when it is
+        also the group's first, it creates the group's internal pad there."""
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        group_name = c10d.new_group(list(range(self.world_size))).group_name
+        expected = sum(range(1, self.world_size + 1))
+        stream = torch.cuda.Stream()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream):
+            t = symm_mem.empty(1024, device=self.device)
+            t.fill_(self.rank + 1)
+            out = torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name)
+        for _ in range(3):
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(out, torch.full_like(out, expected))
+        c10d.barrier()
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
@@ -1455,6 +1484,210 @@ class SymmMemCftHandleTest(MultiProcessTestCase):
             hdl.get_peer_cft_handle(0)
         with self.assertRaisesRegex(RuntimeError, "only available on the NCCL"):
             hdl.get_multimem_cft_handle()
+
+
+@requires_cuda_p2p_access()
+@skip_but_pass_in_sandcastle_if(
+    TEST_WITH_ROCM, "NCCL symmetric memory is not supported on ROCm"
+)
+class NCCLSymmetricMemoryGroupPadTest(MultiProcessTestCase):
+    """PyTorch's own operations synchronize through the group's internal pad,
+    not the allocation's. Spawned rather than continuous: on the allocation's
+    pad these tests trap or deadlock."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return min(3, torch.cuda.device_count())
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    def _init_process(self) -> None:
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.device)
+        c10d.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=c10d.FileStore(self.file_name, self.world_size),
+            device_id=self.device,
+        )
+
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_symmetric_memory_device_API
+    @skip_if_lt_x_gpu(2)
+    def test_builtin_ops_leave_signal_pad_alone(self) -> None:
+        """With every word of the allocation's pad set, as a kernel outside
+        PyTorch may leave it, barrier() and the collectives complete with
+        correct results and leave those words alone."""
+        self._init_process()
+        group_name = c10d.group.WORLD.group_name
+        t = symm_mem.empty(1024, dtype=torch.float32, device=self.device)
+        handle = symm_mem.rendezvous(t, group=group_name)
+        pad = handle.get_signal_pad(self.rank).view(torch.int32)
+        pad.fill_(1)
+        torch.cuda.synchronize()
+        c10d.barrier()
+
+        handle.barrier(channel=0, timeout_ms=_TIMEOUT_MS)
+        expected = torch.full_like(t, sum(range(1, self.world_size + 1)))
+        t.fill_(self.rank + 1)
+        res = torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name)
+        self.assertEqual(res, expected)
+        handle.barrier(channel=0, timeout_ms=_TIMEOUT_MS)
+        t.fill_(self.rank + 1)
+        torch.ops.symm_mem.two_shot_all_reduce_(t, "sum", group_name)
+        self.assertEqual(t, expected)
+        torch.cuda.synchronize()
+        self.assertEqual(pad, torch.ones_like(pad))
+        c10d.barrier()
+
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_symmetric_memory_device_API
+    @skip_if_lt_x_gpu(2)
+    def test_group_pad_shared_across_allocations(self) -> None:
+        """A group's barrier pairs ranks that run it on different allocations,
+        so they share the group's pad; barriers from two streams leave the
+        allocations' pads alone."""
+        self._init_process()
+        handles = []
+        for _ in range(2):
+            t = symm_mem.empty(64, device=self.device)
+            handle = symm_mem.rendezvous(t, group=c10d.group.WORLD.group_name)
+            handle.get_signal_pad(self.rank).view(torch.int32).fill_(1)
+            handles.append(handle)
+        torch.cuda.synchronize()
+        c10d.barrier()
+
+        handles[self.rank % 2].barrier(channel=0, timeout_ms=_TIMEOUT_MS)
+        streams = [torch.cuda.Stream(), torch.cuda.Stream()]
+        for _ in range(100):
+            for handle, stream in zip(handles, streams, strict=True):
+                with torch.cuda.stream(stream):
+                    handle.barrier(channel=0, timeout_ms=_TIMEOUT_MS)
+        torch.cuda.synchronize()
+        for handle in handles:
+            pad = handle.get_signal_pad(self.rank).view(torch.int32)
+            self.assertEqual(pad, torch.ones_like(pad))
+        c10d.barrier()
+
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_symmetric_memory_device_API
+    @skip_if_lt_x_gpu(2)
+    def test_barrier_after_put_with_signal(self) -> None:
+        """nccl_put_with_signal leaves its value in the first word of the
+        receiver's allocation pad. On that pad, the word is where rank 0's
+        barrier(0) signals the receiver, so the barrier timed out."""
+        self._init_process()
+        t = symm_mem.empty(1024, device=self.device)
+        handle = symm_mem.rendezvous(t, group=c10d.group.WORLD.group_name)
+        c10d.barrier()
+        if self.rank == 0:
+            torch.ops.symm_mem.nccl_put_with_signal(t, 5, 1)
+        elif self.rank == 1:
+            torch.ops.symm_mem.nccl_wait_for_signal(t, 5)
+        torch.cuda.synchronize()
+        c10d.barrier()
+        handle.barrier(channel=0, timeout_ms=_TIMEOUT_MS)
+        torch.cuda.synchronize()
+        c10d.barrier()
+
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_symmetric_memory_device_API
+    @skip_if_lt_x_gpu(2)
+    def test_group_pad_freed_with_its_group(self) -> None:
+        """Destroying a group and freeing its allocations releases its pad, so
+        creating and destroying groups does not grow device memory. Each pad is
+        at least the allocation granularity (2 MiB). Guards the pad's cleanup;
+        without pads there is nothing to leak."""
+        self._init_process()
+
+        def cycle() -> int:
+            group = c10d.new_group(list(range(self.world_size)))
+            t = symm_mem.empty(64, device=self.device)
+            symm_mem.rendezvous(t, group=group.group_name).barrier(
+                channel=0, timeout_ms=_TIMEOUT_MS
+            )
+            torch.cuda.synchronize()
+            del t
+            c10d.destroy_process_group(group)
+            del group
+            torch.cuda.synchronize()
+            c10d.barrier()
+            return torch.cuda.mem_get_info(self.device)[0]
+
+        # The first cycles settle one-time allocations; a leak over the other
+        # seven would be 14 MiB.
+        free = [cycle() for _ in range(10)]
+        self.assertLess(free[2] - free[-1], 6 * 1024**2, f"free per cycle: {free}")
+
+    def _check_not_shared_across_groups(self, use_collective: bool) -> None:
+        """WORLD and sub = [1, 2] rendezvous one allocation. A slot is chosen by
+        (channel, group rank), so on the allocation's pad rank 0's WORLD signal
+        to rank 2 takes the word in which rank 2's sub op waits for rank 1
+        (#192581). Rank 0 synchronizes in WORLD while rank 1 is delayed; rank
+        2's sub op must wait for rank 1 and see the data it wrote."""
+        self._init_process()
+        world_name = c10d.group.WORLD.group_name
+        sub = c10d.new_group([1, 2])
+        t = symm_mem.empty(16, device=self.device).zero_()
+        world = symm_mem.rendezvous(t, group=world_name)
+        sub_hdl = None
+        if self.rank in (1, 2):
+            sub_hdl = symm_mem.rendezvous(t, group=sub.group_name)
+
+        def world_sync():
+            if use_collective:
+                torch.ops.symm_mem.one_shot_all_reduce(t, "sum", world_name)
+            else:
+                world.barrier(channel=0, timeout_ms=_TIMEOUT_MS)
+
+        def sub_sum():
+            if use_collective:
+                return torch.ops.symm_mem.one_shot_all_reduce(t, "sum", sub.group_name)
+            sub_hdl.barrier(channel=0, timeout_ms=_TIMEOUT_MS)
+            return sub_hdl.get_buffer(0, t.shape, t.dtype) + t
+
+        world_sync()
+        if sub_hdl is not None:
+            sub_sum()
+        torch.cuda.synchronize()
+        c10d.barrier()
+        torch.cuda.synchronize()
+
+        res = None
+        if self.rank == 0:
+            world_sync()
+        elif self.rank == 1:
+            torch.cuda._sleep(4_000_000_000)
+            t.fill_(1)
+            sub_sum()
+            world_sync()
+        else:
+            t.fill_(2)
+            res = sub_sum()
+            world_sync()
+        torch.cuda.synchronize()
+        c10d.barrier()
+        if res is not None:
+            self.assertEqual(res, torch.full_like(res, 3))
+
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_symmetric_memory_device_API
+    @skip_if_lt_x_gpu(3)
+    def test_barrier_not_shared_across_groups(self) -> None:
+        self._check_not_shared_across_groups(use_collective=False)
+
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_symmetric_memory_device_API
+    @skip_if_lt_x_gpu(3)
+    def test_collective_not_shared_across_groups(self) -> None:
+        self._check_not_shared_across_groups(use_collective=True)
 
 
 instantiate_device_type_tests(TestNCCL, globals(), only_for="cuda")
