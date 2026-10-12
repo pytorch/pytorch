@@ -112,11 +112,9 @@ def _cpython_has_simple_slice_bug() -> bool:
     # simple slices (step is None or 1) raised "can only assign an
     # iterable" instead of "must assign iterable to extended slice".
     # Verified empirically against real CPython builds: the fix shipped in
-    # 3.10.20, 3.11.15, and 3.12.5 (3.12.0 is the first 3.12 release, so
-    # 3.12.0-3.12.4 predate it); 3.13+ never had the bug.
+    # 3.11.15 and 3.12.5 (3.12.0 is the first 3.12 release, so 3.12.0-3.12.4
+    # predate it); 3.13+ never had the bug.
     v = sys.version_info
-    if v[:2] == (3, 10):
-        return v < (3, 10, 20)
     if v[:2] == (3, 11):
         return v < (3, 11, 15)
     if v[:2] == (3, 12):
@@ -1472,14 +1470,6 @@ class DequeVariable(BaseListVariable):
         op: str,
     ) -> VariableTracker:
         return self._seq_richcompare(tx, other, op, collections.deque)
-
-    if sys.version_info < (3, 11):
-
-        def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-            # deque fills nb_bool (deque_bool: Py_SIZE(deque) != 0) up to Python
-            # 3.10; CPython GH-32397 dropped the slot in 3.11, so newer versions
-            # fall through to sq_length in generic_is_true and never reach here.
-            return ConstantVariable.create(len(self.items) > 0)
 
     def is_hashable(self) -> bool:
         return False
