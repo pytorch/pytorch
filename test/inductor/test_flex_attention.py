@@ -2786,6 +2786,115 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    @common_utils.parametrize(
+        "trailing_shape,trailing_indices",
+        [((1,), (0,)), ((4,), (2,)), ((2, 3), (1, 2))],
+        name_fn=lambda trailing_shape, trailing_indices: (
+            f"shape_{'x'.join(map(str, trailing_shape))}_"
+            f"index_{'x'.join(map(str, trailing_indices))}"
+        ),
+    )
+    @expected_not_implemented_on_mps
+    @temp_float32_matmul_precision("highest")
+    def test_captured_score_mod_nested_index_backward(
+        self, device, trailing_shape, trailing_indices
+    ):
+        max_len = 4
+        embedding_table = nn.Parameter(
+            torch.randn(2 * max_len, *trailing_shape, device=device)
+        )
+        embedding_table_ref = nn.Parameter(embedding_table.detach().clone())
+        query = torch.randn(1, 1, 3, 32, device=device)
+        key = torch.randn(1, 1, 3, 32, device=device)
+        value = torch.randn(1, 1, 3, 32, device=device)
+
+        def rpe(score, _b, _h, q_idx, kv_idx):
+            delta = q_idx - kv_idx
+            delta = torch.clamp(delta, -max_len, max_len - 1)
+            delta += max_len
+            lookup = embedding_table[delta.int()]
+            for index in trailing_indices:
+                lookup = lookup[index]
+            return score + lookup
+
+        def rpe_ref(score, _b, _h, q_idx, kv_idx):
+            delta = q_idx - kv_idx
+            delta = torch.clamp(delta, -max_len, max_len - 1)
+            delta += max_len
+            return score + embedding_table_ref[(delta.int(), *trailing_indices)]
+
+        compiled_flex_attention = torch.compile(flex_attention, fullgraph=True)
+        out = compiled_flex_attention(query, key, value, score_mod=rpe)
+        out_ref = flex_attention(query, key, value, score_mod=rpe_ref)
+
+        self.assertEqual(out, out_ref)
+        out.sum().backward()
+        out_ref.sum().backward()
+        self.assertEqual(embedding_table.grad, embedding_table_ref.grad)
+
+    @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps
+    @temp_float32_matmul_precision("highest")
+    def test_captured_score_mod_nested_index_backward_dynamic(self, device):
+        def attention(query, key, value, table):
+            def rpe(score, _b, _h, q_idx, kv_idx):
+                return score + table[q_idx - kv_idx + 2][2]
+
+            return flex_attention(query, key, value, score_mod=rpe)
+
+        def attention_ref(query, key, value, table):
+            def rpe_ref(score, _b, _h, q_idx, kv_idx):
+                return score + table[q_idx - kv_idx + 2, 2]
+
+            return flex_attention(query, key, value, score_mod=rpe_ref)
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled_attention = torch.compile(
+            attention, backend=counter, fullgraph=True, dynamic=True
+        )
+        query = torch.randn(1, 1, 2, 32, device=device)
+        key = torch.randn(1, 1, 2, 32, device=device)
+        value = torch.randn(1, 1, 2, 32, device=device)
+        # A plain tensor rather than an nn.Parameter, which would stay static.
+        for width in (4, 6):
+            table = torch.randn(5, width, device=device, requires_grad=True)
+            table_ref = table.detach().clone().requires_grad_()
+            out = compiled_attention(query, key, value, table)
+            out_ref = attention_ref(query, key, value, table_ref)
+
+            self.assertEqual(out, out_ref)
+            out.sum().backward()
+            out_ref.sum().backward()
+            self.assertEqual(table.grad, table_ref.grad)
+        self.assertEqual(counter.frame_count, 1)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # MPS backward raises NotImplementedError before validation
+    def test_captured_score_mod_nonterminal_index_backward_error(self, device):
+        max_len = 4
+        embedding_table = nn.Parameter(torch.randn(2 * max_len, 4, device=device))
+        query = torch.randn(1, 1, 3, 32, device=device)
+        key = torch.randn(1, 1, 3, 32, device=device)
+        value = torch.randn(1, 1, 3, 32, device=device)
+
+        def rpe(score, _b, _h, q_idx, kv_idx):
+            delta = q_idx - kv_idx
+            delta = torch.clamp(delta, -max_len, max_len - 1)
+            delta += max_len
+            return score + (embedding_table[delta.int()] * 2)[2]
+
+        compiled_flex_attention = torch.compile(flex_attention, fullgraph=True)
+        out = compiled_flex_attention(query, key, value, score_mod=rpe)
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError,
+            "apply all indices in one indexing expression",
+        ):
+            out.sum().backward()
+
+    @supported_platform
+    @skip_on_cpu
     @skip_on_xpu
     @skip_on_mps
     @skip_on_rocm

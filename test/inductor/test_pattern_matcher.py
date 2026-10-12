@@ -11,6 +11,7 @@ import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
 import torch._inductor.pattern_matcher as pattern_matcher
 import torch.nn.functional as F
+from torch._dynamo.source import ConstantSource
 from torch._dynamo.utils import count_calls, counters, detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
@@ -41,7 +42,9 @@ from torch._library.opaque_object import (
     get_opaque_type_name,
     register_custom_class,
 )
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import skipCUDAIf
@@ -735,6 +738,35 @@ class TestPatternMatcher(TestCase):
         node = graph.call_function(torch.add, (x, y), {"alpha": 1})
         self.assertFalse(torch_add.match(node))
 
+    def test_failed_match_drops_traceback(self):
+        # A FailedMatch raised mid-match (here: one KeywordArg bound to two
+        # different nodes) is returned to the caller. Its traceback would hold
+        # the matcher frames and, via f_back, the whole calling stack (e.g. the
+        # real tensors of a backward that triggered compilation) in a cycle.
+        add = torch.ops.aten.add.Tensor
+        pattern = CallFunction(add, KeywordArg("x"), KeywordArg("x"))
+        graph = torch.fx.Graph()
+        x, y = graph.placeholder("x"), graph.placeholder("y")
+        m = pattern.match(graph.call_function(add, (x, y)))
+        self.assertFalse(m)
+        self.assertEqual(str(m), "kwarg mismatch: x")
+        self.assertIsNone(m.__traceback__)
+
+    def test_auto_functionalized_default_kwarg_matches(self):
+        # functionalization passes defaulted args too; patterns written against
+        # auto_functionalized usually omit them
+        lib = self.enterContext(torch.library._scoped_library("pm_af", "FRAGMENT"))
+        lib.define("quant(Tensor! result, Tensor input, int[]? group_shape=None) -> ()")
+        op = torch.ops.pm_af.quant.default
+        af = torch.ops.higher_order.auto_functionalized
+        pattern = CallFunction(af, op, result=KeywordArg("r"), input=KeywordArg("i"))
+        graph = torch.fx.Graph()
+        r, i = graph.placeholder("r"), graph.placeholder("i")
+        for group_shape, ok in ((None, True), ([1, 128], False)):
+            kwargs = {"result": r, "input": i, "group_shape": group_shape}
+            node = graph.call_function(af, (op,), kwargs)
+            self.assertEqual(bool(pattern.match(node)), ok)
+
     def test_addcdiv_fma_keeps_add_alpha(self):
         # https://github.com/pytorch/pytorch/issues/199839
         args = [torch.randn(8, device=GPU_TYPE) for _ in range(3)]
@@ -1269,6 +1301,207 @@ class TestPatternMatcher(TestCase):
             torch.randn(2, 2, device=GPU_TYPE),
             torch.randn(2, 3, device=GPU_TYPE),
             torch.randn(2, 5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+    def test_cat_splitwithsizes_negative_dim(self):
+        # cat on dim=1, split on dim=-1 name the same axis on a 2D input:
+        # the pair must be eliminated exactly as with positive dims (#196905).
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], 1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], -1
+            )
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(2, 2, device=GPU_TYPE),
+            torch.randn(2, 3, device=GPU_TYPE),
+            torch.randn(2, 5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 2)
+
+        # the mirror: cat dim negative, split dim positive
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], -1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], 1
+            )
+            return [s**2 for s in split_with_sizes]
+
+        self.common(fn, args, 1, 2)
+
+        # negative dims on both sides, on a 3D input where the normalization
+        # has to use the real rank
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], -2)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], -2
+            )
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(2, 2, 4, device=GPU_TYPE),
+            torch.randn(2, 3, 4, device=GPU_TYPE),
+            torch.randn(2, 5, 4, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 2)
+
+        # a true mismatch still rejects: on 3D, cat dim=-1 (axis 2) vs split
+        # dim=1, with the cat input count and split sizes in agreement so the
+        # dims are the only thing that can reject
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], -1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [0, 0, 0], 1
+            )
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(4, 0, 2, device=GPU_TYPE),
+            torch.randn(4, 0, 3, device=GPU_TYPE),
+            torch.randn(4, 0, 5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+        # eager cat accepts any dim when every input is a legacy (0,) empty;
+        # the out-of-range dim must not crash extra_check
+        def fn(a, b):
+            cat = torch.ops.aten.cat.default([a, b], 1)
+            return torch.ops.aten.split_with_sizes.default(cat, [0, 0], 0)
+
+        args = [
+            torch.empty(0, device=GPU_TYPE),
+            torch.empty(0, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+        # a dim left at its default shows up as None in the graph; that
+        # default is 0 and must match an explicit cat(dim=0)
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], 0)
+            return torch.split_with_sizes(cat, [2, 3, 5])
+
+        args = [
+            torch.randn(2, device=GPU_TYPE),
+            torch.randn(3, device=GPU_TYPE),
+            torch.randn(5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 2)
+
+        # a legacy 1D empty riding along in the cat inputs has a lower rank
+        # than the cat output; the extra_check must decline the match instead
+        # of indexing it on the canonical dim and raising
+        def fn(a, b):
+            cat = torch.ops.aten.cat.default([a, b], 1)
+            return torch.ops.aten.split_with_sizes.default(cat, [0, 0], -1)
+
+        args = [
+            torch.empty(0, device=GPU_TYPE),
+            torch.empty(2, 0, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+    def test_splitwithsizes_cat_negative_dim(self):
+        # the sibling direction: split on dim=1, cat on dim=-1 is the same
+        # axis and must pass through the same as positive dims (#196905).
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24], 1)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], -1)
+            return cat**2
+
+        args = [
+            torch.randn(2, 32, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 4)
+
+        # negative dims on both sides also match
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24], -1)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], -1)
+            return cat**2
+
+        self.common(fn, args, 1, 4)
+
+        # cat dim -1 vs split dim 0 is a true mismatch and must not collapse
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [1, 1], 0)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], -1)
+            return cat**2
+
+        args = [
+            torch.randn(2, 32, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+        # all-legacy-empty cat keeps rank 1 while the dim stays out of range;
+        # extra_check must compare raw rather than raise
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [0, 0], 0)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 1)
+            return cat**2
+
+        args = [
+            torch.empty(0, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+    def test_splitwithsizes_cat_omitted_dim(self):
+        # dim defaults to 0 for both ops and aot autograd does not fill in
+        # defaults, so an omitted dim traces to a different arity. Both sides
+        # omitted must collapse exactly like the explicit case.
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24])
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1])
+            return cat**2
+
+        args = [
+            torch.randn(32, 2, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 4)
+
+        # only the split dim omitted: the default 0 must match an explicit
+        # cat(dim=0)
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24])
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 0)
+            return cat**2
+
+        self.common(fn, args, 1, 4)
+
+        # only the cat dim omitted
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24], 0)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1])
+            return cat**2
+
+        self.common(fn, args, 1, 4)
+
+        # split's default dim 0 against an explicit cat dim 1 is a true
+        # mismatch and must not collapse
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [16, 16])
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 1)
+            return cat**2
+
+        args = [
+            torch.randn(32, 32, device=GPU_TYPE),
         ]
         self.common(fn, args, 0, 0)
 
@@ -3288,6 +3521,43 @@ class TestPatternMatcher(TestCase):
                 dtype,
                 msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
+
+    def test_meta_matches_specializes_backed_not_unbacked(self):
+        def meta_matches(shape_env, actual, expected):
+            with FakeTensorMode(shape_env=shape_env):
+                val = torch.empty(actual, 8)
+            node = torch.fx.Graph().placeholder("x")
+            node.meta["val"] = val
+            pattern = CallFunction(torch.ops.aten.mm.default, Arg(), Arg())
+            pattern.expected_meta = ((expected, 8), val.dtype, val.device)
+            num_guards = len(shape_env.guards)
+            matched = pattern._meta_matches(node)
+            return matched, shape_env.guards[num_guards:]
+
+        def backed(shape_env, hint, name):
+            return shape_env.create_unspecified_symint_and_symbol(
+                hint, ConstantSource(name), DimDynamic.DYNAMIC
+            )
+
+        # backed, equal at the hint: matches by guarding s0 == s1 + 1
+        shape_env = ShapeEnv()
+        s0, s1 = backed(shape_env, 5, "s0"), backed(shape_env, 4, "s1")
+        matched, guards = meta_matches(shape_env, s0, s1 + 1)
+        self.assertTrue(matched)
+        self.assertEqual(len(guards), 1)
+
+        # backed, not equal at the hint: rejected
+        shape_env = ShapeEnv()
+        s0, s1 = backed(shape_env, 5, "s0"), backed(shape_env, 5, "s1")
+        matched, _ = meta_matches(shape_env, s0, s1 + 1)
+        self.assertFalse(matched)
+
+        # unbacked: rejected without installing a guard
+        shape_env = ShapeEnv()
+        u0, u1 = shape_env.create_unbacked_symint(), shape_env.create_unbacked_symint()
+        matched, guards = meta_matches(shape_env, u0, u1 + 1)
+        self.assertFalse(matched)
+        self.assertEqual(guards, [])
 
     def test_metadata_propagation_register_replacement(self):
         """Verify metadata from matched nodes transfers to replacement nodes."""
