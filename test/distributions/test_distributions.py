@@ -1900,15 +1900,15 @@ class TestDistributions(DistributionsTestCase):
             ):
                 torch.binomial(total_count, total_prob)
 
-    @expectedFailureMPS
-    @set_default_dtype_if_supported(torch.double)
     def test_categorical_zero_prob_log_prob_is_neg_inf(self):
         # Events with probability exactly 0 must have log_prob == -inf in every
         # dtype, matching the logits=-inf path (probs are clamped internally).
         for dtype in (torch.float32, torch.float64):
             probs = torch.tensor([0.0, 1.0], dtype=dtype)
             cat = Categorical(probs=probs)
-            self.assertEqual(cat.log_prob(torch.tensor(0)), torch.tensor(-inf, dtype=dtype))
+            self.assertEqual(
+                cat.log_prob(torch.tensor(0)), torch.tensor(-inf, dtype=dtype)
+            )
             self.assertTrue(torch.isfinite(cat.log_prob(torch.tensor(1))))
             from_logits = Categorical(logits=torch.tensor([-inf, 0.0], dtype=dtype))
             self.assertEqual(
@@ -1925,7 +1925,9 @@ class TestDistributions(DistributionsTestCase):
                 torch.tensor(-inf, dtype=dtype),
             )
             self.assertTrue(
-                torch.isfinite(multinomial.log_prob(torch.tensor([0.0, 5.0], dtype=dtype)))
+                torch.isfinite(
+                    multinomial.log_prob(torch.tensor([0.0, 5.0], dtype=dtype))
+                )
             )
 
     def test_categorical_zero_prob_log_prob_grad_is_finite(self):
@@ -1936,6 +1938,8 @@ class TestDistributions(DistributionsTestCase):
         Multinomial(4, probs=probs).log_prob(torch.tensor([0.0, 1.0, 3.0])).backward()
         self.assertTrue(torch.isfinite(probs.grad).all())
 
+    @expectedFailureMPS
+    @set_default_dtype_if_supported(torch.double)
     def test_multinomial_1d(self):
         total_count = 10
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
