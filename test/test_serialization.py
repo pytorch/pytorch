@@ -15,6 +15,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
 import warnings
 import zipfile
@@ -26,7 +27,11 @@ from unittest.mock import patch
 
 import torch
 from torch.utils.serialization import config as serialization_config
-from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensorConverter
+from torch._subclasses.fake_tensor import (
+    FakeTensorConverter,
+    FakeTensorMode,
+    is_fake_tensor,
+)
 from torch._utils import _rebuild_tensor
 from torch._utils_internal import get_file_path_2
 from torch.serialization import (
@@ -1263,6 +1268,44 @@ class TestSerialization(TestCase, SerializationMixin):
             with torch.serialization.safe_globals([Point]):
                 loaded_p = torch.load(f, weights_only=True)
                 self.assertEqual(loaded_p, p)
+
+    # SECURITY: This prevents malformed pickles from exposing uninitialized
+    # pybind11 objects. Do not remove this regression test.
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "torch.distributed not available"
+    )
+    def test_weights_only_newobj_requires_build(self):
+        from torch.distributed.tensor import Shard
+
+        malformed_pickle = (
+            pickle.PROTO
+            + b"\x02"
+            + pickle.GLOBAL
+            + Shard.__module__.encode()
+            + b"\n"
+            + Shard.__name__.encode()
+            + b"\n"
+            + pickle.EMPTY_TUPLE
+            + pickle.NEWOBJ
+            + pickle.STOP
+        )
+
+        checkpoint = io.BytesIO()
+        with zipfile.ZipFile(checkpoint, "w") as archive:
+            archive.writestr("archive/data.pkl", malformed_pickle)
+            archive.writestr("archive/version", "3\n")
+            archive.writestr("archive/byteorder", sys.byteorder)
+        checkpoint.seek(0)
+
+        with self.assertRaisesRegex(
+            pickle.UnpicklingError, "pickle data is likely corrupt or malicious"
+        ):
+            torch.load(checkpoint, weights_only=True)
+
+        buffer = io.BytesIO()
+        torch.save(Shard(2), buffer)
+        buffer.seek(0)
+        self.assertEqual(torch.load(buffer, weights_only=True), Shard(2))
 
     def test_weights_only_safe_globals_build(self):
         counter = 0
@@ -4912,6 +4955,67 @@ class TestSerialization(TestCase, SerializationMixin):
             with self.assertRaisesRegex(RuntimeError, "size is inconsistent with indices"):
                 torch.load(bad_buf, weights_only=False)
 
+    def test_weights_only_sparse_validation_is_thread_local(self):
+        bad = torch.sparse_coo_tensor(
+            torch.tensor([[0, 999]]),
+            torch.tensor([1.0, 2.0]),
+            (2,),
+            check_invariants=False,
+        )
+        bad_buffer = io.BytesIO()
+        torch.save({"s": bad}, bad_buffer)
+        good_buffer = io.BytesIO()
+        torch.save({"t": torch.ones(1)}, good_buffer)
+
+        bad_validation_started = threading.Event()
+        resume_bad_validation = threading.Event()
+        original_validate = torch._utils._validate_loaded_sparse_tensors
+        errors = {}
+        results = {}
+
+        def synchronized_validate(weights_only=False):
+            if threading.current_thread() is bad_thread:
+                bad_validation_started.set()
+                if not resume_bad_validation.wait(timeout=5):
+                    raise RuntimeError("timed out waiting to resume validation")
+            return original_validate(weights_only=weights_only)
+
+        def load_bad():
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    results["bad"] = torch.load(
+                        io.BytesIO(bad_buffer.getvalue()), weights_only=True
+                    )
+            except Exception as error:
+                errors["bad"] = error
+
+        bad_thread = threading.Thread(target=load_bad)
+        with patch.object(
+            torch._utils,
+            "_validate_loaded_sparse_tensors",
+            synchronized_validate,
+        ):
+            bad_thread.start()
+            try:
+                self.assertTrue(bad_validation_started.wait(timeout=5))
+                try:
+                    results["good"] = torch.load(
+                        io.BytesIO(good_buffer.getvalue()), weights_only=True
+                    )
+                except Exception as error:
+                    errors["good"] = error
+            finally:
+                resume_bad_validation.set()
+                bad_thread.join(timeout=5)
+
+        self.assertFalse(bad_thread.is_alive())
+        self.assertNotIn("good", errors)
+        self.assertEqual(results["good"]["t"], torch.ones(1))
+        self.assertNotIn("bad", results)
+        self.assertIn("bad", errors)
+        self.assertRegex(str(errors["bad"]), "size is inconsistent with indices")
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
@@ -5119,16 +5223,31 @@ class TestSerializationAccelerator(TestCase):
             self.assertFalse(getattr(torch.serialization._serialization_tls, "materialize_fake_tensors", False))
             self.assertFalse(getattr(torch.serialization._serialization_tls, "skip_data", False))
 
-        # Test that without materialize_fake_tensor, behavior for fake_tensors is not altered by ctx
+        # Python FakeTensor keeps its existing pickling failure, while C++ fake
+        # tensors can serialize skipped storage without materializing data.
         if not materialize_fake:
             ft = converter.from_real_tensor(mode, torch.randn(2, device=device))
-            exc = pickle.PicklingError if sys.version_info >= (3, 14) else AttributeError
-            with self.assertRaisesRegex(
-                exc,
-                r"Can't (get|pickle) local object (<function |')WeakValueDictionary\.__init__\.<locals>\.remove"
-            ):
+            if torch._dynamo.config.use_cpp_fake_tensor:
                 with skip_data(), BytesIOContext() as f:
                     torch.save(ft, f)
+                    f.seek(0)
+                    with mode:
+                        loaded = torch.load(f, weights_only=True)
+                self.assertTrue(is_fake_tensor(loaded))
+                self.assertEqual(loaded.shape, ft.shape)
+                self.assertEqual(loaded.device, ft.device)
+            else:
+                exc = (
+                    pickle.PicklingError
+                    if sys.version_info >= (3, 14)
+                    else AttributeError
+                )
+                with self.assertRaisesRegex(
+                    exc,
+                    r"Can't (get|pickle) local object (<function |')WeakValueDictionary\.__init__\.<locals>\.remove"
+                ):
+                    with skip_data(), BytesIOContext() as f:
+                        torch.save(ft, f)
 
     @onlyAccelerator
     def test_tensor_subclass_map_location(self, device):

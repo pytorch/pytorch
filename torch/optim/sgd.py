@@ -11,6 +11,7 @@ from .optimizer import (
     _device_dtype_check_for_fused,
     _differentiable_doc,
     _foreach_doc,
+    _functional_api_doc,
     _fused_doc,
     _maximize_doc,
     _params_doc,
@@ -42,11 +43,11 @@ class SGD(Optimizer):
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
-        if lr < 0.0:
+        if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
-        if momentum < 0.0:
+        if not 0.0 <= momentum:
             raise ValueError(f"Invalid momentum value: {momentum}")
-        if weight_decay < 0.0:
+        if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
         defaults = {
@@ -268,10 +269,6 @@ def sgd(
     nesterov: bool,
     maximize: bool,
 ) -> None:
-    r"""Functional API that performs SGD algorithm computation.
-
-    See :class:`~torch.optim.SGD` for details.
-    """
     # Respect when the user inputs False/True for foreach or fused. We only want to change
     # the default when neither have been user-specified. Note that we default to foreach
     # and pass False to use_fused. This is not a mistake--we want to give the fused impl
@@ -317,6 +314,9 @@ def sgd(
         grad_scale=grad_scale,
         found_inf=found_inf,
     )
+
+
+sgd.__doc__ = _functional_api_doc.format(optimizer="SGD")
 
 
 def _single_tensor_sgd(

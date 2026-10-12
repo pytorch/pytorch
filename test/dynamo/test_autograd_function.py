@@ -625,6 +625,54 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), x + 1)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_apply_reference_does_not_recompile(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            f = MyFn.apply
+            return f(x)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(2)
+
+        self.assertEqual(opt_fn(x), x * 2)
+        self.assertEqual(opt_fn(x), x * 2)
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_backward_reference_still_uses_staticmethod_path(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(ctx, g):
+            f = MyFn.backward
+            return f(ctx, g)
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager")
+
+        class FakeCtx:
+            pass
+
+        ctx = FakeCtx()
+        g = torch.randn(2)
+        result = compiled_fn(ctx, g)
+
+        self.assertEqual(result, g * 2)
+
     def test_missing_attribute_graph_breaks(self):
         class Function(torch.autograd.Function):
             pass
@@ -638,18 +686,89 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
 
-    def test_missing_attribute_hasattr_graph_breaks(self):
+    def test_missing_attribute_hasattr(self):
         class Function(torch.autograd.Function):
             pass
 
         def fn(x):
-            return x, hasattr(Function, "missing")
+            return x + 1, hasattr(Function, "missing")
 
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(2)
+        self.assertEqual(opt_fn(x), (x + 1, False))
+        self.assertEqual(cnt.frame_count, 1)
+        Function.missing = 1
+        self.assertEqual(opt_fn(x), (x + 1, True))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_class_protocols_distinguish_instances(self):
+        class Function(torch.autograd.Function):
+            __hash__ = object.__hash__
+
+        registry = {Function}
+
+        def fn(x):
+            instance = Function()
+            return (
+                x + 1,
+                issubclass(Function, torch.autograd.Function),
+                Function in registry,
+                instance is Function,
+                instance in registry,
+            )
+
+        x = torch.randn(2)
+        expected = fn(x)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
+        def hash_fn():
+            instance = Function()
+            return hash(instance) == hash(Function)
+
+        self.assertEqual(hash_fn(), False)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Unsupported hasattr call",
+            "Comparison on compile-time-only id or hash value",
         ):
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+            torch.compile(hash_fn, backend="eager", fullgraph=True)()
+
+        Function.__hash__ = int.__hash__
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported autograd.Function method"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        for test_fn in (fn, opt_fn):
+            with self.assertRaisesRegex(TypeError, "descriptor '__hash__'"):
+                test_fn(x)
+
+    def test_instance_hash_with_unguardable_class_source(self):
+        class Function(torch.autograd.Function):
+            pass
+
+        @torch._dynamo.assume_constant_result
+        def get_cls():
+            return Function
+
+        def class_fn(x):
+            return x + 1, get_cls() in {Function}
+
+        def instance_fn(x):
+            return x + 1, get_cls()() in {0}
+
+        x = torch.randn(2)
+        self.assertEqual(
+            torch.compile(class_fn, backend="eager", fullgraph=True)(x), class_fn(x)
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported autograd.Function method"
+        ):
+            torch.compile(instance_fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.compile(instance_fn, backend="eager")(x), instance_fn(x))
 
     @parametrize("name", ("__name__", "__bases__"))
     def test_dunder_attribute_uses_generic_getattr(self, name):
@@ -3415,6 +3534,41 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         x = torch.tensor([1.0, 2.0], requires_grad=True)
         result = torch.func.grad(loss_fn)(x)
         self.assertEqual(result, torch.tensor([2.0, 2.0]))
+
+    def test_reverse_mode_custom_backward_compiled(self):
+        """The custom backward must survive compiling a torch.func reverse-mode
+        transform. https://github.com/pytorch/pytorch/issues/193279
+        """
+
+        class SinWithZeroBackward(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return torch.sin(x)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.save_for_backward(*inputs)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return torch.zeros_like(grad)
+
+        def loss(x):
+            return SinWithZeroBackward.apply(x).sum()
+
+        def vjp_fn(x):
+            return torch.func.vjp(loss, x)[1](torch.ones(()))[0]
+
+        x = torch.randn(4)
+        for fn, expected in (
+            (torch.func.grad(loss), torch.zeros(4)),
+            (vjp_fn, torch.zeros(4)),
+            (torch.func.jacrev(SinWithZeroBackward.apply), torch.zeros(4, 4)),
+        ):
+            torch._dynamo.reset()
+            self.assertEqual(fn(x), expected)
+            opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), expected)
 
 
 instantiate_parametrized_tests(AutogradFunctionTests)

@@ -186,7 +186,7 @@ class SIMDKernelFeatures:
     def buf_accesses(self) -> dict[str, list[Dep]]:
         """only needed for config.benchmark_kernel"""
         buf_accesses = collections.defaultdict(list)
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             for access in node.read_writes.reads | node.read_writes.writes:
                 buf_accesses[access.name].append(access)
         return buf_accesses

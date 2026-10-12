@@ -6,8 +6,9 @@ from functools import partial
 
 import cutlass.cute as cute
 from cutlass import Float32, Boolean, const_expr
-from cutlass.cutlass_dsl import T, dsl_user_op
-from cutlass._mlir.dialects import llvm, nvvm
+from cutlass.cutlass_dsl import dsl_user_op
+from cutlass._mlir.dialects import arith, nvvm
+from cutlass._mlir_helpers import math as mlir_math
 
 
 F32_or_F32x2 = Float32 | Tuple[Float32, Float32]
@@ -21,17 +22,29 @@ sub_packed_f32x2 = partial(
 
 
 @dsl_user_op
-def tanh(a: float | Float32, *, loc=None, ip=None) -> Float32:
-    return Float32(
-        llvm.inline_asm(
-            T.f32(),
-            [Float32(a).ir_value(loc=loc, ip=ip)],
-            "tanh.approx.f32 $0, $1;",
-            "=f,f",
-            has_side_effects=False,
-            is_align_stack=False,
+def tanh(x: F32_or_F32x2, *, loc=None, ip=None) -> F32_or_F32x2:
+    if const_expr(not isinstance(x, tuple)):
+        return cute.math.tanh(x, fastmath=True, loc=loc, ip=ip)
+    else:
+        return (
+            cute.math.tanh(x[0], fastmath=True, loc=loc, ip=ip),
+            cute.math.tanh(x[1], fastmath=True, loc=loc, ip=ip),
         )
-    )
+
+
+@dsl_user_op
+def dtanh(
+    x: F32_or_F32x2, dout: F32_or_F32x2, *, loc=None, ip=None
+) -> Tuple[F32_or_F32x2, F32_or_F32x2]:
+    if const_expr(not isinstance(x, tuple)):
+        tanh_x = tanh(x, loc=loc, ip=ip)
+        dx = dout * (1.0 - tanh_x * tanh_x)
+        return dx, tanh_x
+    else:
+        tanh_x = tanh(x, loc=loc, ip=ip)
+        sech2_x = cute.arch.fma_packed_f32x2(tanh_x, (-tanh_x[0], -tanh_x[1]), (1.0, 1.0))
+        dx = cute.arch.mul_packed_f32x2(dout, sech2_x)
+        return dx, tanh_x
 
 
 @dsl_user_op
@@ -41,23 +54,27 @@ def sigmoid_tanh(x: F32_or_F32x2, *, loc=None, ip=None) -> F32_or_F32x2:
         return 0.5 + 0.5 * tanh(0.5 * x)
     else:
         x_half = cute.arch.mul_packed_f32x2((0.5, 0.5), x)
-        tanh_x_half = (tanh(x_half[0]), tanh(x_half[1]))
+        tanh_x_half = tanh(x_half)
         return cute.arch.fma_packed_f32x2(tanh_x_half, (0.5, 0.5), (0.5, 0.5))
 
 
 @dsl_user_op
 def sigmoid(x: F32_or_F32x2, *, loc=None, ip=None) -> F32_or_F32x2:
+    log2_e = math.log2(math.e)
     if const_expr(not isinstance(x, tuple)):
-        return cute.arch.rcp_approx(1.0 + cute.math.exp(-x, fastmath=True), loc=loc, ip=ip)
+        exp_neg_x = cute.math.exp2(x * (-log2_e), fastmath=True, loc=loc, ip=ip)
+        return mlir_math.rcp(exp_neg_x + 1.0, approx=True, ftz=True, loc=loc, ip=ip)
     else:
-        log2_e = math.log2(math.e)
         neg_x = cute.arch.mul_packed_f32x2(x, (-log2_e, -log2_e))
         exp_neg_x = (
-            cute.math.exp2(neg_x[0], fastmath=True),
-            cute.math.exp2(neg_x[1], fastmath=True),
+            cute.math.exp2(neg_x[0], fastmath=True, loc=loc, ip=ip),
+            cute.math.exp2(neg_x[1], fastmath=True, loc=loc, ip=ip),
         )
         denom = cute.arch.add_packed_f32x2(exp_neg_x, (1.0, 1.0))
-        return cute.arch.rcp_approx(denom[0]), cute.arch.rcp_approx(denom[1])
+        return (
+            mlir_math.rcp(denom[0], approx=True, ftz=True, loc=loc, ip=ip),
+            mlir_math.rcp(denom[1], approx=True, ftz=True, loc=loc, ip=ip),
+        )
 
 
 @dsl_user_op
@@ -68,10 +85,25 @@ def dsigmoid_from_output(out: Float32, dout: Float32, *, loc=None, ip=None) -> F
 
 @dsl_user_op
 def relu(x: F32_or_F32x2, *, loc=None, ip=None) -> F32_or_F32x2:
+    # arith.maxnumf (-> PTX max.f32, one FMNMX), NOT cutlass.max: the latter
+    # lowers to setp+selp, which ptxas (CUDA 13.3, sm_100+) fuses into a
+    # following cvt.rs stochastic-rounding convert as F2FP.RELU..RS while
+    # REPLACING the live rbits operand with RZ — silently turning SR into
+    # truncation, even through inline asm. maxnumf also saves an instruction.
+    # (Not nvvm.fmax: the DSL vectorizer only handles arith ops, and the
+    # gated act loops run vectorize=True.) NaN corner: maxnum returns the
+    # non-NaN operand, so relu(NaN) = 0 here where selp gave NaN.
     if const_expr(not isinstance(x, tuple)):
-        return cute.arch.fmax(x, Float32(0.0))
+        return Float32(
+            arith.maxnumf(
+                Float32(x).ir_value(loc=loc, ip=ip),
+                Float32(0.0).ir_value(loc=loc, ip=ip),
+                loc=loc,
+                ip=ip,
+            )
+        )
     else:
-        return cute.arch.fmax(x[0], Float32(0.0)), cute.arch.fmax(x[1], Float32(0.0))
+        return relu(x[0], loc=loc, ip=ip), relu(x[1], loc=loc, ip=ip)
 
 
 @dsl_user_op
@@ -81,7 +113,7 @@ def drelu(
 ) -> Tuple[F32_or_F32x2, F32_or_F32x2]:
     if const_expr(not isinstance(x, tuple)):
         x_pos = Boolean(x > 0)
-        return dout if x_pos else Float32(0.0), cute.arch.fmax(x, Float32(0.0))
+        return dout if x_pos else Float32(0.0), relu(x, loc=loc, ip=ip)
     else:
         x0_pos = Boolean(x[0] > 0)
         x1_pos = Boolean(x[1] > 0)
@@ -92,9 +124,9 @@ def drelu(
 @dsl_user_op
 def relu_sq(x: F32_or_F32x2, *, loc=None, ip=None) -> F32_or_F32x2:
     if const_expr(not isinstance(x, tuple)):
-        return cute.arch.fmax(x, Float32(0.0)) * x
+        return relu(x, loc=loc, ip=ip) * x
     else:
-        relu_x = (cute.arch.fmax(x[0], Float32(0.0)), cute.arch.fmax(x[1], Float32(0.0)))
+        relu_x = relu(x, loc=loc, ip=ip)
         return cute.arch.mul_packed_f32x2(relu_x, x)
 
 
@@ -132,19 +164,17 @@ def gelu_tanh_approx(x: F32_or_F32x2, *, loc=None, ip=None) -> F32_or_F32x2:
     sqrt_2_over_pi = math.sqrt(2 / math.pi)  # ~0.797885
     sqrt_2_over_pi_coeff = 0.044715 * sqrt_2_over_pi  # ~0.0356774
     if const_expr(not isinstance(x, tuple)):
-        return 0.5 * (
-            x
-            # Currently cute.math.tanh(x, fastmath=True) generates very slow code
-            # * (1 + cute.math.tanh(x * (sqrt_2_over_pi + sqrt_2_over_pi_coeff * (x * x)), fastmath=True))
-            * (1.0 + tanh(x * (sqrt_2_over_pi + sqrt_2_over_pi_coeff * (x * x))))
-        )
+        x_sq = x * x
+        z = x * (sqrt_2_over_pi + sqrt_2_over_pi_coeff * x_sq)
+        tanh_z = tanh(z)
+        return 0.5 * (x * tanh_z + x)
     else:
         x_sq = cute.arch.mul_packed_f32x2(x, x)
         x_sq_scaled = cute.arch.fma_packed_f32x2(
             x_sq, (sqrt_2_over_pi_coeff, sqrt_2_over_pi_coeff), (sqrt_2_over_pi, sqrt_2_over_pi)
         )
         z = cute.arch.mul_packed_f32x2(x, x_sq_scaled)
-        tanh_z = (tanh(z[0]), tanh(z[1]))
+        tanh_z = tanh(z)
         x_tanh_z = cute.arch.fma_packed_f32x2(tanh_z, x, x)
         return cute.arch.mul_packed_f32x2((0.5, 0.5), x_tanh_z)
 
@@ -177,11 +207,16 @@ def dgelu_tanh_approx(
 
         # Compute gradient
         # sech^2(z) = 1 - tanh^2(z)
-        sech2_z = 1 - tanh_z * tanh_z
+        # Keep this as a multiply-add expression so vectorize=True lowers to
+        # FFMA2 like the explicit F32x2 path; `1.0 - tanh_z * tanh_z` costs
+        # an extra FADD2/FMUL2 pair per vector.
+        sech2_z = tanh_z * (-tanh_z) + 1.0
         # dz/dx = c1 + 3 * c2 * x^2
         dz_dx = sqrt_2_over_pi + sqrt_2_over_pi_coeff_3 * x_sq
         # d/dx[gelu(x)] = 0.5 * (1 + tanh(z)) + 0.5 * x * sech^2(z) * dz/dx
-        dgelu = half_tanh_z_plus_one + x * (0.5 * (sech2_z * dz_dx))
+        sech2_dz_dx = sech2_z * dz_dx
+        x_sech2_dz_dx = x * sech2_dz_dx
+        dgelu = x_sech2_dz_dx * 0.5 + half_tanh_z_plus_one
 
         dx = dout * dgelu
         return dx, gelu_out
@@ -192,7 +227,7 @@ def dgelu_tanh_approx(
             x_sq, (sqrt_2_over_pi_coeff, sqrt_2_over_pi_coeff), (sqrt_2_over_pi, sqrt_2_over_pi)
         )
         z = cute.arch.mul_packed_f32x2(x, x_sq_scaled)
-        tanh_z = (tanh(z[0]), tanh(z[1]))
+        tanh_z = tanh(z)
         half_tanh_z_plus_one = cute.arch.fma_packed_f32x2(tanh_z, (0.5, 0.5), (0.5, 0.5))
         gelu_out = cute.arch.mul_packed_f32x2(x, half_tanh_z_plus_one)
 
@@ -210,6 +245,106 @@ def dgelu_tanh_approx(
 
         dx = cute.arch.mul_packed_f32x2(dout, dgelu)
         return dx, gelu_out
+
+
+@dsl_user_op
+def gelu_erf(x: F32_or_F32x2, *, loc=None, ip=None) -> F32_or_F32x2:
+    """Exact GELU (torch approximate='none', timm/torchvision ViT default):
+    gelu(x) = 0.5 * x * (1 + erf(x / sqrt(2)))
+    """
+    inv_sqrt_2 = 1.0 / math.sqrt(2.0)
+    if const_expr(not isinstance(x, tuple)):
+        u = cute.math.erf(x * inv_sqrt_2, fastmath=True, loc=loc, ip=ip)
+        return 0.5 * (x * u + x)
+    else:
+        x_scaled = cute.arch.mul_packed_f32x2(x, (inv_sqrt_2, inv_sqrt_2))
+        u = (
+            cute.math.erf(x_scaled[0], fastmath=True, loc=loc, ip=ip),
+            cute.math.erf(x_scaled[1], fastmath=True, loc=loc, ip=ip),
+        )
+        x_u_plus_x = cute.arch.fma_packed_f32x2(u, x, x)
+        return cute.arch.mul_packed_f32x2((0.5, 0.5), x_u_plus_x)
+
+
+@dsl_user_op
+def dgelu_erf(
+    x: F32_or_F32x2, dout: F32_or_F32x2, *, loc=None, ip=None
+) -> Tuple[F32_or_F32x2, F32_or_F32x2]:
+    """Exact-GELU backward: computes gradient w.r.t. x and recomputes forward.
+    d/dx[gelu(x)] = Phi(x) + x * phi(x), with Phi(x) = 0.5 * (1 + erf(x/sqrt(2)))
+    (the standard normal CDF) and phi(x) = exp(-x^2/2) / sqrt(2*pi) (the PDF).
+    Returns: (dx, gelu_out)
+    """
+    inv_sqrt_2 = 1.0 / math.sqrt(2.0)
+    inv_sqrt_2pi = 1.0 / math.sqrt(2.0 * math.pi)
+    neg_half_log2_e = -0.5 * math.log2(math.e)  # exp(-x^2/2) = exp2(x^2 * this)
+    if const_expr(not isinstance(x, tuple)):
+        u = cute.math.erf(x * inv_sqrt_2, fastmath=True, loc=loc, ip=ip)
+        cdf = 0.5 + 0.5 * u
+        gelu_out = x * cdf
+        pdf_exp = cute.math.exp2(x * x * neg_half_log2_e, fastmath=True, loc=loc, ip=ip)
+        dgelu = x * (inv_sqrt_2pi * pdf_exp) + cdf
+        dx = dout * dgelu
+        return dx, gelu_out
+    else:
+        x_scaled = cute.arch.mul_packed_f32x2(x, (inv_sqrt_2, inv_sqrt_2))
+        u = (
+            cute.math.erf(x_scaled[0], fastmath=True, loc=loc, ip=ip),
+            cute.math.erf(x_scaled[1], fastmath=True, loc=loc, ip=ip),
+        )
+        cdf = cute.arch.fma_packed_f32x2(u, (0.5, 0.5), (0.5, 0.5))
+        gelu_out = cute.arch.mul_packed_f32x2(x, cdf)
+        x_sq_scaled = cute.arch.mul_packed_f32x2(
+            cute.arch.mul_packed_f32x2(x, x), (neg_half_log2_e, neg_half_log2_e)
+        )
+        pdf_exp = (
+            cute.math.exp2(x_sq_scaled[0], fastmath=True, loc=loc, ip=ip),
+            cute.math.exp2(x_sq_scaled[1], fastmath=True, loc=loc, ip=ip),
+        )
+        x_pdf = cute.arch.mul_packed_f32x2(
+            cute.arch.mul_packed_f32x2(x, (inv_sqrt_2pi, inv_sqrt_2pi)), pdf_exp
+        )
+        dgelu = cute.arch.add_packed_f32x2(x_pdf, cdf)
+        dx = cute.arch.mul_packed_f32x2(dout, dgelu)
+        return dx, gelu_out
+
+
+@dsl_user_op
+def quick_gelu(x: F32_or_F32x2, *, loc=None, ip=None) -> F32_or_F32x2:
+    """QuickGELU (CLIP lineage): x * sigmoid(1.702 * x)."""
+    alpha = 1.702
+    if const_expr(not isinstance(x, tuple)):
+        return x * sigmoid(alpha * x, loc=loc, ip=ip)
+    else:
+        s = sigmoid(cute.arch.mul_packed_f32x2(x, (alpha, alpha)), loc=loc, ip=ip)
+        return cute.arch.mul_packed_f32x2(x, s)
+
+
+@dsl_user_op
+def dquick_gelu(
+    x: F32_or_F32x2, dout: F32_or_F32x2, *, loc=None, ip=None
+) -> Tuple[F32_or_F32x2, F32_or_F32x2]:
+    """QuickGELU backward: computes gradient w.r.t. x and recomputes forward.
+    With s = sigmoid(1.702 * x) and out = x * s:
+    d/dx = s + 1.702 * x * s * (1 - s) = s + 1.702 * out * (1 - s)
+    Returns: (dx, out)
+    """
+    alpha = 1.702
+    if const_expr(not isinstance(x, tuple)):
+        s = sigmoid(alpha * x, loc=loc, ip=ip)
+        out = x * s
+        dgelu = alpha * (out * (1.0 - s)) + s
+        dx = dout * dgelu
+        return dx, out
+    else:
+        s = sigmoid(cute.arch.mul_packed_f32x2(x, (alpha, alpha)), loc=loc, ip=ip)
+        out = cute.arch.mul_packed_f32x2(x, s)
+        one_minus_s = sub_packed_f32x2((1.0, 1.0), s)
+        dgelu = cute.arch.fma_packed_f32x2(
+            cute.arch.mul_packed_f32x2(out, one_minus_s), (alpha, alpha), s
+        )
+        dx = cute.arch.mul_packed_f32x2(dout, dgelu)
+        return dx, out
 
 
 @dsl_user_op
@@ -256,9 +391,9 @@ def silu(x: F32_or_F32x2, *, loc=None, ip=None) -> F32_or_F32x2:
     silu(x) = x * sigmoid(x) = x * rcp(1 + exp(-x)).
     """
     if const_expr(not isinstance(x, tuple)):
-        return x * sigmoid(x)
+        return x * sigmoid(x, loc=loc, ip=ip)
     else:
-        return cute.arch.mul_packed_f32x2(x, sigmoid(x))
+        return cute.arch.mul_packed_f32x2(x, sigmoid(x, loc=loc, ip=ip))
 
 
 @dsl_user_op
@@ -273,7 +408,7 @@ def silu_tanh(x: F32_or_F32x2, *, already_halved: bool = False, loc=None, ip=Non
         return x_half * tanh(x_half) + x_half
     else:
         x_half = cute.arch.mul_packed_f32x2((0.5, 0.5), x) if const_expr(not already_halved) else x
-        tanh_x_half = (tanh(x_half[0]), tanh(x_half[1]))
+        tanh_x_half = tanh(x_half)
         return cute.arch.fma_packed_f32x2(x_half, tanh_x_half, x_half)
 
 
@@ -291,9 +426,11 @@ def dsilu(
     d_silu(x) = sigmoid(x) * (1 + x * (1 - sigmoid(x))).
     """
     if const_expr(not isinstance(x, tuple)):
-        sigmoid_x = sigmoid(x)
+        sigmoid_x = sigmoid(x, loc=loc, ip=ip)
         silu_x = x * sigmoid_x
-        d_silu_x_dout = (sigmoid_x - silu_x * sigmoid_x + silu_x) * dout
+        # This form vectorizes cleanly with cutlass.range(..., vectorize=True):
+        # FADD2 (1 - sigmoid_x), FFMA2 (silu_x * tmp + sigmoid_x), FMUL2 (* dout).
+        d_silu_x_dout = (sigmoid_x + silu_x * (1.0 - sigmoid_x)) * dout
         return d_silu_x_dout, silu_x
     else:
         sigmoid_x = sigmoid(x)
@@ -332,16 +469,16 @@ def dsilu_tanh(
             tanh_x = tanh(x)
             sigmoid_x = 0.5 * tanh_x + 0.5
             silu_x = x * tanh_x + x
-        d_silu_x_dout = (sigmoid_x - silu_x * sigmoid_x + silu_x) * dout
+        d_silu_x_dout = (sigmoid_x + silu_x * (1.0 - sigmoid_x)) * dout
         return d_silu_x_dout, silu_x
     else:
         if const_expr(not already_halved):
             x_half = cute.arch.mul_packed_f32x2((0.5, 0.5), x)
-            tanh_x_half = (tanh(x_half[0]), tanh(x_half[1]))
+            tanh_x_half = tanh(x_half)
             sigmoid_x = cute.arch.fma_packed_f32x2(tanh_x_half, (0.5, 0.5), (0.5, 0.5))
             silu_x = cute.arch.fma_packed_f32x2(x_half, tanh_x_half, x_half)
         else:
-            tanh_x = (tanh(x[0]), tanh(x[1]))
+            tanh_x = tanh(x)
             sigmoid_x = cute.arch.fma_packed_f32x2(tanh_x, (0.5, 0.5), (0.5, 0.5))
             silu_x = cute.arch.fma_packed_f32x2(x, tanh_x, x)
         sigmoid_x_minus_silu_x_sigmoid_x = cute.arch.fma_packed_f32x2(
@@ -401,7 +538,9 @@ def dswiglu(
         # = (sigmoid_x + silu_x * (1 - sigmoid_x)) * dout
         # = (sigmoid_x + silu_x - silu_x * sigmoid_x) * dout
         # = (sigmoid_x - silu_x * sigmoid_x) * dout + silu_x * dout
-        d_silu_x_dout = (sigmoid_x - silu_x * sigmoid_x) * dout + silu_x_dout  # FFMA, FFMA
+        # This form lets ptxas recover the same two packed FFMA instructions
+        # as the explicit F32x2 path while reusing silu_x_dout for dy.
+        d_silu_x_dout = (sigmoid_x + (-silu_x) * sigmoid_x) * dout + silu_x_dout
         dx = d_silu_x_dout * y  # FMUL
         dy = silu_x_dout
         swiglu_out = silu_x * y  # FMUL
@@ -446,7 +585,7 @@ def dswiglu_tanh(
             sigmoid_x = 0.5 * tanh_x + 0.5
             silu_x = x * tanh_x + x
         silu_x_dout = silu_x * dout
-        d_silu_x_dout = (sigmoid_x - silu_x * sigmoid_x) * dout + silu_x_dout
+        d_silu_x_dout = (sigmoid_x + (-silu_x) * sigmoid_x) * dout + silu_x_dout
         dx = d_silu_x_dout * y
         dy = silu_x_dout
         swiglu_out = silu_x * y
@@ -457,7 +596,7 @@ def dswiglu_tanh(
             sigmoid_x = sigmoid_tanh(x)
             silu_x = cute.arch.mul_packed_f32x2(x, sigmoid_x)
         else:
-            tanh_x = (tanh(x[0]), tanh(x[1]))
+            tanh_x = tanh(x)
             sigmoid_x = cute.arch.fma_packed_f32x2(tanh_x, (0.5, 0.5), (0.5, 0.5))
             silu_x = cute.arch.fma_packed_f32x2(x, tanh_x, x)
         silu_x_dout = cute.arch.mul_packed_f32x2(silu_x, dout)
@@ -475,13 +614,92 @@ def dswiglu_tanh(
 
 
 @dsl_user_op
+def _minnumf(x: F32_or_F32x2, c: float, *, loc=None, ip=None) -> F32_or_F32x2:
+    # NaN-PROPAGATING arith.minimumf -> ONE FMNMX.NAN, and the DSL vectorizer
+    # handles arith ops (see relu's note). NOT arith.minnumf: its IEEE minNum
+    # semantics (NaN -> other operand) cost a 4-op FSETP.NAN/FSETP/FSELx2
+    # expansion in SASS, and would silently clamp NaN preacts to the limit
+    # where torch.clamp propagates them.
+    if const_expr(not isinstance(x, tuple)):
+        return Float32(
+            arith.minimumf(
+                Float32(x).ir_value(loc=loc, ip=ip),
+                Float32(c).ir_value(loc=loc, ip=ip),
+                loc=loc,
+                ip=ip,
+            )
+        )
+    else:
+        return _minnumf(x[0], c, loc=loc, ip=ip), _minnumf(x[1], c, loc=loc, ip=ip)
+
+
+@dsl_user_op
+def _maxnumf(x: F32_or_F32x2, c: float, *, loc=None, ip=None) -> F32_or_F32x2:
+    if const_expr(not isinstance(x, tuple)):
+        return Float32(
+            arith.maximumf(
+                Float32(x).ir_value(loc=loc, ip=ip),
+                Float32(c).ir_value(loc=loc, ip=ip),
+                loc=loc,
+                ip=ip,
+            )
+        )
+    else:
+        return _maxnumf(x[0], c, loc=loc, ip=ip), _maxnumf(x[1], c, loc=loc, ip=ip)
+
+
+@dsl_user_op
+@cute.jit
+def _where_le(val: F32_or_F32x2, x: F32_or_F32x2, c: float, *, loc=None, ip=None) -> F32_or_F32x2:
+    """val where x <= c else 0, elementwise — the clamp-saturation grad mask
+    (boundary-inclusive, matching torch.clamp backward)."""
+    if const_expr(not isinstance(val, tuple)):
+        return val if Boolean(x <= c) else Float32(0.0)
+    else:
+        return (
+            _where_le(val[0], x[0], c, loc=loc, ip=ip),
+            _where_le(val[1], x[1], c, loc=loc, ip=ip),
+        )
+
+
+@dsl_user_op
+@cute.jit
+def _where_abs_le(
+    val: F32_or_F32x2, x: F32_or_F32x2, c: float, *, loc=None, ip=None
+) -> F32_or_F32x2:
+    """val where |x| <= c else 0 — the two-sided clamp mask as ONE compare +
+    one select: FSETP takes an |x| operand modifier, so this beats the naive
+    (x <= c) & (x >= -c) spelling by a setp+sel pair per element. NaN corner:
+    |NaN| <= c is false, so val(NaN) masks to 0 either way."""
+    if const_expr(not isinstance(val, tuple)):
+        return val if Boolean(abs(x) <= c) else Float32(0.0)
+    else:
+        return (
+            _where_abs_le(val[0], x[0], c, loc=loc, ip=ip),
+            _where_abs_le(val[1], x[1], c, loc=loc, ip=ip),
+        )
+
+
+@dsl_user_op
 def swiglu_oai(
-    x: F32_or_F32x2, y: F32_or_F32x2, alpha: float = 1.702, *, loc=None, ip=None
+    x: F32_or_F32x2,
+    y: F32_or_F32x2,
+    alpha: float = 1.702,
+    limit: float = math.inf,
+    *,
+    loc=None,
+    ip=None,
 ) -> F32_or_F32x2:
     """The swiglu variant used in gpt-oss, which has a scaling factor on x and bias of 1 to y.
     https://github.com/openai/gpt-oss/blob/7be9334950053a888e24887a57dac797a17d6e00/gpt_oss/torch/model.py#L249
     x * sigmoid(alpha * x) * (y + 1)
+    A finite ``limit`` applies the gpt-oss preact clamp (their swiglu_limit=7.0):
+    x <- min(x, limit) (above only), y <- clamp(y, -limit, limit). The default
+    inf compiles the clamp out.
     """
+    if const_expr(limit != math.inf):
+        x = _minnumf(x, limit, loc=loc, ip=ip)
+        y = _maxnumf(_minnumf(y, limit, loc=loc, ip=ip), -limit, loc=loc, ip=ip)
     if const_expr(not isinstance(x, tuple)):
         sigmoid_alpha_x = sigmoid(alpha * x)
         silu_x = x * sigmoid_alpha_x
@@ -495,9 +713,18 @@ def swiglu_oai(
 
 @dsl_user_op
 def swiglu_oai_tanh(
-    x: F32_or_F32x2, y: F32_or_F32x2, alpha: float = 1.702, *, loc=None, ip=None
+    x: F32_or_F32x2,
+    y: F32_or_F32x2,
+    alpha: float = 1.702,
+    limit: float = math.inf,
+    *,
+    loc=None,
+    ip=None,
 ) -> F32_or_F32x2:
     """Tanh-based swiglu_oai kept for SASS/accuracy comparison."""
+    if const_expr(limit != math.inf):
+        x = _minnumf(x, limit, loc=loc, ip=ip)
+        y = _maxnumf(_minnumf(y, limit, loc=loc, ip=ip), -limit, loc=loc, ip=ip)
     if const_expr(not isinstance(x, tuple)):
         x_half = 0.5 * x
         silu_x = x_half * tanh(alpha * x_half) + x_half
@@ -505,14 +732,21 @@ def swiglu_oai_tanh(
     else:
         x_half = cute.arch.mul_packed_f32x2((0.5, 0.5), x)
         alpha_x_half = cute.arch.mul_packed_f32x2((alpha, alpha), x_half)
-        tanh_alpha_x_half = (tanh(alpha_x_half[0]), tanh(alpha_x_half[1]))
+        tanh_alpha_x_half = tanh(alpha_x_half)
         silu_x = cute.arch.fma_packed_f32x2(x_half, tanh_alpha_x_half, x_half)
         return cute.arch.fma_packed_f32x2(silu_x, y, silu_x)
 
 
 @dsl_user_op
 def dswiglu_oai(
-    x: F32_or_F32x2, y: F32_or_F32x2, dout: F32_or_F32x2, alpha: float = 1.702, *, loc=None, ip=None
+    x: F32_or_F32x2,
+    y: F32_or_F32x2,
+    dout: F32_or_F32x2,
+    alpha: float = 1.702,
+    limit: float = math.inf,
+    *,
+    loc=None,
+    ip=None,
 ) -> Tuple[F32_or_F32x2, F32_or_F32x2, F32_or_F32x2]:
     """
     Swiglu OAI backward pass: computes gradients w.r.t. x and y
@@ -521,16 +755,29 @@ def dswiglu_oai(
 
     Derivative of x * sigmoid(alpha * x) w.r.t. x:
     d/dx[x * sigmoid(alpha * x)] = sigmoid(alpha * x) + alpha * x * sigmoid(alpha * x) * (1 - sigmoid(alpha * x))
+
+    A finite ``limit`` applies the gpt-oss preact clamp (see swiglu_oai): the
+    math runs on the clamped preacts and the grads are zeroed where the clamp
+    saturates (dx where x > limit; dy where |y| > limit), boundary-inclusive
+    like torch.clamp backward.
     """
+    x_raw, y_raw = x, y
+    if const_expr(limit != math.inf):
+        x = _minnumf(x, limit, loc=loc, ip=ip)
+        y = _maxnumf(_minnumf(y, limit, loc=loc, ip=ip), -limit, loc=loc, ip=ip)
     if const_expr(not isinstance(x, tuple)):
         sigmoid_alpha_x = sigmoid(alpha * x)
         silu_x = x * sigmoid_alpha_x
         silu_x_dout = silu_x * dout
-        d_silu_x_dout = (sigmoid_alpha_x + alpha * (silu_x - silu_x * sigmoid_alpha_x)) * dout
+        # Keep this as two multiply-add expressions. With vectorize=True this
+        # matches the explicit F32x2 path; spelling it as (1 - sigmoid) costs
+        # an extra FADD2/FMUL2 pair per vector.
+        silu_x_minus_product = silu_x * (-sigmoid_alpha_x) + silu_x
+        sigmoid_plus_alpha_diff = silu_x_minus_product * alpha + sigmoid_alpha_x
+        d_silu_x_dout = sigmoid_plus_alpha_diff * dout
         dx = d_silu_x_dout * y + d_silu_x_dout
         dy = silu_x_dout
         swiglu_out = silu_x * y + silu_x
-        return dx, dy, swiglu_out
     else:
         alpha_x = cute.arch.mul_packed_f32x2((alpha, alpha), x)
         sigmoid_alpha_x = sigmoid(alpha_x)
@@ -546,27 +793,44 @@ def dswiglu_oai(
         dx = cute.arch.fma_packed_f32x2(d_silu_x_dout, y, d_silu_x_dout)
         dy = silu_x_dout
         swiglu_out = cute.arch.fma_packed_f32x2(silu_x, y, silu_x)
-        return dx, dy, swiglu_out
+    if const_expr(limit != math.inf):
+        dx = _where_le(dx, x_raw, limit, loc=loc, ip=ip)
+        dy = _where_abs_le(dy, y_raw, limit, loc=loc, ip=ip)
+    return dx, dy, swiglu_out
 
 
 @dsl_user_op
 def dswiglu_oai_tanh(
-    x: F32_or_F32x2, y: F32_or_F32x2, dout: F32_or_F32x2, alpha: float = 1.702, *, loc=None, ip=None
+    x: F32_or_F32x2,
+    y: F32_or_F32x2,
+    dout: F32_or_F32x2,
+    alpha: float = 1.702,
+    limit: float = math.inf,
+    *,
+    loc=None,
+    ip=None,
 ) -> Tuple[F32_or_F32x2, F32_or_F32x2, F32_or_F32x2]:
     """Tanh-based dswiglu_oai kept for SASS/accuracy comparison."""
+    x_raw, y_raw = x, y
+    if const_expr(limit != math.inf):
+        x = _minnumf(x, limit, loc=loc, ip=ip)
+        y = _maxnumf(_minnumf(y, limit, loc=loc, ip=ip), -limit, loc=loc, ip=ip)
     if const_expr(not isinstance(x, tuple)):
         alpha_x_half = (0.5 * alpha) * x
         sigmoid_alpha_x = 0.5 + 0.5 * tanh(alpha_x_half)
         silu_x = x * sigmoid_alpha_x
         silu_x_dout = silu_x * dout
-        d_silu_x_dout = (sigmoid_alpha_x + alpha * (silu_x - silu_x * sigmoid_alpha_x)) * dout
+        # Same spelling as dswiglu_oai: this preserves the packed FFMA2 chain
+        # under cutlass.range(..., vectorize=True).
+        silu_x_minus_product = silu_x * (-sigmoid_alpha_x) + silu_x
+        sigmoid_plus_alpha_diff = silu_x_minus_product * alpha + sigmoid_alpha_x
+        d_silu_x_dout = sigmoid_plus_alpha_diff * dout
         dx = d_silu_x_dout * y + d_silu_x_dout
         dy = silu_x_dout
         swiglu_out = silu_x * y + silu_x
-        return dx, dy, swiglu_out
     else:
         alpha_x_half = cute.arch.mul_packed_f32x2(((0.5 * alpha), (0.5 * alpha)), x)
-        tanh_alpha_x_half = (tanh(alpha_x_half[0]), tanh(alpha_x_half[1]))
+        tanh_alpha_x_half = tanh(alpha_x_half)
         sigmoid_alpha_x = cute.arch.fma_packed_f32x2(tanh_alpha_x_half, (0.5, 0.5), (0.5, 0.5))
         silu_x = cute.arch.mul_packed_f32x2(x, sigmoid_alpha_x)
         silu_x_dout = cute.arch.mul_packed_f32x2(silu_x, dout)
@@ -580,7 +844,10 @@ def dswiglu_oai_tanh(
         dx = cute.arch.fma_packed_f32x2(d_silu_x_dout, y, d_silu_x_dout)
         dy = silu_x_dout
         swiglu_out = cute.arch.fma_packed_f32x2(silu_x, y, silu_x)
-        return dx, dy, swiglu_out
+    if const_expr(limit != math.inf):
+        dx = _where_le(dx, x_raw, limit, loc=loc, ip=ip)
+        dy = _where_abs_le(dy, y_raw, limit, loc=loc, ip=ip)
+    return dx, dy, swiglu_out
 
 
 @dsl_user_op
@@ -637,9 +904,9 @@ def reglu(x: F32_or_F32x2, y: F32_or_F32x2, *, loc=None, ip=None) -> F32_or_F32x
     reglu(x, y) = relu(x) * y = max(x, 0) * y
     """
     if const_expr(not isinstance(x, tuple)):
-        return cute.arch.fmax(x, Float32(0.0)) * y
+        return relu(x, loc=loc, ip=ip) * y
     else:
-        relu_x = relu(x)
+        relu_x = relu(x, loc=loc, ip=ip)
         return cute.arch.mul_packed_f32x2(relu_x, y)
 
 
@@ -658,15 +925,16 @@ def dreglu(
     """
     if const_expr(not isinstance(x, tuple)):
         x_pos = Boolean(x > 0)
-        relu_x = cute.arch.fmax(x, Float32(0.0))
-        dx = (dout * y) if x_pos else Float32(0.0)
+        relu_x = relu(x, loc=loc, ip=ip)
+        dout_y = dout * y
+        dx = dout_y if x_pos else Float32(0.0)
         dy = dout * relu_x
         reglu_out = relu_x * y
         return dx, dy, reglu_out
     else:
         x0_pos = Boolean(x[0] > 0)
         x1_pos = Boolean(x[1] > 0)
-        relu_x = relu(x)
+        relu_x = relu(x, loc=loc, ip=ip)
         dout_y = cute.arch.mul_packed_f32x2(dout, y)
         dx = ((dout_y[0] if x0_pos else Float32(0.0)), (dout_y[1] if x1_pos else Float32(0.0)))
         dy = cute.arch.mul_packed_f32x2(dout, relu_x)
@@ -727,6 +995,9 @@ act_fn_map = {
     "relu": relu,
     "relu_sq": relu_sq,
     "gelu_tanh_approx": gelu_tanh_approx,
+    "gelu_erf": gelu_erf,
+    "quick_gelu": quick_gelu,
+    "tanh": tanh,
 }
 
 dact_fn_map = {
@@ -736,6 +1007,9 @@ dact_fn_map = {
     "relu": drelu,
     "relu_sq": drelu_sq,
     "gelu_tanh_approx": dgelu_tanh_approx,
+    "gelu_erf": dgelu_erf,
+    "quick_gelu": dquick_gelu,
+    "tanh": dtanh,
 }
 
 gate_fn_map = {
