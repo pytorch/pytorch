@@ -832,13 +832,23 @@ void bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Hal
 template<>
 void bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float))
 {
-  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+  auto preferred = at::globalContext().blasPreferredBackend();
+#ifdef USE_ROCM
+  // rocBLAS produces inaccurate results for batched bf16 GEMMs with n == 1 and
+  // fp32 accumulate/output on gfx90a. hipBLASLt is correct for this
+  // shape, so force it even when Cublas is preferred. Scoped to gfx90a only.
+  if (preferred == BlasBackend::Cublas && n == 1 &&
+      at::detail::getCUDAHooks().isGPUArch({"gfx90a"})) {
+    preferred = BlasBackend::Cublaslt;
+  }
+#endif
+  if (preferred == BlasBackend::Cublaslt) {
     if (!bgemm_internal_cublaslt<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16))) {
       bgemm_internal_cublas<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
     }
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
-  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+  else if (preferred == BlasBackend::Ck) {
     TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
   }
 #endif
