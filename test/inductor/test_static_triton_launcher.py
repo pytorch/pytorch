@@ -90,7 +90,7 @@ class TestStaticTritonLauncherUnit(TestCase):
         self.addCleanup(kernel.close)
         result = StaticTritonCompileResult(
             kernel,
-            triton.Config({}),
+            SimpleNamespace(),
             {
                 "device": device,
                 "device_type": "cuda",
