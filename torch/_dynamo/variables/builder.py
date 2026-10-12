@@ -1284,10 +1284,7 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            # OrderedDict replay needs the original key objects, even for literals.
-            use_const_keys = not istype(value, collections.OrderedDict) and all(
-                ConstantVariable.is_literal(k) for k in value
-            )
+            use_const_keys = all(ConstantVariable.is_literal(k) for k in value)
 
             # For use_const_keys, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
@@ -1319,7 +1316,14 @@ class VariableBuilder:
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if use_const_keys:
-                    key = ConstantVariable.create(k)
+                    # Keep OrderedDict keys sourced for replay, but read values by
+                    # literal key so read-only access does not guard input order.
+                    key_source = (
+                        ConstDictKeySource(base, i)
+                        if istype(value, collections.OrderedDict)
+                        else None
+                    )
+                    key = ConstantVariable.create(k, source=key_source)
                     source_key = k
                 else:
                     source_key = ConstDictKeySource(base, i)
