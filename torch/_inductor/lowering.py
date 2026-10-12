@@ -2428,7 +2428,8 @@ def cat(inputs, dim=0):
             # Copying all of a buffer Inductor computes can fuse into its
             # producer, which is cheaper than re-reading it in a pointwise cat.
             return not (
-                isinstance(storage.data, ir.ComputedBuffer)
+                config.cat_fuse_computed_input_copies
+                and isinstance(storage.data, ir.ComputedBuffer)
                 and not storage.data.is_no_op()
                 and V.graph.sizevars.statically_known_equals(
                     x.get_numel(), storage.get_numel()
