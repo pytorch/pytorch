@@ -7775,7 +7775,6 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
-    @dtypesIfMPS(torch.float16, torch.bfloat16, torch.float32)
     def test_rmsnorm_epsilon(self, device, dtype):
         def rms_norm_reference_fn(i, normalized_shape):
             eps = torch.finfo(i.dtype).eps
@@ -10487,7 +10486,6 @@ class TestNNDeviceType(NNTestCase):
         issue_24823_2()
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfMPS(torch.float)
     @largeTensorTest(lambda self, device, dtype:
                      # Upper bound MPS memory usage based on actual measurement
                      int(2.5 * 1024**3 * dtype.itemsize) if torch.device(device).type == 'mps' else
@@ -10536,7 +10534,6 @@ class TestNNDeviceType(NNTestCase):
             large_view.grad.zero_()
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfMPS(torch.float)  # MPS doesn't support float64
     @largeTensorTest(lambda self, device, dtype:
                      # Upper bound MPS memory usage based on actual measurement
                      int(2.5 * 1024**3 * dtype.itemsize) if torch.device(device).type == 'mps' else
@@ -10681,7 +10678,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(logits_soft.grad, logits_hard.grad, atol=tol, rtol=0)
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypesIfMPS(torch.float)
     @dtypes(torch.float, torch.double)
     def test_gumbel_softmax(self, device, dtype):
         self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5], dim=0, count_expected=1)
@@ -12690,7 +12686,6 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(functional, modular, atol=1e-6, rtol=1e-6)
             self.assertEqual(traced, modular, atol=1e-6, rtol=1e-6)
 
-    @dtypesIfMPS(torch.cfloat, torch.float)
     @dtypes(torch.cfloat, torch.cdouble, torch.float)
     def test_to_complex(self, device, dtype):
         m = nn.Linear(3, 5).to(device)
@@ -12705,7 +12700,6 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue("Complex modules are a new feature" in str(w[-1].message))
 
     @skipMeta
-    @dtypesIfMPS(torch.float32)
     @dtypes(torch.float32, torch.float64)
     def test_module_to_empty(self, device, dtype):
         class MyModule(nn.Module):

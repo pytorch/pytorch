@@ -545,6 +545,10 @@ class FSDPParamGroup:
                     if not tensor.is_inference()
                     else contextlib.nullcontext()
                 ):
+                    # Like the world_size > 1 path, copy a byte payload bytewise
+                    # into a cached output of another dtype
+                    if all_gather_input.dtype == torch.uint8:
+                        tensor = tensor.view(torch.uint8)
                     tensor.copy_(all_gather_input)
 
         else:
@@ -894,7 +898,7 @@ class FSDPParamGroup:
             # If there was a mistargeted unshard without a corresponding wait,
             # then we wait here and clear the unshard
             if (event := self._all_gather_result.all_gather_event) is not None:
-                torch.accelerator.current_stream().wait_event(event)
+                self.device_handle.current_stream().wait_event(event)
             work = self._all_gather_result.all_gather_work
             if isinstance(work, dist.distributed_c10d.Work):
                 work.wait()

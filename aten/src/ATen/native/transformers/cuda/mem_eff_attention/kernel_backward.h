@@ -711,6 +711,8 @@ struct AttentionBackwardKernel {
     int64_t delta_strideB = -1;
     int64_t delta_strideH = -1;
     int32_t num_batches = -1;
+    int32_t batch_offset = 0;
+    int32_t head_offset = 0;
     int16_t num_splits_key = 1; // We use `gridDim.x` inside kernel
 
     int64_t gO_strideB = 0;
@@ -740,8 +742,8 @@ struct AttentionBackwardKernel {
     }
 
     CUTLASS_DEVICE bool advance_to_block() {
-      int64_t batch_id = blockIdx.z;
-      int32_t head_id = blockIdx.y;
+      int64_t batch_id = blockIdx.z + batch_offset;
+      int32_t head_id = blockIdx.y + head_offset;
       int32_t kv_head_id = head_id / q_heads_per_kv;
 
       if (kNeedsAccumGradQ || kNeedsAccumGradK || kNeedsAccumGradV) {
@@ -887,7 +889,7 @@ struct AttentionBackwardKernel {
     }
     CUTLASS_HOST_DEVICE int64_t workspace_size() const {
       // Returns size of buffer we need to run this kernel
-      return num_batches * num_heads * workspace_strideBH() * sizeof(float);
+      return int64_t(num_batches) * num_heads * workspace_strideBH() * sizeof(float);
     }
     CUTLASS_HOST_DEVICE bool should_zero_workspace() const {
       return num_splits_key > 1 || window_size > 0;
