@@ -261,11 +261,7 @@ def max_clock_rate(device: int | None = None):
                 pynvml.nvmlShutdown()
     else:
         device = torch.cuda.current_device() if device is None else device
-        # The clock_rate binding queries the current device, not the device
-        # the properties belong to. The value is in kHz.
-        with torch.cuda.device(device):
-            clock_rate = torch.cuda.get_device_properties(device).clock_rate
-        return clock_rate // 1000
+        return torch.cuda.get_device_properties(device).clock_rate // 1000
 
 
 def get_mast_job_name_version() -> tuple[str, int] | None:
