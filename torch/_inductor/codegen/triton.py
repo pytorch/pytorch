@@ -6774,8 +6774,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.cse.newvar(dtype=torch.uint32, shape=reshape_shape[:-1])
                 for _ in range(half)
             )
-            self._emit_recursive_split(str(packed), tuple(map(str, parts)), pair_shape, torch.uint32)
-            for part, low_name, high_name in zip(parts, part_names[::2], part_names[1::2]):
+            self._emit_recursive_split(
+                str(packed), tuple(map(str, parts)), pair_shape, torch.uint32
+            )
+            for part, low_name, high_name in zip(
+                parts, part_names[::2], part_names[1::2]
+            ):
                 self.compute.writeline(
                     f"{low_name} = {part}.to(tl.uint16).to({triton_type(dtype)}, bitcast=True)"
                 )
