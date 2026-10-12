@@ -12297,6 +12297,8 @@ op_db: list[OpInfo] = [
                              dtypes=(torch.complex64, torch.complex128)),
                 DecorateInfo(unittest.skip("Skipped"), 'TestFakeTensor', 'test_strided_layout', device_type='xpu',
                              dtypes=(torch.complex64, torch.complex128)),
+                DecorateInfo(unittest.skip("Skipped"), 'TestTorchFunctionRedispatchOpsDevice', 'test_redispatch',
+                             device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
 
                 # MPS arange does not support complex dtypes yet
                 DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
