@@ -3204,6 +3204,7 @@ class TestXPUMultiprocessing(TestCase):
     def test_event_handle_importer(self, event_cls):
         e0 = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
+
         ctx = mp.get_context("spawn")
         p2c = ctx.SimpleQueue()
         c2p = ctx.SimpleQueue()
@@ -3212,6 +3213,7 @@ class TestXPUMultiprocessing(TestCase):
             args=(event_cls, e0.ipc_handle(), p2c, c2p),
         )
         p.start()
+
         c2p.get()  # wait for child to become ready
         torch.xpu._sleep(200_000_000)  # spin for about 200 ms
         e0.record()
