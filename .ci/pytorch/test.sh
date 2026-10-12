@@ -2796,6 +2796,16 @@ elif [[ "${TEST_CONFIG}" == periodic ]]; then
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *rx7900* ]]; then
+    # Throwaway probe for the rx7900 test_graph_save_on_cpu_cuda failure; not for landing.
+    python .ci/pytorch/rx7900_sparse_probe.py 2000 || true
+    AMD_SERIALIZE_COPY=3 python .ci/pytorch/rx7900_sparse_probe.py 2000 || true
+    AMD_SERIALIZE_KERNEL=3 python .ci/pytorch/rx7900_sparse_probe.py 2000 || true
+    for _ in 1 2 3 4 5; do
+      PYTORCH_TEST_WITH_ROCM=1 python test/test_autograd.py -k test_graph_save_on_cpu_cuda 2>&1 | tail -3 || true
+    done
+    exit 0
+  fi
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
   test_aten
