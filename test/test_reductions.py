@@ -24,7 +24,7 @@ from torch.testing._internal.common_utils import (
     gradcheck, gradgradcheck,
     skipIfMPS,
     skipIfXpu,
-    skipIfTorchDynamo, skipIfTorchDynamoOnDevices, HardwareClassification,
+    skipIfTorchDynamo, HardwareClassification,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, onlyCPU, onlyCUDA, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
@@ -3086,7 +3086,6 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @skipIfTorchDynamoOnDevices("https://github.com/intel/torch-xpu-ops/issues/5123", device_types=['cpu', 'xpu'])
     @skipIfMPS
     def test_var_vs_numpy(self, device, dtype):
         _size = (20, 20)
@@ -3099,7 +3098,6 @@ class TestReductionsDevice(TestCase):
             self._compare_std_var_with_numpy('var', device, dtype, *test_case)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @skipIfTorchDynamoOnDevices("https://github.com/intel/torch-xpu-ops/issues/5123", device_types=['cpu', 'xpu'])
     @skipIfMPS
     def test_std_vs_numpy(self, device, dtype):
         _size = (20, 20)
@@ -3474,7 +3472,6 @@ class TestReductionsDevice(TestCase):
     # Tests to ensure that reduction functions employing comparison operators are usable when there
     # exists a zero dimension (i.e. when the tensors are empty) in the tensor. These tests specifically
     # cater to functions where specifying the `dim` parameter is necessary.
-    @skipIfTorchDynamoOnDevices("https://github.com/intel/torch-xpu-ops/issues/5126", device_types=['cpu', 'xpu'])
     def test_tensor_compare_ops_empty(self, device):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
