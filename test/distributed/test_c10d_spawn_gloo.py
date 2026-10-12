@@ -149,12 +149,18 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 backend="gloo",
             )
             group = c10d.new_group([1])
+            x = torch.ones(5, 5, requires_grad=True)
+            nnf = torch.distributed.nn.functional
 
+            y = nnf.broadcast(x, 1, group=group)
+            y = y + nnf.reduce(x, 1, group=group)
+            y = y + nnf.scatter([x], 1, group=group)
+            (y + sum(nnf.gather(x, 1, group=group))).sum().backward()
             if self.rank == 1:
-                x = torch.ones(5, 5, requires_grad=True)
-                y = torch.distributed.nn.broadcast(x, 1, group=group)
-                y.sum().backward()
-                self.assertEqual(x.grad, torch.ones_like(x))
+                self.assertEqual(x.grad, 4 * torch.ones_like(x))
+            else:
+                self.assertEqual(x.grad, 2 * torch.ones_like(x))
+                self.assertEqual(nnf.gather(x, 1, group=group), ())
 
         @requires_gloo()
         @skip_if_lt_x_gpu(2)
@@ -203,13 +209,16 @@ if not TEST_WITH_DEV_DBG_ASAN:
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
         def test_gather(self):
+            self._test_gather("cuda")
+
+        def _test_gather(self, device_type):
             store = c10d.FileStore(self.file_name, self.world_size)
             # This is required because these functions calls directly to the .dist and needs
             # the world to be initialized
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
             )
-            device = torch.device(f"cuda:{self.rank}")
+            device = self._device(device_type)
             x = torch.ones(5, 5, device=device) + self.rank
             x.requires_grad = True
             tensors = torch.distributed.nn.gather(x, 1)
@@ -234,13 +243,16 @@ if not TEST_WITH_DEV_DBG_ASAN:
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
         def test_scatter(self):
+            self._test_scatter("cuda")
+
+        def _test_scatter(self, device_type):
             store = c10d.FileStore(self.file_name, self.world_size)
             # This is required because these functions calls directly to the .dist and needs
             # the world to be initialized
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
             )
-            device = torch.device(f"cuda:{self.rank}")
+            device = self._device(device_type)
             x0 = torch.ones(5, 5, device=device)
             x1 = torch.ones(5, 5, device=device) + 1
             x0.requires_grad = True
@@ -262,6 +274,76 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 self.assertEqual(x1.grad, x1_s)
             if self.rank == 0:
                 self.assertEqual(x0.grad, torch.zeros(5, 5, device=device))
+
+        @requires_gloo()
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_broadcast_cpu(self):
+            self._test_broadcast("gloo", "cpu")
+
+        @requires_gloo()
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_reduce_cpu(self):
+            self._test_reduce("gloo", "cpu")
+
+        @requires_gloo()
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_allreduce_cpu(self):
+            self._test_allreduce("gloo", "cpu")
+
+        @requires_gloo()
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_all_gather_cpu(self):
+            self._test_all_gather("gloo", "cpu")
+
+        @requires_gloo()
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_all_to_all_cpu(self):
+            self._test_all_to_all("gloo", "cpu")
+
+        @requires_gloo()
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_all_to_all_single_cpu(self):
+            self._test_all_to_all_single("gloo", "cpu")
+
+        @requires_gloo()
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_gather_cpu(self):
+            self._test_gather("cpu")
+
+        @requires_gloo()
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_scatter_cpu(self):
+            self._test_scatter("cpu")
+
+        @requires_gloo()
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_reduce_scatter_cpu(self):
+            self._test_reduce_scatter("gloo", "cpu")
+
+        @requires_gloo()
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_all_gather_base_cpu(self):
+            self._test_all_gather_base("gloo", "cpu")
 
 
 if __name__ == "__main__":
