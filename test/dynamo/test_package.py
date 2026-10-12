@@ -1649,19 +1649,19 @@ class TestSystemInfoDeviceCompatibility(torch._inductor.test_case.TestCase):
 
     def test_current_records_out_of_tree_backend_identity(self):
         # The accelerator return value is a plain namespace because
-        # torch.device("npu") cannot be constructed without the out-of-tree
+        # torch.device("fakeacc") cannot be constructed without the out-of-tree
         # backend installed.
-        accelerator = types.SimpleNamespace(type="npu")
-        fake_npu = types.SimpleNamespace(
-            get_device_name=lambda *args, **kwargs: "FakeNPU910B"
+        accelerator = types.SimpleNamespace(type="fakeacc")
+        fake_module = types.SimpleNamespace(
+            get_device_name=lambda *args, **kwargs: "FakeAccDevice"
         )
         with patch.object(
             torch.accelerator, "current_accelerator", return_value=accelerator
         ):
-            with patch.object(torch, "npu", fake_npu, create=True):
-                with patch.object(torch.version, "npu", "7.7.0", create=True):
+            with patch.object(torch, "fakeacc", fake_module, create=True):
+                with patch.object(torch.version, "fakeacc", "7.7.0", create=True):
                     info = SystemInfo.current()
-        self.assertEqual(info.gpu_name, "FakeNPU910B")
+        self.assertEqual(info.gpu_name, "FakeAccDevice")
         self.assertEqual(info.toolkit_version, "7.7.0")
 
     def test_current_records_in_tree_backend_identity(self):
@@ -1676,30 +1676,46 @@ class TestSystemInfoDeviceCompatibility(torch._inductor.test_case.TestCase):
         self.assertEqual(info.gpu_name, "FakeXPU")
         self.assertEqual(info.toolkit_version, "1.0")
 
+    def test_current_degrades_to_none_without_get_device_name(self):
+        # A device module without get_device_name (e.g. a partial or lazy
+        # backend module) must degrade to (None, None) via the existing
+        # try/except instead of failing the save. The namespace exposes no get_device_name, so
+        # the lookup raises AttributeError exactly like a module that
+        # lacks the API.
+        accelerator = types.SimpleNamespace(type="fakeacc")
+        partial_module = types.SimpleNamespace()
+        with patch.object(
+            torch.accelerator, "current_accelerator", return_value=accelerator
+        ):
+            with patch.object(torch, "fakeacc", partial_module, create=True):
+                info = SystemInfo.current()
+        self.assertIsNone(info.gpu_name)
+        self.assertIsNone(info.toolkit_version)
+
     def test_check_compatibility_arms_checks_for_out_of_tree_backend(self):
         here = self._system_info()
         other = self._system_info()
-        fake_npu = types.SimpleNamespace(is_available=lambda: False)
-        with patch.object(torch, "npu", fake_npu, create=True):
-            with self.assertRaisesRegex(RuntimeError, "npu is not available"):
-                here.check_compatibility(other, "npu")
+        fake_module = types.SimpleNamespace(is_available=lambda: False)
+        with patch.object(torch, "fakeacc", fake_module, create=True):
+            with self.assertRaisesRegex(RuntimeError, "fakeacc is not available"):
+                here.check_compatibility(other, "fakeacc")
 
     def test_check_compatibility_checks_gpu_name_for_out_of_tree_backend(self):
-        here = self._system_info(gpu_name="FakeNPU-910B")
-        other = self._system_info(gpu_name="FakeNPU-310P")
-        fake_npu = types.SimpleNamespace(is_available=lambda: True)
-        with patch.object(torch, "npu", fake_npu, create=True):
+        here = self._system_info(gpu_name="FakeAcc-A")
+        other = self._system_info(gpu_name="FakeAcc-B")
+        fake_module = types.SimpleNamespace(is_available=lambda: True)
+        with patch.object(torch, "fakeacc", fake_module, create=True):
             with self.assertRaisesRegex(RuntimeError, "different GPU"):
-                here.check_compatibility(other, "npu")
+                here.check_compatibility(other, "fakeacc")
 
     def test_check_compatibility_passes_without_oot_toolkit_info(self):
         # torch.version.<backend> may not exist for out-of-tree backends:
         # both sides recording None must not be rejected.
         here = self._system_info()
         other = self._system_info()
-        fake_npu = types.SimpleNamespace(is_available=lambda: True)
-        with patch.object(torch, "npu", fake_npu, create=True):
-            here.check_compatibility(other, "npu")
+        fake_module = types.SimpleNamespace(is_available=lambda: True)
+        with patch.object(torch, "fakeacc", fake_module, create=True):
+            here.check_compatibility(other, "fakeacc")
 
     def test_check_compatibility_skips_device_types_without_a_module(self):
         # "meta" has no torch.meta module: the hardware checks must stay
