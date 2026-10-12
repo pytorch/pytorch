@@ -10,6 +10,7 @@ import inspect
 import itertools
 import keyword
 import math
+import multiprocessing.reduction
 import operator
 import random
 import sys
@@ -6953,6 +6954,15 @@ class GraphModule(torch.nn.Module):
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_forking_pickler_bound_method_reconstruction(self):
+        def fn(x):
+            return multiprocessing.reduction.ForkingPickler.dumps(x * 2)
+
+        x = torch.ones(1, requires_grad=True)
+        msg = "Cowardly refusing to serialize non-leaf tensor which requires_grad"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn, backend="eager")(x)
 
     def test_method_descriptor_preserves_polyfill_trace_rule(self):
         class C:
