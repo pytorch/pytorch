@@ -34,6 +34,7 @@ class TestPersistentReductionLanes(TestCase):
                     "emulate_precision_casts": True,
                     "loop_ordering_after_fusion": True,
                     "triton.nested_reduction": True,
+                    "cat_fuse_computed_input_copies": True,
                     "triton.multi_kernel": 1,
                     "force_disable_caches": True,
                 }

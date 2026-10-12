@@ -90,7 +90,7 @@ class TestStaticTritonLauncherUnit(TestCase):
         self.addCleanup(kernel.close)
         result = StaticTritonCompileResult(
             kernel,
-            SimpleNamespace(),
+            SimpleNamespace(kwargs={}, num_warps=4, num_stages=1),
             {
                 "device": device,
                 "device_type": "cuda",
