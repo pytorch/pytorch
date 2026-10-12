@@ -543,11 +543,6 @@ op_db: list[OpInfo] = [
                 "test_reference_masked",
                 dtypes=(torch.bool, torch.int8, torch.int16, torch.int32),
             ),
-            DecorateInfo(
-                "TestReductionsDevice",
-                "test_ref_small_input",
-                dtypes=(torch.int8, torch.int16, torch.int32),
-            ),
             # FIXME: "cuda_scatter_gather_base_kernel_func" not implemented for ... (used for sparse_coo inputs)
             DecorateInfo(
                 unittest.skip("Skipped!"),

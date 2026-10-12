@@ -911,7 +911,7 @@ class FakeTensorConverter:
             # you've done it right, this is a good test:
             #
             #   PYTORCH_TEST_WITH_DYNAMO=1 python test/test_reductions.py -k
-            #   TestReductionsCPU.test_dim_reduction_fns_fn_name_amax_cpu_bfloat16
+            #   TestReductionsDeviceCPU.test_dim_reduction_fns_fn_name_amax_cpu_bfloat16
             and (source is None or not isinstance(source, RandomValueSource))
             # In Dynamo, shape_env is never none (even with static shapes).
             # However, FakeTensorMode can be used by hand and in some cases
