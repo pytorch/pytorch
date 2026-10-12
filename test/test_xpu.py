@@ -1111,7 +1111,6 @@ print(torch.xpu.is_initialized())
 
     @unittest.skipIf(not HAS_PYZES, "requires pyzes")
     @unittest.skipIf(not Xe2_Or_Later, "not available")
-    @unittest.skip("See https://github.com/intel/torch-xpu-ops/issues/5015")
     @serialTest()
     def test_mem_get_info_with_pyzes(self):
         torch.xpu.synchronize()
