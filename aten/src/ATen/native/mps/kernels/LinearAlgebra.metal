@@ -13,8 +13,8 @@ constant uint TILE_DIM = 16;
 
 template <typename T1, typename T2, typename TA>
 inline TA matmul_inner(
-    constant T1* mat1Data,
-    constant T2* mat2Data,
+    device const T1* mat1Data,
+    device const T2* mat2Data,
     constant array<ulong2, 3>& strides,
     constant uint3& sizes,
     threadgroup TA A_tile[TILE_DIM][TILE_DIM],
@@ -55,8 +55,8 @@ inline TA matmul_inner(
 
 template <typename T, uint N>
 inline c10::metal::opmath_t<T> batched_matmul_inner(
-    constant T* mat1Data,
-    constant T* mat2Data,
+    device const T* mat1Data,
+    device const T* mat2Data,
     uint batch,
     constant array<ulong, N>& strides,
     constant uint4& sizes,
@@ -104,8 +104,8 @@ inline c10::metal::opmath_t<T> batched_matmul_inner(
 
 template <typename T>
 kernel void matmul(
-    constant T* mat1Data [[buffer(0)]],
-    constant T* mat2Data [[buffer(1)]],
+    device const T* mat1Data [[buffer(0)]],
+    device const T* mat2Data [[buffer(1)]],
     device T* outputData [[buffer(2)]],
     constant array<ulong2, 3>& strides [[buffer(3)]],
     constant uint3& sizes [[buffer(4)]],
@@ -124,8 +124,8 @@ kernel void matmul(
 
 template <typename T>
 kernel void int_mm(
-    constant T* mat1Data [[buffer(0)]],
-    constant char* mat2Data [[buffer(1)]],
+    device const T* mat1Data [[buffer(0)]],
+    device const char* mat2Data [[buffer(1)]],
     device int* outputData [[buffer(2)]],
     constant array<ulong2, 3>& strides [[buffer(3)]],
     constant uint3& sizes [[buffer(4)]],
@@ -143,10 +143,10 @@ kernel void int_mm(
 
 template <typename T>
 kernel void addmm(
-    constant T* mat1Data [[buffer(0)]],
-    constant T* mat2Data [[buffer(1)]],
+    device const T* mat1Data [[buffer(0)]],
+    device const T* mat2Data [[buffer(1)]],
     device T* outputData [[buffer(2)]],
-    constant T* biasData [[buffer(3)]],
+    device const T* biasData [[buffer(3)]],
     constant array<c10::metal::opmath_t<T>, 2>& alpha_beta [[buffer(4)]],
     constant array<ulong2, 4>& strides [[buffer(5)]],
     constant uint3& sizes [[buffer(6)]],
@@ -177,8 +177,8 @@ kernel void addmm(
 
 template <typename T>
 kernel void naive_bmm(
-    constant T* mat1Data [[buffer(0)]],
-    constant T* mat2Data [[buffer(1)]],
+    device const T* mat1Data [[buffer(0)]],
+    device const T* mat2Data [[buffer(1)]],
     device T* outputData [[buffer(2)]],
     constant array<ulong, 9>& strides [[buffer(3)]],
     constant uint4& sizes [[buffer(4)]],
@@ -202,10 +202,10 @@ kernel void naive_bmm(
 
 template <typename T>
 kernel void naive_baddbmm(
-    constant T* mat1Data [[buffer(0)]],
-    constant T* mat2Data [[buffer(1)]],
+    device const T* mat1Data [[buffer(0)]],
+    device const T* mat2Data [[buffer(1)]],
     device T* outputData [[buffer(2)]],
-    constant T* biasData [[buffer(3)]],
+    device const T* biasData [[buffer(3)]],
     constant array<c10::metal::opmath_t<T>, 2>& alpha_beta [[buffer(4)]],
     constant array<ulong, 12>& strides [[buffer(5)]],
     constant uint4& sizes [[buffer(6)]],
@@ -235,10 +235,10 @@ kernel void naive_baddbmm(
 
 template <typename T>
 kernel void naive_addbmm(
-    constant T* mat1Data [[buffer(0)]],
-    constant T* mat2Data [[buffer(1)]],
+    device const T* mat1Data [[buffer(0)]],
+    device const T* mat2Data [[buffer(1)]],
     device T* outputData [[buffer(2)]],
-    constant T* biasData [[buffer(3)]],
+    device const T* biasData [[buffer(3)]],
     constant array<c10::metal::opmath_t<T>, 2>& alpha_beta [[buffer(4)]],
     constant array<ulong, 12>& strides [[buffer(5)]],
     constant uint4& sizes [[buffer(6)]],
@@ -3378,7 +3378,7 @@ static T calc_H_irc(
     device T* A,
     uint32_t A_stride_r,
     uint32_t A_stride_c,
-    constant T* tau,
+    device const T* tau,
     uint32_t tau_stride,
     uint32_t r,
     uint32_t c,
@@ -3430,7 +3430,7 @@ static T calc_matmul_rc(
 template <typename T>
 kernel void orgqr(
     device T* A [[buffer(0)]],
-    constant T* tau [[buffer(1)]],
+    device const T* tau [[buffer(1)]],
     device T* H [[buffer(2)]],
     device T* H_prod [[buffer(3)]],
     device T* H_prod_work [[buffer(4)]],
@@ -3537,7 +3537,7 @@ kernel void orgqr(
 template <typename TO, typename TI>
 kernel void unpack_pivots(
     device TO* perm [[buffer(0)]],
-    constant TI* pivots [[buffer(1)]],
+    device const TI* pivots [[buffer(1)]],
     constant UnpackPivotsParams& params [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
   auto perm_batch_stride = params.perm_batch_stride;
@@ -3840,54 +3840,54 @@ REGISTER_GEQRF(float);
 
 #define INSTANTIATE_MM_OPS(DTYPE)                                           \
   template [[host_name("matmul_" #DTYPE)]] kernel void matmul<DTYPE>(       \
-      constant DTYPE * mat1Data [[buffer(0)]],                              \
-      constant DTYPE * mat2Data [[buffer(1)]],                              \
-      device DTYPE * outputData [[buffer(2)]],                              \
-      constant array<ulong2, 3> & strides [[buffer(3)]],                    \
-      constant uint3 & sizes [[buffer(4)]],                                 \
+      device const DTYPE* mat1Data [[buffer(0)]],                           \
+      device const DTYPE* mat2Data [[buffer(1)]],                           \
+      device DTYPE* outputData [[buffer(2)]],                               \
+      constant array<ulong2, 3>& strides [[buffer(3)]],                     \
+      constant uint3& sizes [[buffer(4)]],                                  \
       uint2 tid [[thread_position_in_threadgroup]],                         \
       uint2 group_id [[threadgroup_position_in_grid]]);                     \
   template [[host_name("naive_bmm_" #DTYPE)]] kernel void naive_bmm<DTYPE>( \
-      constant DTYPE * mat1Data [[buffer(0)]],                              \
-      constant DTYPE * mat2Data [[buffer(1)]],                              \
-      device DTYPE * outputData [[buffer(2)]],                              \
-      constant array<ulong, 9> & strides [[buffer(3)]],                     \
-      constant uint4 & sizes [[buffer(4)]],                                 \
+      device const DTYPE* mat1Data [[buffer(0)]],                           \
+      device const DTYPE* mat2Data [[buffer(1)]],                           \
+      device DTYPE* outputData [[buffer(2)]],                               \
+      constant array<ulong, 9>& strides [[buffer(3)]],                      \
+      constant uint4& sizes [[buffer(4)]],                                  \
       uint3 tid [[thread_position_in_threadgroup]],                         \
       uint3 group_id [[threadgroup_position_in_grid]]);                     \
   template [[host_name("addmm_" #DTYPE)]] kernel void addmm<DTYPE>(         \
-      constant DTYPE * mat1Data [[buffer(0)]],                              \
-      constant DTYPE * mat2Data [[buffer(1)]],                              \
-      device DTYPE * outputData [[buffer(2)]],                              \
-      constant DTYPE * biasData [[buffer(3)]],                              \
-      constant array<c10::metal::opmath_t<DTYPE>, 2> &                      \
-          alpha_beta [[buffer(4)]],                                         \
-      constant array<ulong2, 4> & strides [[buffer(5)]],                    \
-      constant uint3 & sizes [[buffer(6)]],                                 \
+      device const DTYPE* mat1Data [[buffer(0)]],                           \
+      device const DTYPE* mat2Data [[buffer(1)]],                           \
+      device DTYPE* outputData [[buffer(2)]],                               \
+      device const DTYPE* biasData [[buffer(3)]],                           \
+      constant array<c10::metal::opmath_t<DTYPE>, 2>& alpha_beta            \
+      [[buffer(4)]],                                                        \
+      constant array<ulong2, 4>& strides [[buffer(5)]],                     \
+      constant uint3& sizes [[buffer(6)]],                                  \
       uint2 tid [[thread_position_in_threadgroup]],                         \
       uint2 group_id [[threadgroup_position_in_grid]]);                     \
   template [[host_name("naive_baddbmm_" #DTYPE)]]                           \
   kernel void naive_baddbmm<DTYPE>(                                         \
-      constant DTYPE * mat1Data [[buffer(0)]],                              \
-      constant DTYPE * mat2Data [[buffer(1)]],                              \
-      device DTYPE * outputData [[buffer(2)]],                              \
-      constant DTYPE * biasData [[buffer(3)]],                              \
-      constant array<c10::metal::opmath_t<DTYPE>, 2> &                      \
-          alpha_beta [[buffer(4)]],                                         \
-      constant array<ulong, 12> & strides [[buffer(5)]],                    \
-      constant uint4 & sizes [[buffer(6)]],                                 \
+      device const DTYPE* mat1Data [[buffer(0)]],                           \
+      device const DTYPE* mat2Data [[buffer(1)]],                           \
+      device DTYPE* outputData [[buffer(2)]],                               \
+      device const DTYPE* biasData [[buffer(3)]],                           \
+      constant array<c10::metal::opmath_t<DTYPE>, 2>& alpha_beta            \
+      [[buffer(4)]],                                                        \
+      constant array<ulong, 12>& strides [[buffer(5)]],                     \
+      constant uint4& sizes [[buffer(6)]],                                  \
       uint3 tid [[thread_position_in_threadgroup]],                         \
       uint3 group_id [[threadgroup_position_in_grid]]);                     \
   template [[host_name("naive_addbmm_" #DTYPE)]]                            \
   kernel void naive_addbmm<DTYPE>(                                          \
-      constant DTYPE * mat1Data [[buffer(0)]],                              \
-      constant DTYPE * mat2Data [[buffer(1)]],                              \
-      device DTYPE * outputData [[buffer(2)]],                              \
-      constant DTYPE * biasData [[buffer(3)]],                              \
-      constant array<c10::metal::opmath_t<DTYPE>, 2> &                      \
-          alpha_beta [[buffer(4)]],                                         \
-      constant array<ulong, 12> & strides [[buffer(5)]],                    \
-      constant uint4 & sizes [[buffer(6)]],                                 \
+      device const DTYPE* mat1Data [[buffer(0)]],                           \
+      device const DTYPE* mat2Data [[buffer(1)]],                           \
+      device DTYPE* outputData [[buffer(2)]],                               \
+      device const DTYPE* biasData [[buffer(3)]],                           \
+      constant array<c10::metal::opmath_t<DTYPE>, 2>& alpha_beta            \
+      [[buffer(4)]],                                                        \
+      constant array<ulong, 12>& strides [[buffer(5)]],                     \
+      constant uint4& sizes [[buffer(6)]],                                  \
       uint3 tid [[thread_position_in_threadgroup]],                         \
       uint3 group_id [[threadgroup_position_in_grid]])
 
@@ -3908,8 +3908,8 @@ INSTANTIATE_MM_OPS(uchar);
 
 #define INSTANTIATE_INT_MM_OP(DTYPE)                                  \
   template [[host_name("int_mm_" #DTYPE)]] kernel void int_mm<DTYPE>( \
-      constant DTYPE * mat1Data [[buffer(0)]],                        \
-      constant char* mat2Data [[buffer(1)]],                          \
+      device const DTYPE* mat1Data [[buffer(0)]],                     \
+      device const char* mat2Data [[buffer(1)]],                      \
       device int* outputData [[buffer(2)]],                           \
       constant array<ulong2, 3>& strides [[buffer(3)]],               \
       constant uint3& sizes [[buffer(4)]],                            \
@@ -3919,17 +3919,17 @@ INSTANTIATE_MM_OPS(uchar);
 INSTANTIATE_INT_MM_OP(char);
 INSTANTIATE_INT_MM_OP(uchar);
 
-#define REGISTER_ORGQR(T)                            \
-  template [[host_name("orgqr_" #T)]]                \
-  kernel void orgqr<T>(                              \
-      device T * A [[buffer(0)]],                    \
-      constant T * tau [[buffer(1)]],                \
-      device T * H [[buffer(2)]],                    \
-      device T * H_prod [[buffer(3)]],               \
-      device T * H_prod_work [[buffer(4)]],          \
-      constant OrgqrParams<> & params [[buffer(5)]], \
-      uint tid [[thread_position_in_threadgroup]],   \
-      uint tptg [[threads_per_threadgroup]],         \
+#define REGISTER_ORGQR(T)                           \
+  template [[host_name("orgqr_" #T)]]               \
+  kernel void orgqr<T>(                             \
+      device T * A [[buffer(0)]],                   \
+      device const T* tau [[buffer(1)]],            \
+      device T* H [[buffer(2)]],                    \
+      device T* H_prod [[buffer(3)]],               \
+      device T* H_prod_work [[buffer(4)]],          \
+      constant OrgqrParams<>& params [[buffer(5)]], \
+      uint tid [[thread_position_in_threadgroup]],  \
+      uint tptg [[threads_per_threadgroup]],        \
       uint tgid [[threadgroup_position_in_grid]]);
 
 REGISTER_ORGQR(float);
@@ -3953,12 +3953,12 @@ REGISTER_ORGQR(half2);
 REGISTER_HOUSEHOLDER_BLOCK(float);
 REGISTER_HOUSEHOLDER_BLOCK(float2);
 
-#define REGISTER_UNPACK_PIVOTS(TO, TI)                    \
-  template [[host_name("unpack_pivots_" #TO "_" #TI)]]    \
-  kernel void unpack_pivots<TO, TI>(                      \
-      device TO * perm [[buffer(0)]],                     \
-      constant TI * pivots [[buffer(1)]],                 \
-      constant UnpackPivotsParams & params [[buffer(2)]], \
+#define REGISTER_UNPACK_PIVOTS(TO, TI)                   \
+  template [[host_name("unpack_pivots_" #TO "_" #TI)]]   \
+  kernel void unpack_pivots<TO, TI>(                     \
+      device TO * perm [[buffer(0)]],                    \
+      device const TI* pivots [[buffer(1)]],             \
+      constant UnpackPivotsParams& params [[buffer(2)]], \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_UNPACK_PIVOTS(int, int);

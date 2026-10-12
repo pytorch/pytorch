@@ -7,7 +7,7 @@ using namespace c10::metal;
 
 template <typename T>
 kernel void constant_pad_nd_dense(
-    constant T* input [[buffer(0)]],
+    device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
     constant ConstantPadDenseParams& params [[buffer(2)]],
     constant T& fill_value [[buffer(3)]],
@@ -51,7 +51,7 @@ kernel void constant_pad_nd_dense(
 
 template <typename T, typename idx_t>
 kernel void constant_pad_nd(
-    constant T* input [[buffer(0)]],
+    device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
     constant ConstantPadNdParams<idx_t>& params [[buffer(2)]],
     constant T& fill_value [[buffer(3)]],
@@ -91,7 +91,7 @@ kernel void constant_pad_nd(
 #define INSTANTIATE_CONSTANT_PAD_ND_IDX(DTYPE, IDX, SUFFIX) \
   template [[host_name("constant_pad_nd_" #DTYPE #SUFFIX)]] \
   kernel void constant_pad_nd<DTYPE, IDX>(                  \
-      constant DTYPE*,                                      \
+      device const DTYPE*,                                  \
       device DTYPE*,                                        \
       constant ConstantPadNdParams<IDX>&,                   \
       constant DTYPE&,                                      \
@@ -101,7 +101,7 @@ kernel void constant_pad_nd(
 #define INSTANTIATE_CONSTANT_PAD_ND(DTYPE)                \
   template [[host_name("constant_pad_nd_dense_" #DTYPE)]] \
   kernel void constant_pad_nd_dense<DTYPE>(               \
-      constant DTYPE*,                                    \
+      device const DTYPE*,                                \
       device DTYPE*,                                      \
       constant ConstantPadDenseParams&,                   \
       constant DTYPE&,                                    \
@@ -345,7 +345,7 @@ INSTANTIATE_PAD_DTYPE(half2, backward);
 
 template <typename T>
 kernel void replication_pad1d_forward(
-    constant T* input [[buffer(0)]],
+    device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
     constant int4& sizes_pad [[buffer(2)]], // (input_W, output_W, padL, padR)
     uint3 tid [[thread_position_in_grid]],
@@ -373,7 +373,7 @@ kernel void replication_pad1d_forward(
 
 template <typename T>
 kernel void replication_pad1d_backward(
-    constant T* grad_output [[buffer(0)]],
+    device const T* grad_output [[buffer(0)]],
     device T* grad_input [[buffer(1)]],
     constant int4& sizes_pad [[buffer(2)]], // (input_W, output_W, padL, padR)
     uint3 tid [[thread_position_in_grid]],
@@ -422,18 +422,18 @@ kernel void replication_pad1d_backward(
 #define INSTANTIATE_REPLICATION_PAD1D_FWD(DTYPE)              \
   template [[host_name("replication_pad1d_forward_" #DTYPE)]] \
   kernel void replication_pad1d_forward<DTYPE>(               \
-      constant DTYPE * input [[buffer(0)]],                   \
-      device DTYPE * output [[buffer(1)]],                    \
-      constant int4 & sizes_pad [[buffer(2)]],                \
+      device const DTYPE* input [[buffer(0)]],                \
+      device DTYPE* output [[buffer(1)]],                     \
+      constant int4& sizes_pad [[buffer(2)]],                 \
       uint3 tid [[thread_position_in_grid]],                  \
       uint3 grid [[threads_per_grid]])
 
 #define INSTANTIATE_REPLICATION_PAD1D_BWD(DTYPE)               \
   template [[host_name("replication_pad1d_backward_" #DTYPE)]] \
   kernel void replication_pad1d_backward<DTYPE>(               \
-      constant DTYPE * grad_output [[buffer(0)]],              \
-      device DTYPE * grad_input [[buffer(1)]],                 \
-      constant int4 & sizes_pad [[buffer(2)]],                 \
+      device const DTYPE* grad_output [[buffer(0)]],           \
+      device DTYPE* grad_input [[buffer(1)]],                  \
+      constant int4& sizes_pad [[buffer(2)]],                  \
       uint3 tid [[thread_position_in_grid]],                   \
       uint3 grid [[threads_per_grid]])
 
