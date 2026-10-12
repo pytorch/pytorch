@@ -2798,9 +2798,15 @@ elif [[ "${TEST_CONFIG}" == periodic ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == *rx7900* ]]; then
     # Throwaway probe for the rx7900 test_graph_save_on_cpu_cuda failure; not for landing.
-    python .ci/pytorch/rx7900_sparse_probe.py 2000 || true
-    AMD_SERIALIZE_COPY=3 python .ci/pytorch/rx7900_sparse_probe.py 2000 || true
-    AMD_SERIALIZE_KERNEL=3 python .ci/pytorch/rx7900_sparse_probe.py 2000 || true
+    # Each configuration runs in 20 fresh processes: the failure shows up at process start.
+    for e in "" AMD_SERIALIZE_COPY=3 AMD_SERIALIZE_KERNEL=3 "-u HSA_CO_DMACOPY_SIZE"; do
+      for mode in h2d save_on_cpu save_on_cpu_sync; do
+        for _ in $(seq 20); do
+          # shellcheck disable=SC2086
+          env $e python -W ignore .ci/pytorch/rx7900_sparse_probe.py "$mode" 200 || true
+        done
+      done
+    done
     for _ in 1 2 3 4 5; do
       PYTORCH_TEST_WITH_ROCM=1 python test/test_autograd.py -k test_graph_save_on_cpu_cuda 2>&1 | tail -3 || true
     done
