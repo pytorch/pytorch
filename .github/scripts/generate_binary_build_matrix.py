@@ -535,6 +535,10 @@ def generate_wheels_matrix(
                                 gpu_arch_version, ""
                             )
                             if gpu_arch_type == "rocm"
+                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[CUDA_STABLE][
+                                "linux"
+                            ]
+                            if gpu_arch_type == "cpu" and os == "macos-arm64"
                             else ""
                         ),
                     }
