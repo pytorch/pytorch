@@ -86,7 +86,7 @@ class ActivityProfilerInterface {
   virtual void popUserCorrelationId() {}
 
   // Saves information for the current thread to be used in profiler output
-  // Client must record any new kernel thread where the activity has occured.
+  // Client must record any new kernel thread where the activity has occurred.
   virtual void recordThreadInfo() {}
 
   // Record trace metadata, currently supporting only string key and values,
