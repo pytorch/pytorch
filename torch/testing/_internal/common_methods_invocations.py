@@ -12281,15 +12281,17 @@ op_db: list[OpInfo] = [
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
 
-               # torch-xpu-ops/issues/4321
-               DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
-                            dtypes=(torch.int64,)),
-
-               # MPS arange does not support complex dtypes yet
-               DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
-                            dtypes=(torch.complex64, torch.complex128)),
-                # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
+                # torch-xpu-ops/issues/4321
                 DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
+                             dtypes=(torch.int64,)),
+                # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
+                DecorateInfo(unittest.skip("Skipped"), 'TestCommon', 'test_python_ref', device_type='xpu',
+                             dtypes=(torch.complex64, torch.complex128)),
+                DecorateInfo(unittest.skip("Skipped"), 'TestCommon', 'test_python_ref_torch_fallback', device_type='xpu',
+                             dtypes=(torch.complex64, torch.complex128)),
+
+                # MPS arange does not support complex dtypes yet
+                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
                              dtypes=(torch.complex64, torch.complex128)),
            )),
     OpInfo('cauchy',
@@ -23740,8 +23742,10 @@ python_ref_db = [
         torch_opinfo_name="arange",
         skips=(
             # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
-            DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
-                         dtypes=(torch.complex64, torch.complex128)),
+             DecorateInfo(unittest.skip("Skipped"), 'TestCommon', 'test_python_ref', device_type='xpu',
+                          dtypes=(torch.complex64, torch.complex128)),
+             DecorateInfo(unittest.skip("Skipped"), 'TestCommon', 'test_python_ref_torch_fallback', device_type='xpu',
+                          dtypes=(torch.complex64, torch.complex128)),
             # Tests that assume input is a tensor or sequence of tensors
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
