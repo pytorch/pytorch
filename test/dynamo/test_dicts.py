@@ -70,61 +70,57 @@ class FakeMapping:
 class DictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
-    @parametrize("operation", [operator.eq, operator.ne])
-    def test_input_comparison_compares_missing_key_once(self, mapping_type, operation):
+    @parametrize(
+        "operation",
+        ["getitem", "contains", "get", "setdefault", "pop"],
+    )
+    def test_discarded_dict_lookup_keeps_value_lazy(self, operation):
+        def fn(x, mapping):
+            if operation == "getitem":
+                mapping["unused"]
+            elif operation == "contains":
+                _ = "unused" in mapping
+            else:
+                getattr(mapping, operation)("unused")
+            return x + 1
+
+        x = torch.ones(1)
+        mapping = {"unused": {torch.ones(1)}}
+        expected = fn(x, mapping.copy())
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping), expected
+        )
+
+    def test_ordered_dict_subclass_setdefault_lookup_error(self):
+        class Mapping(OrderedDict):
+            pass
+
         class Key:
             def __init__(self):
                 self.calls = 0
 
             def __hash__(self):
-                return 42
+                return 7
 
             def __eq__(self, other):
                 self.calls += 1
-                return False
+                if self.calls == 2:
+                    raise ValueError("second lookup")
+                return True
 
-        def fn(x, left, right, stored):
-            stored.calls = 0
-            result = operation(left, right)
-            return x + stored.calls, result
-
-        stored, probe = Key(), Key()
-        left, right = mapping_type(), mapping_type()
-        left[probe] = right[stored] = 1
-        x = torch.ones(1)
-        expected = (x + 1, operation is operator.ne)
-        self.assertEqual(fn(x, left, right, stored), expected)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, left, right, stored),
-            expected,
-        )
-
-    @parametrize(
-        "make_iter",
-        [
-            zip,
-            lambda keys, values: map(tuple, zip(keys, values)),
-            lambda keys, values: filter(None, zip(keys, values)),
-            lambda keys, values: itertools.chain(zip(keys, values)),
-        ],
-    )
-    @parametrize("update", [False, True])
-    def test_ordered_dict_from_iterator(self, make_iter, update):
         def fn(x):
-            pairs = make_iter(("a", "b"), (x, x + 1))
-            if update:
-                result = OrderedDict()
-                result.update(pairs)
-            else:
-                result = OrderedDict(pairs)
-            return result
+            stored, probe = Key(), Key()
+            mapping = Mapping()
+            mapping[stored] = 2
+            try:
+                value = mapping.setdefault(probe, 3)
+            except ValueError:
+                return x + 10
+            return x + value
 
-        x = torch.randn(3)
-        expected = fn(x)
-        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertIs(type(actual), OrderedDict)
-        self.assertEqual(list(actual.items()), list(expected.items()))
+        x = torch.ones(1)
+        self.assertEqual(fn(x), x + 10)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
     def test_subscription_compares_key_once(self, mapping_type):
@@ -147,275 +143,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         self.assertEqual(fn(x), (x + 1, 1))
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
-    def test_update_input_dict_with_custom_new(self):
-        class Mapping(dict):
-            def __new__(cls, *args, **kwargs):
-                return super().__new__(cls)
-
-            def keys(self):
-                raise AssertionError("dict.update must bypass keys")
-
-            def __getitem__(self, key):
-                raise AssertionError("dict.update must bypass __getitem__")
-
-        def fn(x, mapping):
-            result = {}
-            result.update(mapping)
-            return x + result["a"]
-
-        x = torch.randn(3)
-        mapping = Mapping(a=2)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
-            fn(x, mapping),
-        )
-
-    @parametrize("reported_type", [dict, OrderedDict])
-    def test_input_object_reporting_dict_class(self, reported_type):
-        class Proxy:
-            value = 2
-
-            @property
-            def __class__(self):
-                return reported_type
-
-        def fn(x, obj):
-            return x + obj.value
-
-        x = torch.randn(3)
-        obj = Proxy()
-        self.assertIsInstance(obj, reported_type)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), x + 2
-        )
-
-    @parametrize(
-        "mapping_type",
-        [dict, OrderedDict, defaultdict],
-    )
-    def test_equality_preserves_key_hashes(self, mapping_type):
-        class Key:
-            def __init__(self):
-                self.calls = 0
-
-            def __hash__(self):
-                self.calls += 1
-                return 7
-
-        def fn(x):
-            key = Key()
-            left, right = mapping_type(), mapping_type()
-            left[key] = right[key] = x
-            calls = key.calls
-            result = left == right, left != right
-            return x + 1, result, key.calls - calls
-
-        x = torch.randn(3)
-        expected = fn(x)
-        self.assertEqual(expected[1:], ((True, False), 0))
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
-        )
-
-    @parametrize("base", [False, True])
-    def test_ordered_dict_base_comparison(self, base):
-        def fn(x):
-            left = OrderedDict(a=1, b=2)
-            right = OrderedDict(b=2, a=1)
-            if base:
-                return x + dict.__eq__(left, right), x + dict.__ne__(left, right)
-            return x + (left == right), x + (left != right)
-
-        x = torch.randn(3)
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
-    @parametrize("operation", [operator.eq, operator.ne])
-    def test_dict_comparison_reordered_inputs(self, operation):
-        class State:
-            calls = 0
-
-        class Value:
-            def __init__(self, state, equal):
-                self.state = state
-                self.equal = equal
-
-            def __eq__(self, other):
-                self.state.calls += 1
-                return self.equal
-
-        def fn(x, left, right, state):
-            state.calls = 0
-            result = operation(left, right)
-            return x + state.calls, result
-
-        state = State()
-        left = {"a": Value(state, False), "b": Value(state, True)}
-        right = {"a": Value(state, True), "b": Value(state, True)}
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        for count in (1, 2):
-            expected = fn(x, left, right, state)
-            self.assertEqual(expected, (x + count, operation is operator.ne))
-            self.assertEqual(compiled(x, left, right, state), expected)
-            self.assertEqual(counter.frame_count, count)
-            left["a"] = left.pop("a")
-
-    @parametrize("operation", [operator.eq, operator.ne])
-    def test_ordered_dict_comparison_reordered_inputs(self, operation):
-        def fn(x, left, right):
-            return x + operation(left, right)
-
-        left = OrderedDict(a=1, b=2)
-        right = OrderedDict(a=1, b=2)
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.randn(3)
-        self.assertEqual(compiled(x, left, right), fn(x, left, right))
-        self.assertEqual(compiled(x, left, right), fn(x, left, right))
-        self.assertEqual(counter.frame_count, 1)
-
-        right.move_to_end("a")
-        self.assertEqual(compiled(x, left, right), fn(x, left, right))
-        self.assertEqual(counter.frame_count, 2)
-
-        left.move_to_end("a")
-        self.assertEqual(compiled(x, left, right), fn(x, left, right))
-        self.assertEqual(counter.frame_count, 3)
-
-    @parametrize("operation", [operator.eq, operator.ne])
-    def test_ordered_dict_comparison_mutates_key_order(self, operation):
-        class State:
-            def __init__(self):
-                self.calls = 0
-                self.mapping = None
-                self.key = None
-
-        class Key:
-            def __init__(self, value, state):
-                self.value = value
-                self.state = state
-
-            def __hash__(self):
-                return self.value
-
-            def __eq__(self, other):
-                self.state.calls += 1
-                if self.state.calls == 3:
-                    self.state.mapping.move_to_end(self.state.key)
-                return self.value == other.value
-
-        def fn(x):
-            state = State()
-            first = Key(1, state)
-            left = OrderedDict([(first, 1), (Key(2, state), 2)])
-            right = OrderedDict([(Key(1, state), 1), (Key(2, state), 2)])
-            state.mapping, state.key = left, first
-            try:
-                result = operation(left, right)
-            except RuntimeError:
-                result = 50
-            return x + result, state.calls
-
-        x = torch.randn(3)
-        expected = fn(x)
-        # CPython python/cpython#119004 added mutation detection, backported to 3.12.7.
-        if sys.version_info >= (3, 12, 7):
-            self.assertEqual(expected, (x + 50, 3))
-        else:
-            self.assertEqual(expected, (x + (operation is operator.ne), 3))
-        with self.assertRaisesRegex(
-            Unsupported, "Dictionary mutated during comparison"
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(torch.compile(fn, backend="eager")(x), expected)
-
-    @parametrize("operation", [operator.eq, operator.ne])
-    def test_equality_mutates_dictionary(self, operation):
-        class Value:
-            def __init__(self, mapping):
-                self.mapping = mapping
-
-            def __eq__(self, other):
-                self.mapping.pop("b", None)
-                return True
-
-        def fn(x):
-            left = {}
-            left["a"] = Value(left)
-            left["b"] = 1
-            right = {"a": Value({}), "b": 1}
-            return x + operation(left, right), len(left)
-
-        x = torch.randn(3)
-        with self.assertRaisesRegex(
-            Unsupported, "Dictionary mutated during comparison"
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
-
-    @parametrize("name", ["__eq__", "__ne__"])
-    def test_comparison_input_dict_with_custom_new(self, name):
-        class Mapping(dict):
-            def __new__(cls, *args, **kwargs):
-                return super().__new__(cls)
-
-        def fn(x, mapping):
-            return x + getattr(dict, name)({"a": 1}, mapping)
-
-        x = torch.randn(3)
-        mapping = Mapping(a=1)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
-            fn(x, mapping),
-        )
-
-    @parametrize("operation", [operator.eq, operator.ne])
-    @parametrize("reverse", [False, True])
-    def test_dict_comparison_deleted_attribute(self, operation, reverse):
-        class Object:
-            def __init__(self):
-                self.a = 1
-
-        def fn(x):
-            left, right = Object(), Object()
-            del right.a
-            right.b = 1
-            result = (
-                operation(vars(right), vars(left))
-                if reverse
-                else operation(vars(left), vars(right))
-            )
-            return x + result, result
-
-        x = torch.randn(3)
-        expected = fn(x)
-        self.assertEqual(
-            expected, (x + (operation is operator.ne), operation is operator.ne)
-        )
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
-        )
-
-    @parametrize("name", ["__eq__", "__ne__"])
-    @parametrize("arguments", ["missing", "extra", "keyword"])
-    def test_dict_base_comparison_argument_errors(self, name, arguments):
-        def fn(x):
-            operation = getattr(dict, name)
-            try:
-                if arguments == "missing":
-                    operation({})
-                elif arguments == "extra":
-                    operation({}, {}, {})
-                else:
-                    operation({}, {}, extra=1)
-            except TypeError as error:
-                return x + 1, str(error)
-            return x - 1, "missing error"
-
-        x = torch.randn(3)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
@@ -462,42 +189,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
             and mapping_type is OrderedDict
         ):
             hashes = 2
-        self.assertEqual(expected[1], hashes)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
-        )
-
-    @parametrize("state", ["empty", "missing", "first", "last"])
-    @parametrize("last", [False, True])
-    def test_move_to_end_key_hashes(self, state, last):
-        class Key:
-            def __init__(self):
-                self.calls = 0
-
-            def __hash__(self):
-                self.calls += 1
-                return 7
-
-        def fn(x):
-            key = Key()
-            mapping = OrderedDict()
-            if state == "first":
-                mapping[key] = 1
-            if state != "empty":
-                mapping["other"] = 2
-            if state == "last":
-                mapping[key] = 1
-            calls = key.calls
-            try:
-                mapping.move_to_end(key, last)
-                missing = False
-            except KeyError as error:
-                missing = error.args[0] is key
-            return x + len(mapping), key.calls - calls, missing, tuple(mapping.values())
-
-        x = torch.randn(3)
-        expected = fn(x)
-        hashes = int(state != "empty" and state != ("last" if last else "first"))
         self.assertEqual(expected[1], hashes)
         self.assertEqual(
             torch.compile(fn, backend="eager", fullgraph=True)(x), expected
@@ -1543,36 +1234,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
-    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
-    def test_dict_update_from_dict_subclass_iter_override(self, mapping_type):
-        class Mapping(dict):
-            def __init__(self):
-                super().__init__(a=1, b=3)
-                self.calls = []
-
-            def __iter__(self):
-                return super().__iter__()
-
-            def keys(self):
-                self.calls.append("keys")
-                return ["a"]
-
-            def __getitem__(self, key):
-                self.calls.append(("getitem", key))
-                return 2
-
-        def fn(x):
-            source = Mapping()
-            result = mapping_type()
-            result.update(source)
-            return result, source.calls, x + result["a"]
-
-        x = torch.randn(2)
-        expected = fn(x)
-        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(expected, ({"a": 2}, ["keys", ("getitem", "a")], x + 2))
-        self.assertEqual(actual, expected)
-
     def test_dict_update_from_mapping_proxy(self):
         def fn(x):
             source = {"a": x, "b": x + 1}
@@ -2015,26 +1676,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(d.keys(), mp.keys())
 
-    @parametrize("mapping_type", [dict, OrderedDict])
-    @parametrize("name", ["keys", "values", "items"])
-    def test_dict_base_view_reconstruction(self, mapping_type, name):
-        class Mapping(mapping_type):
-            def keys(self):
-                return ["override"]
-
-            values = items = keys
-
-        def fn(x):
-            mapping = Mapping(a=x + 1)
-            return mapping, getattr(mapping_type, name)(mapping)
-
-        x = torch.randn(3)
-        mapping, view = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        expected = getattr(mapping_type, name)(mapping)
-        self.assertIs(type(view), type(expected))
-        self.assertEqual(list(view), list(expected))
-        self.assertIs(view.mapping["a"], mapping["a"])
-
     @parametrize(
         "mapping_type",
         [dict, OrderedDict, defaultdict],
@@ -2105,118 +1746,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(["b", "c", "a"], list(opt_fn(x).keys()))
         self.assertEqual(fn(x), opt_fn(x))
-
-    @parametrize("last", [False, True])
-    @parametrize("first_mutates", [False, True])
-    @parametrize("reorder_input", [False, True])
-    def test_move_to_end_input_order(self, last, first_mutates, reorder_input):
-        def fn(x, mapping):
-            mapping.move_to_end("a", last=last)
-            return x + 1
-
-        orders = ("bca", "abc") if last else ("abc", "bca")
-        if first_mutates:
-            orders = orders[::-1]
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.randn(3)
-        for keys in orders:
-            mapping = OrderedDict.fromkeys("abc" if reorder_input else keys, 1)
-            expected = mapping.copy()
-            if reorder_input:
-                for key in keys:
-                    mapping.move_to_end(key)
-                    expected.move_to_end(key)
-            self.assertEqual(compiled(x, mapping), fn(x, expected))
-            self.assertEqual(list(mapping.items()), list(expected.items()))
-            self.assertEqual(list(dict.keys(mapping)), list(dict.keys(expected)))
-        self.assertEqual(counter.frame_count, 2)
-
-    def test_ordered_dict_value_update_preserves_iterator(self):
-        def fn(x, mapping):
-            mapping["b"] = x + 1
-            return x + 2
-
-        x = torch.randn(3)
-        mapping = OrderedDict.fromkeys("abc", x)
-        iterator = iter(mapping)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping), x + 2
-        )
-        self.assertEqual(list(iterator), list("abc"))
-        self.assertEqual(mapping["b"], x + 1)
-
-    @parametrize("mutation", ["pop", "popitem", "delitem", "clear"])
-    @parametrize("keys", ["c", "abc"])
-    @parametrize("subclass", [False, True])
-    def test_ordered_dict_reinsert_invalidates_iterator(self, mutation, keys, subclass):
-        class Mapping(OrderedDict):
-            pass
-
-        mapping_type = Mapping if subclass else OrderedDict
-
-        def fn(x, mapping):
-            if mutation == "clear":
-                items = list(mapping.items())
-                mapping.clear()
-                mapping.update(items)
-            else:
-                value = mapping["c"]
-                if mutation == "pop":
-                    mapping.pop("c")
-                elif mutation == "popitem":
-                    mapping.popitem()
-                else:
-                    del mapping["c"]
-                mapping["c"] = value
-            return x + 1
-
-        x = torch.randn(3)
-        for run in (fn, torch.compile(fn, backend="eager", fullgraph=True)):
-            mapping = mapping_type.fromkeys(keys, 1)
-            iterator = iter(mapping)
-            self.assertEqual(run(x, mapping), x + 1)
-            self.assertEqual(list(mapping.items()), [(key, 1) for key in keys])
-            with self.assertRaisesRegex(
-                RuntimeError, "OrderedDict mutated during iteration"
-            ):
-                next(iterator)
-
-    @parametrize("subclass", [False, True])
-    @parametrize("mutation", ["insert", "delete", "reinsert"])
-    @parametrize("graph_break", [False, True])
-    def test_move_to_end_with_content_mutation(self, subclass, mutation, graph_break):
-        class Mapping(OrderedDict):
-            def clear(self):
-                raise AssertionError("replay must bypass clear")
-
-        mapping_type = Mapping if subclass else OrderedDict
-
-        def fn(x, mapping):
-            mapping.move_to_end("b")
-            if graph_break:
-                torch._dynamo.graph_break()
-            if mutation == "insert":
-                mapping["d"] = x + 1
-                mapping["e"] = x + 2
-                mapping.move_to_end("d")
-            elif mutation == "delete":
-                del mapping["a"]
-            else:
-                value = mapping.pop("a")
-                mapping["a"] = value
-            mapping.move_to_end("c", last=False)
-            return x + 1
-
-        x = torch.randn(3)
-        mapping = mapping_type.fromkeys("abc", 1)
-        expected = mapping_type.fromkeys("abc", 1)
-        mapping.move_to_end("a")
-        expected.move_to_end("a")
-        compiled = torch.compile(fn, backend="eager", fullgraph=not graph_break)
-        self.assertEqual(compiled(x, mapping), fn(x, expected))
-        self.assertEqual(list(mapping.items()), list(expected.items()))
-        self.assertEqual(list(dict.items(mapping)), list(dict.items(expected)))
 
     def test_mapping_proxy_ban_muation_on_dict_realization(self):
         def fn(x):
@@ -2317,47 +1846,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
-
-    @parametrize("construct", [False, True])
-    @parametrize("reverse", [False, True])
-    def test_defaultdict_union_partial_factory(self, construct, reverse):
-        def fn(x, mapping):
-            if construct:
-                mapping = defaultdict(partial(torch.zeros_like, x), existing=x)
-            other = {"present": x + 1}
-            result = other | mapping if reverse else mapping | other
-            missing = result["missing"]
-            return result, missing, result.default_factory is mapping.default_factory
-
-        x = torch.randn(3)
-        mapping = defaultdict(partial(torch.zeros_like, x), existing=x)
-        expected = fn(x, mapping)
-        actual = torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
-        self.assertIs(type(actual[0]), defaultdict)
-        self.assertEqual(actual[0], expected[0])
-        self.assertEqual(actual[1], torch.zeros_like(x))
-        self.assertTrue(actual[2])
-
-    @parametrize("reverse", [False, True])
-    def test_defaultdict_union_noncallable_factory(self, reverse):
-        def fn(x, mapping):
-            try:
-                if reverse:
-                    {"a": x} | mapping
-                else:
-                    mapping | {"a": x}
-            except TypeError as error:
-                return x + 1, str(error)
-            return x, "no error"
-
-        x = torch.randn(3)
-        mapping = defaultdict(int)
-        mapping.default_factory = 42
-        expected = (x + 1, "first argument must be callable or None")
-        self.assertEqual(fn(x, mapping), expected)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping), expected
-        )
 
     def test_defaultdict_inplace_union_preserves_factory(self):
         def f():
@@ -2828,88 +2316,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         exp_base = base_dict | base_dict
         self.assertIsInstance(exp_base, dict)
-
-    @parametrize(
-        "mapping_type,reverse",
-        [
-            subtest((OrderedDict, False), name="ordered_forward"),
-            subtest((OrderedDict, True), name="ordered_reverse"),
-            subtest((defaultdict, False), name="default_forward"),
-            subtest((defaultdict, True), name="default_reverse"),
-        ],
-    )
-    def test_dict_subclass_union_constructor(self, mapping_type, reverse):
-        class Mapping(mapping_type):
-            def __init__(self, *args):
-                super().__init__(*args)
-                self.initial_items = list(self.items())
-
-            def copy(self):
-                raise AssertionError("copy override called")
-
-            def update(self, *args, **kwargs):
-                raise AssertionError("update override called")
-
-            def __setitem__(self, key, value):
-                super().__setitem__(key, value + 10)
-
-        def fn(x, source):
-            other = {"b": 3, "c": 4}
-            result = other | source if reverse else source | other
-            return result, result.initial_items, x + result["b"]
-
-        source = (
-            Mapping(int, {"a": 1, "b": 2})
-            if mapping_type is defaultdict
-            else Mapping({"a": 1, "b": 2})
-        )
-        x = torch.randn(2)
-        expected = fn(x, source)
-        actual = torch.compile(fn, backend="eager", fullgraph=True)(x, source)
-        self.assertIs(type(actual[0]), Mapping)
-        self.assertEqual(actual, expected)
-        offset = 10 if mapping_type is OrderedDict else 0
-        self.assertEqual(
-            list(actual[0].items()),
-            [("b", 2 + 2 * offset), ("c", 4 + offset), ("a", 1 + 2 * offset)]
-            if reverse
-            else [("a", 1 + 2 * offset), ("b", 3 + offset), ("c", 4 + offset)],
-        )
-        self.assertEqual(
-            actual[1],
-            [("b", 3 + offset), ("c", 4 + offset)]
-            if reverse
-            else [("a", 1 + 2 * offset), ("b", 2 + 2 * offset)],
-        )
-        if mapping_type is defaultdict:
-            self.assertIs(actual[0].default_factory, int)
-
-    @parametrize("reverse", [False, True])
-    def test_ordered_dict_union_mapping_overrides(self, reverse):
-        class Mapping(dict):
-            def keys(self):
-                return ["b"]
-
-            def __getitem__(self, key):
-                return super().__getitem__(key) + 10
-
-            def items(self):
-                raise AssertionError("items override called")
-
-        def fn(x, source):
-            mapping = OrderedDict()
-            # Call __ror__ explicitly: dict subclasses inherit dict.__or__,
-            # which handles the left operand without delegating to OrderedDict.
-            result = mapping.__ror__(source) if reverse else mapping | source
-            return tuple(result), x + result["b"]
-
-        x = torch.ones(1)
-        source = Mapping(a=1, b=2)
-        expected = (("b",), x + 12)
-        self.assertEqual(fn(x, source), expected)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, source), expected
-        )
 
     def test_range_as_dict_key(self):
         def fn(x):
@@ -3786,69 +3192,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             torch.compile(fn, backend="eager", fullgraph=True)(x), expected
         )
-
-    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
-    def test_fromkeys_preserves_key_comparisons(self, mapping_type):
-        class Key:
-            def __init__(self):
-                self.calls = 0
-
-            def __hash__(self):
-                return 42
-
-            def __eq__(self, other):
-                self.calls += 1
-                return self.calls > 1
-
-        def fn(x):
-            first, second = Key(), Key()
-            keys = {first: 1, second: 2}
-            first.calls = 0
-            result = mapping_type.fromkeys(keys, x)
-            return x + len(result), first.calls
-
-        x = torch.ones(1)
-        self.assertEqual(fn(x), (x + 2, 2 if mapping_type is OrderedDict else 1))
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
-    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
-    @parametrize("iterable_type", [dict, set, frozenset])
-    def test_fromkeys_key_hashes(self, mapping_type, iterable_type):
-        class Key:
-            def __init__(self):
-                self.calls = 0
-
-            def __hash__(self):
-                self.calls += 1
-                return 7
-
-        def fn(x):
-            key = Key()
-            keys = iterable_type({key: 1})
-            calls = key.calls
-            result = mapping_type.fromkeys(keys, x)
-            return x + len(result), key.calls - calls
-
-        x = torch.randn(3)
-        expected = fn(x)
-        self.assertEqual(expected[1], int(mapping_type in (OrderedDict, defaultdict)))
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
-        )
-
-    @parametrize("iterable_type", [dict, set, frozenset])
-    def test_fromkeys_input_key_guard(self, iterable_type):
-        def fn(x, mapping):
-            result = dict.fromkeys(mapping)
-            return x + len(result), tuple(result)
-
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.randn(3)
-        for mapping in ({}, {"a": 1}, {"a": 2}, {"a": 1, "b": 2}, {"c": 1, "d": 2}):
-            mapping = iterable_type(mapping)
-            self.assertEqual(compiled(x, mapping), fn(x, mapping))
-        self.assertEqual(counter.frame_count, 4)
 
 
 instantiate_parametrized_tests(DictTests)

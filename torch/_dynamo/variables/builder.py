@@ -813,25 +813,6 @@ def _is_dim_dynamic_from_source_dynamism(
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
 
 
-def _build_dict_items(
-    value: dict[Any, Any],
-    build_key_value: Callable[
-        [int, object, object], tuple[VariableTracker, VariableTracker]
-    ],
-) -> dict[VariableTracker, VariableTracker]:
-    entries = [
-        (position, *build_key_value(position, key, item))
-        for position, key, item in enumerate_items_with_dict_position(value)
-    ]
-    if not isinstance(value, collections.OrderedDict):
-        return {key: item for _, key, item in entries}
-    # Preserve both dict storage order and OrderedDict iteration order.
-    items = collections.OrderedDict((key, item) for _, key, item in sorted(entries))
-    for _, key, _ in entries:
-        items.move_to_end(key)
-    return items
-
-
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -1284,7 +1265,10 @@ class VariableBuilder:
 
                 return key, res_value
 
-            result = _build_dict_items(value, build_key_value)
+            result = dict(
+                build_key_value(i, k, v)
+                for i, k, v in enumerate_items_with_dict_position(value)
+            )
 
             if istype(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
@@ -2218,8 +2202,11 @@ class VariableBuilder:
                 source=self.source,
                 tx=self.tx,
             )
-        elif issubclass(type(value), dict):
-            # Input instances already ran __new__, including any subclass override.
+        elif (
+            isinstance(value, (dict, collections.OrderedDict))
+            and type(value).__new__ is dict.__new__
+        ):
+            # Construct a dict_vt that will reside inside the UserDefinedDictVariable
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -2240,7 +2227,10 @@ class VariableBuilder:
 
                 return key, res_value
 
-            kv_items = _build_dict_items(value, build_key_value)
+            kv_items = dict(
+                build_key_value(i, k, v)
+                for i, k, v in enumerate_items_with_dict_position(value)
+            )
 
             if isinstance(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
