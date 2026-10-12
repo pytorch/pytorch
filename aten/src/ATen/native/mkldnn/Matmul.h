@@ -81,6 +81,10 @@ bool use_mkldnn_matmul(
     const Tensor& mat2,
     const Tensor& result);
 
+// Whether oneDNN runs FP32 matmuls in the current matmul FP32 precision (BF16
+// or TF32) on this CPU and build, ignoring the size heuristics.
+bool use_mkldnn_reduced_f32_matmul();
+
 // x:u8 or s8 * w:s8 -> y:s32
 TORCH_API void mkldnn_matmul_i8i8i32(
     const Tensor &mat1,

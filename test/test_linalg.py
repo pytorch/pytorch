@@ -46,7 +46,7 @@ from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, 
     _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
-from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
+from torch.testing._internal.common_mkldnn import bf32_is_not_fp32, reduced_f32_on_and_off, tf32_is_not_fp32
 from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
@@ -7760,10 +7760,12 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 torch.autograd.gradcheck(
                     partial(op, compute_mode="ieee"), args, check_forward_ad=True
                 )
+                # Meta kernels cannot know what the real kernel supports.
                 meta_args = [a.detach().to("meta") for a in args]
-                self.assertEqual(
-                    op(*meta_args, compute_mode="tf32").shape, op(*args).shape
-                )
+                for mode in ("tf32", "bf16", "bfx9"):
+                    self.assertEqual(
+                        op(*meta_args, compute_mode=mode).shape, op(*args).shape
+                    )
 
                 # Same autocast policy as the plain op, including for backward.
                 float_args = [a.detach().float().requires_grad_() for a in args]
@@ -7774,8 +7776,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 out.sum().backward()
 
         # In FP32, compute_mode must match the global oneDNN setting for the same
-        # mode while a different global setting is active. Where the hardware
-        # cannot accelerate a mode, both sides use IEEE.
+        # mode while a different global setting is active. Where oneDNN cannot
+        # run a mode on this CPU, the global setting falls back to IEEE but
+        # compute_mode raises.
+        supported = {"ieee": True, "tf32": tf32_is_not_fp32(), "bf16": bf32_is_not_fp32()}
+
         def make_float(*shape):
             return torch.randn(*shape, device=device, requires_grad=True)
 
@@ -7791,6 +7796,12 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         for op, args in float_cases:
             for mode in ("ieee", "tf32", "bf16"):
                 with self.subTest(op=op.__name__, compute_mode=mode):
+                    if not supported[mode]:
+                        with self.assertRaisesRegex(
+                            RuntimeError, f"compute_mode '{mode}' is not supported"
+                        ):
+                            op(*args, compute_mode=mode)
+                        continue
                     torch.backends.mkldnn.matmul.fp32_precision = mode
                     expected = op(*args)
                     grad_out = torch.randn_like(expected)
@@ -7812,11 +7823,34 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                     self.assertEqual(out, expected, atol=0, rtol=0)
                     self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, other)
 
+        # An explicit mode is honored even for matmuls small enough that the
+        # global setting would not use oneDNN for them.
+        torch.backends.mkldnn.matmul.fp32_precision = "ieee"
         a = torch.randn(4, 4, device=device)
-        with self.assertRaisesRegex(RuntimeError, "'bfx9' is only supported on CUDA"):
+        a3 = torch.randn(2, 4, 4, device=device)
+        for mode in ("tf32", "bf16"):
+            if supported[mode]:
+                with self.subTest(compute_mode=mode):
+                    self.assertNotEqual(torch.mm(a, a, compute_mode=mode), torch.mm(a, a), atol=0, rtol=0)
+                    self.assertNotEqual(torch.bmm(a3, a3, compute_mode=mode), torch.bmm(a3, a3), atol=0, rtol=0)
+
+        with self.assertRaisesRegex(RuntimeError, "compute_mode 'bfx9' is not supported for Float"):
             torch.mm(a, a, compute_mode="bfx9")
+        with self.assertRaisesRegex(RuntimeError, "compute_mode 'bfx9' is not supported for Float"):
+            torch.bmm(a3, a3, compute_mode="bfx9")
+        c = torch.randn(4, 4, device=device, dtype=torch.cfloat)
+        with self.assertRaisesRegex(RuntimeError, "compute_mode 'bf16' is not supported for ComplexFloat"):
+            torch.mm(c, c, compute_mode="bf16")
         with self.assertRaisesRegex(ValueError, "unknown compute_mode 'none'"):
             torch.mm(a, a, compute_mode="none")
+        # Inputs that are not FP32, and matmuls that do no multiplication, run
+        # no FP32 matmul kernel, so any mode is accepted.
+        for dtype in (torch.double, torch.bfloat16):
+            d = a.to(dtype)
+            self.assertEqual(torch.mm(d, d, compute_mode="bfx9"), torch.mm(d, d), atol=0, rtol=0)
+        self.assertEqual(torch.mm(a[:, :0], a[:0], compute_mode="bfx9"), torch.zeros(4, 4, device=device))
+        self.assertEqual(torch.bmm(a3[..., :0], a3[:, :0], compute_mode="bfx9"), torch.zeros(2, 4, 4, device=device))
+        self.assertEqual(torch.mm(a[:0], a, compute_mode="bfx9").shape, (0, 4))
 
     @onlyNativeDeviceTypes
     def test_mm_bmm_non_memory_dense(self, device):

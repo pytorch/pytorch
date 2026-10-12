@@ -78,6 +78,10 @@ bool use_mkldnn_matmul(
     return false;
 }
 
+bool use_mkldnn_reduced_f32_matmul() {
+    return false;
+}
+
 void mkldnn_matmul_i8i8i32(
     const Tensor &mat1,
     const Tensor &mat2,
@@ -161,8 +165,12 @@ mkldnn_gemm(
   bool fp16_usable = std::is_same_v<scalar_t, c10::Half> && use_mkldnn_fp16_matmul();
   bool bf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_bf32_matmul();
   bool tf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_tf32_matmul();
+  // An explicitly requested reduced FP32 precision (compute_mode) must be
+  // honored, so it skips the size heuristic.
+  bool explicit_reduced_f32 = (bf32_usable || tf32_usable) &&
+      MatmulFloat32PrecisionGuard::get().has_value();
   if ( !(bf16_usable || fp16_usable || bf32_usable || tf32_usable) ||
-      (m * n * k <= 16 * 16 * 16) || (alpha == 0.0f)) {
+      (m * n * k <= 16 * 16 * 16 && !explicit_reduced_f32) || (alpha == 0.0f)) {
     return false;
   }
 
@@ -532,6 +540,10 @@ bool use_mkldnn_matmul(
       use_mkldnn_fp16_matmul(mat1, mat2, result) ||
       use_mkldnn_bf32_matmul(mat1, mat2, result) ||
       use_mkldnn_tf32_matmul(mat1, mat2, result));
+}
+
+bool use_mkldnn_reduced_f32_matmul() {
+  return use_mkldnn_bf32_matmul() || use_mkldnn_tf32_matmul();
 }
 
 static void _mkldnn_matmul_i8i8i32_with_primitive(

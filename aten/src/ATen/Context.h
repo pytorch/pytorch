@@ -772,6 +772,14 @@ struct TORCH_API NoTF32Guard {
 // mm, addmm, bmm and baddbmm; it is not a user-facing API. The CUDA BLAS paths
 // still let NoTF32Guard win over this guard, since kernels use it to protect
 // precision-sensitive internal matmuls.
+//
+// The global setting only permits a precision: a kernel that cannot run it
+// falls back to IEEE silently. A precision installed by this guard was
+// requested explicitly, so an FP32 matmul kernel that reads get() and cannot
+// run it should raise instead of falling back. Kernels that never read it
+// (e.g. out-of-tree backends that predate compute_mode) accept the request
+// silently. Since this is thread-local, kernels must check it on the calling
+// thread, not inside parallel regions.
 struct TORCH_API MatmulFloat32PrecisionGuard {
   explicit MatmulFloat32PrecisionGuard(Float32Precision p);
   MatmulFloat32PrecisionGuard(MatmulFloat32PrecisionGuard&& other) = delete;

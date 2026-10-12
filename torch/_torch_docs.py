@@ -196,10 +196,10 @@ matmul_compute_mode_args = {
         multiplication, overriding the global ``fp32_precision`` setting for this
         call only. One of ``"ieee"``, ``"tf32"``, ``"bf16"`` (CPU only) or
         ``"bfx9"`` (CUDA only); see :ref:`tf32_on_ampere`. The backward pass uses
-        the same compute mode. A mode that is not supported on the device type
-        of the inputs raises an error. As with the global setting, a mode the
-        hardware cannot accelerate (for example ``"tf32"`` before Ampere) uses
-        IEEE precision."""
+        the same compute mode. Unlike the global setting, a mode the kernel
+        cannot use (for example ``"tf32"`` before Ampere) raises an error
+        instead of falling back to IEEE precision. Ignored for inputs that are
+        not float32 or complex64."""
 }
 
 rocm_fp16_notes = {

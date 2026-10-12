@@ -120,10 +120,14 @@ torch.mm(a, b, compute_mode="tf32")
 torch.addmm(bias, a, b, compute_mode="bfx9")
 ```
 
-On CUDA, `compute_mode` accepts `ieee`, `tf32` and `bfx9`; on CPU, it accepts
-`ieee`, `tf32` and `bf16`. Other combinations raise an error rather than
-being ignored. Under `torch.compile`, these calls are not decomposed or fused
-and run the ATen kernel.
+Unlike the global settings, which only allow a reduced precision, `compute_mode`
+requires it: if the kernel that runs the matmul cannot use the requested
+precision, it raises an error instead of silently using IEEE. On CUDA,
+`compute_mode` supports `ieee`, `tf32` (compute capability 8.0 or later) and
+`bfx9` (NVIDIA CUDA 12.9 or later, float32 only); on CPU, `ieee`, and `tf32`
+and `bf16` where oneDNN supports them on the CPU. It only affects float32 and
+complex64 inputs, and is ignored for other dtypes. Under `torch.compile`,
+these calls are not decomposed or fused and run the ATen kernel.
 
 We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
 

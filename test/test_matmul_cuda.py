@@ -29,6 +29,7 @@ from torch.testing._internal.common_cuda import (
     blas_library_context,
     IS_SM90,
     PLATFORM_SUPPORTS_BF16,
+    SM80OrLater,
     SM90OrLater,
     SM100OrLater,
     SM120OrLater,
@@ -421,6 +422,8 @@ class TestMatmulCuda(InductorTestCase):
         return ("ieee", "tf32", "bfx9") if BF16X9_API_SUPPORTED else ("ieee", "tf32")
 
     def _skip_unless_tf32_in_effect(self, device):
+        if torch.version.hip:
+            self.skipTest("compute_mode 'tf32' is not supported on ROCm")
         # The comparisons against the global setting only show that the
         # per-call mode wins if "ieee" and "tf32" give different results.
         _, op, args = self._compute_mode_cases(device)[0]
@@ -520,13 +523,37 @@ class TestMatmulCuda(InductorTestCase):
 
     def test_compute_mode_errors(self, device):
         a = torch.randn(4, 4, device=device)
+        a3 = torch.randn(2, 4, 4, device=device)
         with self.assertRaisesRegex(ValueError, "unknown compute_mode 'fast'"):
             torch.mm(a, a, compute_mode="fast")
+        # Unlike the global setting, an explicit mode the kernel cannot run
+        # raises instead of falling back to IEEE.
         with self.assertRaisesRegex(RuntimeError, "'bf16' is not supported on CUDA"):
             torch.mm(a, a, compute_mode="bf16")
+        with self.assertRaisesRegex(RuntimeError, "'bf16' is not supported on CUDA"):
+            torch.bmm(a3, a3, compute_mode="bf16")
         if not BF16X9_API_SUPPORTED:
             with self.assertRaisesRegex(RuntimeError, "bfx9"):
                 torch.mm(a, a, compute_mode="bfx9")
+        else:
+            c = a.to(torch.cfloat)
+            with self.assertRaisesRegex(RuntimeError, "'bfx9' is not supported for ComplexFloat"):
+                torch.mm(c, c, compute_mode="bfx9")
+        if torch.version.hip:
+            with self.assertRaisesRegex(RuntimeError, "'tf32' is not supported on ROCm"):
+                torch.mm(a, a, compute_mode="tf32")
+        elif not SM80OrLater:
+            with self.assertRaisesRegex(RuntimeError, "'tf32' requires a GPU with compute capability 8.0"):
+                torch.mm(a, a, compute_mode="tf32")
+
+        # Inputs that are not FP32, and matmuls that do no multiplication, run
+        # no FP32 matmul kernel, so any mode is accepted.
+        for dtype in (torch.double, torch.half):
+            d = a.to(dtype)
+            self.assertEqual(torch.mm(d, d, compute_mode="bf16"), torch.mm(d, d), atol=0, rtol=0)
+        self.assertEqual(torch.mm(a[:, :0], a[:0], compute_mode="bf16"), torch.zeros_like(a))
+        self.assertEqual(torch.bmm(a3[..., :0], a3[:, :0], compute_mode="bf16"), torch.zeros_like(a3))
+        self.assertEqual(torch.mm(a[:0], a, compute_mode="bf16").shape, (0, 4))
 
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
     def test_legacy_cublas_honors_sm_carveout(self, device):

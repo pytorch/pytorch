@@ -496,6 +496,47 @@ bool launchGemmWithDistinctCAndDCublasLt(
   );
 }
 
+// compute_mode (see MatmulFloat32PrecisionGuard): raise if the cuBLAS paths
+// cannot run the explicitly requested FP32 precision for `mat`. Call only when
+// a matmul will actually run.
+static void check_explicit_fp32_matmul_precision_cuda(const Tensor& mat) {
+  const auto p = MatmulFloat32PrecisionGuard::get();
+  const auto dtype = mat.scalar_type();
+  // NoTF32Guard forces IEEE for precision-sensitive internal matmuls and wins
+  // over compute_mode.
+  if (!p || *p == Float32Precision::IEEE ||
+      (dtype != kFloat && dtype != kComplexFloat) ||
+      NoTF32Guard::should_disable_fp32_reduced_precision()) {
+    return;
+  }
+  switch (*p) {
+    case Float32Precision::TF32: {
+#ifdef USE_ROCM
+      // Only the hipBLASLt path honors it, and whether that runs depends on
+      // the inputs.
+      TORCH_CHECK(false, "compute_mode 'tf32' is not supported on ROCm");
+#else
+      const auto* prop = at::cuda::getDeviceProperties(mat.device().index());
+      TORCH_CHECK(prop->major >= 8,
+          "compute_mode 'tf32' requires a GPU with compute capability 8.0 or later, but ",
+          mat.device(), " has ", prop->major, ".", prop->minor);
+#endif
+      return;
+    }
+    case Float32Precision::BF16X9:
+#if defined(USE_ROCM) || !defined(CUDA_VERSION) || CUDA_VERSION < 12090
+      TORCH_CHECK(false,
+          "compute_mode 'bfx9' is only supported on NVIDIA CUDA, with PyTorch built with CUDA 12.9 or later");
+#else
+      TORCH_CHECK(dtype == kFloat,
+          "compute_mode 'bfx9' is not supported for ", dtype, " matmuls");
+#endif
+      return;
+    default:
+      TORCH_CHECK(false, "compute_mode '", precision2str(*p), "' is not supported on CUDA");
+  }
+}
+
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false) {
   // Shape checks {
   // Make sure to keep addmm_cuda below in sync with this code; it
@@ -517,6 +558,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // NOLINTNEXTLINE(*c-array*)
   TensorArg targs[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, targs);
+
+  if (mat1.numel() != 0 && mat2.numel() != 0) {
+    check_explicit_fp32_matmul_precision_cuda(mat1);
+  }
 
   // Handle whether to use the Lt interface {
   static bool persistent_disable_addmm_cuda_lt = isGloballyDisabledAddmmCudaLt(self.device());
@@ -721,6 +766,8 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
       return result.mul_(beta);
     }
   }
+
+  check_explicit_fp32_matmul_precision_cuda(batch1);
 
   bool transpose_result = false;
   c10::MaybeOwned<Tensor> result_;
