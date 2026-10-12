@@ -529,15 +529,26 @@ class TestBenchmarker(TestCase):
         )
 
     def test_cudagraph_recursion_guard_is_thread_local(self):
-        from torch._inductor.runtime.benchmarking import Benchmarker
-
+        # The guard is raised while timing the captured replay, per thread: one
+        # thread finishing must not clear another thread's guard.
         benchmarker = InductorBenchmarker()
         both_entered = threading.Barrier(2)
         first_finished = threading.Event()
         observed = []
         errors = []
 
-        def benchmark_with_cuda_graph(_self, _callable, **kwargs):
+        class FakeStream:
+            def wait_stream(self, stream):
+                pass
+
+            def synchronize(self):
+                pass
+
+        class FakeCUDAGraph:
+            def replay(self):
+                pass
+
+        def time_replay(_self, _callable, **kwargs):
             both_entered.wait(timeout=5)
             if threading.current_thread().name == "second":
                 self.assertTrue(first_finished.wait(timeout=5))
@@ -553,10 +564,14 @@ class TestBenchmarker(TestCase):
                 if name == "first":
                     first_finished.set()
 
-        with patch.object(
-            Benchmarker,
-            "benchmark_gpu_with_cuda_graph",
-            benchmark_with_cuda_graph,
+        with (
+            patch.object(InductorBenchmarker, "benchmark_gpu", time_replay),
+            patch("torch.cuda.synchronize"),
+            patch("torch.cuda.Stream", FakeStream),
+            patch("torch.cuda.current_stream", return_value=FakeStream()),
+            patch("torch.cuda.stream", return_value=contextlib.nullcontext()),
+            patch("torch.cuda.CUDAGraph", FakeCUDAGraph),
+            patch("torch.cuda.graph", return_value=contextlib.nullcontext()),
         ):
             first = threading.Thread(target=run, args=("first",), name="first")
             second = threading.Thread(target=run, args=("second",), name="second")
