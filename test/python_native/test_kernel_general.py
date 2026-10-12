@@ -192,6 +192,14 @@ class TestKernelGeneral(TestCase):
         self.assertIs(type(kg._geom_args(narrow)[0]), Int32)
         self.assertIs(type(kg._geom_args(wide)[0]), Int64)
         self.assertIs(type(kg._geom_args(wide_output)[0]), Int32)
+        with self.assertRaisesRegex(ValueError, "indices representable in Int32"):
+            kg.ReduceBlock(
+                T.ArgMaxOps(acc=cutlass.Float32),
+                count=2**31 + 1,
+                num_o=1,
+                red_pairs=((2**31 + 1, 1),),
+                kept_pairs=(),
+            )
         # No reduced runs at all is LEGAL -- an extent-1 reduced axis coalesces away in TI. Pinned
         # here because the arm that allows it is one line in tile._decode_offset, and a crash.
         self.assertEqual(
