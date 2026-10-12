@@ -5,6 +5,9 @@
 The evaluator executes scalar IR operations; each test supplies the loops.
 """
 
+from itertools import product
+from math import prod
+
 import sympy
 
 import torch
@@ -13,7 +16,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.loop_body import LoopBody
 from torch._inductor.virtualized import ops, V
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 
 class EagerOps:
@@ -36,6 +39,9 @@ class EagerOps:
 
     def add(self, lhs, rhs):
         return lhs + rhs
+
+    def mul(self, lhs, rhs):
+        return lhs * rhs
 
     def indirect_indexing(self, value, size, check=True, wrap_neg=True):
         return sympy.Integer(int(value))
@@ -79,13 +85,19 @@ class TestDataDependentIR(TestCase):
 
         with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda x: x))):
             tensor = ir.Pointwise.create(
-                device=torch.device(device), dtype=output.dtype, inner_fn=inner_fn,
-                ranges=[4, j_range], flat_size=[6], output_indexer=output_indexer,
+                device=torch.device(device),
+                dtype=output.dtype,
+                inner_fn=inner_fn,
+                ranges=[4, j_range],
+                flat_size=[6],
+                output_indexer=output_indexer,
             )
             tensor.realize()
             buffer = tensor.data.data
             _, body, _ = buffer.get_default_sizes_body()
-            evaluator = EagerOps({"offsets": offsets, "lengths": lengths, buffer.name: output})
+            evaluator = EagerOps(
+                {"offsets": offsets, "lengths": lengths, buffer.name: output}
+            )
             with V.set_ops_handler(evaluator):
                 for b in range(4):
                     for j in range(int(lengths[b])):
@@ -106,14 +118,22 @@ class TestDataDependentIR(TestCase):
 
         with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda x: x))):
             tensor = ir.Pointwise.create(
-                device=torch.device(device), dtype=torch.float32, inner_fn=inner_fn,
-                ranges=[4, j_range], flat_size=[6], output_indexer=output_indexer,
+                device=torch.device(device),
+                dtype=torch.float32,
+                inner_fn=inner_fn,
+                ranges=[4, j_range],
+                flat_size=[6],
+                output_indexer=output_indexer,
             )
             tensor.realize()
             buffer = tensor.data.data
             rw = buffer.get_read_writes()
-            self.assertEqual(set(buffer.data.get_read_names()), {"values", "lengths", "offsets"})
-            self.assertEqual({dep.name for dep in rw.reads}, {"values", "lengths", "offsets"})
+            self.assertEqual(
+                set(buffer.data.get_read_names()), {"values", "lengths", "offsets"}
+            )
+            self.assertEqual(
+                {dep.name for dep in rw.reads}, {"values", "lengths", "offsets"}
+            )
             self.assertEqual({dep.name for dep in rw.writes}, {buffer.name})
             _, body, _ = buffer.get_default_sizes_body()
             self.assertTrue(body.has_op("register_datadep_range"))
@@ -143,15 +163,21 @@ class TestDataDependentIR(TestCase):
 
         with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda x: x))):
             tensor = ir.Pointwise.create(
-                device=torch.device(device), dtype=output.dtype, inner_fn=inner_fn,
-                ranges=sizes, flat_size=[5], output_indexer=output_indexer,
+                device=torch.device(device),
+                dtype=output.dtype,
+                inner_fn=inner_fn,
+                ranges=sizes,
+                flat_size=[5],
+                output_indexer=output_indexer,
             )
             tensor.realize()
             buffer = tensor.data.data
             _, body, _ = buffer.get_default_sizes_body()
             (renamed,), ranges = dependencies.index_vars_no_squeeze(sizes, prefix="r")
             copied = LoopBody(body, (renamed,), ranges, renamed, [])
-            evaluator = EagerOps({"offsets": offsets, "lengths": lengths, buffer.name: output})
+            evaluator = EagerOps(
+                {"offsets": offsets, "lengths": lengths, buffer.name: output}
+            )
             with V.set_ops_handler(evaluator):
                 for b in range(3):
                     for k in range(int(lengths[b])):
@@ -176,8 +202,11 @@ class TestDataDependentIR(TestCase):
 
         with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda x: x))):
             tensor = ir.Pointwise.create(
-                device=torch.device(device), dtype=torch.int64, inner_fn=inner_fn,
-                ranges=[3, j_range], flat_size=[6],
+                device=torch.device(device),
+                dtype=torch.int64,
+                inner_fn=inner_fn,
+                ranges=[3, j_range],
+                flat_size=[6],
                 output_indexer=lambda index: 2 * index[0] + index[1],
             )
             tensor.realize()
@@ -204,8 +233,12 @@ class TestDataDependentIR(TestCase):
 
         with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda x: x))):
             tensor = ir.Pointwise.create(
-                device=torch.device(device), dtype=torch.int64, inner_fn=inner_fn,
-                ranges=ranges, flat_size=[6], output_indexer=output_indexer,
+                device=torch.device(device),
+                dtype=torch.int64,
+                inner_fn=inner_fn,
+                ranges=ranges,
+                flat_size=[6],
+                output_indexer=output_indexer,
             )
             tensor.realize()
             buffer = tensor.data.data
@@ -239,19 +272,32 @@ class TestDataDependentIR(TestCase):
 
         def inner_fn(index):
             ops.register_datadep_range(ops.load("lengths", index[0]), j_range)
-            address = ops.indirect_indexing(output_indexer(index), values.numel(), wrap_neg=False)
+            address = ops.indirect_indexing(
+                output_indexer(index), values.numel(), wrap_neg=False
+            )
             return ops.load("values", address) + ops.load("bias", index[0])
 
         with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda x: x))):
             lazy = ir.Pointwise.create(
-                device=torch.device(device), dtype=values.dtype, inner_fn=inner_fn,
-                ranges=[4, j_range], flat_size=[values.numel()], output_indexer=output_indexer,
+                device=torch.device(device),
+                dtype=values.dtype,
+                inner_fn=inner_fn,
+                ranges=[4, j_range],
+                flat_size=[values.numel()],
+                output_indexer=output_indexer,
             )
             lazy.realize()
             buffer = lazy.data.data
             _, body, _ = buffer.get_default_sizes_body()
-            evaluator = EagerOps({"offsets": offsets, "lengths": lengths,
-                                  "values": values, "bias": bias, buffer.name: output})
+            evaluator = EagerOps(
+                {
+                    "offsets": offsets,
+                    "lengths": lengths,
+                    "values": values,
+                    "bias": bias,
+                    buffer.name: output,
+                }
+            )
             with V.set_ops_handler(evaluator):
                 for b in range(4):
                     for j in range(int(lengths[b])):
@@ -284,20 +330,36 @@ class TestDataDependentIR(TestCase):
         def inner_fn(index):
             b, j = index
             ops.register_datadep_range(ops.load("lengths", b), j_range)
-            address = ops.load("source_offsets", b) + ops.load("starts", b) + ops.index_expr(j, torch.int64)
+            address = (
+                ops.load("source_offsets", b)
+                + ops.load("starts", b)
+                + ops.index_expr(j, torch.int64)
+            )
             address = ops.indirect_indexing(address, values.numel(), wrap_neg=False)
             return ops.load("values", address)
 
         with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda x: x))):
             lazy = ir.Pointwise.create(
-                device=torch.device(device), dtype=values.dtype, inner_fn=inner_fn,
-                ranges=[3, j_range], flat_size=[output.numel()], output_indexer=output_indexer,
+                device=torch.device(device),
+                dtype=values.dtype,
+                inner_fn=inner_fn,
+                ranges=[3, j_range],
+                flat_size=[output.numel()],
+                output_indexer=output_indexer,
             )
             lazy.realize()
             buffer = lazy.data.data
             _, body, _ = buffer.get_default_sizes_body()
-            evaluator = EagerOps({"source_offsets": source_offsets, "destination_offsets": destination_offsets,
-                                  "starts": starts, "lengths": lengths, "values": values, buffer.name: output})
+            evaluator = EagerOps(
+                {
+                    "source_offsets": source_offsets,
+                    "destination_offsets": destination_offsets,
+                    "starts": starts,
+                    "lengths": lengths,
+                    "values": values,
+                    buffer.name: output,
+                }
+            )
             with V.set_ops_handler(evaluator):
                 for b in range(3):
                     for j in range(int(lengths[b])):
@@ -327,37 +389,203 @@ class TestDataDependentIR(TestCase):
         def output_indexer(index):
             b, j, k = index
             parent = ops.load("offsets", b) + ops.index_expr(j, torch.int64)
-            parent = ops.indirect_indexing(parent, depth_lengths.numel(), wrap_neg=False)
+            parent = ops.indirect_indexing(
+                parent, depth_lengths.numel(), wrap_neg=False
+            )
             return ops.load("depths", parent) + ops.index_expr(k, torch.int64)
 
         def inner_fn(index):
             b, j, k = index
             ops.register_datadep_range(ops.load("row_lengths", b), j_range)
             parent = ops.load("offsets", b) + ops.index_expr(j, torch.int64)
-            parent = ops.indirect_indexing(parent, depth_lengths.numel(), wrap_neg=False)
+            parent = ops.indirect_indexing(
+                parent, depth_lengths.numel(), wrap_neg=False
+            )
             ops.register_datadep_range(ops.load("depth_lengths", parent), k_range)
-            address = ops.indirect_indexing(output_indexer(index), values.numel(), wrap_neg=False)
+            address = ops.indirect_indexing(
+                output_indexer(index), values.numel(), wrap_neg=False
+            )
             return ops.load("values", address) + ops.load("bias", b)
 
         with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda x: x))):
             lazy = ir.Pointwise.create(
-                device=torch.device(device), dtype=values.dtype, inner_fn=inner_fn,
-                ranges=[3, j_range, k_range], flat_size=[values.numel()], output_indexer=output_indexer,
+                device=torch.device(device),
+                dtype=values.dtype,
+                inner_fn=inner_fn,
+                ranges=[3, j_range, k_range],
+                flat_size=[values.numel()],
+                output_indexer=output_indexer,
             )
             lazy.realize()
             buffer = lazy.data.data
             _, body, _ = buffer.get_default_sizes_body()
-            evaluator = EagerOps({"offsets": offsets, "depths": depths, "row_lengths": row_lengths,
-                                  "depth_lengths": depth_lengths, "values": values,
-                                  "bias": bias, buffer.name: output})
+            evaluator = EagerOps(
+                {
+                    "offsets": offsets,
+                    "depths": depths,
+                    "row_lengths": row_lengths,
+                    "depth_lengths": depth_lengths,
+                    "values": values,
+                    "bias": bias,
+                    buffer.name: output,
+                }
+            )
             with V.set_ops_handler(evaluator):
                 for b in range(3):
                     for j in range(int(row_lengths[b])):
                         parent = int(offsets[b]) + j
                         for k in range(int(depth_lengths[parent])):
                             body([b, j, k])
-                            self.assertEqual(evaluator.bounds[j_range], int(row_lengths[b]))
-                            self.assertEqual(evaluator.bounds[k_range], int(depth_lengths[parent]))
+                            self.assertEqual(
+                                evaluator.bounds[j_range], int(row_lengths[b])
+                            )
+                            self.assertEqual(
+                                evaluator.bounds[k_range], int(depth_lengths[parent])
+                            )
+            self.assertEqual(output, reference())
+
+    @parametrize("feature_shape", [(2,), (2, 3), (2, 3, 2)])
+    def test_packed_dense_features(self, device, feature_shape):
+        offsets = torch.tensor([0, 2, 2, 5, 6], device=device)
+        lengths = offsets.diff()
+        values = torch.arange(
+            6 * prod(feature_shape), dtype=torch.float32, device=device
+        )
+        values = values.reshape(6, *feature_shape)
+        bias = torch.tensor([10, 20, 30, 40], device=device)
+        output = torch.empty_like(values)
+        strides = values.stride()
+        j_range = ir.DataDependentRange("j")
+
+        def reference():
+            result = torch.empty_like(values)
+            for b in range(4):
+                for j in range(int(lengths[b])):
+                    packed = int(offsets[b]) + j
+                    for feature in product(*(range(size) for size in feature_shape)):
+                        result[(packed, *feature)] = (
+                            values[(packed, *feature)] + bias[b]
+                        )
+            return result
+
+        def output_indexer(index):
+            b, j, *feature = index
+            address = (
+                ops.load("offsets", b) + ops.index_expr(j, torch.int64)
+            ) * strides[0]
+            for coordinate, stride in zip(feature, strides[1:]):
+                address = address + ops.index_expr(coordinate * stride, torch.int64)
+            return address
+
+        def inner_fn(index):
+            ops.register_datadep_range(ops.load("lengths", index[0]), j_range)
+            address = ops.indirect_indexing(
+                output_indexer(index), values.numel(), wrap_neg=False
+            )
+            return ops.load("values", address) + ops.load("bias", index[0])
+
+        with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda x: x))):
+            tensor = ir.Pointwise.create(
+                device=torch.device(device),
+                dtype=values.dtype,
+                inner_fn=inner_fn,
+                ranges=[4, j_range, *feature_shape],
+                flat_size=list(values.shape),
+                iteration_numel=values.numel(),
+                output_indexer=output_indexer,
+            )
+            tensor.realize()
+            buffer = tensor.data.data
+            buffer.decide_layout()
+            _, body, _ = buffer.get_default_sizes_body()
+            evaluator = EagerOps(
+                {
+                    "offsets": offsets,
+                    "lengths": lengths,
+                    "bias": bias,
+                    "values": values.reshape(-1),
+                    buffer.name: output.reshape(-1),
+                }
+            )
+            with V.set_ops_handler(evaluator):
+                for b in range(4):
+                    for j in range(int(lengths[b])):
+                        for feature in product(
+                            *(range(size) for size in feature_shape)
+                        ):
+                            body([b, j, *feature])
+                last = [5, *(size - 1 for size in feature_shape)]
+                self.assertEqual(buffer.make_loader()(last).value, output[tuple(last)])
+            self.assertEqual(output, reference())
+            self.assertEqual(buffer.get_size(), list(values.shape))
+            self.assertEqual(buffer.get_stride(), list(strides))
+            self.assertEqual(
+                body.indirect_var_ranges[body.indirect_vars[-1]], values.numel()
+            )
+
+    def test_row_sum_with_dense_features(self, device):
+        offsets = torch.tensor([0, 2, 2, 5, 6], device=device)
+        lengths = offsets.diff()
+        values = torch.arange(36, dtype=torch.float32, device=device).reshape(6, 2, 3)
+        output = torch.empty((4, 2, 3), device=device)
+        j_range = ir.DataDependentRange("j")
+
+        def reference():
+            result = torch.zeros_like(output)
+            for b in range(4):
+                for d in range(2):
+                    for e in range(3):
+                        for j in range(int(lengths[b])):
+                            result[b, d, e] += values[int(offsets[b]) + j, d, e] + 1
+            return result
+
+        def inner_fn(index, rindex):
+            b, d, e = index
+            ops.register_datadep_range(ops.load("lengths", b), j_range)
+            address = (
+                ops.load("offsets", b) + ops.index_expr(rindex[0], torch.int64)
+            ) * 6
+            address = address + ops.index_expr(d * 3 + e, torch.int64)
+            address = ops.indirect_indexing(address, values.numel(), wrap_neg=False)
+            return ops.load("values", address) + ops.constant(1, values.dtype)
+
+        with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda x: x))):
+            reduction = ir.Reduction(
+                device=torch.device(device),
+                dtype=values.dtype,
+                inner_fn=inner_fn,
+                ranges=[4, 2, 3],
+                reduction_ranges=[j_range],
+                reduction_type="sum",
+                iteration_numel=values.numel(),
+                src_dtype=values.dtype,
+                reduction_hint=ir.ReductionHint.DEFAULT,
+            )
+            buffer = ir.ComputedBuffer(
+                name="out",
+                layout=ir.FixedLayout(torch.device(device), values.dtype, [4, 2, 3]),
+                data=reduction,
+            )
+            _, body, _ = buffer.get_default_sizes_body()
+            evaluator = EagerOps(
+                {
+                    "values": values.reshape(-1),
+                    "offsets": offsets,
+                    "lengths": lengths,
+                    buffer.name: output.reshape(-1),
+                }
+            )
+            with V.set_ops_handler(evaluator):
+                for b in range(4):
+                    for d in range(2):
+                        for e in range(3):
+                            evaluator.total = 0
+                            for j in range(int(lengths[b])):
+                                body([b, d, e], [j])
+                            if int(lengths[b]) == 0:
+                                evaluator.store_reduction(
+                                    buffer.name, b * 6 + d * 3 + e, 0
+                                )
             self.assertEqual(output, reference())
 
     def test_09_nonuniform_row_sum(self, device):
@@ -379,22 +607,36 @@ class TestDataDependentIR(TestCase):
         def inner_fn(index, rindex):
             b = index[0]
             ops.register_datadep_range(ops.load("lengths", b), j_range)
-            start = ops.indirect_indexing(ops.load("offsets", b), values.numel(), wrap_neg=False)
+            start = ops.indirect_indexing(
+                ops.load("offsets", b), values.numel(), wrap_neg=False
+            )
             return ops.load("values", start + rindex[0]) + ops.constant(1, values.dtype)
 
         with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda x: x))):
             reduction = ir.Reduction(
-                device=torch.device(device), dtype=values.dtype, inner_fn=inner_fn,
-                ranges=[4], reduction_ranges=[j_range], reduction_type="sum",
-                src_dtype=values.dtype, reduction_hint=ir.ReductionHint.DEFAULT,
+                device=torch.device(device),
+                dtype=values.dtype,
+                inner_fn=inner_fn,
+                ranges=[4],
+                reduction_ranges=[j_range],
+                reduction_type="sum",
+                src_dtype=values.dtype,
+                reduction_hint=ir.ReductionHint.DEFAULT,
             )
             buffer = ir.ComputedBuffer(
-                name="out", layout=ir.FixedLayout(torch.device(device), values.dtype, [4]),
+                name="out",
+                layout=ir.FixedLayout(torch.device(device), values.dtype, [4]),
                 data=reduction,
             )
             _, body, _ = buffer.get_default_sizes_body()
-            evaluator = EagerOps({"values": values, "offsets": offsets,
-                                  "lengths": lengths, buffer.name: output})
+            evaluator = EagerOps(
+                {
+                    "values": values,
+                    "offsets": offsets,
+                    "lengths": lengths,
+                    buffer.name: output,
+                }
+            )
             with V.set_ops_handler(evaluator):
                 for b in range(4):
                     evaluator.total = 0

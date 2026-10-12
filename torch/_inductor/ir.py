@@ -1095,8 +1095,14 @@ class Loops(IRNode):
     dtype: torch.dtype
     inner_fn: Callable[..., Any]
     ranges: Sequence[_IntLike]
+    # Physical output shape, e.g. [N, D, E] for loops [B, J(b), D, E].
+    # N counts packed (b, j) pairs; the layout is an ordinary dense tensor.
     flat_size: Sequence[_IntLike] | None = None
     output_indexer: Callable[[Sequence[Expr]], Any] | None = None
+    # Total valid body evaluations, including reduction coordinates.
+    # For both pointwise [B, J(b), D] and sum_J producing [B, D],
+    # this is N * D, where N = sum_b lengths[b]. It is not B * J(b).
+    iteration_numel: _IntLike | None = None
 
     @cache_on_self_and_args("Loops")
     def get_free_symbol_uses(
@@ -1105,6 +1111,9 @@ class Loops(IRNode):
         return OrderedSet().union(
             *(get_free_symbols(e, unbacked_only) for e in self.ranges),
             self.inner_fn_free_symbols(unbacked_only),
+            get_free_symbols(self.iteration_numel, unbacked_only)
+            if self.iteration_numel is not None
+            else (),
         )
 
     def _to_str(self, names: Sequence[str]) -> str:
@@ -1290,7 +1299,8 @@ class Pointwise(Loops):
         value = loader(vars)
         addr = self.output_indexer(vars)
         if isinstance(addr, OpsValue):
-            addr = ops.indirect_indexing(addr, self.flat_size[0], wrap_neg=False)
+            sizes = cast(Sequence[_IntLike], self.flat_size)
+            addr = ops.indirect_indexing(addr, sympy_product(sizes), wrap_neg=False)
         return ops.store(output_name or "unnamed", addr, value)
 
     def constant_to_device(self, device: torch.device) -> IRNode:
@@ -1304,6 +1314,7 @@ class Pointwise(Loops):
             ranges=self.ranges,
             flat_size=self.flat_size,
             output_indexer=self.output_indexer,
+            iteration_numel=self.iteration_numel,
         )
 
 
@@ -1516,6 +1527,7 @@ class Reduction(Loops):
             ranges=self.ranges,
             flat_size=self.flat_size,
             output_indexer=self.output_indexer,
+            iteration_numel=self.iteration_numel,
             reduction_ranges=self.reduction_ranges,
             reduction_type=self.reduction_type,
             src_dtype=self.src_dtype,
