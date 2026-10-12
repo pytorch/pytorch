@@ -53,6 +53,7 @@ __all__ = [
 ]
 
 _USER_PRESERVED_ATTRIBUTES_KEY = "_user_preserved_attributes"
+FX_GRAPH_MODULE_FILE_PREFIX = "fx_generated_"
 
 
 @functools.cache
@@ -283,7 +284,10 @@ def _deserialize_graph_module(
         def proxy(self, node: Any) -> Any:
             proxy = super().proxy(node)
             # Preserve in-place operators (e.g. operator.iadd) in the code
-            if type(proxy).__name__ == "Proxy" and type(proxy).__module__ == "torch.fx.proxy":
+            if (
+                type(proxy).__name__ == "Proxy"
+                and type(proxy).__module__ == "torch.fx.proxy"
+            ):
                 return _inplace_op_proxy_cls()(node, self)
             return proxy
 
