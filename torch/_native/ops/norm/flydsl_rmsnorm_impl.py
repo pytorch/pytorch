@@ -18,11 +18,12 @@ def _common_supported(
     n: int,
     weight: torch.Tensor | None,
 ) -> bool:
-    """Cheap dispatcher predicate for supported forward inputs."""
-    if input.device.type != "cuda":
-        return False
-    device_index = input.device.index
-    if not fu._is_supported_arch(device_index, _SUPPORTED_ARCHES):
+    """Cheap dispatcher predicate for supported forward inputs.
+
+    Size and dtype checks come before device/arch: most declines are size
+    misses, and arch is already memoized in ``_is_supported_arch``.
+    """
+    if n <= 0:
         return False
     if input.dtype not in SUPPORTED_DTYPES:
         return False
@@ -32,12 +33,21 @@ def _common_supported(
         return False
     if weight is None:
         return False
-    return (
+    if not (
         weight.shape == (n,)
         and weight.dtype == input.dtype
-        and weight.device == input.device
         and weight.is_contiguous()
-    )
+    ):
+        return False
+    # Prefer is_cuda / get_device over building torch.device objects.
+    if not input.is_cuda:
+        return False
+    device_index = input.get_device()
+    if weight.get_device() != device_index:
+        return False
+    if not fu._is_supported_arch(device_index, _SUPPORTED_ARCHES):
+        return False
+    return True
 
 
 def _fused_rms_norm_fwd_perf_wins(rows_m: int, n: int) -> bool:
@@ -57,16 +67,21 @@ def _fused_rms_norm_cond(
     eps: float | None,
 ) -> bool:
     n = normalized_shape_1d(normalized_shape)
-    if n is None:
+    if n is None or n <= 0:
         return False
     if eps is not None and not eps >= 0.0:
         return False
+    # Reject on size before the rest of _common_supported: most declined calls
+    # fail the perf gate. Guard n > 0 above so numel() // n never raises;
+    # the eager router does not swallow cond exceptions.
+    rows_m = input.numel() // n
+    if not _fused_rms_norm_fwd_perf_wins(rows_m, n):
+        return False
     if not _common_supported(input, n, weight):
         return False
-    rows_m = input.numel() // n  # n has been validated to be non-Zero
     if not fu._fits_int32_buffer_span(rows_m, n, input.element_size()):
         return False
-    return _fused_rms_norm_fwd_perf_wins(rows_m, n)
+    return True
 
 
 def _fused_rms_norm_impl(

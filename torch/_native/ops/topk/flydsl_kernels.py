@@ -50,6 +50,15 @@ from torch._native.flydsl_utils import _resolve_rocm_arch
 from torch._native.instrumentation import instrumented_flydsl_cache
 
 
+# Prefer the raw cudaStream_t over building a Python Stream on every launch.
+# flydsl_impl._run already installs a device guard when needed, so launchers
+# here stay on the current device.
+_get_current_raw_stream = getattr(
+    torch._C,
+    "_cuda_getCurrentRawStream",
+    lambda device_index: torch.cuda.current_stream(device_index).cuda_stream,
+)
+
 _RADIX_BITS = 8
 _RADIX_MASK = (1 << _RADIX_BITS) - 1
 _RADIX_SIGN_BIT = 1 << (_RADIX_BITS - 1)
@@ -645,18 +654,18 @@ def topk_register_out(
     n = input_2d.shape[1]
     device_index = input_2d.device.index
     arch: str = _resolve_rocm_arch(device_index)  # pyrefly: ignore[bad-assignment]
-
-    with torch.cuda.device(input_2d.device):
-        stream = torch.cuda.current_stream(input_2d.device)
-        compiled = _compile_register_topk(
-            n,
-            k,
-            arch,
-            flyc.compile_backend_name(),
-            device_index,
-            compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
-        )
-        compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, stream)
+    # Device guard lives in flydsl_impl._run / _run_out. Raw stream on both
+    # hit and miss paths (same pattern as flydsl_rmsnorm_fwd).
+    stream = _get_current_raw_stream(device_index)
+    compiled = _compile_register_topk(
+        n,
+        k,
+        arch,
+        flyc.compile_backend_name(),
+        device_index,
+        compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
+    )
+    compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, stream)
 
 
 def topk_register(input_2d: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -709,19 +718,17 @@ def topk_radix_out(
     n = input_2d.shape[1]
     device_index = input_2d.device.index
     arch: str = _resolve_rocm_arch(device_index)  # pyrefly: ignore[bad-assignment]
-
-    with torch.cuda.device(input_2d.device):
-        stream = torch.cuda.current_stream(input_2d.device)
-        compiled = _compile_radix_select_topk(
-            n,
-            k,
-            deterministic,
-            arch,
-            flyc.compile_backend_name(),
-            device_index,
-            compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
-        )
-        compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, stream)
+    stream = _get_current_raw_stream(device_index)
+    compiled = _compile_radix_select_topk(
+        n,
+        k,
+        deterministic,
+        arch,
+        flyc.compile_backend_name(),
+        device_index,
+        compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
+    )
+    compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, stream)
 
 
 def topk_radix(
