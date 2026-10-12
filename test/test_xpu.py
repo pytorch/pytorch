@@ -3156,6 +3156,7 @@ class TestBlockStateAbsorption(TestCase):
         self.assertTrue(check(set()))
 
 
+@instantiate_parametrized_tests
 @unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
 @unittest.skipIf(IS_WINDOWS, "XPU IPC not available on non-Linux platforms")
 @unittest.skipIf(
@@ -3193,49 +3194,61 @@ class TestXPUMultiprocessing(TestCase):
         event.synchronize()
         c2p.put(1)  # notify parent synchronization is done
 
-    def test_event_handle_importer(self):
-        for event_cls in [torch.xpu.Event, torch.Event]:
-            e0 = event_cls(enable_timing=False, interprocess=True)
-            self.assertTrue(e0.query())
-            ctx = mp.get_context("spawn")
-            p2c = ctx.SimpleQueue()
-            c2p = ctx.SimpleQueue()
-            p = ctx.Process(
-                target=TestXPUMultiprocessing._event_handle_importer_consumer,
-                args=(event_cls, e0.ipc_handle(), p2c, c2p),
-            )
-            p.start()
-            c2p.get()  # wait for child to become ready
-            torch.xpu._sleep(200_000_000)  # spin for about 200 ms
-            e0.record()
-            p2c.put(0)  # notify child event is recorded
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.xpu.Event, name="xpu_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_handle_importer(self, event_cls):
+        e0 = event_cls(enable_timing=False, interprocess=True)
+        self.assertTrue(e0.query())
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestXPUMultiprocessing._event_handle_importer_consumer,
+            args=(event_cls, e0.ipc_handle(), p2c, c2p),
+        )
+        p.start()
+        c2p.get()  # wait for child to become ready
+        torch.xpu._sleep(200_000_000)  # spin for about 200 ms
+        e0.record()
+        p2c.put(0)  # notify child event is recorded
 
-            self.assertFalse(e0.query())
-            c2p.get()  # wait for synchronization in child
-            self.assertTrue(e0.query())
-            p2c.put(1)  # notify child to finish
-            p.join()
+        self.assertFalse(e0.query())
+        c2p.get()  # wait for synchronization in child
+        self.assertTrue(e0.query())
+        p2c.put(1)  # notify child to finish
+        p.join()
 
-    def test_event_handle_exporter(self):
-        for event_cls in [torch.xpu.Event, torch.Event]:
-            e0 = event_cls(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.xpu.Event, name="xpu_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_handle_exporter(self, event_cls):
+        e0 = event_cls(enable_timing=False, interprocess=True)
 
-            ctx = mp.get_context("spawn")
-            p2c = ctx.SimpleQueue()
-            c2p = ctx.SimpleQueue()
-            p = ctx.Process(
-                target=TestXPUMultiprocessing._event_handle_exporter_consumer,
-                args=(event_cls, e0.ipc_handle(), p2c, c2p),
-            )
-            p.start()
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestXPUMultiprocessing._event_handle_exporter_consumer,
+            args=(event_cls, e0.ipc_handle(), p2c, c2p),
+        )
+        p.start()
 
-            c2p.get()  # wait for event in child process is recorded
+        c2p.get()  # wait for event in child process is recorded
 
-            self.assertFalse(e0.query())
-            e0.synchronize()
-            self.assertTrue(e0.query())
-            p2c.put(0)  # notify child to finish
-            p.join()
+        self.assertFalse(e0.query())
+        e0.synchronize()
+        self.assertTrue(e0.query())
+        p2c.put(0)  # notify child to finish
+        p.join()
 
     def test_event_multiprocess(self):
         for event in [
