@@ -32,9 +32,9 @@ reduced dim, dtype-casting sum, integer/complex dtypes, non-collapsing outer
 layout) falls through to aten.
 
 Dispatch note: this CuTeDSL override is the only inner-tree path -- the ATen
-CUDA backend has no inner-tree kernel of its own. When this predicate accepts,
-the CuTeDSL kernel runs; when it rejects (or ``PYTORCH_SUM_INNER_TREE`` is
-unset), the call falls through to the unchanged ATen reduction.
+CUDA backend has no inner-tree kernel of its own. When the rollout config is
+disabled, no dispatcher override is installed. When enabled, accepted calls
+run the CuTeDSL kernel and rejected calls fall through to unchanged ATen.
 """
 
 from __future__ import annotations
@@ -46,6 +46,11 @@ from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._tensor_iterator import reduce_op, TensorIterator
 
 from ... import cutedsl_utils as cu
+
+
+# TODO: Move this rollout gate to a shared PyTorch config once eager native-op
+# config ownership is established.
+_INNER_TREE_ENABLED = os.getenv("PYTORCH_SUM_INNER_TREE", "") not in ("", "0")
 
 
 # Reduction input dtypes the kernel handles. fp32/fp64 are the bitwise-
@@ -75,12 +80,6 @@ def _int32_indexing_safe(self: torch.Tensor, d: int) -> bool:
     vec_size = max(1, 16 // self.element_size())
     num_batches_ub = -(-n // (32 * vec_size))
     return n <= _INT32_MAX and m <= _INT32_MAX and m * num_batches_ub <= _INT32_MAX
-
-
-def _inner_tree_enabled() -> bool:
-    # The CUDA gate is `use_inner_tree_reduction()`; the CuTeDSL predicate
-    # requires the explicit feature flag (an empty/"0" value is off).
-    return os.getenv("PYTORCH_SUM_INNER_TREE", "") not in ("", "0")
 
 
 def _normalize_dim(dim: int, ndim: int) -> int:
@@ -175,8 +174,6 @@ def _geometry(self: torch.Tensor, out: torch.Tensor, it: TensorIterator):
 def _base_cond_ok(self: torch.Tensor, dim, dtype) -> int | None:
     """Shared front gate. Returns the normalized reduced dim if the call is a
     candidate, else ``None``."""
-    if not _inner_tree_enabled():
-        return None
     if not self.is_cuda or is_fake_tensor(self):
         return None
     # dtype-casting sum (an explicit out/result dtype) is out of scope.
@@ -268,6 +265,9 @@ def _make_out_impl(reduce_into):
 
 
 def register_to_dispatch() -> None:
+    if not _INNER_TREE_ENABLED:
+        return
+
     # Eligibility (_cond/_out_cond) is reduction-agnostic; only the kernel
     # entry differs between sum and prod.
     cu.register_op_override(

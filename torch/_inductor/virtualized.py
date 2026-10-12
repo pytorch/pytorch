@@ -255,12 +255,14 @@ def _choices_default():
     We virtualize InductorChoices to allow changing inductor heuristics from out of tree.
     """
     from torch._inductor import config
-    from torch._inductor.choices import InductorChoices
+    from torch._inductor.choices import create_inductor_choices
+    from torch._inductor.heuristics.template import tlx
 
-    if config.inductor_choices_class is not None:
-        rv = config.inductor_choices_class()
-    else:
-        rv = InductorChoices()
+    # Has to precede the inductor_choices_class read: installing the torchTLX
+    # integration is what sets it.
+    tlx.maybe_install()
+
+    rv = create_inductor_choices(config.inductor_choices_class)
     setattr(threadlocal, _choices._key, rv)
     return rv
 

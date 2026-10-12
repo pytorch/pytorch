@@ -18,7 +18,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   lumen-cli-unit-tests-python312:
+    needs: check-ci
     permissions:
       contents: read
       pull-requests: write
@@ -46,6 +51,7 @@ jobs:
           pytest -v -s .ci/lumen_cli/tests/*
 
   lumen-cli-compatible-python39:
+    needs: check-ci
     permissions:
       contents: read
       pull-requests: write
