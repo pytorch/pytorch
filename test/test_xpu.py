@@ -19,7 +19,6 @@ import unittest
 import warnings
 from copy import deepcopy
 from itertools import product
-from unittest.mock import patch
 
 import torch
 import torch.multiprocessing as mp
@@ -271,8 +270,19 @@ if __name__ == "__main__":
 
     def test_parse_visible_devices(self):
         def _parse_visible_devices(val, strict=False):
-            with patch.dict(os.environ, {"ZE_AFFINITY_MASK": val}, clear=True):
+            # Set and restore only ZE_AFFINITY_MASK. Do not use patch.dict on
+            # os.environ: it restores via os.environ.clear(), which since
+            # Python 3.15 calls clearenv() and drops variables set natively by
+            # the XPU runtime (e.g. ZES_ENABLE_SYSMAN), breaking mem_get_info().
+            orig = os.environ.get("ZE_AFFINITY_MASK")
+            os.environ["ZE_AFFINITY_MASK"] = val
+            try:
                 return torch.xpu._parse_visible_devices(strict=strict)
+            finally:
+                if orig is None:
+                    del os.environ["ZE_AFFINITY_MASK"]
+                else:
+                    os.environ["ZE_AFFINITY_MASK"] = orig
 
         # Tokens with trailing non-numeric characters are invalid; entire list is rejected
         self.assertEqual(_parse_visible_devices("1a, 2b"), [])
