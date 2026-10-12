@@ -2,6 +2,7 @@
 #include <include/openreg.h>
 
 #include <atomic>
+#include <cstring>
 #include <thread>
 
 namespace {
@@ -178,6 +179,49 @@ TEST_F(EventTest, StreamWaitEventInvalidArgs) {
 
   EXPECT_EQ(orEventDestroy(event), orSuccess);
   EXPECT_EQ(orStreamDestroy(stream), orSuccess);
+}
+
+TEST_F(EventTest, EventIpcHandleRoundTrip) {
+  orEvent_t exporter = nullptr;
+  EXPECT_EQ(orEventCreate(&exporter), orSuccess);
+
+  orIpcEventHandle_t handle{};
+  EXPECT_EQ(orEventIpcGetHandle(&handle, exporter), orSuccess);
+
+  orEvent_t importer = nullptr;
+  EXPECT_EQ(orEventIpcOpenHandle(&importer, handle), orSuccess);
+  EXPECT_NE(importer, nullptr);
+
+  // Recording on the exporter should unblock a synchronize() on the
+  // imported event in what would otherwise be a separate process.
+  orStream_t stream = nullptr;
+  EXPECT_EQ(orStreamCreate(&stream), orSuccess);
+  EXPECT_EQ(orEventRecord(exporter, stream), orSuccess);
+  EXPECT_EQ(orEventSynchronize(importer), orSuccess);
+
+  EXPECT_EQ(orEventDestroy(importer), orSuccess);
+  EXPECT_EQ(orEventDestroy(exporter), orSuccess);
+  EXPECT_EQ(orStreamDestroy(stream), orSuccess);
+}
+
+TEST_F(EventTest, EventIpcGetHandleInvalidArgs) {
+  orEvent_t event = nullptr;
+  EXPECT_EQ(orEventCreate(&event), orSuccess);
+
+  orIpcEventHandle_t handle{};
+  EXPECT_EQ(orEventIpcGetHandle(nullptr, event), orErrorUnknown);
+  EXPECT_EQ(orEventIpcGetHandle(&handle, nullptr), orErrorUnknown);
+
+  EXPECT_EQ(orEventDestroy(event), orSuccess);
+}
+
+TEST_F(EventTest, EventIpcOpenHandleInvalidArgs) {
+  orIpcEventHandle_t bogus_handle{};
+  std::strncpy(bogus_handle.reserved, "/does_not_exist", OR_IPC_HANDLE_SIZE - 1);
+
+  orEvent_t event = nullptr;
+  EXPECT_EQ(orEventIpcOpenHandle(nullptr, bogus_handle), orErrorUnknown);
+  EXPECT_EQ(orEventIpcOpenHandle(&event, bogus_handle), orErrorUnknown);
 }
 
 } // namespace
