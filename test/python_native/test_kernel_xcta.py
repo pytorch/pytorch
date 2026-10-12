@@ -17,20 +17,28 @@ if not TEST_CUTEDSL:
 
 import cutlass
 
-from torch._native.ops.reductions import kernel_xcta, traits as T
+from torch._native.cutedsl import launch as _L
+from torch._native.ops.reductions import kernel_xcta, tile, traits as T
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestKernelXcta(TestCase):
     def test_reduce_row_xcta(self):
-        x = torch.randn(1, 1 << 20, device="cuda")
+        # A misaligned input needs an element-aligned descriptor.
+        raw = torch.randn((1 << 20) + 1, device="cuda")
+        x = raw[1:].view(1, -1)
+        self.assertEqual(
+            _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
+            x.element_size(),
+        )
         out = kernel_xcta.reduce_row_xcta(
-            T.SumOps(acc=cutlass.Float32), "smoke", x, torch.float32
+            T.SumOps(acc=cutlass.Float32),
+            "smoke",
+            x,
+            torch.float32,
         )
-        torch.testing.assert_close(
-            out, x.double().sum(dim=1).float(), atol=2e-2, rtol=1e-4
-        )
+        self.assertEqual(out, x.double().sum(dim=1).float(), atol=2e-2, rtol=1e-4)
 
     def test_two_output_split(self):
         # Stage 2 projects both outputs from one accumulator; this path rejects index traits.

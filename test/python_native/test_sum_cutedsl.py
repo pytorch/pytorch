@@ -11,6 +11,7 @@
 # bit-for-bit, which is the contract for this op.
 
 import hashlib
+import math
 import os
 import sys
 import unittest
@@ -283,6 +284,51 @@ class TestSumCuteDSLOverride(TestCase):
         out = torch.empty(128, device="cuda", dtype=torch.float32)
         torch.sum(x, dim=1, out=out)
         self.assertEqual(out, ref)
+
+    @parametrize("op", ("sum", "prod"))
+    def test_singleton_noncollapsible_rows_fall_through(self, op):
+        values = torch.arange(36, device="cuda", dtype=torch.float32)
+        base = values.reshape(18, 2, 1, 1)
+        x = base[::3]
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = getattr(torch, op)(x, 3)
+        self.assertEqual(getattr(torch, op)(x, 3), expected)
+
+        raw = torch.arange(100, device="cuda", dtype=torch.float32)
+        x = raw.as_strided((6, 2, 1, 1), (6, 1, 1, 1))
+        storage = torch.full((100,), -1.0, device="cuda")
+        out = storage.as_strided((6, 2, 1), (2, 1, 1))
+        getattr(torch, op)(x, 3, out=out)
+        self.assertEqual(out, x[..., 0])
+        self.assertEqual(storage[12:], torch.full_like(storage[12:], -1.0))
+
+    @parametrize("op", ("sum", "prod"))
+    @parametrize("keepdim", (False, True))
+    @parametrize("shape_dim", (((10, 1), 1), ((1, 10), 0), ((2, 1, 5), 1)))
+    def test_singleton_strided_out(self, op, keepdim, shape_dim):
+        shape, dim = shape_dim
+        numel = math.prod(shape)
+        x = torch.arange(1, 1 + numel, device="cuda").reshape(shape).float()
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = getattr(torch, op)(x, dim=dim, keepdim=keepdim)
+
+        storage = torch.full((2 * expected.numel() + 1,), -1.0, device="cuda")
+        out_indices = slice(1, 2 * expected.numel() + 1, 2)
+        out = storage[out_indices].view(expected.shape)
+        getattr(torch, op)(x, dim=dim, keepdim=keepdim, out=out)
+
+        expected_storage = torch.full_like(storage, -1.0)
+        expected_storage[out_indices].copy_(expected.flatten())
+        self.assertEqual(storage, expected_storage)
+
+    @parametrize("op", ("sum", "prod"))
+    def test_singleton_zero_stride_out_falls_through(self, op):
+        x = torch.arange(10, device="cuda", dtype=torch.float32).reshape(10, 1)
+        out = torch.empty(1, device="cuda").expand(10)
+        into = getattr(ordered, f"{op}_into")
+        with mock.patch.object(ordered, f"{op}_into", wraps=into) as run:
+            getattr(torch, op)(x, 1, out=out)
+        self.assertEqual(run.call_count, 0)
 
     def test_strided_outer_input(self):
         base = torch.ones(256, 32, device="cuda", dtype=torch.float32)
