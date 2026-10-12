@@ -5,9 +5,11 @@ description: Checklist for adding a new overload (e.g. `mm.dtype`, `addmm.comput
 
 # Adding an overload to an existing ATen op
 
-A build that touches `native_functions.yaml`, `autocast_mode.h` or a widely included header
-such as `Context.h` is close to a full rebuild. Each missed item below costs another full
-rebuild or ships a silent bug. **Finish all of Part 1 before starting the first build.**
+Editing `native_functions.yaml` regenerates headers that most of the tree includes, so it is
+close to a full rebuild; so is editing `ATen/Context.h` (e.g. to add a global setting).
+`autocast_mode.h` reaches only about a dozen translation units, but forgetting it still costs
+another build, relink and test cycle. Each missed item below costs a rebuild or ships a
+silent bug. **Finish all of Part 1 before starting the first build.**
 
 Find the closest precedent first and copy its footprint. For matmul ops, that's the
 `out_dtype` overloads (`grep -n out_dtype aten/src/ATen/native/native_functions.yaml`).
