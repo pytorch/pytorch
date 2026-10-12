@@ -714,15 +714,20 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
         if args:
             other = args[0]
-            if isinstance(other, ConstDictVariable):
-                # NB - Guard on all the keys of the other dict to ensure
-                # correctness.
+            if (
+                isinstance(other, ConstDictVariable)
+                and other.python_type().__iter__ is dict.__iter__
+            ):
                 other.install_dict_keys_match_guard()
                 self.items.update(other.items)
             elif (
                 isinstance(
                     other,
-                    (variables.UserDefinedObjectVariable, MappingProxyVariable),
+                    (
+                        variables.UserDefinedObjectVariable,
+                        ConstDictVariable,
+                        MappingProxyVariable,
+                    ),
                 )
                 and other.call_obj_hasattr(tx, "keys").as_python_constant()
             ):
@@ -955,6 +960,16 @@ class OrderedDictVariable(ConstDictVariable):
     # gives move_to_end/popitem(last=) below their real backing storage.
     items: "collections.OrderedDict[HashableTracker, VariableTracker]"  # pyrefly: ignore[bad-override]
 
+    def tp_init_impl(
+        self: ConstDictVariable,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, polyfills.odict_update), [self, *args], kwargs
+        )
+
     # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
     # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
     # OrderedDict exposes no tp_getset / tp_members.
@@ -1002,10 +1017,38 @@ class OrderedDictVariable(ConstDictVariable):
         tx.output.side_effects.mutation(self)
         return variables.TupleVariable([k.vt, v])
 
+    def dict_keys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return super().dict_keys(tx, args, kwargs).clone(is_ordered=True)
+
+    def dict_values(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return super().dict_values(tx, args, kwargs).clone(is_ordered=True)
+
+    def dict_items(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return super().dict_items(tx, args, kwargs).clone(is_ordered=True)
+
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
+        "update": Method(tp_init_impl),
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
+        "keys": Method(dict_keys),
+        "values": Method(dict_values),
+        "items": Method(dict_items),
     }
 
     def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
@@ -1049,21 +1092,21 @@ class OrderedDictVariable(ConstDictVariable):
         # OrderedDict.__or__/__ror__ preserve the OrderedDict type, unlike
         # dict.__or__ which returns a plain dict for a subclass operand.
         # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L327-L339
-        if not issubclass(other.python_type(), dict):
+        if not pydict_check(other):
             return ConstantVariable.create(NotImplemented)
-        # Merge via the internal helper, bypassing a subclass's overridden
-        # copy/update while preserving the OrderedDict subclass type.
-        if reverse:
-            new = cast(
-                ConstDictVariable,
-                VariableTracker.build(tx, self.python_type()).call_function(
-                    tx, [other], {}
-                ),
-            )
-            ConstDictVariable.dict_update(new, tx, [self], {})
+        # CPython's odict_or calls the subclass constructor, then merges via
+        # its internal helper without calling overridden copy/update methods.
+        left, right = (other, self) if reverse else (self, other)
+        owner = (
+            left if issubclass(left.python_type(), collections.OrderedDict) else self
+        )
+        if owner.python_type() is collections.OrderedDict:
+            new = OrderedDictVariable({}, mutation_type=ValueMutationNew())
+            OrderedDictVariable.tp_init_impl(new, tx, [left], {})
         else:
-            new = cast(ConstDictVariable, ConstDictVariable.dict_copy(self, tx, [], {}))
-            ConstDictVariable.dict_update(new, tx, [other], {})
+            cls = VariableTracker.build(tx, type).call_function(tx, [owner], {})
+            new = cast(ConstDictVariable, cls.call_function(tx, [left], {}))
+        OrderedDictVariable.tp_init_impl(new, tx, [right], {})
         return new
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -1249,7 +1292,9 @@ class DictViewVariable(VariableTracker):
 
     kv: str | None = None
 
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
+    def __init__(
+        self, dv_dict: ConstDictVariable, *, is_ordered: bool = False, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         if self.kv not in ("keys", "values", "items"):
             raise AssertionError(
@@ -1258,6 +1303,8 @@ class DictViewVariable(VariableTracker):
         if not isinstance(dv_dict, ConstDictVariable):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
+        # The creating descriptor determines the view, not the receiver's type.
+        self.is_ordered = is_ordered
 
     @property
     def view_items(self) -> Any:
@@ -1285,9 +1332,17 @@ class DictViewVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.kv is None:
             raise AssertionError("kv must not be None for reconstruct")
+
+        def load_method() -> None:
+            if self.is_ordered:
+                codegen.load_import_from("collections", "OrderedDict")
+            else:
+                codegen.load_import_from("builtins", "dict")
+            codegen.append_output(codegen.create_load_attr(self.kv))
+
+        codegen.add_push_null(load_method)
         codegen(self.dv_dict)
-        codegen.load_method(self.kv)
-        codegen.call_method(0)
+        codegen.extend_output(create_call_function(1, False))
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
