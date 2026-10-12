@@ -218,7 +218,9 @@ class TestCodegenOutputAlias(TestCase):
         outputs. Exercises non-differentiable output collection in
         forward finalize codegen and backward correctness.
         """
-        with self._capture_codegen_source("compiled_function_forward") as xform_captured:
+        with self._capture_codegen_source(
+            "compiled_function_forward"
+        ) as xform_captured:
 
             @torch.compile(backend="aot_eager")
             def f(x, y):
