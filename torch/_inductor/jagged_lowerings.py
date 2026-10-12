@@ -4,8 +4,9 @@ import sympy
 
 import torch
 
+from .codegen.common import BackendFeature
 from .ir import Pointwise, TensorBox
-from .virtualized import ops
+from .virtualized import ops, V
 
 
 # pyre-ignore[2,3]
@@ -124,9 +125,11 @@ def register_jagged_ops():
         jagged_values_size = jagged_values.get_size()
 
         # only handle the common case of a single jagged dimension
+        # The fused kernel needs indirect_indexing + masked; backends that
+        # can't codegen those (e.g. Pallas) must fall back.
         if (
             len(jagged_offsets) != 1
-            or device.type != "cuda"
+            or not V.graph.has_feature(jagged_values, BackendFeature.INDIRECT_INDEXING)
             or device != jagged_offsets[0].get_device()
             or len(jagged_values_size) != 2
             or len(jagged_offsets[0].get_size()) != 1
@@ -194,9 +197,12 @@ def register_jagged_ops():
         dense_size = dense.get_size()
 
         # only handle the common case of a single jagged dimension
+        # The fused kernel needs bucketize (via get_inverse_offsets) plus
+        # indirect_indexing and masked loads, so it requires both features.
         if (
             len(jagged_offsets) != 1
-            or device.type != "cuda"
+            or not V.graph.has_feature(dense, BackendFeature.BUCKETIZE)
+            or not V.graph.has_feature(dense, BackendFeature.INDIRECT_INDEXING)
             or device != jagged_offsets[0].get_device()
             or len(jagged_offsets[0].get_size()) != 1
             or len(dense_size) != 3

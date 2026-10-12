@@ -87,7 +87,7 @@ class TestBits(TestCase):
                 self.assertEqual(z_ref, z.view(view_type))
 
 
-instantiate_device_type_tests(TestBits, globals())
+instantiate_device_type_tests(TestBits, globals(), allow_xpu=True)
 
 
 class TestBitsSubclass(TestCase):
