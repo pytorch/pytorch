@@ -3,7 +3,7 @@
 import torch
 
 from ... import cutedsl_utils as cu
-from .group_meta import allocate_output
+from .group_meta import allocate_output, expected_out_size_stride
 from .hopper_deepseek_kernel import run_deepseek_grouped_gemm
 from .scaled_grouped_mm_deepseek import _should_use_cutedsl_scaled_grouped_mm_deepseek
 
@@ -75,31 +75,11 @@ def _out_cond(
         return False
     if out.device != self.device or out.data_ptr() % 16 != 0:
         return False
-    want_dtype = out_dtype if out_dtype is not None else torch.bfloat16
-    if out.dtype != want_dtype:
+    if out.dtype != torch.bfloat16:
         return False
-    n = mat2.size(-1)
-    elem_size = 2
-    alignment = max(16 // elem_size, 1)
-    padded_n = -(-n // alignment) * alignment
-    if self.dim() == 3:
-        batch, m = self.size(0), self.size(1)
-        if mat2.dim() == 2:
-            if out.shape != (m, n):
-                return False
-            return out.stride() == (padded_n, 1)
-        if out.shape != (batch, m, n):
-            return False
-        return out.stride() == (m * padded_n, padded_n, 1)
-    m = self.size(0)
-    if mat2.dim() == 2:
-        groups = offs.size(0) if offs is not None else 0
-        if out.shape != (groups, m, n):
-            return False
-        return out.stride() == (m * padded_n, padded_n, 1)
-    if out.dim() != 2 or out.size(0) != m or out.size(1) != n:
-        return False
-    return out.stride() == (padded_n, 1)
+    group_count = offs.size(0) if offs is not None and mat2.dim() == 2 else None
+    size, stride = expected_out_size_stride(self, mat2, torch.bfloat16, group_count)
+    return out.shape == size and out.stride() == stride
 
 
 def _run(
@@ -110,20 +90,14 @@ def _run(
     recipe_a: int,
     recipe_b: int,
     offs,
-    out_dtype,
     out=None,
 ) -> torch.Tensor:
     if out is None:
-        out = allocate_output(
-            self,
-            mat2,
-            out_dtype if out_dtype is not None else torch.bfloat16,
-            offs.size(0) if mat2.dim() == 2 else None,
-        )
-    with torch.cuda.device(self.get_device()):
-        return run_deepseek_grouped_gemm(
-            self, mat2, scale_a, scale_b, recipe_a, recipe_b, offs, out
-        )
+        group_count = offs.size(0) if mat2.dim() == 2 else None
+        out = allocate_output(self, mat2, torch.bfloat16, group_count)
+    return run_deepseek_grouped_gemm(
+        self, mat2, scale_a, scale_b, recipe_a, recipe_b, offs, out
+    )
 
 
 def _impl(
@@ -141,13 +115,7 @@ def _impl(
     contraction_dim=(),
     use_fast_accum=False,
 ) -> torch.Tensor:
-    cutedsl_call = _run
-    if torch.compiler.is_compiling():
-        import torch._dynamo as torch_dynamo
-
-        cutedsl_call = torch_dynamo.disable(cutedsl_call)
-
-    return cutedsl_call(
+    return _run(
         self,
         mat2,
         scale_a[0],
@@ -155,7 +123,6 @@ def _impl(
         recipe_a[0],
         recipe_b[0],
         offs,
-        out_dtype,
     )
 
 
@@ -176,13 +143,7 @@ def _out_impl(
     *,
     out,
 ) -> torch.Tensor:
-    cutedsl_call = _run
-    if torch.compiler.is_compiling():
-        import torch._dynamo as torch_dynamo
-
-        cutedsl_call = torch_dynamo.disable(cutedsl_call)
-
-    return cutedsl_call(
+    return _run(
         self,
         mat2,
         scale_a[0],
@@ -190,7 +151,6 @@ def _out_impl(
         recipe_a[0],
         recipe_b[0],
         offs,
-        out_dtype,
         out=out,
     )
 

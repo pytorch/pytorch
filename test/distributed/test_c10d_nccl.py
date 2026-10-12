@@ -2200,6 +2200,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             device_id=device_idx,
         )
         dist.all_reduce(torch.empty(1, device=torch.device("cuda", device_idx)))
+        # Tear down explicitly so the nccl2 watchdog is stopped before
+        # interpreter shutdown unloads CUDA (avoids a teardown race).
+        dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -5755,7 +5758,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_broadcast_float8(self, float8_dtype):
         device = torch.device(f"cuda:{self.rank}")
-        if sm_is_or_higher_than(device, 9, 0):
+        if not sm_is_or_higher_than(device, 9, 0):
             self.skipTest("FP8 broadcast natively supported on sm90+")
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(

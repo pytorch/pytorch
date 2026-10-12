@@ -54,7 +54,10 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
+    isRocmArchAnyOf,
     MI350_ARCH,
+    NAVI4_ARCH,
+    NAVI_ARCH,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     run_tests,
@@ -213,6 +216,50 @@ def _pad_128x128_scales(scale: torch.Tensor) -> (torch.Tensor, int):
 
 def round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
+
+
+
+def _copy_to_end_of_device_mapping(t):
+    # Places a copy of `t` so that it ends exactly where a VMM mapping ends, with
+    # the following page reserved but unmapped, so any read past `t` faults.
+    from torch.cuda._utils import _check_cuda_bindings_driver as check, _HAS_CUDA_BINDINGS
+
+    if not _HAS_CUDA_BINDINGS:
+        raise unittest.SkipTest("cuda.bindings is required")
+    from cuda.bindings import driver
+
+    nbytes = t.numel() * t.element_size()
+    prop = driver.CUmemAllocationProp()
+    prop.type = driver.CUmemAllocationType.CU_MEM_ALLOCATION_TYPE_PINNED
+    prop.location.type = driver.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE
+    prop.location.id = t.device.index
+    granularity = check(driver.cuMemGetAllocationGranularity(
+        prop, driver.CUmemAllocationGranularity_flags.CU_MEM_ALLOC_GRANULARITY_MINIMUM
+    ))
+    mapped = round_up(nbytes, granularity)
+    base = int(check(driver.cuMemAddressReserve(mapped + granularity, granularity, 0, 0)))
+    handle = check(driver.cuMemCreate(mapped, prop, 0))
+    check(driver.cuMemMap(base, mapped, 0, handle, 0))
+    access = driver.CUmemAccessDesc()
+    access.location = prop.location
+    access.flags = driver.CUmemAccess_flags.CU_MEM_ACCESS_FLAGS_PROT_READWRITE
+    check(driver.cuMemSetAccess(base, mapped, [access], 1))
+
+    class _CudaArray:
+        __cuda_array_interface__ = {
+            "shape": (nbytes,), "typestr": "|u1", "data": (base + mapped - nbytes, False), "version": 3,
+        }
+
+    guarded = torch.as_tensor(_CudaArray(), device=t.device)
+    guarded.copy_(t.contiguous().view(-1).view(torch.uint8))
+
+    def release():
+        torch.cuda.synchronize(t.device)
+        check(driver.cuMemUnmap(base, mapped))
+        check(driver.cuMemRelease(handle))
+        check(driver.cuMemAddressFree(base, mapped + granularity))
+
+    return guarded.view(t.dtype).view(t.shape), release
 
 
 def mx_swizzle_for(device, mat_dtype) -> SwizzleType:
@@ -2513,7 +2560,7 @@ class TestFP8Matmul(TestCase):
         not torch.version.hip and _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
     )
-    @runOnRocmArch(MI350_ARCH)
+    @runOnRocmArch(MI350_ARCH + NAVI4_ARCH)
     @parametrize("output_dtype", [torch.bfloat16, ])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
     @parametrize("M,N,K", [(256, 256, 256), (256, 256, 512)])
@@ -3563,7 +3610,9 @@ class TestFP8Matmul(TestCase):
             )
 
     @onlyAccelerator
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MX_GEMM and not isRocmArchAnyOf(NAVI_ARCH), mx_skip_msg
+    )
     @unittest.skipIf(not torch.version.hip, "The MX scale layout is fixed by arch and ROCm version only on ROCm")
     def test_rocm_mx_swizzle_size_error_names_arch(self, device) -> None:
         # This size check runs before the kernel's arch gate, so on an arch
@@ -3742,12 +3791,11 @@ class TestFP8Matmul(TestCase):
         device,
     ):
         """Covers the three DeepSeek recipes and production kernel variants."""
-        from torch._native import registry
         from torch._native.ops.scaled_grouped_mm.hopper_config import (
             select_kernel_config,
         )
 
-        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
 
         torch.manual_seed(42)
         total_m = sum(group_sizes)
@@ -3850,15 +3898,15 @@ class TestFP8Matmul(TestCase):
             (1, 128, (128, 256, 512), 256, 128),
             (1, 128, (256,), 64, 256),
             (1, 128, (256, 0, 256), 128, 256),
+            # More tiles than SMs, so a CTA reaches an empty group after a full one.
+            (1, 128, (128, 0, 256, 0, 128, 0, 256, 0), 1024, 1024),
         ],
     )
     def test_scaled_grouped_mm_deepseek_blockwise_2d_2d(
         self, out_overload, lhs_block, rhs_block, group_ks, M, N, device
     ):
         """offs splits K: A is (M, K), B is (K, N), out is (G, M, N)."""
-        from torch._native import registry
-
-        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
 
         torch.manual_seed(42)
         K = sum(group_ks)
@@ -3915,7 +3963,7 @@ class TestFP8Matmul(TestCase):
             out = torch.empty_strided(
                 (G, M, N), (M * padded_n, padded_n, 1),
                 device=device, dtype=torch.bfloat16,
-            )
+            ).fill_(float("nan"))
             actual = scaled_grouped_mm_wrap(
                 a_fp8, mat2, [a_scale], [scale_b],
                 [lhs_recipe], [rhs_recipe], out=out, **kwargs,
@@ -3947,9 +3995,7 @@ class TestFP8Matmul(TestCase):
         self, out_overload, lhs_block, rhs_block, B, M, N, K, device
     ):
         """No offs: A is (B, M, K), B is (B, K, N), out is (B, M, N)."""
-        from torch._native import registry
-
-        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
 
         torch.manual_seed(42)
         lhs_recipe = ScalingType.BlockWise1x128 if lhs_block == 1 else ScalingType.BlockWise128x128
@@ -4040,9 +4086,7 @@ class TestFP8Matmul(TestCase):
         self, out_overload, lhs_block, rhs_block, G, M, N, K, device
     ):
         """offs splits N: A is (G, M, K), B is (K, N), out is (M, N)."""
-        from torch._native import registry
-
-        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
 
         torch.manual_seed(42)
         lhs_recipe = ScalingType.BlockWise1x128 if lhs_block == 1 else ScalingType.BlockWise128x128
@@ -4125,6 +4169,47 @@ class TestFP8Matmul(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipCUDAIf(not IS_SM90, "DeepSeek style grouped scaling requires SM90 (Hopper)")
+    @skipIfNoCuteDSL
+    def test_scaled_grouped_mm_deepseek_3d_2d_input_at_mapping_end(self, device):
+        # 1088-column groups leave each group's last 128-wide B tile half empty, so its
+        # second 64-row TMA piece is fully out of bounds, for the last group past B
+        # itself. The driver sets TMA descriptor bit 21 for B, and it survives
+        # tensormap.replace; on Blackwell that makes such pieces read memory.
+        from torch._native.ops.scaled_grouped_mm.hopper_config import select_kernel_config
+
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
+        torch.manual_seed(42)
+        G, M, K, cols = 2, 128, 256, 1088
+        N = G * cols
+        num_sms = torch.cuda.get_device_properties(device).multi_processor_count
+        config = select_kernel_config(total_m=M, n=N, k=K, group_count=G, num_sms=num_sms, jagged_n=True)
+        self.assertEqual(config.tile_n, 128)
+
+        recipe = ScalingType.BlockWise1x128
+        a_fp8_l = []
+        a_scale = torch.empty_strided((G, M, K // 128), (M * (K // 128), 1, M), device=device, dtype=torch.float32)
+        for g in range(G):
+            a_fp8_g, a_q = tensor_to_scale_block(torch.randn(M, K, device=device, dtype=torch.bfloat16), e4m3_type, 1, 128)
+            a_fp8_l.append(a_fp8_g)
+            a_scale[g].copy_(a_q.reciprocal())
+        mat_a = torch.stack(a_fp8_l)
+        b_fp8, b_q = tensor_to_scale_block(torch.randn(N, K, device=device, dtype=torch.bfloat16), e4m3_type, 1, 128)
+        scale_b = b_q.reciprocal().t().contiguous().t()
+        offs = torch.tensor([cols * (g + 1) for g in range(G)], device=device, dtype=torch.int32)
+
+        def run(b):
+            return scaled_grouped_mm_wrap(
+                mat_a, b.t(), a_scale, scale_b, recipe, recipe, offs=offs, out_dtype=torch.bfloat16
+            )
+
+        expected = run(b_fp8)
+        guarded, release = _copy_to_end_of_device_mapping(b_fp8)
+        self.addCleanup(release)
+        self.assertEqual(run(guarded), expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @skipCUDAIf(not IS_SM90, "DeepSeek grouped eligibility requires SM90")
     @skipIfNoCuteDSL
     def test_scaled_grouped_mm_deepseek_eligibility(self, device):
@@ -4176,6 +4261,9 @@ class TestFP8Matmul(TestCase):
         self.assertFalse(eligible(offs=torch.tensor([M], dtype=torch.int32)))
         strided_offs = torch.tensor([M, 0], device=device, dtype=torch.int32)[::2]
         self.assertFalse(eligible(offs=strided_offs))
+        self.assertFalse(
+            eligible(a=a[:, :0], b=b[:, :0], scale_a=scale_a[:, :0], scale_b=scale_b[:, :, :0])
+        )
 
         out = torch.empty((M, N), device=device, dtype=torch.bfloat16)
         self.assertTrue(

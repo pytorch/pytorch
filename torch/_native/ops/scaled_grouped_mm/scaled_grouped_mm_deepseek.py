@@ -1,31 +1,35 @@
 """Eligibility check and execution for the SM90 DeepSeek FP8 grouped mm."""
 
-import functools
+from collections.abc import Sequence
+from typing import NamedTuple
 
 import torch
+from torch._meta_registrations import ceil_div, round_up
+from torch._native.cutedsl.hw_caps import caps
+from torch._native.utils.capability import device_ok, is_traced, on_current_device
+from torch._native.utils.tensor import const_data_ptr
 
-from ._common import BLOCKWISE_128X128, BLOCKWISE_1X128, ceil_div, NO_SWIZZLE, round_up
+from ._common import BLOCKWISE_128X128, BLOCKWISE_1X128, NO_SWIZZLE
 from .hopper_config import select_kernel_config
 
 
-_DEEPSEEK_RECIPES = {
-    (BLOCKWISE_1X128, BLOCKWISE_1X128),
-    (BLOCKWISE_1X128, BLOCKWISE_128X128),
-    (BLOCKWISE_128X128, BLOCKWISE_1X128),
+class _DeepSeekFormat(NamedTuple):
+    name: str
+    recipe_a: int
+    recipe_b: int
+
+    def matches(self, recipe_a: Sequence[int], recipe_b: Sequence[int]) -> bool:
+        return recipe_a[0] == self.recipe_a and recipe_b[0] == self.recipe_b
+
+
+_DEEPSEEK_FORMATS = {
+    fmt.name: fmt
+    for fmt in (
+        _DeepSeekFormat("1x128_1x128", BLOCKWISE_1X128, BLOCKWISE_1X128),
+        _DeepSeekFormat("1x128_128x128", BLOCKWISE_1X128, BLOCKWISE_128X128),
+        _DeepSeekFormat("128x128_1x128", BLOCKWISE_128X128, BLOCKWISE_1X128),
+    )
 }
-
-
-@functools.cache
-def _num_sms(device: int) -> int:
-    return torch.cuda.get_device_properties(
-        torch.device("cuda", device)
-    ).multi_processor_count
-
-
-@functools.cache
-def _sm90_only(device: int) -> bool:
-    major, _ = torch.cuda.get_device_capability(device)
-    return major == 9
 
 
 def _expected_scale_b_shape(
@@ -75,9 +79,21 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
     contraction_dim,
     use_fast_accum,
 ) -> bool:
-    if not self.is_cuda:
+    if is_traced(self) or not device_ok(self, (9,)) or not on_current_device(self):
         return False
+    # Every DeepSeek format shares these dtypes and differs only in recipes.
     if self.dtype != torch.float8_e4m3fn or mat2.dtype != torch.float8_e4m3fn:
+        return False
+    if (
+        len(scale_a) != 1
+        or len(scale_b) != 1
+        or len(recipe_a) != 1
+        or len(recipe_b) != 1
+    ):
+        return False
+    if scale_a[0].dtype != torch.float32 or scale_b[0].dtype != torch.float32:
+        return False
+    if not any(fmt.matches(recipe_a, recipe_b) for fmt in _DEEPSEEK_FORMATS.values()):
         return False
     if self.dim() not in (2, 3) or mat2.dim() not in (2, 3):
         return False
@@ -103,34 +119,21 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
         or offs.stride(0) != 1
     ):
         return False
-    if (
-        len(scale_a) != 1
-        or len(recipe_a) != 1
-        or len(scale_b) != 1
-        or len(recipe_b) != 1
-    ):
-        return False
     if len(swizzle_a) != 1 or len(swizzle_b) != 1:
+        return False
+    if swizzle_a[0] != NO_SWIZZLE or swizzle_b[0] != NO_SWIZZLE:
         return False
     recipe_a0 = recipe_a[0]
     recipe_b0 = recipe_b[0]
-    if swizzle_a[0] != NO_SWIZZLE or swizzle_b[0] != NO_SWIZZLE:
-        return False
-    if (recipe_a0, recipe_b0) not in _DEEPSEEK_RECIPES:
-        return False
-    if not _sm90_only(self.device.index or 0):
-        return False
     scale_a0 = scale_a[0]
     scale_b0 = scale_b[0]
-    if scale_a0.dtype != torch.float32 or scale_b0.dtype != torch.float32:
-        return False
     if (
         mat2.device != self.device
         or scale_a0.device != self.device
         or scale_b0.device != self.device
     ):
         return False
-    if self.data_ptr() % 16 != 0 or mat2.data_ptr() % 16 != 0:
+    if const_data_ptr(self) % 16 != 0 or const_data_ptr(mat2) % 16 != 0:
         return False
 
     b_is_2d = mat2.dim() == 2
@@ -161,7 +164,8 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
                 return False
     if k2 != k:
         return False
-    if k % 128 != 0:
+    # The kernel needs at least one K tile to produce an accumulator.
+    if k == 0 or k % 128 != 0:
         return False
     # ATen validates this before it picks a backend, so accepting it here would
     # make the op's domain depend on whether this path is registered.
@@ -204,7 +208,7 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
         and scale_a0.stride(-1) % 4 != 0
     ):
         return False
-    if recipe_a0 == BLOCKWISE_1X128 and scale_a0.data_ptr() % 16 != 0:
+    if recipe_a0 == BLOCKWISE_1X128 and const_data_ptr(scale_a0) % 16 != 0:
         return False
     if scale_b0.shape != _expected_scale_b_shape(recipe_b0, group_count, k, n, b_is_2d):
         return False
@@ -224,7 +228,7 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
         return False
     if recipe_b0 == BLOCKWISE_1X128 and not b_is_2d and scale_b0.stride(0) % 4 != 0:
         return False
-    if recipe_b0 == BLOCKWISE_1X128 and scale_b0.data_ptr() % 16 != 0:
+    if recipe_b0 == BLOCKWISE_1X128 and const_data_ptr(scale_b0) % 16 != 0:
         return False
     # Decline shapes the selector cannot tile, rather than letting the launch
     # path raise after this returned True.
@@ -233,7 +237,7 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
         n=n,
         k=k,
         group_count=group_count,
-        num_sms=_num_sms(self.device.index or 0),
+        num_sms=caps(self.device.index).sm_count,
         groups_split_k=b_is_2d and not a_is_3d,
         batched=a_is_3d and not b_is_2d,
         jagged_n=a_is_3d and b_is_2d,

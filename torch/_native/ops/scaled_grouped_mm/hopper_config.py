@@ -4,6 +4,8 @@ import functools
 import math
 from typing import NamedTuple
 
+from torch._meta_registrations import ceil_div
+
 
 class HopperDeepSeekConfig(NamedTuple):
     tile_m: int
@@ -50,11 +52,11 @@ def _tile_rank(
 ) -> tuple[int, float, int]:
     # Tiling is per group, so the M extent that matters is the average group,
     # not total_m: a 128-row tile over 4-row groups wastes twice a 64-row tile.
-    m_tiles = -(-avg_group_m // tile_m)
-    n_tiles = -(-n // tile_n)
+    m_tiles = ceil_div(avg_group_m, tile_m)
+    n_tiles = ceil_div(n, tile_n)
     tiles = group_count * m_tiles * n_tiles
     work = tiles * tile_m * tile_n
-    waves = -(-tiles // num_sms)
+    waves = ceil_div(tiles, num_sms)
     wave_fill = tiles / (waves * num_sms)
     return -work, wave_fill * math.sqrt(tile_m * tile_n), tile_n
 
@@ -97,7 +99,7 @@ def select_kernel_config(
 
     tile_m, tile_n = best_tile
     cluster_n = 1
-    tiles_n = -(-n // tile_n)
+    tiles_n = ceil_div(n, tile_n)
     tiny_single_group = (
         group_count == 1
         and not uniform_m

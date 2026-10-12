@@ -4,9 +4,11 @@ import functools
 from typing import NamedTuple
 
 import torch
+from torch._meta_registrations import round_up
+from torch._native.utils.tensor import const_data_ptr
 
 from ._common import BLOCKWISE_1X128
-from .hopper_config import HopperDeepSeekConfig, select_kernel_config
+from .hopper_config import HopperDeepSeekConfig
 
 
 class GroupMetadata(NamedTuple):
@@ -24,9 +26,7 @@ def expected_out_size_stride(
     group_count: int | None = None,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     n = mat_b.size(-1)
-    elem_size = torch.empty((), dtype=out_dtype).element_size()
-    alignment = max(16 // elem_size, 1)
-    padded_n = -(-n // alignment) * alignment
+    padded_n = round_up(n, max(16 // out_dtype.itemsize, 1))
     if mat_a.dim() == 3:
         if mat_b.dim() == 2:
             # offs splits N: one 2-D output, groups own column ranges.
@@ -87,7 +87,7 @@ def build_group_metadata(
     recipe_a: int,
     offs: torch.Tensor,
     out: torch.Tensor,
-    config: HopperDeepSeekConfig | None = None,
+    config: HopperDeepSeekConfig,
     offs_align: int = 1,
 ) -> GroupMetadata:
     # mat_b.size(0) is K when offs splits K; offs is absent when batched.
@@ -98,8 +98,6 @@ def build_group_metadata(
     # M is fixed when offs splits N; mat_a.size(0) is the group count there.
     total_m = mat_a.size(-2) if jagged_n else mat_a.size(0)
     device_index = mat_a.device.index
-    if device_index is None:
-        device_index = torch.cuda.current_device()
     stream_ptr = torch.cuda.current_stream(device_index).cuda_stream
     meta = _get_group_metadata_tensors(group_count, device_index, stream_ptr)
     if batched:
@@ -109,24 +107,6 @@ def build_group_metadata(
         meta.tile_offsets.zero_()
         meta.total_tiles.zero_()
         return meta
-    if config is None:
-        config = select_kernel_config(
-            total_m=total_m,
-            n=mat_b.size(-1),
-            k=mat_a.size(-1),
-            group_count=group_count,
-            groups_split_k=b_is_2d and not jagged_n,
-            jagged_n=jagged_n,
-        )
-    if config.cluster_n > 1:
-        tiles_n = -(-mat_b.size(-1) // config.tile_n)
-        if tiles_n % config.cluster_n != 0:
-            raise ValueError(
-                f"cluster_n={config.cluster_n} requires N tiles ({tiles_n}, "
-                f"from N={mat_b.size(-1)}/tile_n={config.tile_n}) to be "
-                f"divisible by cluster_n"
-            )
-
     groups_split_k = b_is_2d and not jagged_n
     if jagged_n:
         scale_a_rows_per_block = 1
@@ -148,11 +128,11 @@ def build_group_metadata(
 
     launch_build_group_metadata(
         offs,
-        mat_a.data_ptr(),
-        mat_b.data_ptr(),
+        const_data_ptr(mat_a),
+        const_data_ptr(mat_b),
         out.data_ptr(),
-        scale_a.data_ptr(),
-        scale_b.data_ptr(),
+        const_data_ptr(scale_a),
+        const_data_ptr(scale_b),
         mat_a.stride(0),
         mat_b.stride(1) if jagged_n else mat_b.stride(0),
         out.stride(1) if jagged_n else out.stride(0),

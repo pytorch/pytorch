@@ -6,9 +6,15 @@ import cutlass.cute as cute
 import cutlass.cute.testing as cute_testing
 from cutlass import Int32, Int64
 
+from torch._meta_registrations import ceil_div
+from torch._native.cutedsl.launch import (
+    compile_kernel,
+    fake_compact,
+    read_only,
+    stream,
+    sym,
+)
 from torch._native.instrumentation import instrumented_cutedsl_cache
-
-from ._common import _make_fake_1d_tensor, _make_fake_2d_tensor, read_only
 
 
 class _BuildGroupMetadata:
@@ -242,17 +248,9 @@ def _compile_build_group_metadata(
     jagged_n: bool = False,
     offs_align: int = 1,
 ):
-    from cutlass import Int32 as _Int32, Int64 as _Int64
-
-    offs_fake = _make_fake_1d_tensor(_Int32)
-    out_mnkl_fake = _make_fake_2d_tensor(_Int32, 4)
-    out_ptrs_abc_fake = _make_fake_2d_tensor(_Int64, 3)
-    out_ptrs_scale_ab_fake = _make_fake_2d_tensor(_Int64, 2)
-    out_tile_offsets_fake = _make_fake_1d_tensor(_Int32)
-    out_total_tiles_fake = _make_fake_1d_tensor(_Int32)
-    zero_i64 = _Int64(0)
-    zero_i32 = _Int32(0)
-    return cute.compile(
+    zero_i64 = Int64(0)
+    zero_i32 = Int32(0)
+    return compile_kernel(
         _BuildGroupMetadata(
             elem_size_ab,
             elem_size_scale,
@@ -260,9 +258,10 @@ def _compile_build_group_metadata(
             cluster_m,
             groups_split_k,
             jagged_n,
+            offs_align,
         ),
         zero_i32,
-        offs_fake,
+        fake_compact(Int32, (sym(),)),
         zero_i64,
         zero_i64,
         zero_i64,
@@ -279,15 +278,15 @@ def _compile_build_group_metadata(
         zero_i32,
         zero_i32,
         zero_i32,
-        out_mnkl_fake,
-        out_ptrs_abc_fake,
-        out_ptrs_scale_ab_fake,
-        out_tile_offsets_fake,
-        out_total_tiles_fake,
+        fake_compact(Int32, (sym(), 4), stride_order=(1, 0)),
+        fake_compact(Int64, (sym(), 3), stride_order=(1, 0)),
+        fake_compact(Int64, (sym(), 2), stride_order=(1, 0)),
+        fake_compact(Int32, (sym(),)),
+        fake_compact(Int32, (sym(),)),
         zero_i32,
         256,
-        cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
-        options="--enable-tvm-ffi --enable-assertions",
+        cute.runtime.make_fake_stream(),
+        options="--enable-assertions",
     )
 
 
@@ -323,7 +322,7 @@ def launch_build_group_metadata(
     offs_align: int = 1,
 ) -> None:
     threads_per_block = 256
-    num_blocks = (offs.numel() + threads_per_block - 1) // threads_per_block
+    num_blocks = ceil_div(offs.numel(), threads_per_block)
     _compile_build_group_metadata(
         elem_size_ab,
         elem_size_scale,
@@ -357,4 +356,5 @@ def launch_build_group_metadata(
         out_tile_offsets,
         out_total_tiles,
         num_blocks,
+        stream(offs.device.index),
     )

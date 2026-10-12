@@ -2,15 +2,59 @@
 
 import argparse
 import gc
+import time
 import warnings
 from dataclasses import dataclass
 
 import torch
 import torch._native.ops.scaled_grouped_mm
+import torch.backends.python_native as python_native
+from torch._meta_registrations import round_up
 from torch.nn.functional import scaled_mm, ScalingType, SwizzleType
 
 
 _STAT_CHOICES = ("median", "mean", "min", "max", "p10", "p90")
+_BENCH_SETTLE_SECONDS = 0.1
+
+# (num_experts, hidden_size, expert intermediate size, top_k), from each
+# model's Hugging Face config.json. Each expert computes
+# (silu(x @ W_gate) * (x @ W_up)) @ W_down; as in torchtitan's GroupedLinear
+# (torchtitan/models/common/linear.py), W_gate and W_up are fused, giving one
+# up GEMM with N = 2 * intermediate, K = hidden and one down GEMM with
+# N = hidden, K = intermediate, over M = tokens * top_k routed rows.
+_MOE_MODELS = {
+    "Mixtral-8x7B": (8, 4096, 14336, 2),
+    "Llama-4-Scout": (16, 5120, 8192, 1),
+    "DeepSeek-V3": (256, 7168, 2048, 8),
+    "gpt-oss-120b": (128, 2880, 2880, 4),
+    "Qwen3-235B-A22B": (128, 4096, 1536, 8),
+}
+_MOE_TOKENS = (256, 16384)
+
+
+def _moe_model_gmnk(row_align):
+    # Each expert's routed rows are padded to row_align, so no group is empty.
+    gmnk = []
+    for experts, hidden, intermediate, top_k in _MOE_MODELS.values():
+        # DeepSeek blockwise scaling quantizes both in 128-blocks, which drops
+        # gpt-oss-120b's 2880.
+        if hidden % 128 or intermediate % 128:
+            continue
+        for tokens in _MOE_TOKENS:
+            rows_per_expert = round_up(-(-tokens * top_k // experts), row_align)
+            m = experts * rows_per_expert
+            gmnk.append([experts, m, 2 * intermediate, hidden])
+            gmnk.append([experts, m, hidden, intermediate])
+    return gmnk
+
+
+def _default_gmnk(layout, lhs_block):
+    # Splitting K, or a 128x128 A recipe, needs 128-aligned group starts.
+    if layout == "2d_2d":
+        return [[g, n, k, m] for g, m, n, k in _moe_model_gmnk(128)]
+    return _moe_model_gmnk(128 if lhs_block == 128 else 32)
+
+
 _MIN_REF_GROUP_M = 128
 
 
@@ -22,11 +66,9 @@ class BenchResult:
 
 
 def _require_cutedsl_scaled_grouped_mm_override():
-    from torch._native import cutedsl_utils as cu, registry
     from torch._native.common_utils import check_native_jit_disabled
 
-    registry._register_all_overrides()
-    if not cu.runtime_available():
+    if not python_native.cutedsl.available:
         raise RuntimeError(
             "CuTeDSL runtime dependencies are not available. Install "
             "nvidia-cutlass-dsl and apache-tvm-ffi."
@@ -35,18 +77,14 @@ def _require_cutedsl_scaled_grouped_mm_override():
         raise RuntimeError(
             "native DSL overrides are disabled by TORCH_DISABLE_NATIVE_JIT=1."
         )
-    if "_scaled_grouped_mm_v2" not in registry.get_dsl_operations("cutedsl"):
-        version = cu.runtime_version()
+    if "_scaled_grouped_mm_v2" not in python_native.get_dsl_operations("cutedsl"):
+        version = python_native.cutedsl.version
         raise RuntimeError(
             "CuTeDSL override for aten::_scaled_grouped_mm_v2 is not "
             "registered. Current nvidia-cutlass-dsl version: "
             f"{version}. If this is a newer local test version, rerun "
             "with TORCH_NATIVE_SKIP_VERSION_CHECK=1."
         )
-
-
-def _pad_up(x: int, multiple: int) -> int:
-    return -(-x // multiple) * multiple
 
 
 def _generate_offsets(total, groups, device, mode="balanced", align=1):
@@ -139,7 +177,7 @@ def _to_op_scale_128x128(scale_natural: torch.Tensor, k: int) -> torch.Tensor:
     kb = k // 128
     padded = torch.zeros(
         scale_natural.shape[0],
-        _pad_up(kb, 4),
+        round_up(kb, 4),
         device=scale_natural.device,
         dtype=scale_natural.dtype,
     )
@@ -158,7 +196,7 @@ def _make_grouped_scale_b(scales: list[torch.Tensor], K: int, N: int, rhs_block:
             dtype=scales[0].dtype,
         )
     else:
-        L4 = _pad_up(K // 128, 4)
+        L4 = round_up(K // 128, 4)
         N_blocks = N // 128
         grouped = torch.empty_strided(
             (G, L4, N_blocks),
@@ -447,12 +485,14 @@ def _do_bench_cuda(fn, warmup: int, rep: int, stat: str) -> BenchResult:
     if rep < 1:
         raise ValueError(f"rep must be >= 1, got {rep}")
     for _ in range(warmup):
+        time.sleep(_BENCH_SETTLE_SECONDS)
         fn()
     torch.cuda.synchronize()
     samples_us = []
     for _ in range(rep):
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
+        time.sleep(_BENCH_SETTLE_SECONDS)
         start.record()
         fn()
         end.record()
@@ -502,8 +542,8 @@ def _make_grouped_op(a_fp8, mat2, a_scale, scale_b, lhs_recipe, rhs_recipe, offs
     from torch._native.ops.scaled_grouped_mm.cutedsl_impl import _cond
     from torch._native.ops.scaled_grouped_mm.group_meta import expected_out_size_stride
 
-    lhs_recipe_int = lhs_recipe.value if hasattr(lhs_recipe, "value") else lhs_recipe
-    rhs_recipe_int = rhs_recipe.value if hasattr(rhs_recipe, "value") else rhs_recipe
+    lhs_recipe_int = lhs_recipe.value
+    rhs_recipe_int = rhs_recipe.value
     swizzle_int = SwizzleType.NO_SWIZZLE.value
     out_size, out_stride = expected_out_size_stride(
         a_fp8,
@@ -594,7 +634,7 @@ def _make_reference(
                 continue
             call_start, call_end = start, end
             group_m = end - start
-            padded_m = _pad_up(max(group_m, _MIN_REF_GROUP_M), 4)
+            padded_m = round_up(max(group_m, _MIN_REF_GROUP_M), 4)
             if lhs_block == 1 and padded_m != group_m:
                 # cuBLASLt's FP8 heuristic search can fail outright
                 # (CUBLAS_STATUS_NOT_SUPPORTED) both for very small M and for
@@ -737,7 +777,7 @@ def benchmark_deepseek_scaled_grouped_mm(
     if grouping not in ("balanced", "random"):
         raise ValueError(f"grouping must be 'balanced' or 'random', got {grouping}")
     if gmnk is None:
-        gmnk = _DEFAULT_GMNK
+        gmnk = _default_gmnk(layout, lhs_block)
 
     if not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] != 9:
         raise SystemExit("This benchmark requires a Hopper (SM90) GPU.")
@@ -793,10 +833,18 @@ def benchmark_deepseek_scaled_grouped_mm(
             cute_res = _do_bench_cuda(bench_cute, warmup=warmup, rep=rep, stat=stat)
 
         if do_correctness:
+            # Graph replays keep their outputs alive, and a 2d-2d output can be
+            # 15 GB, so free them and compare in chunks to bound fp32 temporaries.
+            bench_ref = bench_cute = None
+            gc.collect()
+            torch.cuda.empty_cache()
             try:
                 expected = fn_ref()
                 actual = fn_cute()
-                torch.testing.assert_close(actual, expected, rtol=rtol, atol=atol)
+                rows = max(1, (1 << 26) // max(1, expected[0].numel()))
+                for a, e in zip(actual.split(rows), expected.split(rows)):
+                    torch.testing.assert_close(a, e, rtol=rtol, atol=atol)
+                del expected, actual
                 if not emit_us_only:
                     print("  ✓ results match", flush=True)
             except AssertionError:
@@ -882,34 +930,17 @@ def _parse_gmnk(value: str) -> list[int]:
     return parts
 
 
-_DEFAULT_GMNK = [
-    [1, 2048, 2048, 7168],
-    [1, 8192, 2048, 7168],
-    [1, 32768, 2048, 7168],
-    [1, 131072, 2048, 7168],
-    [256, 2048, 2048, 7168],
-    [256, 8192, 2048, 7168],
-    [256, 32768, 2048, 7168],
-    [256, 131072, 2048, 7168],
-    [1, 2048, 7168, 2048],
-    [1, 8192, 7168, 2048],
-    [1, 32768, 7168, 2048],
-    [1, 131072, 7168, 2048],
-    [256, 2048, 7168, 2048],
-    [256, 8192, 7168, 2048],
-    [256, 32768, 7168, 2048],
-    [256, 131072, 7168, 2048],
-]
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--gmnk",
         nargs="+",
         type=_parse_gmnk,
-        default=_DEFAULT_GMNK,
-        help="Problem sizes as G,M,N,K (space-separated, M = total rows across the group).",
+        default=None,
+        help=(
+            "Problem sizes as G,M,N,K (space-separated, M = total rows across the group). "
+            "Defaults to MoE model shapes."
+        ),
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--lhs-block", type=int, choices=(1, 128), default=1)

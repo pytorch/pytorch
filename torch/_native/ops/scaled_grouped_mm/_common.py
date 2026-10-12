@@ -1,42 +1,12 @@
 """Shared helpers for DeepSeek grouped mm."""
 
-import torch
+from torch._meta_registrations import round_up
 from torch.nn.functional import ScalingType, SwizzleType
 
 
 BLOCKWISE_1X128 = ScalingType.BlockWise1x128.value
 BLOCKWISE_128X128 = ScalingType.BlockWise128x128.value
 NO_SWIZZLE = SwizzleType.NO_SWIZZLE.value
-
-
-def read_only(tensor: torch.Tensor) -> torch.Tensor:
-    """Export-const view; COW is not materialized. Wrap only at the call
-    site: the wrapper raises on non-DLPack torch ops."""
-    from torch.utils.dlpack import ReadOnlyTensorWrapper
-
-    return ReadOnlyTensorWrapper(tensor)
-
-
-def _make_fake_1d_tensor(dtype):
-    import cutlass.cute as cute
-
-    return cute.runtime.make_fake_tensor(dtype, (cute.sym_int(),), stride=(1,))
-
-
-def _make_fake_2d_tensor(dtype, cols: int):
-    import cutlass.cute as cute
-
-    return cute.runtime.make_fake_tensor(
-        dtype, (cute.sym_int(), cols), stride=(cols, 1)
-    )
-
-
-def ceil_div(a: int, b: int) -> int:
-    return -(-a // b)
-
-
-def round_up(a: int, b: int) -> int:
-    return ceil_div(a, b) * b
 
 
 # cp.async.bulk needs 16-byte-aligned addresses, so a copy may start up to

@@ -662,6 +662,30 @@ TEST(StaticRuntime, EmbeddingBagWithMixedInt32Int64Input) {
   testStaticRuntime(embedding_bag_default, args);
 }
 
+TEST(StaticRuntime, EmbeddingBagHalfTypesWithAndWithoutWeights) {
+  const std::string embedding_bag = R"JIT(
+    def forward(self, weight: Tensor, indices: Tensor, offsets: Tensor, per_sample_weights: Tensor):
+        unweighted, _, _, _ = torch.embedding_bag(weight, indices, offsets)
+        weighted, _, _, _ = torch.embedding_bag(
+            weight, indices, offsets, False, 0, False, per_sample_weights)
+        return unweighted.clone(), weighted.clone()
+  )JIT";
+
+  const auto indices = torch::tensor({0, 2, 1, 3}, at::ScalarType::Long);
+  const auto offsets = torch::tensor({0, 2}, at::ScalarType::Long);
+  const auto make_args = [&](const at::ScalarType dtype) {
+    const auto options = torch::TensorOptions().dtype(dtype);
+    const auto weight = torch::arange(1, 33, options).reshape({4, 8}) / 8;
+    const auto per_sample_weights =
+        torch::tensor({0.5, 1.5, 2.0, 0.25}, options);
+    return std::vector<IValue>{
+        weight, indices, offsets, per_sample_weights};
+  };
+
+  testStaticRuntime(embedding_bag, make_args(at::ScalarType::Half));
+  testStaticRuntime(embedding_bag, make_args(at::ScalarType::BFloat16));
+}
+
 TEST(StaticRuntime, LayerNorm) {
   const std::string layer_norm_with_weights = R"JIT(
     def forward(self, input: Tensor, normalized_shape: List[int], weight: Tensor, bias: Tensor):
@@ -2253,6 +2277,10 @@ TEST(StaticRuntime, Narrow) {
 
   testStaticRuntime(narrow_with_int_script, args_a);
   testStaticRuntime(narrow_with_int_script, args_a, args_b);
+
+  auto c = at::tensor({1, 2, 3, 4, 5, 6, 7, 8, 9}).reshape({3, 3});
+  std::vector<IValue> args_c{c, -1, -1, 1};
+  testStaticRuntime(narrow_with_int_script, args_c);
 }
 
 TEST(StaticRuntime, TupleUnpack) {
@@ -2339,10 +2367,6 @@ TEST(StaticRuntime, QuantizedLinear) {
 }
 
 TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
-#if defined(__aarch64__) || defined(_M_ARM64)
-  // See https://github.com/pytorch/pytorch/issues/178522.
-  GTEST_SKIP() << "Skipping QuantizedLinearDynamicFp16 on AArch64.";
-#endif
   const std::string quantized_linear_dynamic_fp16_script = R"IR(
     graph(%input: Tensor, %weights: Tensor):
         %bias: None = prim::Constant()
@@ -2364,10 +2388,6 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
 }
 
 TEST(StaticRuntime, QuantizedLinearReluDynamicFp16) {
-#if defined(__aarch64__) || defined(_M_ARM64)
-  // See https://github.com/pytorch/pytorch/issues/178522.
-  GTEST_SKIP() << "Skipping QuantizedLinearReluDynamicFp16 on AArch64.";
-#endif
   const std::string quantized_linear_relu_dynamic_fp16_script = R"IR(
     graph(%input: Tensor, %weights: Tensor):
         %bias: None = prim::Constant()

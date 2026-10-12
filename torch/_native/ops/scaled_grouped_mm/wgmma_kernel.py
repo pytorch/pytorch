@@ -1,5 +1,10 @@
 """WGMMA kernels for SM90 DeepSeek grouped mm."""
 
+# Derived from CUTLASS examples/python/CuTeDSL/cute/hopper/kernel/dense_gemm/
+# dense_gemm_persistent.py, with the two-accumulator promotion of
+# dense_gemm_fp8_2xacc.py and the per-group tensormap updates of
+# grouped_gemm/grouped_gemm.py.
+
 import functools
 import os
 
@@ -16,14 +21,19 @@ from cutlass.pipeline import pipeline_init_arrive, pipeline_init_wait
 from cutlass.utils import LayoutEnum
 
 import torch
+from torch._native.cutedsl.launch import (
+    compile_kernel,
+    fake_compact,
+    read_only,
+    stream,
+    sym,
+)
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from ._common import (
-    _make_fake_1d_tensor,
     BLOCKWISE_1X128,
     FP32_SCALE_COPY_ALIGN_ELEMS as _SCALE_ALIGN,
     fp32_scale_stage_size,
-    read_only,
 )
 
 
@@ -45,7 +55,7 @@ def _make_fake_out_tensor(dtype, m, n, rank3):
     # Own symbol: mat_b's leading dim is 1 here.
     return cute.runtime.make_fake_tensor(
         dtype,
-        (cute.sym_int(), m, n),
+        (sym(), m, n),
         stride=(cute.sym_int64(divisibility=16), cute.sym_int64(divisibility=16), 1),
         assumed_align=16,
     )
@@ -71,14 +81,14 @@ def _make_fake_mat_b_tensor(dtype, g, k, n):
 
 def _make_fake_scale_a_tensor(dtype, recipe_a, m):
     if recipe_a == BLOCKWISE_1X128:
-        shape = (m, cute.sym_int())
+        shape = (m, sym())
     else:
-        shape = (cute.sym_int(), cute.sym_int())
+        shape = (sym(), sym())
     # Always rank 3: the batch axis is length 1 unless A is batched, and the
     # kernel slices it so the row stride stays a static 1.
     return cute.runtime.make_fake_tensor(
         dtype,
-        (cute.sym_int(), *shape),
+        (sym(), *shape),
         stride=(cute.sym_int64(), 1, cute.sym_int64()),
         assumed_align=16 if recipe_a == BLOCKWISE_1X128 else None,
     )
@@ -86,28 +96,14 @@ def _make_fake_scale_a_tensor(dtype, recipe_a, m):
 
 def _make_fake_scale_b_tensor(dtype, recipe_b, g, n):
     if recipe_b == BLOCKWISE_1X128:
-        shape = (g, n, cute.sym_int())
+        shape = (g, n, sym())
     else:
-        shape = (g, cute.sym_int(), cute.sym_int())
+        shape = (g, sym(), sym())
     return cute.runtime.make_fake_tensor(
         dtype,
         shape,
         stride=(cute.sym_int64(), 1, cute.sym_int64()),
         assumed_align=16 if recipe_b == BLOCKWISE_1X128 else None,
-    )
-
-
-def _make_fake_compact_2d_tensor(dtype, cols: int):
-    rows = cute.sym_int()
-    return cute.runtime.make_fake_tensor(dtype, (rows, cols), stride=(cols, 1))
-
-
-def _make_fake_tensormaps(dtype, num_tensormaps: int, tensormap_stride: int):
-    ctas = cute.sym_int()
-    return cute.runtime.make_fake_tensor(
-        dtype,
-        (ctas, num_tensormaps, tensormap_stride),
-        stride=(num_tensormaps * tensormap_stride, tensormap_stride, 1),
     )
 
 
@@ -332,9 +328,6 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
         self.dynamic_a = not (groups_split_k or batched or jagged_n)
         self.dynamic_b = jagged_n
         self.dynamic_c = self.dynamic_a or jagged_n
-        # Scales ride a pipeline of their own: an mbarrier's transaction count
-        # only works if a single instruction class pays into it, and TMA owns
-        # the mainloop barrier's.
         if cluster_m != 1:
             raise ValueError(
                 "cluster_m must be 1 (only N-direction clustering is implemented)"
@@ -428,6 +421,8 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
         uniform_m=None,
         uniform_n=None,
     ):
+        # Unlike the example's StaticPersistentGroupTileScheduler, groups are
+        # found by binary search over the metadata kernel's tile_offsets.
         if cutlass.const_expr(self.batched):
             group = tile // uniform_tiles
             local_tile = tile - group * uniform_tiles
@@ -537,6 +532,8 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
 
     @cute.jit
     def _issue_wgmma(self, tiled_mma, partial, tCrA, tCrB, num_k_blocks, stage_index):
+        # Promotes every k_tile rather than every mma_promotion_interval, since
+        # the blockwise scales change with each 128-wide K block.
         partial.fill(0.0)
         warpgroup.fence()
         mma_atom = cute.make_mma_atom(tiled_mma.op)
@@ -1502,36 +1499,39 @@ def _compile_deepseek_persistent_wgmma(
     )
     zero_i32 = Int32(0)
 
-    m = cute.sym_int()
-    k = cute.sym_int(divisibility=128)
-    g = cute.sym_int()
-    n = cute.sym_int()
+    m = sym()
+    k = sym(128)
+    g = sym()
+    n = sym()
 
-    return cute.compile(
+    return compile_kernel(
         kernel,
-        _make_fake_batched_operand(Float8E4M3FN, g if batched else cute.sym_int(), m, k)
+        _make_fake_batched_operand(Float8E4M3FN, g if batched else sym(), m, k)
         if batched or jagged_n
         else _make_fake_matmul_operand(Float8E4M3FN, m, k),
         _make_fake_mat_b_tensor(Float8E4M3FN, g, k, n),
         _make_fake_scale_a_tensor(Float32, recipe_a, m),
         _make_fake_scale_b_tensor(Float32, recipe_b, g, n),
-        _make_fake_1d_tensor(Int32),
-        _make_fake_compact_2d_tensor(Int32, 4),
-        _make_fake_1d_tensor(Int32),
-        _make_fake_1d_tensor(Int32),
-        _make_fake_compact_2d_tensor(cutlass.Int64, 3),
-        _make_fake_tensormaps(
+        fake_compact(Int32, (sym(),)),
+        fake_compact(Int32, (sym(), 4), stride_order=(1, 0)),
+        fake_compact(Int32, (sym(),)),
+        fake_compact(Int32, (sym(),)),
+        fake_compact(cutlass.Int64, (sym(), 3), stride_order=(1, 0)),
+        fake_compact(
             cutlass.Int64,
-            _DeepSeekPersistentWgmma.num_tensormaps,
-            _DeepSeekPersistentWgmma.bytes_per_tensormap // 8,
+            (
+                sym(),
+                _DeepSeekPersistentWgmma.num_tensormaps,
+                _DeepSeekPersistentWgmma.bytes_per_tensormap // 8,
+            ),
+            stride_order=(2, 1, 0),
         ),
         _make_fake_out_tensor(BFloat16, m, n, groups_split_k or batched),
         zero_i32,
         zero_i32,
         zero_i32,
         kernel.threads_per_cta,
-        cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
-        options="--enable-tvm-ffi",
+        cute.runtime.make_fake_stream(),
     )
 
 
@@ -1553,8 +1553,6 @@ def _alloc_tensormaps(
 
 def _get_tensormaps(num_blocks: int, device: torch.device) -> torch.Tensor:
     device_index = device.index
-    if device_index is None:
-        device_index = torch.cuda.current_device()
     stream_ptr = torch.cuda.current_stream(device_index).cuda_stream
     return _alloc_tensormaps(device_index, num_blocks, stream_ptr)
 
@@ -1596,18 +1594,6 @@ def launch_deepseek_grouped_wgmma(
     small_scale_a = recipe_a == BLOCKWISE_1X128 and scale_a.size(-2) < (
         fp32_scale_stage_size(tile_m) if a_scale_wide else tile_m
     )
-    # _clamp_tile_start relies on the staged scales' k stride being an
-    # align-multiple whenever there is more than one k-block to offset by.
-    for staged, recipe in ((scale_a, recipe_a), (scale_b, recipe_b)):
-        if (
-            recipe == BLOCKWISE_1X128
-            and staged.size(-1) > 1
-            and staged.stride(-1) % _SCALE_ALIGN != 0
-        ):
-            raise AssertionError(
-                f"staged scale k stride {staged.stride(-1)} must be a multiple "
-                f"of {_SCALE_ALIGN} when k spans {staged.size(-1)} blocks"
-            )
     if b_is_2d:
         # Length-1 L axis, indexed with 0; only the rank has to match.
         mat_b = mat_b.unsqueeze(0)
@@ -1645,4 +1631,5 @@ def launch_deepseek_grouped_wgmma(
         mat_a.size(-1),
         num_blocks,
         num_blocks,
+        stream(mat_a.device.index),
     )

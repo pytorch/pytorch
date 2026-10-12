@@ -1,19 +1,11 @@
 """Launch point for SM90 DeepSeek FP8 grouped mm."""
 
-import functools
-
 import torch
+from torch._native.cutedsl.hw_caps import caps
 
 from ._common import BLOCKWISE_1X128
 from .group_meta import build_group_metadata
 from .hopper_config import select_kernel_config
-
-
-@functools.cache
-def _num_sms(device_index: int) -> int:
-    return torch.cuda.get_device_properties(
-        torch.device("cuda", device_index)
-    ).multi_processor_count
 
 
 def run_deepseek_grouped_gemm(
@@ -26,10 +18,7 @@ def run_deepseek_grouped_gemm(
     offs: torch.Tensor,
     out: torch.Tensor,
 ) -> torch.Tensor:
-    device_index = mat_a.device.index
-    if device_index is None:
-        device_index = torch.cuda.current_device()
-    num_sms = _num_sms(device_index)
+    num_sms = caps(mat_a.device.index).sm_count
     b_is_2d = mat_b.dim() == 2
     a_is_3d = mat_a.dim() == 3
     batched = a_is_3d and not b_is_2d
