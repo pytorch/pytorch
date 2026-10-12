@@ -1204,7 +1204,7 @@ def _create_runtime_wrapper(
     _inner_compiled_fn = compiled_fn
     _first_invocation_ctx = compiled_invoker.first_invocation_ctx
 
-    @simple_wraps(_inner_compiled_fn)
+    @simple_wraps(compiled_invoker.compiled_fn)
     def runtime_wrapper(args: list[Any]) -> Any:
         # Short-circuit eval when not profiling.
         if not torch.autograd.profiler._is_profiler_enabled:
