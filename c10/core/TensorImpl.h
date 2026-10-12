@@ -251,13 +251,25 @@ struct C10_API FakeTensorMode {
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
 
+  // Mode state that the Python CppFakeTensorMode reads and writes, mirroring
+  // the Python FakeTensorMode attributes of the same names.
+  uint64_t epoch_ = 0;
+  bool allow_scalar_outputs_ = false;
+  // Like Python's FakeTensorMode: static unless there is a shape env.
+  bool static_shapes_;
+  // torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access, read when
+  // the mode is created; applied to each fake's storage in
+  // set_fake_tensor_mode.
+  bool allow_unsafe_data_ptr_access_ = true;
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,
       bool allow_meta = true)
       : shape_env_(std::move(shape_env)),
         fake_tensor_converter_(std::move(converter)),
-        allow_meta_(allow_meta) {}
+        allow_meta_(allow_meta),
+        static_shapes_(shape_env_ == nullptr) {}
 
   // record the real constant a fake tensor was created from; the constant is
   // stored on the fake's ExtraMeta so it dies with the tensor
@@ -1533,6 +1545,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       TORCH_CHECK(
           mode->allow_meta_,
           "device.type must not be 'meta' when allow_meta is False");
+    }
+    // Same as Python FakeTensor.__new__: a fake has no real data, so reading a
+    // mutable data pointer warns or throws depending on the mode.
+    if (mode && has_storage()) {
+      auto* storage_impl = storage().unsafeGetStorageImpl();
+      if (mode->allow_unsafe_data_ptr_access_) {
+        storage_impl->set_warn_deprecated_on_mutable_data_ptr();
+      } else {
+        storage_impl->set_throw_on_mutable_data_ptr();
+      }
     }
     extra_meta.fake_tensor_mode_ = std::move(mode);
   }
