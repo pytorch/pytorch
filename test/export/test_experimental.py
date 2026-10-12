@@ -29,7 +29,9 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+    IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
     skipCUDAIf,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils import _pytree as pytree
@@ -1343,6 +1345,7 @@ def forward(self, args_0):
         )
 
 
+@unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperimentDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -1567,6 +1570,7 @@ class TestExperimentDevice(TestCase):
         not IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
         "Requires CUDA with SM >= 8.0, and Triton",
     )
+    @skipXPUIf(not IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED, "requires XPU and Triton")
     def test_aot_export_flex_attention_callable_mask_mod(self, device):
         """Test flex_attention AOT export with callable class as mask_mod.
 
@@ -1639,6 +1643,7 @@ class TestExperimentDevice(TestCase):
         not IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
         "Requires CUDA with SM >= 8.0, and Triton",
     )
+    @skipXPUIf(not IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED, "requires XPU and Triton")
     def test_aot_export_flex_attention_with_blockmask_placeholders(self, device):
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
