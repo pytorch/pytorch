@@ -218,40 +218,43 @@ def run_functionalized_fw_and_collect_metadata(
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
-        with disable_above, mode, suppress_pending, disable_autocast_cache():
-            # precondition: The passed in function already handles unflattening inputs + flattening outputs
-            flat_f_args = pytree.tree_map(_to_fun, flat_args)
-            flat_f_args_descs = flat_args_descs
-            flat_f_outs = f(*flat_f_args)
+        # ExcludeDispatchKeyGuard restores autocast TLS when it exits, so the
+        # comparison has to run first. The cache flag is already restored.
+        with disable_above:
+            with mode, suppress_pending, disable_autocast_cache():
+                # precondition: The passed in function already handles unflattening inputs + flattening outputs
+                flat_f_args = pytree.tree_map(_to_fun, flat_args)
+                flat_f_args_descs = flat_args_descs
+                flat_f_outs = f(*flat_f_args)
 
-            # Assert that f does NOT have an AOTOutputs in it, easy mistake to
-            # make!  You need to drop the second output before calling this
-            # function
-            if pytree.tree_any(lambda x: isinstance(x, AOTOutput), flat_f_outs):
-                raise AssertionError(
-                    f"{f} returned AOTOutput when it shouldn't. Did you remember to wrap the "
-                    "function with without_output_descs before passing it here?"
+                # Assert that f does NOT have an AOTOutputs in it, easy mistake to
+                # make!  You need to drop the second output before calling this
+                # function
+                if pytree.tree_any(lambda x: isinstance(x, AOTOutput), flat_f_outs):
+                    raise AssertionError(
+                        f"{f} returned AOTOutput when it shouldn't. Did you remember to wrap the "
+                        "function with without_output_descs before passing it here?"
+                    )
+
+                # NB: this is just to setup the input descriptors, we will
+                # recreate these descriptors (with the same convention!) when we
+                # actually do the trace
+                flat_f_outs_descs = [PlainAOTOutput(i) for i in range(len(flat_f_outs))]
+
+                # We didn't do any tracing, so we don't need to process the
+                # unbacked symbols, they will just disappear into the ether.
+                # Also, prevent memoization from applying.
+                if fake_mode:
+                    fake_mode.epoch += 1
+                    fake_mode.reset_nt_tensor_id_counter()
+
+            if prior_autocast_states != _get_autocast_states():
+                raise RuntimeError(
+                    "AOTAutograd does not support tracing graphs that mutate the autocast state. "
+                    "Dynamo will only insert autocast context managers (e.g. with torch.autocast(..)) into the graph, "
+                    "which will unwind all of their mutations to autocast state before the graph exits. "
+                    "If you encounter this error while using torch.compile, please file a bug."
                 )
-
-            # NB: this is just to setup the input descriptors, we will
-            # recreate these descriptors (with the same convention!) when we
-            # actually do the trace
-            flat_f_outs_descs = [PlainAOTOutput(i) for i in range(len(flat_f_outs))]
-
-            # We didn't do any tracing, so we don't need to process the
-            # unbacked symbols, they will just disappear into the ether.
-            # Also, prevent memoization from applying.
-            if fake_mode:
-                fake_mode.epoch += 1
-                fake_mode.reset_nt_tensor_id_counter()
-
-        if prior_autocast_states != _get_autocast_states():
-            raise RuntimeError(
-                "AOTAutograd does not support tracing graphs that mutate the autocast state. "
-                "Dynamo will only insert autocast context managers (e.g. with torch.autocast(..)) into the graph, "
-                "which will unwind all of their mutations to autocast state before the graph exits. "
-                "If you encounter this error while using torch.compile, please file a bug."
-            )
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
