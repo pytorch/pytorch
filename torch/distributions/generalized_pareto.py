@@ -76,7 +76,9 @@ class GeneralizedPareto(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         z = self._z(value)
-        eq_zero = torch.isclose(self.concentration, torch.tensor(0.0))
+        eq_zero = torch.isclose(
+            self.concentration, torch.zeros_like(self.concentration)
+        )
         safe_conc = torch.where(
             eq_zero, torch.ones_like(self.concentration), self.concentration
         )
@@ -91,7 +93,9 @@ class GeneralizedPareto(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         z = self._z(value)
-        eq_zero = torch.isclose(self.concentration, torch.tensor(0.0))
+        eq_zero = torch.isclose(
+            self.concentration, torch.zeros_like(self.concentration)
+        )
         safe_conc = torch.where(
             eq_zero, torch.ones_like(self.concentration), self.concentration
         )

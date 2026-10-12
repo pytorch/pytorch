@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 
+import math
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -97,8 +99,11 @@ class Laplace(Distribution):
         )
 
     def icdf(self, value):
-        term = value - 0.5
-        return self.loc - self.scale * (term).sign() * torch.log1p(-2 * term.abs())
+        # Work from the nearer tail so that small probabilities keep their precision
+        # instead of being rounded through ``value - 0.5``.
+        lower = self.loc + self.scale * torch.log(2 * value)
+        upper = self.loc - self.scale * (math.log(2) + torch.log1p(-value))
+        return torch.where(value < 0.5, lower, upper)
 
     def entropy(self):
         return 1 + torch.log(2 * self.scale)

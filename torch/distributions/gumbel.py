@@ -71,6 +71,17 @@ class Gumbel(TransformedDistribution):
         y = (self.loc - value) / self.scale
         return (y - y.exp()) - self.scale.log()
 
+    def cdf(self, value):
+        # Evaluate directly: the inherited TransformedDistribution.cdf maps the
+        # value back through the transforms and validates it against the
+        # truncated base Uniform support, which wrongly rejects tail values.
+        if self._validate_args:
+            self._validate_sample(value)
+        return torch.exp(-torch.exp((self.loc - value) / self.scale))
+
+    def icdf(self, value):
+        return self.loc - self.scale * torch.log(-torch.log(value))
+
     @property
     def mean(self) -> Tensor:
         return self.loc + self.scale * euler_constant
