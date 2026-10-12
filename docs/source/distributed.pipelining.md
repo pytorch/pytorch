@@ -160,19 +160,17 @@ inference, which supports models with several prediction outputs.
 
 ### Named Loss Metrics
 
-A loss function can return a scalar tensor or
-`torch.distributed.pipelining.PipelineLossResult`. The latter keeps a scalar
-backward objective together with named tensor metrics:
+A loss function can return a scalar tensor or a dictionary with a scalar tensor
+under `"loss"` and named tensor metrics under `"metrics"`. The dictionary keeps
+the backward objective explicit without a separate result class:
 
 ```python
-from torch.distributed.pipelining import PipelineLossResult
-
-
 def loss_fn(output, target):
     squared_error = (output - target).square()
-    return PipelineLossResult(
-        squared_error.mean(), {"squared_error_sum": squared_error.sum()}
-    )
+    return {
+        "loss": squared_error.mean(),
+        "metrics": {"squared_error_sum": squared_error.sum()},
+    }
 
 
 losses, results = [], []
@@ -181,8 +179,9 @@ schedule.step(x, target=target, losses=losses, loss_results=results)
 
 The existing `losses` list remains a list of loss tensors. The optional
 `loss_results` list is filled on the loss-owning rank with one detached result
-per microbatch, so reporting does not retain autograd graphs. Scalar loss
-functions produce results with empty metrics. The caller chooses how to
+dictionary per microbatch, with detached `"loss"` and `"metrics"` tensors, so
+reporting does not retain autograd graphs. Scalar loss functions and dictionaries
+without `"metrics"` produce results with empty metrics. The caller chooses how to
 aggregate and normalize metrics; schedules do not assume a particular objective.
 `eval()` accepts the same result container. If execution raises, it may contain
 results from the microbatches that completed before the error.
@@ -733,11 +732,6 @@ pipeline rank.
 
 ```{eval-rst}
 .. currentmodule:: torch.distributed.pipelining.schedules
-```
-
-```{eval-rst}
-.. autoclass:: PipelineLossResult
-    :members:
 ```
 
 ```{eval-rst}

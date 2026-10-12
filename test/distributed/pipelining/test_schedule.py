@@ -50,6 +50,7 @@ from torch.distributed.pipelining.schedules import (
     _build_recv_ops,
     _defer_recv_ops,
     _format_pipeline_order,
+    _get_loss_from_result,
     _merge_bw,
     _PendingSendTracker,
     _PipelineSchedule,
@@ -63,7 +64,6 @@ from torch.distributed.pipelining.schedules import (
     get_schedule_class,
     I,
     OVERLAP_F_B,
-    PipelineLossResult,
     PipelineScheduleMulti,
     PipelineScheduleSingle,
     RECV_B,
@@ -617,7 +617,7 @@ class ScheduleTest(TestCase):
         def loss_fn(output, target):
             loss = torch.nn.functional.mse_loss(output, target, reduction="sum")
             return (
-                PipelineLossResult(loss, {"mean": output.mean()})
+                {"loss": loss, "metrics": {"mean": output.mean()}}
                 if structured
                 else loss
             )
@@ -639,10 +639,13 @@ class ScheduleTest(TestCase):
                 self.assertEqual(parameter.grad, expected.grad)
             self.assertEqual(len(results), 2)
             for result, loss in zip(results, losses, strict=True):
-                self.assertEqual(result.loss, loss)
-                self.assertFalse(result.loss.requires_grad)
-                self.assertEqual(set(result.metrics), {"mean"} if structured else set())
-                for value in result.metrics.values():
+                self.assertIsInstance(result, dict)
+                self.assertEqual(result["loss"], loss)
+                self.assertFalse(result["loss"].requires_grad)
+                self.assertEqual(
+                    set(result["metrics"]), {"mean"} if structured else set()
+                )
+                for value in result["metrics"].values():
                     self.assertFalse(value.requires_grad)
                     self.assertIsNone(value.grad_fn)
             self.assertIsNone(schedule._loss_results)
@@ -652,9 +655,19 @@ class ScheduleTest(TestCase):
 
     def test_loss_result_rejects_invalid_values(self):
         with self.assertRaisesRegex(TypeError, "scalar tensor"):
-            PipelineLossResult(torch.ones(2))
+            _get_loss_from_result({"loss": torch.ones(2)})
         with self.assertRaisesRegex(TypeError, "names to tensors"):
-            PipelineLossResult(torch.ones(()), {"value": 1})
+            _get_loss_from_result({"loss": torch.ones(()), "metrics": {"value": 1}})
+        with self.assertRaisesRegex(TypeError, "names to tensors"):
+            _get_loss_from_result(
+                {"loss": torch.ones(()), "metrics": {1: torch.ones(())}}
+            )
+        with self.assertRaisesRegex(TypeError, "scalar tensor"):
+            _get_loss_from_result({"metrics": {}})
+        with self.assertRaisesRegex(TypeError, "loss/metrics dictionary"):
+            _get_loss_from_result((torch.ones(()), {}))
+        loss = torch.ones((), requires_grad=True)
+        self.assertIs(_get_loss_from_result({"loss": loss}), loss)
 
     @parametrize("schedule_class", [ScheduleGPipe, ScheduleInterleaved1F1B])
     def test_loss_results_eval_and_failure_cleanup(self, schedule_class):
@@ -670,7 +683,7 @@ class ScheduleTest(TestCase):
             if should_fail and calls == 2:
                 raise RuntimeError("second microbatch loss failed")
             loss = torch.nn.functional.mse_loss(output, target, reduction="sum")
-            return PipelineLossResult(loss, {"loss_sum": loss})
+            return {"loss": loss, "metrics": {"loss_sum": loss}}
 
         stage = PipelineStage(torch.nn.Linear(4, 4), 0, 1, "cpu")
         stages = (
@@ -691,7 +704,7 @@ class ScheduleTest(TestCase):
             self.assertIsNone(output)
             self.assertEqual(len(results), 2)
             self.assertEqual(len(losses), 2)
-            self.assertTrue(all(result.loss.grad_fn is None for result in results))
+            self.assertTrue(all(result["loss"].grad_fn is None for result in results))
             self.assertIsNone(schedule._loss_results)
             self.assertFalse(schedule._internal_losses)
 
