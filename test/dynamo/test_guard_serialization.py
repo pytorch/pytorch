@@ -1247,31 +1247,37 @@ class _ModuleWithDtypeAttr(torch.nn.Module):
         self.empty = ()
 
 
+_RAW_DESCRIPTORS = [
+    os.DirEntry.is_file,
+    list.count,
+    dict.__dict__["fromkeys"],
+]
+_generic_class_getitem = typing.Generic.__dict__["__class_getitem__"]
+if isinstance(_generic_class_getitem, types.ClassMethodDescriptorType):
+    _RAW_DESCRIPTORS.append(_generic_class_getitem)
+
+
+@instantiate_parametrized_tests
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
     # directly rather than through a capture, so none of
     # TestGuardSerialization's setup applies.
 
-    def test_raw_descriptors_require_an_immutable_owner(self):
-        mutable = [os.DirEntry.is_file]
-        generic_class_getitem = typing.Generic.__dict__["__class_getitem__"]
-        if isinstance(generic_class_getitem, types.ClassMethodDescriptorType):
-            mutable.append(generic_class_getitem)
-        for descriptor in mutable:
-            with self.subTest(descriptor=descriptor):
-                with self.assertRaisesRegex(PackageError, "mutable owner"):
-                    GuardsStatePickler(
-                        {id(descriptor): descriptor}, {}, {}, {}, io.BytesIO()
-                    ).dump(descriptor)
-
-        immutable = (list.count, dict.__dict__["fromkeys"])
-        for descriptor in immutable:
-            with self.subTest(descriptor=descriptor):
-                buf = io.BytesIO()
-                GuardsStatePickler({id(descriptor): descriptor}, {}, {}, {}, buf).dump(
-                    descriptor
-                )
-                self.assertIs(load_guards_state(buf.getvalue()), descriptor)
+    @parametrize("descriptor", _RAW_DESCRIPTORS)
+    def test_raw_descriptors_require_an_immutable_owner(self, descriptor):
+        owner = descriptor.__objclass__
+        flags = type.__dict__["__flags__"].__get__(owner, type(owner))
+        if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+            with self.assertRaisesRegex(PackageError, "mutable owner"):
+                GuardsStatePickler(
+                    {id(descriptor): descriptor}, {}, {}, {}, io.BytesIO()
+                ).dump(descriptor)
+            return
+        buf = io.BytesIO()
+        GuardsStatePickler({id(descriptor): descriptor}, {}, {}, {}, buf).dump(
+            descriptor
+        )
+        self.assertIs(load_guards_state(buf.getvalue()), descriptor)
 
     def test_type_dict_helpers_bypass_metaclass_hooks(self):
         calls = []
