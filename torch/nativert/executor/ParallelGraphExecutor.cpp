@@ -98,7 +98,8 @@ void ThreadPoolExecutor::add(
       return;
     }
     case 1: {
-      return add(session, *begin);
+      add(session, *begin);
+      return;
     }
   }
 
@@ -178,7 +179,8 @@ void WorkUnit::run(ThreadPoolExecutor* executor, SessionState* session) {
 
     switch (newWorkUnits.size()) {
       case 0: {
-        return session->removeWork();
+        session->removeWork();
+        return;
       }
       case 1: {
         break;

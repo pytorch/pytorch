@@ -310,9 +310,55 @@ INSTANTIATE_CONV_WEIGHT_TO_DHWIO(float)
 INSTANTIATE_CONV_WEIGHT_TO_DHWIO(half)
 INSTANTIATE_CONV_WEIGHT_TO_DHWIO(bfloat)
 
-#if __METAL_VERSION__ >= 400 && \
-    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
-#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+template <typename T, bool OUT_NLC>
+kernel void conv1d_depthwise(
+    device const T* input [[buffer(0)]],
+    device const T* weight [[buffer(1)]],
+    device T* output [[buffer(2)]],
+    constant Conv2DParams& p [[buffer(3)]],
+    device const T* bias [[buffer(4)]],
+    uint3 pos [[thread_position_in_grid]]) {
+  const int x = int(pos.x) * kConv1dDepthwiseOutputsPerThread, o = int(pos.y);
+  device const T* row =
+      input + (int64_t(pos.z) * p.C_in + o / p.C_out_per_group) * p.W;
+  float acc[kConv1dDepthwiseOutputsPerThread];
+  for (int j = 0; j < kConv1dDepthwiseOutputsPerThread; ++j) {
+    acc[j] = p.has_bias ? float(bias[o]) : 0.0f;
+  }
+  for (int tap = 0; tap < p.kW; ++tap) {
+    const float w = float(weight[o * p.kW + tap]);
+    for (int j = 0; j < kConv1dDepthwiseOutputsPerThread; ++j) {
+      const int i = (x + j) * p.sW + tap * p.dW - p.padW;
+      if (i >= 0 && i < p.W) {
+        acc[j] += float(row[i]) * w;
+      }
+    }
+  }
+  for (int j = 0; j < kConv1dDepthwiseOutputsPerThread && x + j < p.outW; ++j) {
+    output
+        [OUT_NLC ? (int64_t(pos.z) * p.outW + x + j) * p.C_out + o
+                 : (int64_t(pos.z) * p.C_out + o) * p.outW + x + j] = T(acc[j]);
+  }
+}
+
+#define INSTANTIATE_CONV1D_DEPTHWISE(DT, OUT, OUT_NLC)                 \
+  template [[host_name("conv1d_depthwise_" #OUT "_" #DT)]] kernel void \
+  conv1d_depthwise<DT, OUT_NLC>(                                       \
+      device const DT*,                                                \
+      device const DT*,                                                \
+      device DT*,                                                      \
+      constant Conv2DParams&,                                          \
+      device const DT*,                                                \
+      uint3);
+
+INSTANTIATE_CONV1D_DEPTHWISE(float, ncl, false)
+INSTANTIATE_CONV1D_DEPTHWISE(half, ncl, false)
+INSTANTIATE_CONV1D_DEPTHWISE(bfloat, ncl, false)
+INSTANTIATE_CONV1D_DEPTHWISE(float, nlc, true)
+INSTANTIATE_CONV1D_DEPTHWISE(half, nlc, true)
+INSTANTIATE_CONV1D_DEPTHWISE(bfloat, nlc, true)
+
+#if C10_METAL_HAS_MPP
 #include <metal_cooperative_tensor>
 #include <metal_simdgroup>
 
@@ -822,7 +868,122 @@ INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 1, 1, 1, 64, 64)
 INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 1, 2, 2, dyn, -1)
 INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 2, 2, 2, dyn, -1)
 
-#endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
+template <typename T, bool NLC, bool OUT_NLC, int BO, int NSG>
+kernel void conv1d_mpp(
+    device T* input [[buffer(0)]],
+    device T* weight [[buffer(1)]],
+    device T* output [[buffer(2)]],
+    constant Conv2DParams& p [[buffer(3)]],
+    device const T* bias [[buffer(4)]],
+    device T* head [[buffer(5)]],
+    uint3 tgid [[threadgroup_position_in_grid]]) {
+  using extents = dextents<int32_t, 2>;
+  using strides = array<int32_t, 2>;
+  using tensor2d = tensor<device T, extents, tensor_inline>;
+  constexpr auto desc = matmul2d_descriptor(
+      OUT_NLC ? 64 : BO,
+      OUT_NLC ? BO : 64,
+      static_cast<int>(dynamic_extent),
+      OUT_NLC && !NLC,
+      OUT_NLC || NLC,
+      !is_same_v<T, float>,
+      matmul2d_descriptor::mode::multiply_accumulate);
+  matmul2d<desc, execution_simdgroups<NSG>> op;
+  auto acc = op.template get_destination_cooperative_tensor<
+      tensor2d,
+      tensor2d,
+      float>();
+  for (uint16_t i = 0; i < acc.get_capacity(); ++i) {
+    acc[i] = 0.0f;
+  }
+  const int cg = p.C_in_per_group, og = p.C_out_per_group;
+  const int group = int(tgid.x) / ((og + BO - 1) / BO);
+  const int o_off = int(tgid.x) % ((og + BO - 1) / BO) * BO;
+  const int x_off = int(tgid.y) * 64;
+  const bool merged = NLC && p.dW == 1 && p.C_in == cg;
+  const int K = merged ? p.kW * cg : cg;
+  // Tiles are 64 output positions wide (the matmul2d N extent). `head` holds
+  // the positions read by the tiles that start inside the left padding: up to
+  // ceil(padW / 64) * 64 of them plus the taps reaching past the last one.
+  const bool from_head = !NLC && x_off < p.padW;
+  const int length = from_head
+      ? min(p.W + p.padW, (p.padW + 63) / 64 * 64 + (p.kW - 1) * p.dW)
+      : p.W;
+  device T* in = (from_head ? head : input) +
+      int64_t(tgid.z) * length * p.C_in + group * cg * (NLC ? 1 : length);
+  for (int tap = 0; tap < (merged ? 1 : p.kW); ++tap) {
+    const int start =
+        NLC ? tap * p.dW : x_off + tap * p.dW - (from_head ? 0 : p.padW);
+    if (!NLC && start >= length) {
+      continue;
+    }
+    tensor2d wt(
+        weight + (merged ? 0 : (int64_t(tap) * p.C_out + group * og) * cg),
+        extents(K, og),
+        strides{1, merged ? p.kW * cg : cg});
+    tensor2d xt(
+        in + start * (NLC ? p.C_in : 1),
+        NLC ? extents(K, p.outW) : extents(length - start, cg),
+        strides{1, NLC ? p.sW * p.C_in : length});
+    auto w_tile = wt.slice(0, o_off);
+    auto x_tile = xt.slice(0, NLC ? x_off : 0);
+    if constexpr (OUT_NLC) {
+      op.run(x_tile, w_tile, acc);
+    } else {
+      op.run(w_tile, x_tile, acc);
+    }
+  }
+  auto out =
+      op.template get_destination_cooperative_tensor<tensor2d, tensor2d, T>();
+  for (uint16_t i = 0; i < acc.get_capacity(); ++i) {
+    const int o = group * og +
+        min(o_off + int(acc.get_multidimensional_index(i)[OUT_NLC ? 0 : 1]),
+            og - 1);
+    out[i] =
+        T(acc[i] +
+          (p.has_bias && acc.is_valid_element(i) ? float(bias[o]) : 0.0f));
+  }
+  tensor2d dst(
+      output + int64_t(tgid.z) * p.C_out * p.outW +
+          group * og * (OUT_NLC ? 1 : p.outW),
+      OUT_NLC ? extents(og, p.outW) : extents(p.outW, og),
+      strides{1, OUT_NLC ? p.C_out : p.outW});
+  auto dst_tile = OUT_NLC ? dst.slice(o_off, x_off) : dst.slice(x_off, o_off);
+  out.store(dst_tile);
+}
+
+#define INSTANTIATE_CONV1D_MPP(DT, IN, NLC, OUT, OUT_NLC, BO, NSG)   \
+  template [[host_name("conv1d_mpp_" #IN "_" #OUT "_b" #BO "_s" #NSG \
+                       "_" #DT)]] kernel void                        \
+  conv1d_mpp<DT, NLC, OUT_NLC, BO, NSG>(                             \
+      device DT*,                                                    \
+      device DT*,                                                    \
+      device DT*,                                                    \
+      constant Conv2DParams&,                                        \
+      device const DT*,                                              \
+      device DT*,                                                    \
+      uint3);
+
+#define INSTANTIATE_CONV1D_MPP_NCL(DT, BO, NSG)               \
+  INSTANTIATE_CONV1D_MPP(DT, ncl, false, ncl, false, BO, NSG) \
+  INSTANTIATE_CONV1D_MPP(DT, ncl, false, nlc, true, BO, NSG)
+
+#define INSTANTIATE_CONV1D_MPP_LAYOUTS(DT, NSG)              \
+  INSTANTIATE_CONV1D_MPP_NCL(DT, 64, NSG)                    \
+  INSTANTIATE_CONV1D_MPP(DT, nlc, true, ncl, false, 64, NSG) \
+  INSTANTIATE_CONV1D_MPP(DT, nlc, true, nlc, true, 64, NSG)
+
+#define INSTANTIATE_CONV1D_MPP_ALL(DT)  \
+  INSTANTIATE_CONV1D_MPP_LAYOUTS(DT, 2) \
+  INSTANTIATE_CONV1D_MPP_LAYOUTS(DT, 4) \
+  INSTANTIATE_CONV1D_MPP_NCL(DT, 16, 2) \
+  INSTANTIATE_CONV1D_MPP_NCL(DT, 32, 2)
+
+INSTANTIATE_CONV1D_MPP_ALL(float)
+INSTANTIATE_CONV1D_MPP_ALL(half)
+INSTANTIATE_CONV1D_MPP_ALL(bfloat)
+
+#endif // C10_METAL_HAS_MPP
 
 // Direct NCHW conv fallback for filter dims >= 256 (MPSGraph miscomputes); each
 // thread does R consecutive ow outputs. I is int when all numels fit in int32.

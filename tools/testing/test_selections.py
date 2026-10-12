@@ -46,22 +46,31 @@ THRESHOLD = 60 * 10  # 10 minutes
 
 # See Note [ROCm parallel CI testing]
 # Special logic for ROCm GHA runners to query number of GPUs available.
+# hipInfo gcnArchName lines also contain " gfx", so the same count works on Windows.
 if IS_ROCM and not IS_MEM_LEAK_CHECK:
-    try:
-        # This is the same logic used in GHA health check, see .github/templates/common.yml.j2
-        lines = (
-            subprocess.check_output(["rocminfo"], encoding="ascii").strip().split("\n")
-        )
-        count = 0
-        for line in lines:
-            if " gfx" in line:
-                count += 1
-        if count == 0:
-            raise AssertionError("There must be at least 1 GPU")
+    gpu_info_cmds = ["hipInfo", "rocminfo"] if os.name == "nt" else ["rocminfo"]
+    gpu_count = 0
+    tool_ran = False
+    for gpu_info_cmd in gpu_info_cmds:
+        try:
+            # errors="replace" tolerates non-ASCII device marketing names on Windows.
+            output = subprocess.check_output(
+                [gpu_info_cmd], encoding="utf-8", errors="replace"
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            continue
+        tool_ran = True
+        gpu_count = sum(" gfx" in line for line in output.strip().split("\n"))
+        if gpu_count > 0:
+            break
+    if gpu_count > 0:
         # Limiting to 8 GPUs(PROCS)
-        NUM_PROCS = min(count, 8)
-    except subprocess.CalledProcessError:
-        # The safe default for ROCm GHA runners is to run tests serially.
+        NUM_PROCS = min(gpu_count, 8)
+    elif tool_ran:
+        # A GPU runner whose query tools see no devices is unhealthy; fail loudly.
+        raise AssertionError("There must be at least 1 GPU")
+    else:
+        # No GPU query tool available; the safe default is to run tests serially.
         NUM_PROCS = 1
 
 

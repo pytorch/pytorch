@@ -16,6 +16,7 @@ load(
     ":build_variables.bzl",
     "aten_cpu_source_list",
     "aten_native_source_list",
+    "aten_native_xnnpack_source_list",
     "core_sources_common",
     "core_sources_full_mobile_no_backend_interface_xplat",
     "core_trainer_sources",
@@ -184,6 +185,7 @@ THIRD_PARTY_LIBS = {
     "FP16": ["//xplat/third-party/FP16:FP16", "//third_party:FP16"],
     "FXdiv": ["//xplat/third-party/FXdiv:FXdiv", "//third_party:FXdiv"],
     "XNNPACK": ["//xplat/third-party/XNNPACK:XNNPACK", "//third_party:XNNPACK"],
+    "XNNPACK_interface": ["//xplat/third-party/XNNPACK:interface", "//third_party:interface"],
     "clog": ["//xplat/third-party/clog:clog", "//third_party:clog"],
     "cpuinfo": ["//third-party/cpuinfo:cpuinfo", "//third_party:cpuinfo"],
     "flatbuffers-api": ["//third-party/flatbuffers/fbsource_namespace:flatbuffers-api", "//third_party:flatbuffers-api"],
@@ -290,7 +292,6 @@ def get_aten_preprocessor_flags():
         "-DATEN_MKL_SEQUENTIAL_FBXPLAT=0",
         "-DUSE_PYTORCH_METAL",
         "-DUSE_PYTORCH_QNNPACK",
-        "-DUSE_XNNPACK",
         "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
         "-DAT_PARALLEL_OPENMP_FBXPLAT=0",
         "-DAT_PARALLEL_NATIVE_FBXPLAT=1",
@@ -891,6 +892,8 @@ def get_pt_operator_registry_dict(
             ROOT + ":torch_mobile_core",
             ROOT + ":aten_cpu",
             ROOT + ":aten_metal_prepack_header",
+            ROOT + ":aten_xnnpack_interface",
+            third_party("XNNPACK"),
             third_party("glog"),
             C10,
         ] + ([ROOT + ":torch_mobile_train"] if train else []),
@@ -1589,6 +1592,7 @@ def define_buck_targets(
         ],
         deps = [
             ":aten_cpu",
+            ":aten_xnnpack_interface",
             ":backend_interface_lib",
             ":generated-autograd-headers",
             ":torch_headers",
@@ -2085,8 +2089,30 @@ def define_buck_targets(
         ],
     )
 
+    # Public ATen headers expose XNNPACK-backed class layouts when USE_XNNPACK
+    # is enabled. Keep that compile-time ABI coupled to headers, not the
+    # implementation archive.
+    fb_xplat_cxx_library(
+        name = "aten_xnnpack_interface",
+        exported_preprocessor_flags = [
+            "-DUSE_XNNPACK",
+        ] + ([] if IS_OSS else [
+            "-DXNNPACK_NO_CODE_CACHE",
+        ]),
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            third_party("XNNPACK_interface"),
+        ],
+        labels = labels,
+    )
+
     # aten_cpu and aten_native_cpu
-    for name, srcs in [
+    #
+    # extra_deps carries the XNNPACK dep, which only aten_native_cpu needs: some of
+    # its quantized kernels call the xnn_* API directly. aten_cpu touches no XNNPACK
+    # API at all, so it does not name an XNNPACK implementation and consumers of it
+    # (notably torch_mobile_core) are free to choose one.
+    for name, srcs, extra_deps, extra_exported_deps, target_visibility in [
         ("aten_cpu", jit_core_sources + aten_cpu_source_list + [
             # Generated
             ":gen_aten[Functions.cpp]",
@@ -2099,8 +2125,12 @@ def define_buck_targets(
             ":gen_aten[core/TensorMethods.cpp]",
             # Needed by ATen/native/EmbeddingBag.cpp
             "caffe2/perfkernels/embedding_lookup_idx.cc",
-        ]),
-        ("aten_native_cpu", aten_native_source_list),
+        ], [], [], ["PUBLIC"]),
+        ("aten_native_cpu", aten_native_source_list, [
+            ":aten_native_xnnpack",
+            ":aten_xnnpack_interface",
+            third_party("XNNPACK"),
+        ], [":aten_xnnpack_interface"], []),
     ]:
         fb_xplat_cxx_library(
             name = name,
@@ -2108,12 +2138,11 @@ def define_buck_targets(
             header_namespace = "",
             # @lint-ignore BUCKLINT
             link_whole = True,
-            visibility = ["PUBLIC"],
-            deps = [
+            visibility = target_visibility,
+            deps = extra_deps + [
                 third_party("omp"),
                 third_party("cpuinfo"),
                 third_party("glog"),
-                third_party("XNNPACK"),
                 third_party("pocketfft"),
             ] + select({
                 "DEFAULT": [],
@@ -2140,7 +2169,7 @@ def define_buck_targets(
                 "ovr_config//os:android": c2_fbandroid_xplat_compiler_flags,
             }),
             exported_preprocessor_flags = get_aten_preprocessor_flags(),
-            exported_deps = [
+            exported_deps = extra_exported_deps + [
                 ":aten_header",
                 ":caffe2_headers",
                 ":common_core",
@@ -2156,6 +2185,63 @@ def define_buck_targets(
             labels = labels,
             **aten_default_args
         )
+
+    # The ATen operators implemented directly on top of the XNNPACK API. Split out
+    # of aten_native_cpu so that the XNNPACK dep sits at a level each consumer picks
+    # for itself, letting full PyTorch and PyTorch mobile diverge later. Both use
+    # third_party("XNNPACK") today, so this is a no-op for now.
+    fb_xplat_cxx_library(
+        name = "aten_native_xnnpack",
+        srcs = aten_native_xnnpack_source_list,
+        header_namespace = "",
+        # Operator registrations live in static initializers, so nothing may be
+        # dropped at link time.
+        # @lint-ignore BUCKLINT
+        link_whole = True,
+        # Selective registries compile these sources themselves with per-app
+        # registration flags. Restrict this archive so both owners cannot enter
+        # the same link and register the same classes twice.
+        visibility = [ROOT + ":aten_native_cpu"],
+        deps = [
+            ":aten_xnnpack_interface",
+            third_party("XNNPACK"),
+        ],
+        compiler_flags = get_aten_compiler_flags() + select({
+            "DEFAULT": [],
+            "ovr_config//os:android-arm32": [
+                "-mfpu=vfpv3-d16",
+                "-march=armv7-a",
+                "-mthumb",
+                "-mfpu=neon",
+            ],
+            "ovr_config//os:android-x86_32": [
+                "-mssse3",
+            ],
+            "ovr_config//os:android-x86_64": [
+                "-mssse3",
+            ],
+        }) + select({
+            "DEFAULT": [],
+            "ovr_config//os:android": c2_fbandroid_xplat_compiler_flags,
+        }),
+        exported_preprocessor_flags = get_aten_preprocessor_flags(),
+        exported_deps = [
+            ":aten_cpu",
+            ":aten_header",
+            ":caffe2_headers",
+            ":common_core",
+            ":generated_aten_config_header",
+            ":generated_aten_headers_cpu",
+            ":jit_core_headers",
+            ":pthreadpool",
+            third_party("fmt"),
+            third_party("ruy"),
+            C10,
+            ROOT_PATH + "aten/src/ATen/native/quantized/cpu/qnnpack:pytorch_qnnpack",
+        ],
+        labels = labels,
+        **aten_default_args
+    )
 
     fb_xplat_cxx_library(
         name = "lean_runtime_with_flatbuffer",
