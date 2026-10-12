@@ -416,7 +416,8 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
         # Dim-0 sizes that need padding, multi-dim, and one large enough to
         # span several blocks per chunk
         sizes = [(5, 3), (7,), (2049, 2, 2)]
-        # On CUDA: the fused kernel, then two composite fallbacks
+        # On CUDA: the fused kernel, a composite fallback, then the fused kernel
+        # casting fp16
         for input_dtypes, noncontiguous in (
             ((bf16, fp32, bf16), False),
             ((bf16, fp32, bf16), True),
@@ -437,23 +438,57 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
             # Autograd must see the in-place write to out
             self.assertGreater(out._version, version)
 
+    def test_numerics_with_leading_dims(self, device):
+        bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
+        # Shard(1) and Shard(2) inputs next to a dim-0 input that needs padding
+        sizes = [(5, 3), (2, 8, 3), (3, 2, 4)]
+        num_leading_dims = [0, 1, 2]
+        # On CUDA: the fused kernel copying, casting bf16, casting fp16, then the
+        # composite fallback for two cast dtypes
+        for input_dtypes in (
+            (fp32, fp32, fp32),
+            (bf16, fp32, bf16),
+            (fp16, fp16, fp16),
+            (bf16, fp16, fp32),
+        ):
+            tensors = [
+                torch.randn(size, device=device, dtype=dtype)
+                for size, dtype in zip(sizes, input_dtypes)
+            ]
+            # FSDP2's default reorder: each Shard(i) input's chunks along dim 0
+            reordered = [
+                torch.cat(torch.chunk(t, 4, dim=dim), dim=0) if dim else t
+                for t, dim in zip(tensors, num_leading_dims)
+            ]
+            expected = torch._chunk_cat([t.to(fp32) for t in reordered], 0, 4)
+            out = torch.empty_like(expected)
+            version = out._version
+            torch.ops.fsdp.chunk_cat_mixed_dtype(
+                tensors, 0, 4, out=out, num_leading_dims=num_leading_dims
+            )
+            self.assertEqual(out, expected, atol=0, rtol=0)
+            self.assertGreater(out._version, version)
+
     @onlyCUDA
     def test_kernels(self, device):
         bf16, fp32 = torch.bfloat16, torch.float32
-        tensors = [torch.randn(8, 3, device=device, dtype=d) for d in (bf16, fp32)]
-        out = torch.empty(2, 24, device=device)
-        with profile(activities=[ProfilerActivity.CUDA]) as prof:
-            torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, 2, out=out)
-            torch.cuda.synchronize()
-        chunk_cat_kernels = [
-            event.name
-            for event in prof.events()
-            if event.device_type == DeviceType.CUDA
-            and "chunk_cat_cuda_kernel" in event.name
-        ]
-        # One launch copies the fp32 input and a second casts the bf16 one. The
-        # composite fallback casts separately and launches _chunk_cat once.
-        self.assertEqual(len(chunk_cat_kernels), 2, str(chunk_cat_kernels))
+        for size, num_leading_dims in (((8, 3), None), ((2, 8, 3), [1, 1])):
+            tensors = [torch.randn(size, device=device, dtype=d) for d in (bf16, fp32)]
+            out = torch.empty(2, tensors[0].numel(), device=device)
+            with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                torch.ops.fsdp.chunk_cat_mixed_dtype(
+                    tensors, 0, 2, out=out, num_leading_dims=num_leading_dims
+                )
+                torch.cuda.synchronize()
+            chunk_cat_kernels = [
+                event.name
+                for event in prof.events()
+                if event.device_type == DeviceType.CUDA
+                and "chunk_cat_cuda_kernel" in event.name
+            ]
+            # One launch copies the fp32 input and a second casts the bf16 one.
+            # The composite fallback casts separately and launches _chunk_cat once.
+            self.assertEqual(len(chunk_cat_kernels), 2, str(chunk_cat_kernels))
 
 
 instantiate_device_type_tests(
@@ -470,10 +505,17 @@ class TestFullyShardNativeCollectiveCopy(TestCase):
             torch.ops.fsdp._all_gather_copy_out_.default,
             ([torch.empty_like(tensor)], packed, [packed.size(1)], [outer_size], 4),
         )
-        torch.library.opcheck(
-            torch.ops.fsdp._reduce_scatter_copy_in_.default,
-            (torch.empty_like(packed), [tensor], [1], 4),
-        )
+        # Mixed dtypes chunked along dim 1, then flattened and chunked along dim 0
+        tensors = [tensor, tensor.bfloat16()]
+        for inputs, num_leading_dims in (
+            (tensors, [1, 1]),
+            ([t.flatten() for t in tensors], None),
+        ):
+            torch.library.opcheck(
+                torch.ops.fsdp.chunk_cat_mixed_dtype.default,
+                (inputs, 0, 4),
+                {"out": packed.repeat(1, 2), "num_leading_dims": num_leading_dims},
+            )
 
     @onlyCUDA
     def test_cuda_graph(self, device):
@@ -482,7 +524,9 @@ class TestFullyShardNativeCollectiveCopy(TestCase):
         output = torch.empty_like(tensor)
 
         def copy():
-            torch.ops.fsdp._reduce_scatter_copy_in_(packed, [tensor], [1], 4)
+            torch.ops.fsdp.chunk_cat_mixed_dtype(
+                [tensor], 0, 4, out=packed, num_leading_dims=[1]
+            )
             torch.ops.fsdp._all_gather_copy_out_(
                 [output], packed, [packed.size(1)], [128], 4
             )
