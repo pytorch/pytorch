@@ -6,6 +6,8 @@ Only tests covering operations supported in PR 1 (read-only ops + wiring)
 are included; mutation, methods, and conversions will follow in later PRs.
 """
 
+import sys
+
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
@@ -299,6 +301,77 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         b = self.type2test(b"mississippi")
         self.assertEqual(b.count(b"i"), 4)
         self.assertEqual(b.count(b"i", 6), 2)
+
+    @make_dynamo_test
+    def test_split_rsplit(self):
+        b = bytearray(b"a,,b,c")
+        parts = b.split(b",", maxsplit=2)
+        self.assertEqual(
+            parts,
+            [bytearray(b"a"), bytearray(), bytearray(b"b,c")],
+        )
+        self.assertIs(type(parts[0]), bytearray)
+        self.assertEqual(
+            b.rsplit(b",", maxsplit=2),
+            [bytearray(b"a,"), bytearray(b"b"), bytearray(b"c")],
+        )
+        self.assertEqual(
+            b.split(bytearray(b","), 1),
+            [bytearray(b"a"), bytearray(b",b,c")],
+        )
+        whitespace = bytearray(b"  a  b  ")
+        self.assertEqual(whitespace.split(None, 0), [bytearray(b"a  b  ")])
+        self.assertEqual(whitespace.rsplit(None, 0), [bytearray(b"  a  b")])
+        self.assertRaisesRegex(ValueError, "^empty separator$", b.split, b"")
+        self.assertRaisesRegex(
+            TypeError, "^a bytes-like object is required, not 'str'$", b.rsplit, ","
+        )
+        self.assertRaisesRegex(
+            OverflowError,
+            "^Python int too large to convert to C ssize_t$",
+            b.split,
+            b",",
+            sys.maxsize + 1,
+        )
+        self.assertRaisesRegex(
+            OverflowError,
+            "^Python int too large to convert to C ssize_t$",
+            b.rsplit,
+            b",",
+            sys.maxsize + 1,
+        )
+
+    def test_input_bytearray_split_rsplit(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.split(b","), ba.rsplit(b",", 1)
+
+        self.assertEqual(
+            fn(bytearray(b"a,b,c")),
+            (
+                [bytearray(b"a"), bytearray(b"b"), bytearray(b"c")],
+                [bytearray(b"a,b"), bytearray(b"c")],
+            ),
+        )
+
+    def test_input_bytearray_split_rsplit_nonconstant_separator(self):
+        def fn(x, ba, sep):
+            return x + 1, ba.split(sep), ba.rsplit(sep)
+
+        args = torch.ones(1), bytearray(b"a,b,c"), memoryview(b",")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Dynamo does not know how to trace method `split` of class `bytearray`",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertEqual(
+            torch.compile(fn, backend="eager")(*args),
+            (
+                torch.tensor([2.0]),
+                [bytearray(b"a"), bytearray(b"b"), bytearray(b"c")],
+                [bytearray(b"a"), bytearray(b"b"), bytearray(b"c")],
+            ),
+        )
 
     @make_dynamo_test
     def test_hex(self):
