@@ -3270,7 +3270,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         res = self._vectorcall_method(tx, "__init__", args, kwargs)
         if not res.is_constant_none():
             raise_type_error(
-                tx, f"__init__() should return None, got {res.python_type_name()}"
+                tx, f"__init__() should return None, not {res.python_type_name()!r}"
             )
         return res
 
