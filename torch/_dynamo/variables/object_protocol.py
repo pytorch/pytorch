@@ -2452,10 +2452,28 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # Fixed-layout objects with generic attribute access cannot have extra attributes.
+    # Before Python 3.15, builtin types can expose distinct wrappers for the
+    # same PyObject_GenericGetAttr slot. Fixed-layout objects with that slot
+    # cannot have extra attributes, unless __getattr__ supplies them.
     if (
         not py_type.__dictoffset__
-        and mro_lookup(py_type, "__getattribute__") is object.__getattribute__
+        and mro_lookup(py_type, "__getattr__") is NO_SUCH_SUBOBJ
+        and any(
+            mro_lookup(py_type, "__getattribute__") is cls.__getattribute__
+            for cls in (
+                object,
+                list,
+                tuple,
+                dict,
+                set,
+                frozenset,
+                int,
+                str,
+                bytes,
+                range,
+                types.GeneratorType,
+            )
+        )
     ):
         raise_observed_exception(
             AttributeError,
