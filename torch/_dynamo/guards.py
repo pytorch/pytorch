@@ -1334,6 +1334,18 @@ def check_closure(value: object, metadata: Any) -> bool:
     return id(value) == metadata
 
 
+def _ordered_dict_key_signature(
+    value: collections.OrderedDict[Any, Any],
+) -> list[tuple[type[Any] | None, Any]]:
+    from .variables.constant import ConstantVariable
+
+    # Match literal keys by value, without calling user-defined key comparisons.
+    return [
+        (type(key), key) if ConstantVariable.is_literal(key) else (None, id(key))
+        for key in collections.OrderedDict.keys(value)
+    ]
+
+
 def _constant_subclass_base_value(value: object) -> Any:
     """Extract the base constant value from a constant subclass instance."""
     from .variables.user_defined import _CONSTANT_BASE_TYPES
@@ -3479,26 +3491,23 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: [
-            id(key) for key in collections.OrderedDict.keys(value)
-        ],
-        eval_fn=lambda value, metadata: [
-            id(key) for key in collections.OrderedDict.keys(value)
-        ]
-        == metadata,
+        get_metadata_fn=lambda guard, value: _ordered_dict_key_signature(value),
+        eval_fn=lambda value, metadata: constants_identical(
+            _ordered_dict_key_signature(value), metadata
+        ),
     )
     def ORDERED_DICT_KEYS_MATCH(self, guard: Guard) -> None:
-        key_ids = [
-            self.id_ref(key, guard.name)
-            for key in collections.OrderedDict.keys(self.get(guard))
-        ]
+        from .variables.constant import ConstantVariable
+
+        value = self.get(guard)
+        key_signature = _ordered_dict_key_signature(value)
+        for key in collections.OrderedDict.keys(value):
+            if not ConstantVariable.is_literal(key):
+                self.id_ref(key, guard.name)
 
         def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
-            return collections.OrderedDict.__len__(value) == len(key_ids) and all(
-                id(current) == expected
-                for current, expected in zip(
-                    collections.OrderedDict.keys(value), key_ids
-                )
+            return constants_identical(
+                _ordered_dict_key_signature(value), key_signature
             )
 
         code = [f"___check_order({self.arg_ref(guard)})"]
