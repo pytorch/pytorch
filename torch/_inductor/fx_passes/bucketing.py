@@ -272,6 +272,7 @@ def _meta_arg(arg: object) -> object:
     return arg
 
 
+# TODO: Unify with same_tensor_meta in fx_utils.py
 def _same_tensor_metadata(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
     def same_dim(lhs_dim: object, rhs_dim: object) -> bool:
         from torch.fx.experimental.symbolic_shapes import statically_known_true
@@ -448,6 +449,49 @@ def is_wait_tensor(node: torch.fx.Node) -> bool:
         node.op == "call_function"
         and node.target is torch.ops._c10d_functional.wait_tensor.default
     )
+
+
+def deduplicate_wait_tensors(
+    graph: torch.fx.Graph, waits: list[torch.fx.Node] | None = None
+) -> None:
+    """Keep the first wait on each FX value and remove later no-op waits."""
+    if waits is None:
+        waits = graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.wait_tensor.default,
+            sort=False,
+        )
+
+    waits_by_input: dict[torch.fx.Node, list[torch.fx.Node]] = defaultdict(list)
+    wait_nodes = OrderedSet(waits)
+    for wait in waits:
+        waited_value = wait.args[0]
+        if isinstance(waited_value, torch.fx.Node):
+            waits_by_input[waited_value].append(wait)
+
+    visited = OrderedSet[torch.fx.Node]()
+    for waited_value, direct_waits in waits_by_input.items():
+        if waited_value in wait_nodes:
+            continue
+
+        wait_group: list[torch.fx.Node] = []
+        pending = list(direct_waits)
+        while pending:
+            wait = pending.pop()
+            if wait in visited:
+                continue
+            visited.add(wait)
+            wait_group.append(wait)
+            pending.extend(waits_by_input.get(wait, ()))
+
+        if len(wait_group) < 2:
+            continue
+        canonical_wait = direct_waits[0]
+        for wait in wait_group:
+            if wait is canonical_wait:
+                continue
+            wait.replace_all_uses_with(canonical_wait)
+            graph.erase_node(wait)
 
 
 def is_all_reduce_tensor(node: torch.fx.Node) -> bool:

@@ -137,7 +137,7 @@ __all__ = [
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
-_Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"]
+_Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE"]
 _R = TypeVar("_R")
 
 
@@ -260,9 +260,19 @@ class FlexKernelOptions(TypedDict, total=False):
     option for debugging. Default: False."""
 
     USE_TMA: NotRequired[bool]
-    """Whether to use Tensor Memory Accelerator (TMA) on supported hardware.
-    This is experimental and may not work on all hardware, currently specific
-    to NVIDIA GPUs Hopper+. Default: False."""
+    """Whether to use hardware tensor descriptors for the attention operands.
+    This is experimental and may not work on all hardware. It is supported on
+    NVIDIA Hopper+ (TMA), Intel GPUs, and AMD gfx1250 (TDM); the AMD path covers
+    the forward and decode kernels only, not the backward pass. The default is
+    backend-dependent: Intel GPUs and eligible AMD gfx1250 inputs select
+    descriptors automatically, and everything else defaults to False. Setting
+    False forces the pointer path. Setting True requests descriptors but remains
+    subject to the dtype and layout checks, falling back to the pointer path
+    when the operands are ineligible. On AMD gfx1250, setting
+    ``torch._inductor.config.triton.enable_flex_tdm = False`` at compile time
+    disables the forward and decode descriptors even for ``USE_TMA=True``; it is
+    the control for callers that cannot reach this option, and it does not
+    affect NVIDIA or Intel selection."""
 
     # ROCm-specific options
 
@@ -284,6 +294,7 @@ class FlexKernelOptions(TypedDict, total=False):
         - "TRITON": Standard Triton flex_attention kernel
         - "TRITON_DECODE": Triton flex_decoding kernel, only available for short sequence lengths with specific configurations
         - "FLASH": Experimental: Flash Attention kernel (cute-dsl), user needs to have flash installed
+        - "FLYDSL": Experimental FlyDSL FlexAttention forward kernel
 
     This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
     Raises an error if the requested backend cannot be used. Default: "AUTO"
