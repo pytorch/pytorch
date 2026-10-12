@@ -34,12 +34,23 @@ include(ExternalProject)
 # the SYCL compiler (icpx -fsycl). CMake allows only one CXX compiler per build
 # tree, so it is built here as an isolated ExternalProject producing a kernel-only
 # shared library (libxpupti_compute.so / xpupti_compute.dll).
+#
+# The library is installed next to the test executables, which find it through
+# $ORIGIN on Linux and through the executable's directory on Windows. PyTorch
+# sets CMAKE_RUNTIME_OUTPUT_DIRECTORY and ships only that directory (and not
+# this binary directory) to its test machines.
+if(CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+  set(XPUPTI_COMPUTE_DIR ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+else()
+  set(XPUPTI_COMPUTE_DIR ${CMAKE_CURRENT_BINARY_DIR})
+endif()
+
 set(XPUPTI_COMPUTE_LIB
-  ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}xpupti_compute${CMAKE_SHARED_LIBRARY_SUFFIX})
+  ${XPUPTI_COMPUTE_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}xpupti_compute${CMAKE_SHARED_LIBRARY_SUFFIX})
 
 if(WIN32)
   set(XPUPTI_COMPUTE_IMPLIB
-      ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_IMPORT_LIBRARY_PREFIX}xpupti_compute${CMAKE_IMPORT_LIBRARY_SUFFIX})
+      ${XPUPTI_COMPUTE_DIR}/${CMAKE_IMPORT_LIBRARY_PREFIX}xpupti_compute${CMAKE_IMPORT_LIBRARY_SUFFIX})
 else()
   set(XPUPTI_COMPUTE_IMPLIB "")
 endif()
@@ -52,7 +63,7 @@ endif()
 
 set(_xpupti_compute_cmake_args
     -DCMAKE_CXX_COMPILER=${SYCL_COMPILER}
-    -DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR})
+    -DCMAKE_INSTALL_PREFIX=${XPUPTI_COMPUTE_DIR})
 
 if(WIN32)
   get_filename_component(_sycl_compiler_dir "${SYCL_COMPILER}" DIRECTORY)
@@ -89,8 +100,9 @@ function(add_sycl_test test_file)
   target_link_libraries(${test_name} PRIVATE
     ${LINK_LIBRARIES}
     xpupti_compute)
-  set_target_properties(${test_name} PROPERTIES
-    BUILD_RPATH ${CMAKE_CURRENT_BINARY_DIR})
+  if(NOT WIN32)
+    set_target_properties(${test_name} PROPERTIES BUILD_RPATH "$ORIGIN")
+  endif()
   gtest_discover_tests(${test_name} ${ARGN})
 endfunction()
 
