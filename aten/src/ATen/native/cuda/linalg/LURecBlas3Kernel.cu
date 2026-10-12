@@ -1304,10 +1304,10 @@ void ldl_diagonal_panel(
   typename c10::scalar_value_type<scalar_t>::type* dpart_max, int* dpart_idx,
   int max_coop_blocks
 ) {
+  // TODO: can be easily extended to the batched case
   constexpr int PANEL_THRESHOLD = 512;
   constexpr int LARGE_PANEL_NTHREADS = 1024;
   constexpr int SMALL_PANEL_NTHREADS = 256;
-  // TODO: can be easily extended to the batched case
   const auto stream = at::cuda::getCurrentCUDAStream();
 
   auto problem_dim = n - curr_step;
