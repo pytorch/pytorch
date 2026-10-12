@@ -5216,6 +5216,26 @@
       ]
     }
   ],
+  "GB7427": [
+    {
+      "Gb_type": "dict subclass in torch.fx.traceback.annotate",
+      "Context": "str(annotation)",
+      "Explanation": "Dynamo reads annotation entries directly, which would bypass overridden mapping methods (e.g. __getitem__) on a dict subclass.",
+      "Hints": [
+        "Pass a plain dict to torch.fx.traceback.annotate."
+      ]
+    }
+  ],
+  "GB2842": [
+    {
+      "Gb_type": "dynamic value in torch.fx.traceback.annotate",
+      "Context": "str(value)",
+      "Explanation": "Annotation values are stored as constants in the graph. Dynamic floats are specialized, but other dynamic values are not, since specializing them (e.g. a tensor size) can cause a recompile for every distinct value.",
+      "Hints": [
+        "Compute the annotation value from configuration rather than from tensors or sizes."
+      ]
+    }
+  ],
   "GB9300": [
     {
       "Gb_type": "P2P compilation disabled for batch_isend_irecv",
