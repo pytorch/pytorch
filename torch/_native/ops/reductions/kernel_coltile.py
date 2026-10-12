@@ -405,7 +405,10 @@ def _reduce_col_tile(
         )
         build2 = lambda: _compile(  # noqa: E731
             op2,
-            [_L.fake_compact(torch2cute[pp.dtype], (_L.sym_int64(),)) for pp in parts],
+            [
+                _L.fake_compact(torch2cute[pp.dtype], (cute.sym_int64(),))
+                for pp in parts
+            ],
             [
                 _L.fake_compact(torch2cute[out.dtype], (_L.sym(),))
                 for out in kernel_outs
