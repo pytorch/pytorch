@@ -709,7 +709,7 @@ class GemmBase:
 
             finalizer_load_acc = load_acc_and_fold
         else:
-            split_k_sem, ws_ptr = None, None
+            split_k_sem, ws_ptr, split_idx = None, None, None
         # Mixed static/dynamic test (quack.dsl.mixed_constexpr_if): the const_expr
         # prefix folds at trace time, so split_k == 1 / SEPARATE codegen is a bare
         # epilogue call with no dynamic if, while SERIAL/PARALLEL non-finalizing

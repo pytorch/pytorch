@@ -58,11 +58,21 @@ preprocessed.
 """
 
 import ast
+import inspect
+import os
 from copy import deepcopy
 
 import cutlass.base_dsl.ast_preprocessor as ast_preprocessor
 
 __all__ = ["rewrite_mixed_constexpr_if"]
+
+# Other quack copies (e.g. mslk's, loaded by FA4) install their own scoped patch
+# under the upstream `_quack_mixed_constexpr_if_patch` flag, so this copy needs
+# its own flag to avoid being skipped. Scoped to this package so foreign kernels
+# keep stock DSL lowering.
+_QUACK_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
+_PATCH_FLAG = "_torch_vendor_quack_mixed_constexpr_if_patch"
+_ACTIVE_ATTR = "_torch_vendor_quack_mixed_if_active"
 
 
 def _is_constexpr_call(node: ast.expr) -> bool:
@@ -134,21 +144,38 @@ def _rewrite_elif_chain(node: ast.If) -> ast.If:
 
 def _install_mixed_constexpr_if_ast_patch() -> None:
     preprocessor_cls = ast_preprocessor.DSLPreprocessor
-    if getattr(preprocessor_cls, "_quack_mixed_constexpr_if_patch", False):
+    if getattr(preprocessor_cls, _PATCH_FLAG, False):
         return
 
     original_visit_if = preprocessor_cls.visit_If
+    original_transform_function = preprocessor_cls.transform_function
+
+    def transform_function(self, func_name, function_pointer):
+        # transform_function recurses into nested @cute.jit helpers; classify
+        # each function by its own source file and restore on exit.
+        prev = getattr(self, _ACTIVE_ATTR, False)
+        try:
+            src_file = inspect.getsourcefile(function_pointer) or ""
+        except TypeError:
+            src_file = ""
+        setattr(self, _ACTIVE_ATTR, src_file.startswith(_QUACK_ROOT))
+        try:
+            return original_transform_function(self, func_name, function_pointer)
+        finally:
+            setattr(self, _ACTIVE_ATTR, prev)
 
     def visit_if(self, node: ast.If):
         # The DSL recurses into elifs via create_if_function, which bypasses
         # visit_If, so normalize the whole chain while we still hold its head.
         # Work tail-first: rewriting an earlier mixed elif duplicates its
         # orelse, and both copies must already contain the normalized tail.
-        return original_visit_if(self, _rewrite_elif_chain(node))
+        if getattr(self, _ACTIVE_ATTR, False):
+            node = _rewrite_elif_chain(node)
+        return original_visit_if(self, node)
 
-    preprocessor_cls._quack_original_visit_If = original_visit_if
+    preprocessor_cls.transform_function = transform_function
     preprocessor_cls.visit_If = visit_if
-    preprocessor_cls._quack_mixed_constexpr_if_patch = True
+    setattr(preprocessor_cls, _PATCH_FLAG, True)
 
 
 _install_mixed_constexpr_if_ast_patch()

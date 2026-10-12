@@ -336,6 +336,18 @@ from . import cute_dsl_mlir_threading
 cute_dsl_elf_fix.patch()
 cute_dsl_mlir_threading.patch()
 
+# Upstream quack/__init__.py imports quack.dsl so its CuTe DSL patches (tensor
+# indexing sugar, Tensor.to/clone/contiguous, mixed const_expr ifs) are live
+# before any kernel is preprocessed. Call them explicitly: bare side-effect
+# imports are skipped under lazy imports.
+from .dsl import cute_tensor as _cute_tensor
+from .dsl import cute_tensor_indexing as _cute_tensor_indexing
+from .dsl import mixed_constexpr_if as _mixed_constexpr_if
+
+_cute_tensor_indexing.patch_cute_tensor_indexing()
+_cute_tensor.patch_cute_tensor()
+_mixed_constexpr_if._install_mixed_constexpr_if_ast_patch()
+
 # PyTorch-owned EpiOps (torch/_inductor/kernel/flex_gemm/quack_ops) are hashed
 # into the disk-cache fingerprint with this package. The fingerprint is memoized
 # on first jit_cache use anywhere in the process, so register here, before any
