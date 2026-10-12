@@ -5487,7 +5487,8 @@ class AutogradFunctionApplyVariable(VariableTracker):
         only tensor/symint outputs, flattened, plus any intermediates. Match
         them by VariableTracker identity, as handle_saved_tensors_wiring does
         for the backward inputs. Traced outputs with no original counterpart
-        get no gradient and declare None.
+        get no gradient and declare None. trace_backward_graph has already
+        validated the declarations.
         """
         if ctx.output_grad_dtypes is None:
             raise AssertionError("Expected ctx.output_grad_dtypes to be set")
@@ -5496,15 +5497,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
             if isinstance(fwd_out, variables.BaseListVariable)
             else [fwd_out]
         )
-        if len(fwd_out_vts) != len(ctx.output_grad_dtypes):
-            unimplemented(
-                gb_type="autograd.Function.apply: set_output_grad_dtype arity mismatch",
-                context=f"{len(ctx.output_grad_dtypes)} declarations for "
-                f"{len(fwd_out_vts)} outputs",
-                explanation="ctx.set_output_grad_dtype must declare one dtype "
-                "per forward output.",
-                hints=["Pass one torch.dtype or None per forward output."],
-            )
         fwd_vt_to_grad_dtype = {
             fwd_vt: grad_dtype
             for fwd_vt, grad_dtype in zip(fwd_out_vts, ctx.output_grad_dtypes)
@@ -5651,6 +5643,26 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     bwd_args.append(ConstantVariable.create(None))
 
         num_grad_args = len(bwd_args)
+        # Validate ctx.set_output_grad_dtype before it shapes the backward
+        # trace: invalid declarations graph break, so eager raises its error.
+        if ctx.output_grad_dtypes is not None and (
+            len(ctx.output_grad_dtypes) != num_grad_args
+            or any(
+                grad_dtype is not None and not grad_arg.is_tensor()
+                for grad_arg, grad_dtype in zip(bwd_args, ctx.output_grad_dtypes)
+            )
+        ):
+            unimplemented(
+                gb_type="autograd.Function.apply: invalid set_output_grad_dtype",
+                context=f"declarations {ctx.output_grad_dtypes} for "
+                f"{num_grad_args} outputs",
+                explanation="ctx.set_output_grad_dtype must declare one dtype per "
+                "forward output, and None for non-tensor outputs.",
+                hints=[
+                    "Pass one torch.dtype or None per forward output, and None "
+                    "for non-tensor outputs."
+                ],
+            )
         bwd_fn, bwd_args = self.prepare_fn_vt(tx, ctx, "backward", bwd_args)
         # Gradients declared via ctx.set_output_grad_dtype reach backward in
         # the declared dtype, not the forward output's dtype.

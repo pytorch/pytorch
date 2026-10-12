@@ -2053,6 +2053,50 @@ class GraphModule(torch.nn.Module):
     aten::detach(t: f32[4])  ->  t: f32[4]""",
         )
 
+    def test_set_output_grad_dtype_invalid_declarations(self):
+        # Invalid declarations graph break, so eager raises its error.
+        cases = {
+            "too few": ((), False, "number of declarations"),
+            "too many": (
+                (torch.float32, torch.float32),
+                False,
+                "number of declarations",
+            ),
+            "dtype on non-tensor output": (
+                (torch.float32, torch.float32),
+                True,
+                "not a differentiable tensor",
+            ),
+        }
+        for name, (dtypes, non_tensor_output, eager_error) in cases.items():
+
+            class ToBFloat16(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.set_output_grad_dtype(*dtypes)
+                    out = x.to(torch.bfloat16)
+                    return (2, out) if non_tensor_output else out
+
+                @staticmethod
+                def backward(ctx, *grads):
+                    return grads[-1]
+
+            def fn(x):
+                return ToBFloat16.apply(x)
+
+            x = torch.ones(4, requires_grad=True)
+            with self.subTest(name):
+                with self.assertRaisesRegex(RuntimeError, eager_error):
+                    fn(x)
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported, "invalid set_output_grad_dtype"
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(x)
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(RuntimeError, eager_error):
+                    torch.compile(fn, backend="eager")(x)
+
     def test_mark_non_differentiable(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         from torch.autograd import Function

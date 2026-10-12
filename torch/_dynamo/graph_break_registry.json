@@ -1793,6 +1793,17 @@
       ]
     }
   ],
+  "GB2492": [
+    {
+      "Gb_type": "autograd.Function.apply: invalid set_output_grad_dtype",
+      "Context": "declarations {ctx.output_grad_dtypes} for {num_grad_args} outputs",
+      "Explanation": "ctx.set_output_grad_dtype must declare one dtype per forward output, and None for non-tensor outputs.",
+      "Hints": [
+        "Pass one torch.dtype or None per forward output, and None ",
+        "for non-tensor outputs."
+      ]
+    }
+  ],
   "GB6441": [
     {
       "Gb_type": "unsupported torch.cuda.MemPool attribute",
