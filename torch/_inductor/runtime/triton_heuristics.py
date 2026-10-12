@@ -5452,20 +5452,23 @@ class GridExpr:
 
 class Grid1D(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
-        self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
+        (prefix,) = self.inductor_meta.get("grid_prefixes", ("x",))
+        self.x_grid = self.ceildiv(f"{prefix}numel", meta.get(f"{prefix.upper()}BLOCK"))
 
 
 class Grid2D(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
-        self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
-        self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
+        x, y = self.inductor_meta.get("grid_prefixes", ("x", "y"))
+        self.x_grid = self.ceildiv(f"{x}numel", meta.get(f"{x.upper()}BLOCK"))
+        self.y_grid = self.ceildiv(f"{y}numel", meta.get(f"{y.upper()}BLOCK"))
 
 
 class Grid3D(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
-        self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
-        self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
-        self.z_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
+        x, y, z = self.inductor_meta.get("grid_prefixes", ("x", "y", "z"))
+        self.x_grid = self.ceildiv(f"{x}numel", meta.get(f"{x.upper()}BLOCK"))
+        self.y_grid = self.ceildiv(f"{y}numel", meta.get(f"{y.upper()}BLOCK"))
+        self.z_grid = self.ceildiv(f"{z}numel", meta.get(f"{z.upper()}BLOCK"))
 
 
 class BatchMatmulGrid3D(GridExpr):
@@ -5477,11 +5480,13 @@ class BatchMatmulGrid3D(GridExpr):
 
 class Grid2DWithYZOverflow(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
-        self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
+        x, y = self.inductor_meta.get("grid_prefixes", ("x", "y"))
+        self.x_grid = self.ceildiv(f"{x}numel", meta.get(f"{x.upper()}BLOCK"))
         self.prefix.extend(
             [
                 self.assign_tmp(
-                    "y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))
+                    "y_grid_raw_",
+                    self.ceildiv(f"{y}numel", meta.get(f"{y.upper()}BLOCK")),
                 ),
                 self.assign_tmp(
                     "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())

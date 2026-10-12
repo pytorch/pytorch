@@ -3139,11 +3139,12 @@ class CSEProxy(DefaultHandler):
             # A load from an invalidated store requires us to
             # keep the actual buffer around
             V.kernel.must_keep_buffers.add(name)
-        if free_symbol_is_type(index, SymT.TMP):
-            return self.kernel.indirect_load(name, index)
         store_cache = self.kernel.cse.store_cache
         if name in store_cache:
             return store_cache[name]
+        if free_symbol_is_type(index, SymT.TMP):
+            return self.kernel.indirect_load(name, index)
+
         out = self.kernel.load(name, index)
         # count load that is not in the store_cache, and also not in the
         # cse cache.

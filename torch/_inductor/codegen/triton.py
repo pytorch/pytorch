@@ -4039,7 +4039,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # reduction indexing goes inside a loop
             if not tree.is_loop:
                 self.iteration_ranges_codegen_header(tree, self.body)
-            elif self.inside_reduction:
+            elif self.inside_reduction or tree.is_datadep:
                 # workaround for this issue:
                 # https://gist.github.com/jansel/6527126f781559095c5531f98a4235a7
                 self.body.writeline(
@@ -4078,7 +4078,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.loads.clear()
         self.compute.clear()
         self.body.writeline(f"{tree.prefix}numel = {value}")
-        self.codegen_reduction_numels(self.body)
+        if self.inside_reduction:
+            self.codegen_reduction_numels(self.body)
         self.outside_loop_vars.add(value)
 
     def need_numel_args(self):
@@ -7359,7 +7360,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         ):
             return
 
-        loop_trees = [tree for tree in self.range_trees if tree.is_loop]
+        loop_trees = [
+            tree
+            for tree in self.range_trees
+            if tree.is_loop and (self.inside_reduction or tree.is_datadep)
+        ]
         if self.mix_order_reduction:
             if not self.persistent_reduction:
                 raise AssertionError(
@@ -7450,7 +7455,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     f"tl.store(ws_ptr + (tl.program_id(0) + {idx} * tl.num_programs(0)) * r0_numel + r0_index, accum{idx}, r0_mask)"
                 )
 
-        elif self.inside_reduction and len(loop_trees) > 0:
+        elif len(loop_trees) > 0:
             # Write the loop headers.
             for level, tree in enumerate(loop_trees):
                 with self.body.indent(offset=level):
@@ -7459,8 +7464,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     loop_end = (
                         "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
                     )
-                    if tree.numel in self.datadep_ranges:
-                        loop_end = f"tl.max(tl.where(xmask, {prefix}numel, 0))"
+                    if tree.is_datadep:
+                        parent_masks = " & ".join(
+                            parent.mask_name()
+                            for parent in self.range_trees
+                            if parent.grid_dim is not None
+                        )
+                        loop_end = f"tl.max(tl.where({parent_masks}, {prefix}numel, 0))"
                     # Conditionalize pipelining on HIP for Triton due to
                     # reports of numerical inaccuracies on older Triton
                     if torch.version.hip and get_triton_version() > (3, 2):
@@ -7475,7 +7485,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             # The innermost loop performs the reduction.
             with self.body.indent(offset=len(loop_trees)):
-                self.codegen_reduction_indices(self.body)
+                if self.inside_reduction:
+                    self.codegen_reduction_indices(self.body)
                 self.body.splice(self.indexing_code)
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
@@ -7845,6 +7856,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 sorted(self.autotune_hints, key=lambda hint: hint.value)
             ),
         }
+        grid_trees = [tree for tree in self.range_trees if tree.grid_dim is not None]
+        if grid_trees:
+            out["grid_prefixes"] = tuple(
+                tree.prefix
+                for tree in sorted(grid_trees, key=lambda tree: tree.grid_dim)
+            )
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
         if config.deterministic or config.test_configs.force_filter_reduction_configs:
@@ -8386,7 +8403,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 code.writeline("XBLOCK: tl.constexpr = 1")
 
     def _get_grid_type(self) -> type[triton_heuristics.GridExpr]:
-        n = sum([int(not tree.is_reduction) for tree in self.range_trees])
+        n = sum(int(tree.grid_dim is not None) for tree in self.range_trees)
         if self.mix_order_reduction:
             if n != 1:
                 raise AssertionError(f"expected n == 1, got {n}")

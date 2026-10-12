@@ -189,6 +189,7 @@ class IterationRangesRoot(IterationRanges):
         tensor_dim: int | None,
         grid_dim: int | None,
         has_zdim: bool,
+        is_datadep: bool = False,
     ) -> None:
         if pid_cache is None:
             pid_cache = {}
@@ -208,12 +209,13 @@ class IterationRangesRoot(IterationRanges):
         # pid_cache["tl.program_id(0)"] = pid_m
         self.pid_cache: dict[str, str] = pid_cache
 
-        # True if the dimension is implemented as a single program looping over
-        # the full dimension (currently only used for non-persistent reduction)
+        # True if a program loops over the dimension in blocks.
 
-        if is_loop and not (self.is_reduction and grid_dim is None):
-            raise AssertionError("loop ranges must be reduction with no grid_dim")
+        if is_loop and grid_dim is not None:
+            raise AssertionError("loop ranges must have no grid_dim")
         self.is_loop = is_loop
+        # A dependent pointwise axis has is_datadep=True, is_reduction=False.
+        self.is_datadep = is_datadep
         # Index of corresponding dimension on triton tensors
         self.tensor_dim = tensor_dim
         # Index of corresponding dimension in the triton grid
@@ -453,6 +455,7 @@ class DerivedIterationRangesRoot(IterationRangesRoot):
             # kernel prologue and closes over a stale reduction offset from a
             # previous loop iteration.
             is_loop=parent.is_loop,
+            is_datadep=parent.is_datadep,
             tensor_dim=parent.tensor_dim,
             grid_dim=parent.grid_dim,
             has_zdim=parent.has_zdim,
@@ -688,6 +691,16 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # Convert to dicts for O(1) index lookup.
         tensor_dim_map = filtered_index_map(tensor_dims, active_prefixes)
         grid_dim_map = filtered_index_map(grid_dims, all_prefixes)
+        datadep_prefixes = OrderedSet(
+            prefix
+            for prefix in active_prefixes
+            if numels[prefix].has(ir.DataDependentRange)
+        )
+        if datadep_prefixes:
+            grid_dim_map = filtered_index_map(
+                grid_dims, active_prefixes - datadep_prefixes
+            )
+            breakpoint()
 
         range_trees = []
         for i, prefix in enumerate(active_prefixes):
@@ -703,7 +716,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     index,
                     self,  # type: ignore[arg-type]
                     pid_cache=pid_cache,
-                    is_loop=is_reduction and not self.persistent_reduction,
+                    is_loop=prefix in datadep_prefixes
+                    or (is_reduction and not self.persistent_reduction),
+                    is_datadep=prefix in datadep_prefixes,
                     tensor_dim=tensor_dim,
                     grid_dim=grid_dim,
                     has_zdim="z" in numels,
@@ -2996,6 +3011,7 @@ class SIMDScheduling(BaseScheduling):
                         (numel2, rnumel2, 1),
                     )
                     if not ordinary_fusion:
+                        breakpoint()
                         why("invalid tiling for reduction")
             else:
                 ordinary_fusion = numel1 == numel2
@@ -5996,6 +6012,11 @@ class SIMDScheduling(BaseScheduling):
         Returns:
             `(tile1, tile2, reduction_numel)` s.t. `tile1 * tile2 == numel`
         """
+        if reduction_numel == 1 and numel.has(ir.DataDependentRange):
+            node = next(iter(EnableReduction.filter(node_schedule)))
+            breakpoint()
+            return cls.create_tiling(node.get_ranges()[0], [reduction_numel]), None
+
         selection = cls.select_tiling_with_memory(
             node_schedule, numel, reduction_numel, coalesce_analysis
         )
