@@ -277,7 +277,11 @@ class TestAmdSmiImport(TestCase):
                 loader_dir = os.path.join(tmpdir, "loader")
                 os.mkdir(loader_dir)
                 os.symlink(library_source, os.path.join(loader_dir, "libamd_smi.so"))
-                env_updates["LD_LIBRARY_PATH"] = loader_dir
+                env_updates["LD_LIBRARY_PATH"] = os.pathsep.join(
+                    path
+                    for path in (loader_dir, os.environ.get("LD_LIBRARY_PATH"))
+                    if path
+                )
                 env_updates["ROCM_HOME"] = ""
                 env_updates["ROCM_PATH"] = ""
             if provide_sdk_library:
