@@ -216,6 +216,9 @@ class CustomMmaPipelined : public CustomMmaBase<Shape_, Policy_, 2> {
     // shared memory will always be zero-filled
   }
 
+  CUTLASS_DEVICE
+  static void drain_cp_asyncs() {}
+
   template <bool kLoadA = true, bool kLoadB = true>
   CUTLASS_DEVICE static void prologue(
       typename Base::SharedStorage& shared_storage,
