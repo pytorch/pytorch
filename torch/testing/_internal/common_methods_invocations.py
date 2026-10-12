@@ -789,6 +789,11 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': False})
 
 
+def sample_inputs_pow(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
+    if dtype.is_complex and not requires_grad:
+        yield SampleInput(torch.zeros(3, device=device, dtype=dtype), torch.tensor([-1, 1j, 2], device=device, dtype=dtype))
+
 def sample_inputs_nextafter(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
 
@@ -18226,6 +18231,7 @@ op_db: list[OpInfo] = [
                     dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
                     dtypesIfMPS=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
                     ref=np.power,
+                    sample_inputs_func=sample_inputs_pow,
                     # Due to AVX2 currently not being fully supported for Float16, log_vml_cpu can't be enabled
                     # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
                     # unsupported on CPU.
