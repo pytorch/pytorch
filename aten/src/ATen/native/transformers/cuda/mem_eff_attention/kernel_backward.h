@@ -711,6 +711,8 @@ struct AttentionBackwardKernel {
     int64_t delta_strideB = -1;
     int64_t delta_strideH = -1;
     int32_t num_batches = -1;
+    int32_t batch_offset = 0;
+    int32_t head_offset = 0;
     int16_t num_splits_key = 1; // We use `gridDim.x` inside kernel
 
     int64_t gO_strideB = 0;
@@ -740,8 +742,8 @@ struct AttentionBackwardKernel {
     }
 
     CUTLASS_DEVICE bool advance_to_block() {
-      int64_t batch_id = blockIdx.z;
-      int32_t head_id = blockIdx.y;
+      int64_t batch_id = blockIdx.z + batch_offset;
+      int32_t head_id = blockIdx.y + head_offset;
       int32_t kv_head_id = head_id / q_heads_per_kv;
 
       if (kNeedsAccumGradQ || kNeedsAccumGradK || kNeedsAccumGradV) {
@@ -887,7 +889,7 @@ struct AttentionBackwardKernel {
     }
     CUTLASS_HOST_DEVICE int64_t workspace_size() const {
       // Returns size of buffer we need to run this kernel
-      return num_batches * num_heads * workspace_strideBH() * sizeof(float);
+      return int64_t(num_batches) * num_heads * workspace_strideBH() * sizeof(float);
     }
     CUTLASS_HOST_DEVICE bool should_zero_workspace() const {
       return num_splits_key > 1 || window_size > 0;
@@ -1590,6 +1592,7 @@ struct AttentionBackwardKernel {
       mma.set_prologue_done(kPrologueQK);
       mma.set_zero_outside_bounds(!skipBoundsChecks);
       mma(gemm_k_iterations, accum, iterator_A, iterator_B, accum);
+      Mma::drain_cp_asyncs();
       accum = cutlass::multiplies<typename Mma::FragmentC>()(scale, accum);
 
       // Epilogue: add LSE + exp and store that to our shared memory buffer
@@ -1844,7 +1847,7 @@ struct AttentionBackwardKernel {
           output_frags.gradV,
           iterator_B,
           output_frags.gradV);
-      __syncthreads();
+      Mma::drain_cp_asyncs();
       if (kPrologueGV && !kSingleIterationGradV &&
           col + MatmulGradV::ThreadblockShape::kN < p.head_dim_value) {
         prologueGradV(col + MatmulGradV::ThreadblockShape::kN);
@@ -1900,7 +1903,7 @@ struct AttentionBackwardKernel {
 
       // Compute threadblock-scoped matrix multiply-add
       mma(gemm_k_iterations, accum, iterator_A, iterator_B, accum);
-      __syncthreads();
+      Mma::drain_cp_asyncs();
       if (kPrologueGQ) {
         prologueGradQ(0);
       }
@@ -2092,7 +2095,7 @@ struct AttentionBackwardKernel {
       __syncthreads();
       mma.set_prologue_done(kPrologueGQ);
       mma(gemm_k_iterations, accum, iterator_B, accum);
-      __syncthreads();
+      Mma::drain_cp_asyncs();
       bool isLastColumn = kSingleIterationGradQ ||
           (col + MatmulGradQ::ThreadblockShape::kN >= p.head_dim);
       if (kPrologueGQ && !isLastColumn) {
@@ -2230,7 +2233,7 @@ struct AttentionBackwardKernel {
           output_frags.gradK,
           iterator_B,
           output_frags.gradK);
-      __syncthreads();
+      Mma::drain_cp_asyncs();
       bool isLastColumn = kSingleIterationGradK ||
           col + MatmulGradK::ThreadblockShape::kN >= p.head_dim;
       if (kPrologueGK && !isLastColumn) {
