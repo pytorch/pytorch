@@ -2271,6 +2271,8 @@ __all__ = [
     "MemPool",
     "LocalizedAllocator",
     "use_mem_pool",
+    "HostMemPool",
+    "use_host_mem_pool",
     "temperature",
     "power_draw",
     "clock_rate",

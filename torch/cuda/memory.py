@@ -69,6 +69,8 @@ __all__ = [
     "MemPool",
     "LocalizedAllocator",
     "use_mem_pool",
+    "HostMemPool",
+    "use_host_mem_pool",
 ]
 
 
@@ -91,12 +93,25 @@ if not hasattr(torch._C, "_MemPool"):
     )
     torch._C.__dict__["_cuda_releasePool"] = _dummy_type("_cuda_releasePool")
 
+if not hasattr(torch._C, "_HostMemPool"):
+    # Define dummy base classes
+    torch._C.__dict__["_HostMemPool"] = _dummy_type("_HostMemPool")
+    torch._C.__dict__["_host_beginAllocateCurrentThreadToPool"] = _dummy_type(
+        "_host_beginAllocateCurrentThreadToPool"
+    )
+    torch._C.__dict__["_host_endAllocateCurrentThreadToPool"] = _dummy_type(
+        "_host_endAllocateCurrentThreadToPool"
+    )
+
 from torch._C import (  # noqa: F401
     _cuda_beginAllocateCurrentThreadToPool,
     _cuda_beginAllocateToPool,
     _cuda_CUDAAllocator,
     _cuda_endAllocateToPool,
     _cuda_releasePool,
+    _host_beginAllocateCurrentThreadToPool,
+    _host_endAllocateCurrentThreadToPool,
+    _HostMemPool,
     _MemPool,
 )
 
@@ -1867,6 +1882,8 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
         When used during :class:`~torch.cuda.CUDAGraph` capture, the graph
         retains the pool until the graph is reset or destroyed.
     """
+    if isinstance(pool, HostMemPool):
+        raise TypeError("use_mem_pool got a HostMemPool; use use_host_mem_pool")
     device_index = (
         torch.cuda.current_device() if device is None else _get_device_index(device)
     )
@@ -1879,6 +1896,97 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
     finally:
         _cuda_endAllocateToPool(device_index, pool.id)
         _cuda_releasePool(device_index, pool.id)
+
+
+class HostMemPool(_HostMemPool):
+    r"""HostMemPool represents a pool of pinned (page-locked) host memory in the
+    CUDA host caching allocator.
+
+    Pinned allocations of a thread inside :class:`use_host_mem_pool` come from
+    this pool, and blocks freed by any thread return to it. The pool keeps its
+    cached blocks apart from other pools; it does not choose where memory is
+    placed. A typical use is one pool per NUMA node, entered by the loader
+    threads bound to that node; see :ref:`cuda-pinned-host-memory-pools`.
+
+    Creating a pool allocates no memory. While the pool is alive, emptying the
+    host cache does not touch its cached blocks. Deleting the pool frees them,
+    unless a CUDA graph capture is underway. Blocks still in use, and a cache
+    left during a capture, are freed by a later
+    :func:`torch.accelerator.empty_host_cache`.
+    """
+
+    @property
+    def id(self) -> tuple[int, int]:
+        r"""Returns the ID of this pool as a tuple of two ints."""
+        return super().id
+
+    def use_count(self) -> int:  # pylint: disable=useless-parent-delegation
+        r"""Returns the reference count of this pool: 1 for the pool object,
+        plus one for every open :class:`use_host_mem_pool` context on any thread."""
+        return super().use_count()
+
+
+class _HostMemPoolContexts(threading.local):
+    def __init__(self) -> None:
+        # The open use_host_mem_pool contexts of this thread, innermost last.
+        self.stack: list[use_host_mem_pool] = []
+
+
+_host_mem_pool_contexts = _HostMemPoolContexts()
+
+
+class use_host_mem_pool:
+    r"""A context manager that routes the current thread's pinned host
+    allocations to a given pool.
+
+    Args:
+        pool(torch.cuda.HostMemPool): a HostMemPool object to be made active so
+            that pinned allocations route to this pool.
+
+    .. note::
+        Only the current thread's pinned allocations route to the pool,
+        including the pinned outputs of ``tensor.to("cpu", non_blocking=True)``.
+        Threads started inside the context do not. Several threads can use one
+        pool at the same time, and contexts nest: the innermost one wins.
+        Unlike :func:`use_mem_pool`, entering a pool that another thread is
+        using, or that this thread already entered, is allowed.
+
+    .. note::
+        During CUDA graph capture, allocations on the capturing stream go to
+        the graph's pool instead, even when the context is entered inside the
+        capture (unlike :func:`use_mem_pool`). A HostMemPool cannot be used as
+        a graph pool.
+
+    .. note::
+        Contexts must be exited in reverse order, on the thread that entered
+        them; otherwise exiting raises an error and changes nothing. Use the
+        context from synchronous code: one that stays open across a ``yield``
+        or ``await`` also routes whatever runs on the thread in between. When a
+        thread exits inside the context, its route is ended.
+    """
+
+    def __init__(self, pool: HostMemPool) -> None:
+        if not isinstance(pool, HostMemPool):
+            raise TypeError(
+                f"use_host_mem_pool expects a HostMemPool, got {type(pool).__name__}"
+            )
+        self._pool = pool
+
+    def __enter__(self) -> None:
+        _host_beginAllocateCurrentThreadToPool(self._pool.id)
+        _host_mem_pool_contexts.stack.append(self)
+
+    def __exit__(self, *args: object) -> None:
+        # The native end checks the pool id only, so it cannot tell this
+        # context from another one of the same pool on this thread.
+        stack = _host_mem_pool_contexts.stack
+        if not stack or stack[-1] is not self:
+            raise RuntimeError(
+                "use_host_mem_pool contexts must be exited in reverse order of "
+                "entry, on the thread that entered them"
+            )
+        _host_endAllocateCurrentThreadToPool(self._pool.id)
+        stack.pop()
 
 
 # Process-lifetime singleton: the UVM pluggable allocator + the ctypes closures

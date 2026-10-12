@@ -131,6 +131,12 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
+  // The host allocator rejects this too, but only after the device allocator
+  // has been routed to the pool, so check before any state changes.
+  TORCH_CHECK(
+      !at::getHostAllocator(at::kCUDA)->is_host_mem_pool(pool),
+      "Pool (", pool.first, ", ", pool.second,
+      ") belongs to a HostMemPool and cannot be used as a graph capture pool");
 
   capture_mode_ = capture_mode;
 
