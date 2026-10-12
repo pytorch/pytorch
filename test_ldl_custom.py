@@ -25,10 +25,15 @@ kernel is never called and the whole file silently tests something else. The
 gate is on hermitian only -- real dtypes reach it just as complex ones do.
 """
 
+import functools
+import os
+import re
+
 import torch
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCUDA,
 )
 from torch.testing._internal.common_dtype import floating_and_complex_types
@@ -44,6 +49,52 @@ from torch.testing._internal.common_utils import (
 # The kernel's panel width. Sizes either side of a multiple of this are what
 # exercise the deferred trailing update and out-of-panel pivots.
 NB = 32
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_STANDALONE_CU = os.path.join(_HERE, "ldl_panel_standalone.cu")
+_ORIGINAL_CU = os.path.join(_HERE, "aten/src/ATen/native/cuda/linalg/LURecBlas3Kernel.cu")
+
+
+@functools.cache
+def _standalone_ext():
+    from torch.utils.cpp_extension import load
+
+    return load("ldl_panel_standalone", [_STANDALONE_CU], verbose=False)
+
+
+_GRID_VARIANTS = [(True, b, 256) for b in (1, 2, 3, 7)] + [(False, 1, 256), (False, 1, 1024)]
+
+
+def _factor_panels(A, nb, panels, cooperative, nblocks, nthreads, hermitian):
+    """Runs the first `panels` panels of the standalone kernel on a column-major
+    copy of A, with the trailing update between them as the library does it."""
+    n = A.size(-1)
+    LD = A.mT.contiguous().mT.clone()
+    ipiv = torch.zeros(n, dtype=torch.int32, device=A.device)
+    info = torch.zeros(1, dtype=torch.int32, device=A.device)
+    step = 0
+    for _ in range(panels):
+        width = min(nb, n - step)
+        new_step = _standalone_ext().panel(
+            LD, ipiv, info, width, step, cooperative, nblocks, nthreads, hermitian
+        )
+        end = step + width
+        if end < n:
+            LD[end:, end:] -= LD[end:, step:new_step] @ LD[step:new_step, end:]
+        step = new_step
+    return LD, ipiv, info
+
+
+def _equal_with_nonfinite(a, b):
+    """Bitwise equality that tolerates NaNs, whose payload is not specified."""
+    return torch.equal(a.isnan(), b.isnan()) and torch.equal(a.nan_to_num(), b.nan_to_num())
+
+
+def _kernel_source(path, begin, end):
+    with open(path) as f:
+        text = f.read()
+    body = text[text.index(begin) : text.index(end)]
+    return re.sub(r"\s+", " ", body).strip()
 
 
 def _real_dtype(dtype):
@@ -361,6 +412,175 @@ class TestLDLCustomKernel(TestCase):
         A = STRUCTURES[structure](n, (), dtype, device)
         self._check(A, hermitian=True)
 
+    # Panels with more than COOP_MIN_ROWS = 2048 remaining rows are factored by a
+    # cooperative grid with one row per thread, so the pivot search is a grid-wide
+    # argmax. For n > 2048 the first panels take that path and the last ones fall
+    # back to a single block within the same factorization.
+    @onlyCUDA
+    @parametrize("structure", ["indefinite", "zero_diagonal", "out_of_panel_heavy",
+                               "arrow", "integer_valued", "clustered"])
+    @parametrize("n", [2048, 2049, 2050, 2304, 2305, 2560, 3000, 4100, 8193])
+    @dtypes(torch.float64, torch.complex128)
+    def test_cooperative_panel(self, device, dtype, n, structure):
+        """arrow puts every column's maximum in the last row, i.e. the last block;
+        integer_valued and clustered tie across blocks, so the lowest index has to
+        win the grid-wide reduction as it does within a block."""
+        torch.manual_seed(n)
+        A = STRUCTURES[structure](n, (), dtype, device)
+        self._check(A, hermitian=True)
+
+    @onlyCUDA
+    @parametrize("n", [2049, 4100])
+    @dtypes(torch.float32, torch.complex64)
+    def test_cooperative_panel_single_precision(self, device, dtype, n):
+        torch.manual_seed(n)
+        self._check(indefinite(n, (), dtype, device), hermitian=True)
+
+    @onlyCUDA
+    @parametrize("n", [2049, 3000])
+    @dtypes(torch.float64, torch.complex128)
+    def test_cooperative_panel_batched(self, device, dtype, n):
+        torch.manual_seed(n)
+        self._check(indefinite(n, (2,), dtype, device), hermitian=True)
+
+    @onlyCUDA
+    @parametrize("n", [2049, 4100])
+    @dtypes(torch.float64, torch.complex128)
+    def test_cooperative_panel_determinism(self, device, dtype, n):
+        """The grid-wide reduction must not depend on block scheduling."""
+        torch.manual_seed(n)
+        A = integer_valued(n, (), dtype, device)
+        LD0, piv0, _ = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        for _ in range(5):
+            LD, piv, _ = torch.linalg.ldl_factor_ex(A, hermitian=True)
+            self.assertTrue(torch.equal(piv, piv0))
+            self.assertTrue(torch.equal(LD, LD0))
+
+    @onlyCUDA
+    @largeTensorTest("60GB", "cuda")
+    @dtypes(torch.float64)
+    def test_very_large(self, device, dtype):
+        """Many cooperative panels with a grid of 157 blocks at the start."""
+        n = 40000
+        torch.manual_seed(n)
+        self._check(indefinite(n, (), dtype, device), hermitian=True)
+
+    @onlyCUDA
+    def test_standalone_kernel_matches_original(self, device):
+        """ldl_panel_standalone.cu holds a copy of the panel kernel, so guard it
+        against drifting from the original."""
+        original = _kernel_source(
+            _ORIGINAL_CU,
+            "template <typename scalar_t, int BS, bool hermitian, bool cooperative>",
+            "// Upper bound on the grid of the cooperative",
+        )
+        copy = _kernel_source(_STANDALONE_CU, "// BEGIN COPY", "// END COPY")
+        self.assertEqual(copy.replace("// BEGIN COPY", "").strip(), original)
+
+    # The cooperative grid is capped by max_cooperative_panel_blocks() (660 on H100
+    # for double, i.e. n > ~169k), after which every thread covers several rows.
+    # A grid smaller than the row count is forced here on the standalone copy of
+    # the kernel, whose results must not depend on the grid size at all.
+    @onlyCUDA
+    @parametrize("nb", [32, 64, 128])
+    @parametrize("structure", ["indefinite", "arrow", "integer_valued", "zero_diagonal"])
+    @parametrize("n", [300, 4100])
+    @dtypes(*floating_and_complex_types())
+    def test_panel_grid_size_invariance(self, device, dtype, n, structure, nb):
+        torch.manual_seed(n)
+        A = STRUCTURES[structure](n, (), dtype, device)
+        self._check_grid_invariance(A, nb, hermitian=True)
+
+    @onlyCUDA
+    @parametrize("n", [300, 4100])
+    @dtypes(torch.complex64, torch.complex128)
+    def test_panel_grid_size_invariance_symmetric(self, device, dtype, n):
+        """Complex symmetric (not Hermitian): the other instantiation of the kernel."""
+        torch.manual_seed(n)
+        A = symmetrize(torch.randn(n, n, dtype=dtype, device=device), hermitian=False)
+        self._check_grid_invariance(A, 32, hermitian=False)
+
+    # Column 0 is planted with off-diagonal entries of equal magnitude in the given
+    # rows, over a near-zero background and a zero diagonal. Every 1x1 test then
+    # fails, and so does the one on the candidate's diagonal, so the pivot is a 2x2
+    # block with the candidate as its second row: the swap runs between rows living
+    # in different blocks. Ties must go to the lowest row, as inside a block.
+    _PLANTED_ROWS = {
+        "block_boundary": (255, 256),
+        "far_blocks": (700, 3000, 4099),
+        "same_block_then_far": (1000, 1010, 4000),
+        "last_row": (4099,),
+        **{f"block_{b}": (256 * b + 17,) for b in range(16)},
+    }
+
+    @onlyCUDA
+    @parametrize("placement", list(_PLANTED_ROWS))
+    @dtypes(*floating_and_complex_types())
+    def test_pivot_across_blocks(self, device, dtype, placement):
+        n, rows = 4100, self._PLANTED_ROWS[placement]
+        torch.manual_seed(0)
+        A = symmetrize(1e-3 * torch.randn(n, n, dtype=dtype, device=device), hermitian=True)
+        A.diagonal().zero_()
+        A[:, 0] = A[0, :].conj() if dtype.is_complex else A[0, :]
+        for i, r in enumerate(rows):
+            # |re| + |im| ties between 1 and 1j, which a Euclidean abs would not see
+            A[r, 0] = 1j if (dtype.is_complex and i % 2) else 1.0
+            A[0, r] = A[r, 0].conj()
+        want = -(min(rows) + 1)
+        for LD, ipiv, info in self._grid_variants(A, 32, hermitian=True):
+            self.assertEqual(ipiv[:2].tolist(), [want, want])
+
+    @onlyCUDA
+    @parametrize("bad", [float("nan"), float("inf")])
+    @dtypes(*floating_and_complex_types())
+    def test_panel_nonfinite_column(self, device, dtype, bad):
+        """A column of NaN/Inf makes the grid-wide argmax see no (or an infinite)
+        candidate. Nothing may crash, and every grid must agree."""
+        n = 4100
+        torch.manual_seed(0)
+        A = indefinite(n, (), dtype, device)
+        A[1:, 0] = bad
+        A[0, 1:] = bad
+        self._check_grid_invariance(A, 32, hermitian=True, panels=2)
+
+    @onlyCUDA
+    @dtypes(torch.float64, torch.complex128)
+    def test_panel_race_stress(self, device, dtype):
+        """The partial results of the grid-wide argmax are double-buffered because a
+        fast block may move on while a slow one still reads: perturb the block
+        scheduling with concurrent GPU work and repeat."""
+        n = 4100
+        torch.manual_seed(0)
+        A = integer_valued(n, (), dtype, device)
+        ref = _factor_panels(A, 32, 2, True, -(-n // 256), 256, True)
+        busy = torch.randn(4096, 4096, device=device)
+        side = torch.cuda.Stream()
+        for nblocks in (2, 3, 17):
+            for _ in range(40):
+                with torch.cuda.stream(side):
+                    for _ in range(8):
+                        busy @ busy
+                got = _factor_panels(A, 32, 2, True, nblocks, 256, True)
+                torch.cuda.synchronize()
+                for g, w in zip(got, ref):
+                    self.assertTrue(torch.equal(g, w))
+
+    def _grid_variants(self, A, nb, hermitian, panels=4):
+        """Results of the full-grid reference and of every forced configuration,
+        reference first."""
+        n = A.size(-1)
+        yield _factor_panels(A, nb, panels, True, -(-n // 256), 256, hermitian)
+        for cooperative, nblocks, nthreads in _GRID_VARIANTS:
+            yield _factor_panels(A, nb, panels, cooperative, nblocks, nthreads, hermitian)
+
+    def _check_grid_invariance(self, A, nb, hermitian, panels=4):
+        variants = self._grid_variants(A, nb, hermitian, panels)
+        ref = next(variants)
+        for (cooperative, nblocks, nthreads), got in zip(_GRID_VARIANTS, variants):
+            with self.subTest(cooperative=cooperative, nblocks=nblocks, nthreads=nthreads):
+                for g, w in zip(got, ref):
+                    self.assertTrue(_equal_with_nonfinite(g, w))
+
     @parametrize("structure", ["indefinite", "zero_diagonal", "out_of_panel_heavy",
                                "clustered", "ill_conditioned"])
     @parametrize("batch", [(1,), (2,), (3,), (5,), (2, 2), (1, 3), (3, 1), (2, 2, 2)])
@@ -368,7 +588,7 @@ class TestLDLCustomKernel(TestCase):
     @dtypes(torch.float64, torch.complex128)
     def test_batched(self, device, dtype, n, batch, structure):
         """The kernel factors one matrix per launch, so the batch is driven by a
-        loop in BatchLinearAlgebra.cpp. Multi-dimensional batch shapes matter:
+        loop in the kernel's host wrapper. Multi-dimensional batch shapes matter:
         they are flattened before the loop, so a wrong flattening shows up as
         untouched trailing elements rather than as a wrong first element.
         """
