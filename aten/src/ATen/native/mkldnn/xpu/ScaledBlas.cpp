@@ -369,6 +369,18 @@ Tensor& _scaled_mm_out_xpu(
       mat2,
       scale_a,
       scale_b);
+  if ((scaling_choice_a == ScalingType::BlockWise1x128 ||
+       scaling_choice_a == ScalingType::BlockWise128x128) &&
+      (scaling_choice_b == ScalingType::BlockWise1x128 ||
+       scaling_choice_b == ScalingType::BlockWise128x128)) {
+    TORCH_CHECK(
+        scale_a.scalar_type() == scale_b.scalar_type(),
+        "Both scale_a and scale_b must have the same dtype for blockwise "
+        "(DeepSeek-style) scaling, got scale_a.dtype()=",
+        scale_a.scalar_type(),
+        " and scale_b.dtype()=",
+        scale_b.scalar_type());
+  }
   TORCH_CHECK(
       !scale_result ||
           (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
