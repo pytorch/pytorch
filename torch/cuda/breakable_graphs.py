@@ -1,9 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-
 r"""Breakable CUDA graphs for PyTorch."""
 
 from __future__ import annotations
@@ -17,7 +11,8 @@ from typing import Any, TYPE_CHECKING, TypeGuard
 from typing_extensions import Self
 
 import torch
-import torch.cuda._gpu_trace as _gpu_trace
+
+from . import _gpu_trace
 
 
 if TYPE_CHECKING:
@@ -355,6 +350,7 @@ class breakable_graph:
             discarded.
 
     Examples::
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> @torch.cuda.no_graph
         ... def copy_to_buffer(dst: torch.Tensor, src: torch.Tensor) -> None:
         ...     dst.copy_(src)

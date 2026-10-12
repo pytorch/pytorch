@@ -139,7 +139,7 @@ used for their results.
     export_graph_data
 ```
 
-### Breakable CUDA graphs (prototype)
+### Breakable CUDA graphs
 
 {class}`torch.cuda.BreakableCUDAGraph` captures a sequence of CUDA graphs separated
 by eager Python functions. Use {class}`torch.cuda.breakable_graph` for capture,
@@ -191,7 +191,7 @@ importing PyTorch to include unjoined stream IDs in capture errors.
 
 All segments share a graph memory pool. Pass `pool=other_graph.pool()` to
 {class}`torch.cuda.BreakableCUDAGraph` to share across sequences, subject to the
-usual [graph memory management constraints](notes/cuda.md#graph-memory-management).
+usual {ref}`graph memory management constraints <graph-memory-management>`.
 `reset()` clears the segments and preserves the pool. Nested captures are not
 supported; reset the graph before capturing a replacement sequence.
 

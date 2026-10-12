@@ -1,5 +1,6 @@
 # Owner(s): ["module: cuda graphs"]
 
+import contextvars
 import gc
 import threading
 import weakref
@@ -8,7 +9,7 @@ from unittest.mock import Mock, patch
 import torch
 from torch.cuda import (
     breakable_graph,
-    breakable_graphs as bcg,
+    breakable_graphs,
     BreakableCUDAGraph,
     force_no_graph,
     is_in_breakable_graph,
@@ -25,9 +26,9 @@ from torch.testing._internal.common_utils import (
 
 class TestBreakableGraphAPI(TestCase):
     def test_exports(self):
-        for name in bcg.__all__:
+        for name in breakable_graphs.__all__:
             self.assertIn(name, torch.cuda.__all__)
-            self.assertIs(getattr(torch.cuda, name), getattr(bcg, name))
+            self.assertIs(getattr(torch.cuda, name), getattr(breakable_graphs, name))
 
     def test_no_graph_outside_capture(self):
         @no_graph
@@ -46,19 +47,23 @@ class TestBreakableGraphAPI(TestCase):
 
         self.assertIs(no_graph(enable=False)(fn), fn)
 
-    def test_capture_state_is_thread_local(self):
+    @parametrize("inherit", [False, True])
+    def test_capture_state_is_context_local(self, inherit):
         ctx = breakable_graph(BreakableCUDAGraph())
-        token = bcg._current_breakable_graph_ctx.set(ctx)
+        token = breakable_graphs._current_breakable_graph_ctx.set(ctx)
         states = []
         try:
             active = is_in_breakable_graph
-            thread = threading.Thread(target=lambda: states.append(active()))
+            context = contextvars.copy_context() if inherit else contextvars.Context()
+            thread = threading.Thread(
+                target=context.run, args=(lambda: states.append(active()),)
+            )
             thread.start()
             thread.join()
             self.assertTrue(is_in_breakable_graph())
-            self.assertEqual(states, [False])
+            self.assertEqual(states, [inherit])
         finally:
-            bcg._current_breakable_graph_ctx.reset(token)
+            breakable_graphs._current_breakable_graph_ctx.reset(token)
 
     @parametrize("option", ["capture_stub", "barrier_fn"])
     def test_invalid_callback(self, option):
@@ -108,21 +113,21 @@ class TestBreakableGraphAPI(TestCase):
     def test_debug_fork_tracking(self):
         ctx = breakable_graph(BreakableCUDAGraph())
         ctx._capturing_stream_id = 1
-        token = bcg._current_breakable_graph_ctx.set(ctx)
+        token = breakable_graphs._current_breakable_graph_ctx.set(ctx)
         try:
-            with patch.object(bcg, "_DEBUG", True):
-                bcg._on_event_record(10, 1)
-                bcg._on_event_wait(10, 2)
-                bcg._on_event_wait(10, 3)
+            with patch.object(breakable_graphs, "_DEBUG", True):
+                breakable_graphs._on_event_record(10, 1)
+                breakable_graphs._on_event_wait(10, 2)
+                breakable_graphs._on_event_wait(10, 3)
                 self.assertEqual(ctx._forked_stream_ids, {2, 3})
-                bcg._on_event_record(11, 2)
-                bcg._on_event_wait(11, 1)
+                breakable_graphs._on_event_record(11, 2)
+                breakable_graphs._on_event_wait(11, 1)
                 self.assertEqual(ctx._forked_stream_ids, {3})
-                bcg._on_event_record(12, 1)
-                bcg._on_event_wait(12, 2)
+                breakable_graphs._on_event_record(12, 1)
+                breakable_graphs._on_event_wait(12, 2)
                 self.assertEqual(ctx._forked_stream_ids, {2, 3})
         finally:
-            bcg._current_breakable_graph_ctx.reset(token)
+            breakable_graphs._current_breakable_graph_ctx.reset(token)
 
 
 class TestBreakableCUDAGraph(TestCase):
@@ -455,7 +460,7 @@ class TestBreakableCUDAGraph(TestCase):
         expected = "side stream was not joined"
         if debug:
             expected += f".*Unjoined side-stream id\\(s\\): \\[{side.cuda_stream}\\]"
-        with patch.object(bcg, "_DEBUG", debug):
+        with patch.object(breakable_graphs, "_DEBUG", debug):
             with self.assertRaisesRegex(RuntimeError, expected):
                 with breakable_graph(graph, stream=capture):
                     x.add_(1)
