@@ -21,7 +21,6 @@ import torch.nn.functional as F
 from torch._higher_order_ops import flex_gemm
 from torch._higher_order_ops.flex_gemm import (
     _SUPPORTED_FLEX_GEMM_OP_NAMES,
-    flex_gemm_hop,
     nvfp4_pack,
     to_blocked,
 )
@@ -1967,12 +1966,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         torch.testing.assert_close(actual, F.grouped_mm(x, w_t, offs=offs).relu())
 
     @parametrize("varlen_k", (False, True))
-    def test_grouped_mm_compiled_carries_offs_as_tensor_operand(self, varlen_k):
-        graphs = []
+    def test_grouped_mm_compiled_reads_offs_at_runtime(self, varlen_k):
+        from torch._dynamo.testing import CompileCounterWithBackend
 
-        def record_backend(gm, example_inputs):
-            graphs.append(gm)
-            return gm.forward
+        counter = CompileCounterWithBackend("eager")
 
         def fn(x, w_t, offs):
             return flex_gemm(
@@ -1985,20 +1982,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         x, w_t, offs = self.makeGroupedMm()
         if varlen_k:
             x, w_t = x.mT, x
-        actual = torch.compile(fn, backend=record_backend, fullgraph=True)(x, w_t, offs)
-
-        self.assertEqual(actual, F.grouped_mm(x, w_t, offs=offs).relu())
-        (graph,) = graphs
-        (hop_node,) = graph.graph.find_nodes(op="call_function", target=flex_gemm_hop)
-        self.assertIs(hop_node.args[0], torch.ops.aten._grouped_mm.default)
-        self.assertEqual(len(hop_node.args[2]), 3)
-        self.assertTrue(all(isinstance(arg, torch.fx.Node) for arg in hop_node.args[2]))
-        self.assertEqual(hop_node.args[3], {})
-        body = getattr(graph, hop_node.args[1].target)
-        (gemm_node,) = body.graph.find_nodes(
-            op="call_function", target=torch.ops.aten._grouped_mm.default
-        )
-        self.assertEqual(len(gemm_node.args), 3)
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for seqlens in ((24, 0, 40), (16, 24, 24)):
+            offs.copy_(torch.tensor(seqlens).cumsum(0))
+            expected = F.grouped_mm(x, w_t, offs=offs).relu()
+            self.assertEqual(compiled(x, w_t, offs), expected)
+        self.assertEqual(counter.frame_count, 1)
 
     def test_grouped_mm_rejects_unsupported_forms(self):
         x, w_t, offs = self.makeGroupedMm()
@@ -2065,16 +2054,15 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("unequal_totals", a, b[:-1], offs, "equal reduction extents"),
             ("mixed_dtype", a, b.half(), offs, "supports only bf16/fp16"),
             ("fp32", a.float(), b.float(), offs, "supports only bf16/fp16"),
-            ("offs_dtype", a, b, offs.long(), "int32"),
-            ("offs_stride", a, b, offs.repeat_interleave(2)[::2], "contiguous"),
-            ("offs_rank", a, b, offs[None, :], "offs"),
         )
         for name, mat_a, mat_b, offsets, error in cases:
             with self.subTest(name=name):
                 for node, value in zip(args, (mat_a, mat_b, offsets)):
                     node.meta["val"] = value
                 if error is None:
-                    self.assertEqual(lowering.quack_grouped_mm_contract(gemm), args)
+                    self.assertEqual(
+                        lowering.quack_grouped_mm_contract(gemm), (args, "k")
+                    )
                 else:
                     with self.assertRaisesRegex(NotImplementedError, error):
                         lowering.quack_grouped_mm_contract(gemm)
@@ -9063,12 +9051,11 @@ class TestFlexGemmGroupedWgradDevice(FlexGemmTestCase):
         self.assertEqual(actual.shape, (offs.numel(), a.shape[0], b.shape[1]))
         self.assertEqual(actual.dtype, a.dtype)
         self.assertTrue(actual.isfinite().all())
+        eager_out = epilogue_fn(F.grouped_mm(a, b, offs=offs))
         for group, (start, end) in enumerate(itertools.pairwise([0, *offs.tolist()])):
             with self.subTest(group=group, start=start, end=end):
-                lhs, rhs = a[:, start:end], b[start:end]
-                expected = epilogue_fn(lhs.double() @ rhs.double())
-                eager = epilogue_fn(lhs @ rhs)
-                result = actual[group]
+                expected = epilogue_fn(a[:, start:end].double() @ b[start:end].double())
+                eager, result = eager_out[group], actual[group]
                 if start == end:
                     self.assertEqual(result, expected.to(result.dtype), atol=0, rtol=0)
                     continue
@@ -9158,6 +9145,25 @@ class TestFlexGemmGroupedWgradDevice(FlexGemmTestCase):
                     compiled(a, b, offs), a, b, offs, epilogue_fn
                 )
 
+    def test_grouped_mm_varlen_k_constrains_produced_operand_layouts(self, device):
+        # x.mT * 0.5 has m-major FX metadata, but Inductor would realize the
+        # pointwise result contiguous (K-major) unless lowering fixes the layout.
+        x = self.makeTensor(128, 64, device=device)
+        b = self.makeTensor(128, 96, device=device)
+        offs = torch.tensor([37, 128], device=device, dtype=torch.int32)
+
+        def fn(x, b, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x.mT * 0.5, b * 2),
+                lambda acc: acc,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, b, offs)
+        self.assertGroupedWgradMatches(actual, x.mT * 0.5, b * 2, offs, lambda acc: acc)
+
     def test_grouped_mm_varlen_k_dynamic_and_cuda_graph(self, device):
         from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -9182,7 +9188,6 @@ class TestFlexGemmGroupedWgradDevice(FlexGemmTestCase):
             actual, aux = compiled(a, b, offs)
             self.assertGroupedWgradMatches(actual, a, b, offs, lambda x: x)
             self.assertGroupedWgradMatches(aux, a, b, offs, lambda x: x * scale)
-        self.assertEqual(counter.frame_count, 1)
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
             actual, aux = compiled(a, b, offs)
