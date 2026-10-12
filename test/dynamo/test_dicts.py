@@ -85,11 +85,80 @@ class DictTests(torch._dynamo.test_case.TestCase):
             return x + 1
 
         x = torch.ones(1)
+        # Realizing a set of tensors graph-breaks in fullgraph mode, so this
+        # value detects accidental realization even when the lookup is discarded.
         mapping = {"unused": {torch.ones(1)}}
         expected = fn(x, mapping.copy())
         self.assertEqual(
             torch.compile(fn, backend="eager", fullgraph=True)(x, mapping), expected
         )
+
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    @parametrize("operation", ["contains", "get", "pop"])
+    @parametrize("present", [False, True])
+    def test_input_dict_lookup_comparison_count(self, mapping_type, operation, present):
+        class Key:
+            def __init__(self):
+                self.calls = 0
+
+            def __hash__(self):
+                return 42
+
+            def __eq__(self, other):
+                self.calls += 1
+                return present
+
+        def fn(x, mapping, stored, probe):
+            stored.calls = 0
+            if operation == "contains":
+                result = probe in mapping
+            else:
+                result = getattr(mapping, operation)(probe, 11)
+            return x + stored.calls, result
+
+        x = torch.ones(1)
+        stored, probe = Key(), Key()
+        eager_mapping, compiled_mapping = mapping_type(), mapping_type()
+        eager_mapping[stored] = compiled_mapping[stored] = 7
+        expected = fn(x, eager_mapping, stored, probe)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(
+            x, compiled_mapping, stored, probe
+        )
+        self.assertEqual(actual, expected)
+
+    @parametrize("key", ["a", 3, (1, 2)])
+    def test_input_dict_contains_key_guard(self, key):
+        def fn(x, mapping, key):
+            return x + (key in mapping)
+
+        x = torch.zeros(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for mapping in ({key: 1}, {"other": 1}, {key: 2}):
+            self.assertEqual(compiled(x, mapping, key), fn(x, mapping, key))
+
+    @parametrize("present", [False, True])
+    def test_ordered_dict_subclass_setdefault_dispatch(self, present):
+        class Mapping(OrderedDict):
+            def __contains__(self, key):
+                self.calls.append("contains")
+                return present
+
+            def __getitem__(self, key):
+                self.calls.append("getitem")
+                return 17
+
+            def __setitem__(self, key, value):
+                self.calls.append("setitem")
+                super().__setitem__(key, value + 1)
+
+        def fn(x):
+            mapping = Mapping()
+            mapping.calls = []
+            result = mapping.setdefault("key", 3)
+            return x + result, mapping.calls, list(mapping.items())
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_ordered_dict_subclass_setdefault_lookup_error(self):
         class Mapping(OrderedDict):
