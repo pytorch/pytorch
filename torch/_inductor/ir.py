@@ -4279,7 +4279,7 @@ class View(GenericView):
 
 @ir_dataclass
 class ReinterpretView(BaseView):
-    """Pretend our storage has a different layout"""
+    """Pretend our storage has a different layout (a view over raw storage)"""
 
     layout: Layout
 
