@@ -317,7 +317,8 @@ struct CublasLtTypeInfo {
 };
 
 template <typename T, typename C_Dtype = T>
-CublasLtTypeInfo<T, C_Dtype> getCublasLtTypeInfo() {
+CublasLtTypeInfo<T, C_Dtype> getCublasLtTypeInfo(
+    std::optional<at::Float32Precision> fp32_precision = std::nullopt) {
   CublasLtTypeInfo<T, C_Dtype> info;
   if constexpr (std::is_same_v<T, double>) {
     info.ab_type = CUDA_R_64F;
@@ -325,13 +326,12 @@ CublasLtTypeInfo<T, C_Dtype> getCublasLtTypeInfo() {
     info.compute_type = CUBLAS_COMPUTE_64F;
     info.scale_type = CUDA_R_64F;
   } else if constexpr (std::is_same_v<T, float>) {
-    const auto fp32_precision = at::globalContext().float32Precision(
-        at::Float32Backend::CUDA, at::Float32Op::MATMUL);
-    if (fp32_precision == at::Float32Precision::TF32) {
+    const auto precision = fp32MatmulPrecision(fp32_precision);
+    if (precision == at::Float32Precision::TF32) {
       info.compute_type = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
-    if (fp32_precision == at::Float32Precision::BF16X9 &&
+    if (precision == at::Float32Precision::BF16X9 &&
         !at::NoTF32Guard::should_disable_fp32_reduced_precision()) {
       info.compute_type = CUBLAS_COMPUTE_32F_EMULATED_16BFX9;
     }

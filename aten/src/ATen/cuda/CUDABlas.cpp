@@ -251,7 +251,7 @@ using detail::CuBlasLtGroupedMatrixLayout;
   } while (0)
 
 template <typename Dtype, typename C_Dtype = Dtype>
-static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
+static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype), std::optional<at::Float32Precision> fp32_precision = std::nullopt) {
 #if defined(USE_ROCM) && ROCM_VERSION == 60400
   // regression in ROCm 6.4, planned fixed in 6.4.1, hipblaslt TT fp32 calculation errors
   // best to disallow hipblaslt for this specific case
@@ -261,7 +261,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     }
   }
 #endif
-  const auto type_info = detail::getCublasLtTypeInfo<Dtype, C_Dtype>();
+  const auto type_info = detail::getCublasLtTypeInfo<Dtype, C_Dtype>(fp32_precision);
   const cudaDataType_t abType = type_info.ab_type;
   const cudaDataType_t cType = type_info.c_type;
   const cublasComputeType_t computeType = type_info.compute_type;
@@ -479,6 +479,46 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 }
 
 
+// getCurrentCUDABlasHandle sets the handle's math mode from the global FP32
+// matmul precision. For a precision requested for this call, set it from that
+// instead, and restore it afterwards.
+class Fp32MathModeGuard {
+ public:
+#if !defined(USE_ROCM)
+  Fp32MathModeGuard(cublasHandle_t handle, std::optional<at::Float32Precision> fp32_precision) {
+    if (fp32_precision) {
+      handle_ = handle;
+      TORCH_CUDABLAS_CHECK(cublasGetMathMode(handle, &previous_mode_));
+      const bool tf32 = !NoTF32Guard::should_disable_fp32_reduced_precision() &&
+          *fp32_precision == at::Float32Precision::TF32;
+      TORCH_CUDABLAS_CHECK(cublasSetMathMode(
+          handle, tf32 ? CUBLAS_TF32_TENSOR_OP_MATH : CUBLAS_DEFAULT_MATH));
+    }
+  }
+  ~Fp32MathModeGuard() {
+    if (handle_) {
+      cublasSetMathMode(handle_, previous_mode_);
+    }
+  }
+#else
+  // ROCm does not set a math mode from the FP32 matmul precision.
+  Fp32MathModeGuard(cublasHandle_t, std::optional<at::Float32Precision>) {}
+#endif
+  Fp32MathModeGuard(const Fp32MathModeGuard&) = delete;
+  Fp32MathModeGuard& operator=(const Fp32MathModeGuard&) = delete;
+
+#if !defined(USE_ROCM)
+ private:
+  cublasHandle_t handle_ = nullptr;
+  cublasMath_t previous_mode_{};
+#endif
+};
+
+// The float and complex<float> cuBLAS GEMMs, with an explicit FP32 matmul
+// precision (std::nullopt means the global setting).
+template <typename Dtype>
+void bgemm_internal_cublas_with_precision(CUDABLAS_BGEMM_ARGTYPES(Dtype), std::optional<at::Float32Precision> fp32_precision);
+
 template <typename Dtype, typename C_Dtype = Dtype>
 inline void bgemm_internal_cublas(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
   TORCH_CHECK(false, "at::cuda::blas::bgemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
@@ -497,16 +537,17 @@ void bgemm_internal_cublas<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
 }
 
 template <>
-void bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
+void bgemm_internal_cublas_with_precision<float>(CUDABLAS_BGEMM_ARGTYPES(float), std::optional<at::Float32Precision> fp32_precision) {
   auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
+  Fp32MathModeGuard math_mode_guard(handle, fp32_precision);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   BGEMM_CHECK_ARGVALUES(float);
   auto compute_type = CUBLAS_COMPUTE_32F;
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
-  if (useBF16x9()) {
+  if (useBF16x9(fp32_precision)) {
     compute_type = CUBLAS_COMPUTE_32F_EMULATED_16BFX9;
   }
 #endif
@@ -551,9 +592,10 @@ void bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::co
 }
 
 template <>
-void bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
+void bgemm_internal_cublas_with_precision<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>), std::optional<at::Float32Precision> fp32_precision) {
   auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
+  Fp32MathModeGuard math_mode_guard(handle, fp32_precision);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
@@ -562,6 +604,16 @@ void bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::com
       handle, opa, opb, m, n, k, reinterpret_cast<const cuComplex*>(&alpha), reinterpret_cast<const cuComplex*>(a),
       lda, stridea, reinterpret_cast<const cuComplex*>(b), ldb, strideb, reinterpret_cast<const cuComplex*>(&beta),
       reinterpret_cast<cuComplex*>(c), ldc, stridec, num_batches));
+}
+
+template <>
+void bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
+  bgemm_internal_cublas_with_precision<float>(CUDABLAS_BGEMM_ARGS(float), std::nullopt);
+}
+
+template <>
+void bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
+  bgemm_internal_cublas_with_precision<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>), std::nullopt);
 }
 
 template <typename C_Dtype>
@@ -705,16 +757,22 @@ void bgemm_internal<double>(CUDABLAS_BGEMM_ARGTYPES(double))
 }
 
 template <>
-void bgemm_internal<float>(CUDABLAS_BGEMM_ARGTYPES(float))
+void bgemm_internal_with_precision<float>(CUDABLAS_BGEMM_ARGTYPES(float), std::optional<at::Float32Precision> fp32_precision)
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
-    if (!bgemm_internal_cublaslt<float>(CUDABLAS_BGEMM_ARGS(float))) {
-      bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGS(float));
+    if (!bgemm_internal_cublaslt<float>(CUDABLAS_BGEMM_ARGS(float), fp32_precision)) {
+      bgemm_internal_cublas_with_precision<float>(CUDABLAS_BGEMM_ARGS(float), fp32_precision);
     }
   }
   else {
-    bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGS(float));
+    bgemm_internal_cublas_with_precision<float>(CUDABLAS_BGEMM_ARGS(float), fp32_precision);
   }
+}
+
+template <>
+void bgemm_internal<float>(CUDABLAS_BGEMM_ARGTYPES(float))
+{
+  bgemm_internal_with_precision<float>(CUDABLAS_BGEMM_ARGS(float), std::nullopt);
 }
 
 template <>
@@ -736,21 +794,30 @@ void bgemm_internal<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<d
 }
 
 template <>
-void bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>))
+void bgemm_internal_with_precision<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>), std::optional<at::Float32Precision> fp32_precision)
 {
-  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+  // cuBLASLt ignores TF32 for complex<float>, so an explicitly requested TF32
+  // GEMM uses cuBLAS, which honors it through the math mode.
+  const bool explicit_tf32 = fp32_precision == at::Float32Precision::TF32;
+  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt && !explicit_tf32) {
 #ifdef USE_ROCM
     // hipblaslt does not support complex<float> gemm yet
-    bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
+    bgemm_internal_cublas_with_precision<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>), fp32_precision);
 #else
-    if (!bgemm_internal_cublaslt<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>))) {
-      bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
+    if (!bgemm_internal_cublaslt<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>), fp32_precision)) {
+      bgemm_internal_cublas_with_precision<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>), fp32_precision);
     }
 #endif
   }
   else {
-    bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
+    bgemm_internal_cublas_with_precision<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>), fp32_precision);
   }
+}
+
+template <>
+void bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>))
+{
+  bgemm_internal_with_precision<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>), std::nullopt);
 }
 
 template <>
@@ -991,6 +1058,9 @@ void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16
 
 
 
+template <typename Dtype>
+void gemm_internal_cublas_with_precision(CUDABLAS_GEMM_ARGTYPES(Dtype), std::optional<at::Float32Precision> fp32_precision);
+
 template <typename Dtype, typename C_Dtype = Dtype>
 inline void gemm_internal_cublas(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
   TORCH_CHECK(false, "at::cuda::blas::gemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
@@ -1009,16 +1079,17 @@ void gemm_internal_cublas<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
 }
 
 template <>
-void gemm_internal_cublas<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
+void gemm_internal_cublas_with_precision<float>(CUDABLAS_GEMM_ARGTYPES(float), std::optional<at::Float32Precision> fp32_precision) {
   auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
+  Fp32MathModeGuard math_mode_guard(handle, fp32_precision);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(float);
   auto compute_type = CUBLAS_COMPUTE_32F;
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
-  if (useBF16x9()) {
+  if (useBF16x9(fp32_precision)) {
     compute_type = CUBLAS_COMPUTE_32F_EMULATED_16BFX9;
   }
 #endif
@@ -1059,9 +1130,10 @@ void gemm_internal_cublas<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::comp
 }
 
 template <>
-void gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
+void gemm_internal_cublas_with_precision<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>), std::optional<at::Float32Precision> fp32_precision) {
   auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
+  Fp32MathModeGuard math_mode_guard(handle, fp32_precision);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
@@ -1070,6 +1142,16 @@ void gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::compl
       handle, opa, opb, m, n, k, reinterpret_cast<const cuComplex*>(&alpha), reinterpret_cast<const cuComplex*>(a),
       lda, reinterpret_cast<const cuComplex*>(b), ldb, reinterpret_cast<const cuComplex*>(&beta),
       reinterpret_cast<cuComplex*>(c), ldc));
+}
+
+template <>
+void gemm_internal_cublas<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
+  gemm_internal_cublas_with_precision<float>(CUDABLAS_GEMM_ARGS(float), std::nullopt);
+}
+
+template <>
+void gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
+  gemm_internal_cublas_with_precision<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>), std::nullopt);
 }
 
 template <typename C_Dtype>
@@ -1262,10 +1344,15 @@ void gemm_internal_cublas<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYP
 }
 
 template <typename Dtype, typename C_Dtype = Dtype>
-inline void gemm_internal_cublaslt(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
+inline void gemm_internal_cublaslt(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype), std::optional<at::Float32Precision> fp32_precision = std::nullopt) {
   // forward to bgemm implementation but set strides and batches to 0
-  if (!bgemm_internal_cublaslt(transa, transb, m, n, k, alpha, a, lda, 0, b, ldb, 0, beta, c, ldc, 0, 0)) {
-    gemm_internal_cublas(CUDABLAS_GEMM_ARGS(Dtype));
+  if (!bgemm_internal_cublaslt(transa, transb, m, n, k, alpha, a, lda, 0, b, ldb, 0, beta, c, ldc, 0, 0, fp32_precision)) {
+    if constexpr (std::is_same_v<Dtype, C_Dtype> &&
+                  (std::is_same_v<Dtype, float> || std::is_same_v<Dtype, c10::complex<float>>)) {
+      gemm_internal_cublas_with_precision<Dtype>(CUDABLAS_GEMM_ARGS(Dtype), fp32_precision);
+    } else {
+      gemm_internal_cublas(CUDABLAS_GEMM_ARGS(Dtype));
+    }
   }
 }
 
@@ -1291,23 +1378,30 @@ void gemm_internal<double>(CUDABLAS_GEMM_ARGTYPES(double))
 }
 
 template <>
-void gemm_internal<float>(CUDABLAS_GEMM_ARGTYPES(float))
+void gemm_internal_with_precision<float>(CUDABLAS_GEMM_ARGTYPES(float), std::optional<at::Float32Precision> fp32_precision)
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
-    gemm_internal_cublaslt<float>(CUDABLAS_GEMM_ARGS(float));
+    gemm_internal_cublaslt<float>(CUDABLAS_GEMM_ARGS(float), fp32_precision);
   }
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
     if (at::detail::getCUDAHooks().isGPUArch({"gfx11", "gfx12"})) { //no CK GEMM version
-      gemm_internal_cublaslt<float>(CUDABLAS_GEMM_ARGS(float));
+      gemm_internal_cublaslt<float>(CUDABLAS_GEMM_ARGS(float), fp32_precision);
     } else{
+      // CK always computes in IEEE.
       at::native::gemm_internal_ck<float>(CUDABLAS_GEMM_ARGS(float));
     }
   }
 #endif
   else {
-    gemm_internal_cublas<float>(CUDABLAS_GEMM_ARGS(float));
+    gemm_internal_cublas_with_precision<float>(CUDABLAS_GEMM_ARGS(float), fp32_precision);
   }
+}
+
+template <>
+void gemm_internal<float>(CUDABLAS_GEMM_ARGTYPES(float))
+{
+  gemm_internal_with_precision<float>(CUDABLAS_GEMM_ARGS(float), std::nullopt);
 }
 
 template <>
@@ -1327,19 +1421,27 @@ void gemm_internal<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<dou
 }
 
 template <>
-void gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>))
+void gemm_internal_with_precision<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>), std::optional<at::Float32Precision> fp32_precision)
 {
-  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+  // See bgemm_internal_with_precision<c10::complex<float>>.
+  const bool explicit_tf32 = fp32_precision == at::Float32Precision::TF32;
+  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt && !explicit_tf32) {
 #ifdef USE_ROCM
     // hipblaslt does not support complex gemm yet
-    gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
+    gemm_internal_cublas_with_precision<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>), fp32_precision);
 #else
-    gemm_internal_cublaslt<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
+    gemm_internal_cublaslt<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>), fp32_precision);
 #endif
   }
   else {
-    gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
+    gemm_internal_cublas_with_precision<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>), fp32_precision);
   }
+}
+
+template <>
+void gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>))
+{
+  gemm_internal_with_precision<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>), std::nullopt);
 }
 
 template <>
@@ -1580,7 +1682,8 @@ bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const C_Dtype* c_ptr,
     int64_t c_ld,
-    at::opmath_type<Dtype> beta) {
+    at::opmath_type<Dtype> beta,
+    std::optional<at::Float32Precision> fp32_precision) {
   TORCH_INTERNAL_ASSERT(
       !(bias && c_ptr),
       "gemm_and_bias: bias and a distinct C operand are mutually exclusive");
@@ -1601,7 +1704,7 @@ bool gemm_and_bias(
   // bias is added in the epilogue, which accumulates with beta == 0
   opmath_t beta_val = bias ? opmath_t(0) : beta;
 
-  const auto type_info = detail::getCublasLtTypeInfo<Dtype, C_Dtype>();
+  const auto type_info = detail::getCublasLtTypeInfo<Dtype, C_Dtype>(fp32_precision);
   const cudaDataType_t abType = type_info.ab_type;
   const cudaDataType_t cType = type_info.c_type;
   const cublasComputeType_t computeType = type_info.compute_type;
@@ -1801,7 +1904,8 @@ template bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const double* c_ptr,
     int64_t c_ld,
-    at::opmath_type<double> beta);
+    at::opmath_type<double> beta,
+    std::optional<at::Float32Precision> fp32_precision);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1820,7 +1924,8 @@ template bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const float* c_ptr,
     int64_t c_ld,
-    at::opmath_type<float> beta);
+    at::opmath_type<float> beta,
+    std::optional<at::Float32Precision> fp32_precision);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1839,7 +1944,8 @@ template bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const at::Half* c_ptr,
     int64_t c_ld,
-    at::opmath_type<at::Half> beta);
+    at::opmath_type<at::Half> beta,
+    std::optional<at::Float32Precision> fp32_precision);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1858,7 +1964,8 @@ template bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const float* c_ptr,
     int64_t c_ld,
-    at::opmath_type<at::Half> beta);
+    at::opmath_type<at::Half> beta,
+    std::optional<at::Float32Precision> fp32_precision);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1877,7 +1984,8 @@ template bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const at::BFloat16* c_ptr,
     int64_t c_ld,
-    at::opmath_type<at::BFloat16> beta);
+    at::opmath_type<at::BFloat16> beta,
+    std::optional<at::Float32Precision> fp32_precision);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1896,7 +2004,8 @@ template bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const float* c_ptr,
     int64_t c_ld,
-    at::opmath_type<at::BFloat16> beta);
+    at::opmath_type<at::BFloat16> beta,
+    std::optional<at::Float32Precision> fp32_precision);
 
 using at::blas::ScalingType;
 using at::blas::SwizzleType;

@@ -212,9 +212,21 @@ void gemm(
     const float *b, int64_t ldb,
     const float beta,
     float *c, int64_t ldc) {
+  gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc, std::nullopt);
+}
+
+void gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    const float alpha,
+    const float *a, int64_t lda,
+    const float *b, int64_t ldb,
+    const float beta,
+    float *c, int64_t ldc,
+    std::optional<at::Float32Precision> fp32_precision) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_MKLDNN_ENABLED()
-   if (mkldnn_reduced_f32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   if (mkldnn_reduced_f32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc, fp32_precision)) {
      return;
    }
 #endif

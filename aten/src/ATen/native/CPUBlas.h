@@ -7,6 +7,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Scalar.h>
 #include <ATen/Config.h>
+#include <ATen/Context.h>
 
 
 namespace at::native::cpublas {
@@ -74,6 +75,19 @@ void gemm(
     const float *b, int64_t ldb,
     float beta,
     float *c, int64_t ldc);
+
+// With the FP32 matmul precision requested for this call (the compute_mode
+// overloads of mm, addmm, bmm and baddbmm); std::nullopt means the global
+// setting, as above.
+void gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const float *a, int64_t lda,
+    const float *b, int64_t ldb,
+    float beta,
+    float *c, int64_t ldc,
+    std::optional<at::Float32Precision> fp32_precision);
 
 void gemm(
     TransposeType transa, TransposeType transb,

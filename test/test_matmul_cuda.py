@@ -4,6 +4,7 @@ import contextlib
 import json
 import math
 import os
+import re
 import unittest
 import warnings
 from itertools import product
@@ -28,6 +29,7 @@ from torch.testing._internal.common_cuda import (
     blas_library_context,
     IS_SM90,
     PLATFORM_SUPPORTS_BF16,
+    SM80OrLater,
     SM90OrLater,
     SM100OrLater,
     SM120OrLater,
@@ -398,6 +400,189 @@ class TestMatmulCuda(InductorTestCase):
                 (matrix(64, 2), matrix(2, 4)),
                 "extern_kernels.mm(",
             )
+
+    def _compute_mode_cases(self, device):
+        torch.manual_seed(1234)
+
+        def matrix(*shape):
+            return torch.randn(*shape, device=device)
+
+        return (
+            ("mm", torch.mm, (matrix(64, 128), matrix(128, 32))),
+            ("addmm", torch.addmm, (matrix(32), matrix(64, 128), matrix(128, 32))),
+            ("bmm", torch.bmm, (matrix(2, 64, 128), matrix(2, 128, 32))),
+            (
+                "baddbmm",
+                torch.baddbmm,
+                (matrix(2, 64, 32), matrix(2, 64, 128), matrix(2, 128, 32)),
+            ),
+        )
+
+    def _compute_modes(self):
+        return ("ieee", "tf32", "bfx9") if BF16X9_API_SUPPORTED else ("ieee", "tf32")
+
+    def _skip_unless_tf32_in_effect(self, device):
+        if torch.version.hip:
+            self.skipTest("compute_mode 'tf32' is not supported on ROCm")
+        # The comparisons against the global setting only show that the
+        # per-call mode wins if "ieee" and "tf32" give different results.
+        _, op, args = self._compute_mode_cases(device)[0]
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        ieee = op(*args)
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        tf32 = op(*args)
+        if torch.equal(ieee, tf32):
+            self.skipTest("TF32 does not change matmul results on this device")
+
+    @blas_library_context("cublas")
+    def test_compute_mode_matches_global_precision_cublas(self, device):
+        self._test_compute_mode_matches_global_precision(device)
+
+    @blas_library_context("cublaslt")
+    def test_compute_mode_matches_global_precision_cublaslt(self, device):
+        self._test_compute_mode_matches_global_precision(device)
+
+    def _test_compute_mode_matches_global_precision(self, device):
+        self._skip_unless_tf32_in_effect(device)
+        complex_cases = [
+            (name, op, [a.to(torch.cfloat) for a in args])
+            for name, op, args in self._compute_mode_cases(device)
+        ]
+        for name, op, args in self._compute_mode_cases(device) + tuple(complex_cases):
+            modes = self._compute_modes()
+            if args[0].is_complex():
+                modes = ("ieee", "tf32")
+            for mode in modes:
+                with self.subTest(op=name, dtype=args[0].dtype, compute_mode=mode):
+                    torch.backends.cuda.matmul.fp32_precision = mode
+                    # With the global setting, cuBLASLt ignores TF32 for
+                    # complex64; compute_mode uses cuBLAS to honor it.
+                    with (
+                        blas_library_context("cublas")
+                        if args[0].is_complex() and mode == "tf32"
+                        else contextlib.nullcontext()
+                    ):
+                        expected = op(*args)
+                    # The per-call mode must win over a different global setting,
+                    # and leave the global setting untouched.
+                    other = "tf32" if mode == "ieee" else "ieee"
+                    torch.backends.cuda.matmul.fp32_precision = other
+                    actual = op(*args, compute_mode=mode)
+                    self.assertEqual(actual, expected, atol=0, rtol=0)
+                    self.assertEqual(torch.backends.cuda.matmul.fp32_precision, other)
+                    out = torch.empty_like(actual)
+                    op(*args, compute_mode=mode, out=out)
+                    self.assertEqual(out, expected, atol=0, rtol=0)
+                    # The global setting applies again to the next call.
+                    if not args[0].is_complex():
+                        self.assertEqual(
+                            op(*args), op(*args, compute_mode=other), atol=0, rtol=0
+                        )
+
+    def test_compute_mode_backward(self, device):
+        self._skip_unless_tf32_in_effect(device)
+        for name, op, args in self._compute_mode_cases(device):
+            for mode in self._compute_modes():
+                with self.subTest(op=name, compute_mode=mode):
+                    torch.backends.cuda.matmul.fp32_precision = mode
+                    leaves = [a.clone().requires_grad_() for a in args]
+                    out = op(*leaves)
+                    grad_out = torch.randn_like(out)
+                    expected = torch.autograd.grad(out, leaves, grad_out)
+
+                    torch.backends.cuda.matmul.fp32_precision = (
+                        "tf32" if mode == "ieee" else "ieee"
+                    )
+                    leaves = [a.clone().requires_grad_() for a in args]
+                    out = op(*leaves, compute_mode=mode)
+                    actual = torch.autograd.grad(out, leaves, grad_out)
+                    self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    def test_compute_mode_compile(self, device):
+        self._skip_unless_tf32_in_effect(device)
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+
+        def calls(code, op):
+            return re.findall(
+                rf"= torch\.ops\.aten\.{op}\.compute_mode\(.*compute_mode='tf32'\)",
+                code,
+            )
+
+        for name, op, args in self._compute_mode_cases(device):
+            with self.subTest(op=name):
+                fn = partial(op, compute_mode="tf32")
+                expected = fn(*args)
+                actual, (code,) = run_and_get_code(
+                    torch.compile(fn, fullgraph=True), *args
+                )
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+                self.assertEqual(len(calls(code, name)), 1)
+
+                # The backward graph must keep the compute_mode too. Compare
+                # with default tolerances: the addmm/baddbmm bias gradient is a
+                # sum that Inductor may reduce in a different order.
+                leaves = [a.clone().requires_grad_() for a in args]
+                grad_out = torch.randn_like(expected)
+                expected_grads = torch.autograd.grad(fn(*leaves), leaves, grad_out)
+                torch._dynamo.reset()
+                compiled = torch.compile(fn, fullgraph=True)
+                actual_grads, (_, bwd_code) = run_and_get_code(
+                    lambda: torch.autograd.grad(compiled(*leaves), leaves, grad_out)
+                )
+                self.assertEqual(actual_grads, expected_grads)
+                bwd_op = "bmm" if name.endswith("bmm") else "mm"
+                self.assertEqual(len(calls(bwd_code, bwd_op)), 2)
+
+    def test_compute_mode_autocast(self, device):
+        # Under autocast the overloads follow the same cast policy as the plain
+        # ops, so the saved inputs and the backward agree on dtype.
+        for name, op, args in self._compute_mode_cases(device):
+            with self.subTest(op=name):
+                leaves = [a.clone().requires_grad_() for a in args]
+                with torch.autocast(device, dtype=torch.float16):
+                    expected = op(*leaves)
+                    actual = op(*leaves, compute_mode="tf32")
+                self.assertEqual(actual.dtype, torch.float16)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+                grads = torch.autograd.grad(actual.sum(), leaves)
+                for leaf, grad in zip(leaves, grads):
+                    self.assertEqual(grad.dtype, leaf.dtype)
+
+    def test_compute_mode_errors(self, device):
+        a = torch.randn(4, 4, device=device)
+        a3 = torch.randn(2, 4, 4, device=device)
+        with self.assertRaisesRegex(ValueError, "unknown compute_mode 'fast'"):
+            torch.mm(a, a, compute_mode="fast")
+        with self.assertRaisesRegex(ValueError, "unknown compute_mode 'fast'"):
+            torch.mm(a.to("meta"), a.to("meta"), compute_mode="fast")
+        # Unlike the global setting, an explicit mode the kernel cannot run
+        # raises instead of falling back to IEEE.
+        with self.assertRaisesRegex(RuntimeError, "'bf16' is not supported on CUDA"):
+            torch.mm(a, a, compute_mode="bf16")
+        with self.assertRaisesRegex(RuntimeError, "'bf16' is not supported on CUDA"):
+            torch.bmm(a3, a3, compute_mode="bf16")
+        if not BF16X9_API_SUPPORTED:
+            with self.assertRaisesRegex(RuntimeError, "bfx9"):
+                torch.mm(a, a, compute_mode="bfx9")
+        else:
+            c = a.to(torch.cfloat)
+            with self.assertRaisesRegex(RuntimeError, "'bfx9' is not supported for ComplexFloat"):
+                torch.mm(c, c, compute_mode="bfx9")
+        if torch.version.hip:
+            with self.assertRaisesRegex(RuntimeError, "'tf32' is not supported on ROCm"):
+                torch.mm(a, a, compute_mode="tf32")
+        elif not SM80OrLater:
+            with self.assertRaisesRegex(RuntimeError, "'tf32' requires a GPU with compute capability 8.0"):
+                torch.mm(a, a, compute_mode="tf32")
+
+        # Inputs that are not FP32, and matmuls that do no multiplication, run
+        # no FP32 matmul kernel, so any mode is accepted.
+        for dtype in (torch.double, torch.half):
+            d = a.to(dtype)
+            self.assertEqual(torch.mm(d, d, compute_mode="bf16"), torch.mm(d, d), atol=0, rtol=0)
+        self.assertEqual(torch.mm(a[:, :0], a[:0], compute_mode="bf16"), torch.zeros_like(a))
+        self.assertEqual(torch.bmm(a3[..., :0], a3[:, :0], compute_mode="bf16"), torch.zeros_like(a3))
+        self.assertEqual(torch.mm(a[:0], a, compute_mode="bf16").shape, (0, 4))
 
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
     def test_legacy_cublas_honors_sm_carveout(self, device):
