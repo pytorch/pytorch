@@ -17,7 +17,7 @@ import torch._prims as prims
 import torch.utils._pytree as pytree
 from torch._prims.context import TorchRefsMode
 from torch._prims_common.wrappers import _maybe_remove_out_wrapper
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch._subclasses.fake_utils import outputs_alias_inputs
 from torch.fx.experimental.symbolic_shapes import (
     constrain_range,
@@ -68,7 +68,6 @@ from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     IS_S390X,
     IS_SANDCASTLE,
-    MACOS_VERSION,
     noncontiguous_like,
     parametrize,
     run_tests,
@@ -561,14 +560,14 @@ class TestCommon(TestCase):
                 continue
 
             if isinstance(result, torch.Tensor):
-                self.assertTrue(isinstance(meta_result, FakeTensor))
+                self.assertTrue(is_fake_tensor(meta_result))
                 prims.utils.compare_tensor_meta(
                     result, meta_result, check_conj=op.op not in CHECK_CONJ_SKIPS
                 )
             elif isinstance(result, Sequence):
                 for a, b in zip(result, meta_result):
                     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
-                        self.assertTrue(isinstance(b, FakeTensor))
+                        self.assertTrue(is_fake_tensor(b))
                         prims.utils.compare_tensor_meta(
                             a, b, check_conj=op.op not in CHECK_CONJ_SKIPS
                         )
@@ -2952,27 +2951,6 @@ fake_backward_mps_xfails = {
     )
 }
 
-# MPS linalg solves return row-major results, while the metas are column-major
-fake_backward_mps_linalg_xfails = {
-    xfail(name, device_type="mps")
-    for name in (
-        "cholesky_solve",
-        "linalg.cholesky",
-        "linalg.cholesky_ex",
-        "linalg.lu",
-        "linalg.lu_factor",
-        "linalg.lu_factor_ex",
-        "linalg.lu_solve",
-        "linalg.qr",
-        "linalg.solve",
-        "linalg.solve_ex",
-        "linalg.solve_triangular",
-        "linalg.tensorsolve",
-        "lu",
-        "lu_solve",
-    )
-}
-
 
 @unMarkDynamoStrictTest
 class TestFakeTensor(TestCase):
@@ -3047,7 +3025,7 @@ class TestFakeTensor(TestCase):
                             self.assertEqual(fake_out, real_out)
                             continue
 
-                        self.assertTrue(isinstance(fake_out, FakeTensor))
+                        self.assertTrue(is_fake_tensor(fake_out))
                         # if you see a shape exception here, you may need to add
                         # a `dynamic_output_shape` tag to an operator
 
@@ -3230,10 +3208,7 @@ class TestFakeTensor(TestCase):
     @onlyAccelerator
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(
-        fake_backward_xfails
-        | fake_backward_mps_xfails
-        | fake_backward_mps_linalg_xfails
-        | {skip("sparse.sampled_addmm")}
+        fake_backward_xfails | fake_backward_mps_xfails | {skip("sparse.sampled_addmm")}
     )
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
@@ -3241,10 +3216,7 @@ class TestFakeTensor(TestCase):
     @onlyAccelerator
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(
-        fake_backward_xfails
-        | fake_autocast_backward_xfails
-        | fake_backward_mps_xfails
-        | fake_backward_mps_linalg_xfails
+        fake_backward_xfails | fake_autocast_backward_xfails | fake_backward_mps_xfails
     )
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(
@@ -3304,15 +3276,11 @@ class TestForwardADWithScalars(TestCase):
                 )
 
 
-instantiate_device_type_tests(
-    TestCommon, globals(), allow_xpu=True, allow_mps=MACOS_VERSION >= 15.0
-)
+instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestMathBits, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
-instantiate_device_type_tests(
-    TestFakeTensor, globals(), allow_xpu=True, allow_mps=MACOS_VERSION >= 15.0
-)
+instantiate_device_type_tests(TestFakeTensor, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestTags, globals(), only_for="cpu")
 instantiate_device_type_tests(TestForwardADWithScalars, globals(), allow_xpu=True)
 

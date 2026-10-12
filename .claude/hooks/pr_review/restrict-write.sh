@@ -95,6 +95,26 @@ actual=$(LC_ALL=C bash -c 'printf %s "$1" | wc -c' _ "$target") \
 
 tool=$(printf '%s' "$input" | jq -r '.tool_name // "?"' 2>/dev/null || echo '?')
 
+# Only the top-level reviewer writes the verdict. Claude Code puts `agent_id`
+# on a sub-agent's hook payload and leaves it off the main session's, so a
+# sub-agent steered by PR content cannot write or overwrite the findings file.
+# This check FAILS OPEN if a Claude Code release stops sending `agent_id`:
+# re-verify that the field is still emitted whenever the action pin moves.
+agent_id=$(printf '%s' "$input" | jq -r '.agent_id // empty') \
+  || die_closed "jq failed reading .agent_id"
+if [ -n "$agent_id" ]; then
+  printf 'DENY  %s -> %s (sub-agent)\n' "$(logsafe "$tool")" "$(logsafe "$target")" >> "$LOG" 2>/dev/null || true
+  deny=$(jq -n '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: "Sub-agents may not write files. Report your result to the reviewer that spawned you."
+    }
+  }') || die_closed "jq failed building the denial"
+  printf '%s\n' "$deny"
+  exit 0
+fi
+
 if [[ "$target" == "$FINDINGS" ]]; then
   printf 'ALLOW %s -> %s\n' "$(logsafe "$tool")" "$(logsafe "$target")" >> "$LOG" 2>/dev/null || true
   # Emit nothing: no opinion, so the ordinary permission path applies and the
