@@ -510,6 +510,7 @@ class BackendFeature(Enum):
     PREFER_STORE_LOOP_ORDER = auto()
     TRITON_TEMPLATES = auto()
     REDUCE_TO_SINGLE_ELEMENT = auto()
+    INDIRECT_INDEXING = auto()
 
 
 def get_backend_features(
