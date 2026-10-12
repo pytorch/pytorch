@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -43,7 +43,7 @@ class ChunkingMeta:
                 f"Can not have both a non-None chunk_dim and a true need_sum: {self.chunk_dim}"
             )
 
-    def copy(self, **kwargs: Any) -> ChunkingMeta:
+    def copy(self, **kwargs: object) -> ChunkingMeta:
         meta = ChunkingMeta(**self.__dict__)
         for k, v in kwargs.items():
             setattr(meta, k, v)
