@@ -23746,6 +23746,8 @@ python_ref_db = [
                           dtypes=(torch.complex64, torch.complex128)),
              DecorateInfo(unittest.skip("Skipped"), 'TestCommon', 'test_python_ref_torch_fallback', device_type='xpu',
                           dtypes=(torch.complex64, torch.complex128)),
+             DecorateInfo(unittest.skip("Skipped"), 'TestTorchFunctionRedispatchOpsDeviceXPU', 'test_redispatch',
+                          device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
             # Tests that assume input is a tensor or sequence of tensors
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
