@@ -410,9 +410,9 @@ class TestRoundTwoRegressions(unittest.TestCase):
             build(ok_payload(findings=[]), parse_diff(DIFF))
 
     def test_a_clean_verdict_carrying_a_major_finding_is_refused(self):
-        # The suppression direction, and the one an injection wants: publish
-        # acts on `verdict`, so a clean verdict would move the PR to the
-        # terminal label while the artifact records a major problem nothing
+        # The suppression direction, and the one an injection wants: Dr. CI
+        # acts on the recorded `verdict`, so a clean verdict would mark the PR
+        # ready for review while the artifact records a major problem nothing
         # downstream reads.
         with self.assertRaises(Rejected):
             build(ok_payload(verdict="ready_for_human_review"), parse_diff(DIFF))
