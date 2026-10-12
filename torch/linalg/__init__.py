@@ -1793,6 +1793,13 @@ same matrices passed one-by-one can therefore use different drivers. If
 (``S_min / S_max`` below a multiple of ``sqrt(eps)``), that batch is recomputed
 with `'gesvd'`.
 
+.. note:: When `'gesvda'` is used, cuSOLVER still needs temporary `U` and `V`
+          buffers even if only singular values are requested
+          (:func:`torch.linalg.svdvals`, or the internal `compute_uv=False` path).
+          For large batched shapes this can use noticeable extra device memory
+          (on the order of the input plus an ``n x n`` factor per batch). Prefer
+          an explicit ``driver`` if that matters more than the speedup.
+
 Differences with `numpy.linalg.svd`:
 
 - Unlike `numpy.linalg.svd`, this function always returns a tuple of three tensors
