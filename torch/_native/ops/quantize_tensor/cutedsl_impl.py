@@ -1,6 +1,12 @@
 """CuTeDSL implementations of the MXFP8 quantization operators."""
 
 import torch
+from torch._quantization_formats import (
+    _get_quant_format,
+    _quantize_tensor_dual_validate_inputs,
+    _quantize_tensor_validate_inputs,
+    _TensorQuantFormat,
+)
 
 from ... import cutedsl_utils as cu
 from .utils import _device_capability
@@ -44,25 +50,26 @@ def _quantize_tensor_impl(
     qdata_rounding_mode: int = 0,
     random_key: torch.Tensor | None = None,
 ) -> list[torch.Tensor]:
-    from torch.nn.functional import ScalingAlgorithm, ScalingType, SwizzleType
+    from torch.nn.functional import SwizzleType
 
     if input.dim() != 2:
         raise ValueError("quantize_tensor requires a 2D input")
-    if input.size(1) % 32 != 0:
-        raise ValueError("quantize_tensor requires columns divisible by 32")
     if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise ValueError("quantize_tensor supports only fp16, bf16, and fp32 input")
-    if qdata_dtype != torch.float8_e4m3fn:
-        raise ValueError("quantize_tensor supports only float8_e4m3fn qdata")
-    if scaling_algorithm != ScalingAlgorithm.MXFP_E8M0_RU.value:
-        raise ValueError("quantize_tensor requires scaling_algorithm=MXFP_E8M0_RU")
-    if scaling_type != ScalingType.BlockWise1x32.value:
-        raise ValueError("quantize_tensor supports only BlockWise1x32 scaling")
-    if swizzle_type not in (
-        SwizzleType.NO_SWIZZLE.value,
-        SwizzleType.SWIZZLE_32_4_4.value,
-    ):
-        raise ValueError("unsupported quantize_tensor swizzle type")
+    quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
+    if quant_format == _TensorQuantFormat.MXFP8:
+        _quantize_tensor_validate_inputs(
+            quant_format,
+            input,
+            scaling_type,
+            qdata_dtype,
+            scaling_algorithm,
+            swizzle_type,
+            scaling_type_use_square_block_size,
+        )
+    else:
+        raise AssertionError(f"Unknown {quant_format=}")
+
     stochastic_rounding = _validate_rounding(
         input,
         qdata_rounding_mode,
@@ -74,16 +81,7 @@ def _quantize_tensor_impl(
     if input.is_contiguous():
         source, orientation = input, "dim_k"
     else:
-        source = input.t()
-        if not source.is_contiguous():
-            raise ValueError("input must be contiguous or a transpose of contiguous")
-        orientation = "dim_m"
-    if orientation == "dim_m" and not is_scale_swizzled:
-        raise ValueError("dim-m quantization requires SWIZZLE_32_4_4")
-    if scaling_type_use_square_block_size and (
-        orientation != "dim_k" or not is_scale_swizzled
-    ):
-        raise ValueError("32x32 MXFP8 scaling requires dim-k and SWIZZLE_32_4_4")
+        source, orientation = input.t(), "dim_m"
     if input.device.type != "cuda" or torch.version.hip is not None:
         raise RuntimeError("quantize_tensor requires an NVIDIA CUDA tensor")
     if _device_capability(input.get_device()) < (10, 0):
@@ -115,26 +113,24 @@ def _quantize_tensor_dual_impl(
     qdata_rounding_mode: int = 0,
     random_key: torch.Tensor | None = None,
 ) -> list[torch.Tensor]:
-    from torch.nn.functional import ScalingAlgorithm, ScalingType, SwizzleType
-
     if input.dim() != 2:
         raise ValueError("quantize_tensor_dual requires a 2D input")
-    if input.size(0) % 32 != 0 or input.size(1) % 32 != 0:
-        raise ValueError("dual quantization requires both dimensions divisible by 32")
-    if not input.is_contiguous():
-        raise ValueError("quantize_tensor_dual requires a contiguous input")
     if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise ValueError("dual quantization supports only fp16, bf16, and fp32 input")
-    if qdata_dtype != torch.float8_e4m3fn:
-        raise ValueError("quantize_tensor_dual supports only float8_e4m3fn qdata")
-    if scaling_algorithm != ScalingAlgorithm.MXFP_E8M0_RU.value:
-        raise ValueError("quantize_tensor_dual requires scaling_algorithm=MXFP_E8M0_RU")
-    if scaling_type != ScalingType.BlockWise1x32.value:
-        raise ValueError("quantize_tensor_dual supports only BlockWise1x32 scaling")
-    if swizzle_type != SwizzleType.SWIZZLE_32_4_4.value:
-        raise ValueError("quantize_tensor_dual requires SWIZZLE_32_4_4")
-    if scaling_type_use_square_block_size:
-        raise ValueError("quantize_tensor_dual does not support 32x32 MXFP8 scaling")
+    quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
+    if quant_format == _TensorQuantFormat.MXFP8:
+        _quantize_tensor_dual_validate_inputs(
+            quant_format,
+            input,
+            scaling_type,
+            qdata_dtype,
+            scaling_algorithm,
+            swizzle_type,
+            scaling_type_use_square_block_size,
+        )
+    else:
+        raise AssertionError(f"Unknown {quant_format=}")
+
     stochastic_rounding = _validate_rounding(
         input,
         qdata_rounding_mode,
