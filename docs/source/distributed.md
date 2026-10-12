@@ -1374,6 +1374,17 @@ torchrun --nproc-per-node=2 train.py
 # Open http://localhost:25999
 ```
 
+For an end-to-end NCCL2 failure example, see
+{download}`verify_nccl2_flight_recorder.py <../../torch/distributed/examples/verify_nccl2_flight_recorder.py>`.
+The example deliberately hangs an NCCL2 collective and verifies that the c10d
+health check causes the debug server to write a Flight Recorder dump for every
+rank. Run it on a host with at least two GPUs:
+
+```bash
+torchrun --standalone --nproc-per-node=2 \
+  torch/distributed/examples/verify_nccl2_flight_recorder.py
+```
+
 #### Configuration Reference
 
 `start_debug_server()` accepts the following parameters:
@@ -1471,6 +1482,11 @@ capability.
 **TorchComms FlightRecorder JSON** ``/torchcomms_fr_trace_json``
   Same data as ``/torchcomms_fr_trace`` but rendered as raw formatted JSON.
 
+**c10d Health Check** ``/c10d_health_check``
+  Fetches the c10d health state from every rank. When any rank reports an
+  unhealthy backend, the server requests a Flight Recorder dump for that
+  backend from every worker.
+
 **torch.profiler** ``/profile``
   Triggers ``torch.profiler.profile()`` on every worker for a configurable
   duration, then returns the Chrome trace JSON. The frontend page provides a
@@ -1531,6 +1547,22 @@ collective operations, their metadata, and timing information.
 ```bash
 curl -X POST \
   http://worker-host:port/handler/fr_trace_json  # @lint-ignore
+```
+
+**``fr_dump_file``** — Starts a Flight Recorder dump for one backend. The
+``backend`` query parameter selects the backend-specific recorder.
+
+```bash
+curl -X POST \
+  "http://worker-host:port/handler/fr_dump_file?backend=nccl2"  # @lint-ignore
+```
+
+**``c10d_health_check``** — Returns the process-wide c10d health state and the
+names of any unhealthy backends (application/json).
+
+```bash
+curl -X POST \
+  http://worker-host:port/handler/c10d_health_check  # @lint-ignore
 ```
 
 **``dump_nccl_trace_json``** — NCCL flight-recorder trace (application/json).
@@ -1615,14 +1647,16 @@ Handlers that support dumping:
 +------------------------------------+------------------------+---------------------------------------------------+
 | ``TorchCommsFlightRecorderHandler``| ``torchcomms_fr_trace``| TorchComms flight-recorder tables.                |
 +------------------------------------+------------------------+---------------------------------------------------+
+| ``C10dHealthCheckHandler``         | ``c10d_health_check``  | c10d health and backend Flight Recorder dumps.    |
++------------------------------------+------------------------+---------------------------------------------------+
 | ``WaitCountersHandler``            | ``wait_counters``      | Wait counter JSON for all ranks.                  |
 +------------------------------------+------------------------+---------------------------------------------------+
 | ``TCPStoreHandler``                | ``tcpstore``           | All TCPStore key-value pairs.                     |
 +------------------------------------+------------------------+---------------------------------------------------+
 ```
 
-By default (when ``enabled_dumps=None``), only ``"stacks"`` and ``"fr_trace"``
-are enabled.
+By default (when ``enabled_dumps=None``), ``"stacks"``, ``"fr_trace"``, and
+``"c10d_health_check"`` are enabled.
 
 #### Registering Custom Handlers
 
@@ -2270,14 +2304,15 @@ not that the remote application consumed or acknowledged the data. Asyncio calle
 can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains valid
 until unregistration or close, and tensors must not be resized or have their storage replaced.
 
-CUDA stream semantics, graph capture, tracing, batching, remote slicing, and
-rank-based bootstrap helpers are outside this initial API. Rank-to-endpoint
-lookup belongs in a separate control-plane adapter. Descriptor classes define explicit ``serialize()``/``deserialize()`` methods.
+Ordinary reads and writes are not ordered on CUDA streams. The API does not
+provide tracing, batching, or remote slicing. Descriptor classes define explicit
+``serialize()``/``deserialize()`` methods.
 The built-in backends declare their fields in a versioned JSON envelope; binary
 metadata is base64-encoded. Unknown fields, versions, backends, and invalid field
 types are rejected. Tensor contents and native handles are never serialized.
 
 .. autofunction:: torch.distributed._transport.new_transport
+.. autofunction:: torch.distributed._transport.new_transport_rank
 .. autoclass:: torch.distributed._transport.Transport
    :members:
 .. autoclass:: torch.distributed._transport.Memory
@@ -2289,6 +2324,42 @@ types are rejected. Tensor contents and native handles are never serialized.
 .. autofunction:: torch.distributed._transport.wait_all
 .. autofunction:: torch.distributed._transport.available_transports
 .. autofunction:: torch.distributed._transport.register_transport
+
+CUDA streams
+~~~~~~~~~~~~
+
+``read_stream`` and ``write_stream`` order a transfer on ``stream``, or the
+current CUDA stream if ``None``. The transfer starts after prior work on the
+stream; later work waits for it to complete. Calls return after enqueueing and
+no kernel runs while the transfer is in flight.
+
+.. code-block:: python
+
+    with torch.cuda.stream(stream):
+        source.copy_(producer)
+        transport.write_stream(source_view, remote_destination)
+        transport.read_stream(destination_view, remote_source)
+        consume(destination)
+
+Stream transfers can be captured with ``torch.cuda.graph``; each replay submits
+a new transfer. Register buffers and warm up transfers before capture. Captured
+buffers stay registered until ``close``; replaying after ``close`` terminates
+the process.
+
+.. code-block:: python
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        source.copy_(producer)
+        transport.write_stream(source_view, remote_destination)
+    graph.replay()
+
+The default implementation awaits ``write_async``/``read_async`` on a shared
+asyncio loop thread and gates the stream with a CUDA stream memory wait. It requires Linux
+and GPUDirect RDMA write ordering, and allows 64 outstanding transfers per
+stream; captured transfers hold their slot until ``close``. Since consumers may
+already be enqueued, a failed transfer terminates the process. Backends with
+native stream support may override these methods.
 
 NIXL backend
 ~~~~~~~~~~~~
