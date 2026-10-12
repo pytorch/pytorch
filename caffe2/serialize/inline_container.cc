@@ -906,7 +906,8 @@ void PyTorchStreamWriter::throwIfWriterFuncError() {
   auto error = std::move(writer_func_error_);
   writer_func_error_ = nullptr;
   finalized_ = true;
-  // A callback failure leaves an incomplete archive; only release miniz state.
+  // A callback failure leaves an incomplete archive; release miniz state and
+  // prevent further writes or finalization.
   mz_zip_writer_end(ar_.get());
   std::rethrow_exception(error);
 }

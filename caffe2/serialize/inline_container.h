@@ -285,6 +285,8 @@ class TORCH_API PyTorchStreamWriter final {
   uint64_t version_ = kMinProducedFileFormatVersion;
   bool finalized_ = false;
   bool err_seen_ = false;
+  // A callback failure abandons the archive; every miniz call that can invoke
+  // m_pWrite must check and rethrow this exception after returning.
   std::exception_ptr writer_func_error_;
   friend size_t ostream_write_func(
       void* pOpaque,
