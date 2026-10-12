@@ -109,6 +109,7 @@ from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
     GetSet,
+    maybe_get_python_type,
     Member,
     Method,
     MutationType,
@@ -129,6 +130,7 @@ from .object_protocol import (
     is_nb_not_implemented,
     mro_attr_source,
     mro_lookup,
+    pycallable_check,
     pynumber_as_ssize_t,
     pynumber_index,
     type_disallows_instantiation,
@@ -5177,16 +5179,7 @@ class DefaultDictVariable(ConstDictVariable):
         val = arg.get_real_python_backed_value()
         if val is not NO_SUCH_SUBOBJ:
             return val is None or callable(val)
-        # Callables (functions, builtins, classes) are supported
-        return isinstance(
-            arg,
-            (
-                variables.BaseBuiltinVariable,
-                variables.functions.BaseUserFunctionVariable,
-                variables.functions.PolyfilledFunctionVariable,
-                variables.UserDefinedClassVariable,
-            ),
-        )
+        return pycallable_check(maybe_get_python_type(arg))
 
     def is_python_constant(self) -> bool:
         if not self.default_factory.is_python_constant():
