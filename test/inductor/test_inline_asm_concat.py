@@ -88,6 +88,7 @@ class TestInlineAsmConcat(TestCase):
         {
             "force_pointwise_cat": False,
             "max_complex_pointwise_cat_inputs": 8,
+            "cat_fuse_computed_input_copies": True,
             "triton.multi_kernel": 0,
             "fx_graph_cache": False,
         }
@@ -177,6 +178,7 @@ class TestInlineAsmConcat(TestCase):
                     "triton.nested_reduction": True,
                     "loop_ordering_after_fusion": True,
                     "emulate_precision_casts": True,
+                    "cat_fuse_computed_input_copies": True,
                     "force_disable_caches": True,
                 }
             ),
@@ -227,6 +229,7 @@ class TestPointwisePackingChoices(TestCase):
     settings = {
         "triton.nested_reduction": True,
         "loop_ordering_after_fusion": True,
+        "cat_fuse_computed_input_copies": True,
         "emulate_precision_casts": True,
         "force_disable_caches": True,
     }
