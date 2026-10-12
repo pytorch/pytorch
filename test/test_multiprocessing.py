@@ -22,12 +22,15 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     load_tests,
+    parametrize,
     run_tests,
     slowTest,
+    subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -265,8 +268,8 @@ def _event_multiprocess_child(event, p2c, c2p):
     c2p.put(1)  # notify parent synchronization is done
 
 
-def _event_handle_importer_consumer(handle, p2c, c2p):
-    e1 = torch.cuda.Event.from_ipc_handle(0, handle)
+def _event_handle_importer_consumer(event_cls, handle, p2c, c2p):
+    e1 = event_cls.from_ipc_handle(0, handle)
     c2p.put(0)  # notify parent child is ready
     p2c.get()  # wait for record in parent
     e1.synchronize()
@@ -274,10 +277,10 @@ def _event_handle_importer_consumer(handle, p2c, c2p):
     p2c.get()  # wait for parent to finish before destructing child event
 
 
-def _event_handle_exporter_consumer(handle, p2c, c2p):
+def _event_handle_exporter_consumer(event_cls, handle, p2c, c2p):
     stream = torch.cuda.Stream()
-    with torch.cuda.stream(stream):
-        e1 = torch.cuda.Event.from_ipc_handle(torch.cuda.current_device(), handle)
+    with stream:
+        e1 = event_cls.from_ipc_handle(torch.cuda.current_device(), handle)
         torch.cuda._sleep(50000000)  # spin for about 50 ms
         e1.record()
         c2p.put(0)
@@ -811,6 +814,7 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         self.assertEqual(mp._get_thread_name(), name)
 
 
+@instantiate_parametrized_tests
 @unittest.skipIf(
     TEST_WITH_TSAN,
     "TSAN is not fork-safe since we're forking in a multi-threaded environment",
@@ -1032,8 +1036,15 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
             # create handle on different device from recorded event
             e1.ipc_handle()
 
-    def test_event_handle_importer(self):
-        e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.cuda.Event, name="cuda_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_handle_importer(self, event_cls):
+        e0 = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
 
         ctx = mp.get_context("spawn")
@@ -1041,7 +1052,7 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=_event_handle_importer_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
+            args=(event_cls, e0.ipc_handle(), p2c, c2p),
         )
         p.start()
 
@@ -1056,15 +1067,22 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         p2c.put(1)  # notify child that parent is done
         p.join()
 
-    def test_event_handle_exporter(self):
-        e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.cuda.Event, name="cuda_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_handle_exporter(self, event_cls):
+        e0 = event_cls(enable_timing=False, interprocess=True)
 
         ctx = mp.get_context("spawn")
         p2c = ctx.SimpleQueue()
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=_event_handle_exporter_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
+            args=(event_cls, e0.ipc_handle(), p2c, c2p),
         )
         p.start()
         # wait for event in child process is recorded
