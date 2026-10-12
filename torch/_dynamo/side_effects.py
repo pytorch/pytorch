@@ -52,6 +52,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
+from .guards import GuardBuilder, install_guard
 from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import (
     is_frozen_dataclass,
@@ -1814,6 +1815,13 @@ def _codegen_ordered_dict_mutation(ctx: SideEffectReplayContext) -> None:
     var = ctx.var
     if not isinstance(var, variables.OrderedDictVariable):
         raise AssertionError(type(var))
+    if var.source and isinstance(
+        var.mutation_type, (ValueMutationExisting, AttributeMutationExisting)
+    ):
+        # Replay specializes on both storage order and linked-list iteration order.
+        cg.tx.output.guard_on_key_order.add(var.source)
+        var.install_dict_keys_match_guard()
+        install_guard(var.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
     cg.add_push_null(
         lambda: cg.load_import_from(__name__, "_manual_ordered_dict_update")
     )
