@@ -2240,7 +2240,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         )
 
     @expectedFailureMPS
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4022")
     @set_default_dtype_if_supported(torch.double)
     def test_relaxed_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
