@@ -118,9 +118,9 @@ if typing.TYPE_CHECKING:
 def _snapshot_external_objects(ctx: Any) -> None:
     """Snapshot the external object registry onto ctx for backward restore."""
     ctx._external_objects = {
-        k: ref()
+        k: r
         for k, ref in enumerate(index_to_external_object_weakref)
-        if ref() is not None
+        if (r := ref()) is not None
     }
 
 
@@ -879,26 +879,29 @@ def _codegen_compiled_fn_invocation(
         buf.emit(
             "prev_view_replay_enabled = torch._C._is_view_replay_enabled()", indent=2
         )
+        buf.emit("prev_grad_enabled = torch.is_grad_enabled()", indent=2)
         buf.emit("try:", indent=2)
-        buf.emit("if not prev_view_replay_enabled:", indent=3)
-        buf.emit("torch._C._set_view_replay_enabled(True)", indent=4)
-        buf.emit("with torch.enable_grad():", indent=3)
-        buf.emit("_on_before_call_()", indent=4)
+        buf.emit(
+            "if not prev_view_replay_enabled: torch._C._set_view_replay_enabled(True)",
+            indent=3,
+        )
+        buf.emit("if not prev_grad_enabled: torch._C._set_grad_enabled(True)", indent=3)
+        buf.emit("_on_before_call_()", indent=3)
         if disable_amp:
             buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
-            buf.emit("with _DisableAutocast_():", indent=4)
-            buf.emit("all_outs = _compiled_fn_(args_)", indent=5)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=5)
-        else:
+            buf.emit("with _DisableAutocast_():", indent=3)
             buf.emit("all_outs = _compiled_fn_(args_)", indent=4)
             _codegen_normalize_as_list(buf, "all_outs", indent_level=4)
+        else:
+            buf.emit("all_outs = _compiled_fn_(args_)", indent=3)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=3)
         buf.emit("finally:", indent=2)
         buf.emit(
-            "if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:",
+            "if not prev_view_replay_enabled: torch._C._set_view_replay_enabled(False)",
             indent=3,
         )
         buf.emit(
-            "torch._C._set_view_replay_enabled(prev_view_replay_enabled)", indent=4
+            "if not prev_grad_enabled: torch._C._set_grad_enabled(False)", indent=3
         )
     else:
         buf.emit("grad_enabled = torch.is_grad_enabled()", indent=2)
@@ -3482,13 +3485,15 @@ class _AOTDispatchAutogradFunctionFactory:
             buf.writeline("return non_diff")
 
         _codegen_transform_raw_returns: Callable[..., list[Any]] = buf.build()  # type: ignore[assignment]
+        # Config variable resolution is expensive; get it off the hot path.
+        do_debug_assert = config.debug_assert
 
         # Monkey-patch forward_epilogue.finalize to use codegen'd transform
         def _codegen_finalize(ctx: Any, fw_outs: Any) -> tuple[Any, ...]:
             num_forward_returns = fw_metadata.num_forward_returns
             raw_returns = list(fw_outs[:num_forward_returns])
             fw_outs_not_requiring_grad = _codegen_transform_raw_returns(raw_returns)
-            if config.debug_assert:
+            if do_debug_assert:
                 if num_mutated_runtime_inps > 0:
                     user_mutated_inputs_raw = raw_returns[0:num_mutated_runtime_inps]
                     mut_inp_infos = [
