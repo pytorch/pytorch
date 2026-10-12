@@ -4401,14 +4401,11 @@ def collect_defined_kernels(kernel_list: list[str]) -> Iterator[None]:
         self: PythonWrapperCodegen,
         kernel_name: str,
         kernel_code: str,
-        metadata: str | None = None,
-        gpu: bool = True,
-        cpp_definition: str | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> Any:
         kernel_list.append(kernel_code)
-        return orig_define_kernel(
-            self, kernel_name, kernel_code, metadata, gpu, cpp_definition
-        )
+        return orig_define_kernel(self, kernel_name, kernel_code, *args, **kwargs)
 
     with mock.patch.object(PythonWrapperCodegen, "define_kernel", define_kernel):
         yield
@@ -5800,6 +5797,15 @@ def _tlx_registry_options(name: str) -> list[str]:
 
 def tlx_only_cuda_options() -> list[str]:
     return _tlx_registry_options("tlx_only_cuda_options")
+
+
+def forwarded_cuda_compile_options() -> list[str]:
+    """CUDA Triton compile options forwarded from kernel configs.
+
+    ``ctas_per_cga`` is also set by Meta autoWS 2CTA templates, so it must be
+    forwarded even when TLX is off.
+    """
+    return list(dict.fromkeys(["ctas_per_cga", *tlx_only_cuda_options()]))
 
 
 def tlx_only_hip_options() -> list[str]:
