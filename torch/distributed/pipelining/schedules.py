@@ -8,11 +8,11 @@ import itertools
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque, OrderedDict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import lru_cache
+from functools import lru_cache, partial
 from types import MappingProxyType
 from typing import Any, cast, Literal, NamedTuple, Protocol
 
@@ -23,6 +23,7 @@ from torch.cuda.graph_annotations import mark_kernels
 from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
+from torch.utils.hooks import RemovableHandle
 
 from ._p2p import (
     _build_p2p_edge_groups,
@@ -74,9 +75,12 @@ class _ComputationType(str, Enum):
     RECV_F = "RECV_F"
     SEND_B = "SEND_B"
     RECV_B = "RECV_B"
+    WAIT_SEND_F = "WAIT_SEND_F"
+    WAIT_SEND_B = "WAIT_SEND_B"
     FULL_BACKWARD = "B"
     OVERLAP_F_B = "OVERLAP_F_B"
     REDUCE_GRAD = "REDUCE_GRAD"
+    WAIT_REDUCE_GRAD = "WAIT_REDUCE_GRAD"
 
     @staticmethod
     def from_str(action: str) -> "_ComputationType":
@@ -95,9 +99,12 @@ SEND_F = _ComputationType.SEND_F
 RECV_F = _ComputationType.RECV_F
 SEND_B = _ComputationType.SEND_B
 RECV_B = _ComputationType.RECV_B
+WAIT_SEND_F = _ComputationType.WAIT_SEND_F
+WAIT_SEND_B = _ComputationType.WAIT_SEND_B
 FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
+WAIT_REDUCE_GRAD = _ComputationType.WAIT_REDUCE_GRAD
 
 # Keep the alias private; public schedule signatures spell out the accepted
 # forms so generated API documentation remains self-contained.
@@ -118,7 +125,7 @@ B = FULL_BACKWARD
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
 _action_regex = re.compile(
-    r"(\d+)(F|I|B|W|UNSHARD|RESHARD|REDUCE_GRAD|SEND_F|RECV_F|SEND_B|RECV_B)(\d*)"
+    r"(\d+)(WAIT_REDUCE_GRAD|WAIT_SEND_F|WAIT_SEND_B|REDUCE_GRAD|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B|F|I|B|W)(\d*)"
 )
 
 
@@ -309,6 +316,9 @@ class _PipelineSchedule(ABC):
         # Derived
         self._has_backward = self._loss_fn is not None
         self._p2p_initialized = False
+        self._post_metadata_inference_cleanups: OrderedDict[int, Callable[[], None]] = (
+            OrderedDict()
+        )
 
         # Holds the losses for each microbatch.
         self._internal_losses: list[torch.Tensor] = []
@@ -494,6 +504,24 @@ class _PipelineSchedule(ABC):
                 stage_device,
             )
 
+    def register_post_metadata_inference_cleanup(
+        self, callback: Callable[[], None]
+    ) -> RemovableHandle:
+        """Register a callback after dynamic metadata inference is cleaned up.
+
+        The callback runs after all local stages restore their metadata-inference
+        state. It does not run when stages use constructor-provided static metadata.
+
+        Args:
+            callback: Zero-argument cleanup called after dynamic metadata inference.
+
+        Returns:
+            A handle that removes the callback when no longer needed.
+        """
+        handle = RemovableHandle(self._post_metadata_inference_cleanups)
+        self._post_metadata_inference_cleanups[handle.id] = callback
+        return handle
+
     def _initialize_pp_stages(
         self,
         stages: list[_PipelineStageBase],
@@ -554,6 +582,9 @@ class _PipelineSchedule(ABC):
         pipeline_stages = [
             stage for stage in stages if isinstance(stage, PipelineStage)
         ]
+        uses_dynamic_metadata = any(
+            stage._inference_mode == InferenceMode.DYNAMIC for stage in pipeline_stages
+        )
         for stage in pipeline_stages:
             stage._pre_metadata_inference_backup()
 
@@ -585,6 +616,9 @@ class _PipelineSchedule(ABC):
         finally:
             for stage in pipeline_stages:
                 stage._post_metadata_inference_cleanup()
+            if uses_dynamic_metadata:
+                for cleanup in tuple(self._post_metadata_inference_cleanups.values()):
+                    cleanup()
 
         return fwd_initialized, bwd_initialized
 
@@ -952,6 +986,81 @@ def _wait_batch_p2p(work: list[dist.Work]):
         w.wait()
 
 
+def _wait_and_release_fwd_send(
+    stage: _PipelineStageBase,
+    microbatch_index: int,
+    ops: list[dist.P2POp],
+    work_batches: list[list[dist.Work]],
+) -> None:
+    """Wait for a forward send and release its communication and stage references."""
+    for work in work_batches:
+        _wait_batch_p2p(work)
+        work.clear()
+    ops.clear()
+    stage.release_fwd_send_outputs(microbatch_index)
+
+
+_SendKey = tuple[_ComputationType, int, int]
+
+
+@dataclass
+class _PendingSend:
+    """Own one send batch until its matching wait."""
+
+    ops: list[dist.P2POp]
+    works: list[dist.Work]
+    retire: Callable[[], None] | None = None
+
+
+class _PendingSendTracker:
+    """Track send work and ownership until retirement."""
+
+    def __init__(self) -> None:
+        self._pending: dict[_SendKey, _PendingSend] = {}
+        self._registered: set[_SendKey] = set()
+
+    def check_can_register(self, key: _SendKey) -> None:
+        """Raise if this send was already registered."""
+        if key in self._registered:
+            raise AssertionError(f"Duplicate pipeline send {key}")
+
+    def register(
+        self,
+        key: _SendKey,
+        ops: list[dist.P2POp],
+        works: list[dist.Work],
+        retire: Callable[[], None] | None = None,
+    ) -> None:
+        """Register a pending send and its retirement callback."""
+        self.check_can_register(key)
+        self._registered.add(key)
+        self._pending[key] = _PendingSend(ops, works, retire)
+
+    def wait(self, key: _SendKey) -> None:
+        """Wait for and retire the pending send."""
+        if key not in self._pending:
+            raise AssertionError(f"No pending pipeline send for {key}")
+        pending = self._pending[key]
+        _wait_batch_p2p(pending.works)
+        pending.works.clear()
+        pending.ops.clear()
+        if pending.retire is not None:
+            pending.retire()
+        del self._pending[key]
+
+    def assert_empty(self) -> None:
+        """Raise if a send has no matching wait."""
+        if self._pending:
+            raise AssertionError(
+                f"Pipeline sends have no matching wait: {list(self._pending)}"
+            )
+
+    def drain(self) -> None:
+        """Wait for pending sends during error cleanup."""
+        for key in list(self._pending):
+            self.wait(key)
+
+
 class PipelineScheduleSingle(_PipelineSchedule):
     """
     Base class for single-stage schedules.
@@ -1168,7 +1277,9 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
         self._initialize_stage(arg_mbs[0], kwarg_mbs[0], maybe_first_target)
 
         # Delay send waits
-        fwd_sends_to_wait: list[list[dist.Work]] = []
+        pending_fwd_sends: list[
+            tuple[int, list[dist.P2POp], list[list[dist.Work]]]
+        ] = []
 
         # Run microbatches
         for i in range(self._n_microbatches):
@@ -1182,15 +1293,17 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
 
                 ops = self._stage.get_fwd_send_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_send")
-                fwd_sends_to_wait.extend(works.values())
+                pending_fwd_sends.append((i, ops, list(works.values())))
+                del ops, works
 
             logger.debug("[%s] Forwarded microbatch %s", self._stage.stage_index, i)
 
         # Wait for all forward sends to finish
-        # This should not have performance impact because by the time the first
-        # backward arrives all the forward sends should have been finished.
-        for work in fwd_sends_to_wait:
-            _wait_batch_p2p(work)
+        for microbatch_index, send_ops, work_batches in pending_fwd_sends:
+            _wait_and_release_fwd_send(
+                self._stage, microbatch_index, send_ops, work_batches
+            )
+        pending_fwd_sends.clear()
 
 
 class ScheduleGPipe(PipelineScheduleSingle):
@@ -1223,7 +1336,9 @@ class ScheduleGPipe(PipelineScheduleSingle):
         )
 
         # Delay send waits
-        fwd_sends_to_wait: list[list[dist.Work]] = []
+        fwd_sends_to_wait: list[
+            tuple[int, list[dist.P2POp], list[list[dist.Work]]]
+        ] = []
 
         # Run microbatches
         for i in range(self._n_microbatches):
@@ -1239,17 +1354,22 @@ class ScheduleGPipe(PipelineScheduleSingle):
 
                 ops = self._stage.get_fwd_send_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_send")
-                fwd_sends_to_wait.extend(works.values())
+                fwd_sends_to_wait.append((i, ops, list(works.values())))
+                del ops, works
 
             logger.debug("[%s] Forwarded microbatch %s", self._stage.stage_index, i)
 
             self._maybe_compute_loss(self._stage, output, target_mbs, i, loss_kwargs)
+            del output
 
         # Wait for all forward sends to finish
         # This should not have performance impact because by the time the first
         # backward arrives all the forward sends should have been finished.
-        for work in fwd_sends_to_wait:
-            _wait_batch_p2p(work)
+        for microbatch_index, send_ops, work_batches in fwd_sends_to_wait:
+            _wait_and_release_fwd_send(
+                self._stage, microbatch_index, send_ops, work_batches
+            )
+        fwd_sends_to_wait.clear()
 
         # Run backward
         # Delay send waits
@@ -1406,7 +1526,13 @@ or equal to the number of stages ({self._num_stages})."
             # finished, otherwise, we are heavily communication bound, in which
             # case it doesn't create a lot of benefit to compute next chunk
             # eagerly either)
-            _wait_batch_p2p(send_work)
+            if fwd_mb_index > 0:
+                _wait_and_release_fwd_send(
+                    self._stage,
+                    fwd_mb_index - 1,
+                    fwd_sends,
+                    [send_work],
+                )
 
             # Send activations
             fwd_sends = self._stage.get_fwd_send_ops(fwd_mb_index)
@@ -1420,6 +1546,7 @@ or equal to the number of stages ({self._num_stages})."
             self._maybe_compute_loss(
                 self._stage, output, target_mbs, fwd_mb_index, loss_kwargs
             )
+            del output
             fwd_mb_index += 1
 
         # Now we should have send ops left over, to be fused with first 1B of 1B1F phase below.
@@ -1430,7 +1557,14 @@ or equal to the number of stages ({self._num_stages})."
             bwd_recvs = self._stage.get_bwd_recv_ops(bwd_mb_index)
 
             # Now, we need to fire the fwd_sends and bwd_recvs together
-            _wait_batch_p2p(_batch_p2p(fwd_sends + bwd_recvs, desc="fwd_send_bwd_recv"))
+            send_work = _batch_p2p(fwd_sends + bwd_recvs, desc="fwd_send_bwd_recv")
+            _wait_and_release_fwd_send(
+                self._stage,
+                fwd_mb_index - 1,
+                fwd_sends,
+                [send_work],
+            )
+            bwd_recvs.clear()
 
             # Backward one chunk
             loss = self._maybe_get_loss(self._stage, bwd_mb_index)
@@ -1466,6 +1600,7 @@ or equal to the number of stages ({self._num_stages})."
             self._maybe_compute_loss(
                 self._stage, output, target_mbs, fwd_mb_index, loss_kwargs
             )
+            del output
 
             # Get the fwd send ops, but don't fire, leave it for the next iter (wrap-around)
             fwd_sends = self._stage.get_fwd_send_ops(fwd_mb_index)
@@ -1582,14 +1717,20 @@ def _requires_reduce_grad(action_type: _ComputationType) -> bool:
 
 
 def _add_reduce_grad(
-    actions: list[_Action | None], n_microbatches: int
+    actions: list[_Action | None],
+    n_microbatches: int,
+    defer_reduce_grad_wait: bool = False,
 ) -> list[_Action | None]:
     """
     REDUCE_GRAD refers to joint across minibatches grad reduction.
     reduce_grad frees memory and we want to schedule it just after the last "backward"-like stage.
+    Each reduction has a matching wait. By default, the wait follows the
+    reduction. When deferred, it runs before the next reduction or at schedule
+    end. This keeps at most one reduction pending per rank.
     """
     actions_with_reduce_grad: list[_Action | None] = []
     cnt: dict[int, int] = defaultdict(int)
+    pending_stage_idx: int | None = None
 
     def _leaf_action(a, to_schedule):
         if _requires_reduce_grad(a.computation_type):
@@ -1610,7 +1751,21 @@ def _add_reduce_grad(
             _leaf_action(a, schedule_reduce_grad_stage_idxs)
 
         for stage_idx in schedule_reduce_grad_stage_idxs:
+            if defer_reduce_grad_wait and pending_stage_idx is not None:
+                actions_with_reduce_grad.append(
+                    _Action(pending_stage_idx, WAIT_REDUCE_GRAD, None)
+                )
             actions_with_reduce_grad.append(_Action(stage_idx, REDUCE_GRAD, None))
+            if defer_reduce_grad_wait:
+                pending_stage_idx = stage_idx
+            else:
+                actions_with_reduce_grad.append(
+                    _Action(stage_idx, WAIT_REDUCE_GRAD, None)
+                )
+    if pending_stage_idx is not None:
+        actions_with_reduce_grad.append(
+            _Action(pending_stage_idx, WAIT_REDUCE_GRAD, None)
+        )
     return actions_with_reduce_grad
 
 
@@ -1797,6 +1952,370 @@ def _merge_bw(
         else:
             merged_actions.append(action)
     return merged_actions
+
+
+def _add_wait_send(
+    comm_actions: dict[int, list[_Action]],
+) -> dict[int, list[_Action]]:
+    """Add one explicit wait for every pipeline send.
+
+    A forward send waits after its matching local backward. Backward sends and
+    forward sends without a matching backward wait at schedule end. The local
+    backward proves that the peer consumed the forward activation, so its wait
+    should not stall.
+    """
+    backward_types = (FULL_BACKWARD, BACKWARD_INPUT)
+    actions_with_waits: dict[int, list[_Action]] = {}
+
+    for rank, actions in comm_actions.items():
+        pending: dict[_SendKey, _Action] = {}
+        rank_actions_with_waits: list[_Action] = []
+
+        for action in actions:
+            rank_actions_with_waits.append(action)
+            if action.computation_type in (SEND_F, SEND_B):
+                if action.microbatch_index is None:
+                    raise AssertionError(
+                        f"Send action {action} has no microbatch index"
+                    )
+                key = (
+                    action.computation_type,
+                    action.stage_index,
+                    action.microbatch_index,
+                )
+                if key in pending:
+                    raise AssertionError(f"Duplicate pipeline send {action}")
+                pending[key] = action
+
+            for part in action.sub_actions or (action,):
+                if part.computation_type not in backward_types:
+                    continue
+                if part.microbatch_index is None:
+                    raise AssertionError(
+                        f"Backward action {part} has no microbatch index"
+                    )
+                key = (SEND_F, part.stage_index, part.microbatch_index)
+                if key in pending:
+                    rank_actions_with_waits.append(
+                        _Action(part.stage_index, WAIT_SEND_F, part.microbatch_index)
+                    )
+                    del pending[key]
+
+        for send_type, stage_index, microbatch_index in pending:
+            wait_type = WAIT_SEND_F if send_type == SEND_F else WAIT_SEND_B
+            rank_actions_with_waits.append(
+                _Action(stage_index, wait_type, microbatch_index)
+            )
+        actions_with_waits[rank] = rank_actions_with_waits
+
+    return actions_with_waits
+
+
+def _validate_send_waits(comm_actions: dict[int, list[_Action]]) -> None:
+    """Validate that every pipeline send has one ordered wait."""
+    for rank, actions in comm_actions.items():
+        pending: set[_SendKey] = set()
+        registered: set[_SendKey] = set()
+
+        for action in actions:
+            for part in action.sub_actions or (action,):
+                if part.computation_type in (SEND_F, SEND_B):
+                    if part.microbatch_index is None:
+                        raise ValueError(
+                            f"Send action {part} at rank {rank} has no microbatch index"
+                        )
+                    key = (
+                        part.computation_type,
+                        part.stage_index,
+                        part.microbatch_index,
+                    )
+                    if key in registered:
+                        raise ValueError(
+                            f"Duplicate pipeline send {part} at rank {rank}"
+                        )
+                    registered.add(key)
+                    pending.add(key)
+                elif part.computation_type in (WAIT_SEND_F, WAIT_SEND_B):
+                    if part.microbatch_index is None:
+                        raise ValueError(
+                            f"Wait action {part} at rank {rank} has no microbatch index"
+                        )
+                    send_type = (
+                        SEND_F if part.computation_type == WAIT_SEND_F else SEND_B
+                    )
+                    key = (send_type, part.stage_index, part.microbatch_index)
+                    if key not in pending:
+                        raise ValueError(
+                            f"Pipeline wait {part} at rank {rank} has no pending send"
+                        )
+                    pending.remove(key)
+
+        if pending:
+            sends = ", ".join(
+                str(_Action(stage_index, send_type, microbatch_index))
+                for send_type, stage_index, microbatch_index in sorted(
+                    pending, key=lambda key: (key[1], key[2], key[0].value)
+                )
+            )
+            raise ValueError(
+                f"Pipeline sends at rank {rank} have no matching wait: {sends}"
+            )
+
+
+def _add_wait_send_budget(
+    comm_actions: dict[int, list[_Action]],
+    stage_to_rank: Callable[[int], int],
+    max_outstanding_sends: int,
+) -> dict[int, list[_Action]]:
+    """Move waits to cap pending sends on each rank.
+
+    The dependency graph contains rank-local action order, send-to-receive
+    edges, and the current wait placements. Before a send exceeds the limit,
+    the pass moves a pending wait to that point if doing so cannot create a
+    cycle. It prefers waits whose receive must already be posted. A safe wait
+    for an independent receive may stall.
+    """
+    _validate_send_waits(comm_actions)
+    ranks = sorted(comm_actions)
+    send_types = {SEND_F: (1, RECV_F), SEND_B: (-1, RECV_B)}
+    wait_types = {WAIT_SEND_F: SEND_F, WAIT_SEND_B: SEND_B}
+    node_actions: dict[tuple[int, int], _Action] = {}
+    action_nodes: dict[tuple[int, int], tuple[int, int]] = {}
+    rank_nodes: dict[int, list[tuple[int, int]]] = {}
+
+    # Waits are movable constraints, so they are not fixed-action nodes.
+    for rank in ranks:
+        rank_nodes[rank] = []
+        for action_index, action in enumerate(comm_actions[rank]):
+            if action.computation_type in wait_types:
+                continue
+            node = (rank, len(rank_nodes[rank]))
+            rank_nodes[rank].append(node)
+            node_actions[node] = action
+            action_nodes[(rank, action_index)] = node
+
+    send_nodes: dict[_SendKey, tuple[int, int]] = {}
+    recv_nodes: dict[tuple[int, _ComputationType, int, int], tuple[int, int]] = {}
+    for node, action in node_actions.items():
+        if action.microbatch_index is None:
+            continue
+        if action.computation_type in send_types:
+            send_nodes[
+                (
+                    action.computation_type,
+                    action.stage_index,
+                    action.microbatch_index,
+                )
+            ] = node
+        elif action.computation_type in (RECV_F, RECV_B):
+            recv_nodes[
+                (
+                    node[0],
+                    action.computation_type,
+                    action.stage_index,
+                    action.microbatch_index,
+                )
+            ] = node
+
+    matching_recv: dict[_SendKey, tuple[int, int]] = {}
+    for send_key in send_nodes:
+        send_type, stage_index, microbatch_index = send_key
+        stage_offset, recv_type = send_types[send_type]
+        peer_stage = stage_index + stage_offset
+        peer_rank = stage_to_rank(peer_stage)
+        recv_key = (peer_rank, recv_type, peer_stage, microbatch_index)
+        if recv_key not in recv_nodes:
+            raise ValueError(
+                f"Pipeline send {_Action(stage_index, send_type, microbatch_index)} "
+                "has no matching receive"
+            )
+        matching_recv[send_key] = recv_nodes[recv_key]
+
+    wait_before: dict[_SendKey, tuple[int, int] | None] = {}
+    for rank in ranks:
+        next_node = None
+        for action_index in reversed(range(len(comm_actions[rank]))):
+            action = comm_actions[rank][action_index]
+            if action.computation_type not in wait_types:
+                next_node = action_nodes[(rank, action_index)]
+                continue
+            if action.microbatch_index is None:
+                raise AssertionError(f"Wait action {action} has no microbatch index")
+            wait_before[
+                (
+                    wait_types[action.computation_type],
+                    action.stage_index,
+                    action.microbatch_index,
+                )
+            ] = next_node
+
+    nodes = list(node_actions)
+    edges: dict[tuple[int, int], Counter[tuple[int, int]]] = {
+        node: Counter() for node in nodes
+    }
+
+    def add_edge(source: tuple[int, int], target: tuple[int, int]) -> None:
+        edges[source][target] += 1
+
+    def remove_edge(source: tuple[int, int], target: tuple[int, int]) -> None:
+        edges[source][target] -= 1
+        if not edges[source][target]:
+            del edges[source][target]
+
+    def is_reachable(source: tuple[int, int], target: tuple[int, int]) -> bool:
+        """Return whether the current dependency graph has a path to target."""
+        if source == target:
+            return True
+        pending = list(edges[source])
+        visited = {source}
+        while pending:
+            node = pending.pop()
+            if node == target:
+                return True
+            if node not in visited:
+                visited.add(node)
+                pending.extend(edges[node])
+        return False
+
+    for rank in ranks:
+        for source, target in zip(rank_nodes[rank], rank_nodes[rank][1:]):
+            add_edge(source, target)
+    for send_key, send_node in send_nodes.items():
+        add_edge(send_node, matching_recv[send_key])
+    for send_key, before_node in wait_before.items():
+        if before_node is not None:
+            add_edge(matching_recv[send_key], before_node)
+
+    in_degree = dict.fromkeys(nodes, 0)
+    for successors in edges.values():
+        for successor in successors:
+            in_degree[successor] += 1
+    queue = deque(node for node in nodes if in_degree[node] == 0)
+    num_walked = 0
+    while queue:
+        node = queue.popleft()
+        num_walked += 1
+        for successor in edges[node]:
+            in_degree[successor] -= 1
+            if in_degree[successor] == 0:
+                queue.append(successor)
+    if num_walked != len(nodes):
+        raise ValueError("Pipeline sends, receives, and waits form a cycle")
+
+    moved_waits: set[_SendKey] = set()
+    moved_counts = {rank: Counter() for rank in ranks}
+    potentially_stalling = {rank: Counter() for rank in ranks}
+    actions_with_waits: dict[int, list[_Action]] = {rank: [] for rank in ranks}
+    peak_pending_sends = dict.fromkeys(ranks, 0)
+
+    def classify_wait(
+        send_key: _SendKey, before_node: tuple[int, int]
+    ) -> tuple[bool, bool]:
+        """Return whether moving this wait is safe and non-stalling."""
+        recv_node = matching_recv[send_key]
+        old_before_node = wait_before[send_key]
+        if old_before_node is not None:
+            remove_edge(recv_node, old_before_node)
+        unsafe = is_reachable(before_node, recv_node)
+        non_stalling = not unsafe and is_reachable(recv_node, before_node)
+        if old_before_node is not None:
+            add_edge(recv_node, old_before_node)
+        return not unsafe, non_stalling
+
+    def move_wait(send_key: _SendKey, before_node: tuple[int, int]) -> None:
+        recv_node = matching_recv[send_key]
+        old_before_node = wait_before[send_key]
+        if old_before_node is not None:
+            remove_edge(recv_node, old_before_node)
+        add_edge(recv_node, before_node)
+        wait_before[send_key] = before_node
+        moved_waits.add(send_key)
+
+    for rank in ranks:
+        pending_sends: dict[_SendKey, _Action] = {}
+        for action_index, action in enumerate(comm_actions[rank]):
+            if action.computation_type in send_types:
+                before_node = action_nodes[(rank, action_index)]
+                while len(pending_sends) >= max_outstanding_sends:
+                    non_stalling = []
+                    may_stall = []
+                    for send_key in pending_sends:
+                        safe, completes_before = classify_wait(send_key, before_node)
+                        if not safe:
+                            continue
+                        (non_stalling if completes_before else may_stall).append(
+                            send_key
+                        )
+                    candidates = non_stalling or may_stall
+                    if not candidates:
+                        outstanding = ", ".join(
+                            str(send) for send in pending_sends.values()
+                        )
+                        raise ValueError(
+                            f"Cannot satisfy max_outstanding_sends="
+                            f"{max_outstanding_sends} on pipeline rank {rank} "
+                            f"before {action}. Outstanding: [{outstanding}]. "
+                            "Increase the limit or change the schedule."
+                        )
+                    send_key = candidates[0]
+                    send = pending_sends.pop(send_key)
+                    move_wait(send_key, before_node)
+                    wait_type = (
+                        WAIT_SEND_F if send.computation_type == SEND_F else WAIT_SEND_B
+                    )
+                    actions_with_waits[rank].append(
+                        _Action(send.stage_index, wait_type, send.microbatch_index)
+                    )
+                    moved_counts[rank][send.computation_type] += 1
+                    if not non_stalling:
+                        potentially_stalling[rank][send.computation_type] += 1
+
+                actions_with_waits[rank].append(action)
+                if action.microbatch_index is None:
+                    raise AssertionError(
+                        f"Send action {action} has no microbatch index"
+                    )
+                send_key = (
+                    action.computation_type,
+                    action.stage_index,
+                    action.microbatch_index,
+                )
+                pending_sends[send_key] = action
+                peak_pending_sends[rank] = max(
+                    peak_pending_sends[rank], len(pending_sends)
+                )
+            elif action.computation_type in wait_types:
+                if action.microbatch_index is None:
+                    raise AssertionError(
+                        f"Wait action {action} has no microbatch index"
+                    )
+                send_key = (
+                    wait_types[action.computation_type],
+                    action.stage_index,
+                    action.microbatch_index,
+                )
+                if send_key in moved_waits:
+                    moved_waits.remove(send_key)
+                else:
+                    actions_with_waits[rank].append(action)
+                    del pending_sends[send_key]
+            else:
+                actions_with_waits[rank].append(action)
+
+    for rank in ranks:
+        logger.debug(
+            "Pipeline rank %d send budget %d: peak %d, moved waits F=%d B=%d, "
+            "potentially stalling F=%d B=%d",
+            rank,
+            max_outstanding_sends,
+            peak_pending_sends[rank],
+            moved_counts[rank][SEND_F],
+            moved_counts[rank][SEND_B],
+            potentially_stalling[rank][SEND_F],
+            potentially_stalling[rank][SEND_B],
+        )
+
+    return actions_with_waits
 
 
 def _add_send_recv(
@@ -2494,6 +3013,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
             try:
                 ops: list[dist.P2POp] = []
                 recv_requests: list[tuple[_PipelineStageBase, bool, int]] = []
+                fwd_send_to_release: tuple[_PipelineStageBase, int] | None = None
                 if action is not None:
                     computation_type = action.computation_type
                     mb_index = action.microbatch_index
@@ -2515,6 +3035,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
                             stage, output, target_mbs, mb_index, loss_kwargs
                         )
                         ops.extend(stage.get_fwd_send_ops(mb_index))
+                        del output
+                        fwd_send_to_release = (stage, mb_index)
                     elif computation_type == _ComputationType.FULL_BACKWARD:
                         # perform backward computation
                         stage = stage_index_to_stage[stage_index]
@@ -2631,7 +3153,13 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
                 # do the communication
                 ops.extend(_build_recv_ops(recv_requests))
-                _wait_batch_p2p(_batch_p2p(ops))
+                work = _batch_p2p(ops)
+                _wait_batch_p2p(work)
+                work.clear()
+                ops.clear()
+                if fwd_send_to_release is not None:
+                    stage, mb_index = fwd_send_to_release
+                    stage.release_fwd_send_outputs(mb_index)
             except Exception as e:
                 logger.error(
                     "[Rank %s] pipeline schedule %s caught the following exception '%s' \
@@ -2678,6 +3206,14 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     ``max_active_stages`` controls FSDP parameter residency, while
     ``unshard_lookahead`` independently controls all-gather issue distance; see
     :func:`_resolve_unshard_lookahead` for its policies.
+
+    Compute-comms schedules must pair each ``REDUCE_GRAD`` with a matching
+    ``WAIT_REDUCE_GRAD`` and keep at most one reduction pending per rank.
+
+    ``WAIT_SEND_F`` and ``WAIT_SEND_B`` match an earlier send for the same
+    stage and microbatch. Place each wait after the peer can post the matching
+    receive. The matching wait is the only normal path that retires the send.
+    The runtime drains pending sends only when action execution fails.
     """
 
     def __init__(self, *args, **kwargs):
@@ -2686,6 +3222,16 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self._unshard_lookahead: _UnshardLookahead = kwargs.pop(
             "unshard_lookahead", "full"
         )
+        self._defer_reduce_grad_wait: bool = kwargs.pop("defer_reduce_grad_wait", False)
+        self._max_outstanding_sends: int | None = kwargs.pop(
+            "max_outstanding_sends", None
+        )
+        if self._max_outstanding_sends is not None and (
+            not isinstance(self._max_outstanding_sends, int)
+            or isinstance(self._max_outstanding_sends, bool)
+            or self._max_outstanding_sends < 0
+        ):
+            raise ValueError("max_outstanding_sends must be a non-negative integer")
         super().__init__(*args, **kwargs)
         # Action to custom function mapping
         self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
@@ -2729,10 +3275,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             UNSHARD,
             RESHARD,
             REDUCE_GRAD,
+            WAIT_REDUCE_GRAD,
         ):
             raise ValueError(
-                f"Invalid computation type {computation_type}. Only FORWARD, FULL_BACKWARD, \
-                BACKWARD_INPUT, BACKWARD_WEIGHT, OVERLAP_F_B, UNSHARD, RESHARD and REDUCE_GRAD are supported."
+                f"Invalid computation type {computation_type}. Only FORWARD, "
+                "FULL_BACKWARD, BACKWARD_INPUT, BACKWARD_WEIGHT, OVERLAP_F_B, "
+                "UNSHARD, RESHARD, REDUCE_GRAD, and WAIT_REDUCE_GRAD are supported."
             )
 
         # Check if computation_type is already registered
@@ -2779,7 +3327,41 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         )
                     self.pipeline_order_with_comms[rank].append(action)
             # TODO what level of validation should we offer for compute+comms schedule?
+            for rank, action_list in self.pipeline_order_with_comms.items():
+                pending_stage_idx: int | None = None
+                for action in action_list:
+                    for sub_action in action.sub_actions or (action,):
+                        stage_idx = sub_action.stage_index
+                        if sub_action.computation_type == REDUCE_GRAD:
+                            if pending_stage_idx is not None:
+                                raise ValueError(
+                                    f"Rank {rank} cannot start REDUCE_GRAD for stage "
+                                    f"{stage_idx} while stage {pending_stage_idx} has "
+                                    "a pending reduction"
+                                )
+                            pending_stage_idx = stage_idx
+                        elif sub_action.computation_type == WAIT_REDUCE_GRAD:
+                            if pending_stage_idx is None:
+                                raise ValueError(
+                                    f"Rank {rank} has WAIT_REDUCE_GRAD for stage "
+                                    f"{stage_idx} without a pending reduction"
+                                )
+                            if pending_stage_idx != stage_idx:
+                                raise ValueError(
+                                    f"Rank {rank} has WAIT_REDUCE_GRAD for stage "
+                                    f"{stage_idx}, but stage {pending_stage_idx} "
+                                    "has the pending reduction"
+                                )
+                            pending_stage_idx = None
+                if pending_stage_idx is not None:
+                    raise ValueError(
+                        f"Stage {pending_stage_idx} at rank {rank} has "
+                        "REDUCE_GRAD without WAIT_REDUCE_GRAD"
+                    )
         elif format == "compute_only":
+            if self._defer_reduce_grad_wait:
+                self._validate_deferred_gradient_reduction()
+
             # Validate that the schedule does not have comms already added to it
             for rank, action_list in actions.items():
                 for i, action in enumerate(action_list):
@@ -2801,12 +3383,16 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 self.pipeline_order_with_comms[rank] = _add_reduce_grad(  # type: ignore[assignment]
                     self.pipeline_order_with_comms[rank],  # type: ignore[arg-type]
                     self._n_microbatches,
+                    defer_reduce_grad_wait=self._defer_reduce_grad_wait,
                 )
 
             self.pipeline_order_with_comms = _add_send_recv(
                 self.pipeline_order_with_comms,
                 stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
                 num_stages=self._num_stages,
+            )
+            self.pipeline_order_with_comms = _add_wait_send(
+                self.pipeline_order_with_comms
             )
 
             if self._defer_pp_recv:
@@ -2817,15 +3403,28 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         else:
             raise NotImplementedError(f"{format=} is not implemented")
 
+        _validate_send_waits(self.pipeline_order_with_comms)
+        if self._max_outstanding_sends is not None:
+            self.pipeline_order_with_comms = _add_wait_send_budget(
+                self.pipeline_order_with_comms,
+                stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
+                max_outstanding_sends=self._max_outstanding_sends,
+            )
+            _validate_send_waits(self.pipeline_order_with_comms)
+
     def _load_csv(
         self,
         filename: str,
         format: Literal["compute_only", "compute_comms"] = "compute_only",
     ):
-        """Loads a csv in simple format and then lowers it to include communication actions
+        """Loads a csv in simple format and then lowers it to include communication actions.
 
         format must be either "compute_only" or "compute_comms".  If compute_only, the lowering passes
         will automatically be run to generate a compute_comms schedule.
+
+        A compute_comms row must place one WAIT_SEND_F or WAIT_SEND_B after each
+        matching send and after the peer can post its receive. The wait matches
+        by stage and microbatch and owns send retirement.
         """
         if format == "compute_only":
             # this will populate self.pipeline_order
@@ -2885,6 +3484,22 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             if stage_idx not in self.unsharded_stages:
                 raise AssertionError(f"Attempted to compute on sharded {stage_idx=}")
 
+    def _validate_deferred_gradient_reduction(self) -> None:
+        comm_ctx_to_stage: dict[int, int] = {}
+        for stage in self._stages:
+            if not isinstance(stage.submod, FSDPModule):
+                continue
+            comm_ctx_id = id(stage.submod._get_fsdp_state()._comm_ctx)
+            previous_stage = comm_ctx_to_stage.get(comm_ctx_id)
+            if previous_stage is not None:
+                raise ValueError(
+                    "defer_reduce_grad_wait does not support FSDP stages that "
+                    "share a communication context. Do not call "
+                    f"share_comm_ctx() for stages {previous_stage} and "
+                    f"{stage.stage_index}"
+                )
+            comm_ctx_to_stage[comm_ctx_id] = stage.stage_index
+
     def _step_microbatches(
         self,
         arg_mbs: list | None = None,
@@ -2917,8 +3532,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 "Must call _prepare_schedule_with_comms() before calling _step_microbatches()"
             )
 
-        # send ops should be waited on before step() exists, mainly for hygiene
-        send_ops: list[list[dist.Work]] = []
+        pending_sends = _PendingSendTracker()
 
         def _perform_action(action: _Action) -> None:
             comp_type = action.computation_type
@@ -2932,6 +3546,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     UNSHARD,
                     RESHARD,
                     REDUCE_GRAD,
+                    WAIT_REDUCE_GRAD,
                 )
             ):
                 raise AssertionError(f"{action=} missing mb_index")
@@ -2948,9 +3563,24 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             # However, I was wondering if I should avoid calling batched operators at all in the case that there is
             # only one operator per batch.  I could iterate through the 'fwd_send_ops' one by one and run them.
             if comp_type == SEND_F:
-                send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
+                key = (SEND_F, stage_idx, mb_index)
+                pending_sends.check_can_register(key)
+                ops = stage.get_fwd_send_ops(mb_index)
+                pending_sends.register(
+                    key,
+                    ops,
+                    _batch_p2p(ops),
+                    partial(stage.release_fwd_send_outputs, mb_index),
+                )
             elif comp_type == SEND_B:
-                send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
+                key = (SEND_B, stage_idx, mb_index)
+                pending_sends.check_can_register(key)
+                ops = stage.get_bwd_send_ops(mb_index)
+                pending_sends.register(key, ops, _batch_p2p(ops))
+            elif comp_type in (WAIT_SEND_F, WAIT_SEND_B):
+                send_type = SEND_F if comp_type == WAIT_SEND_F else SEND_B
+                key = (send_type, stage_idx, mb_index)
+                pending_sends.wait(key)
             elif comp_type == RECV_F:
                 if (stage_idx, mb_index) in self.fwd_recv_ops:
                     raise AssertionError(
@@ -3097,15 +3727,28 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     last_backward=last_backward,
                 )
             elif comp_type == REDUCE_GRAD:
+                if not self._has_backward:
+                    return
                 if not self._finalize_gradients and stage_uses_fsdp:
                     self._deferred_stages.add(stage_idx)
                     return
-                grad_scale_factor = self._n_microbatches if self.scale_grads else 1
-                stage.perform_reduce_grad(grad_scale_factor)
+                if stage_uses_fsdp:
+                    stage.start_gradient_reduction()
+                else:
+                    grad_scale_factor = self._n_microbatches if self.scale_grads else 1
+                    stage.perform_reduce_grad(grad_scale_factor)
                 if stage_uses_fsdp:
                     self.unsharded_stages.discard(stage_idx)
                     self._deferred_stages.discard(stage_idx)
                     self._finalized_stages.add(stage_idx)
+            elif comp_type == WAIT_REDUCE_GRAD:
+                if not self._has_backward:
+                    return
+                if not self._finalize_gradients and stage_uses_fsdp:
+                    return
+                if stage_uses_fsdp:
+                    grad_scale_factor = self._n_microbatches if self.scale_grads else 1
+                    stage.wait_for_gradient_reduction(grad_scale_factor)
             else:
                 raise ValueError(f"{action=} is unknown or unsupported")
 
@@ -3129,11 +3772,11 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 ):
                     if action.computation_type in self._comp_type_to_function_map:
                         ctx = _PipelineContext(
-                            self,
-                            arg_mbs,
-                            kwarg_mbs,
-                            target_mbs,
-                            losses,
+                            schedule_ref=self,
+                            arg_mbs=arg_mbs,
+                            kwarg_mbs=kwarg_mbs,
+                            target_mbs=target_mbs,
+                            losses=losses,
                         )
                         self._comp_type_to_function_map[action.computation_type](
                             action, ctx
@@ -3145,7 +3788,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             _perform_action(sub_a)
                     else:
                         _perform_action(action)
-            except Exception as e:
+            except Exception:
                 logger.error(
                     "_PipelineScheduleRuntime caught exception at step %s when running action %s.  Full Schedule:",
                     time_step,
@@ -3157,11 +3800,20 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         error_step_number=time_step,
                     )
                 )
-                raise e
+                try:
+                    pending_sends.drain()
+                except Exception:
+                    logger.exception("Failed to drain pending pipeline sends")
+                raise
 
-        # Mostly these operations should have finished long ago, but there isn't an obvious time when to wait for them
-        while send_ops:
-            _wait_batch_p2p(send_ops.pop())
+        try:
+            pending_sends.assert_empty()
+        except Exception:
+            try:
+                pending_sends.drain()
+            except Exception:
+                logger.exception("Failed to drain pending pipeline sends")
+            raise
 
         if len(self.unshard_ops) != 0:
             raise AssertionError("Unused unshard operations")
@@ -3187,6 +3839,12 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             unshards may be issued. ``"full"`` matches ``max_active_stages``;
             ``"auto"`` uses ``min(rank + 2, max_active_stages)``; a tuple
             supplies one positive integer per pipeline rank.
+        defer_reduce_grad_wait: If ``True``, delay each FSDP
+            ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
+            end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
+            reduction may be pending per pipeline rank.
+        max_outstanding_sends: Maximum number of pending forward and backward
+            send batches on each pipeline rank. ``None`` applies no hard limit.
     """
 
     def __init__(
@@ -3200,6 +3858,9 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
+        *,
+        defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         super().__init__(
             stages=stages,
@@ -3211,6 +3872,8 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
+            defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -3435,6 +4098,16 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             unshards may be issued. ``"full"`` matches ``max_active_stages``;
             ``"auto"`` uses ``min(rank + 2, max_active_stages)``; a tuple
             supplies one positive integer per pipeline rank.
+        defer_reduce_grad_wait: If ``True``, delay each FSDP
+            ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
+            end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
+            reduction may be pending per pipeline rank.
+        max_outstanding_sends: Maximum number of pending forward and backward
+            send batches on each pipeline rank. ``None`` applies no hard limit.
+            A smaller limit may move a wait before its receive is guaranteed
+            to be posted and may stall. Schedule construction raises
+            ``ValueError`` when no causally safe wait placement can meet the
+            limit.
     """
 
     def __init__(
@@ -3450,6 +4123,9 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
+        *,
+        defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3464,6 +4140,8 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
+            defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3557,6 +4235,12 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             unshards may be issued. ``"full"`` matches ``max_active_stages``;
             ``"auto"`` uses ``min(rank + 2, max_active_stages)``; a tuple
             supplies one positive integer per pipeline rank.
+        defer_reduce_grad_wait: If ``True``, delay each FSDP
+            ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
+            end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
+            reduction may be pending per pipeline rank.
+        max_outstanding_sends: Maximum number of pending forward and backward
+            send batches on each pipeline rank. ``None`` applies no hard limit.
     """
 
     def __init__(
@@ -3572,6 +4256,9 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
+        *,
+        defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3588,6 +4275,8 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
+            defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3767,6 +4456,12 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             unshards may be issued. ``"full"`` matches ``max_active_stages``;
             ``"auto"`` uses ``min(rank + 2, max_active_stages)``; a tuple
             supplies one positive integer per pipeline rank.
+        defer_reduce_grad_wait: If ``True``, delay each FSDP
+            ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
+            end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
+            reduction may be pending per pipeline rank.
+        max_outstanding_sends: Maximum number of pending forward and backward
+            send batches on each pipeline rank. ``None`` applies no hard limit.
     """
 
     def __init__(
@@ -3782,6 +4477,9 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
+        *,
+        defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3798,6 +4496,8 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
+            defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -3966,6 +4666,12 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             unshards may be issued. ``"full"`` matches ``max_active_stages``;
             ``"auto"`` uses ``min(rank + 2, max_active_stages)``; a tuple
             supplies one positive integer per pipeline rank.
+        defer_reduce_grad_wait: If ``True``, delay each FSDP
+            ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
+            end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
+            reduction may be pending per pipeline rank.
+        max_outstanding_sends: Maximum number of pending forward and backward
+            send batches on each pipeline rank. ``None`` applies no hard limit.
     """
 
     def __init__(
@@ -3981,6 +4687,9 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
+        *,
+        defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3997,6 +4706,8 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
+            defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -4643,6 +5354,16 @@ def _simulate_comms_compute(
             peer_stage_idx = stage_idx + 1
             expected_send = _Action(peer_stage_idx, SEND_B, action.microbatch_index)
             return expected_send in _prev_ops_rank[stage_to_rank(peer_stage_idx)]
+        elif action.computation_type in (WAIT_SEND_F, WAIT_SEND_B):
+            # Require the peer recv to keep the simulation conservative.
+            forward = action.computation_type == WAIT_SEND_F
+            send_type = SEND_F if forward else SEND_B
+            if _Action(stage_idx, send_type, action.microbatch_index) not in prev_ops:
+                return False
+            peer_stage_idx = stage_idx + 1 if forward else stage_idx - 1
+            recv_type = RECV_F if forward else RECV_B
+            expected_recv = _Action(peer_stage_idx, recv_type, action.microbatch_index)
+            return expected_recv in _prev_ops_rank[stage_to_rank(peer_stage_idx)]
         else:
             raise ValueError(f"Unsupported action type {action}")
 
