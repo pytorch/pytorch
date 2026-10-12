@@ -13995,111 +13995,6 @@ class TestViewOpsMPS(TestCaseMPS):
         else:
             return x.transpose(dim0, dim1)
 
-    def test_diagonal_view(self, device="mps"):
-        t = torch.ones((5, 5), device=device)
-        v = torch.diagonal(t)
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[0] = 0
-        self.assertEqual(t[0, 0], v[0])
-
-        t = torch.ones((3, 3, 3), device="mps")
-        v = torch.diagonal(t, offset=1, dim1=1, dim2=2)
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[0, 0] = 0
-        self.assertEqual(t[0, 0, 1], v[0, 0])
-
-    def test_select_view(self, device="mps") -> None:
-        t = torch.ones((5, 5), device=device)
-        v = t.select(0, 2)
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[0] = 0
-        self.assertEqual(t[2, 0], v[0])
-
-    def test_unbind_view(self, device="mps") -> None:
-        t = torch.zeros((5, 5), device=device)
-        tup = torch.unbind(t)
-
-        for idx, v in enumerate(tup):
-            self.assertTrue(self.is_view_of(t, v))
-
-            v[0] = idx + 1
-            self.assertEqual(t[idx, 0], v[0])
-
-    def test_expand_view(self, device="mps") -> None:
-        t = torch.ones((5, 1), device=device)
-        v = t.expand(5, 5)
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[2, 2] = 0
-        self.assertEqual(t[2, 0], v[2, 2])
-
-    def test_expand_as_view(self, device="mps"):
-        t = torch.ones((5, 1), device=device)
-        e = torch.empty((5, 5), device=device)
-        v = t.expand_as(e)
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[2, 2] = 0
-        self.assertEqual(t[2, 0], v[2, 2])
-
-    def test_narrow_view(self, device="mps"):
-        t = torch.ones((5, 5), device=device)
-        v = torch.narrow(t, 1, 2, 2)
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[0, 0] = 0
-        self.assertEqual(t[0, 2], v[0, 0])
-
-    def test_permute_view(self, device="mps") -> None:
-        t = torch.ones((5, 5), device=device)
-        v = t.permute(1, 0)
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[0, 1] = 0
-        self.assertEqual(t[1, 0], v[0, 1])
-
-    def test_transpose_view(self, device="mps"):
-        for fn in (torch.swapdims, torch.swapaxes, torch.transpose):
-            t = torch.ones((5, 5), device=device)
-            v = fn(t, 0, 1)
-            self.assertTrue(self.is_view_of(t, v))
-
-            v[0, 1] = 0
-            self.assertEqual(t[1, 0], v[0, 1])
-
-    def test_transpose_inplace_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        v = t.view_as(t)
-        v = v.swapdims_(0, 1)
-        self.assertTrue(self.is_view_of(t, v))
-        v[0, 1] = 0
-        self.assertEqual(t[1, 0], v[0, 1])
-
-        t = torch.ones(5, 5, device=device)
-        v = t.view_as(t)
-        v = v.swapaxes_(0, 1)
-        self.assertTrue(self.is_view_of(t, v))
-        v[0, 1] = 0
-        self.assertEqual(t[1, 0], v[0, 1])
-
-        t = torch.ones(5, 5, device=device)
-        v = t.view_as(t)
-        v = v.transpose_(0, 1)
-        self.assertTrue(self.is_view_of(t, v))
-        v[0, 1] = 0
-        self.assertEqual(t[1, 0], v[0, 1])
-
-    def test_t_view(self, device="mps"):
-        t = torch.ones((5, 5), device=device)
-        v = t.t()
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[0, 1] = 0
-        self.assertEqual(t[1, 0], v[0, 1])
-
     def test_inplace_view_add(self):
         # https://github.com/pytorch/pytorch/issues/96153
         t_mps = torch.ones((2, 6,), device='mps')[1].reshape(2, 3)
@@ -14107,31 +14002,6 @@ class TestViewOpsMPS(TestCaseMPS):
         t_mps = t_mps + 1
         t_cpu = t_cpu + 1
         self.assertEqual(t_mps, t_cpu)
-
-    def test_t_inplace_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        v = t.view_as(t)
-        v = v.t_()
-        self.assertTrue(self.is_view_of(t, v))
-        v[0, 1] = 0
-        self.assertEqual(t[1, 0], v[0, 1])
-
-    def test_T_view(self, device="mps"):
-        for op in ("T", "H", "mT", "mH"):
-            t = torch.ones((5, 5), device=device)
-            v = getattr(t, op)
-            self.assertTrue(self.is_view_of(t, v))
-
-            v[0, 1] = 0
-            self.assertEqual(t[1, 0], v[0, 1])
-
-    def test_unfold_view(self, device="mps"):
-        t = torch.ones(10, device=device)
-        v = t.unfold(0, 3, 2)
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[1, 0] = 0
-        self.assertEqual(t[2], v[1, 0])
 
     def test_squeeze_view(self, device="mps"):
         t = torch.ones(5, 1, 5, device=device)
@@ -14148,55 +14018,6 @@ class TestViewOpsMPS(TestCaseMPS):
         v[0, 1] = 0
         self.assertIs(t, v._base)
 
-    def test_unsqueeze_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        v = torch.unsqueeze(t, 1)
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[0, 0, 1] = 0
-        self.assertEqual(t[0, 1], v[0, 0, 1])
-
-    def test_unsqueeze_inplace_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        v = t.view_as(t)
-        v = v.unsqueeze_(1)
-        self.assertTrue(self.is_view_of(t, v))
-        v[0, 0, 1] = 0
-        self.assertEqual(t[0, 1], v[0, 0, 1])
-
-    def test_as_strided_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        v = torch.as_strided(t, (25,), (1,))
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[6] = 0
-        self.assertEqual(t[1, 1], v[6])
-
-    def test_as_strided_inplace_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        v = t.view_as(t)
-        v = v.as_strided_((25,), (1,))
-        self.assertTrue(self.is_view_of(t, v))
-        v[6] = 0
-        self.assertEqual(t[1, 1], v[6])
-
-    def test_view_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        v = t.view(25)
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[6] = 0
-        self.assertEqual(t[1, 1], v[6])
-
-    def test_view_as_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        e = torch.empty((25,))
-        v = t.view_as(e)
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[6] = 0
-        self.assertEqual(t[1, 1], v[6])
-
     def test_contiguous_self(self, device="mps"):
         t = torch.ones(5, 5, device=device)
         s = t.contiguous()
@@ -14209,23 +14030,6 @@ class TestViewOpsMPS(TestCaseMPS):
 
         nv[0, 0] = 0
         self.assertNotEqual(t[0, 0], nv[0, 0])
-
-    def test_reshape_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        v = torch.reshape(t, (25,))
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[6] = 0
-        self.assertEqual(t[1, 1], v[6])
-
-    def test_reshape_as_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        e = torch.empty((25,), device=device)
-        v = t.reshape_as(e)
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[6] = 0
-        self.assertEqual(t[1, 1], v[6])
 
     def test_reshape_nonview(self, device="mps"):
         t = torch.ones(5, 5, device=device)
@@ -14292,109 +14096,7 @@ class TestViewOpsMPS(TestCaseMPS):
         nv = t.flatten(1, 1)
         self.assertIs(t, nv)
 
-    def test_basic_indexing_slice_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        v = t[:2, :3]
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[0, 0] = 0
-        self.assertEqual(t[0, 0], v[0, 0])
-
-    def test_basic_indexing_ellipses_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        v = t[..., :2]
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[0, 0] = 0
-        self.assertEqual(t[0, 0], v[0, 0])
-
-    def test_basic_indexing_newaxis_view(self, device="mps"):
-        t = torch.ones(5, 5, device=device)
-        v = t[None, :2, 3]
-        self.assertTrue(self.is_view_of(t, v))
-
-        v[0, 0] = 0
-        self.assertEqual(t[0, 3], v[0, 0])
-
-    def test_chunk_view(self, device="mps"):
-        t = torch.zeros(3, 3, device=device)
-        l = torch.chunk(t, 3)
-
-        for idx, v in enumerate(l):
-            self.assertTrue(self.is_view_of(t, v))
-
-            v[0, 0] = idx + 1
-            self.assertEqual(t[idx, 0], v[0, 0])
-
-    def test_split_view(self, device="mps"):
-        t = torch.zeros(3, 3, device=device)
-        l = torch.split(t, [1, 1, 1])
-
-        for idx, v in enumerate(l):
-            self.assertTrue(self.is_view_of(t, v))
-
-            v[0, 0] = idx + 1
-            self.assertEqual(t[idx, 0], v[0, 0])
-
-    def test_movedim_view(self, device="mps"):
-        def run_test(device, op):
-            t = torch.zeros(3, 3, device=device)
-            out = op(t)
-
-            self.assertTrue(self.is_view_of(t, out))
-
-            # Randomly change values in output
-            # and verify that original is changed
-            # as well.
-            for _ in range(3):
-                idx_1, idx_2 = random.randint(0, 2), random.randint(0, 2)
-                out[idx_1, idx_2] = random.random()
-                self.assertEqual(t[idx_2, idx_1], out[idx_1, idx_2])
-
-        for fn in [torch.movedim, torch.moveaxis]:
-            op = partial(fn, source=(0, 1), destination=(1, 0))
-            run_test(device, op)
-
-            op = partial(fn, source=0, destination=1)
-            run_test(device, op)
-
     # Testing that the generated view_copy kernel and its derivative are implemented correctly
-    def test_view_copy(self, device="mps"):
-        a = torch.randn(4, device=device, requires_grad=True)
-        a_ref = a.detach().clone().requires_grad_()
-        a_view = a_ref.view(2, 2)
-        a_view_copy = torch.view_copy(a, (2, 2))
-
-        # view_copy ops don't preserve view relationship
-        self.assertTrue(self.is_view_of(a_ref, a_view))
-        self.assertFalse(self.is_view_of(a, a_view_copy))
-
-        a_view_copy.sum().backward()
-        a_view.sum().backward()
-
-        # forward and backward give the same shape + result
-        self.assertEqual(a_view_copy, a_view)
-        self.assertEqual(a.grad, a_ref.grad)
-
-    def test_view_copy_out(self, device="mps"):
-        a = torch.randn(2, 2, device=device)
-        out = torch.empty(2, device=device)
-
-        torch.diagonal_copy(a, out=out)
-        expected = torch.diagonal_copy(a)
-
-        self.assertEqual(expected, out)
-
-        a = torch.randn(4, device=device)
-        out1 = torch.empty(2, device=device)
-        out2 = torch.empty(2, device=device)
-
-        torch.split_copy(a, 2, out=(out1, out2))
-        expected1, expected2 = torch.split_copy(a, 2)
-
-        self.assertEqual(expected1, out1)
-        self.assertEqual(expected2, out2)
-
     def test_detached_view_copy(self, device="mps"):
         # https://github.com/pytorch/pytorch/issues/86052
         x = torch.arange(2)
@@ -15647,40 +15349,6 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertEqual(reference[[0, 123, 44488, 68807, 123343], ],
                          torch.tensor([0, 123, 44488, 68807, 123343], dtype=torch.int))
 
-    def test_set_item_to_scalar_tensor(self, device="mps"):
-        m = random.randint(1, 10)
-        n = random.randint(1, 10)
-        z = torch.randn([m, n], device=device)
-        a = 1.0
-        w = torch.tensor(a, requires_grad=True, device=device)
-        z[:, 0] = w
-        z.sum().backward()
-        self.assertEqual(w.grad, m * a)
-
-    def test_single_int(self, device="mps"):
-        v = torch.randn(5, 7, 3, device=device)
-        self.assertEqual(v[4].shape, (7, 3))
-
-    def test_multiple_int(self, device="mps"):
-        v = torch.randn(5, 7, 3, device=device)
-        self.assertEqual(v[4].shape, (7, 3))
-        self.assertEqual(v[4, :, 1].shape, (7,))
-
-    def test_none(self, device="mps"):
-        v = torch.randn(5, 7, 3, device=device)
-        self.assertEqual(v[None].shape, (1, 5, 7, 3))
-        self.assertEqual(v[:, None].shape, (5, 1, 7, 3))
-        self.assertEqual(v[:, None, None].shape, (5, 1, 1, 7, 3))
-        self.assertEqual(v[..., None].shape, (5, 7, 3, 1))
-
-    def test_step(self, device="mps"):
-        v = torch.arange(10, device=device)
-        self.assertEqual(v[::1], v)
-        self.assertEqual(v[::2].tolist(), [0, 2, 4, 6, 8])
-        self.assertEqual(v[::3].tolist(), [0, 3, 6, 9])
-        self.assertEqual(v[::11].tolist(), [0])
-        self.assertEqual(v[1:6:2].tolist(), [1, 3, 5])
-
     def test_step_assignment(self, device="mps"):
         v = torch.zeros(4, 4, device=device)
         v[0, 1::2] = torch.tensor([3., 4.], device=device)
@@ -15709,13 +15377,6 @@ class TestAdvancedIndexing(TestCaseMPS):
         y.index_put_((mask, ), y[mask], accumulate=True)
         self.assertEqual(y, torch.ones(size=(10, 10), device=device))
 
-    def test_multiple_bool_indices(self, device="mps"):
-        v = torch.randn(5, 7, 3, device=device)
-        # note: these broadcast together and are transposed to the first dim
-        mask1 = torch.tensor([1, 0, 1, 1, 0], dtype=torch.bool, device=device)
-        mask2 = torch.tensor([1, 1, 1], dtype=torch.bool, device=device)
-        self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
-
     def test_byte_mask(self, device="mps"):
         v = torch.randn(5, 7, 3, device=device)
         mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
@@ -15726,15 +15387,6 @@ class TestAdvancedIndexing(TestCaseMPS):
 
         v = torch.tensor([1.], device=device)
         self.assertEqual(v[v == 0], torch.tensor([], device=device))
-
-    def test_byte_mask_accumulate(self, device="mps"):
-        mask = torch.zeros(size=(10, ), dtype=torch.uint8, device=device)
-        y = torch.ones(size=(10, 10), device=device)
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            y.index_put_((mask, ), y[mask], accumulate=True)
-            self.assertEqual(y, torch.ones(size=(10, 10), device=device))
-            self.assertEqual(len(w), 2)
 
     def test_index_put_accumulate_expanded_values(self, device="mps"):
         t = torch.zeros((5, 2))
@@ -15910,23 +15562,6 @@ class TestAdvancedIndexing(TestCaseMPS):
 
         self.assertEqual(run(device).cpu(), run("cpu"))
 
-    def test_multiple_byte_mask(self, device="mps"):
-        v = torch.randn(5, 7, 3, device=device)
-        # note: these broadcast together and are transposed to the first dim
-        mask1 = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
-        mask2 = torch.ByteTensor([1, 1, 1]).to(device)
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
-            self.assertEqual(len(w), 2)
-
-    def test_byte_mask2d(self, device="mps"):
-        v = torch.randn(5, 7, 3, device=device)
-        c = torch.randn(5, 7, device=device)
-        num_ones = (c > 0).sum()
-        r = v[c > 0]
-        self.assertEqual(r.shape, (num_ones, 3))
-
     def test_jit_indexing(self, device="mps"):
         def fn1(x):
             x[x < 50] = 1.0
@@ -15944,12 +15579,6 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertEqual(out, ref)
         out = scripted_fn2(data.detach().clone())
         self.assertEqual(out, ref)
-
-    def test_int_indices(self, device="mps"):
-        v = torch.randn(5, 7, 3, device=device)
-        self.assertEqual(v[[0, 4, 2]].shape, (3, 7, 3))
-        self.assertEqual(v[:, [0, 4, 2]].shape, (5, 3, 3))
-        self.assertEqual(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
 
     def test_index_put_src_datatype(self):
         def helper(device, dtype):
@@ -15977,35 +15606,6 @@ class TestAdvancedIndexing(TestCaseMPS):
             self.assertEqual(res.shape, src.shape)
         [helper(device="mps", dtype=dtype) for dtype in [torch.float, torch.float16, torch.long, torch.bool]]
 
-    def test_int_indices2d(self, device="mps"):
-        # From the NumPy indexing example
-        x = torch.arange(0, 12, device=device).view(4, 3)
-        rows = torch.tensor([[0, 0], [3, 3]], device=device)
-        columns = torch.tensor([[0, 2], [0, 2]], device=device)
-        self.assertEqual(x[rows, columns].tolist(), [[0, 2], [9, 11]])
-
-    def test_int_indices_broadcast(self, device="mps"):
-        # From the NumPy indexing example
-        x = torch.arange(0, 12, device=device).view(4, 3)
-        rows = torch.tensor([0, 3], device=device)
-        columns = torch.tensor([0, 2], device=device)
-        result = x[rows[:, None], columns]
-        self.assertEqual(result.tolist(), [[0, 2], [9, 11]])
-
-    def test_empty_index(self, device="mps"):
-        x = torch.arange(0, 12, device=device).view(4, 3)
-        idx = torch.tensor([], dtype=torch.long, device=device)
-        self.assertEqual(x[idx].numel(), 0)
-
-        # empty assignment should have no effect but not throw an exception
-        y = x.clone()
-        y[idx] = -1
-        self.assertEqual(x, y)
-
-        mask = torch.zeros(4, 3, device=device).bool()
-        y[mask] = -1
-        self.assertEqual(x, y)
-
     def test_empty_ndim_index(self, device="mps"):
         x = torch.randn(5, device=device)
         self.assertEqual(torch.empty(0, 2, device=device), x[torch.empty(0, 2, dtype=torch.int64, device=device)])
@@ -16019,19 +15619,6 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertEqual(x[[], []].shape, (0,))
         with self.assertRaisesRegex(IndexError, 'for dimension with size 0'):
             x[:, [0, 1]]
-
-    def test_empty_ndim_index_bool(self, device="mps"):
-        x = torch.randn(5, device=device)
-        self.assertRaises(IndexError, lambda: x[torch.empty(0, 2, dtype=torch.uint8, device=device)])
-
-    def test_empty_slice(self, device="mps"):
-        x = torch.randn(2, 3, 4, 5, device=device)
-        y = x[:, :, :, 1]
-        z = y[:, 1:1, :]
-        self.assertEqual((2, 0, 4), z.shape)
-        # this isn't technically necessary, but matches NumPy stride calculations.
-        self.assertEqual((60, 20, 5), z.stride())
-        self.assertTrue(z.is_contiguous())
 
     def test_empty_reduce(self, device="mps"):
         x = torch.rand(0, 3, device=device)
@@ -16061,128 +15648,6 @@ class TestAdvancedIndexing(TestCaseMPS):
             self.assertEqual(a.data_ptr(), a[None].data_ptr())
             self.assertEqual(a.data_ptr(), a[...].data_ptr())
 
-    def test_index_setitem_bools_slices(self, device="mps"):
-        true = torch.tensor(1, dtype=torch.uint8, device=device)
-        false = torch.tensor(0, dtype=torch.uint8, device=device)
-
-        tensors = [torch.randn(2, 3, device=device), torch.tensor(3, device=device)]
-
-        for a in tensors:
-            # prefix with a 1,1, to ensure we are compatible with numpy which cuts off prefix 1s
-            # (some of these ops already prefix a 1 to the size)
-            neg_ones = torch.ones_like(a) * -1
-            neg_ones_expanded = neg_ones.unsqueeze(0).unsqueeze(0)
-            a[True] = neg_ones_expanded
-            self.assertEqual(a, neg_ones)
-            a[False] = 5
-            self.assertEqual(a, neg_ones)
-            a[true] = neg_ones_expanded * 2
-            self.assertEqual(a, neg_ones * 2)
-            a[false] = 5
-            self.assertEqual(a, neg_ones * 2)
-            a[None] = neg_ones_expanded * 3
-            self.assertEqual(a, neg_ones * 3)
-            a[...] = neg_ones_expanded * 4
-            self.assertEqual(a, neg_ones * 4)
-            if a.dim() == 0:
-                with self.assertRaises(IndexError):
-                    a[:] = neg_ones_expanded * 5
-
-    def test_index_scalar_with_bool_mask(self, device="mps"):
-        a = torch.tensor(1, device=device)
-        uintMask = torch.tensor(True, dtype=torch.uint8, device=device)
-        boolMask = torch.tensor(True, dtype=torch.bool, device=device)
-        self.assertEqual(a[uintMask], a[boolMask])
-        self.assertEqual(a[uintMask].dtype, a[boolMask].dtype)
-
-        a = torch.tensor(True, dtype=torch.bool, device=device)
-        self.assertEqual(a[uintMask], a[boolMask])
-        self.assertEqual(a[uintMask].dtype, a[boolMask].dtype)
-
-    def test_setitem_expansion_error(self, device="mps"):
-        true = torch.tensor(True, device=device)
-        a = torch.randn(2, 3, device=device)
-        # check prefix with  non-1s doesn't work
-        a_expanded = a.expand(torch.Size([5, 1]) + a.size())
-        # NumPy: ValueError
-        with self.assertRaises(RuntimeError):
-            a[True] = a_expanded
-        with self.assertRaises(RuntimeError):
-            a[true] = a_expanded
-
-    def test_getitem_scalars(self, device="mps"):
-        zero = torch.tensor(0, dtype=torch.int64, device=device)
-        one = torch.tensor(1, dtype=torch.int64, device=device)
-
-        # non-scalar indexed with scalars
-        a = torch.randn(2, 3, device=device)
-        self.assertEqual(a[0], a[zero])
-        self.assertEqual(a[0][1], a[zero][one])
-        self.assertEqual(a[0, 1], a[zero, one])
-        self.assertEqual(a[0, one], a[zero, 1])
-
-        # indexing by a scalar should slice (not copy)
-        self.assertEqual(a[0, 1].data_ptr(), a[zero, one].data_ptr())
-        self.assertEqual(a[1].data_ptr(), a[one.int()].data_ptr())
-        self.assertEqual(a[1].data_ptr(), a[one.short()].data_ptr())
-
-        # scalar indexed with scalar
-        r = torch.randn((), device=device)
-        with self.assertRaises(IndexError):
-            r[:]
-        with self.assertRaises(IndexError):
-            r[zero]
-        self.assertEqual(r, r[...])
-
-    def test_setitem_scalars(self, device="mps"):
-        zero = torch.tensor(0, dtype=torch.int64)
-
-        # non-scalar indexed with scalars
-        a = torch.randn(2, 3, device=device)
-        a_set_with_number = a.clone()
-        a_set_with_scalar = a.clone()
-        b = torch.randn(3, device=device)
-
-        a_set_with_number[0] = b
-        a_set_with_scalar[zero] = b
-        self.assertEqual(a_set_with_number, a_set_with_scalar)
-        a[1, zero] = 7.7
-        self.assertEqual(7.7, a[1, 0])
-
-        # scalar indexed with scalars
-        r = torch.randn((), device=device)
-        with self.assertRaises(IndexError):
-            r[:] = 8.8
-        with self.assertRaises(IndexError):
-            r[zero] = 8.8
-        r[...] = 9.9
-        self.assertEqual(9.9, r)
-
-    def test_basic_advanced_combined(self, device="mps"):
-        # From the NumPy indexing example
-        x = torch.arange(0, 12, device=device).view(4, 3)
-        self.assertEqual(x[1:2, 1:3], x[1:2, [1, 2]])
-        self.assertEqual(x[1:2, 1:3].tolist(), [[4, 5]])
-
-        # Check that it is a copy
-        unmodified = x.clone()
-        x[1:2, [1, 2]].zero_()
-        self.assertEqual(x, unmodified)
-
-        # But assignment should modify the original
-        unmodified = x.clone()
-        x[1:2, [1, 2]] = 0
-        self.assertNotEqual(x, unmodified)
-
-    def test_int_assignment(self, device="mps"):
-        x = torch.arange(0, 4, device=device).view(2, 2)
-        x[1] = 5
-        self.assertEqual(x.tolist(), [[0, 1], [5, 5]])
-
-        x = torch.arange(0, 4, device=device).view(2, 2)
-        x[1] = torch.arange(5, 7, device=device)
-        self.assertEqual(x.tolist(), [[0, 1], [5, 6]])
-
     def test_byte_tensor_assignment(self, device="mps"):
         x = torch.arange(0., 16, device=device).view(4, 4)
         b = torch.ByteTensor([True, False, True, False]).to(device)
@@ -16196,21 +15661,6 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertEqual(x[1], torch.arange(4., 8, device=device))
         self.assertEqual(x[2], value)
         self.assertEqual(x[3], torch.arange(12., 16, device=device))
-
-    def test_variable_slicing(self, device="mps"):
-        x = torch.arange(0, 16, device=device).view(4, 4)
-        indices = torch.IntTensor([0, 1]).to(device)
-        i, j = indices
-        self.assertEqual(x[i:j], x[0:1])
-
-    def test_ellipsis_tensor(self, device="mps"):
-        x = torch.arange(0, 9, device=device).view(3, 3)
-        idx = torch.tensor([0, 2], device=device)
-        self.assertEqual(x[..., idx].tolist(), [[0, 2],
-                                                [3, 5],
-                                                [6, 8]])
-        self.assertEqual(x[idx, ...].tolist(), [[0, 1, 2],
-                                                [6, 7, 8]])
 
     def test_invalid_index(self, device="mps"):
         x = torch.arange(0, 16, device=device).view(4, 4)
@@ -16234,17 +15684,6 @@ class TestAdvancedIndexing(TestCaseMPS):
             return x[0]
 
         self.assertRaisesRegex(IndexError, 'invalid index', runner)
-
-    def test_cpu_indices(self, device="mps"):
-        idx = torch.tensor([0, 1])
-        b = torch.zeros(2, device=device)
-        x = torch.ones(10, device=device)
-        x[idx] = b  # index_put_
-        ref = torch.ones(10, device=device)
-        ref[:2] = 0
-        self.assertEqual(x, ref, atol=0, rtol=0)
-        out = x[idx]  # index
-        self.assertEqual(out, torch.zeros(2, device=device), atol=0, rtol=0)
 
     def test_nextafter(self, device="mps"):
         for dtype in [torch.float16, torch.bfloat16, torch.float32]:
