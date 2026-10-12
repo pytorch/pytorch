@@ -7463,11 +7463,10 @@ def _check_scaled_mm_sizes(
                     ),
                 )
         else:
-            is_xpu = device_hint(self) == "xpu"
             torch._check(
                 (scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32)
                 or (
-                    is_xpu
+                    device_hint(self) == "xpu"
                     and scale_a.dtype == torch.float8_e8m0fnu
                     and scale_b.dtype == torch.float8_e8m0fnu
                 ),
