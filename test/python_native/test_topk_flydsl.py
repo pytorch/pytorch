@@ -27,6 +27,9 @@ _REGISTER_KS = tuple(sorted(_impl_register_ks))
 _RADIX_PADDING_KS = (65, 129, 513)
 # One K per radix gate row, plus the register gate, to cover each N ceiling.
 _GATE_MAX_N_KS = (max(_REGISTER_KS), 64, 257, 513)
+# Cycles torch.cuda._sleep keeps a side stream busy, so a launch that lands on
+# another stream runs before the work queued behind the sleep.
+_SLEEP_CYCLES = 100_000_000
 
 
 def _gate_n_bounds(k: int, dtype: torch.dtype = torch.float32) -> tuple[int, int]:
@@ -841,6 +844,114 @@ class TestFlyDSLTopK(TestCase):
             self.assertEqual(info.currsize, 2)
         finally:
             torch.cuda.set_device(old_device)
+
+    def _launch_kernel(self, kernel: str, x: torch.Tensor, k: int):
+        from torch._native.ops.topk.flydsl_kernels import topk_radix, topk_register
+
+        if kernel == "register":
+            return topk_register(x, k)
+        return topk_radix(x, k, deterministic=False)
+
+    def _stream_case_inputs(self, k: int, kernel: str, dtype: torch.dtype):
+        torch.manual_seed(0)
+        n = _test_n(k, dtype)
+        self.assertEqual(_expected_kernel(k, n, dtype), kernel)
+        shape = (_test_m(k, dtype), n)
+        return _make_test_input(shape, dtype), _make_test_input(shape, dtype)
+
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2,
+        "requires at least 2 visible CUDA devices",
+    )
+    @parametrize("k,kernel", ((8, "register"), (128, "radix")))
+    def test_launcher_enters_guard_for_non_current_device(self, k, kernel):
+        # The launchers own the device guard, so direct callers (not only the
+        # dispatcher) get a launch on the tensor's device.
+        if not fu._is_supported_arch(1, _SUPPORTED_ARCHES):
+            self.skipTest("requires a second gfx950 device")
+
+        torch.manual_seed(0)
+        n = _test_n(k)
+        self.assertEqual(_expected_kernel(k, n), kernel)
+        device = torch.device("cuda", 1)
+        x = make_tensor(
+            (_test_m(k, device_index=1), n), device=device, dtype=torch.float32
+        )
+        with pn.flydsl.disabled():
+            ref_v, _ = torch.topk(x, k, dim=-1)
+
+        old_device = torch.cuda.current_device()
+        try:
+            torch.cuda.set_device(0)
+            got_v, got_i = self._launch_kernel(kernel, x, k)
+            self.assertEqual(torch.cuda.current_device(), 0)
+        finally:
+            torch.cuda.set_device(old_device)
+        torch.cuda.synchronize(device)
+
+        self.assertEqual(got_v.device, device)
+        self.assertEqual(got_v, ref_v, atol=0, rtol=0)
+        self.assertEqual(torch.gather(x, -1, got_i), got_v, atol=0, rtol=0)
+
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    @parametrize("k,kernel", ((8, "register"), (128, "radix")))
+    def test_nondefault_stream_reuses_specialization(self, k, kernel, dtype):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        x, new_x = self._stream_case_inputs(k, kernel, dtype)
+        with pn.flydsl.disabled():
+            ref_v, _ = torch.topk(new_x, k, dim=-1)
+
+        self._launch_kernel(kernel, x, k)  # compile on the default stream
+        torch.cuda.synchronize()
+
+        # The input is overwritten on the side stream, behind a sleep. A launch
+        # that went to any other stream would run first and read the old input.
+        stream = torch.cuda.Stream(device=x.device)
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            torch.cuda._sleep(_SLEEP_CYCLES)
+            x.copy_(new_x)
+            got_v, got_i = self._launch_kernel(kernel, x, k)
+            done = torch.cuda.Event()
+            done.record(stream)
+        done.synchronize()
+
+        self.assertEqual(got_v, ref_v, atol=0, rtol=0)
+        self.assertEqual(torch.gather(x, -1, got_i), got_v, atol=0, rtol=0)
+        info = topk_cache_info(kernel)
+        self.assertEqual(info.misses, 1)
+        self.assertGreaterEqual(info.hits, 1)
+
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    @parametrize("k,kernel", ((8, "register"), (128, "radix")))
+    def test_warm_cuda_graph_capture_reuses_specialization(self, k, kernel, dtype):
+        # A cold capture cannot compile. A warm capture must reuse the
+        # specialization through the raw-stream launch path.
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        x, new_x = self._stream_case_inputs(k, kernel, dtype)
+        self._launch_kernel(kernel, x, k)
+        torch.cuda.synchronize()
+        self.assertEqual(topk_cache_info(kernel).misses, 1)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            got_v, got_i = self._launch_kernel(kernel, x, k)
+
+        x.copy_(new_x)
+        with pn.flydsl.disabled():
+            ref_v, _ = torch.topk(x, k, dim=-1)
+        got_v.zero_()
+        got_i.zero_()
+        graph.replay()
+        torch.cuda.synchronize()
+
+        self.assertEqual(got_v, ref_v, atol=0, rtol=0)
+        self.assertEqual(torch.gather(x, -1, got_i), got_v, atol=0, rtol=0)
+        info = topk_cache_info(kernel)
+        self.assertEqual(info.misses, 1)
+        self.assertGreaterEqual(info.hits, 1)
 
 
 instantiate_parametrized_tests(TestFlyDSLTopK)

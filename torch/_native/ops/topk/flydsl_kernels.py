@@ -934,8 +934,10 @@ def topk_register_out(
     arch: str = _resolve_rocm_arch(device_index)  # pyrefly: ignore[bad-assignment]
     spec = topk_spec(input_2d.dtype, largest)
 
-    with torch.cuda.device(input_2d.device):
-        stream = torch.cuda.current_stream(input_2d.device)
+    def _launch() -> None:
+        # Raw cudaStream_t on both hit and miss paths: no Python Stream object
+        # per launch, and CUDA graph capture never constructs one.
+        stream = torch._C._cuda_getCurrentRawStream(device_index)
         compiled = _compile_register_topk(
             n,
             k,
@@ -946,6 +948,13 @@ def topk_register_out(
             compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
         )
         compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, stream)
+
+    # Enter the device guard only when the tensor is not on the current device.
+    if torch.cuda.current_device() == device_index:
+        _launch()
+    else:
+        with torch.cuda.device(device_index):
+            _launch()
 
 
 def topk_register(
@@ -1016,8 +1025,8 @@ def topk_radix_out(
     arch: str = _resolve_rocm_arch(device_index)  # pyrefly: ignore[bad-assignment]
     spec = topk_spec(input_2d.dtype, largest)
 
-    with torch.cuda.device(input_2d.device):
-        stream = torch.cuda.current_stream(input_2d.device)
+    def _launch() -> None:
+        stream = torch._C._cuda_getCurrentRawStream(device_index)
         compiled = _compile_radix_select_topk(
             k,
             deterministic,
@@ -1028,6 +1037,12 @@ def topk_radix_out(
             compile_args=(input_2d, values_2d, indices_2d, rows_m, n, stream),
         )
         compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, n, stream)
+
+    if torch.cuda.current_device() == device_index:
+        _launch()
+    else:
+        with torch.cuda.device(device_index):
+            _launch()
 
 
 def topk_radix(
