@@ -3855,7 +3855,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
 
         def flush() -> None:
             if any(is_statement(x) for x in run):
-                wrapper.lines.append(AnnotatedExternKernelBlock(list(run), module_fqn))
+                wrapper.writeline(AnnotatedExternKernelBlock(list(run), module_fqn))
             else:
                 wrapper.lines.extend(run)
             run.clear()

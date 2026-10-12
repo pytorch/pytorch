@@ -1358,8 +1358,8 @@ def _reset_kernel_annotations() -> None:
 def save_kernel_annotations(path: str | Path) -> None:
     """Save the current kernel annotations to a pickle file.
 
-    The file can be passed directly to the Chrome trace annotator
-    (``torch.cuda._annotate_cuda_graph_trace``).
+    Load it with ``pickle.load`` and pass the result to
+    ``prof.export_chrome_trace(path, cuda_graph_annotations=...)``.
     """
     with open(path, "wb") as f:
         pickle.dump(dict(get_kernel_annotations()), f)
