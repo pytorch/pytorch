@@ -555,20 +555,20 @@ def _local_allgather_base_(
 
     if not isinstance(output_tensor, LocalTensor):
         raise AssertionError("Output tensor must be a LocalTensor")
-    if not isinstance(input_tensor, LocalTensor):
-        raise AssertionError("Input tensor must be a LocalTensor")
 
     for group_offset in group_offsets:
         group_ranks = [group_offset + r for r in ranks]
 
-        if not all(rank in input_tensor._local_tensors for rank in group_ranks):
-            continue
         if not all(rank in output_tensor._local_tensors for rank in group_ranks):
             continue
 
-        gathered_tensors = []
-        for rank_i in group_ranks:
-            gathered_tensors.append(input_tensor._local_tensors[rank_i])
+        # allgather object happens to create pure tensor, so we special case it here
+        if isinstance(input_tensor, LocalTensor):
+            if not all(rank in input_tensor._local_tensors for rank in group_ranks):
+                continue
+            gathered_tensors = [input_tensor._local_tensors[r] for r in group_ranks]
+        else:
+            gathered_tensors = [input_tensor] * len(group_ranks)
 
         gathered_tensor = torch.cat(gathered_tensors, dim=0)
 

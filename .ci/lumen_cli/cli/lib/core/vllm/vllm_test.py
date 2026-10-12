@@ -33,7 +33,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parents[6] / ".github" / "scripts"
 def _stable_torch_backend() -> str:
     # The uv --torch-backend channel must match the CUDA toolchain of the
     # build, so reuse CUDA_STABLE from generate_binary_build_matrix.py (the
-    # single source of truth for the stable CUDA version, e.g. "13.0" -> cu130)
+    # single source of truth for the stable CUDA version, e.g. "13.2" -> cu132)
     # rather than hardcoding the channel here.
     if str(_SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(_SCRIPTS_DIR))
