@@ -19,7 +19,7 @@ int64_t InterpValue::intValue() const {
   }
   AT_FORALL_INT_TYPES(TYPE_CASE);
 #undef TYPE_CASE
-  throw unsupported_dtype();
+  TORCH_CHECK(false, "UNSUPPORTED DTYPE");
 }
 
 template <typename T>
@@ -37,7 +37,7 @@ static inline std::enable_if_t<std::is_floating_point_v<T>, T> mod_value(
 }
 
 static inline bool mod_value(bool lhs, bool rhs) {
-  throw std::runtime_error("Attempted modulus of bool");
+  TORCH_CHECK(false, "Attempted modulus of bool");
 }
 
 template <typename T>
@@ -196,7 +196,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           break;
         default:
           // TODO: change to a proper error report
-          throw std::runtime_error("invalid operator type");
+          TORCH_CHECK(false, "invalid operator type");
       }
     }
     return InterpValue(result_v);
@@ -223,7 +223,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           break;
         default:
           // TODO: change to a proper error report
-          throw std::runtime_error("invalid operator type");
+          TORCH_CHECK(false, "invalid operator type");
       }
     }
     return InterpValue(result_v);
@@ -249,7 +249,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           break;
         default:
           // TODO: change to a proper error report
-          throw std::runtime_error("invalid operator type");
+          TORCH_CHECK(false, "invalid operator type");
       }
     }
     return InterpValue(result_v);
@@ -289,7 +289,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           break;
         default:
           // TODO: change to a proper error report
-          throw std::runtime_error("invalid operator type");
+          TORCH_CHECK(false, "invalid operator type");
       }
     }
     return InterpValue(result_v);
@@ -305,9 +305,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     InterpValue lhs_v = value_;
     v->rhs()->accept(this);
     InterpValue rhs_v = value_;
-    if (lhs_v.dtype() != rhs_v.dtype()) {
-      throw malformed_input("bad dtype in binary op", v);
-    }
+    TORCH_CHECK(
+        lhs_v.dtype() == rhs_v.dtype(),
+        "MALFORMED INPUT: bad dtype in binary op - ",
+        std::to_string(v));
 
     IRNodeType expr_type = v->expr_type();
     if (expr_type == IRNodeType::kAnd || expr_type == IRNodeType::kOr ||
@@ -323,7 +324,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           value_ = bitwise_binary_op<unsigned char>(lhs_v, rhs_v, expr_type);
           break;
         default:
-          throw unsupported_dtype();
+          TORCH_CHECK(false, "UNSUPPORTED DTYPE");
       }
       return;
     }
@@ -340,7 +341,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           value_ = shift_binary_op<unsigned char>(lhs_v, rhs_v, expr_type);
           break;
         default:
-          throw unsupported_dtype();
+          TORCH_CHECK(false, "UNSUPPORTED DTYPE");
       }
       return;
     }
@@ -356,7 +357,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         value_ = binary_op<unsigned char>(lhs_v, rhs_v, expr_type);
         break;
       default:
-        throw unsupported_dtype();
+        TORCH_CHECK(false, "UNSUPPORTED DTYPE");
     }
   }
 
@@ -376,7 +377,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
       default:
-        throw unsupported_dtype();
+        TORCH_CHECK(false, "UNSUPPORTED DTYPE");
     }
 
     return value;
@@ -394,10 +395,11 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     v->ret_val2()->accept(this);
     InterpValue ret_val2_v = value_;
 
-    if (lhs_v.dtype() != rhs_v.dtype() ||
-        ret_val1_v.dtype() != ret_val2_v.dtype()) {
-      throw malformed_input("bad dtype in CompareSelect", v);
-    }
+    TORCH_CHECK(
+        lhs_v.dtype() == rhs_v.dtype() &&
+            ret_val1_v.dtype() == ret_val2_v.dtype(),
+        "MALFORMED INPUT: bad dtype in CompareSelect - ",
+        std::to_string(v));
 
     switch (lhs_v.dtype().scalar_type()) {
 #define TYPE_CASE(Type, Name)                          \
@@ -408,7 +410,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
       default:
-        throw unsupported_dtype();
+        TORCH_CHECK(false, "UNSUPPORTED DTYPE");
     }
   }
 
@@ -439,9 +441,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   TORCH_API void visit(const VarPtr& v) override {
     auto iter = eval_context_.find(v);
-    if (iter == eval_context_.end()) {
-      throw malformed_input("could not find Var in context", v);
-    }
+    TORCH_CHECK(
+        iter != eval_context_.end(),
+        "MALFORMED INPUT: could not find Var in context - ",
+        std::to_string(v));
 
     value_ = iter->second;
   }
@@ -486,7 +489,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       DST_TYPE_CASE_QUANT(c10::qint8, QInt8, int8_t)
 #undef DST_TYPE_CASE_QUANT
       default:
-        throw unsupported_dtype();
+        TORCH_CHECK(false, "UNSUPPORTED DTYPE");
     }
   }
 
@@ -495,9 +498,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     src_value->accept(this);
     Dtype dst_dtype = v->dtype();
     Dtype src_dtype = src_value->dtype();
-    if (src_dtype.lanes() != dst_dtype.lanes()) {
-      throw malformed_input("lane mismatch in Cast", v);
-    }
+    TORCH_CHECK(
+        src_dtype.lanes() == dst_dtype.lanes(),
+        "MALFORMED INPUT: lane mismatch in Cast - ",
+        std::to_string(v));
 
     if (src_dtype != dst_dtype) {
       switch (src_dtype.scalar_type()) {
@@ -510,7 +514,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         SRC_TYPE_CASE(c10::qint8, QInt8);
 #undef SRC_TYPE_CASE
         default:
-          throw unsupported_dtype();
+          TORCH_CHECK(false, "UNSUPPORTED DTYPE");
       }
     }
   }
@@ -541,7 +545,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_SCALAR_TYPES(DST_TYPE_CASE);
 #undef DST_TYPE_CASE
       default:
-        throw unsupported_dtype();
+        TORCH_CHECK(false, "UNSUPPORTED DTYPE");
     }
   }
 
@@ -550,9 +554,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     src_value->accept(this);
     Dtype dst_dtype = v->dtype();
     Dtype src_dtype = src_value->dtype();
-    if (src_dtype.byte_size() != dst_dtype.byte_size()) {
-      throw malformed_input("lane mismatch in Cast", v);
-    }
+    TORCH_CHECK(
+        src_dtype.byte_size() == dst_dtype.byte_size(),
+        "MALFORMED INPUT: lane mismatch in Cast - ",
+        std::to_string(v));
     if (src_dtype != dst_dtype) {
       switch (src_dtype.scalar_type()) {
 #define SRC_TYPE_CASE(Type, Name)                         \
@@ -563,7 +568,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         AT_FORALL_SCALAR_TYPES(SRC_TYPE_CASE);
 #undef SRC_TYPE_CASE
         default:
-          throw unsupported_dtype();
+          TORCH_CHECK(false, "UNSUPPORTED DTYPE");
       }
     }
   }
@@ -575,9 +580,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     auto start = value_.intValue();
     v->stop()->accept(this);
     auto stop = value_.intValue();
-    if (eval_context_.count(var_node)) {
-      throw malformed_input("could not find var_node in For context", v);
-    }
+    TORCH_CHECK(
+        !eval_context_.count(var_node),
+        "MALFORMED INPUT: could not find var_node in For context - ",
+        std::to_string(v));
 
     for (auto i = start; i < stop; i++) {
       eval_context_[var_node] = InterpValue(dtype, i);
@@ -616,7 +622,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
       default:
-        throw unsupported_dtype();
+        TORCH_CHECK(false, "UNSUPPORTED DTYPE");
     }
   }
 
@@ -631,12 +637,15 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND(Bool, TYPE_CASE);
 #undef TYPE_CASE
       case ScalarType::Half:
-        throw unsupported_dtype("IfThenElse condition can't have Half dtype");
+        TORCH_CHECK(
+            false,
+            "UNSUPPORTED DTYPE: IfThenElse condition can't have Half dtype");
       case ScalarType::BFloat16:
-        throw unsupported_dtype(
-            "IfThenElse condition can't have BFloat16 dtype");
+        TORCH_CHECK(
+            false,
+            "UNSUPPORTED DTYPE: IfThenElse condition can't have BFloat16 dtype");
       default:
-        throw unsupported_dtype();
+        TORCH_CHECK(false, "UNSUPPORTED DTYPE");
     }
 
     if (cond_v) {
@@ -659,7 +668,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_INT_TYPES(TYPE_CASE);
 #undef TYPE_CASE
       default:
-        throw unsupported_dtype();
+        TORCH_CHECK(false, "UNSUPPORTED DTYPE");
     }
   }
 
@@ -667,7 +676,12 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::stringstream ss;
     ss << "Index out of bounds in check_bounds. Index: " << idx
        << "; bounds: [0, " << bound << ").";
-    throw malformed_input(std::move(ss).str(), buf);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: ",
+        std::move(ss).str(),
+        " - ",
+        std::to_string(buf));
   }
 
   void check_bounds(const BufPtr& buf, const std::vector<ExprPtr>& indices) {
@@ -675,10 +689,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     if (dims.size() != indices.size()) {
       // indices are flattened, but not buffer
       if (indices.size() == 1) {
-        if (dims.size() != buf->strides().size()) {
-          throw malformed_input(
-              "Number of dimensions did not match number of strides", buf);
-        }
+        TORCH_CHECK(
+            dims.size() == buf->strides().size(),
+            "MALFORMED INPUT: Number of dimensions did not match number of strides - ",
+            std::to_string(buf));
         int64_t buf_size = 1;
         if (!dims.empty()) {
           ExprHandle buf_size_expr = ExprHandle(immLike(dims[0], 1));
@@ -700,11 +714,14 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         }
         return;
       }
-      throw malformed_input(
+      TORCH_CHECK(
+          false,
+          "MALFORMED INPUT: ",
           "dimensions and indices mismatch in check_bounds. Buf has " +
               std::to_string(dims.size()) + " dimensions and indices has " +
               std::to_string(indices.size()) + " dimensions.",
-          buf);
+          " - ",
+          std::to_string(buf));
     }
     for (const auto& i : c10::irange(dims.size())) {
       auto opt_dim = intValue(dims[i]);
@@ -724,9 +741,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   TORCH_API void visit(const LoadPtr& v) override {
     auto iter = buffer_mapping_.find(v->buf());
-    if (iter == buffer_mapping_.end()) {
-      throw malformed_input("could not find base node in Load", v);
-    }
+    TORCH_CHECK(
+        iter != buffer_mapping_.end(),
+        "MALFORMED INPUT: could not find base node in Load - ",
+        std::to_string(v));
     void* ptr = iter->second;
 
     check_bounds(v->buf(), v->indices());
@@ -760,15 +778,19 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       default:
-        throw unsupported_dtype("scalar type:" + std::to_string(v_sdtype));
+        TORCH_CHECK(
+            false,
+            "UNSUPPORTED DTYPE: ",
+            "scalar type:" + std::to_string(v_sdtype));
     }
   }
 
   TORCH_API void visit(const StorePtr& v) override {
     auto iter = buffer_mapping_.find(v->buf());
-    if (iter == buffer_mapping_.end()) {
-      throw malformed_input("could not find base node in Store", v);
-    }
+    TORCH_CHECK(
+        iter != buffer_mapping_.end(),
+        "MALFORMED INPUT: could not find base node in Store - ",
+        std::to_string(v));
 
     void* ptr = iter->second;
 
@@ -781,41 +803,43 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
 
     switch (v_sdtype) {
-#define TYPE_CASE(Type, Name)                                   \
-  case ScalarType::Name: {                                      \
-    v->value()->accept(this);                                   \
-    std::vector<Type> value = this->value().as_vec<Type>();     \
-    if (index.size() != value.size()) {                         \
-      throw malformed_input("value size mismatch in Store", v); \
-    }                                                           \
-    Type* ptr##Name = static_cast<Type*>(ptr);                  \
-    for (const auto i : c10::irange(index.size())) {            \
-      GRAPH_DEBUG(                                              \
-          "STORE: ptr=",                                        \
-          ptr##Name,                                            \
-          ", buf=",                                             \
-          v->buf()->name_hint(),                                \
-          ", idx=",                                             \
-          index[i],                                             \
-          ", val=",                                             \
-          (int)underlyingValue(value[i]));                      \
-      ptr##Name[index[i]] = value[i];                           \
-    }                                                           \
+#define TYPE_CASE(Type, Name)                               \
+  case ScalarType::Name: {                                  \
+    v->value()->accept(this);                               \
+    std::vector<Type> value = this->value().as_vec<Type>(); \
+    TORCH_CHECK(                                            \
+        index.size() == value.size(),                       \
+        "MALFORMED INPUT: value size mismatch in Store - ", \
+        std::to_string(v));                                 \
+    Type* ptr##Name = static_cast<Type*>(ptr);              \
+    for (const auto i : c10::irange(index.size())) {        \
+      GRAPH_DEBUG(                                          \
+          "STORE: ptr=",                                    \
+          ptr##Name,                                        \
+          ", buf=",                                         \
+          v->buf()->name_hint(),                            \
+          ", idx=",                                         \
+          index[i],                                         \
+          ", val=",                                         \
+          (int)underlyingValue(value[i]));                  \
+      ptr##Name[index[i]] = value[i];                       \
+    }                                                       \
   } break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
       TYPE_CASE(c10::quint8, QUInt8);
       TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       default:
-        throw unsupported_dtype();
+        TORCH_CHECK(false, "UNSUPPORTED DTYPE");
     }
   }
 
   void visit(const ExternalCallPtr& v) override {
     auto& func_registry = getNNCFunctionRegistry();
-    if (!func_registry.count(v->func_name())) {
-      throw unimplemented_lowering(v);
-    }
+    TORCH_CHECK(
+        func_registry.count(v->func_name()),
+        "UNIMPLEMENTED LOWERING: ",
+        std::to_string(v));
     GRAPH_DEBUG(
         "EXTERNAL CALL: func=",
         v->func_name(),
@@ -834,9 +858,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
     for (const BufPtr& b : bufs) {
       auto iter = buffer_mapping_.find(b);
-      if (iter == buffer_mapping_.end()) {
-        throw malformed_input("could not find buf", v);
-      }
+      TORCH_CHECK(
+          iter != buffer_mapping_.end(),
+          "MALFORMED INPUT: could not find buf - ",
+          std::to_string(v));
 
       buf_ptrs.push_back(iter->second);
       buf_ranks.push_back(b->dims().size());
@@ -864,8 +889,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         auto x = value().as<float>();
         val = reinterpret_cast<int64_t*>(&x)[0];
       } else {
-        throw malformed_input(
-            "extra_args in ExternalCalls must have int64 dtype", v);
+        TORCH_CHECK(
+            false,
+            "MALFORMED INPUT: extra_args in ExternalCalls must have int64 dtype - ",
+            std::to_string(v));
       }
       extra_args.push_back(val);
     }
@@ -884,9 +911,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   void visit(const ExternalCallWithAllocPtr& v) override {
     auto& func_registry = getNNCFunctionRegistry();
-    if (!func_registry.count(v->func_name())) {
-      throw unimplemented_lowering(v);
-    }
+    TORCH_CHECK(
+        func_registry.count(v->func_name()),
+        "UNIMPLEMENTED LOWERING: ",
+        std::to_string(v));
     GRAPH_DEBUG("EXTERNAL CALL: func=", v->func_name());
 
     const auto& bufs_out = v->buf_out_args();
@@ -904,9 +932,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     size_t i = 0;
     for (const auto& b : bufs_in) {
       auto iter = buffer_mapping_.find(b);
-      if (iter == buffer_mapping_.end()) {
-        throw malformed_input("could not find buf", v);
-      }
+      TORCH_CHECK(
+          iter != buffer_mapping_.end(),
+          "MALFORMED INPUT: could not find buf - ",
+          std::to_string(v));
       buf_ptrs[bufs_out_size + i] = iter->second;
       // @lint-ignore CLANGTIDY
       buf_ranks.push_back(b->dims().size());
@@ -935,8 +964,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         auto x = value().as<float>();
         val = reinterpret_cast<int64_t*>(&x)[0];
       } else {
-        throw malformed_input(
-            "extra_args in ExternalCalls must have int64 dtype", v);
+        TORCH_CHECK(
+            false,
+            "MALFORMED INPUT: extra_args in ExternalCalls must have int64 dtype - ",
+            std::to_string(v));
       }
       extra_args.push_back(val);
     }
@@ -973,14 +1004,14 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<TInput> v2;
     if (values.size() >= 2ULL) {
       v2 = values[1].as_vec<TInput>();
-      if (v1.size() != v2.size()) {
-        throw malformed_input("value size mismatch in Intrinsics", v);
-      }
+      TORCH_CHECK(
+          v1.size() == v2.size(),
+          "MALFORMED INPUT: value size mismatch in Intrinsics - ",
+          std::to_string(v));
     }
 
-    if (values.size() > 2) {
-      throw unimplemented_lowering(v);
-    }
+    TORCH_CHECK(
+        values.size() <= 2, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
 
     std::vector<TReturn> result(v1.size(), -1);
     if (values.size() == 1ULL) {
@@ -1004,9 +1035,9 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       } else if (inp_dtype == ScalarType::Double) {
         visit_intrinsics_helper<int, double>(v);
       } else if (inp_dtype == ScalarType::Half) {
-        throw unsupported_dtype(); // TODO
+        TORCH_CHECK(false, "UNSUPPORTED DTYPE"); // TODO
       } else if (inp_dtype == ScalarType::BFloat16) {
-        throw unsupported_dtype(); // TODO
+        TORCH_CHECK(false, "UNSUPPORTED DTYPE"); // TODO
       }
     } else {
       switch (ty) {
@@ -1017,7 +1048,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         AT_FORALL_SCALAR_TYPES(TYPE_CASE);
 #undef TYPE_CASE
         default:
-          throw unsupported_dtype();
+          TORCH_CHECK(false, "UNSUPPORTED DTYPE");
       }
     }
   }
@@ -1035,11 +1066,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         "ALLOCATE: buf=", v->buf()->name_hint(), ", size=", total_byte_size);
     auto buffer = std::make_unique<std::vector<int>>(int_count);
     auto iter = buffer_mapping_.find(b);
-    if (iter != buffer_mapping_.end() && iter->second != nullptr) {
-      throw std::runtime_error(
-          "Allocate a buffer that has already been allocated: " +
-          v->buffer_var()->name_hint());
-    }
+    TORCH_CHECK(
+        iter == buffer_mapping_.end() || iter->second == nullptr,
+        "Allocate a buffer that has already been allocated: " +
+            v->buffer_var()->name_hint());
     buffer_mapping_[b] = buffer->data();
     internal_buffers_.emplace(std::move(b), std::move(buffer));
   }
@@ -1052,11 +1082,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     BufPtr b = v->buf();
     GRAPH_DEBUG("FREE: buf=", v->buf()->name_hint());
     auto count = internal_buffers_.erase(b);
-    if (count == 0) {
-      throw std::runtime_error(
-          "Free a buffer that is not currently bound: " +
-          v->buffer_var()->name_hint());
-    }
+    TORCH_CHECK(
+        count != 0,
+        "Free a buffer that is not currently bound: " +
+            v->buffer_var()->name_hint());
     buffer_mapping_.erase(b);
   }
 
@@ -1065,11 +1094,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     const auto bufs_num = bufs.size();
     std::vector<void*> buf_ptrs;
     for (const auto& buf : bufs) {
-      if (!ext_bufs_free_ptr_.count(buf)) {
-        throw std::runtime_error(
-            "Free an external allocated buffer that does not have corresponding pointer for freeing: " +
-            buf->base_handle()->name_hint());
-      }
+      TORCH_CHECK(
+          ext_bufs_free_ptr_.count(buf),
+          "Free an external allocated buffer that does not have corresponding pointer for freeing: " +
+              buf->base_handle()->name_hint());
       buf_ptrs.push_back(ext_bufs_free_ptr_[buf]);
     }
     nnc_aten_free(bufs_num, buf_ptrs.data());
@@ -1160,7 +1188,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kIsNan:
         return std::isnan(v);
       default:
-        throw std::runtime_error("Invalid op_type: " + std::to_string(op_type));
+        TORCH_CHECK(false, "Invalid op_type: " + std::to_string(op_type));
     }
   }
 
@@ -1177,8 +1205,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         return std::is_unsigned_v<TInput> ? v : std::abs(static_cast<X>(v));
       }
       default:
-        throw std::runtime_error(
-            "Invalid integral op_type: " + std::to_string(op_type));
+        TORCH_CHECK(
+            false, "Invalid integral op_type: " + std::to_string(op_type));
     }
   }
 
@@ -1188,7 +1216,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kIsNan:
         return std::isnan(v);
       default:
-        throw std::runtime_error("Invalid op_type: " + std::to_string(op_type));
+        TORCH_CHECK(false, "Invalid op_type: " + std::to_string(op_type));
     }
   }
 
@@ -1204,7 +1232,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kAtan2:
         return std::atan2(v1, v2);
       default:
-        throw std::runtime_error("Invalid op_type: " + std::to_string(op_type));
+        TORCH_CHECK(false, "Invalid op_type: " + std::to_string(op_type));
     }
   }
 
@@ -1241,9 +1269,9 @@ void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
 }
 
 void SimpleIREvaluator::call_raw(const std::vector<void*>& args) {
-  if (args.size() != buffer_args().size()) {
-    throw malformed_input("bad args in IREvaluator call");
-  }
+  TORCH_CHECK(
+      args.size() == buffer_args().size(),
+      "MALFORMED INPUT: bad args in IREvaluator call");
   for (const auto i : c10::irange(args.size())) {
     bindArg(buffer_args()[i], args[i]);
   }
@@ -1268,7 +1296,7 @@ void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
     default:
-      throw unsupported_dtype();
+      TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   }
 }
 
@@ -1284,7 +1312,7 @@ std::optional<int64_t> evalInt(ExprPtr e) {
   try {
     return ExprEval<SimpleIREvaluator>(cast<int64_t>(ExprHandle(std::move(e))))
         .value<int64_t>();
-  } catch (std::runtime_error&) {
+  } catch (const std::exception&) {
     return std::nullopt;
   }
 }
