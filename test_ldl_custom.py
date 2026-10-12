@@ -89,6 +89,37 @@ def _factor_panels(A, nb, panels, cooperative, nblocks, nthreads, hermitian):
     return LD, ipiv, info
 
 
+# The threshold LAPACK's own test drivers use for its scaled residuals. Those run at
+# small n: the residual of Bunch-Kaufman on the hardest of these inputs grows like
+# 0.5 * sqrt(n) (rounding errors accumulate as a random walk), on CPU LAPACK and CUDA
+# alike -- 22 at n=2049, 32 at 4100, 42 at 8193, 98 at 40000 -- so past n ~ 3500 the
+# bound follows it, with some headroom.
+LAPACK_RESID_THRESH = 30.0
+
+
+def _resid_threshold(n):
+    return max(LAPACK_RESID_THRESH, 0.7 * n ** 0.5)
+
+
+def _lapack_residual(A, X, B):
+    """LAPACK's scaled residual for a linear solve (as in xPOT02/xSYT02):
+    ||B - A X||_1 / (||A||_1 ||X||_1 eps), with eps the relative machine precision
+    (half of finfo.eps, as LAPACK's dlamch('E') counts rounding, not truncation).
+    Worst over the batch."""
+    eps = torch.finfo(A.dtype).eps / 2
+    one_norm = lambda M: M.abs().sum(-2).amax(-1)
+    return (one_norm(B - A @ X) / (one_norm(A) * one_norm(X) * eps)).amax().item()
+
+
+def _residual_after_solve(A, LD, piv, hermitian=True, nrhs=3):
+    """Solves on CPU (complex+Hermitian is not supported on CUDA) with the
+    factorization of A, returning the LAPACK residual."""
+    A = symmetrize(A.cpu(), hermitian)
+    B = make_tensor((*A.shape[:-1], nrhs), dtype=A.dtype, device="cpu")
+    X = torch.linalg.ldl_solve(LD.cpu(), piv.cpu(), B, hermitian=hermitian)
+    return _lapack_residual(A, X, B)
+
+
 def _equal_with_nonfinite(a, b):
     """Bitwise equality that tolerates NaNs, whose payload is not specified."""
     return torch.equal(a.isnan(), b.isnan()) and torch.equal(a.nan_to_num(), b.nan_to_num())
@@ -116,14 +147,20 @@ def _spectrum(n, batch, s, dtype, device):
     return (q * s.unsqueeze(-2).to(dtype)) @ q.mH
 
 
-def exact_last_zero_matrix(n, dtype, device, seed):
+def exact_last_zero_matrix(n, dtype, device, seed, swaps=()):
     """Hermitian matrix whose last pivot is exactly zero, in exact arithmetic and in
     floating point alike: an identity-like diagonal d_i = +-2^k with one coupling
     v_i = 2^j * unit to the last index (|v_i| <= |d_i|, so no interchange), and
     A[-1, -1] = sum |v_i|^2 / d_i. Everything is a small dyadic number, so the
     updates reach exactly zero in whatever order they are applied, unlike a general
     singular matrix, where rounding decides. The last entry is only ever touched
-    by the updates, never factored until the very end."""
+    by the updates, never factored until the very end.
+
+    Each (a, b) in swaps (a < b, all distinct, below n - 1) plants an interchange:
+    d_a = 1/2, d_b = 4 and A[a, b] = 1 fail the 1x1 test for column a and make
+    Bunch-Kaufman take b as a 1x1 pivot instead. The pair's couplings v_a = v_b / 4
+    cancel once b is eliminated, so no further interchange follows, and the Schur
+    complement of the pair is added to A[-1, -1] exactly."""
     g = torch.Generator().manual_seed(seed)
     j = torch.randint(0, 2, (n - 1,), generator=g)
     k = j + torch.randint(0, 2, (n - 1,), generator=g)
@@ -131,12 +168,26 @@ def exact_last_zero_matrix(n, dtype, device, seed):
     units = [1, 1j, -1, -1j] if dtype.is_complex else [1, -1]
     u = torch.tensor([units[i] for i in torch.randint(0, len(units), (n - 1,), generator=g).tolist()], dtype=dtype)
     v = (2.0 ** j).to(dtype) * u
-    d = sign * 2.0 ** k
+    d = (sign * 2.0 ** k).to(dtype)
     A = torch.zeros(n, n, dtype=dtype)
-    A.diagonal()[:-1] = d.to(dtype)
+    last = torch.zeros((), dtype=dtype)
+    paired = set()
+    for a, b in swaps:
+        paired |= {a, b}
+        d[a], d[b] = 0.5, 4.0
+        v[b] = u[b]
+        v[a] = 0.25 * u[b]
+        A[a, b] = A[b, a] = 1.0
+        v2 = torch.stack([v[a], v[b]])
+        Minv = torch.tensor([[4.0, -1.0], [-1.0, 0.5]], dtype=dtype)
+        last = last + v2.conj() @ Minv @ v2
+    for i in range(n - 1):
+        if i not in paired:
+            last = last + v[i].abs() ** 2 / d[i].real
+    A.diagonal()[:-1] = d
     A[:-1, -1] = v
     A[-1, :-1] = v.conj()
-    A[-1, -1] = (v.abs() ** 2 / d).sum().to(dtype)
+    A[-1, -1] = last.real if dtype.is_complex else last
     return A.to(device)
 
 
@@ -416,20 +467,11 @@ class TestLDLCustomKernel(TestCase):
         self.assertTrue((pivots.abs() >= 1).all(), f"pivot with |p| < 1: {pivots}")
         self.assertTrue((pivots.abs() <= n).all(), f"pivot out of range: {pivots}")
 
-        Asym = symmetrize(A.cpu(), hermitian)
-        B = make_tensor((*A.shape[:-1], nrhs), dtype=A.dtype, device="cpu")
-        X = torch.linalg.ldl_solve(LD.cpu(), pivots.cpu(), B, hermitian=hermitian)
-        R = Asym @ X - B
-
-        # Backward error: ||AX - B|| / (||A|| ||X|| + ||B||). Normalising this way
-        # keeps the bound meaningful for ill-conditioned and badly scaled input,
-        # where the residual is small but B alone is a poor yardstick. The fixed
-        # per-dtype defaults in assertEqual are far too tight here -- they reject
-        # valid float32 results from n=33 up, on CPU as readily as on CUDA.
-        denom = Asym.abs().amax() * X.abs().amax() + B.abs().amax()
-        rel = (R.abs().amax() / denom).item()
-        tol = 1000 * n * torch.finfo(A.dtype).eps
-        self.assertLess(rel, tol, f"backward error {rel:.3e} exceeds {tol:.3e}")
+        # LAPACK's scaled solve residual. The per-dtype defaults of assertEqual are far too
+        # tight here: they reject valid float32 results from n=33 up, on CPU as
+        # readily as on CUDA.
+        resid = _residual_after_solve(A, LD, pivots, hermitian, nrhs)
+        self.assertLess(resid, _resid_threshold(n))
 
     # ------------------------------------------------------------------ sweeps
 
@@ -553,6 +595,24 @@ class TestLDLCustomKernel(TestCase):
             self.assertEqual(info.item(), n)
             self.assertEqual(ipiv[-1].item(), n)
             self.assertEqual(LD.diagonal().imag.abs().max().item() if dtype.is_complex else 0, 0)
+
+    # The library picks the panel width per architecture (e.g. 16, 24, 48, 96 on GB200
+    # against 32 to 128 on H100), and ends panels on 256-byte boundaries. Whatever the
+    # width, the whole factorization has to be right, so run the standalone kernel with
+    # all of them, 2x2 blocks straddling the panel ends included.
+    @onlyCUDA
+    @parametrize("structure", ["indefinite", "zero_diagonal", "out_of_panel_heavy"])
+    @parametrize("nb", [8, 16, 24, 48, 64, 96, 128, 200])
+    @parametrize("n", [100, 300, 700])
+    @dtypes(*floating_and_complex_types())
+    def test_panel_widths_full_factorization(self, device, dtype, n, nb, structure):
+        torch.manual_seed(n)
+        A = STRUCTURES[structure](n, (), dtype, device)
+        for cooperative, nblocks, nthreads in ((True, -(-n // 256), 256), (False, 1, 1024)):
+            LD, ipiv, info = _factor_panels(A, nb, None, cooperative, nblocks, nthreads, True)
+            self.assertEqual(info.item(), 0)
+            torch.manual_seed(0)
+            self.assertLess(_residual_after_solve(A, LD, ipiv), _resid_threshold(n))
 
     @onlyCUDA
     @parametrize("n", [300, 4100])
@@ -748,36 +808,6 @@ class TestLDLCustomKernel(TestCase):
                     self.assertEqual(pattern_from_pivots(piv.cpu()), pattern)
 
     # -------------------------------------------------------------- CUDA-only
-
-    @onlyCUDA
-    @parametrize("structure", ["indefinite", "zero_diagonal", "out_of_panel_heavy", "ill_conditioned"])
-    @parametrize("n", [33, 64, 127, 257, 513, 1025])
-    @dtypes(torch.float64, torch.complex128)
-    def test_matches_cpu_quality(self, device, dtype, n, structure):
-        """CUDA must factor about as accurately as CPU LAPACK.
-
-        Compares residuals, not factors: the two backends routinely choose
-        different pivot sequences at these sizes, which makes LD and the pivot
-        vector differ wholesale while both factorizations stay valid.
-        """
-        torch.manual_seed(n)
-        A = STRUCTURES[structure](n, (), dtype, device)
-        B = make_tensor((n, 3), dtype=dtype, device="cpu")
-        Asym = symmetrize(A.cpu(), True)
-
-        def resid(a):
-            LD, piv, _ = torch.linalg.ldl_factor_ex(a, hermitian=True)
-            x = torch.linalg.ldl_solve(LD.cpu(), piv.cpu(), B, hermitian=True)
-            denom = Asym.abs().amax() * x.abs().amax() + B.abs().amax()
-            return ((Asym @ x - B).abs().amax() / denom).item()
-
-        cuda_r, cpu_r = resid(A), resid(A.cpu())
-        floor = 200 * n * torch.finfo(dtype).eps
-        self.assertLess(
-            cuda_r,
-            max(50 * cpu_r, floor),
-            f"cuda {cuda_r:.3e} vs cpu {cpu_r:.3e} (n={n}, {structure})",
-        )
 
     @onlyCUDA
     @parametrize("structure", list(STRUCTURES))
@@ -1129,6 +1159,66 @@ class TestLDLCustomKernel(TestCase):
         self.assertTrue((piv.abs() <= n).all(), f"pivot out of range: {piv}")
         self.assertGreaterEqual(info.item(), 0)
         self.assertLessEqual(info.item(), n)
+
+    # (n, planted interchanges): adjacent, far, several, across panel boundaries,
+    # and out of panel on the cooperative path
+    _SWAP_LAYOUTS = {
+        "adjacent": (8, [(0, 1)]),
+        "far": (70, [(0, 40)]),
+        "two": (70, [(10, 60), (20, 50)]),
+        "panel_boundary": (300, [(31, 33), (5, 200), (100, 150)]),
+        "cooperative": (2100, [(0, 2000), (31, 2050)]),
+    }
+
+    @parametrize("layout", list(_SWAP_LAYOUTS))
+    @dtypes(*floating_and_complex_types())
+    def test_zero_last_pivot_after_interchanges(self, device, dtype, layout):
+        """Same as test_zero_last_pivot_from_updates, but the updates reach the
+        last entry through columns that were interchanged first."""
+        n, swaps = self._SWAP_LAYOUTS[layout]
+        for seed in range(2):
+            A = exact_last_zero_matrix(n, dtype, device, seed, swaps)
+            _, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+            self.assertEqual([piv[a].item() for a, _ in swaps], [b + 1 for _, b in swaps])
+            self.assertEqual(info.item(), n)
+            A[-1, -1] += 0.5
+            _, _, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+            self.assertEqual(info.item(), 0)
+
+    @onlyCUDA
+    @parametrize("hermitian", [True, False])
+    @parametrize("n", [5, 33, 150, 600, 2049])
+    @dtypes(torch.float32, torch.float64)
+    def test_solve_on_cuda(self, device, dtype, n, hermitian):
+        """ldl_solve runs on CUDA for real dtypes. Its input is what the custom
+        kernel produced, so the pivot encoding and the layout of LD have to be the
+        ones cuSOLVER's solver expects. (Complex+Hermitian has no CUDA solver.)"""
+        torch.manual_seed(n)
+        A = indefinite(n, (), dtype, device)
+        B = make_tensor((n, 3), dtype=dtype, device=device)
+        LD, piv, _ = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
+        X = torch.linalg.ldl_solve(LD, piv, B, hermitian=hermitian)
+        self.assertLess(_lapack_residual(A, X, B), _resid_threshold(n))
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_unsupported_dtype(self, device, dtype):
+        with self.assertRaises(NotImplementedError):
+            torch.linalg.ldl_factor_ex(torch.eye(4, dtype=dtype, device=device), hermitian=True)
+
+    @onlyCUDA
+    @parametrize("structure", ["indefinite", "zero_diagonal", "out_of_panel_heavy", "clustered",
+                               "tiny_diagonal", "integer_valued", "complex_real_valued", "ill_conditioned"])
+    @parametrize("n", [33, 127, 513, 1025, 2049])
+    @dtypes(*floating_and_complex_types())
+    def test_lapack_residual(self, device, dtype, n, structure):
+        """The scaled residual stays under LAPACK's own test threshold (see
+        _resid_threshold). Measured on these inputs it is 0.1 to 22 for CUDA and CPU
+        LAPACK alike, so a loss of a few digits would show."""
+        torch.manual_seed(n)
+        A = STRUCTURES[structure](n, (), dtype, device)
+        torch.manual_seed(0)
+        resid = _residual_after_solve(A, *torch.linalg.ldl_factor_ex(A, hermitian=True)[:2])
+        self.assertLess(resid, _resid_threshold(n))
 
     @parametrize("n", [2, 5, 33, 34, 65, 150, 2049, 4100])
     @dtypes(*floating_and_complex_types())
