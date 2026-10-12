@@ -359,6 +359,7 @@ Save after instantiation and before resetting or destroying the graph.
      CUDAPluggableAllocator
      change_current_allocator
      MemPool
+     HostMemPool
      LocalizedAllocator
 ```
 
@@ -377,6 +378,10 @@ Save after instantiation and before resetting or destroying the graph.
 
 ```{eval-rst}
 .. autoclass:: torch.cuda.use_mem_pool
+```
+
+```{eval-rst}
+.. autoclass:: torch.cuda.use_host_mem_pool
 ```
 
 ```{eval-rst}

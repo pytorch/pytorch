@@ -49,6 +49,14 @@ struct CUDACachingHostAllocatorImpl
     allocate_host_memory_slowpath(size, ptr);
   }
 
+  void allocate_host_mem_pool_memory(size_t size, void** ptr) override {
+    // The reserve segment is shared by all pools and was placed by whichever
+    // thread allocated first, so skip it. Still create it on first use, as
+    // allocate_host_memory does, so that free_block never creates it.
+    get_reserve_segment();
+    allocate_host_memory_slowpath(size, ptr);
+  }
+
   void allocate_host_memory_slowpath(size_t size, void** ptr) {
     // Pinned memory pointers allocated by any device can be directly used by
     // any other device, regardless of the current device at the time of
