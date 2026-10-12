@@ -215,6 +215,20 @@ test_rerun_then_fail      | 2            | failed  | AssertionError: attempt 3 f
 test_no_rerun_needed      | 0            | passed  |""",
         )
 
+    def test_reruns_keep_outcomes(self) -> None:
+        # run_test.py always passes --reruns, under which pytest-rerunfailures sends
+        # an attempt's reports only once it ends. Each test's last run must still
+        # match the run without it.
+        def last_outcomes(raw: str) -> dict[str, str]:
+            runs = (json.loads(line) for line in raw.splitlines()[1:])
+            return {run["case_name"]: run["outcome"] for run in runs}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            args = [str(_PYTEST_SUITE), "--reruns", "2"]
+            _, report = _run_plugin(str(_TEST_DIR), args, Path(tmp) / "suite")
+            raw = report.read_text()
+        self.assertEqual(last_outcomes(raw), last_outcomes(self.raw))
+
     def test_schema(self) -> None:
         report, *runs = (json.loads(line) for line in self.raw.splitlines())
         self.assertEqual(
@@ -303,17 +317,23 @@ TestUnittest    | test_unittest            | test_unittest""",
         )
 
     def test_subtests(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            _, report = _run_plugin(
-                str(_REPORT_TESTDATA), ["subtests_report.py"], Path(tmp) / "subtests"
+        # With --reruns, as run_test.py passes, pytest-rerunfailures sends the
+        # test's setup report after its subtests' reports.
+        for args in ([], ["--reruns", "1"]):
+            with tempfile.TemporaryDirectory() as tmp:
+                _, report = _run_plugin(
+                    str(_REPORT_TESTDATA),
+                    ["subtests_report.py", *args],
+                    Path(tmp) / "subtests",
+                )
+                runs = _runs(report)
+            # One run per test, however many subtests it has.
+            self.assertEqual(
+                [(run["case_name"], run["outcome"]) for run in runs],
+                [("test_failing_subtest", "failed")],
+                args,
             )
-            runs = _runs(report)
-        # One run per test, however many subtests it has.
-        self.assertEqual(
-            [(run["case_name"], run["outcome"]) for run in runs],
-            [("test_failing_subtest", "failed")],
-        )
-        self.assertIn("1 != 0", runs[0]["outcome_summary"])
+            self.assertIn("1 != 0", runs[0]["outcome_summary"])
 
     def test_skip_after_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
