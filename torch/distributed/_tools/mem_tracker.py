@@ -153,7 +153,8 @@ class _WeakRefInfo:
             int: The memory consumed in bytes.
         """
         mem = self.size * self.element_size
-        if self.device.type == "cuda":
+        accelerator = torch.accelerator.current_accelerator()
+        if accelerator is not None and self.device.type == accelerator.type:
             return math.ceil((mem) / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
         return mem
 
