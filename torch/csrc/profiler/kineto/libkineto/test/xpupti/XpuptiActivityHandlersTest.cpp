@@ -686,11 +686,20 @@ TEST_F(XpuptiActivityHandlersTest, PeerToPeerMemcpyIsGpuMemcpy) {
   EXPECT_EQ(
       activity.getMetadataValue(XpuMetadataFields::kBytes),
       std::optional<uint64_t>{4096});
-  EXPECT_EQ(
-      activity.getMetadataValue(XpuMetadataFields::kFromDevice),
-      std::optional<int64_t>{activity.deviceId()});
+  EXPECT_TRUE(
+      activity.getMetadataValue(XpuMetadataFields::kFromDevice).has_value());
   EXPECT_TRUE(
       activity.getMetadataValue(XpuMetadataFields::kToDevice).has_value());
+  // The copy is on the device that ran it, which the v3 record names.
+  const auto inDevice = activity.getMetadataValue(XpuMetadataFields::kInDevice);
+  if constexpr (KN::kReportsCopyExecutingDevice) {
+    EXPECT_EQ(inDevice, std::optional<int64_t>{activity.deviceId()});
+  } else {
+    EXPECT_FALSE(inDevice.has_value());
+    EXPECT_EQ(
+        activity.getMetadataValue(XpuMetadataFields::kFromDevice),
+        std::optional<int64_t>{activity.deviceId()});
+  }
 }
 
 // --- Mixed dispatch test ---
