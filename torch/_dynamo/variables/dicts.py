@@ -437,7 +437,8 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker:
         key = self._lookup_key(tx, arg)
         value = self.items.get(key)
-        if value is None or isinstance(value, variables.DeletedVariable):
+        # The deletion marker is explicit; `isinstance` would realize lazy values.
+        if value is None or type(value) is variables.DeletedVariable:
             raise_observed_exception(KeyError, tx, args=[arg])
         return value
 
@@ -509,8 +510,8 @@ class ConstDictVariable(VariableTracker):
         arg = key.vt
         if key_present is None:
             value = self.items.get(key)
-            key_present = value is not None and not isinstance(
-                value, variables.DeletedVariable
+            key_present = (
+                value is not None and type(value) is not variables.DeletedVariable
             )
         if arg.source is None and arg.is_python_constant():
             guard_fn = (
@@ -568,9 +569,7 @@ class ConstDictVariable(VariableTracker):
         key = self._lookup_key(tx, item)
         self.install_dict_contains_guard(tx, key)
         value = self.items.get(key)
-        contains = value is not None and not isinstance(
-            value, variables.DeletedVariable
-        )
+        contains = value is not None and type(value) is not variables.DeletedVariable
         return VariableTracker.build(tx, contains)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -660,7 +659,7 @@ class ConstDictVariable(VariableTracker):
         check_positional(tx, "get", len(args), 1, 2)
         key = self._lookup_key(tx, args[0])
         value = self.items.get(key)
-        if value is None or isinstance(value, variables.DeletedVariable):
+        if value is None or type(value) is variables.DeletedVariable:
             self.install_dict_contains_guard(tx, key)
             if len(args) == 1:
                 # if default is not given, return None
@@ -690,7 +689,7 @@ class ConstDictVariable(VariableTracker):
             else self._lookup_key(tx, args[0])
         )
         value = self.items.get(key)
-        if value is None or isinstance(value, variables.DeletedVariable):
+        if value is None or type(value) is variables.DeletedVariable:
             # missing item, return the default value. Install no DICT_CONTAINS guard.
             self.install_dict_contains_guard(tx, key)
             if len(args) == 1:
@@ -805,7 +804,13 @@ class ConstDictVariable(VariableTracker):
         self.install_dict_keys_match_guard()
         key = self._lookup_key(tx, args[0])
         value = self.items.get(key)
-        if value is not None and not isinstance(value, variables.DeletedVariable):
+        if value is not None and type(value) is not variables.DeletedVariable:
+            if (
+                isinstance(self, OrderedDictVariable)
+                and self.python_type() is not collections.OrderedDict
+            ):
+                # `OrderedDict_setdefault_impl` uses `PyObject_GetItem` for subclasses.
+                return generic_getitem(tx, self, args[0])
             return value
         else:
             if len(args) == 1:
@@ -978,7 +983,13 @@ class ConstDictVariable(VariableTracker):
         if self.source:
             # Value comparisons can have order-dependent side effects.
             tx.output.guard_on_key_order.add(self.source)
-        for key, value in _iter_detecting_mutation(iter(self.items.items())):
+        # CPython's dict_equal walks storage order even for OrderedDict.
+        items = (
+            dict.items(self.items)
+            if isinstance(self.items, dict)
+            else self.items.items()
+        )
+        for key, value in _iter_detecting_mutation(iter(items)):
             # Native equality reuses each key's insertion-time hash.
             other_value = other.items.get(key)
             if other_value is None or isinstance(
@@ -1099,10 +1110,38 @@ class OrderedDictVariable(ConstDictVariable):
         tx.output.side_effects.mutation(self)
         return variables.TupleVariable([k.vt, v])
 
+    def dict_keys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return super().dict_keys(tx, args, kwargs).clone(is_ordered=True)
+
+    def dict_values(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return super().dict_values(tx, args, kwargs).clone(is_ordered=True)
+
+    def dict_items(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return super().dict_items(tx, args, kwargs).clone(is_ordered=True)
+
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
+        "update": Method(tp_init_impl),
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
+        "keys": Method(dict_keys),
+        "values": Method(dict_values),
+        "items": Method(dict_items),
     }
 
     def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
@@ -1346,7 +1385,9 @@ class DictViewVariable(VariableTracker):
 
     kv: str | None = None
 
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
+    def __init__(
+        self, dv_dict: ConstDictVariable, *, is_ordered: bool = False, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         if self.kv not in ("keys", "values", "items"):
             raise AssertionError(
@@ -1355,6 +1396,8 @@ class DictViewVariable(VariableTracker):
         if not isinstance(dv_dict, ConstDictVariable):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
+        # The creating descriptor determines the view, not the receiver's type.
+        self.is_ordered = is_ordered
 
     @property
     def view_items(self) -> Any:
@@ -1384,7 +1427,7 @@ class DictViewVariable(VariableTracker):
             raise AssertionError("kv must not be None for reconstruct")
 
         def load_method() -> None:
-            if isinstance(self.dv_dict, OrderedDictVariable):
+            if self.is_ordered:
                 codegen.load_import_from("collections", "OrderedDict")
             else:
                 codegen.load_import_from("builtins", "dict")
