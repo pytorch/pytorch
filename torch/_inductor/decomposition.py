@@ -267,6 +267,7 @@ def _lerp_scalar(start: torch.Tensor, end: torch.Tensor, weight: float) -> torch
     # matching eager CUDA's dual-formula (see aten/src/ATen/native/Lerp.h).
     # Convert end to start's memory format so the output preserves start's layout,
     # matching eager TensorIterator behavior.
+    # NOTE: no promotion; bool/int inputs also fail eagerly for lerp.Scalar.
     fmt = suggest_memory_format(start)
     if fmt != torch.contiguous_format:
         end = end.contiguous(memory_format=fmt)
@@ -285,6 +286,18 @@ def _lerp_tensor(
     fmt = suggest_memory_format(start)
     if fmt != torch.contiguous_format:
         end = end.contiguous(memory_format=fmt)
+    # Eager's lerp.Tensor meta only promotes when weight is 0-d; match that so
+    # sub/addcmul never see raw bool tensors (see aten/src/ATen/native/Lerp.cpp).
+    if weight.dim() == 0:
+        _, dtype = elementwise_dtypes(
+            start,
+            end,
+            weight,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        )
+        start = start.to(dtype)
+        end = end.to(dtype)
+        weight = weight.to(dtype)
     diff = end - start
     mask = weight.abs() >= 0.5
     neg_omw = -(1.0 - weight)
