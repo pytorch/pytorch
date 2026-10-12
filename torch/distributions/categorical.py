@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 
 import torch
-from torch import nan, Tensor
+from torch import inf, nan, Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import lazy_property, logits_to_probs, probs_to_logits
@@ -148,11 +148,27 @@ class Categorical(Distribution):
         samples_2d = torch.multinomial(probs_2d, sample_shape.numel(), True).T
         return samples_2d.reshape(self._extended_shape(sample_shape))
 
+    def _exact_logits(self) -> Tensor:
+        """
+        Like ``logits``, but events with probability exactly 0 get ``-inf`` when
+        the distribution was parametrized by ``probs``. ``probs_to_logits`` clamps
+        probabilities to ``eps`` for numerical stability, which would otherwise
+        give impossible events a finite, dtype-dependent log-probability.
+        """
+        probs = self.__dict__.get("probs")
+        if probs is not None and probs is self._param:
+            return torch.where(
+                probs == 0,
+                torch.full_like(self.logits, -inf),
+                self.logits,
+            )
+        return self.logits
+
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
         value = value.long().unsqueeze(-1)
-        value, log_pmf = torch.broadcast_tensors(value, self.logits)
+        value, log_pmf = torch.broadcast_tensors(value, self._exact_logits())
         value = value[..., :1]
         return log_pmf.gather(-1, value).squeeze(-1)
 
