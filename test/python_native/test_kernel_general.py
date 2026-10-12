@@ -5,6 +5,7 @@
 import pathlib
 import sys
 import unittest
+from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
@@ -33,14 +34,14 @@ from torch._native.ops.reductions import (
 
 
 class _DecodeProbe:
-    def __init__(self, wide):
-        self.wide = wide
+    def __init__(self, native_div):
+        self.native_div = native_div
 
     @cute.jit
     def __call__(self, out, exts, strides, linear, stream):
         divs = (
             exts
-            if cutlass.const_expr(self.wide)
+            if cutlass.const_expr(self.native_div)
             else [cute.FastDivmodDivisorV2(e) for e in exts]
         )
         self.kernel(out, divs, strides, linear).launch(
@@ -54,7 +55,7 @@ class _DecodeProbe:
             divs,
             strides,
             cutlass.const_expr(2),
-            cutlass.const_expr(self.wide),
+            cutlass.const_expr(self.native_div),
         )
 
 
@@ -67,6 +68,57 @@ class TestKernelGeneral(TestCase):
             T.SumOps(acc=cutlass.Float32), "smoke", x, [1], torch.float32
         )
         torch.testing.assert_close(out, x.sum(dim=1), atol=1e-2, rtol=1e-2)
+
+    def test_extent_one_reduced_axis(self):
+        # TensorIterator coalesces away the reduced run; the kernel must fold one value.
+        x = torch.randn(4, 1, 5, device="cuda")
+        out = torch.empty(4, 5, device="cuda")
+        red, kept = kg._ti_pairs(x, kg._probe(x, {1}))
+        op = kg.ReduceBlock(
+            T.SumOps(acc=cutlass.Float32),
+            count=1,
+            num_o=out.numel(),
+            red_pairs=red,
+            kept_pairs=kept,
+        )
+        self.assertEqual(op.npairs_red, 0)
+        kg._launch(op, ("unit_red", "unit_red"), [kg._flat(x)], [out.reshape(-1)])
+        self.assertEqual(out, x.sum(dim=1))
+
+    def test_wide_geometry_runs_kernel(self):
+        trait = T.SumOps(acc=cutlass.Float32)
+
+        # Exercise Int64 count arithmetic without allocating or reducing 2**31 elements.
+        x = torch.tensor([3.0], device="cuda")
+        out = torch.empty_like(x)
+        wide_count = kg.ReduceBlock(
+            trait,
+            count=2**31,
+            num_o=1,
+            red_pairs=((65536, 1), (32768, 65536)),
+            kept_pairs=(),
+            flat_tail=True,
+            limit=1,
+        )
+        kg._launch(wide_count, ("wide", "wide_count"), [x], [out])
+        self.assertEqual(out, x)
+
+        # Lower only the selection and grid limits to run the real wide-output split.
+        x = torch.arange(6, dtype=torch.float32, device="cuda")
+        out = torch.empty_like(x)
+        with (
+            mock.patch.object(kg, "_INT32_LIMIT", 4),
+            mock.patch.object(kg, "_GRID_X_MAX", 3),
+        ):
+            wide_output = kg.ReduceBlock(
+                trait,
+                count=1,
+                num_o=6,
+                red_pairs=(),
+                kept_pairs=((3, 1), (2, 3)),
+            )
+            kg._launch(wide_output, ("wide", "wide_output"), [x], [out])
+        self.assertEqual(out, x)
 
     def test_two_stage_row_ragged_split(self):
         # A prime row requires ragged stage-1 chunks that stop at row boundaries.
@@ -89,14 +141,14 @@ class TestKernelGeneral(TestCase):
     def test_int64_mixed_radix_decode(self):
         """Decode logical indices beyond INT32_MAX without truncating strides or extents."""
         cases = (
-            (False, (65537, 65539), (3, 5), (1 << 31) + 17),
-            (True, ((1 << 31) + 17, 3), (7, 11), (1 << 31) + 23),
+            (False, Int32, (65537, 65539), (3, 5), (1 << 31) + 17),
+            (True, Int32, (65537, 65539), (3, 5), (1 << 32) + 17),
+            (True, Int64, ((1 << 31) + 17, 3), (7, 11), (1 << 31) + 23),
         )
-        for wide, extents, strides, linear in cases:
+        for native_div, extent_type, extents, strides, linear in cases:
             out = torch.empty(1, dtype=torch.int64, device="cuda")
-            extent_type = Int64 if wide else Int32
             fn = _L.compile_kernel(
-                _DecodeProbe(wide),
+                _DecodeProbe(native_div),
                 _L.fake_compact(cutlass.Int64, (_L.sym(),)),
                 [extent_type(e) for e in extents],
                 [Int64(s) for s in strides],
