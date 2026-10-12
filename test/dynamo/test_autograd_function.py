@@ -1991,6 +1991,40 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(x.grad, y, atol=0, rtol=0)
 
+    def test_set_output_grad_dtype_non_tensor_output(self):
+        # The traced autograd.Function drops the non-tensor output, so the
+        # declarations must be remapped to its remaining outputs.
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        class ToBFloat16(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.set_output_grad_dtype(None, torch.bfloat16, torch.float32)
+                return 2, x.to(torch.bfloat16), y.to(torch.bfloat16)
+
+            @staticmethod
+            def backward(ctx, grad_n, grad_x, grad_y):
+                return grad_x, grad_y
+
+        def fn(x, y, z):
+            # fp32 * bf16 sends fp32 gradients into both bf16 outputs.
+            n, x_bf16, y_bf16 = ToBFloat16.apply(x, y)
+            return (x_bf16 * z + y_bf16 * z) * n
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=True)
+        # 1 + 2**-9 is exact in fp32 but rounds to 1 in bf16.
+        z = torch.full((4,), 1 + 2**-9)
+        fn(x, y, z).sum().backward()
+        ref_grads = (x.grad, y.grad)
+        # x's gradient is declared bf16, so rounded; y's is declared fp32.
+        self.assertEqual(ref_grads[0], torch.full((4,), 2.0), atol=0, rtol=0)
+        self.assertEqual(ref_grads[1], 2 * z, atol=0, rtol=0)
+        x.grad = y.grad = None
+        torch.compile(fn, backend=cnt, fullgraph=True)(x, y, z).sum().backward()
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual((x.grad, y.grad), ref_grads, atol=0, rtol=0)
+
     def test_mark_non_differentiable(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         from torch.autograd import Function

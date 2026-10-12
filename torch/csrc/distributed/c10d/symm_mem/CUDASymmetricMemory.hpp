@@ -58,6 +58,7 @@ class CUDASymmetricMemory : public SymmetricMemory {
   void wait_signal(int src_rank, int channel, size_t timeout_ms) override;
 
   int get_rank() override;
+  std::string get_group_name() override;
   int get_world_size() override;
   c10::Device get_device() override;
   bool world_within_direct_access() override;
