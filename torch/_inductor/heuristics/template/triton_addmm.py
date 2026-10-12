@@ -32,6 +32,4 @@ class AddMMConfigMixin(TemplateConfigHeuristics):
                 ["addmm_epilogue", kernel_inputs.out_dtype(), alpha, beta]
             ),
             "prefix_args": 1,
-            # Index 0 is the prefix input consumed by the addmm/baddbmm epilogue.
-            "prefix_inputs_fusion_indices": (0,),
         }

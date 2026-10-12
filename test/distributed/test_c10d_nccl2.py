@@ -385,6 +385,59 @@ class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
         return "nccl-legacy"
 
 
+class ProcessGroupNCCL2LazyInitTest(_ProcessGroupNCCL2OptionsTest):
+    """With lazy_init, communicators are created on first use."""
+
+    @staticmethod
+    def _lazy_opts() -> "dist.ProcessGroupNCCL.Options":
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.lazy_init = True
+        return opts
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_new_group_defers_comm(self) -> None:
+        group = dist.new_group(pg_options=self._lazy_opts(), device_id=self.device)
+        backend = group._get_backend(self.device)
+        self.assertFalse(backend.supports_splitting)
+        self.assertEqual(backend.comm_ptr, 0)
+
+        t = torch.ones(1, device=self.device)
+        dist.all_reduce(t, group=group)
+        self.assertNotEqual(backend.comm_ptr, 0)
+        self.assertEqual(t, torch.full_like(t, self.world_size))
+
+        # Every member initialized it on the all_reduce, so it can be split.
+        self.assertTrue(backend.supports_splitting)
+        child = group.split_group([self.rank], group_name=f"lazy_child{self.rank}")
+        t = torch.ones(1, device=self.device)
+        dist.all_reduce(t, group=child)
+        self.assertEqual(t, torch.ones_like(t))
+        dist.destroy_process_group(group)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_new_group_with_nonmembers(self) -> None:
+        # Only members bootstrap the communicator; non-members don't split.
+        group = dist.new_group(
+            ranks=[0], pg_options=self._lazy_opts(), device_id=self.device
+        )
+        if self.rank == 0:
+            t = torch.ones(1, device=self.device)
+            dist.all_reduce(t, group=group)
+            self.assertEqual(t, torch.ones_like(t))
+            dist.destroy_process_group(group)
+        else:
+            self.assertEqual(group, dist.GroupMember.NON_GROUP_MEMBER)
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCLLazyLazyInitTest(ProcessGroupNCCL2LazyInitTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+
 class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:
@@ -605,6 +658,9 @@ class _ProcessGroupNCCL2SubgroupTest(MultiProcContinuousTest):
     They run on a throwaway subgroup so the class-wide default group survives;
     a collective on that default group afterwards is what proves the process is
     still alive and healthy.
+
+    After a timeout, all ranks must abort the subgroup, including peers that
+    did not observe the failure. Mixing abort and destroy can hang in NCCL.
     """
 
     @classmethod
@@ -710,7 +766,7 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
 
         self._wait_for_rank_zero(pg)
-        dist.destroy_process_group(pg)
+        dist.distributed_c10d._abort_process_group(pg)
         self._check_all_reduce()
 
     @requires_nccl()
@@ -735,7 +791,7 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
 
         self._wait_for_rank_zero(pg)
-        dist.destroy_process_group(pg)
+        dist.distributed_c10d._abort_process_group(pg)
         self._check_all_reduce()
 
 
@@ -760,7 +816,7 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
                 work.wait()
 
         self._wait_for_rank_zero(pg)
-        dist.destroy_process_group(pg)
+        dist.distributed_c10d._abort_process_group(pg)
         self._check_all_reduce()
 
 
@@ -855,7 +911,7 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
                 self.assertFalse(os.path.exists(path))
 
         dist.destroy_process_group(gloo_pg)
-        dist.destroy_process_group(pg)
+        dist.distributed_c10d._abort_process_group(pg)
         self._check_all_reduce()
 
 
@@ -902,7 +958,7 @@ class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
                 self.assertEqual(hung[0]["profiling_name"], "nccl2:all_reduce")
             self._wait_for_rank_zero(pg)
 
-        dist.destroy_process_group(pg)
+        dist.distributed_c10d._abort_process_group(pg)
         self._check_all_reduce()
 
 
