@@ -3204,6 +3204,7 @@ class TestXPUMultiprocessing(TestCase):
     def test_event_handle_importer(self, event_cls):
         e0 = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
+
         ctx = mp.get_context("spawn")
         p2c = ctx.SimpleQueue()
         c2p = ctx.SimpleQueue()
@@ -3212,6 +3213,7 @@ class TestXPUMultiprocessing(TestCase):
             args=(event_cls, e0.ipc_handle(), p2c, c2p),
         )
         p.start()
+
         c2p.get()  # wait for child to become ready
         torch.xpu._sleep(200_000_000)  # spin for about 200 ms
         e0.record()
@@ -3250,31 +3252,35 @@ class TestXPUMultiprocessing(TestCase):
         p2c.put(0)  # notify child to finish
         p.join()
 
-    def test_event_multiprocess(self):
-        for event in [
-            torch.xpu.Event(enable_timing=False, interprocess=True),
-            torch.Event(enable_timing=False, interprocess=True),
-        ]:
-            self.assertTrue(event.query())
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.xpu.Event, name="xpu_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_multiprocess(self, event_cls):
+        event = event_cls(enable_timing=False, interprocess=True)
+        self.assertTrue(event.query())
 
-            ctx = mp.get_context("spawn")
-            p2c = ctx.SimpleQueue()
-            c2p = ctx.SimpleQueue()
-            p = ctx.Process(
-                target=TestXPUMultiprocessing._event_multiprocess_child,
-                args=(event, p2c, c2p),
-            )
-            p.start()
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestXPUMultiprocessing._event_multiprocess_child,
+            args=(event, p2c, c2p),
+        )
+        p.start()
 
-            c2p.get()  # wait for until child process is ready
-            torch.xpu._sleep(200_000_000)  # spin for about 200 ms
-            event.record()
-            p2c.put(0)  # notify child event is recorded
+        c2p.get()  # wait for until child process is ready
+        torch.xpu._sleep(200_000_000)  # spin for about 200 ms
+        event.record()
+        p2c.put(0)  # notify child event is recorded
 
-            self.assertFalse(event.query())
-            c2p.get()  # wait for synchronization in child
-            self.assertTrue(event.query())
-            p.join()
+        self.assertFalse(event.query())
+        c2p.get()  # wait for synchronization in child
+        self.assertTrue(event.query())
+        p.join()
 
 
 @contextlib.contextmanager

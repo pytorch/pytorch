@@ -1013,7 +1013,7 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         p.start()
 
         c2p.get()  # wait for until child process is ready
-        torch.cuda._sleep(200000000)  # spin for about 200 ms
+        torch.cuda._sleep(50000000)  # spin for about 50 ms
         event.record()
         p2c.put(0)  # notify child event is recorded
 
