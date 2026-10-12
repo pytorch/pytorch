@@ -1,3 +1,6 @@
+# Derived from CUTLASS examples/python/CuTeDSL/cute/blackwell/kernel/
+# blockscaled_grouped_gemm/grouped_blockscaled_gemm.py, with the overlapping
+# accumulator, N=64 scale handling and nvfp4 global scale from moe/torch_scaled_grouped_mm.py.
 import cuda.bindings.driver as cuda
 import cutlass
 import cutlass.cute as cute
@@ -29,6 +32,7 @@ _MetadataStrides = tuple[
 ]
 
 
+# Only the group search is reused; CLC, not the static schedule, hands out tiles.
 class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler):
     @classmethod
     def create_for_clc(
@@ -212,6 +216,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         self.has_global_scale = sf_vec_size == 16
         self.use_2cta_instrs = mma_tiler_mn[0] == 256
         self.cluster_shape_mn = cluster_shape_mn
+        # Swaps A and B for small groups, so their rows fill the narrower N tile.
         self.transpose_ab = transpose_ab
         self.uniform_mn_groups = uniform_mn_groups
         self.mma_tiler = (*mma_tiler_mn, 1)
@@ -574,6 +579,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         )
 
         direct_problem_shape_mnl = (0, 0, 0)
+        # 2d/2d groups share M and N, so CLC can hand out (m, n, group) directly.
         if cutlass.const_expr(self.uniform_mn_groups):
             cluster_count_m, cluster_count_n = cute.ceil_div(
                 (tensor_a.shape[0], tensor_b.shape[0]),
@@ -597,6 +603,7 @@ class Sm100GroupedBlockScaledGemmKernel:
                 estimate_total_num_clusters,
                 swizzle_size=self.CLC_SWIZZLE_SIZE,
             )
+        # offs is on device, so launch a host upper bound; CLC masks the excess tiles.
         grid = utils.ClcDynamicPersistentTileScheduler.get_grid_shape(
             estimate_tile_sched_params
         )
@@ -666,6 +673,7 @@ class Sm100GroupedBlockScaledGemmKernel:
 
         self.shared_storage = SharedStorage
 
+        # Descriptors are built once per group, as CLC may send a CTA to any group.
         self.init_kernel(
             tma_atom_a,
             tma_atom_b,
@@ -1041,6 +1049,10 @@ class Sm100GroupedBlockScaledGemmKernel:
             ),
         )
         is_leader_cluster_cta = cta_rank_in_cluster == 0
+
+        # setmaxnreg is warpgroup-aligned, so the idle warp must run it too.
+        if warp_idx == self.epilogue_load_warp_id:
+            cute.arch.setmaxregister_decrease(self.GENERIC_REG_REQUIREMENT)
 
         if warp_idx == self.scheduler_warp_id:
             cute.arch.setmaxregister_decrease(self.GENERIC_REG_REQUIREMENT)

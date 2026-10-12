@@ -60,13 +60,9 @@ def _impl(
 ) -> Tensor:
     from .scaled_grouped_mm_blockscaled import scaled_grouped_mm_blockscaled
 
-    cutedsl_call = scaled_grouped_mm_blockscaled
-    if torch.compiler.is_compiling():
-        import torch._dynamo as torch_dynamo
-
-        cutedsl_call = torch_dynamo.disable(cutedsl_call)
-
-    return cutedsl_call(mat_a, mat_b, scale_a, scale_b, cast(Tensor, offs), out_dtype)
+    return scaled_grouped_mm_blockscaled(
+        mat_a, mat_b, scale_a, scale_b, cast(Tensor, offs)
+    )
 
 
 def register_to_dispatch() -> None:

@@ -4,70 +4,77 @@ from typing import cast, NamedTuple
 
 import torch
 from torch import Tensor
+from torch._meta_registrations import ceil_div, round_up
 from torch._native.instrumentation import instrumented_cutedsl_cache
+from torch._native.utils.capability import device_ok, is_traced, on_current_device
+from torch._native.utils.tensor import const_data_ptr
 from torch.nn.functional import ScalingType, SwizzleType
 
-
-class _KernelConfig(NamedTuple):
-    mma_tile_mn: tuple[int, int]
-    cluster_shape_mn: tuple[int, int]
-    transpose_ab: bool
+from .scaled_grouped_mm_blockscaled_heuristics import (
+    _select_kernel_config_fp4,
+    _select_kernel_config_fp8,
+)
 
 
 class _BlockScaledFormat(NamedTuple):
     name: str
-    torch_ab_dtype: torch.dtype
-    torch_scale_ab_dtype: torch.dtype
-    scale_ab_recipe: ScalingType
+    ab_dtype: torch.dtype
+    scale_dtypes: tuple[torch.dtype, ...]
+    scale_recipes: tuple[int, ...]
     scale_ab_vec_size: int
     logical_vals_per_elem: int
-    cutlass_ab_dtype_name: str
-    cutlass_scale_ab_dtype_name: str
-    torch_global_scale_dtype: torch.dtype | None = None
+
+    def matches(
+        self,
+        mat_a: Tensor,
+        mat_b: Tensor,
+        scale_a: Sequence[Tensor],
+        scale_b: Sequence[Tensor],
+        recipe_a: tuple[int, ...],
+        recipe_b: tuple[int, ...],
+    ) -> bool:
+        return (
+            mat_a.dtype == self.ab_dtype
+            and mat_b.dtype == self.ab_dtype
+            and tuple(scale.dtype for scale in scale_a) == self.scale_dtypes
+            and tuple(scale.dtype for scale in scale_b) == self.scale_dtypes
+            and recipe_a == self.scale_recipes
+            and recipe_b == self.scale_recipes
+        )
 
 
-_TORCH_TO_CUTLASS_DTYPE_NAME = {
-    torch.bfloat16: "BFloat16",
-    torch.float16: "Float16",
-    torch.float32: "Float32",
-    torch.float8_e4m3fn: "Float8E4M3FN",
-    torch.float8_e5m2: "Float8E5M2",
+_BLOCKSCALED_FORMATS = {
+    fmt.name: fmt
+    for fmt in (
+        _BlockScaledFormat(
+            name="mxfp8",
+            ab_dtype=torch.float8_e4m3fn,
+            scale_dtypes=(torch.float8_e8m0fnu,),
+            scale_recipes=(ScalingType.BlockWise1x32.value,),
+            scale_ab_vec_size=32,
+            logical_vals_per_elem=1,
+        ),
+        _BlockScaledFormat(
+            name="mxfp4",
+            ab_dtype=torch.float4_e2m1fn_x2,
+            scale_dtypes=(torch.float8_e8m0fnu,),
+            scale_recipes=(ScalingType.BlockWise1x32.value,),
+            scale_ab_vec_size=32,
+            logical_vals_per_elem=2,
+        ),
+        _BlockScaledFormat(
+            name="nvfp4",
+            ab_dtype=torch.float4_e2m1fn_x2,
+            scale_dtypes=(torch.float8_e4m3fn, torch.float32),
+            scale_recipes=(
+                ScalingType.BlockWise1x16.value,
+                ScalingType.TensorWise.value,
+            ),
+            scale_ab_vec_size=16,
+            logical_vals_per_elem=2,
+        ),
+    )
 }
-
-
-_BLOCKSCALED_FORMATS = (
-    _BlockScaledFormat(
-        name="mxfp8",
-        torch_ab_dtype=torch.float8_e4m3fn,
-        torch_scale_ab_dtype=torch.float8_e8m0fnu,
-        scale_ab_recipe=ScalingType.BlockWise1x32,
-        scale_ab_vec_size=32,
-        logical_vals_per_elem=1,
-        cutlass_ab_dtype_name="Float8E4M3FN",
-        cutlass_scale_ab_dtype_name="Float8E8M0FNU",
-    ),
-    _BlockScaledFormat(
-        name="mxfp4",
-        torch_ab_dtype=torch.float4_e2m1fn_x2,
-        torch_scale_ab_dtype=torch.float8_e8m0fnu,
-        scale_ab_recipe=ScalingType.BlockWise1x32,
-        scale_ab_vec_size=32,
-        logical_vals_per_elem=2,
-        cutlass_ab_dtype_name="Float4E2M1FN",
-        cutlass_scale_ab_dtype_name="Float8E8M0FNU",
-    ),
-    _BlockScaledFormat(
-        name="nvfp4",
-        torch_ab_dtype=torch.float4_e2m1fn_x2,
-        torch_scale_ab_dtype=torch.float8_e4m3fn,
-        scale_ab_recipe=ScalingType.BlockWise1x16,
-        scale_ab_vec_size=16,
-        logical_vals_per_elem=2,
-        cutlass_ab_dtype_name="Float4E2M1FN",
-        cutlass_scale_ab_dtype_name="Float8E4M3FN",
-        torch_global_scale_dtype=torch.float32,
-    ),
-)
 
 
 def _get_blockscaled_format(
@@ -75,485 +82,19 @@ def _get_blockscaled_format(
     mat_b: Tensor,
     scale_a: Sequence[Tensor],
     scale_b: Sequence[Tensor],
-    scale_recipe_a: Sequence[ScalingType | int],
-    scale_recipe_b: Sequence[ScalingType | int],
+    scale_recipe_a: Sequence[int],
+    scale_recipe_b: Sequence[int],
 ) -> _BlockScaledFormat | None:
-    mat_a_dtype = mat_a.dtype
-    if mat_a_dtype != mat_b.dtype:
-        return None
-
-    scale_a_len = len(scale_a)
-    scale_b_len = len(scale_b)
-    scale_recipe_a_len = len(scale_recipe_a)
-    scale_recipe_b_len = len(scale_recipe_b)
-
-    if (
-        scale_a_len == 1
-        and scale_b_len == 1
-        and scale_recipe_a_len == 1
-        and scale_recipe_b_len == 1
-    ):
-        scale_a_dtype = scale_a[0].dtype
-        if scale_a_dtype != scale_b[0].dtype:
-            return None
-        recipe_a = scale_recipe_a[0]
-        recipe_b = scale_recipe_b[0]
-        blockwise_1x32 = ScalingType.BlockWise1x32
-        if not (
-            (recipe_a == blockwise_1x32 or recipe_a == blockwise_1x32.value)
-            and (recipe_b == blockwise_1x32 or recipe_b == blockwise_1x32.value)
-        ):
-            return None
-        if mat_a_dtype == torch.float8_e4m3fn and scale_a_dtype == torch.float8_e8m0fnu:
-            return _BLOCKSCALED_FORMATS[0]
-        if (
-            mat_a_dtype == torch.float4_e2m1fn_x2
-            and scale_a_dtype == torch.float8_e8m0fnu
-        ):
-            return _BLOCKSCALED_FORMATS[1]
-        return None
-
-    if (
-        scale_a_len != 2
-        or scale_b_len != 2
-        or scale_recipe_a_len != 2
-        or scale_recipe_b_len != 2
-    ):
-        return None
-
-    if mat_a_dtype != torch.float4_e2m1fn_x2:
-        return None
-    if scale_a[0].dtype != torch.float8_e4m3fn:
-        return None
-    if scale_b[0].dtype != torch.float8_e4m3fn:
-        return None
-    if scale_a[1].dtype != torch.float32:
-        return None
-    if scale_b[1].dtype != torch.float32:
-        return None
-
-    blockwise_1x16 = ScalingType.BlockWise1x16
-    tensorwise = ScalingType.TensorWise
-    recipe_a0 = scale_recipe_a[0]
-    recipe_a1 = scale_recipe_a[1]
-    recipe_b0 = scale_recipe_b[0]
-    recipe_b1 = scale_recipe_b[1]
-    if (
-        (recipe_a0 == blockwise_1x16 or recipe_a0 == blockwise_1x16.value)
-        and (recipe_a1 == tensorwise or recipe_a1 == tensorwise.value)
-        and (recipe_b0 == blockwise_1x16 or recipe_b0 == blockwise_1x16.value)
-        and (recipe_b1 == tensorwise or recipe_b1 == tensorwise.value)
-    ):
-        return _BLOCKSCALED_FORMATS[2]
-    return None
-
-
-@functools.cache
-def _is_blackwell_device(device_id: int) -> bool:
-    try:
-        major, _ = torch.cuda.get_device_capability(device_id)
-    except Exception:
-        return False
-    return major == 10
-
-
-def _select_kernel_config_fp8(M: int, N: int, K: int) -> _KernelConfig:
-    # Port of MSLK mx8mx8bf16_grouped::get_kernel_via_heuristics()
-    cfg_256_64_ba = _KernelConfig((256, 64), (2, 1), True)
-    cfg_256_128_ba = _KernelConfig((256, 128), (2, 1), True)
-    cfg_256_256_ab = _KernelConfig((256, 256), (2, 1), False)
-    cfg_256_256_ba = _KernelConfig((256, 256), (2, 1), True)
-
-    M = int(M)
-    N = int(N)
-    K = int(K)
-
-    # CuTeDSL-tuned overrides for large per-group workloads where the
-    # MSLK heuristic tends to over-select transpose_ab=True.
-    if M >= 2048 and N >= 6144 and K >= 2048:
-        return cfg_256_256_ab
-    if N == 5120 and K == 8192 and M <= 4096:
-        return cfg_256_256_ab
-
-    if M <= 64:
-        return cfg_256_64_ba
-    elif M <= 128:
-        if N <= 1024:
-            if K <= 5120:
-                return cfg_256_64_ba
-            else:
-                return cfg_256_128_ba
-        else:
-            return cfg_256_128_ba
-    elif M <= 1024:
-        if N <= 1024:
-            if K <= 1024:
-                return cfg_256_256_ab
-            elif K <= 5120:
-                return cfg_256_256_ba
-            elif K <= 6144:
-                return cfg_256_256_ab
-            elif K <= 7168:
-                return cfg_256_256_ba
-            elif K <= 8192:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 2048:
-            if K <= 1024:
-                return cfg_256_256_ba
-            elif K <= 2048:
-                return cfg_256_256_ab
-            elif K <= 7168:
-                return cfg_256_256_ba
-            elif K <= 8192:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 4096:
-            if K <= 5120:
-                return cfg_256_256_ba
-            elif K <= 6144:
-                return cfg_256_256_ab
-            elif K <= 8192:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        elif N <= 5120:
-            if K <= 1024:
-                return cfg_256_256_ab
-            elif K <= 5120:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        elif N <= 6144:
-            if K <= 1024:
-                return cfg_256_256_ba
-            elif K <= 2048:
-                return cfg_256_256_ab
-            elif K <= 6144:
-                return cfg_256_256_ba
-            elif K <= 8192:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 7168:
-            if K <= 5120:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        elif N <= 8192:
-            if K <= 4096:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        else:
-            if K <= 1024:
-                return cfg_256_256_ab
-            elif K <= 2048:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-    elif M <= 2048:
-        if N <= 1024:
-            if K <= 1024:
-                return cfg_256_256_ba
-            elif K <= 2048:
-                return cfg_256_256_ab
-            elif K <= 7168:
-                return cfg_256_256_ba
-            elif K <= 8192:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 2048:
-            return cfg_256_256_ba
-        elif N <= 4096:
-            if K <= 1024:
-                return cfg_256_256_ba
-            elif K <= 2048:
-                return cfg_256_256_ab
-            elif K <= 4096:
-                return cfg_256_256_ba
-            elif K <= 7168:
-                return cfg_256_256_ab
-            elif K <= 8192:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        elif N <= 6144:
-            if K <= 1024:
-                return cfg_256_256_ab
-            elif K <= 6144:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        elif N <= 7168:
-            if K <= 1024:
-                return cfg_256_256_ab
-            elif K <= 5120:
-                return cfg_256_256_ba
-            elif K <= 8192:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ab
-        elif N <= 8192:
-            if K <= 4096:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        else:
-            if K <= 2048:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-    elif M <= 4096:
-        if N <= 1024:
-            if K <= 1024:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 2048:
-            if K <= 2048:
-                return cfg_256_256_ab
-            elif K <= 5120:
-                return cfg_256_256_ba
-            elif K <= 6144:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 4096:
-            if K <= 1024:
-                return cfg_256_256_ab
-            elif K <= 8192:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        elif N <= 5120:
-            if K <= 8192:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        elif N <= 6144:
-            if K <= 1024:
-                return cfg_256_256_ab
-            elif K <= 4096:
-                return cfg_256_256_ba
-            elif K <= 5120:
-                return cfg_256_256_ab
-            elif K <= 7168:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        elif N <= 7168:
-            if K <= 2048:
-                return cfg_256_256_ba
-            elif K <= 4096:
-                return cfg_256_256_ab
-            elif K <= 5120:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        elif N <= 8192:
-            if K <= 1024:
-                return cfg_256_256_ba
-            elif K <= 2048:
-                return cfg_256_256_ab
-            elif K <= 4096:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        else:
-            if K <= 1024:
-                return cfg_256_256_ab
-            elif K <= 2048:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-    elif M <= 5120:
-        if N <= 1024:
-            if K <= 1024:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 2048:
-            return cfg_256_256_ba
-        elif N <= 4096:
-            if K <= 1024:
-                return cfg_256_256_ba
-            elif K <= 2048:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 5120:
-            if K <= 1024:
-                return cfg_256_256_ba
-            elif K <= 2048:
-                return cfg_256_256_ab
-            elif K <= 6144:
-                return cfg_256_256_ba
-            elif K <= 7168:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 6144:
-            if K <= 1024:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 7168:
-            if K <= 5120:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        elif N <= 8192:
-            if K <= 1024:
-                return cfg_256_256_ab
-            elif K <= 5120:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        else:
-            if K <= 2048:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-    elif M <= 6144:
-        if N <= 1024:
-            return cfg_256_256_ba
-        elif N <= 2048:
-            if K <= 1024:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 4096:
-            return cfg_256_256_ba
-        elif N <= 5120:
-            if K <= 7168:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        elif N <= 6144:
-            return cfg_256_256_ba
-        elif N <= 7168:
-            if K <= 4096:
-                return cfg_256_256_ba
-            elif K <= 5120:
-                return cfg_256_256_ab
-            elif K <= 6144:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        elif N <= 8192:
-            if K <= 5120:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        else:
-            if K <= 1024:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-    elif M <= 7168:
-        if N <= 2048:
-            if K <= 1024:
-                return cfg_256_256_ba
-            elif K <= 2048:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 4096:
-            if K <= 1024:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 6144:
-            return cfg_256_256_ba
-        elif N <= 7168:
-            if K <= 8192:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        elif N <= 8192:
-            if K <= 2048:
-                return cfg_256_256_ba
-            elif K <= 5120:
-                return cfg_256_256_ab
-            elif K <= 7168:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-        else:
-            if K <= 1024:
-                return cfg_256_256_ab
-            elif K <= 2048:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-    elif M <= 8192:
-        if N <= 1024:
-            return cfg_256_256_ba
-        elif N <= 2048:
-            if K <= 1024:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        elif N <= 8192:
-            return cfg_256_256_ba
-        else:
-            if K <= 2048:
-                return cfg_256_256_ba
-            else:
-                return cfg_256_256_ab
-    else:
-        if N <= 1024:
-            if K <= 1024:
-                return cfg_256_256_ab
-            else:
-                return cfg_256_256_ba
-        else:
-            return cfg_256_256_ba
-
-
-def _select_kernel_config_fp4(M: int, N: int, K: int) -> _KernelConfig:
-    # Port of MSLK f4f4bf16_grouped::get_kernel_via_heuristics().  The
-    # FP4 kernel family carries its K-tiling in the compiled
-    # dtype-specific kernel, so the MSLK 256x256x128 vs 256x256x256
-    # distinction collapses to a single 256x256 choice here.  Unlike
-    # MSLK, groups of up to 128 rows are transposed onto the N tile,
-    # as in the FP8 heuristic.
-    cfg_128_64 = _KernelConfig((128, 64), (1, 1), True)
-    cfg_256_64 = _KernelConfig((256, 64), (2, 1), True)
-    cfg_256_128_ba = _KernelConfig((256, 128), (2, 1), True)
-    cfg_256_256 = _KernelConfig((256, 256), (2, 1), False)
-
-    M = int(M)
-    N = int(N)
-    K = int(K)
-
-    if M <= 1:
-        return cfg_256_64
-    if M <= 64:
-        if N <= 1024:
-            return cfg_256_64
-        if N <= 2048:
-            return cfg_128_64 if K <= 2048 else cfg_256_64
-        if N <= 7168:
-            return cfg_256_64
-        if N <= 8192:
-            if K <= 6144:
-                return cfg_256_64
-            if K <= 7168:
-                return cfg_128_64
-            return cfg_256_64
-        return cfg_256_64
-    if M <= 128:
-        return cfg_256_128_ba
-    return cfg_256_256
-
-
-def _round_up(a: int, b: int) -> int:
-    return ((a + b - 1) // b) * b
+    recipe_a = tuple(scale_recipe_a)
+    recipe_b = tuple(scale_recipe_b)
+    return next(
+        (
+            fmt
+            for fmt in _BLOCKSCALED_FORMATS.values()
+            if fmt.matches(mat_a, mat_b, scale_a, scale_b, recipe_a, recipe_b)
+        ),
+        None,
+    )
 
 
 def _allocate_output(
@@ -561,7 +102,7 @@ def _allocate_output(
 ) -> Tensor:
     M, N = mat_a.size(0), mat_b.size(-1)
     alignment = 128 // torch.finfo(out_dtype).bits
-    N_padded = _round_up(N, alignment)
+    N_padded = round_up(N, alignment)
     if mat_b.dim() == 2:
         return torch.empty_strided(
             (ngroups, M, N),
@@ -581,93 +122,63 @@ def _compile_scaled_grouped_mm_blockscaled(
     mma_tile_mn: tuple[int, int],
     cluster_shape_mn: tuple[int, int],
     transpose_ab: bool,
-    ab_dtype_name: str,
-    scale_ab_dtype_name: str,
+    ab_dtype: torch.dtype,
+    scale_ab_dtype: torch.dtype,
     scale_ab_vec_size: int,
-    c_dtype_name: str,
 ):
     import cutlass
     import cutlass.cute as cute
     from cutlass.cute.runtime import make_fake_stream, make_fake_tensor
 
+    from torch._native.cutedsl.dtypes import torch2cute
+    from torch._native.cutedsl.launch import compile_kernel, fake_compact, sym
+
     from .scaled_grouped_mm_blockscaled_kernel import Sm100GroupedBlockScaledGemmKernel
 
-    m = cute.sym_int()
-    n = cute.sym_int(divisibility=16)
-    k = cute.sym_int(divisibility=scale_ab_vec_size)
-    a_stride_m = cute.sym_int(divisibility=16)
-    b_stride_n = cute.sym_int(divisibility=16)
-    scale_a_m = cute.sym_int()
-    scale_a_k = cute.sym_int()
-    scale_b_n = cute.sym_int()
-    scale_b_k = cute.sym_int()
-    scale_a_stride_m = cute.sym_int()
-    scale_a_stride_k = cute.sym_int()
-    scale_b_stride_n = cute.sym_int()
-    scale_b_stride_k = cute.sym_int()
+    m = sym()
+    n = sym(16)
+    k = sym(scale_ab_vec_size)
+    a_stride_m = sym(16)
+    b_stride_n = sym(16)
 
-    ab_dtype = getattr(cutlass, ab_dtype_name)
-    scale_ab_dtype = getattr(cutlass, scale_ab_dtype_name)
-    c_dtype = getattr(cutlass, c_dtype_name)
-    c_stride_0 = cute.sym_int(divisibility=max(1, 16 * 8 // c_dtype.width))
+    cute_ab_dtype = torch2cute[ab_dtype]
+    cute_scale_ab_dtype = torch2cute[scale_ab_dtype]
+    c_dtype = torch2cute[torch.bfloat16]
+    c_stride_0 = sym(128 // c_dtype.width)
 
-    fake_a = make_fake_tensor(
-        ab_dtype,
-        (m, k, 1),
-        stride=(a_stride_m, 1, 0),
-    )
+    fake_a = make_fake_tensor(cute_ab_dtype, (m, k, 1), stride=(a_stride_m, 1, 0))
     if uniform_mn_groups:
-        fake_b = make_fake_tensor(ab_dtype, (n, k, 1), stride=(b_stride_n, 1, 0))
+        fake_b = make_fake_tensor(cute_ab_dtype, (n, k, 1), stride=(b_stride_n, 1, 0))
     else:
         fake_b = make_fake_tensor(
-            ab_dtype,
-            (n, k, cute.sym_int()),
-            stride=(b_stride_n, 1, cute.sym_int(divisibility=16)),
+            cute_ab_dtype, (n, k, sym()), stride=(b_stride_n, 1, sym(16))
         )
     if transpose_ab:
         # In transpose mode, C is passed as (N, M, 1) with transpose strides.
-        fake_c = make_fake_tensor(
-            c_dtype,
-            (n, m, 1),
-            stride=(1, c_stride_0, 0),
-        )
+        fake_c = make_fake_tensor(c_dtype, (n, m, 1), stride=(1, c_stride_0, 0))
     else:
-        fake_c = make_fake_tensor(
-            c_dtype,
-            (m, n, 1),
-            stride=(c_stride_0, 1, 0),
-        )
+        fake_c = make_fake_tensor(c_dtype, (m, n, 1), stride=(c_stride_0, 1, 0))
     fake_scale_a = make_fake_tensor(
-        scale_ab_dtype,
-        (scale_a_m, scale_a_k, 1),
-        stride=(scale_a_stride_m, scale_a_stride_k, 0),
+        cute_scale_ab_dtype, (sym(), sym(), 1), stride=(sym(), sym(), 0)
     )
     fake_scale_b = make_fake_tensor(
-        scale_ab_dtype,
-        (scale_b_n, scale_b_k, 1),
-        stride=(scale_b_stride_n, scale_b_stride_k, 0),
+        cute_scale_ab_dtype, (sym(), sym(), 1), stride=(sym(), sym(), 0)
     )
 
-    g = cute.sym_int()
-    fake_problem = make_fake_tensor(cutlass.Int32, (g, 4), stride=(4, 1))
-    fake_total_clusters = make_fake_tensor(cutlass.Int32, (1,), stride=(1,))
-
-    tensormap_stride1 = Sm100GroupedBlockScaledGemmKernel.bytes_per_tensormap // 8
-    tensormap_stride0 = (
-        tensormap_stride1 * Sm100GroupedBlockScaledGemmKernel.num_tensormaps
-    )
-    fake_tensormap = make_fake_tensor(
+    g = sym()
+    fake_problem = fake_compact(cutlass.Int32, (g, 4), stride_order=(1, 0))
+    fake_total_clusters = fake_compact(cutlass.Int32, (1,))
+    fake_tensormap = fake_compact(
         cutlass.Int64,
         (
             g,
             Sm100GroupedBlockScaledGemmKernel.num_tensormaps,
             Sm100GroupedBlockScaledGemmKernel.bytes_per_tensormap // 8,
         ),
-        stride=(tensormap_stride0, tensormap_stride1, 1),
+        stride_order=(2, 1, 0),
     )
-    fake_offs = make_fake_tensor(cutlass.Int32, (g,), stride=(1,))
-    fake_group_offsets = make_fake_tensor(cutlass.Int32, (g, 2), stride=(2, 1))
-    fake_stream = make_fake_stream(use_tvm_ffi_env_stream=True)
+    fake_offs = fake_compact(cutlass.Int32, (g,))
+    fake_group_offsets = fake_compact(cutlass.Int32, (g, 2), stride_order=(1, 0))
 
     grouped_gemm = Sm100GroupedBlockScaledGemmKernel(
         sf_vec_size=scale_ab_vec_size,
@@ -677,51 +188,43 @@ def _compile_scaled_grouped_mm_blockscaled(
         uniform_mn_groups=uniform_mn_groups,
     )
 
-    compiled = cute.compile(
-        grouped_gemm,
-        initial_a=fake_a,
-        initial_b=fake_b,
-        initial_c=fake_c,
-        initial_sfa=fake_scale_a,
-        initial_sfb=fake_scale_b,
-        group_count=0,
-        problem_shape_mnkl=fake_problem,
-        estimate_total_num_clusters=cutlass.Int32(1),
-        total_num_clusters=fake_total_clusters,
-        tensormap_cute_tensor=fake_tensormap,
-        offs=fake_offs,
-        group_offsets=fake_group_offsets,
-        sf_act_rows=cutlass.Int32(1),
-        dims_mnk=(cute.sym_int(32), cute.sym_int(32), cute.sym_int(32)),
-        base_ptrs=tuple(cute.sym_int(64) for _ in range(7)),
-        strides=tuple(
-            tuple(cute.sym_int(64) for _ in range(rank))
-            for rank in (2, 3, 2, 3, 2, 2, 2)
-        ),
-        max_active_clusters=max_active_clusters,
-        stream=fake_stream,
-        options="--enable-assertions --enable-tvm-ffi",
+    group_count = 0
+    estimate_total_num_clusters = cutlass.Int32(1)
+    sf_act_rows = cutlass.Int32(1)
+    dims_mnk = tuple(cute.sym_int(32) for _ in range(3))
+    base_ptrs = tuple(cute.sym_int(64) for _ in range(7))
+    strides = tuple(
+        tuple(cute.sym_int(64) for _ in range(rank)) for rank in (2, 3, 2, 3, 2, 2, 2)
     )
-    return compiled
-
-
-@functools.lru_cache(maxsize=1)
-def _get_hardware_info(device_id: int):
-    import cutlass
-
-    return cutlass.utils.HardwareInfo(device_id)
+    return compile_kernel(
+        grouped_gemm,
+        fake_a,
+        fake_b,
+        fake_c,
+        fake_scale_a,
+        fake_scale_b,
+        group_count,
+        fake_problem,
+        estimate_total_num_clusters,
+        fake_total_clusters,
+        fake_tensormap,
+        fake_offs,
+        fake_group_offsets,
+        sf_act_rows,
+        dims_mnk,
+        base_ptrs,
+        strides,
+        max_active_clusters,
+        make_fake_stream(),
+        options="--enable-assertions",
+    )
 
 
 @functools.cache
-def _get_schedule_meta(cluster_size: int, device_id: int) -> tuple[int, int]:
-    hw = _get_hardware_info(device_id)
-    sm_count = hw.get_max_active_clusters(1)
-    max_active_clusters = hw.get_max_active_clusters(cluster_size)
-    return sm_count, max_active_clusters
+def _get_max_active_clusters(cluster_size: int, device_id: int) -> int:
+    import cutlass
 
-
-def _ceil_div_int(a: int, b: int) -> int:
-    return (a + b - 1) // b
+    return cutlass.utils.HardwareInfo(device_id).get_max_active_clusters(cluster_size)
 
 
 def _with_l_dim(t: Tensor) -> Tensor:
@@ -752,23 +255,15 @@ def _estimate_total_clusters_for_launch(
 ) -> int:
     if b_is_2d:
         if transpose_ab:
-            return (
-                ngroups
-                * _ceil_div_int(N, cluster_tile_m)
-                * _ceil_div_int(M, cluster_tile_n)
-            )
-        return (
-            ngroups
-            * _ceil_div_int(M, cluster_tile_m)
-            * _ceil_div_int(N, cluster_tile_n)
-        )
+            return ngroups * ceil_div(N, cluster_tile_m) * ceil_div(M, cluster_tile_n)
+        return ngroups * ceil_div(M, cluster_tile_m) * ceil_div(N, cluster_tile_n)
 
     if transpose_ab:
-        grouped_tiles = _ceil_div_int(M, cluster_tile_n) + max(ngroups - 1, 0)
-        return _ceil_div_int(N, cluster_tile_m) * grouped_tiles
+        grouped_tiles = ceil_div(M, cluster_tile_n) + max(ngroups - 1, 0)
+        return ceil_div(N, cluster_tile_m) * grouped_tiles
 
-    grouped_tiles = _ceil_div_int(M, cluster_tile_m) + max(ngroups - 1, 0)
-    return grouped_tiles * _ceil_div_int(N, cluster_tile_n)
+    grouped_tiles = ceil_div(M, cluster_tile_m) + max(ngroups - 1, 0)
+    return grouped_tiles * ceil_div(N, cluster_tile_n)
 
 
 @functools.cache
@@ -813,8 +308,8 @@ def _get_aux_tensors(
 
 def _validated_blockscaled_format(mat_a: Tensor, scale_a: list[Tensor]):
     if mat_a.dtype == torch.float8_e4m3fn:
-        return _BLOCKSCALED_FORMATS[0]
-    return _BLOCKSCALED_FORMATS[2 if len(scale_a) == 2 else 1]
+        return _BLOCKSCALED_FORMATS["mxfp8"]
+    return _BLOCKSCALED_FORMATS["nvfp4" if len(scale_a) == 2 else "mxfp4"]
 
 
 def scaled_grouped_mm_blockscaled(
@@ -823,9 +318,10 @@ def scaled_grouped_mm_blockscaled(
     scale_a: list[Tensor],
     scale_b: list[Tensor],
     offs: Tensor,
-    output_dtype: torch.dtype | None = None,
 ) -> Tensor:
     # Assumes _should_use_cutedsl_scaled_grouped_mm_blockscaled accepted the inputs.
+    from torch._native.cutedsl.launch import read_only, stream
+
     def _is_transposed_layout(t: Tensor) -> bool:
         end_dim = t.dim() - 1
         if t.stride(end_dim - 1) == 1 and t.stride(end_dim) >= max(
@@ -858,25 +354,27 @@ def scaled_grouped_mm_blockscaled(
     mat_b_n = int(mat_b.size(-1))
     mat_b_physical_k = int(mat_b.size(0 if b_is_2d else -2))
     global_scale_ptrs = (0, 0)
-    if fmt.torch_global_scale_dtype is not None:
+    if fmt.name == "nvfp4":
         if scale_a[1].numel() != ngroups or scale_b[1].numel() != ngroups:
             raise ValueError(
                 "NVFP4 global scales must have numel equal to offs.numel()"
             )
         global_scale_a = scale_a[1].contiguous()
         global_scale_b = scale_b[1].contiguous()
-        global_scale_ptrs = (global_scale_a.data_ptr(), global_scale_b.data_ptr())
-    requested_out_dtype = output_dtype or torch.bfloat16
-    out = _allocate_output(mat_a, mat_b, requested_out_dtype, ngroups)
+        global_scale_ptrs = (
+            const_data_ptr(global_scale_a),
+            const_data_ptr(global_scale_b),
+        )
+    out = _allocate_output(mat_a, mat_b, torch.bfloat16, ngroups)
     if ngroups == 0:
         return out
 
-    if mat_a.data_ptr() % 16 != 0:
+    if const_data_ptr(mat_a) % 16 != 0:
         raise ValueError("expected data_ptr to be aligned to 16 bytes")
     if _is_transposed_layout(mat_a):
         raise ValueError("expected mat_a to not be transposed")
 
-    if mat_b.data_ptr() % 16 != 0:
+    if const_data_ptr(mat_b) % 16 != 0:
         raise ValueError("expected data_ptr to be aligned to 16 bytes")
     if not _is_transposed_layout(mat_b):
         raise ValueError("expected mat_b to be transposed")
@@ -893,9 +391,7 @@ def scaled_grouped_mm_blockscaled(
                 "for 2d/3d grouped gemm, offs size must match mat_b.size(0)"
             )
 
-    device_id = (
-        device.index if device.index is not None else torch.cuda.current_device()
-    )
+    device_id = device.index
     m_for_heuristic = mat_a_m if b_is_2d else (mat_a_m // max(ngroups, 1))
     k_for_heuristic = logical_k_a // max(ngroups, 1) if b_is_2d else logical_k_a
     if fmt.name in ("mxfp4", "nvfp4"):
@@ -904,7 +400,7 @@ def scaled_grouped_mm_blockscaled(
         config = _select_kernel_config_fp8(m_for_heuristic, mat_b_n, k_for_heuristic)
 
     cluster_size = config.cluster_shape_mn[0] * config.cluster_shape_mn[1]
-    _, max_active_clusters = _get_schedule_meta(cluster_size, device_id)
+    max_active_clusters = _get_max_active_clusters(cluster_size, device_id)
     cluster_tile_m, cluster_tile_n = _get_cluster_tile_shape_mn(
         config.mma_tile_mn, config.cluster_shape_mn
     )
@@ -924,10 +420,9 @@ def scaled_grouped_mm_blockscaled(
         config.mma_tile_mn,
         config.cluster_shape_mn,
         config.transpose_ab,
-        fmt.cutlass_ab_dtype_name,
-        fmt.cutlass_scale_ab_dtype_name,
+        fmt.ab_dtype,
+        fmt.scale_dtypes[0],
         fmt.scale_ab_vec_size,
-        _TORCH_TO_CUTLASS_DTYPE_NAME[requested_out_dtype],
     )
 
     problem_sizes, total_num_clusters, tensormaps, group_offsets = _get_aux_tensors(
@@ -937,11 +432,11 @@ def scaled_grouped_mm_blockscaled(
     scale_a0 = scale_a[0]
     scale_b0 = scale_b[0]
 
-    mat_a_ptr = mat_a.data_ptr()
-    mat_b_ptr = mat_b.data_ptr()
+    mat_a_ptr = const_data_ptr(mat_a)
+    mat_b_ptr = const_data_ptr(mat_b)
     out_ptr = out.data_ptr()
-    scale_a_ptr = scale_a0.data_ptr()
-    scale_b_ptr = scale_b0.data_ptr()
+    scale_a_ptr = const_data_ptr(scale_a0)
+    scale_b_ptr = const_data_ptr(scale_b0)
     mat_a_stride = mat_a.stride()
     mat_b_stride = mat_b.stride()
     out_stride = out[0].stride() if b_is_2d else out.stride()
@@ -966,7 +461,7 @@ def scaled_grouped_mm_blockscaled(
         out_stride,
         (
             (
-                _round_up(logical_k_a // fmt.scale_ab_vec_size, 4),
+                round_up(logical_k_a // fmt.scale_ab_vec_size, 4),
                 1,
             )
             if (not b_is_2d) and fmt.name == "nvfp4"
@@ -976,23 +471,25 @@ def scaled_grouped_mm_blockscaled(
     )
 
     scaled_grouped_mm_blockscaled_compiled(
-        _with_l_dim(mat_a),
-        _with_l_dim(mat_b.transpose(0, 1)) if b_is_2d else mat_b.permute(2, 1, 0),
+        read_only(_with_l_dim(mat_a)),
+        read_only(
+            _with_l_dim(mat_b.transpose(0, 1)) if b_is_2d else mat_b.permute(2, 1, 0)
+        ),
         _with_l_dim(
             (out[0].transpose(0, 1) if config.transpose_ab else out[0])
             if b_is_2d
             else (out.transpose(0, 1) if config.transpose_ab else out)
         ),
-        _with_l_dim(scale_a0),
-        _with_l_dim(scale_b0),
+        read_only(_with_l_dim(scale_a0)),
+        read_only(_with_l_dim(scale_b0)),
         ngroups,
         problem_sizes,
         estimate_total_num_clusters,
         total_num_clusters,
         tensormaps,
-        offs,
+        read_only(offs),
         group_offsets,
-        scale_a0.numel() // _round_up(logical_k_a // fmt.scale_ab_vec_size, 4),
+        scale_a0.numel() // round_up(logical_k_a // fmt.scale_ab_vec_size, 4),
         (mat_a_m, mat_b_n, logical_k_a),
         (
             mat_a_ptr,
@@ -1003,6 +500,7 @@ def scaled_grouped_mm_blockscaled(
             *global_scale_ptrs,
         ),
         metadata_strides,
+        stream(device_id),
     )
     return out
 
@@ -1026,41 +524,31 @@ def _should_use_cutedsl_scaled_grouped_mm_blockscaled(
         return False
     if not isinstance(scale_a, list) or not isinstance(scale_b, list):
         return False
-    if mat_a.device.type != "cuda" or mat_b.device.type != "cuda":
+    if is_traced(mat_a) or not device_ok(mat_a, (10,)):
         return False
-    a_is_2d = mat_a.dim() == 2
-    b_is_2d = mat_b.dim() == 2
-    b_dim = mat_b.dim()
-    if not a_is_2d or (not b_is_2d and b_dim != 3):
+    if not on_current_device(mat_a) or mat_b.device != mat_a.device:
         return False
-    requested_out_dtype = out_dtype or torch.bfloat16
-    if not any(requested_out_dtype == dtype for dtype in _TORCH_TO_CUTLASS_DTYPE_NAME):
+    if mat_a.dim() != 2 or mat_b.dim() not in (2, 3):
+        return False
+    # The kernel needs at least one K tile to produce an accumulator.
+    if mat_a.size(-1) == 0:
+        return False
+    if out_dtype not in (None, torch.bfloat16):
         return False
     if not isinstance(contraction_dim, Sequence):
         return False
     if (
-        a_is_2d
-        and not b_is_2d
+        mat_b.dim() == 3
         and contraction_dim
         and tuple(cast(Sequence[int], contraction_dim)) != (-1, -2)
     ):
-        return False
-    device_id = (
-        mat_a.device.index
-        if mat_a.device.index is not None
-        else torch.cuda.current_device()
-    )
-    if not _is_blackwell_device(device_id):
         return False
     if not isinstance(scale_recipe_a, list) or not isinstance(scale_recipe_b, list):
         return False
     if not isinstance(swizzle_a, list) or not isinstance(swizzle_b, list):
         return False
-    if len(swizzle_a) != 1 or len(swizzle_b) != 1:
-        return False
-    if swizzle_a[0] != SwizzleType.SWIZZLE_32_4_4.value:
-        return False
-    if swizzle_b[0] != SwizzleType.SWIZZLE_32_4_4.value:
+    swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
+    if swizzle_a != swizzle or swizzle_b != swizzle:
         return False
     fmt = _get_blockscaled_format(
         mat_a,

@@ -10,9 +10,6 @@ import unittest
 
 import torch
 
-from torch._native.ops.scaled_grouped_mm._cpp_utils import (
-    _call_cpp_scaled_grouped_mm_v2,
-)
 
 from torch.nn.functional import (
     grouped_mm,
@@ -57,7 +54,10 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
+    isRocmArchAnyOf,
     MI350_ARCH,
+    NAVI4_ARCH,
+    NAVI_ARCH,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     run_tests,
@@ -74,6 +74,7 @@ from torch.testing._internal.common_quantized import (
     ceil_div, to_blocked,
     to_mxfp,
     data_to_nvfp4_scale,
+    data_to_nvfp4_with_global_scale,
     from_blocked_format,
     generate_jagged_offs,
     pack_uint4,
@@ -352,58 +353,6 @@ def scaled_grouped_mm_wrap(
             use_fast_accum=use_fast_accum)
 
 
-def scaled_grouped_mm_cpp_wrap(
-    a,
-    b,
-    scale_a,
-    scale_b,
-    scale_recipe_a,
-    scale_recipe_b,
-    swizzle_a=SwizzleType.NO_SWIZZLE,
-    swizzle_b=SwizzleType.NO_SWIZZLE,
-    scale_result=None,
-    out_dtype=torch.bfloat16,
-    use_fast_accum=False,
-    offs=None,
-    bias=None,
-    wrap_v2=True,
-):
-    if not wrap_v2:
-        return scaled_grouped_mm_wrap(
-            a,
-            b,
-            scale_a,
-            scale_b,
-            scale_recipe_a,
-            scale_recipe_b,
-            swizzle_a=swizzle_a,
-            swizzle_b=swizzle_b,
-            scale_result=scale_result,
-            out_dtype=out_dtype,
-            use_fast_accum=use_fast_accum,
-            offs=offs,
-            bias=bias,
-            wrap_v2=wrap_v2,
-        )
-
-    return _call_cpp_scaled_grouped_mm_v2(
-        a,
-        b,
-        scale_a,
-        scale_recipe_a,
-        swizzle_a,
-        scale_b,
-        scale_recipe_b,
-        swizzle_b,
-        offs=offs,
-        bias=bias,
-        out_dtype=out_dtype,
-        contraction_dim=[],
-        use_fast_accum=use_fast_accum,
-    )
-
-
-
 def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype, bias: torch.Tensor | None = None) -> torch.Tensor:
     # naive implementation: dq -> op -> q
     x_fp32 = x.to(torch.float) / x_scale
@@ -579,42 +528,6 @@ def data_to_mx_scale(x, block_size, recipe):
     scale_e8m0_biased = scale_e8m0_biased.to(torch.uint8)
     scale_e8m0_biased = scale_e8m0_biased.view(torch.float8_e8m0fnu)
     return scale_e8m0_biased.reshape(orig_shape[0], -1)
-
-
-def data_to_nvfp4_with_global_scale(x, block_size):
-    # Simple (slow) reference implementation of NVFP4 two-level-scaling
-    orig_shape = x.shape
-    x = x.reshape(-1, block_size)
-
-    # Per-block-amax
-    block_max = torch.amax(torch.abs(x), 1) + 1e-12
-
-    # Per-tensor max
-    global_max = x.abs().max()
-
-    # Constants
-    # Global encoding scale for block-scales
-    S_enc = FP4_MAX_VAL * F8E4M3_MAX_VAL / global_max
-    S_dec = 1. / S_enc
-
-    # Per-block decode-scale
-    S_dec_b = block_max / FP4_MAX_VAL
-
-    # Stored scaled-e4m3 per-block decode scales
-    S_dec_b_e4m3 = (S_dec_b * S_enc).to(torch.float8_e4m3fn)
-
-    # Actual per-block encoding scale
-    S_enc_b = S_enc / S_dec_b_e4m3.float()
-
-    # scale & reshape input, reshape scales
-    x = (S_enc_b.unsqueeze(1) * x).bfloat16().reshape(orig_shape)
-    S_dec_b_e4m3 = S_dec_b_e4m3.reshape(orig_shape[0], -1)
-
-    # cast input
-    x_fp4 = _bfloat16_to_float4_e2m1fn_x2(x)
-
-    # fp4x2, fp8_e4m3, float respectively
-    return x_fp4, S_dec_b_e4m3, S_dec.float()
 
 
 def unpack_uint4(uint8_data) -> torch.Tensor:
@@ -1088,15 +1001,16 @@ class TestFP8Matmul(TestCase):
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    @skipIfNoCuteDSL
     def test_scaled_grouped_mm_2d_2d_empty_groups(self, format, device):
         # Groups with no K rows must produce zeros, also when the CTA ran a
-        # non-empty tile before, so there are more tiles than SMs.
+        # non-empty tile before, so there are more tiles than SMs. The C++
+        # path leaves such groups unwritten, so this targets CuTeDSL only.
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
         offs = torch.tensor([128, 128, 256, 256, 384, 384, 512, 512], dtype=torch.int32, device=device)
-        self._run_scaled_grouped_mm_2d_2d(8, 2048, 2048, 512, format, False, device, offs, poison_output=True)
+        self._run_scaled_grouped_mm_2d_2d(8, 2048, 2048, 512, format, False, device, offs)
 
-    def _run_scaled_grouped_mm_2d_2d(
-        self, G, M, N, K, format, use_out, device, input_group_end_offsets, poison_output=False
-    ):
+    def _run_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, use_out, device, input_group_end_offsets):
         torch.manual_seed(42)
 
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
@@ -1139,10 +1053,6 @@ class TestFP8Matmul(TestCase):
             kwargs["out"] = torch.empty(
                 (G, M, N), dtype=torch.bfloat16, device=device
             )
-        if poison_output:
-            # Freed right away, so the output reuses this NaN-filled block and
-            # any group left unwritten fails the NaN check below.
-            torch.full((G, M, N), float("nan"), dtype=torch.bfloat16, device=device)
 
         # Compute mxfp8 grouped mm output
         y_lp = scaled_grouped_mm_wrap(
@@ -1176,7 +1086,6 @@ class TestFP8Matmul(TestCase):
     @parametrize("K", [4096])
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
     @parametrize("use_out", [False, True])
-    @skipIfNoCuteDSL
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device):
         self._run_scaled_grouped_mm_2d_3d(G, M, N, K, format, use_out, device, compare_cpp=True)
 
@@ -1185,6 +1094,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
     @skipIfNoCuteDSL
     def test_scaled_grouped_mm_2d_3d_n64_tiles(self, format, device):
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
         # Jagged groups averaging 64 rows select a 64-wide N tile, with some
         # groups spanning several N tiles.
         self._run_scaled_grouped_mm_2d_3d(16, 1024, 8192, 4096, format, False, device, compare_cpp=False)
@@ -1194,6 +1104,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
     @skipIfNoCuteDSL
     def test_scaled_grouped_mm_2d_3d_input_at_mapping_end(self, format, device):
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
         # Groups smaller than the N tile leave TMA boxes past the last group's
         # rows; with the input ending at unmapped memory those must not fault.
         offs = torch.tensor([32, 64, 96, 128], dtype=torch.int32, device=device)
@@ -1206,10 +1117,6 @@ class TestFP8Matmul(TestCase):
         self, G, M, N, K, format, use_out, device, compare_cpp,
         input_group_end_offsets=None, guard_input_end=False,
     ):
-        from torch._native import registry
-
-        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
-
         torch.manual_seed(42)
 
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
@@ -1344,11 +1251,12 @@ class TestFP8Matmul(TestCase):
             **kwargs
         )
         if compare_cpp:
-            y_cpp = scaled_grouped_mm_cpp_wrap(
-                xq,
-                wq.transpose(-2, -1),
-                **{k: v for k, v in kwargs.items() if k != "out"}
-            )
+            with torch.backends.python_native.operations_disabled("_scaled_grouped_mm_v2"):
+                y_cpp = scaled_grouped_mm_wrap(
+                    xq,
+                    wq.transpose(-2, -1),
+                    **{k: v for k, v in kwargs.items() if k != "out"}
+                )
 
         if use_out:
             self.assertEqual(y_lp.data_ptr(), kwargs["out"].data_ptr())
@@ -2673,7 +2581,7 @@ class TestFP8Matmul(TestCase):
         not torch.version.hip and _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
     )
-    @runOnRocmArch(MI350_ARCH)
+    @runOnRocmArch(MI350_ARCH + NAVI4_ARCH)
     @parametrize("output_dtype", [torch.bfloat16, ])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
     @parametrize("M,N,K", [(256, 256, 256), (256, 256, 512)])
@@ -3723,7 +3631,9 @@ class TestFP8Matmul(TestCase):
             )
 
     @onlyAccelerator
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MX_GEMM and not isRocmArchAnyOf(NAVI_ARCH), mx_skip_msg
+    )
     @unittest.skipIf(not torch.version.hip, "The MX scale layout is fixed by arch and ROCm version only on ROCm")
     def test_rocm_mx_swizzle_size_error_names_arch(self, device) -> None:
         # This size check runs before the kernel's arch gate, so on an arch

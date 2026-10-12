@@ -29,7 +29,6 @@ from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
-    _producer_fusion_enabled_inputs,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
@@ -47,6 +46,7 @@ from torch._inductor.scheduler import (
     SubParentEpilogueCandidate,
     SubParentEpilogueGrouping,
     SubParentOutputGroup,
+    WhyNoFuse,
 )
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import (
@@ -130,6 +130,21 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_why_no_fuse_names_are_lazy(self):
+        node1 = Mock()
+        node2 = Mock()
+        node1.get_name.return_value = "node1"
+        node2.get_name.return_value = "node2"
+
+        why = WhyNoFuse(node1, node2)
+        with patch("torch._inductor.scheduler.fusion_log.debug") as debug:
+            why("reason %s", "details")
+        debug.assert_called_once_with(why)
+        node1.get_name.assert_not_called()
+        node2.get_name.assert_not_called()
+
+        self.assertEqual(str(why), "cannot fuse node1 with node2: reason details")
+
     def _mock_base_snode(self, name, device=None):
         node = Mock()
         node.get_name.return_value = name
@@ -1030,6 +1045,7 @@ class TestScheduler(TestCase):
 
         scheduler.name_to_fused_node = {"node1": node1, "node2": node2}
         scheduler._fusion_memory_state = None
+        scheduler._loop_mutation_trackers = []
         scheduler._can_fuse_impl = Mock(return_value=True)
         scheduler.will_fusion_create_cycle = Mock(return_value=True)
         scheduler.unfusable_node = Mock(return_value=False)
@@ -2552,35 +2568,6 @@ class TestScheduler(TestCase):
         node.read_writes = read_writes
         return node
 
-    @parametrize(
-        "prologue_enabled,epilogue_enabled,expected",
-        (
-            (True, True, ("load", "both", "store")),
-            (True, False, ("load",)),
-            (False, True, ("store",)),
-            (False, False, ()),
-        ),
-    )
-    def test_producer_fusion_allowed_inputs_respect_placement_flags(
-        self,
-        prologue_enabled: bool,
-        epilogue_enabled: bool,
-        expected: tuple[str, ...],
-    ):
-        template = Mock()
-        template.allow_prologue_fusion = prologue_enabled
-        template.allow_epilogue_fusion = epilogue_enabled
-        template.load_input_fusion_allowed_inputs = OrderedSet(("load", "both"))
-        template.store_output_fusion_allowed_inputs = OrderedSet(("store", "both"))
-
-        template_node = Mock()
-        template_node.get_template_node.return_value = template
-
-        self.assertEqual(
-            _producer_fusion_enabled_inputs(template_node),
-            OrderedSet(expected),
-        )
-
     def test_prologue_fusion_uses_template_aliasing_hook(self):
         def make_prologue_and_template(hook_blocks: bool):
             prologue_node = Mock()
@@ -2607,10 +2594,8 @@ class TestScheduler(TestCase):
             input_node.get_name.return_value = "x"
             template.inputs = [input_node]
             template.allow_prologue_fusion = True
-            template.allow_epilogue_fusion = False
-            template.load_input_fusion_allowed_inputs = OrderedSet(["x"])
-            template.store_output_fusion_allowed_inputs = OrderedSet()
-            template.has_aliasing_or_mutation_for_producer_fusion.return_value = (
+            template.get_allowed_prologue_inps.return_value = OrderedSet(["x"])
+            template.has_aliasing_or_mutation_for_prologue_fusion.return_value = (
                 hook_blocks
             )
             template_node.get_template_node.return_value = template
@@ -2653,7 +2638,7 @@ class TestScheduler(TestCase):
             with V.set_graph_handler(graph), V.set_choices_handler(choices):
                 result = Scheduler._can_fuse(scheduler, prologue_node, template_node)
 
-            template.has_aliasing_or_mutation_for_producer_fusion.assert_called_once_with(
+            template.has_aliasing_or_mutation_for_prologue_fusion.assert_called_once_with(
                 template_node
             )
             template_node.has_aliasing_or_mutation.assert_not_called()

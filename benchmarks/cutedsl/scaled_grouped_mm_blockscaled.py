@@ -1,4 +1,5 @@
 import argparse
+import functools
 import gc
 import importlib
 import time
@@ -7,12 +8,10 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 import torch
-from torch._native.ops.scaled_grouped_mm._cpp_utils import (
-    _call_cpp_scaled_grouped_mm_v2,
-)
+import torch.backends.python_native as python_native
 from torch.nn.functional import scaled_grouped_mm, ScalingType, SwizzleType
 from torch.testing._internal.common_quantized import (
-    _bfloat16_to_float4_e2m1fn_x2,
+    data_to_nvfp4_with_global_scale,
     to_blocked,
     to_mxfp,
 )
@@ -180,10 +179,9 @@ def _do_bench_cuda(fn, warmup=10, rep=100, stat: str = "median") -> BenchResult:
 
 
 def _require_cutedsl_scaled_grouped_mm_override():
-    from torch._native import cutedsl_utils as cu, registry
     from torch._native.common_utils import check_native_jit_disabled
 
-    if not cu.runtime_available():
+    if not python_native.cutedsl.available:
         raise RuntimeError(
             "--backend cute requested, but CuTeDSL runtime dependencies "
             "are not available. Install nvidia-cutlass-dsl and "
@@ -194,8 +192,8 @@ def _require_cutedsl_scaled_grouped_mm_override():
             "--backend cute requested, but native DSL overrides are disabled "
             "by TORCH_DISABLE_NATIVE_JIT=1."
         )
-    if "_scaled_grouped_mm_v2" not in registry.get_dsl_operations("cutedsl"):
-        version = cu.runtime_version()
+    if "_scaled_grouped_mm_v2" not in python_native.get_dsl_operations("cutedsl"):
+        version = python_native.cutedsl.version
         raise RuntimeError(
             "--backend cute requested, but the CuTeDSL override for "
             "aten::_scaled_grouped_mm_v2 is not registered. Current "
@@ -311,59 +309,11 @@ def _generate_offsets(total, groups, device, mode="balanced", align=1):
     return torch.cumsum(counts, dim=0).to(dtype=torch.int32)
 
 
-def _convert_to_mxfp8(t, block_size: int):
-    t_scale, t_lp = to_mxfp(t, format="mxfp8")
-    return t_lp, t_scale
-
-
-def _unpack_uint4(uint8_data: torch.Tensor) -> torch.Tensor:
-    shape = uint8_data.shape
-    out = torch.empty(
-        (*shape[:-1], shape[-1] * 2), device=uint8_data.device, dtype=torch.uint8
-    )
-    uint8_data_as_uint8 = uint8_data.view(torch.uint8).contiguous().view(-1)
-    out_flat = out.view(-1)
-    out_flat[1::2] = uint8_data_as_uint8 >> 4
-    out_flat[::2] = uint8_data_as_uint8 & 0xF
-    return out_flat.view((*shape[:-1], shape[-1] * 2))
-
-
-def _convert_to_mxfp4(t, block_size: int):
-    t_scale, t_lp = to_mxfp(t, format="mxfp4")
-    return t_lp, t_scale
-
-
-def _convert_to_nvfp4(t, block_size: int):
-    f8e4m3_max = torch.finfo(torch.float8_e4m3fn).max
-    orig_shape = t.shape
-    t_flat = t.reshape(-1, block_size)
-
-    block_max = torch.amax(torch.abs(t_flat), 1) + 1e-12
-    global_max = t_flat.abs().max()
-
-    scale_enc = 6.0 * f8e4m3_max / global_max
-    scale_dec = 1.0 / scale_enc
-    scale_dec_block = block_max / 6.0
-    scale_dec_block_f8 = (scale_dec_block * scale_enc).to(torch.float8_e4m3fn)
-    scale_enc_block = scale_enc / scale_dec_block_f8.float()
-
-    t_scaled = (scale_enc_block.unsqueeze(1) * t_flat).bfloat16().reshape(orig_shape)
-    t_scale = scale_dec_block_f8.reshape(orig_shape[0], -1)
-    t_lp = _bfloat16_to_float4_e2m1fn_x2(t_scaled)
-    return t_lp, t_scale, scale_dec
-
-
 def _convert_to_blockscaled(t, block_size: int, format: str):
-    if format == "mxfp8":
-        t_lp, t_scale = _convert_to_mxfp8(t, block_size)
-        return t_lp, t_scale, None
-    if format == "mxfp4":
-        t_lp, t_scale = _convert_to_mxfp4(t, block_size)
-        return t_lp, t_scale, None
     if format == "nvfp4":
-        t_lp, t_scale, t_global_scale = _convert_to_nvfp4(t, block_size)
-        return t_lp, t_scale, t_global_scale
-    raise ValueError(f"Unsupported format: {format}")
+        return data_to_nvfp4_with_global_scale(t, block_size)
+    t_scale, t_lp = to_mxfp(t, block_size, format)
+    return t_lp, t_scale, None
 
 
 def _prepare_inputs(
@@ -568,9 +518,10 @@ def benchmark_scaled_grouped_mm(
     else:
         scale_recipe = [ScalingType.BlockWise1x32]
 
-    scale_recipe_int = [recipe.value for recipe in scale_recipe]
-    swizzle_int = [swizzle.value]
     run_cpp = backend in ("both", "cpp")
+    cpp_only = functools.partial(
+        python_native.operations_disabled, "_scaled_grouped_mm_v2"
+    )
     run_cute = backend in ("both", "cute")
     if run_cute:
         _require_cutedsl_scaled_grouped_mm_override()
@@ -599,14 +550,12 @@ def benchmark_scaled_grouped_mm(
 
             def _select_override(M, N, K):
                 base = old_select(M, N, K)
-                return sgmm_mod._KernelConfig(
-                    mma_tile_mn if mma_tile_mn is not None else base.mma_tile_mn,
-                    (
-                        cluster_shape_mn
-                        if cluster_shape_mn is not None
-                        else base.cluster_shape_mn
-                    ),
-                    transpose_ab if transpose_ab is not None else base.transpose_ab,
+                return base._replace(
+                    mma_tile_mn=mma_tile_mn or base.mma_tile_mn,
+                    cluster_shape_mn=cluster_shape_mn or base.cluster_shape_mn,
+                    transpose_ab=base.transpose_ab
+                    if transpose_ab is None
+                    else transpose_ab,
                 )
 
             setattr(sgmm_mod, select_name, _select_override)
@@ -650,31 +599,7 @@ def benchmark_scaled_grouped_mm(
                 _prepared_k_eff,
             ) = prepared_inputs
 
-            fn_cpp = lambda: _call_cpp_scaled_grouped_mm_v2(  # noqa: E731
-                xq,
-                wq.transpose(-2, -1),
-                (
-                    [x_blocked_scales, x_global_scales]
-                    if format == "nvfp4"
-                    else [x_blocked_scales]
-                ),
-                scale_recipe_int,
-                swizzle_int,
-                (
-                    [w_blocked_scales, w_global_scales]
-                    if format == "nvfp4"
-                    else [w_blocked_scales]
-                ),
-                scale_recipe_int,
-                swizzle_int,
-                offs=offs,
-                bias=None,
-                out_dtype=torch.bfloat16,
-                contraction_dim=[],
-                use_fast_accum=False,
-            )
-
-            fn_cute_base = lambda: scaled_grouped_mm(  # noqa: E731
+            call = lambda: scaled_grouped_mm(  # noqa: E731
                 xq,
                 wq.transpose(-2, -1),
                 (
@@ -694,24 +619,27 @@ def benchmark_scaled_grouped_mm(
                 offs=offs,
                 output_dtype=torch.bfloat16,
             )
-            fn_cute = _make_cute_call(fn_cute_base)
+            fn_cpp = call
+            fn_cute = _make_cute_call(call)
             return fn_cpp, fn_cute
 
         us_cpp = None
         us_cute = None
 
         fn_cpp, fn_cute = _ensure_bench_fns()
-        bench_fn_cpp = (
-            _maybe_wrap_cuda_graph(fn_cpp, "cpp", use_cuda_graphs) if run_cpp else None
-        )
+        bench_fn_cpp = None
+        if run_cpp:
+            with cpp_only():
+                bench_fn_cpp = _maybe_wrap_cuda_graph(fn_cpp, "cpp", use_cuda_graphs)
+                res_cpp = _do_bench_cuda(
+                    bench_fn_cpp, warmup=warmup, rep=rep, stat=stat
+                )
+            us_cpp = res_cpp.value
         bench_fn_cute = (
             _maybe_wrap_cuda_graph(fn_cute, "cute", use_cuda_graphs)
             if run_cute
             else None
         )
-        if run_cpp:
-            res_cpp = _do_bench_cuda(bench_fn_cpp, warmup=warmup, rep=rep, stat=stat)
-            us_cpp = res_cpp.value
         if run_cute:
             if run_cpp:
                 # In --backend both, CuTeDSL inherits state left by
@@ -750,7 +678,8 @@ def benchmark_scaled_grouped_mm(
         if do_correctness and run_cpp and run_cute:
             fn_cpp, fn_cute = _ensure_bench_fns()
             try:
-                out_cpp = fn_cpp()
+                with cpp_only():
+                    out_cpp = fn_cpp()
                 out_cute = fn_cute()
                 torch.testing.assert_close(out_cpp, out_cute, rtol=rtol, atol=atol)
                 print("  ✓ results match")
