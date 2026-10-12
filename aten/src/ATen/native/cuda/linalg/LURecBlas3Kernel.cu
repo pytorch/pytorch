@@ -1129,6 +1129,18 @@ ldl_diagonal_panel_fused_kernel(
     const auto [lambda, ilambda] = reduce_argmax(update_rowcol(curr_step, /*first=*/curr_step, /*skip=*/-1));
 
     if (curr_step == panel_end - 1) {
+      // The last column is a 1x1 pivot of its own: nothing is left to eliminate
+      // but its singularity, which is checked here. Advancing curr_step ends the
+      // factorization.
+      if (curr_step == n - 1) {
+        if (gtid == 0) {
+          dipiv[n - 1] = n;
+          if (ldl::abs(dLD[LinOff(n - 1, n - 1, lda)]) == static_cast<real_t>(0) && *dinfo == 0) {
+            *dinfo = n;
+          }
+        }
+        curr_step = n;
+      }
       break;
     }
 
@@ -1276,12 +1288,6 @@ ldl_diagonal_panel_fused_kernel(
   if (gtid == 0) {
     // Panel is processed -- update curr_step in the global memory
     *dcurr_step = curr_step;
-
-    // Implies the whole computation is done, but
-    // dipiv[-1] still needs to be updated
-    if (curr_step == n - 1) {
-      dipiv[n - 1] = n;
-    }
   }
 }
 
@@ -1373,7 +1379,7 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
   // Right-Down-Diagonal-looking blocked LDLT/LDLH:
   // step through columns/rows in blocks of NB or NB-1 (pivots are 1x1 or 2x2)
   // and factor diagonal panels, then update the trailing matrix with a GEMM
-  while (step < n - 1) {
+  while (step < n) {
     // 1. Panel factorization {
     const auto curr_nb = ldl::aligned_panel_width<scalar_t>(step, nb, n);
     ldl_diagonal_panel<scalar_t, hermitian>(

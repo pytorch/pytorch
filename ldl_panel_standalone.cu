@@ -211,6 +211,18 @@ ldl_diagonal_panel_fused_kernel(
     const auto [lambda, ilambda] = reduce_argmax(update_rowcol(curr_step, /*first=*/curr_step, /*skip=*/-1));
 
     if (curr_step == panel_end - 1) {
+      // The last column is a 1x1 pivot of its own: nothing is left to eliminate
+      // but its singularity, which is checked here. Advancing curr_step ends the
+      // factorization.
+      if (curr_step == n - 1) {
+        if (gtid == 0) {
+          dipiv[n - 1] = n;
+          if (ldl::abs(dLD[LinOff(n - 1, n - 1, lda)]) == static_cast<real_t>(0) && *dinfo == 0) {
+            *dinfo = n;
+          }
+        }
+        curr_step = n;
+      }
       break;
     }
 
@@ -358,12 +370,6 @@ ldl_diagonal_panel_fused_kernel(
   if (gtid == 0) {
     // Panel is processed -- update curr_step in the global memory
     *dcurr_step = curr_step;
-
-    // Implies the whole computation is done, but
-    // dipiv[-1] still needs to be updated
-    if (curr_step == n - 1) {
-      dipiv[n - 1] = n;
-    }
   }
 }
 // END COPY

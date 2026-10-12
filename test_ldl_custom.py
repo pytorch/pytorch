@@ -830,6 +830,27 @@ class TestLDLCustomKernel(TestCase):
         self.assertTrue(torch.equal(piv_v, piv_c))
         self.assertEqual(LD_v, LD_c)
 
+    @parametrize("hermitian", [True, False])
+    @parametrize("batch", [(), (2,)])
+    @parametrize("n", [2, 5, 33, 150, 300])
+    @dtypes(*floating_and_complex_types())
+    def test_only_lower_triangle_is_read(self, device, dtype, n, batch, hermitian):
+        """The strictly upper triangle is never read, and neither is the imaginary
+        part of a Hermitian diagonal (LAPACK ignores it). The kernel mirrors the
+        lower triangle into the upper one by adding to it, so junk there would leak
+        into the result unless it is cleared first."""
+        torch.manual_seed(n)
+        A = symmetrize(indefinite(n, batch, dtype, device), hermitian)
+        junk = make_tensor((*batch, n, n), dtype=dtype, device=device)
+        dirty = A.tril() + junk.triu(1)
+        if hermitian and dtype.is_complex:
+            dirty.diagonal(dim1=-2, dim2=-1).add_(1j * junk.diagonal(dim1=-2, dim2=-1).real)
+        clean_LD, clean_piv, clean_info = torch.linalg.ldl_factor_ex(A.tril(), hermitian=hermitian)
+        LD, piv, info = torch.linalg.ldl_factor_ex(dirty, hermitian=hermitian)
+        self.assertTrue(torch.equal(piv, clean_piv))
+        self.assertTrue(torch.equal(info, clean_info))
+        self.assertEqual(LD.tril(), clean_LD.tril())
+
     @parametrize("n", [33, 65])
     @dtypes(torch.float64, torch.complex128)
     def test_batched_leading_dimension(self, device, dtype, n):
@@ -1045,6 +1066,95 @@ class TestLDLCustomKernel(TestCase):
         self.assertTrue((piv.abs() <= n).all(), f"pivot out of range: {piv}")
         self.assertGreaterEqual(info.item(), 0)
         self.assertLessEqual(info.item(), n)
+
+    @parametrize("n", [2, 3, 5, 32, 33, 34, 40, 65, 150, 2049, 4100])
+    @dtypes(*floating_and_complex_types())
+    def test_zero_last_pivot_sets_info(self, device, dtype, n):
+        """The last pivot has no column of its own to be factored, so singularity
+        there has to be checked separately. info must name it, as LAPACK does."""
+        A = torch.diag(torch.arange(1, n + 1, device=device).to(dtype))
+        A[-1, -1] = 0
+        _, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertEqual(info.item(), n)
+        self.assertEqual(piv.tolist(), list(range(1, n + 1)))
+
+    # The last column is handled by a launch of its own, or by the panel that ends on
+    # it, depending on where the panel boundaries and 2x2 blocks fall. These layouts
+    # cover the last pivot being a 1x1 or a 2x2 block, and a 2x2 block straddling a
+    # panel boundary (NB = 32) right before it.
+    _LAST_COLUMN_PATTERNS = {
+        "all_1x1": lambda n: (1,) * n,
+        "ends_2x2": lambda n: (1,) * (n - 2) + (2,),
+        "straddle_then_1x1": lambda n: (1,) * (NB - 1) + (2,) + (1,) * (n - NB - 1),
+        "straddle_then_2x2": lambda n: (1,) * (NB - 1) + (2,) + (1,) * (n - NB - 3) + (2,),
+        "2x2_before_last": lambda n: (1,) * (n - 3) + (2,) + (1,),
+    }
+
+    @parametrize("layout", list(_LAST_COLUMN_PATTERNS))
+    @parametrize("n", [34, 35, 36, 64, 65, 66, 97])
+    @dtypes(*floating_and_complex_types())
+    def test_last_column_layouts(self, device, dtype, n, layout):
+        pattern = self._LAST_COLUMN_PATTERNS[layout](n)
+        if sum(pattern) != n or min(pattern) < 1:
+            self.skipTest(f"{layout} does not fit n={n}")
+        torch.manual_seed(n)
+        A = matrix_for_pattern(pattern, dtype, device)
+        _, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertEqual(info.item(), 0)
+        self.assertEqual(pattern_from_pivots(piv.cpu()), pattern)
+        self.assertEqual(piv[-1].item(), n if pattern[-1] == 1 else -n)
+        self._check(A, hermitian=True)
+
+        if pattern[-1] == 1:
+            # same layout with the last pivot exactly zero
+            A[-1, -1] = 0
+            _, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+            self.assertEqual(info.item(), n)
+            self.assertEqual(pattern_from_pivots(piv.cpu()), pattern)
+
+    @parametrize("n", [33, 65, 150])
+    @dtypes(torch.float64, torch.complex128)
+    def test_zero_last_pivot_keeps_first_info(self, device, dtype, n):
+        """info names the first singular pivot, so a zero last pivot must not
+        overwrite an earlier one."""
+        A = torch.diag(torch.arange(1, n + 1, device=device).to(dtype))
+        A[n // 2, n // 2] = 0
+        A[-1, -1] = 0
+        _, _, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertEqual(info.item(), n // 2 + 1)
+
+    @parametrize("n", [33, 65])
+    @dtypes(torch.float64, torch.complex128)
+    def test_tiny_last_pivot_is_not_singular(self, device, dtype, n):
+        A = torch.diag(torch.arange(1, n + 1, device=device).to(dtype))
+        A[-1, -1] = torch.finfo(torch.float64).tiny
+        _, _, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertEqual(info.item(), 0)
+
+    @parametrize("n", [2, 33, 65])
+    @dtypes(torch.float64, torch.complex128)
+    def test_zero_last_pivot_batched(self, device, dtype, n):
+        """info is per batch element: only the flagged ones may report n."""
+        A = torch.diag_embed(torch.arange(1, n + 1, device=device).to(dtype).expand(4, n)).clone()
+        for i in (1, 3):
+            A[i, -1, -1] = 0
+        _, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertEqual(info.tolist(), [0, n, 0, n])
+        self.assertEqual(piv.tolist(), [list(range(1, n + 1))] * 4)
+
+    @parametrize("batch", [(), (3,)])
+    @parametrize("n", [2, 33, 64, 65, 150, 257])
+    @dtypes(torch.complex64, torch.complex128)
+    def test_hermitian_D_is_real(self, device, dtype, n, batch):
+        """A Hermitian D has a real diagonal, as LAPACK returns it, including the
+        last entry, which only the trailing GEMM touches. The input carries an
+        imaginary part on its diagonal, which LAPACK ignores. Holds for the diagonal
+        of 2x2 blocks too."""
+        torch.manual_seed(n)
+        A = indefinite(n, batch, dtype, device)
+        A.diagonal(dim1=-2, dim2=-1).add_(0.5j * torch.rand(*batch, n, device=device))
+        LD, _, _ = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertEqual(LD.diagonal(dim1=-2, dim2=-1).imag, torch.zeros(*batch, n, device=device, dtype=LD.diagonal().imag.dtype))
 
     @parametrize("n", [16, 64, 150])
     @dtypes(*floating_and_complex_types())
