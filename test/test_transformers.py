@@ -1156,7 +1156,13 @@ class TestTransformersAccelerator(NNTestCase):
 
         with torch.no_grad():
             eager_out = model(x)
-            compiled_out = torch.compile(model)(x)
+
+            # The fake kernel must report the same strides as the real kernel.
+            with FakeTensorMode(allow_non_fake_inputs=True) as fake_mode:
+                fake_out = model(fake_mode.from_tensor(x))
+            self.assertEqual(eager_out.stride(), fake_out.stride())
+
+            compiled_out = torch.compile(model, fullgraph=True)(x)
 
         self.assertEqual(eager_out, compiled_out)
         self.assertEqual(eager_out.stride(), compiled_out.stride())
