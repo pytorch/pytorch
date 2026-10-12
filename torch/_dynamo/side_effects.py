@@ -1826,15 +1826,15 @@ def _codegen_ordered_dict_mutation(ctx: SideEffectReplayContext) -> None:
         lambda: cg.load_import_from(__name__, "_manual_ordered_dict_update")
     )
     cg(var.source)
-    cg(
-        variables.TupleVariable(
-            [
-                variables.TupleVariable([key.vt, value])
-                for key, value in dict.items(var.items)
-            ]
-        )
-    )
-    cg(variables.TupleVariable([key.vt for key in var.items]))
+    # Build tuples explicitly so constant folding cannot discard key sources.
+    for key, value in dict.items(var.items):
+        cg(key.vt)
+        cg(value)
+        cg.append_output(create_instruction("BUILD_TUPLE", arg=2))
+    cg.append_output(create_instruction("BUILD_TUPLE", arg=len(var.items)))
+    for key in var.items:
+        cg(key.vt)
+    cg.append_output(create_instruction("BUILD_TUPLE", arg=len(var.items)))
     cg(variables.ConstantVariable.create(var.has_deleted_keys))
     ctx.suffixes.append(
         [*create_call_function(4, False), create_instruction("POP_TOP")]
