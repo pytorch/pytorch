@@ -42,6 +42,10 @@ def xor_words(pairs, maximum, outputs):
 
 
 class TestInlineAsmConcat(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.enterContext(config.patch(cat_fuse_computed_input_copies=True))
+
     @parametrize("multiple_outputs", [False, True])
     @config.patch(
         {
@@ -88,7 +92,6 @@ class TestInlineAsmConcat(TestCase):
         {
             "force_pointwise_cat": False,
             "max_complex_pointwise_cat_inputs": 8,
-            "cat_fuse_computed_input_copies": True,
             "triton.multi_kernel": 0,
             "fx_graph_cache": False,
         }
@@ -178,7 +181,6 @@ class TestInlineAsmConcat(TestCase):
                     "triton.nested_reduction": True,
                     "loop_ordering_after_fusion": True,
                     "emulate_precision_casts": True,
-                    "cat_fuse_computed_input_copies": True,
                     "force_disable_caches": True,
                 }
             ),
