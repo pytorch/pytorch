@@ -235,7 +235,7 @@ TEST(CuptiCallbackApiTest, ContentionTest) {
   api.deleteCallback(domain, kineto_cbid, atomic_cb);
 }
 
-TEST(CuptiCallbackApiTest, Bechmark) {
+TEST(CuptiCallbackApiTest, Benchmark) {
   constexpr int iters = 1000;
   // atomic bench a number of times to get a baseline
 
