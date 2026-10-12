@@ -5,6 +5,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <c10/util/complex.h>
+#include <c10/util/irange.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
 #include <thrust/swap.h>
@@ -1404,7 +1405,8 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
   }
 }
 
-void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool hermitian) {
+// Factors a single matrix: the panel kernels run on a 1x1x1 grid.
+static void ldl_factor_blas3_single(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool hermitian) {
   // LD is lower triangular.
   // We materialize the upper triangular part for GEMM-friendly residual updates,
   // and that also spares us from swaps that restore the initial triangular structure.
@@ -1425,6 +1427,32 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
       ldl_factor_panels<scalar_t, /*hermitian=*/false>(LD, pivots, info, n, lda);
     }
   });
+}
+
+void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool hermitian) {
+  const auto n = LD.size(-1);
+  if (LD.numel() == 0) {
+    return;
+  }
+  if (n == 1) {
+    // The only pivot is the lone entry, and it is singular iff it is zero.
+    pivots.fill_(1);
+    info.copy_(LD.eq(0).squeeze(-1).squeeze(-1));
+    return;
+  }
+
+  const auto batch_size = batchCount(LD);
+  if (batch_size == 1) {
+    ldl_factor_blas3_single(LD, pivots, info, hermitian);
+    return;
+  }
+  // view, not reshape: a silent copy would discard the in-place result.
+  auto LD_3d = LD.view({-1, n, n});
+  auto pivots_2d = pivots.view({-1, n});
+  auto info_1d = info.view({-1});
+  for (const auto i : c10::irange(batch_size)) {
+    ldl_factor_blas3_single(LD_3d[i], pivots_2d[i], info_1d[i], hermitian);
+  }
 }
 
 } // at::native

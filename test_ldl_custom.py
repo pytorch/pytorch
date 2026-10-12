@@ -429,7 +429,7 @@ class TestLDLCustomKernel(TestCase):
         A = indefinite(n, (), dtype, device)
         self._check(A, hermitian=True, nrhs=nrhs)
 
-    @parametrize("n", list(range(2, 11)))
+    @parametrize("n", list(range(1, 11)))
     @dtypes(*floating_and_complex_types())
     def test_all_pivot_patterns(self, device, dtype, n):
         """Every 1x1/2x2 block layout for small n.
@@ -502,7 +502,7 @@ class TestLDLCustomKernel(TestCase):
 
     @onlyCUDA
     @parametrize("structure", list(STRUCTURES))
-    @parametrize("n", list(range(2, 41)))
+    @parametrize("n", list(range(1, 41)))
     @dtypes(torch.float64, torch.complex128)
     def test_pivots_match_cpu(self, device, dtype, n, structure):
         """CUDA and CPU Bunch-Kaufman must choose identical pivots for small n.
@@ -629,6 +629,27 @@ class TestLDLCustomKernel(TestCase):
         self.assertEqual(LD.shape, A.shape)
         self.assertEqual(piv.shape, A.shape[:-1])
         self.assertEqual(info.shape, A.shape[:-2])
+
+    @onlyCUDA
+    @parametrize("batch", [(), (3,), (2, 3), (0,), (2, 0), (0, 3)])
+    @dtypes(*floating_and_complex_types())
+    def test_n1(self, device, dtype, batch):
+        """n == 1 is a shortcut: pivot is 1 and info flags an exactly zero entry."""
+        A = make_tensor((*batch, 1, 1), dtype=dtype, device=device)
+        A.view(-1)[::2] = 0
+        LD, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertEqual(LD, A)
+        self.assertEqual(piv, torch.ones_like(piv))
+        self.assertEqual(info, (A == 0).squeeze(-1).squeeze(-1).to(torch.int32))
+
+    @parametrize("batch", [(), (3,), (2, 3), (0,), (2, 0), (0, 3)])
+    @dtypes(*floating_and_complex_types())
+    def test_n0(self, device, dtype, batch):
+        A = torch.empty(*batch, 0, 0, dtype=dtype, device=device)
+        LD, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertEqual(LD.shape, A.shape)
+        self.assertEqual(piv.shape, (*batch, 0))
+        self.assertEqual(info, torch.zeros(batch, dtype=torch.int32, device=device))
 
     @parametrize("n", [33, 64])
     @dtypes(torch.float64, torch.complex128)
