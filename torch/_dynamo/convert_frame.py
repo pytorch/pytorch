@@ -394,6 +394,10 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     "cuda", "matmul", cuda_matmul_fp32_prec
                 )
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
+                # The trace-time objects are stale once compilation ends; leaving
+                # them makes every forward of a graph without a pre-graph store
+                # snapshot them for backward.
+                reset_user_object_tracking()
                 if not guards.check():
                     raise AssertionError(
                         f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
