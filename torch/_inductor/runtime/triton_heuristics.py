@@ -952,7 +952,9 @@ class CachingAutotuner(KernelInterface):
             and (not all_results_static or self._has_pending_runtime_autotuning())
         ):
             for result in group_results:
-                TritonBundler.omit(triton_hash_to_path_key(result.kernel.hash), device)
+                TritonBundler.omit(
+                    triton_hash_to_path_key(result.kernel.hash), device, self
+                )
             return
         for result in results:
             TritonBundler.put(

@@ -212,7 +212,7 @@ class TritonBundler:
     _entries: list[TritonBundleEntry] | None = None
     _static_autotuners: list[StaticallyLaunchedAutotuner] | None = None
     _winners: dict[object, OrderedSet[str]] | None = None
-    _omitted_groups: OrderedSet[_TritonCacheGroup] | None = None
+    _omitted_groups: dict[object, OrderedSet[_TritonCacheGroup]] | None = None
 
     # __grp__kernel_name.json contains metadata with source code paths
     # we use this as sentinel value for search and replace
@@ -252,7 +252,7 @@ class TritonBundler:
         cls._entries = []
         cls._static_autotuners = []
         cls._winners = {}
-        cls._omitted_groups = OrderedSet()
+        cls._omitted_groups = {}
 
     @classmethod
     def end_compile(cls) -> None:
@@ -280,9 +280,11 @@ class TritonBundler:
             )
 
     @classmethod
-    def omit(cls, kernel_hash: str, device: int) -> None:
+    def omit(cls, kernel_hash: str, device: int, autotuner: object) -> None:
         if cls._omitted_groups is not None:
-            cls._omitted_groups.add((triton_cache_dir(device), kernel_hash))
+            cls._omitted_groups.setdefault(autotuner, OrderedSet()).add(
+                (triton_cache_dir(device), kernel_hash)
+            )
 
     @classmethod
     def put_winner(cls, kernel_hash: str, autotuner: object) -> None:
@@ -444,7 +446,19 @@ class TritonBundler:
                 result: list[TritonKernelArtifacts] = []
                 kernel_names: list[str] = []
                 for entry in entries:
-                    if (entry.directory, entry.kernel_hash) in cls._omitted_groups:
+                    omitted_groups = (
+                        cls._omitted_groups.get(entry.autotuner)
+                        if cls._omitted_groups
+                        else None
+                    )
+                    if (
+                        omitted_groups
+                        and (
+                            entry.directory,
+                            entry.kernel_hash,
+                        )
+                        in omitted_groups
+                    ):
                         log.debug("Skipping unowned kernel %s", entry.kernel_hash)
                         continue
                     group_winners = winners.get(entry.autotuner) if winners else None

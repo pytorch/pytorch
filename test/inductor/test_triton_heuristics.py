@@ -1783,17 +1783,18 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
     @skipIfRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_mixed_static_results_omit_shared_artifact_groups_across_devices(self):
+    def test_mixed_static_results_preserve_trusted_shared_artifact_groups(self):
         from torch._inductor.runtime.runtime_utils import triton_cache_dir
         from torch._inductor.runtime.triton_heuristics import (
             StaticTritonCompileResult,
+            triton_hash_to_path_key,
             TritonCompileResult,
         )
         from torch._inductor.triton_bundler import TritonBundler
 
         args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
         autotuner = CachingAutotuner(**args)
-        regular_autotuner = CachingAutotuner(
+        trusted_autotuner = CachingAutotuner(
             **TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
         )
 
@@ -1801,19 +1802,12 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
             static_result = autotuner._precompile_config(autotuner.configs[0])
         with config.patch(use_static_triton_launcher=False):
             regular_result = autotuner._precompile_config(autotuner.configs[1])
-            regular_autotuner._precompile_worker()
         autotuner.compile_results = [static_result, regular_result]
         autotuner.configs = None
         autotuner.triton_meta["device"] = 0
-        regular_autotuner.triton_meta["device"] = 1
+        trusted_autotuner.triton_meta["device"] = 1
 
-        cubin_path = static_result.cubin_path()
-        with open(cubin_path, "rb") as file:
-            original_cubin = file.read()
         try:
-            with open(cubin_path, "wb") as file:
-                file.write(b"tampered")
-
             with config.patch(
                 bundle_triton_into_fx_graph_cache=True,
                 use_static_triton_launcher=True,
@@ -1821,30 +1815,32 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
             ):
                 TritonBundler.begin_compile()
                 autotuner._precompile_worker()
-                regular_autotuner._precompile_worker()
+                trusted_autotuner._precompile_worker()
+                TritonBundler.put_static_autotuner("trusted", trusted_autotuner)
                 bundle, _ = TritonBundler.collect()
             result_types = {type(result) for result in autotuner.compile_results}
             mixed_hashes = {result.kernel.hash for result in autotuner.compile_results}
-            regular_hashes = {
-                result.kernel.hash for result in regular_autotuner.compile_results
+            trusted_hashes = {
+                result.kernel.hash for result in trusted_autotuner.compile_results
             }
         finally:
-            with open(cubin_path, "wb") as file:
-                file.write(original_cubin)
             autotuner.release_benchmark_artifacts()
-            regular_autotuner.release_benchmark_artifacts()
+            trusted_autotuner.release_benchmark_artifacts()
 
         self.assertFalse(autotuner._has_pending_runtime_autotuning())
         self.assertEqual(
             result_types,
             {StaticTritonCompileResult, TritonCompileResult},
         )
-        self.assertEqual(mixed_hashes, regular_hashes)
+        self.assertEqual(mixed_hashes, trusted_hashes)
         self.assertNotEqual(
-            autotuner.triton_meta["device"], regular_autotuner.triton_meta["device"]
+            autotuner.triton_meta["device"], trusted_autotuner.triton_meta["device"]
         )
         self.assertEqual(triton_cache_dir(0), triton_cache_dir(1))
-        self.assertEqual(bundle.kernel_artifacts, [])
+        self.assertEqual(
+            {artifacts.kernel_hash for artifacts in bundle.kernel_artifacts},
+            {triton_hash_to_path_key(kernel_hash) for kernel_hash in trusted_hashes},
+        )
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_autotune_cache_round_trips_maxnreg(self):
