@@ -221,10 +221,6 @@ STRUCTURES = {
     "huge_scale": huge_scale,
 }
 
-# Structures that are singular (or effectively so) at tiny n, where there is no
-# room for the 2x2 blocks they are built to require.
-_NEEDS_ROOM = ("zero_diagonal", "out_of_panel_heavy", "arrow", "tridiagonal", "banded")
-
 
 def symmetrize(a, hermitian):
     return a.tril() + a.tril(-1).mH if hermitian else a.tril() + a.tril(-1).mT
@@ -349,8 +345,8 @@ class TestLDLCustomKernel(TestCase):
     @parametrize("n", [2, 3, 4, 5, 7, 8, 15, 16, 17, 31, 32, 33, 34, 63, 64, 65, 66, 96, 127, 128, 129])
     @dtypes(*floating_and_complex_types())
     def test_structures(self, device, dtype, n, structure):
-        if structure in _NEEDS_ROOM and n < 4:
-            self.skipTest(f"{structure} is singular for n={n}")
+        if structure == "zero_diagonal" and n < 2:
+            self.skipTest("zero_diagonal is the zero matrix for n=1")
         torch.manual_seed(n)
         A = STRUCTURES[structure](n, (), dtype, device)
         self._check(A, hermitian=True)
@@ -526,8 +522,8 @@ class TestLDLCustomKernel(TestCase):
         Everything else in this file validates by residual instead, because at
         large n the pivot sequence is genuinely allowed to differ.
         """
-        if structure in _NEEDS_ROOM and n < 4:
-            self.skipTest(f"{structure} is singular for n={n}")
+        if structure == "zero_diagonal" and n < 2:
+            self.skipTest("zero_diagonal is the zero matrix for n=1")
         for seed in range(10):
             torch.manual_seed(seed)
             A = STRUCTURES[structure](n, (), dtype, device)
