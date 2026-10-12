@@ -1020,6 +1020,43 @@ print("RECOVERED")
         y = torch.ones(10000000 - 1, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
+    def test_storage_copy_releases_gil_during_blocking_cuda_to_cpu(self):
+        # UntypedStorage.copy_ should release the GIL around the native copy,
+        # matching Tensor.copy_, so other Python threads can run while a
+        # blocking CUDA->CPU copy waits on prior GPU work. See #200410.
+        src = torch.ones(1, dtype=torch.uint8, device="cuda")
+        dst = torch.empty(1, dtype=torch.uint8)
+        torch.cuda.synchronize()
+
+        def count_heartbeats(copy_fn):
+            beats = []
+            stop = threading.Event()
+
+            def heartbeat():
+                while not stop.wait(0.001):
+                    beats.append(time.perf_counter())
+
+            thread = threading.Thread(target=heartbeat)
+            thread.start()
+            try:
+                torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+                start = time.perf_counter()
+                copy_fn()
+                end = time.perf_counter()
+            finally:
+                stop.set()
+                thread.join()
+            return sum(start < t < end for t in beats)
+
+        storage_beats = count_heartbeats(
+            lambda: dst.untyped_storage().copy_(src.untyped_storage(), False)
+        )
+        self.assertEqual(dst, src.cpu())
+        # With the GIL held, the issue repro saw ~1 heartbeat during the wait;
+        # with the GIL released, Tensor.copy_ saw ~18. Require several
+        # heartbeats so a regression to holding the GIL fails the test.
+        self.assertGreaterEqual(storage_beats, 5)
+
     def test_copy_non_blocking_type_conversion(self):
         a = torch.ones(1, device="cuda")
         b = torch.zeros(1, device="cpu", pin_memory=True)
