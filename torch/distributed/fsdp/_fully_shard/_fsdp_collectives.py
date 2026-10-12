@@ -481,12 +481,9 @@ def _default_all_gather_output_fn(
             copy_output = torch.empty_like(output)
             reassembled.append((copy_output, output, outer_size))
         split_output = copy_output.view(torch.uint8) if byte_views else copy_output
-        try:
-            split_output = split_output.view(world_size, split_size)
-        except RuntimeError:  # the output of a smaller payload
+        if split_output.numel() != world_size * split_size:  # a smaller payload
             split_output = split_output.narrow(0, 0, world_size * split_size)
-            split_output = split_output.view(world_size, split_size)
-        split_outputs.append(split_output)
+        split_outputs.append(split_output.view(world_size, split_size))
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs
     )
@@ -556,12 +553,14 @@ def foreach_all_gather_copy_out(
 
 
 # Note [Reduce-scatter input fn]
-# copy_in = fn(unsharded_grads, shard_dims, world_size) runs before FSDP allocates
-# the reduce-scatter input and may replace entries of unsharded_grads, e.g. with
-# reordered copies. copy_in(reduce_scatter_input) then fills that flat buffer so
-# that, viewed as (world_size, -1), row r holds each gradient's padded shard r in
-# order, cast to the buffer's dtype. Both run on the current stream; FSDP frees
-# copy_in and the gradients afterward, so keep neither.
+# copy_in = fn(unsharded_grads, shard_dims=shard_dims, world_size=world_size) runs
+# before FSDP allocates the reduce-scatter input and may replace entries of
+# unsharded_grads, e.g. with reordered copies. copy_in(reduce_scatter_input) then
+# fills that flat buffer so that, viewed as (world_size, -1), row r holds each
+# gradient's padded shard r in order, cast to the buffer's dtype. Both run on the
+# current stream; FSDP frees copy_in and the gradients afterward, so keep neither.
+# The keywords make callbacks with the earlier (fsdp_params, unsharded_grads,
+# world_size) signature fail.
 def _default_reduce_scatter_input_fn(
     unsharded_grads: list[torch.Tensor],
     shard_dims: list[int],
@@ -634,7 +633,9 @@ def foreach_reduce(
         fsdp_param.padded_sharded_param_size.numel() for fsdp_param in fsdp_params
     ]
     # See Note [Reduce-scatter input fn]
-    copy_in = prepare_reduce_scatter_inputs(unsharded_grads, shard_dims, world_size)
+    copy_in = prepare_reduce_scatter_inputs(
+        unsharded_grads, shard_dims=shard_dims, world_size=world_size
+    )
     reduce_scatter_output_numel = sum(padded_sharded_numels)
     reduce_scatter_input = reduce_scatter_comm.allocate(
         (reduce_scatter_output_numel * world_size,),
