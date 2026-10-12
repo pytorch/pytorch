@@ -532,14 +532,6 @@ def _torchci_report_args(reports_dir: str | None) -> list[str]:
     return [f"--save-torchci-reports={reports_dir}"]
 
 
-def _torchci_reports_default() -> str | None:
-    # The CI jobs that write reports by default, widening until it's all of CI.
-    # upload-test-artifacts uploads this folder.
-    if IS_CI and os.environ.get("GITHUB_WORKFLOW") in ("trunk", "pull"):
-        return str(REPO_ROOT / "test/torchci-reports")
-    return None
-
-
 def run_test(
     test_module: ShardedTest,
     test_directory,
@@ -1682,9 +1674,8 @@ def parse_args():
         "--save-torchci-reports",
         # Absolute, since tests run from test/.
         type=os.path.abspath,
-        default=_torchci_reports_default(),
         metavar="DIR",
-        help="write test run reports to DIR (default in rolled-out CI jobs: test/torchci-reports)",
+        help="write test run reports to DIR",
     )
     parser.add_argument(
         "-i",
