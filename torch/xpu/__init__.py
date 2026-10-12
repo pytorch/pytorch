@@ -66,7 +66,7 @@ class _ZesDeviceInfo:
 
 _cached_zes_device_infos: list[_ZesDeviceInfo] = []
 # Interval between two HW counter reads; must be >=100ms for fresh data.
-_zes_sample_interval_ms = 150
+_zes_sample_interval_ms = 100
 
 
 def _is_compiled() -> bool:
