@@ -574,9 +574,9 @@ class BaseBuiltinVariable(VariableTracker):
         """Dispatch an unbound method of the wrapped builtin type, if that is
         what the call is.  Written out (list.copy(lst)) or read out as a value
         (`copier = list.copy`): CPython looks the descriptor up on the type,
-        checks the receiver against __objclass__, and runs that type's C slot on
-        it -- the receiver's call_method, for the types modeled here.  Shared by
-        every builtin type rather than copied per type.
+        checks the receiver against __objclass__, and runs that descriptor's
+        slot on the receiver.  Shared by every builtin type rather than copied
+        per type.
         """
         fn = self.as_python_constant()
         if args and isinstance(fn, type):
@@ -585,7 +585,12 @@ class BaseBuiltinVariable(VariableTracker):
                 descriptor, (types.MethodDescriptorType, types.WrapperDescriptorType)
             ):
                 obj, rest = args[0], args[1:]
-                obj_type = maybe_get_python_type(obj)
+                try:
+                    obj_type = obj.python_type()
+                except NotImplementedError:
+                    # No type to check the descriptor against; leave the call to
+                    # the receiver rather than graph breaking with a dynamo bug.
+                    return None
                 if not issubclass(obj_type, descriptor.__objclass__):
                     # descr_check: the descriptor does not apply to this receiver
                     # type, and dispatching by name would silently run another
@@ -597,9 +602,26 @@ class BaseBuiltinVariable(VariableTracker):
                         f"apply to a '{obj_type.__name__}' object",
                     )
                 if isinstance(obj, UserDefinedObjectVariable):
-                    # A Python override on a subclass must not run: start the
-                    # lookup at the defining base, as the C slot does.
+                    # A user class reaches this call through its own dispatch,
+                    # and call_base_method starts the slot lookup at the builtin
+                    # base rather than the user class, so a Python override of
+                    # the same name never runs in place of the descriptor's
+                    # slot: list.append(OverridingAppend(), 3) appends.
                     return obj.call_base_method(tx, name, rest, kwargs)
+                # A builtin VT dispatches by name, which is this descriptor's
+                # slot only when the receiver's own type resolves the name back
+                # to the descriptor.  Where another C descriptor shadows it
+                # (OrderedDict.keys) that descriptor's slot is still the right
+                # one, but where a plain attribute shadows it the name belongs
+                # to the receiver's type and running its method here would be
+                # wrong: object.__eq__ is not list/dict/set equality, and
+                # object.__hash__(lst) is the id hash, not list's TypeError.
+                shadow = inspect.getattr_static(obj_type, name, None)
+                if shadow is not descriptor and not isinstance(
+                    shadow,
+                    (types.MethodDescriptorType, types.WrapperDescriptorType),
+                ):
+                    return None
                 return obj.call_method(tx, name, rest, kwargs)
         return None
 
@@ -2065,9 +2087,12 @@ class BuiltinVariable(BaseBuiltinVariable):
         if name == "__repr__" and len(args) == 1 and not kwargs:
             return super().call_method(tx, name, args, kwargs)
 
-        # The base class repeats this dispatch for the builtin VTs that do not
-        # inherit this one; here it has to precede the protocol handlers below,
-        # which would run a subclass override instead of the type's own slot.
+        # Must precede the protocol handlers below, which dispatch on the
+        # receiver and so would run a subclass override where this runs the
+        # type's own slot.  The base class repeats this for the builtin VTs that
+        # do not inherit from this one.  Every type those handlers name defines
+        # the slot, so they only run for a type that lacks it: int.__len__(x)
+        # reaches its handler, list.__len__(x) is dispatched here.
         result = self._call_unbound_method(tx, name, args, kwargs)
         if result is not None:
             return result

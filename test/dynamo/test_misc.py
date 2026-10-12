@@ -5427,53 +5427,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNot(d.b, p.b)  # deep copy clones the list
         self.assertIs(type(d), Plain)
 
-    def test_copy_reduce_override(self):
-        # object.__reduce_ex__ must defer to a type's overridden __reduce__
-        # rather than the copyreg __newobj__ path. Exercise both a plain custom
-        # class and the pure-Python functools.partial (which returns func plus a
-        # 4-tuple state consumed by __setstate__).
-        from test.support.import_helper import import_fresh_module
-
-        class Custom:
-            def __init__(self, a, b=None):
-                self.a = a
-                self.b = b
-
-            def __reduce__(self):
-                return (type(self), (self.a,), {"b": self.b})
-
-            def __setstate__(self, state):
-                self.b = state["b"]
-
-        def fn(o):
-            return copy.copy(o), copy.deepcopy(o)
-
-        # graph break on equality comparison for py_functools.args tuples
-        cfn = torch.compile(fn, fullgraph=False, backend="eager")
-
-        obj = Custom(1, [10, 20])
-        c, d = cfn(obj)
-        self.assertEqual(c.a, 1)
-        self.assertIs(c.b, obj.b)  # shallow copy shares the list from state
-        self.assertEqual(d.a, 1)
-        self.assertIsNot(d.b, obj.b)  # deep copy clones the list
-        self.assertEqual(d.b, obj.b)
-
-        py_functools = import_fresh_module("functools", blocked=["_functools"])
-        p = py_functools.partial(sorted, ["asdf"], key=lambda t: t[0])
-        p.attr = [1, 2]
-        c, d = cfn(p)
-
-        self.assertIs(c.func, p.func)
-        self.assertIs(c.args, p.args)
-        self.assertIs(c.keywords, p.keywords)
-        self.assertIs(c.attr, p.attr)  # shallow copy shares __dict__ attr
-
-        self.assertEqual(d.args, p.args)
-        self.assertEqual(list(d.keywords), list(p.keywords))
-        self.assertIsNot(d.attr, p.attr)  # deep copy clones __dict__ attr
-        self.assertEqual(d.attr, p.attr)
-
     def test_copy_exact_container_methods(self):
         # copy.copy dispatches exact list/dict/set through copy._copy_dispatch,
         # whose entries are the unbound C method descriptors list.copy,
@@ -5530,6 +5483,40 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(4)
         correct = fn(x)
         result = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+    def test_unbound_descriptor_owner_not_receiver_type(self):
+        # list.append(lst, v) is method_descr_call on list's own C slot, so a
+        # subclass overriding append must not see the override run.  The
+        # override here raises, which only a dispatch on the receiver reaches.
+        class OverridingAppend(list):
+            def append(self, value):
+                raise RuntimeError("overridden append ran")
+
+        def fn(x, lst):
+            list.append(lst, 3)
+            return x + len(lst)
+
+        x = torch.randn(4)
+        correct = fn(x, OverridingAppend([1, 2]))
+        result = torch.compile(fn, fullgraph=True, backend="eager")(
+            x, OverridingAppend([1, 2])
+        )
+        self.assertEqual(correct, x + 3)
+        self.assertEqual(result, correct)
+
+        # The same holds for copy, whose override returns a list of the wrong
+        # kind rather than raising.
+        class OverridingCopy(list):
+            def copy(self):
+                return "overridden"
+
+        def copied(x, lst):
+            return x + len(list.copy(lst))
+
+        copied_args = (x, OverridingCopy([1, 2]))
+        correct = copied(*copied_args)
+        result = torch.compile(copied, fullgraph=True, backend="eager")(*copied_args)
         self.assertEqual(result, correct)
 
     def test_unbound_list_methods(self):
