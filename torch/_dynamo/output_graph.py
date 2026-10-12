@@ -70,11 +70,7 @@ from torch._guards import (
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
-from torch._subclasses.fake_tensor import (
-    maybe_get_fake_device,
-    maybe_get_item_memo,
-    maybe_set_fake_device,
-)
+from torch._subclasses.fake_tensor import maybe_get_item_memo
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
@@ -3049,10 +3045,7 @@ class OutputGraph(OutputGraphCommon):
                 for node, snapshot in self._shallow_copy_placeholder_snapshots.items():
                     node.meta["example_value"] = snapshot
                     idx = placeholder_to_idx[node]
-                    snapshot_device = maybe_get_fake_device(snapshot)
-                    if snapshot_device is None:
-                        raise AssertionError("expected a fake tensor device")
-                    maybe_set_fake_device(example_inputs[idx], snapshot_device)
+                    example_inputs[idx].fake_device = snapshot.fake_device  # type: ignore[union-attr]
 
             gm.graph.lint()
             if is_noop_graph(gm):
@@ -3560,11 +3553,13 @@ class OutputGraph(OutputGraphCommon):
         # Import here to prevent circular import
         from torch._dynamo.symbolic_convert import TensorifyState
 
+        # Typed like FakeTensor.item_memo (SymNumberMemoDescriptor.__get__)
+        memo_type = torch.SymInt | torch.SymFloat | None
         for node in self.graph.nodes:
             example_value = node.meta.get("example_value")
-            item_memo = maybe_get_item_memo(example_value)
+            item_memo = cast(memo_type, maybe_get_item_memo(example_value))
             if (
-                isinstance(item_memo, (torch.SymFloat, torch.SymInt))
+                item_memo is not None
                 and hasattr(item_memo.node._expr, "name")
                 and all(u.target == "item" for u in node.users)
                 and TensorifyState.should_specialize(

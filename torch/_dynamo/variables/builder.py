@@ -3713,7 +3713,7 @@ class VariableBuilder:
         if fake_mode is not self.tx.fake_mode:
             raise AssertionError(
                 f"fake mode ({fake_mode}) from fake tensor metadata doesn't match mode"
-                f"({self.tx.fake_mode}) from InstructionTranslator"
+                "({self.tx.fake_mode}) from InstructionTranslator"
             )
 
         # There's something a bit incoherent about pass_arg_as_tensor,
@@ -3819,7 +3819,7 @@ class VariableBuilder:
             if fake_mode is not self.tx.fake_mode:
                 raise AssertionError(
                     f"fake mode ({fake_mode}) from fake tensor metadata doesn't match mode"
-                    f"({self.tx.fake_mode}) from InstructionTranslator"
+                    "({self.tx.fake_mode}) from InstructionTranslator"
                 )
 
             proxy.node.meta["grapharg"] = GraphArg(
@@ -5291,10 +5291,7 @@ def _wrap_to_fake_tensor_and_record_impl(
         if (
             source is not None
             and is_fake_tensor(fake_e)
-            and isinstance(
-                sym_val := maybe_get_item_memo(fake_e),
-                (torch.SymFloat, torch.SymInt),
-            )
+            and (sym_val := maybe_get_item_memo(fake_e)) is not None
         ):
             # Match the peephole in FakeTensorConverter.from_real_tensor that
             # strips FloatTensorSource before calling create_symbol.  Without
@@ -5304,6 +5301,8 @@ def _wrap_to_fake_tensor_and_record_impl(
                 item_source = source.base
             else:
                 item_source = CallMethodItemSource(source)
+            # Typed like FakeTensor.item_memo (SymNumberMemoDescriptor.__get__)
+            sym_val = cast(torch.SymInt | torch.SymFloat, sym_val)
             tx.output.tracked_fakes.append(
                 TrackedFake(sym_val, item_source, symbolic_context)
             )
