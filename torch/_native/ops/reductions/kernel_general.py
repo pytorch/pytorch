@@ -7,15 +7,15 @@ import math
 from collections.abc import Sequence
 from typing import Any, cast, Literal
 
-from cutlass import Int32, Int64
+from cutlass import Float32, Float64, Int32, Int64
 
 import torch
 from torch._tensor_iterator import reduce_op
 
 from ...cutedsl import launch as _L
-from ...cutedsl.dtypes import cute2torch, torch2cute
+from ...cutedsl.dtypes import torch2cute
 from ...cutedsl.plan_cache import cached_plan
-from . import _storage, tile
+from . import tile
 from .traits import WARP
 
 
@@ -44,21 +44,17 @@ class ReduceBlock:
         ragged_chunk: bool = False,
         from_partials: bool = False,
         block: int = 128,
-        order: Literal["linear", "inner_tree"] = "linear",
-        itree: Any = None,
     ) -> None:
         self.trait = trait
         self.count = count  # elements reduced per output (= prod red exts)
         self.num_o = num_o  # number of outputs / blocks (= prod kept exts)
-        # An empty reduced list is LEGAL: an extent-1 reduced axis coalesces away in TI, leaving a
-        # fold of one element per output. An empty KEPT list is a full reduction.
+        # An extent-one reduced axis can coalesce away, leaving no reduced pairs.
         self.red_pairs = tuple(red_pairs)
         self.kept_pairs = tuple(kept_pairs)
         self.npairs_red = len(self.red_pairs)
         self.npairs_kept = len(self.kept_pairs)
         self.wide_count = count >= _INT32_LIMIT
         self.wide_output = num_o >= _INT32_LIMIT
-        self.wide_gidx = getattr(trait, "has_index", False) and trait.idx is Int64
         self.wide_red = any(ext >= _INT32_LIMIT for ext, _ in self.red_pairs)
         self.wide_kept = any(ext >= _INT32_LIMIT for ext, _ in self.kept_pairs)
         self.in_base = in_base  # flat input offset of output coordinate 0
@@ -86,14 +82,11 @@ class ReduceBlock:
             npairs_kept=self.npairs_kept,
             wide_count=self.wide_count,
             wide_output=self.wide_output,
-            wide_gidx=self.wide_gidx,
             wide_red=self.wide_red,
             wide_kept=self.wide_kept,
             gidx_from=gidx_from,
             flat_tail=flat_tail,
             ragged_chunk=ragged_chunk,
-            order=order,
-            itree=itree,
         )
 
     @property
@@ -119,6 +112,8 @@ class ReduceBlock:
 _stream = _L.stream
 # _L.compile_kernel uses fake operands and tvm-ffi, avoiding per-call tensor wrapping.
 _compile = _L.compile_kernel
+_PART_TORCH = {Float32: torch.float32, Float64: torch.float64, Int32: torch.int32}
+
 _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
 _PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
 
@@ -140,7 +135,7 @@ def _operands(ts: Sequence[torch.Tensor], read_only: bool = False) -> list[Any]:
 
 
 def _exts(pairs: Pairs, wide: bool = False) -> list[Any] | None:
-    # FastDivmod encodes Int32 divisors; wider dimensions use native Int64 division.
+    # FastDivmod has an Int32 dividend; wider decodes use native Int64 division.
     dtype = Int64 if wide else Int32
     return [dtype(ext) for ext, _ in pairs] or None
 
@@ -158,9 +153,9 @@ def _geom_args(op: ReduceBlock) -> tuple[Any, ...]:
         Int64(op.project_n),
         None if grid_x is None else Int32(grid_x),
         None if grid_x is None else Int32(-(-op.num_o // grid_x)),
-        _exts(op.red_pairs, op.wide_red),
+        _exts(op.red_pairs, op.wide_count or op.wide_red),
         _strides(op.red_pairs),
-        _exts(op.kept_pairs, op.wide_kept),
+        _exts(op.kept_pairs, op.wide_output or op.wide_kept),
         _strides(op.kept_pairs),
         Int64(op.in_base),
         Int64(op.limit),
@@ -183,16 +178,8 @@ def _launch(
             key,
             lambda: _compile(
                 op.tile,
-                # A flat input storage span can exceed 2**31 even though each
-                # decoded kept and reduced extent fits Int32.
                 _fakes(ins, int64_extent=True),
-                _fakes(
-                    outs,
-                    int64_extent=op.wide_output
-                    or (
-                        op.final and any(width == 2 for width in op.tile.output_widths)
-                    ),
-                ),
+                _fakes(outs, int64_extent=op.wide_output),
                 *_geom_args(op),
                 _stream(),
             ),
@@ -232,20 +219,8 @@ def _probe(x: torch.Tensor, red_axes: set[int]) -> torch.Tensor:
 
 def _flat(x: torch.Tensor) -> torch.Tensor:
     # View all storage at stride one because TI strides are storage-relative; reshape could copy.
-    storage_view = _storage.real_view(x)
-    n = max(
-        storage_view.untyped_storage().nbytes() // storage_view.element_size(),
-        1,
-    )
-    return torch.as_strided(storage_view, (n,), (1,), storage_offset=0)
-
-
-def _kernel_out(out: torch.Tensor) -> torch.Tensor:
-    return _storage.flat_view(out)
-
-
-def _kernel_outs(outs: Sequence[torch.Tensor]) -> list[torch.Tensor]:
-    return [_kernel_out(out) for out in outs]
+    n = max(x.untyped_storage().nbytes() // x.element_size(), 1)
+    return torch.as_strided(x, (n,), (1,), storage_offset=0)
 
 
 # Fast-path classification shared by routing and condition gates, after TI coalescing.
@@ -377,7 +352,7 @@ def _two_stage_row(
         return None
 
     parts = [
-        torch.empty(M * C, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
+        torch.empty(M * C, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
         for f in range(trait.nfields)
     ]
     outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes]
@@ -567,7 +542,7 @@ def _reduce_all(
     chunk = (L + G - 1) // G
 
     parts = [
-        torch.empty(G, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
+        torch.empty(G, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
         for f in range(trait.nfields)
     ]
     outs = [torch.empty(1, device=x.device, dtype=d) for d in out_dtypes]

@@ -101,14 +101,10 @@ def _out_keepdim_view(
 def _eligibility(
     self: torch.Tensor, d: int, out: torch.Tensor
 ) -> TensorIterator | None:
-    """Return the reduction ``TensorIterator`` if ``(self, d, out)`` fits the
-    kernel's expected geometry, else ``None``. ``d`` is already normalized
-    and ``out`` is a keepdim-shaped output (broadcast-aligned with ``self``).
+    """Return the iterator if its operands canonicalize to ``(M, N)`` / ``(M,)``.
 
-    Mirrors ``try_inner_tree_reduction``: build the reduction iterator, then
-    require a single coalesced reduced (fastest) dimension with element
-    stride 1 on the input, and at most one non-reduced (outer) dimension so
-    the operands canonicalize to a single ``(M, N)`` view.
+    ``d`` is normalized and ``out`` is keepdim-shaped. TensorIterator stores
+    dimensions fastest-first and omits size-one dimensions.
     """
     try:
         it = reduce_op(out, self)
@@ -120,14 +116,23 @@ def _eligibility(
     if it.ndim == 0 or it.ndim > 2:
         return None
 
+    m = out.numel()
+    n = self.numel() // m
+    expected_shape = tuple(size for size in (n, m) if size != 1)
+    if not expected_shape:
+        expected_shape = (1,)
+    if tuple(it.shape) != expected_shape:
+        return None
+
     input_index = it.ntensors - 1  # operands are (out, self); input is last
     es_in = it.element_strides(input_index)
-    # Input must be contiguous on the reduced (fastest, dim-0) axis.
+    # For N == 1, dim 0 is the row axis; retain the compact-row restriction.
     if es_in[0] != 1:
         return None
-    # Reduction must be on the fastest dim: either the whole tensor is the
-    # reduction (ndim == 1) or the reduced-dim stride is the smallest.
-    if it.ndim == 2 and not (es_in[0] < es_in[1]):
+    if n > 1 and m > 1 and not (es_in[0] < es_in[1]):
+        return None
+    row_dim = 0 if n == 1 else 1
+    if m > 1 and it.element_strides(0)[row_dim] == 0:
         return None
     return it
 
@@ -139,9 +144,10 @@ def _geometry(self: torch.Tensor, out: torch.Tensor, it: TensorIterator):
     between rows of the canonical ``(M, N)`` / ``(M,)`` views."""
     m = out.numel()
     n = self.numel() // m if m else 0
-    if it.ndim == 2:
-        in_row_stride = it.element_strides(it.ntensors - 1)[1]
-        out_row_stride = it.element_strides(0)[1]
+    if m > 1:
+        row_dim = 0 if n == 1 else 1
+        in_row_stride = it.element_strides(it.ntensors - 1)[row_dim]
+        out_row_stride = it.element_strides(0)[row_dim]
     else:
         in_row_stride = n
         out_row_stride = 1
