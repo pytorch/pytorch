@@ -485,50 +485,17 @@ class TritonBundler:
                     path = os.path.join(entry.directory, entry.kernel_hash)
                     if not os.path.exists(path):
                         continue
-                    if config.use_static_triton_launcher:
-                        binary_digests = (
-                            cls._static_binary_digests.get(entry.autotuner)
-                            if cls._static_binary_digests
-                            else None
-                        )
-                        trusted = binary_digests is not None
-                        for filename in os.listdir(path):
-                            if (
-                                os.path.splitext(filename)[1]
-                                not in GPU_KERNEL_BIN_EXTS.values()
-                            ):
-                                continue
-                            expected_digests = OrderedSet()
-                            if binary_digests is not None:
-                                expected_digests.update(
-                                    binary_digests.get(
-                                        (entry.device, entry.kernel_hash, filename),
-                                        (),
-                                    )
-                                )
-                                expected_digests.update(
-                                    binary_digests.get(
-                                        (None, entry.kernel_hash, filename),
-                                        (),
-                                    )
-                                )
-                            try:
-                                with open(os.path.join(path, filename), "rb") as file:
-                                    digest = hashlib.sha256(file.read()).digest()
-                            except OSError:
-                                trusted = False
-                                break
-                            if digest not in expected_digests:
-                                trusted = False
-                                break
-                        if not trusted:
-                            log.debug(
-                                "Skipping kernel absent from static snapshot %s",
-                                entry.kernel_hash,
-                            )
-                            continue
+                    binary_digests = (
+                        cls._static_binary_digests.get(entry.autotuner)
+                        if config.use_static_triton_launcher
+                        and cls._static_binary_digests
+                        else None
+                    )
+                    trusted = True
+                    artifact_kernel_names: list[str] = []
                     for filename in os.listdir(path):
                         filepath = os.path.join(path, filename)
+                        extension = os.path.splitext(filename)[1]
                         try:
                             if not os.path.isfile(filepath):
                                 raise AssertionError(
@@ -536,33 +503,69 @@ class TritonBundler:
                                 )
                             with open(filepath, "rb") as file:
                                 payload = file.read()
-                                if filepath.endswith(".json"):
-                                    # Make sure there's no sentinel value
-                                    if TritonBundler._REPLACE_BYTES in payload:
-                                        log.warning(
-                                            "Bundle contains illegal %s, payload: %s",
-                                            TritonBundler._REPLACE_BYTES,
-                                            payload,
-                                        )
-                                        raise AssertionError(
-                                            "Bundle contains illegal bytes"
-                                        )
-                                    # Remove the path from payload
-                                    payload = payload.replace(
-                                        str.encode(path), TritonBundler._REPLACE_BYTES
-                                    )
-                                artifacts.append(
-                                    TritonKernelArtifact(filename, payload)
-                                )
-                            counters["inductor"]["triton_bundler_save_kernel"] += 1
                         except Exception:
                             log.debug("failed to collect triton kernel", exc_info=True)
-                        extension = os.path.splitext(filename)[1]
+                            if (
+                                binary_digests is not None
+                                and extension in GPU_KERNEL_BIN_EXTS.values()
+                            ):
+                                trusted = False
+                            continue
+
+                        if (
+                            binary_digests is not None
+                            and extension in GPU_KERNEL_BIN_EXTS.values()
+                        ):
+                            expected_digests = OrderedSet()
+                            expected_digests.update(
+                                binary_digests.get(
+                                    (entry.device, entry.kernel_hash, filename),
+                                    (),
+                                )
+                            )
+                            expected_digests.update(
+                                binary_digests.get(
+                                    (None, entry.kernel_hash, filename),
+                                    (),
+                                )
+                            )
+                            if hashlib.sha256(payload).digest() not in expected_digests:
+                                trusted = False
+
+                        try:
+                            if filepath.endswith(".json"):
+                                # Make sure there's no sentinel value
+                                if TritonBundler._REPLACE_BYTES in payload:
+                                    log.warning(
+                                        "Bundle contains illegal %s, payload: %s",
+                                        TritonBundler._REPLACE_BYTES,
+                                        payload,
+                                    )
+                                    raise AssertionError(
+                                        "Bundle contains illegal bytes"
+                                    )
+                                # Remove the path from payload
+                                payload = payload.replace(
+                                    str.encode(path), TritonBundler._REPLACE_BYTES
+                                )
+                            artifacts.append(TritonKernelArtifact(filename, payload))
+                        except Exception:
+                            log.debug("failed to collect triton kernel", exc_info=True)
                         if extension in GPU_KERNEL_BIN_EXTS.values():
                             # Each kernel has bunch of files like .cubin(for cuda), .zebin(for xpu), .json, .ttir
                             # Just append one of them without the extension
-                            kernel_names.append(Path(filename).stem)
+                            artifact_kernel_names.append(Path(filename).stem)
+                    if not trusted:
+                        log.debug(
+                            "Skipping kernel absent from static snapshot %s",
+                            entry.kernel_hash,
+                        )
+                        continue
                     if artifacts:
+                        counters["inductor"]["triton_bundler_save_kernel"] += len(
+                            artifacts
+                        )
+                        kernel_names.extend(artifact_kernel_names)
                         result.append(
                             TritonKernelArtifacts(
                                 entry.kernel_hash,

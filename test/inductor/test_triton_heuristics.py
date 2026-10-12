@@ -1818,6 +1818,108 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
     @skipIfRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_static_snapshot_validates_collected_binary(self):
+        from torch._inductor.runtime.triton_heuristics import triton_hash_to_path_key
+        from torch._inductor.triton_bundler import TritonBundler
+
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"]["grid_type"] = "Grid1D"
+        autotuner = CachingAutotuner(**args)
+
+        with (
+            fresh_cache(),
+            config.patch(
+                bundle_triton_into_fx_graph_cache=True,
+                compile_threads=1,
+                use_static_triton_launcher=True,
+            ),
+        ):
+            TritonBundler.begin_compile()
+            try:
+                autotuner.precompile(static_triton_bundle_key="snapshot")
+                winner = autotuner.compile_results[0]
+                winner_hash = triton_hash_to_path_key(winner.kernel.hash)
+                TritonBundler.put_winner(winner_hash, autotuner)
+                binary_path = winner.cubin_path()
+                with open(binary_path, "rb") as file:
+                    expected_payload = file.read()
+                with tempfile.NamedTemporaryFile(
+                    dir=os.path.dirname(os.path.dirname(binary_path)), delete=False
+                ) as replacement:
+                    replacement_path = replacement.name
+                    replacement.write(b"untrusted replacement")
+
+                audit_state = {"active": True, "opens": 0}
+
+                def replace_before_second_open(event, audit_args):
+                    if (
+                        audit_state["active"]
+                        and event == "open"
+                        and os.fspath(audit_args[0]) == binary_path
+                    ):
+                        audit_state["opens"] += 1
+                        if audit_state["opens"] == 2:
+                            os.replace(replacement_path, binary_path)
+
+                sys.addaudithook(replace_before_second_open)
+                try:
+                    bundle, _ = TritonBundler.collect()
+                finally:
+                    audit_state["active"] = False
+            finally:
+                TritonBundler.end_compile()
+                autotuner.release_benchmark_artifacts()
+
+        group = next(
+            artifacts
+            for artifacts in bundle.kernel_artifacts
+            if artifacts.kernel_hash == winner_hash
+        )
+        binary = next(
+            artifact
+            for artifact in group.artifacts
+            if artifact.filename == os.path.basename(binary_path)
+        )
+        self.assertEqual(audit_state["opens"], 1)
+        self.assertEqual(binary.payload, expected_payload)
+
+    @skipIfRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_non_static_kernel_is_bundled_with_static_launcher_enabled(self):
+        from torch._inductor.runtime.triton_heuristics import triton_hash_to_path_key
+        from torch._inductor.triton_bundler import TritonBundler
+
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"]["grid_type"] = "Grid1D"
+        autotuner = CachingAutotuner(**args)
+
+        with (
+            fresh_cache(),
+            config.patch(
+                bundle_triton_into_fx_graph_cache=True,
+                compile_threads=1,
+                use_static_triton_launcher=False,
+            ),
+        ):
+            TritonBundler.begin_compile()
+            try:
+                autotuner.precompile()
+                kernel_hash = triton_hash_to_path_key(
+                    autotuner.compile_results[0].kernel.hash
+                )
+                with config.patch(use_static_triton_launcher=True):
+                    bundle, _ = TritonBundler.collect()
+            finally:
+                TritonBundler.end_compile()
+                autotuner.release_benchmark_artifacts()
+
+        self.assertIn(
+            kernel_hash,
+            {artifacts.kernel_hash for artifacts in bundle.kernel_artifacts},
+        )
+
+    @skipIfRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_mixed_static_results_preserve_trusted_shared_artifact_groups(self):
         from torch._inductor.runtime.runtime_utils import triton_cache_dir
         from torch._inductor.runtime.triton_heuristics import (
