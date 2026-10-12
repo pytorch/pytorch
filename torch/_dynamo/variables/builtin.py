@@ -33,7 +33,7 @@ import sys
 import types
 import typing
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, cast, NoReturn, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
@@ -102,6 +102,7 @@ from .dicts import (
     DictItemsVariable,
     DictKeysVariable,
     DictViewVariable,
+    pydict_check,
     pydict_checkexact,
 )
 from .lists import (
@@ -3557,12 +3558,28 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
-            obj = args[0]
-            if name in ("keys", "values", "items", "update"):
-                return cast(
-                    VariableTracker,
-                    ConstDictVariable.tp_methods[name](obj, tx, name, args[1:], kwargs),
+            obj = args[0].realize()
+            if not pydict_check(obj):
+                if isinstance(resolved_fn, types.WrapperDescriptorType):
+                    raise_type_error(
+                        tx,
+                        f"descriptor '{name}' requires a 'dict' object "
+                        f"but received a '{obj.python_type_name()}'",
+                    )
+                raise_type_error(
+                    tx,
+                    f"descriptor '{name}' for 'dict' objects doesn't apply "
+                    f"to a '{obj.python_type_name()}' object",
                 )
+            if name in ("keys", "values", "items", "update") and isinstance(
+                obj, ConstDictVariable
+            ):
+                result = ConstDictVariable.tp_methods[name](
+                    obj, tx, name, args[1:], kwargs
+                )
+                if result is not None:
+                    return result
+                return super().call_method(tx, name, args, kwargs)
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)
             return obj.call_method(tx, name, args[1:], kwargs)
