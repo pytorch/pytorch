@@ -1172,6 +1172,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
                 tx, self, *args
             )
+        elif self.value is collections.OrderedDict and name in (
+            "keys",
+            "values",
+            "items",
+            "update",
+        ):
+            return cast(
+                VariableTracker,
+                OrderedDictVariable.tp_methods[name](
+                    args[0], tx, name, args[1:], kwargs
+                ),
+            )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif (
@@ -3212,6 +3224,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
+            if (
+                isinstance(self, ConstDictVariable)
+                and isinstance(method, types.MethodDescriptorType)
+                and method.__objclass__ in (dict, collections.OrderedDict)
+                and method.__name__ in ("keys", "values", "items", "update")
+            ):
+                # Honor the defining dictionary type for aliased builtin descriptors.
+                owner = (
+                    OrderedDictVariable
+                    if method.__objclass__ is collections.OrderedDict
+                    else ConstDictVariable
+                )
+                return cast(
+                    VariableTracker,
+                    owner.tp_methods[method.__name__](
+                        self, tx, method.__name__, args, kwargs
+                    ),
+                )
+
             overloaded = (
                 self._base_methods is not None and method not in self._base_methods
             )
@@ -5098,7 +5129,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
             # subclass override of update() -- self.call_method would
             # dispatch to an override if the subclass defines one, which is
             # wrong here (verified by CPython's test_override_update).
-            ConstDictVariable.call_method(self, tx, "update", args, kwargs)
+            ConstDictVariable.tp_methods["update"](self, tx, "update", args, kwargs)
             return variables.ConstantVariable.create(None)
         return super().tp_init_impl(tx, args, kwargs)
 
