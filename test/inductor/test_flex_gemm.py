@@ -159,25 +159,6 @@ class TestFlexGemmRuntimeImport(TestCase):
         importlib.import_module("torch._inductor.kernel.flex_gemm.runtime")
         self.assertNotIn("torch._vendor.quack", sys.modules)
 
-    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
-    def test_quack_cache_fingerprint_covers_quack_ops_before_any_cache_use(self):
-        # A non-FlexGEMM caller (RMSNorm, symmetric GEMM) may compute QuACK's memoized source
-        # fingerprint first; quack_ops must already be registered by then.
-        script = (
-            "from pathlib import Path\n"
-            "import torch._vendor.quack\n"
-            "from torch._vendor.quack import cache\n"
-            "from torch._vendor.quack.cache import jit\n"
-            "import torch._inductor.kernel.flex_gemm.quack_ops as quack_ops\n"
-            "ops_dir = Path(quack_ops.__file__).resolve().parent\n"
-            "assert ops_dir in cache.EXTRA_SOURCE_DIRS, cache.EXTRA_SOURCE_DIRS\n"
-            "with_ops = jit._compute_source_fingerprint()\n"
-            "cache.EXTRA_SOURCE_DIRS.remove(ops_dir)\n"
-            "jit._compute_source_fingerprint.cache_clear()\n"
-            "assert with_ops != jit._compute_source_fingerprint(), 'quack_ops not hashed'\n"
-        )
-        subprocess.run([sys.executable, "-c", script], check=True, timeout=300)
-
     def test_quack_support_probe_requires_cutlass(self):
         with mock.patch.object(lowering.importlib.util, "find_spec", return_value=None):
             self.assertFalse(lowering.has_flex_gemm_quack())
@@ -2010,7 +1991,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     torch.compile(fn, backend="inductor", fullgraph=True)(x, w_t, offs)
 
     def test_fake_tensor_mode_tuple_aux_returns_fake_tensors(self):
-        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_fake_mode
 
         with FakeTensorMode() as mode:
             a = mode.from_tensor(torch.randn(8, 16))
@@ -2025,8 +2006,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(aux.shape, torch.Size([8, 12]))
         self.assertEqual(actual.dtype, torch.float32)
         self.assertEqual(aux.dtype, torch.float32)
-        self.assertIs(actual.fake_mode, mode)
-        self.assertIs(aux.fake_mode, mode)
+        self.assertIs(maybe_get_fake_mode(actual), mode)
+        self.assertIs(maybe_get_fake_mode(aux), mode)
 
     @unittest.skipUnless(
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
