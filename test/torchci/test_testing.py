@@ -505,6 +505,20 @@ class TestReportEnablement(TestCase):
         with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", False):
             self.assertEqual(args("/reports"), [])
 
+    def test_run_test_exports_the_compiler(self) -> None:
+        run_test_module = importlib.import_module("run_test")
+        environment = importlib.import_module(
+            "torch.testing._internal.torchci.environment"
+        )
+        with (
+            unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", True),
+            unittest.mock.patch.object(environment, "export_compiler") as export,
+        ):
+            run_test_module._export_torchci_compiler(None)
+            export.assert_not_called()
+            run_test_module._export_torchci_compiler("/reports")
+            export.assert_called_once_with()
+
 
 class TestReportHelpers(TestCase):
     def test_identity_survives_unwrap_errors(self):
@@ -597,6 +611,56 @@ class TestReportHelpers(TestCase):
         self.assertEqual(
             environment._compiler(f"PyTorch built with:\n{config}"), expected
         )
+
+    @skipIfTorchDynamo("patches torch.__config__.show")
+    def test_build_compiler(self) -> None:
+        environment = importlib.import_module(
+            "torch.testing._internal.torchci.environment"
+        )
+        gcc = "PyTorch built with:\n  - GCC 11.4\n"
+        with (
+            unittest.mock.patch.dict(os.environ),
+            unittest.mock.patch.object(torch.__config__, "show") as show,
+        ):
+            for name in environment.COMPILER_ENV_VARS:
+                os.environ.pop(name, None)
+            show.return_value = gcc
+            self.assertEqual(environment._build_compiler("cpu"), ("gcc", "11"))
+            # A backend registered without its full hooks (MAIA) makes show() raise.
+            show.side_effect = RuntimeError("Cannot query detailed MAIA version.")
+            self.assertEqual(environment._build_compiler("mps"), ("", ""))
+            show.reset_mock(side_effect=True)
+            # show() initializes an accelerator build's device runtime.
+            for accelerator in ("cuda", "rocm", "xpu"):
+                self.assertEqual(environment._build_compiler(accelerator), ("", ""))
+            show.assert_not_called()
+            # run_test.py's export wins, even empty, so show() is never needed.
+            os.environ.update(zip(environment.COMPILER_ENV_VARS, ("clang", "21")))
+            self.assertEqual(environment._build_compiler("cuda"), ("clang", "21"))
+            os.environ.update(zip(environment.COMPILER_ENV_VARS, ("", "")))
+            self.assertEqual(environment._build_compiler("cpu"), ("", ""))
+            show.assert_not_called()
+
+    @skipIfTorchDynamo("patches torch.__config__.show")
+    def test_export_compiler(self) -> None:
+        environment = importlib.import_module(
+            "torch.testing._internal.torchci.environment"
+        )
+        with (
+            unittest.mock.patch.dict(os.environ),
+            unittest.mock.patch.object(torch.__config__, "show") as show,
+        ):
+            show.return_value = "PyTorch built with:\n  - GCC 11.4\n"
+            environment.export_compiler()
+            self.assertEqual(
+                [os.environ[name] for name in environment.COMPILER_ENV_VARS],
+                ["gcc", "11"],
+            )
+            show.side_effect = RuntimeError("Cannot query detailed MAIA version.")
+            environment.export_compiler()
+            self.assertEqual(
+                [os.environ[name] for name in environment.COMPILER_ENV_VARS], ["", ""]
+            )
 
     def test_windows_os_version(self):
         environment = importlib.import_module(
