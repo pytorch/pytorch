@@ -380,7 +380,7 @@ class ComboKernel(Kernel):
             if ndim < 2:
                 raise AssertionError(f"Combokernel not support tile {tiled_groups}")
 
-            # Skip 2d reductions (r0_,r1_) and 3D pointwise (x,y,z) from combo
+            # Skip multi-axis reductions and 3D pointwise kernels from combo.
             keys = tiled_groups.keys()
             if ("r0_" in keys and "r1_" in keys) or "z" in keys:
                 all_partitions.append([node_info])
