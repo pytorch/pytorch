@@ -7,6 +7,7 @@ import math
 from collections.abc import Sequence
 from typing import Any, cast, Literal, NamedTuple
 
+import cutlass.cute as cute
 from cutlass import Float32, Float64, Int32, Int64
 
 import torch
@@ -59,6 +60,9 @@ class ReduceBlock:
         self.wide_output = num_o >= _INT32_LIMIT
         self.wide_red = any(ext >= _INT32_LIMIT for ext, _ in self.red_pairs)
         self.wide_kept = any(ext >= _INT32_LIMIT for ext, _ in self.kept_pairs)
+        index_extent = limit if limit is not None else count
+        if getattr(trait, "has_index", False) and index_extent > _INT32_LIMIT:
+            raise ValueError("index reductions require indices representable in Int32")
         self.in_base = in_base  # flat input offset of output coordinate 0
         self.limit = limit if limit is not None else count  # ragged tail bound
         # Projection divisor: count normally, or original L when stage 2 folds G partials.
@@ -137,7 +141,7 @@ def _fakes(
     return [
         _L.fake_compact(
             torch2cute[t.dtype],
-            (_L.sym_int64() if int64_extent else _L.sym(),),
+            (cute.sym_int64() if int64_extent else _L.sym(),),
             align=None if alignments is None else alignments[i],
         )
         for i, t in enumerate(ts)
@@ -531,9 +535,7 @@ def _try_indexed_itree(
     """Apply the fixed logical-row DAG through arbitrary storage strides."""
     from . import kernel_rowtile as rt
 
-    plan = rt.itree_plan(
-        count, num_o, x.element_size(), stage=False, device=x.device
-    )
+    plan = rt.itree_plan(count, num_o, x.element_size(), stage=False, device=x.device)
     if plan is None:
         return None
     # General addressing cannot stage physically adjacent rows.
@@ -905,9 +907,7 @@ def _reduce_all(
         res = xc.reduce_row_xcta(trait, trait_key, xf, out_dtypes[0], flatten=True)
         res = None if res is None else (res,)
     else:
-        res = xc.reduce_row_xcta_2out(
-            trait, trait_key, xf, out_dtypes, flatten=True
-        )
+        res = xc.reduce_row_xcta_2out(trait, trait_key, xf, out_dtypes, flatten=True)
     if res is not None:
         return res
     # If xcta declines, grid-stride any L without reshaping or extent-dependent compile cost.
