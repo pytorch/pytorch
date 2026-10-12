@@ -247,7 +247,7 @@ class CuteDSLTemplateKernel(Kernel):
     def create_cse_var(self, *args, **kwargs):
         return CuteDSLCSEVariable(*args, **kwargs)
 
-    def gen_imports(self) -> str:
+    def gen_imports(self, uses_inline_asm: bool = False) -> str:
         """Generate common imports for CuteDSL templates."""
         imports = IndentedBuffer()
         imports.splice(
@@ -262,6 +262,10 @@ class CuteDSLTemplateKernel(Kernel):
             from torch._inductor.codegen.cutedsl._cutedsl_utils import result_to_ssa, ssa_to_fragment, ssa_to_indexable
             """
         )
+        if uses_inline_asm:
+            imports.splice(
+                "from torch._inductor.codegen.cutedsl._inline_asm import inline_asm_elementwise_intrinsic"
+            )
         return imports.getvalue()
 
     def gen_defines(self, **kwargs) -> str:
@@ -302,8 +306,11 @@ class CuteDSLTemplateKernel(Kernel):
             **kwargs,
         )
 
-        # Always prepend the common imports
-        imports = self.gen_imports()
+        # Always prepend the common imports. The inline-asm intrinsic import is
+        # conditional so kernels without asm do not load the MLIR llvm dialects.
+        imports = self.gen_imports(
+            uses_inline_asm="inline_asm_elementwise_intrinsic(" in rendered_code
+        )
         full_code = imports + rendered_code
 
         return PartialRender(full_code, self.render_hooks)

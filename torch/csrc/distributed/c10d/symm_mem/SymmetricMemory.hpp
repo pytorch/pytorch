@@ -48,7 +48,13 @@ inline void check_rank(int rank, int world_size) {
 // different purposes. Without the concept of channels, we cannot guarantee the
 // correctness of the barriers since signals issued from barrier on stream A
 // can be received by the barrier on stream B. By specifying different channels
-// for these two barriers, they can operate correctly in parallel.
+// for these two barriers, their signals stay separate.
+//
+// NOTE [symmetric memory stream ordering]
+// The built-in operations that touch the signal pad are ordered across CUDA
+// streams per process group by GroupStreamGuard, so different channels do not
+// give them concurrency across streams. User kernels launched on a raw
+// get_signal_pad() tensor are not covered.
 class TORCH_API SymmetricMemory : public torch::CustomClassHolder {
  public:
   ~SymmetricMemory() override = default;
@@ -93,6 +99,10 @@ class TORCH_API SymmetricMemory : public torch::CustomClassHolder {
   virtual int get_rank() = 0;
   virtual int get_world_size() = 0;
   virtual c10::Device get_device() = 0;
+  // The name of the process group this handle was rendezvoused on.
+  virtual std::string get_group_name() {
+    TORCH_CHECK(false, "NYI");
+  }
 
   virtual const std::vector<int>& get_rank_to_global_rank() {
     TORCH_CHECK(false, "NYI");
@@ -167,9 +177,13 @@ struct GroupInfo {
 C10_EXPORT GroupInfo& get_group_info(const std::string& group_name);
 
 // Identical to empty_strided, but allows symmetric memory access to be
-// established for the allocated tensor via SymmetricMemory::rendezvous(). This
-// function itself is not a collective operation. It invokes
-// SymmetricMemoryAllocator::alloc() for the requested device under the hood.
+// established for the allocated tensor via SymmetricMemory::rendezvous(). It
+// invokes SymmetricMemoryAllocator::alloc() for the requested device under the
+// hood.
+//
+// Whether this is a collective operation is backend-dependent. The NVSHMEM
+// allocator calls nvshmem_malloc and barriers inside alloc(), so with that
+// backend every rank must call this the same number of times in the same order.
 //
 // NOTE [symmetric memory persistent allocation]
 // If an `alloc_id` is supplied, empty_strided_p2p will perform persistent

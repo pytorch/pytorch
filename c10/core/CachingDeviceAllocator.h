@@ -103,6 +103,16 @@ struct SegmentInfo {
   void* stream = nullptr; // Records the address of the underlying stream
   bool is_large = false;
   bool is_expandable = false;
+  // Base and size of the whole expandable reservation this segment is a mapped
+  // run of, and the segment size it maps in (large_segment_size_mb, or 2 MB for
+  // the small pool), so a later process can recreate the same reservation
+  // whatever its own settings. 0 for non-expandable segments.
+  size_t expandable_segment_base = 0;
+  size_t expandable_reservation_size = 0;
+  size_t expandable_segment_size = 0;
+  // The Expandable_Segments_Handle_Type its handles were created shareable as
+  // (c10/cuda/CUDAAllocatorConfig.h), 0 when they are not shareable.
+  int expandable_segment_handle_type = 0;
   MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
   std::shared_ptr<GatheredContext> context_when_allocated;
@@ -179,6 +189,10 @@ struct TraceEntry {
   trace_time_ time_{};
   std::string compile_context_;
   std::string user_metadata_;
+  // Tag attached by allocator internals (e.g. "mallocWithAddress" on the
+  // synthetic prefix-block malloc/free pair), kept separate so
+  // user_metadata_ stays verbatim what the user set.
+  std::string internal_metadata_;
 };
 
 inline TraceEntry::Action parseTraceEntryAction(std::string_view action) {
@@ -259,7 +273,7 @@ struct C10_API DeviceAllocator : public c10::Allocator {
 
   // Return the free memory size and total memory size in bytes for the
   // specified device.
-  virtual std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) {
+  virtual std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex /*device*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false, "getMemoryInfo is not implemented for this allocator yet.");
   }

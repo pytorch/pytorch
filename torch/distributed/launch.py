@@ -103,7 +103,7 @@ or
 
 .. versionchanged:: 2.0.0
 
-    The launcher will passes the ``--local-rank=<rank>`` argument to your script.
+    The launcher will pass the ``--local-rank=<rank>`` argument to your script.
     From PyTorch 2.0.0 onwards, the dashed ``--local-rank`` is preferred over the
     previously used underscored ``--local_rank``.
 

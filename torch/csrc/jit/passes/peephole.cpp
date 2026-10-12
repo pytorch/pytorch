@@ -2,6 +2,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/concat_opt.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -27,11 +28,38 @@ struct PeepholeOptimizeImpl {
 
   bool run() {
     bool changed = optimizeBlock(graph_->block());
-    changed |= PeepholeOptimizeListIdioms(graph_);
-    changed |= PeepholeOptimizeDictIdioms(graph_);
-    changed |= PeepholeOptimizeAliasSensitive(graph_, shape_peepholes_);
-    changed |= PeepholeOptimizeNonTensor(graph_);
-    changed |= CombineConcats(graph_);
+
+    std::optional<AliasDb> alias_db;
+    auto invalidate_alias_db = [&] { alias_db.reset(); };
+    auto get_alias_db = [&]() -> AliasDb& {
+      if (!alias_db) {
+        alias_db.emplace(graph_);
+      }
+      return *alias_db;
+    };
+
+    if (PeepholeOptimizeListIdioms(
+            graph_, /*refine_list_len=*/false, get_alias_db())) {
+      changed = true;
+      invalidate_alias_db();
+    }
+    if (PeepholeOptimizeDictIdioms(graph_, get_alias_db())) {
+      changed = true;
+      invalidate_alias_db();
+    }
+    if (PeepholeOptimizeAliasSensitive(
+            graph_, shape_peepholes_, get_alias_db())) {
+      changed = true;
+      invalidate_alias_db();
+    }
+    if (PeepholeOptimizeNonTensor(graph_)) {
+      changed = true;
+      invalidate_alias_db();
+    }
+    if (CombineConcats(graph_, get_alias_db())) {
+      changed = true;
+      invalidate_alias_db();
+    }
     return changed;
   }
 
