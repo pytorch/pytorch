@@ -137,6 +137,7 @@ class NestedLaneTestCase(TestCase):
             "loop_ordering_after_fusion": True,
             "split_reductions": False,
             "emulate_precision_casts": True,
+            "cat_fuse_computed_input_copies": True,
             "force_disable_caches": True,
         }
         with config.patch({**settings, "triton.nested_reduction": False}):
