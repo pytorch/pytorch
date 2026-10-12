@@ -334,6 +334,21 @@ class IteratorVariable(VariableTracker):
             return variables.ConstantVariable.create(False)
         return super().call_obj_hasattr(tx, name)
 
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name not in ("__iter__", "__next__") and not hasattr(
+            self.python_type(), name
+        ):
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[
+                    f"'{self.python_type().__name__}' object has no attribute '{name}'"
+                ],
+            )
+        return super().tp_getattro_impl(tx, name)
+
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         """Iterators are their own iterator."""
         return self
