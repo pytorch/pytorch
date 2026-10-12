@@ -208,7 +208,7 @@ class RuntimeEstimator(TorchDispatchMode):
             Tuple[Any, float]: A tuple containing the result of the function and
                 the mean operation time in milliseconds.
         """
-        if not isinstance(cls.fake_mode, FakeTensorMode):
+        if cls.fake_mode is None:
             raise AssertionError(
                 "Initialize/Assign FakeTensorMode before using this function"
             )
@@ -373,7 +373,7 @@ class RuntimeEstimator(TorchDispatchMode):
 
     def __enter__(self) -> Self:
         fake_mode = active_fake_mode()
-        if not isinstance(fake_mode, FakeTensorMode):
+        if fake_mode is None:
             raise AssertionError(
                 "No FakeTensorMode found, designed to be used under FakeTensorMode"
             )
