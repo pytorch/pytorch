@@ -186,6 +186,31 @@ def _manual_list_update(list_from: list[Any], list_to: list[Any]) -> None:
     list.extend(list_to, list_from)
 
 
+def _manual_ordered_dict_update(
+    target: collections.OrderedDict[Any, Any],
+    items: tuple[tuple[Any, Any], ...],
+    keys: tuple[Any, ...],
+    has_deleted_keys: bool,
+) -> None:
+    # A pure reorder must not clear/reinsert the underlying dict entries.
+    previous = tuple(dict.items(target))
+    if (
+        has_deleted_keys
+        or len(previous) != len(items)
+        or any(old_key is not key for (old_key, _), (key, _) in zip(previous, items))
+    ):
+        collections.OrderedDict.clear(target)
+        previous = ()
+    for index, (key, value) in enumerate(items):
+        if index >= len(previous) or previous[index][1] is not value:
+            collections.OrderedDict.__setitem__(target, key, value)
+    if any(
+        old is not key for old, key in zip(collections.OrderedDict.keys(target), keys)
+    ):
+        for key in keys:
+            collections.OrderedDict.move_to_end(target, key)
+
+
 def _manual_set_update(set_from: Any, set_to: Any) -> None:
     # Call the set methods directly, not any overridden subclass methods.
     set.clear(set_to)
@@ -1700,6 +1725,9 @@ def _codegen_const_dict_or_set_mutation(ctx: SideEffectReplayContext) -> None:
     #   + only if a key was removed from the input dict
     # (5) update the original dictionary with the dict created in (2)
     if var.has_new_items():
+        if isinstance(var, variables.OrderedDictVariable):
+            _codegen_ordered_dict_mutation(ctx)
+            return
         cg(var.source)  # type: ignore[attr-defined]
         cg.load_method("update")
         cg(var, allow_cache=False)  # Don't codegen via source
@@ -1787,11 +1815,39 @@ def _codegen_cell_mutation(ctx: SideEffectReplayContext) -> None:
         ctx.log(var)
 
 
+def _codegen_ordered_dict_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.OrderedDictVariable):
+        raise AssertionError(type(var))
+    cg.add_push_null(
+        lambda: cg.load_import_from(__name__, "_manual_ordered_dict_update")
+    )
+    cg(var.source)
+    cg(
+        variables.TupleVariable(
+            [
+                variables.TupleVariable([key.vt, value])
+                for key, value in dict.items(var.items)
+            ]
+        )
+    )
+    cg(variables.TupleVariable([key.vt for key in var.items]))
+    cg(variables.ConstantVariable.create(var.has_deleted_keys))
+    ctx.suffixes.append(
+        [*create_call_function(4, False), create_instruction("POP_TOP")]
+    )
+    ctx.log(var)
+
+
 def _codegen_user_defined_dict_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
     if not isinstance(var, variables.UserDefinedDictVariable):
         raise AssertionError(type(var))
+    if isinstance(var, variables.OrderedDictVariable):
+        _codegen_ordered_dict_mutation(ctx)
+        return
     # Do dict related update manually here. The store_attr mutations will be
     # applied later.
     varname_map = {}
