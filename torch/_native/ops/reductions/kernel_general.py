@@ -5,7 +5,7 @@
 
 import math
 from collections.abc import Sequence
-from typing import Any, cast, Literal, TYPE_CHECKING
+from typing import Any, cast, Literal
 
 from cutlass import Float32, Float64, Int32, Int64
 
@@ -17,10 +17,6 @@ from ...cutedsl.dtypes import torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import tile
 from .traits import WARP
-
-
-if TYPE_CHECKING:
-    from .kernel_rowtile import _ItreePlan
 
 
 # (extent, element-stride) pairs from TensorIterator, fastest dim first.
@@ -357,8 +353,6 @@ def _as_shape(out: torch.Tensor, out_shape: Sequence[int]) -> torch.Tensor:
     if tuple(out.shape) == tuple(out_shape):
         return out
     reshaped = out.reshape(out_shape)
-    if out._base is not None:
-        return reshaped.clone()
     if reshaped._base is None:
         return reshaped
     out.resize_(out_shape)
@@ -468,21 +462,6 @@ def _two_stage_general(
     return tuple(outs)
 
 
-def _indexed_itree_plan(
-    count: int,
-    num_o: int,
-    itemsize: int,
-    device: torch.device,
-) -> "_ItreePlan | None":
-    from . import kernel_rowtile as rt
-
-    plan = rt.itree_plan(count, num_o, itemsize, stage=False, device=device)
-    if plan is None:
-        return None
-    # General addressing cannot stage physically adjacent rows.
-    return plan._replace(stage_rows=False)
-
-
 def _try_indexed_itree(
     trait: Any,
     trait_key: str,
@@ -497,9 +476,13 @@ def _try_indexed_itree(
     """Apply the fixed logical-row DAG through arbitrary storage strides."""
     from . import kernel_rowtile as rt
 
-    plan = _indexed_itree_plan(count, num_o, x.element_size(), x.device)
+    plan = rt.itree_plan(
+        count, num_o, x.element_size(), stage=False, device=x.device
+    )
     if plan is None:
         return None
+    # General addressing cannot stage physically adjacent rows.
+    plan = plan._replace(stage_rows=False)
     nbatch = plan.split[0] if plan.shape == "split" else 1
     if num_o * nbatch >= 2**31:
         return None
@@ -593,10 +576,14 @@ def _reduce(
     out_shape = [s for i, s in enumerate(x.shape) if i not in red_axes]
     num_o = max(1, math.prod(out_shape))
     count = x.numel() // num_o
-    red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
     from . import kernel_rowtile as rt
 
-    if rt.inner_tree_order_enabled() and count < _INT32_LIMIT and num_o < _INT32_LIMIT:
+    if (
+        rt.inner_tree_order_enabled()
+        and 0 < count < _INT32_LIMIT
+        and num_o < _INT32_LIMIT
+    ):
+        red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
         kind = fast_kind(red_pairs, kept_pairs, nouts)
         if x.is_contiguous() and kind in ("row", "all"):
             x2 = x.reshape(num_o, count)
@@ -630,6 +617,8 @@ def _reduce(
             return (_as_shape(out, out_shape),)
         outs = reduce_all2(trait, trait_key, x, out_dtypes, block=block)
         return tuple(_as_shape(o, out_shape) for o in outs)
+
+    red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
 
     # Reshape post-TI contiguous innermost reductions onto a fast kernel; general remains
     # the fallback for direct calls and declines.
