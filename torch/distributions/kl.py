@@ -571,7 +571,9 @@ def _kl_beta_normal(p, q):
 @register_kl(Beta, Uniform)
 def _kl_beta_uniform(p, q):
     result = -p.entropy() + (q.high - q.low).log()
-    result = torch.where((q.low > p.support.lower_bound) | (q.high < p.support.upper_bound), inf, result)
+    result = torch.where(
+        (q.low > p.support.lower_bound) | (q.high < p.support.upper_bound), inf, result
+    )
     return result
 
 
@@ -864,7 +866,9 @@ def _kl_uniform_beta(p, q):
         - (q.concentration1 + q.concentration0).lgamma()
     )
     result = t3 + t4 - t1 - t2
-    result = torch.where((p.high > q.support.upper_bound) | (p.low < q.support.lower_bound), inf, result)
+    result = torch.where(
+        (p.high > q.support.upper_bound) | (p.low < q.support.lower_bound), inf, result
+    )
     return result
 
 
