@@ -1356,8 +1356,8 @@ def div(
     supports_two_python_scalars=True,
 )
 def divmod(
-    a: TensorLikeType | NumberType,
-    b: TensorLikeType | NumberType,
+    a: TensorOrNumberLikeType,
+    b: TensorOrNumberLikeType,
 ) -> tuple[TensorLikeType, TensorLikeType]:
     if isinstance(a, Number) and isinstance(b, Number):
         # pyrefly: ignore [bad-argument-type]
@@ -1368,10 +1368,8 @@ def divmod(
     elif isinstance(a, Tensor) and isinstance(b, Number):
         # pyrefly: ignore [bad-argument-type]
         b = scalar_tensor(b, device=a.device, dtype=a.dtype)
-    elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
-        raise RuntimeError(
-            f"Expected all tensors to be on the same device, but found at least two devices, {a.device} and {b.device}!"
-        )
+    elif isinstance(a, Tensor) and isinstance(b, Tensor):
+        utils.check_same_device(a, b, allow_cpu_scalar_tensors=True)
 
     q = aten.floor_divide(a, b)
     r = aten.remainder(a, b)
