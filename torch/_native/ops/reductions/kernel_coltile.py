@@ -165,6 +165,8 @@ class PartialColumns:
             else:
                 for f in cutlass.range_constexpr(self.nouts):
                     outs[f][col] = outs[f].element_type(result[f])
+
+
 class _OrderedColReduce:
     """Preserve the row inner-tree DAG while coalescing adjacent column loads."""
 
@@ -416,7 +418,7 @@ def reduce_ordered_col(
     ]
     kernel_x = _flat(x)
     kernel_outs = [out.reshape(-1) for out in outs]
-    fake_in = _L.fake_compact(torch2cute[kernel_x.dtype], (_L.sym_int64(),))
+    fake_in = _L.fake_compact(torch2cute[kernel_x.dtype], (cute.sym_int64(),))
     fake_outs = [
         _L.fake_compact(torch2cute[out.dtype], (_L.sym(),)) for out in kernel_outs
     ]
@@ -679,7 +681,10 @@ def _reduce_col_tile(
         )
         build2 = lambda: _compile(  # noqa: E731
             op2,
-            [_L.fake_compact(torch2cute[pp.dtype], (_L.sym_int64(),)) for pp in parts],
+            [
+                _L.fake_compact(torch2cute[pp.dtype], (cute.sym_int64(),))
+                for pp in parts
+            ],
             [
                 _L.fake_compact(torch2cute[out.dtype], (_L.sym(),))
                 for out in kernel_outs
