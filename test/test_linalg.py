@@ -1081,6 +1081,42 @@ class TestLinalg(TestCase):
             self.assertEqual(H, Href, atol=1e-9, rtol=1e-7)
 
     @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.double)
+    def test_solve_forward_over_reverse_without_create_graph(self, device, dtype):
+        # Regression for #200600: with create_graph=False, linalg_solve_backward
+        # used the saved LU/pivots path and dropped A's forward-mode tangent,
+        # so forward-over-reverse through linalg.solve was silently wrong.
+        # X = B/A at A=2, B=1: d/dA(dX/dB) = -1/A^2 = -0.25,
+        #                      d/dA(dX/dA) = 2B/A^3 = 0.25.
+        def tangent_of_grad(solve, wrt, create_graph=False):
+            A0 = torch.tensor([[2.0]], dtype=dtype, device=device, requires_grad=True)
+            B0 = torch.tensor([[1.0]], dtype=dtype, device=device, requires_grad=True)
+            with fwAD.dual_level():
+                A = fwAD.make_dual(A0, torch.ones_like(A0))
+                X = solve(A, B0)
+                g, = torch.autograd.grad(
+                    X.sum(), {"A": A0, "B": B0}[wrt], create_graph=create_graph
+                )
+                return fwAD.unpack_dual(g).tangent
+
+        def lu(A, B):
+            LU, piv = torch.linalg.lu_factor(A)
+            return torch.linalg.lu_solve(LU, piv, B)
+
+        expected_B = torch.tensor([[-0.25]], dtype=dtype, device=device)
+        expected_A = torch.tensor([[0.25]], dtype=dtype, device=device)
+        for solve in (
+            torch.linalg.solve,
+            lu,
+            lambda A, B: torch.linalg.inv(A) @ B,
+        ):
+            self.assertEqual(tangent_of_grad(solve, "B"), expected_B)
+            self.assertEqual(tangent_of_grad(solve, "A"), expected_A)
+            self.assertEqual(tangent_of_grad(solve, "B", True), expected_B)
+            self.assertEqual(tangent_of_grad(solve, "A", True), expected_A)
+
+    @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     def test_eigh(self, device, dtype):

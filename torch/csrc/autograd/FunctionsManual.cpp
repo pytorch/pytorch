@@ -6675,9 +6675,12 @@ std::tuple<Tensor, Tensor> linalg_solve_backward(
   };
 
   // If the user is going to compute higher order gradients, then we need to
-  // recompute the LU and the pivots
+  // recompute the LU and the pivots. Also recompute when A carries a forward
+  // tangent: with create_graph=False GradMode is off, so the saved LU/pivots
+  // path would drop A's fwAD tangent and silently corrupt forward-over-reverse
+  // Hessian-vector products (see #200600).
   Tensor gB_;
-  if (at::GradMode::is_enabled()) {
+  if (at::GradMode::is_enabled() || isFwGradDefined(A)) {
     gB_ = at::linalg_solve(A.mH(), vector_to_matrix(gX), left);
   } else {
     gB_ = at::linalg_lu_solve(
