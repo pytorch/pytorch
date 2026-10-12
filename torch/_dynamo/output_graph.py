@@ -3560,11 +3560,13 @@ class OutputGraph(OutputGraphCommon):
         # Import here to prevent circular import
         from torch._dynamo.symbolic_convert import TensorifyState
 
+        # Typed like FakeTensor.item_memo (SymNumberMemoDescriptor.__get__)
+        memo_type = torch.SymInt | torch.SymFloat | None
         for node in self.graph.nodes:
             example_value = node.meta.get("example_value")
-            item_memo = maybe_get_item_memo(example_value)
+            item_memo = cast(memo_type, maybe_get_item_memo(example_value))
             if (
-                isinstance(item_memo, (torch.SymFloat, torch.SymInt))
+                item_memo is not None
                 and hasattr(item_memo.node._expr, "name")
                 and all(u.target == "item" for u in node.users)
                 and TensorifyState.should_specialize(
