@@ -28,6 +28,15 @@ FLYDSL_DTYPE_CONFIGS = {
     "bf16": (fx.BFloat16, 16),
 }
 
+# A cached FlyDSL callable accepts the raw cudaStream_t. Prefer that over
+# building a Python Stream wrapper on every launch (see layernorm_patched.py /
+# dispatch_investigation.md). Fall back only when the C API is absent.
+_get_current_raw_stream = getattr(
+    torch._C,
+    "_cuda_getCurrentRawStream",
+    lambda device_index: torch.cuda.current_stream(device_index).cuda_stream,
+)
+
 
 def _get_warp_size(arch: str) -> int:
     """Return wave64 for CDNA GPUs and wave32 for RDNA GPUs."""
@@ -305,15 +314,15 @@ def rmsnorm_fwd(
 
     rows_m = input.numel() // n
     input_shape = input.shape
+    is_2d = input.ndim == 2
+    input_2d = input if is_2d else input.reshape(rows_m, n)
+    # Keep the launch buffer rank-stable: make_compile_arg bakes rank (and every
+    # dim except 0) into the specialization, while the cache key is only
+    # (N, dtype, arch, backend, device). View to the ATen stat shape on return.
+    output_2d = torch.empty_like(input_2d)
+    rstd_flat = torch.empty(rows_m, device=input.device, dtype=torch.float32)
 
-    with torch.cuda.device(input.device):
-        is_2d = input.ndim == 2
-        input_2d = input if is_2d else input.reshape(rows_m, n)
-        output_2d = torch.empty_like(input_2d)
-        rstd_flat = torch.empty(rows_m, device=input.device, dtype=torch.float32)
-
-        stream = torch.cuda.current_stream()
-
+    def _launch(stream) -> None:
         compiled = _compile_rmsnorm_fwd(
             n,
             _dtype_str(input.dtype),
@@ -330,7 +339,6 @@ def rmsnorm_fwd(
                 stream,
             ),
         )
-
         compiled(
             read_only_tensor(input_2d),
             read_only_tensor(weight),
@@ -340,6 +348,15 @@ def rmsnorm_fwd(
             float(eps),
             stream,
         )
+
+    # Skip the device guard when tensors are already on the current device.
+    # Prefer the raw stream on both hit and miss paths so CUDA graph capture
+    # never constructs a Python Stream object.
+    if torch.cuda.current_device() == device_index:
+        _launch(_get_current_raw_stream(device_index))
+    else:
+        with torch.cuda.device(device_index):
+            _launch(_get_current_raw_stream(device_index))
 
     if is_2d:
         result = output_2d, rstd_flat.view((rows_m, 1))

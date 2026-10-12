@@ -86,12 +86,9 @@ def _min_rows_for_full_wave(device_idx: int) -> int:
 def _eligible(
     self: torch.Tensor, k: int, dim: int, largest: bool, sorted_: bool
 ) -> bool:
+    # Cheap rejects first: dtype/flags, then (K, N) / row count, arch last.
+    # Arch is memoized, but most declines miss the kernel or row gate.
     if not self.is_cuda or self.dtype != torch.float32:
-        return False
-    device_index = self.device.index
-    if device_index is None or not fu._is_supported_arch(
-        device_index, _SUPPORTED_ARCHES
-    ):
         return False
     if not largest or not sorted_:
         return False
@@ -100,13 +97,18 @@ def _eligible(
     if self.numel() == 0:
         return False
     N = self.shape[-1] if self.ndim >= 1 else 0
-    M = self.numel() // N if N else 0
+    if N <= 0 or _kernel_for(k, N) is None:
+        return False
+    M = self.numel() // N
     if not _fits_topk_buffer_span(M, N, k, self.element_size()):
         return False
+    device_index = self.get_device()
     # Performance gate: small row counts underutilize CUs, so fall back to ATen.
     if M < _min_rows_for_full_wave(device_index):
         return False
-    return _kernel_for(k, N) is not None
+    if not fu._is_supported_arch(device_index, _SUPPORTED_ARCHES):
+        return False
+    return True
 
 
 def _cond(
