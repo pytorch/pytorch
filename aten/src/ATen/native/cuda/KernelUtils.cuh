@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/core/TensorAccessor.h>
 #include <torch/headeronly/cuda/Atomic.h>
 #include <torch/headeronly/cuda/KernelUtils.h>
 
@@ -18,6 +19,44 @@ namespace at::native {
 
 using torch::headeronly::fastAtomicAdd;
 using torch::headeronly::fastSpecializedAtomicAdd;
+
+// Scatter into a packed accessor without naming a bound.
+//
+// fastAtomicAdd needs to know how far it may look for a pairing partner -- see
+// Note [Passing pointer and offset to fastAtomicAdd] in GridSampler.cu. A
+// caller holding a raw pointer supplies that by hand, and too large a value
+// lets the pairing write past the allocation. An accessor already carries what
+// it would be derived from:
+//
+//   memory_span = 1 + sum over d of (size[d] - 1) * stride[d]
+//
+// the distance to the last addressable element rather than the element count,
+// which is what at::native::storage_size_for computes on the host. The two
+// differ for a strided view, whose gaps are legal pairing partners: inside the
+// region, though belonging to whatever the view was taken from, and only ever
+// receiving a zero.
+template <
+    typename scalar_t,
+    size_t N,
+    template <typename U> class PtrTraits,
+    typename index_t,
+    typename... Idx>
+__device__ __forceinline__ void fastAtomicAdd(
+    at::GenericPackedTensorAccessor<scalar_t, N, PtrTraits, index_t> accessor,
+    scalar_t value,
+    Idx... indices) {
+  static_assert(
+      sizeof...(Idx) == N, "fastAtomicAdd needs one index per dimension");
+  const index_t index[N] = {static_cast<index_t>(indices)...};
+  index_t offset = 0;
+  index_t memory_span = 1;
+#pragma unroll
+  for (size_t d = 0; d < N; ++d) {
+    offset += index[d] * accessor.stride(d);
+    memory_span += (accessor.size(d) - 1) * accessor.stride(d);
+  }
+  fastAtomicAdd(accessor.data(), offset, memory_span, value, true);
+}
 
 __device__ __forceinline__ size_t
 idx(const size_t nc,
