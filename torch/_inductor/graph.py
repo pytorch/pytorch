@@ -2037,14 +2037,17 @@ class GraphLowering(torch.fx.Interpreter):
         # over n (not the accumulated origins) gives us a complete map by the
         # time lowering finishes.
         _stack = n.meta.get("nn_module_stack")
-        if _stack:
+        if _stack and config.triton.cudagraph_kernel_annotations:
             from torch._inductor.fx_passes.graph_view import (
                 _clean_stack_name,
                 _strip_instance_suffix,
             )
 
             _innermost = _clean_stack_name(list(_stack.values())[-1][0])
-            self.fx_fqn_map[n.name] = f"{_innermost}.{_strip_instance_suffix(n.name)}"
+            if _innermost:
+                self.fx_fqn_map[n.name] = (
+                    f"{_innermost}.{_strip_instance_suffix(n.name)}"
+                )
         with (
             ir.IRNode.current_origins(origins),
             ir.IRNode.current_stream_idx(self._get_node_stream(n)),

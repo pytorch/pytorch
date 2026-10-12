@@ -1226,12 +1226,19 @@ class AnnotatedExternKernelBlock(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         code.writeline(f"with _graph_annotations.mark_kernels({self.module_fqn!r}):")
         with code.indent():
+            start = len(code._lines)
             for line in self.inner_lines:
                 if isinstance(line, WrapperLine):
                     # pyrefly: ignore [missing-attribute]
                     line.codegen(code)
                 else:
                     code.writeline(line)
+            # An empty (or comment-only) with-body is a SyntaxError.
+            if all(
+                isinstance(x, str) and (not x.strip() or x.lstrip().startswith("#"))
+                for x in code._lines[start:]
+            ):
+                code.writeline("pass")
 
 
 @dataclasses.dataclass

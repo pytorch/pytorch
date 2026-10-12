@@ -1430,12 +1430,8 @@ def register_fqn_annotation_hooks(
 
     Example::
 
-        from torch.cuda._graph_annotations import (
-            register_fqn_annotation_hooks,
-            clear_kernel_annotations,
-        )
+        from torch.cuda._graph_annotations import register_fqn_annotation_hooks
 
-        clear_kernel_annotations()
         handles = register_fqn_annotation_hooks(model)
 
         g = torch.cuda.CUDAGraph()
@@ -1453,7 +1449,7 @@ def register_fqn_annotation_hooks(
         fqn = f"L.{name}" if name else "L"
 
         def pre_hook(mod: Any, _input: Any, fqn: str = fqn) -> None:
-            cm = mark_kernels({"module_name": fqn})
+            cm = mark_kernels(fqn)
             active_cms[id(mod)].append(cm)
             cm.__enter__()
 

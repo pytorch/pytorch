@@ -3817,9 +3817,53 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
                     return (
                         f"L.{module_path}.{_strip_instance_suffix(lowering_node.name)}"
                     )
-            return None
-        # lowering_fx_node not set (e.g. convolution); fall back to walking origins.
-        return get_fused_kernel_module_fqn([self])
+        return None
+
+    @staticmethod
+    def _write_annotated_lines(
+        wrapper: PythonWrapperCodegen, lines: list[Any], module_fqn: str
+    ) -> None:
+        """Re-emit an extern kernel's codegen lines wrapped in mark_kernels.
+
+        Memory-planning lines stay at the top level, since the memory planners
+        only walk top-level lines. Runs with no statement (empty or comments
+        only) are left unwrapped, as an empty ``with`` body is invalid Python.
+        Externs that emit subgraph scopes (cond, while_loop) are not wrapped.
+        """
+        from torch._inductor.codegen.wrapper import (
+            AnnotatedExternKernelBlock,
+            CommentLine,
+            EnterSubgraphLine,
+            ExitSubgraphLine,
+            MemoryPlanningLine,
+            WrapperLine,
+        )
+
+        if any(isinstance(x, (EnterSubgraphLine, ExitSubgraphLine)) for x in lines):
+            wrapper.lines.extend(lines)
+            return
+
+        def is_statement(line: Any) -> bool:
+            if isinstance(line, str):
+                return bool(line.strip()) and not line.lstrip().startswith("#")
+            return isinstance(line, WrapperLine) and not isinstance(line, CommentLine)
+
+        run: list[Any] = []
+
+        def flush() -> None:
+            if any(is_statement(x) for x in run):
+                wrapper.lines.append(AnnotatedExternKernelBlock(list(run), module_fqn))
+            else:
+                wrapper.lines.extend(run)
+            run.clear()
+
+        for line in lines:
+            if isinstance(line, MemoryPlanningLine):
+                flush()
+                wrapper.lines.append(line)
+            else:
+                run.append(line)
+        flush()
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         if not isinstance(self.node, ir.ExternKernel):
@@ -3829,16 +3873,17 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             and not V.graph.cpp_wrapper
             and not V.graph.fx_wrapper
         ):
-            from torch._inductor.codegen.wrapper import AnnotatedExternKernelBlock
-
             module_fqn = self._get_extern_module_fqn()
-            if module_fqn:
+            # MultiOutput and DynamicScalar launch no kernels; don't wrap them.
+            if module_fqn and not isinstance(
+                self.node, (ir.MultiOutput, ir.DynamicScalar)
+            ):
                 V.graph.fx_extern_fqns.add(module_fqn.removeprefix("L."))
                 n_before = len(wrapper.lines)
                 self.node.codegen(wrapper)
                 inner_lines = wrapper.lines[n_before:]
                 del wrapper.lines[n_before:]
-                wrapper.writeline(AnnotatedExternKernelBlock(inner_lines, module_fqn))
+                self._write_annotated_lines(wrapper, inner_lines, module_fqn)
                 return
         return self.node.codegen(wrapper)
 
@@ -12630,7 +12675,11 @@ class Scheduler:
         # same block, the filter is incomplete and returns None, leaving the
         # Triton kernel unannotated.  Walking all nodes up front makes the
         # filter order-independent.
-        if config.triton.cudagraph_kernel_annotations and not V.graph.cpp_wrapper:
+        if (
+            config.triton.cudagraph_kernel_annotations
+            and not V.graph.cpp_wrapper
+            and not V.graph.fx_wrapper
+        ):
             for node in nodes:
                 for snode in node.get_nodes():
                     if isinstance(snode, ExternKernelSchedulerNode):

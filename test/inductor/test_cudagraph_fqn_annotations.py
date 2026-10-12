@@ -1,41 +1,47 @@
 # Owner(s): ["module: inductor"]
-"""End-to-end tests for CUDA graph kernel FQN annotation.
+"""Tests for CUDA graph kernel FQN annotation.
 
-These exercise the two supported paths for attaching nn.Module fully-qualified
-names to CUDA graph kernel nodes:
+nn.Module fully-qualified names are attached to CUDA graph kernel nodes on two
+paths:
 
-  1. Inductor cudagraph trees, driven by
-     ``triton.cudagraph_kernel_annotations`` (tests 1, 2, 4).
+  1. Inductor, driven by ``triton.cudagraph_kernel_annotations``: the generated
+     wrapper wraps kernel calls in ``mark_kernels(fqn)``.
   2. Standalone ``torch.cuda.CUDAGraph`` capture via
-     ``register_fqn_annotation_hooks`` (test 3).
+     ``register_fqn_annotation_hooks``.
 
-Annotations are recorded keyed by the graph node ``tools_id`` and each value is
-a list of ``{"name": "<fqn>"}`` dicts (see ``mark_kernels``).  All tests require
-CUDA with ``cudaGraphNodeGetToolsId`` (CUDA >= 13.1) and are skipped otherwise.
+Annotations are keyed by graph node ``tools_id``; each value is a list of
+``{"name": "<fqn>"}`` dicts.  ``TestFqnAnnotationCodegen`` checks the generated
+wrapper code and only needs CUDA + Triton.  ``TestCudagraphFqnAnnotations``
+checks the recorded annotations and needs ``cudaGraphNodeGetToolsId``
+(CUDA >= 13.1).
 """
 
 import json
+import re
 import unittest
 
 import torch
 import torch.nn as nn
+from torch._dynamo.utils import counters
+from torch._functorch import config as functorch_config
 from torch._inductor import config
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.cuda._graph_annotations import (
     _HAS_CUDA_BINDINGS,
     _is_tools_id_unavailable,
-    clear_kernel_annotations,
+    _reset_kernel_annotations,
     get_kernel_annotations,
     register_fqn_annotation_hooks,
     save_kernel_annotations,
 )
-from torch.testing._internal.common_utils import run_tests, TemporaryFileName, TestCase
+from torch.testing._internal.common_utils import skipIfRocm, TemporaryFileName
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
-# --- Fixtures (ported from the external validation harness) ---
+# --- Fixtures ---
 # Llama-shaped hierarchy exercising deep dotted FQNs:
-#   L.model.layers.N.input_layernorm, L.model.layers.N.mlp, L.logits
+#   L.model.layers.N.fc1.linear, L.logits
 
 
 class LeafModule(nn.Module):
@@ -147,69 +153,141 @@ class SharedMaskAttn(nn.Module):
         return x
 
 
-# --- Profiler graph-node-id extraction (test 4) ---
-# Candidate metadata keys under which CUPTI/kineto may surface the cuda graph
-# node id on a kernel event.  The first GPU run confirms the real key (the test
-# dumps observed keys on miss, see test_profiler_path_recovers_fqn).
-_GRAPH_NODE_ID_KEYS = (
-    "Cuda Graph Node Id",
-    "cuda graph node id",
-    "graph node id",
-    "graphNodeId",
-    "graph_node_id",
-    "Cuda Graph Id",
-    "cudaGraphId",
-)
+class GraphBreakLayers(nn.Module):
+    """Structurally identical layers split into separate graphs, so the FX
+    graph cache sees identical graphs that differ only in nn_module_stack."""
 
+    def __init__(self, dim=32):
+        super().__init__()
+        self.layers = nn.ModuleList([LayerBlock(dim) for _ in range(2)])
 
-def _event_metadata(evt) -> dict:
-    """Merge an in-memory kineto event's extra_meta() and metadata_json()."""
-    md: dict = {}
-    try:
-        em = evt.extra_meta()
-        if em:
-            md.update(em)
-    except Exception:
-        pass
-    try:
-        mj = evt.metadata_json()
-        if mj:
-            s = mj.strip()
-            if not s.startswith("{"):
-                s = "{" + s + "}"
-            md.update(json.loads(s))
-    except Exception:
-        pass
-    return md
-
-
-def _kernel_graph_node_id(evt):
-    """Return the cuda graph node id for a kineto kernel event, or None.
-
-    TODO(discovery): confirm on CUDA 13.1 hardware which key CUPTI/kineto uses.
-    Both nsys and the torch profiler read this from the same CUPTI activity
-    record, and the value must equal the ``tools_id`` that keys
-    ``get_kernel_annotations()`` after ``remap_to_exec_graph``.
-    """
-    md = _event_metadata(evt)
-    for k in _GRAPH_NODE_ID_KEYS:
-        if k in md:
-            try:
-                return int(md[k])
-            except (TypeError, ValueError):
-                pass
-    return None
+    def forward(self, x):
+        x = self.layers[0](x)
+        torch._dynamo.graph_break()
+        return self.layers[1](x)
 
 
 def _all_fqn_strings(annotations) -> list:
-    out = []
-    for ann_list in annotations.values():
-        for ann in ann_list:
-            if isinstance(ann, dict):
-                fqn = ann.get("str") or ann.get("module_name") or ann.get("name")
-                if fqn:
-                    out.append(fqn)
-    return out
+    return [
+        ann["name"]
+        for ann_list in annotations.values()
+        for ann in ann_list
+        if isinstance(ann, dict) and ann.get("name")
+    ]
+
+
+def _expected_shared_mask_attn_fqns(num_layers: int) -> set[str]:
+    expected: set[str] = set()
+    for i in range(num_layers):
+        expected |= {
+            f"L.layers.{i}.qkv.addmm",
+            f"L.layers.{i}.where + L.layers.{i}.full_default",
+            f"L.layers.{i}._scaled_dot_product_efficient_attention",
+            f"L.layers.{i}.proj.mm_default",
+            f"L.layers.{i}.proj.add_tensor",
+        }
+    return expected
+
+
+def _assert_per_layer_fused_and_extern(test, all_strs, num_layers, prefix):
+    """Every layer has a fused-Triton ('+'-joined) and an extern annotation,
+    and every annotation carries the 'L.' prefix."""
+    test.assertEqual([s for s in all_strs if not s.startswith("L.")], [])
+    for i in range(num_layers):
+        layer_strs = [s for s in all_strs if f"{prefix}{i}." in s]
+        test.assertTrue(
+            [s for s in layer_strs if " + " in s],
+            f"layer {i} has no fused-Triton annotation; saw: {layer_strs}",
+        )
+        test.assertTrue(
+            [s for s in layer_strs if " + " not in s],
+            f"layer {i} has no extern annotation; saw: {layer_strs}",
+        )
+
+
+@unittest.skipUnless(HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
+class TestFqnAnnotationCodegen(TestCase):
+    """Checks the mark_kernels() calls in the generated wrapper code."""
+
+    def _mark_kernels_args(
+        self, model, *inputs, annotate=True, fullgraph=True
+    ) -> list[str]:
+        with (
+            config.patch({"triton.cudagraph_kernel_annotations": annotate}),
+            torch.no_grad(),
+        ):
+            compiled = torch.compile(model, fullgraph=fullgraph)
+            _, codes = run_and_get_code(compiled, *inputs)
+        return re.findall(r"mark_kernels\('([^']*)'\)", "\n".join(codes))
+
+    def test_each_layer_has_fused_triton_and_extern_annotation(self):
+        model = OuterModel(dim=64, num_layers=2).cuda()
+        x = torch.randn(1, 64, device="cuda")
+        all_strs = self._mark_kernels_args(model, x)
+        _assert_per_layer_fused_and_extern(self, all_strs, 2, "L.model.layers.")
+
+    def test_no_annotations_when_flag_off(self):
+        model = OuterModel(dim=64, num_layers=2).cuda()
+        x = torch.randn(1, 64, device="cuda")
+        self.assertEqual(self._mark_kernels_args(model, x, annotate=False), [])
+
+    @skipIfRocm(msg="expects the efficient-attention SDPA backend")
+    def test_kernel_annotations_match_expected(self):
+        model = SharedMaskAttn(n_layers=2, dim=32, n_heads=2).cuda()
+        x = torch.randn(1, 16, 32, device="cuda")
+        all_strs = set(self._mark_kernels_args(model, x))
+        self.assertEqual(all_strs, _expected_shared_mask_attn_fqns(2))
+
+    def test_fx_graph_cache_keeps_per_layer_fqns(self):
+        # layers.0 and layers.1 compile to identical graphs that differ only in
+        # nn_module_stack. With annotations on, that must be in the FX graph
+        # cache key, or layers.1 reuses layers.0's code and its FQNs.
+        model = GraphBreakLayers(dim=32).cuda()
+        x = torch.randn(1, 32, device="cuda")
+        with functorch_config.patch(enable_autograd_cache=False):
+            # Control: with annotations off, layers.1 hits layers.0's entry.
+            counters.clear()
+            self._mark_kernels_args(model, x, annotate=False, fullgraph=False)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+            counters.clear()
+            all_strs = self._mark_kernels_args(model, x, fullgraph=False)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        for i in range(2):
+            self.assertTrue(
+                any(s.startswith(f"L.layers.{i}.") for s in all_strs),
+                f"no annotation for layers.{i}; saw {sorted(set(all_strs))}",
+            )
+
+    def test_user_triton_kernel_not_annotated_with_stale_fqn(self):
+        # A user Triton kernel after a SIMD kernel must not inherit its FQN.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_one(x_ptr, out_ptr, n, BLOCK_SIZE: tl.constexpr):
+            offs = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n
+            tl.store(out_ptr + offs, tl.load(x_ptr + offs, mask=mask) + 1, mask=mask)
+
+        class Act(nn.Module):
+            def forward(self, x):
+                return x.relu()
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.act = Act()
+
+            def forward(self, x):
+                y = self.act(x)
+                out = torch.empty_like(y)
+                add_one[(y.numel(),)](y, out, y.numel(), BLOCK_SIZE=16)
+                return out
+
+        x = torch.randn(64, device="cuda")
+        # Only the relu SIMD kernel is annotated, not add_one.
+        self.assertEqual(len(self._mark_kernels_args(Model(), x)), 1)
 
 
 @unittest.skipUnless(
@@ -217,13 +295,15 @@ def _all_fqn_strings(annotations) -> list:
     "Requires CUDA with cudaGraphNodeGetToolsId (CUDA >= 13.1)",
 )
 class TestCudagraphFqnAnnotations(TestCase):
+    """Checks the annotations recorded on captured CUDA graph nodes."""
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
-        clear_kernel_annotations()
+        _reset_kernel_annotations()
 
     def tearDown(self):
-        clear_kernel_annotations()
+        _reset_kernel_annotations()
         torch._dynamo.reset()
         super().tearDown()
 
@@ -246,10 +326,7 @@ class TestCudagraphFqnAnnotations(TestCase):
 
         self._run_inductor_cg(model, x, annotate=True)
 
-        annotations = dict(get_kernel_annotations())
-        self.assertTrue(annotations, "expected non-empty kernel annotations")
-
-        all_strs = _all_fqn_strings(annotations)
+        all_strs = _all_fqn_strings(dict(get_kernel_annotations()))
         missing = [
             i
             for i in range(num_layers)
@@ -262,23 +339,14 @@ class TestCudagraphFqnAnnotations(TestCase):
         )
 
     def test_each_layer_has_fused_triton_and_extern_annotation(self):
-        """Every block must have BOTH a fused-Triton annotation and an extern-mm
-        annotation, each carrying the 'L.' prefix.
-
-        This catches two bugs introduced together during code review:
-
-        1. Extern kernels (cuBLAS mm from nn.Linear) were annotated without
-           the 'L.' anchor prefix, making them inconsistent with Triton kernels.
-
-        2. The last block's fused Triton kernel was silently unannotated.
-           The inductor scheduler codegen'd the last block's extern mm before
-           its Triton fused kernel; at that point the extern FQN was present in
-           fx_extern_fqns, which caused get_fused_kernel_module_fqn to return
-           None for the Triton kernel, suppressing its AnnotatedKernelCallLine.
+        """Every block must have both a fused-Triton annotation and an
+        extern-mm annotation, each carrying the 'L.' prefix.
 
         OuterModel produces both kernel types per block: nn.Linear -> cuBLAS mm
         (extern) and silu(h)*h+x -> fused Triton pointwise. The fused Triton
         annotation is a multi-op '+'-joined string; the extern mm is a single op.
+        This also guards the last block's fused kernel, which was once left
+        unannotated when its extern mm was codegen'd first.
         """
         num_layers = 4
         model = OuterModel(dim=64, num_layers=num_layers).cuda()
@@ -286,29 +354,10 @@ class TestCudagraphFqnAnnotations(TestCase):
 
         self._run_inductor_cg(model, x, annotate=True)
 
-        annotations = dict(get_kernel_annotations())
-        self.assertTrue(annotations, "expected non-empty kernel annotations")
-        all_strs = _all_fqn_strings(annotations)
-
-        missing_prefix = [s for s in all_strs if not s.startswith("L.")]
-        self.assertEqual(
-            missing_prefix,
-            [],
-            f"FQNs missing 'L.' prefix (likely extern kernels): {missing_prefix}",
+        all_strs = _all_fqn_strings(dict(get_kernel_annotations()))
+        _assert_per_layer_fused_and_extern(
+            self, all_strs, num_layers, "L.model.layers."
         )
-
-        for i in range(num_layers):
-            layer_strs = [s for s in all_strs if f"L.model.layers.{i}." in s]
-            fused = [s for s in layer_strs if " + " in s]
-            extern = [s for s in layer_strs if " + " not in s]
-            self.assertTrue(
-                fused,
-                f"layer {i} has no fused-Triton annotation; saw: {layer_strs}",
-            )
-            self.assertTrue(
-                extern,
-                f"layer {i} has no extern-mm annotation; saw: {layer_strs}",
-            )
 
     def test_annotations_disabled_when_flag_off(self):
         model = OuterModel(dim=64, num_layers=4).cuda()
@@ -342,9 +391,7 @@ class TestCudagraphFqnAnnotations(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(static_output.shape, (4, 10))
 
-        annotations = dict(get_kernel_annotations())
-        self.assertTrue(annotations, "expected non-empty kernel annotations")
-        all_strs = _all_fqn_strings(annotations)
+        all_strs = _all_fqn_strings(dict(get_kernel_annotations()))
         self.assertTrue(
             any("L.networks." in s for s in all_strs),
             f"expected networks.* FQNs; saw {sorted(set(all_strs))}",
@@ -353,8 +400,7 @@ class TestCudagraphFqnAnnotations(TestCase):
     def test_profiler_path_recovers_fqn(self):
         from torch.profiler import profile, ProfilerActivity
 
-        num_layers = 4
-        model = OuterModel(dim=64, num_layers=num_layers).cuda()
+        model = OuterModel(dim=64, num_layers=4).cuda()
         x = torch.randn(1, 64, device="cuda")
 
         compiled, _ = self._run_inductor_cg(model, x, annotate=True)
@@ -366,56 +412,26 @@ class TestCudagraphFqnAnnotations(TestCase):
                 compiled(x)
                 torch.cuda.synchronize()
 
-        # Export to Chrome trace JSON and read kernel events.  The CUPTI field
-        # "graph node id" carries the same graphNodeId that keyed our annotations.
-        # Write to /artifacts/ when available (CI), otherwise use a temp file.
-        import os
-
-        artifacts_dir = "/artifacts"
-        use_artifacts = os.path.isdir(artifacts_dir) and os.access(
-            artifacts_dir, os.W_OK
-        )
-
-        if use_artifacts:
-            trace_path = os.path.join(
-                artifacts_dir, "cuda_graph_fqn_profiler_trace.json"
-            )
-            prof.export_chrome_trace(trace_path)
-            with open(trace_path) as f:
+        # The CUPTI field "graph node id" on kernel events carries the same id
+        # that keys the annotations.
+        with TemporaryFileName(suffix=".json") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
                 trace = json.load(f)
-        else:
-            with TemporaryFileName(suffix=".json") as fname:
-                prof.export_chrome_trace(fname)
-                with open(fname) as f:
-                    trace = json.load(f)
-
-        # Save annotations (graph_node_id -> [{str: fqn}]) for post-processing.
-        if use_artifacts:
-            annotations_path = os.path.join(
-                artifacts_dir, "cuda_graph_fqn_annotations.json"
-            )
-            with open(annotations_path, "w") as f:
-                json.dump({str(k): v for k, v in annotations.items()}, f, indent=2)
 
         kernel_events = [
             e for e in trace.get("traceEvents", []) if e.get("cat") == "kernel"
         ]
         recovered: dict[int, str] = {}
         for ke in kernel_events:
-            args = ke.get("args", {})
-            raw = args.get("graph node id")
-            if raw is None:
-                continue
+            raw = ke.get("args", {}).get("graph node id")
             try:
                 gid = int(raw)
             except (TypeError, ValueError):
                 continue
-            if gid in annotations:
-                for ann in annotations[gid]:
-                    if isinstance(ann, dict):
-                        fqn = ann.get("str") or ann.get("name")
-                        if fqn:
-                            recovered[gid] = fqn
+            for ann in annotations.get(gid, []):
+                if isinstance(ann, dict) and ann.get("name"):
+                    recovered[gid] = ann["name"]
 
         seen_arg_keys = sorted({k for ke in kernel_events for k in ke.get("args", {})})
         self.assertTrue(
@@ -423,49 +439,19 @@ class TestCudagraphFqnAnnotations(TestCase):
             f"No FQN recovered from Chrome trace kernel events. "
             f"Kernel event arg keys seen: {seen_arg_keys}",
         )
-        # The profiler path must reproduce the nsys result: per-layer FQNs.
         self.assertTrue(
             any("L.model.layers." in v for v in recovered.values()),
             f"recovered FQNs lack layer hierarchy: {sorted(set(recovered.values()))}",
         )
 
-    def test_extern_and_triton_fqns_share_L_prefix(self):
-        """Extern kernels (e.g. cuBLAS addmm from nn.Linear) and Triton fused
-        kernels must both carry the 'L.' prefix in their FQN annotations.
-
-        OuterModel produces both: nn.Linear -> cuBLAS addmm (extern kernel) and
-        silu*h+x -> Triton fused kernel.  Without the fix, extern kernels emit
-        e.g. "model.layers.0.fc1.linear.addmm" while Triton kernels emit
-        "L.model.layers.0.fc1.linear", making the two namespaces inconsistent.
-        """
-        model = OuterModel(dim=64, num_layers=2).cuda()
-        x = torch.randn(1, 64, device="cuda")
-        self._run_inductor_cg(model, x, annotate=True)
-        annotations = dict(get_kernel_annotations())
-        self.assertTrue(annotations, "expected non-empty kernel annotations")
-        all_strs = _all_fqn_strings(annotations)
-        self.assertTrue(all_strs, "expected non-empty FQN strings in annotations")
-        missing_prefix = [s for s in all_strs if not s.startswith("L.")]
-        self.assertEqual(
-            missing_prefix,
-            [],
-            f"FQNs missing 'L.' prefix (likely extern kernels): {missing_prefix}",
-        )
-
-    def test_save_annotations_and_chrome_trace(self):
-        """save_kernel_annotations writes a pickle; Chrome trace export bakes
-        FQN annotations directly when cuda_graph_annotations is passed."""
-
-        num_layers = 4
-        model = OuterModel(dim=64, num_layers=num_layers).cuda()
-        x = torch.randn(1, 64, device="cuda")
-
-        compiled, _ = self._run_inductor_cg(model, x, annotate=True)
-        annotations = dict(get_kernel_annotations())
-        self.assertTrue(annotations, "expected non-empty annotations")
-
-        # save_kernel_annotations persists the registry to disk.
+    def test_save_kernel_annotations(self):
         import pickle
+
+        model = OuterModel(dim=64, num_layers=4).cuda()
+        x = torch.randn(1, 64, device="cuda")
+
+        self._run_inductor_cg(model, x, annotate=True)
+        self.assertTrue(dict(get_kernel_annotations()), "expected annotations")
 
         with TemporaryFileName(suffix=".pkl") as ann_path:
             save_kernel_annotations(ann_path)
@@ -487,66 +473,15 @@ class TestCudagraphFqnAnnotations(TestCase):
         Triton causal-mask kernel (``where`` + ``full_default``), an extern SDPA,
         an extern proj mm, and a Triton proj bias-add. The key over-attribution
         guard is the mask kernel: its annotation must be exactly
-        ``where + full_default``. Before the compute-tracking fix,
-        get_fused_kernel_module_fqn walked origins and the mask kernel was also
-        attributed the qkv view/permute/split ops it only reads.
-
-        Expected values validated on B300/CUDA 13.1.
+        ``where + full_default``, not also the qkv view/permute/split ops it
+        only reads.
         """
         model = SharedMaskAttn(n_layers=2, dim=32, n_heads=2).cuda()
         x = torch.randn(1, 16, 32, device="cuda")
 
         self._run_inductor_cg(model, x, annotate=True)
         all_strs = set(_all_fqn_strings(dict(get_kernel_annotations())))
-        # Print for diagnostics if the assertEqual below fails.
-        for s in sorted(all_strs):
-            print(f"  annotation: {s!r}")
-
-        expected: set[str] = set()
-        for i in (0, 1):
-            expected |= {
-                f"L.layers.{i}.qkv.addmm",
-                f"L.layers.{i}.where + L.layers.{i}.full_default",
-                f"L.layers.{i}._scaled_dot_product_efficient_attention",
-                f"L.layers.{i}.proj.mm_default",
-                f"L.layers.{i}.proj.add_tensor",
-            }
-        self.assertEqual(all_strs, expected)
-
-
-@unittest.skipUnless(HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
-class TestStaleFqnReset(TestCase):
-    def test_user_triton_kernel_not_annotated_with_stale_fqn(self):
-        # A user Triton kernel after a SIMD kernel must not inherit its FQN.
-        import triton
-        import triton.language as tl
-
-        @triton.jit
-        def add_one(x_ptr, out_ptr, n, BLOCK_SIZE: tl.constexpr):
-            offs = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-            mask = offs < n
-            tl.store(out_ptr + offs, tl.load(x_ptr + offs, mask=mask) + 1, mask=mask)
-
-        class Act(nn.Module):
-            def forward(self, x):
-                return x.relu()
-
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.act = Act()
-
-            def forward(self, x):
-                y = self.act(x)
-                out = torch.empty_like(y)
-                add_one[(y.numel(),)](y, out, y.numel(), BLOCK_SIZE=16)
-                return out
-
-        x = torch.randn(64, device="cuda")
-        with config.patch({"triton.cudagraph_kernel_annotations": True}):
-            _, (code,) = run_and_get_code(torch.compile(Model(), fullgraph=True), x)
-        # Only the relu SIMD kernel is annotated, not add_one.
-        self.assertEqual(code.count("mark_kernels("), 1, code)
+        self.assertEqual(all_strs, _expected_shared_mask_attn_fqns(2))
 
 
 class TestGraphViewHelpers(TestCase):

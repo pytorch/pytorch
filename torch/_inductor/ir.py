@@ -8,6 +8,7 @@ import itertools
 import logging
 import operator
 import textwrap
+import threading
 import traceback
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
@@ -594,21 +595,25 @@ def try_get_name(x):
 # into the sink. Tracing a fused buffer's inner_fn therefore collects ALL the
 # original FX nodes inlined into it — one per original layer that was fused.
 # Realized inputs are read via ops.load (not inner_fn descent), so they are
-# natural boundaries with no transitive cascade. None when collection is off.
-_active_compute_sink: OrderedSet[Any] | None = None
+# natural boundaries with no transitive cascade. Thread-local so concurrent
+# compiles don't share a sink; the sink is None when collection is off.
+_compute_sink_tls = threading.local()
+
+
+def _get_compute_sink() -> OrderedSet[Any] | None:
+    return getattr(_compute_sink_tls, "sink", None)
 
 
 @contextlib.contextmanager
 def collect_compute_nodes(
     sink: OrderedSet[Any],
 ) -> Generator[None, None, None]:
-    global _active_compute_sink
-    prev = _active_compute_sink
-    _active_compute_sink = sink
+    prev = _get_compute_sink()
+    _compute_sink_tls.sink = sink
     try:
         yield
     finally:
-        _active_compute_sink = prev
+        _compute_sink_tls.sink = prev
 
 
 class IRNode:
@@ -1105,16 +1110,17 @@ class Loops(IRNode):
         # outer inner_fn is traced, it calls each inlined Loops's inner_fn,
         # which records that Loops's original layer FX node. This gives the
         # complete set of original layers fused into the kernel.
-        # Only installed when both annotation flags are on.
+        # Only installed when cudagraph_kernel_annotations is on.
         if not config.triton.cudagraph_kernel_annotations:
             return
         orig_inner_fn = self.inner_fn
 
         def _tracking_inner_fn(*args: Any, **kwargs: Any) -> Any:
-            if _active_compute_sink is not None:
+            sink = _get_compute_sink()
+            if sink is not None:
                 node = self.lowering_fx_node
                 if node is not None:
-                    _active_compute_sink.add(node)
+                    sink.add(node)
             return orig_inner_fn(*args, **kwargs)
 
         self._post_init_setattr("inner_fn", _tracking_inner_fn)
