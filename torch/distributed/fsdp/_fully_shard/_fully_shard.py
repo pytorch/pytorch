@@ -887,9 +887,10 @@ class FSDPModule:
             This API is experimental. The callback signature and supported FSDP
             internals may change without backward compatibility.
 
-        ``copy_in = fn(unsharded_grads, shard_dims, world_size)`` runs before FSDP
-        allocates the reduce-scatter input and may replace entries of
-        ``unsharded_grads``, e.g. with reordered copies.
+        ``copy_in = fn(unsharded_grads, shard_dims=shard_dims,
+        world_size=world_size)`` runs before FSDP allocates the reduce-scatter
+        input and may replace entries of ``unsharded_grads``, e.g. with
+        reordered copies.
         ``copy_in(reduce_scatter_input)`` then fills that flat buffer so that,
         viewed as ``(world_size, -1)``, row ``r`` holds each gradient's padded
         shard ``r`` in order, cast from any gradient dtype to the buffer's. Both
