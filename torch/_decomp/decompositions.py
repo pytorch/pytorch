@@ -5996,10 +5996,17 @@ def squeeze_default(self: Tensor, dim: int | None = None):
 @register_decomposition(torch.ops.aten._weight_norm_interface)
 def _weight_norm_interface(v, g, dim=0):
     # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
-    keep_dim = tuple(i for i in range(len(v.shape)) if i != dim)
-    # align with cuda behavior, keep norm in 'float' when g is 'bfloat16'
-    norm_dtype = torch.float if g.dtype == torch.bfloat16 else None
-    norm = v.norm(2, keep_dim, keepdim=True, dtype=norm_dtype)
+    reduce_dims = tuple(i for i in range(len(v.shape)) if i != dim)
+    # match ATen: CPU/CUDA keep the norm in float when g is bfloat16/half, MPS keeps g.dtype
+    if g.dtype in (torch.bfloat16, torch.half) and v.device.type != "mps":
+        norm_dtype = torch.float
+    else:
+        norm_dtype = g.dtype
+    if reduce_dims:
+        norm = v.norm(2, reduce_dims, keepdim=True, dtype=norm_dtype)
+    else:
+        # dim=() reduces over all dims for any p, so a 1-D v needs per-element abs
+        norm = v.abs().to(norm_dtype)
     return v * (g / norm.to(g.dtype)), norm
 
 
