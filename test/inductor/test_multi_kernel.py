@@ -180,6 +180,47 @@ class MultiKernelTest(TestCase):
 
         self.assertEqual(events, ["lock_enter", "lock_exit"])
 
+    @skipIfXpu(msg="uses CUDA graph capture")
+    def test_benchmark_sub_kernels_captures_on_current_stream(self):
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        output = torch.zeros(1, device=GPU_TYPE)
+        multi_kernel_call = self._benchmark_lock_call([])
+        kernel = multi_kernel_call._kernels[0]
+        multi_kernel_call._kernels = [kernel]
+
+        def run(output, *, stream):
+            with torch.cuda.stream(torch.cuda.ExternalStream(stream)):
+                output.add_(1)
+
+        kernel.run = run
+        kernel.get_device_interface = lambda: get_interface_for_device(GPU_TYPE)
+
+        def benchmark(fn, **kwargs):
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                fn()
+            stream.synchronize()
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(
+                graph, stream=stream, capture_error_mode="thread_local"
+            ):
+                fn()
+            torch.cuda.synchronize()
+            output.zero_()
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(output, torch.ones_like(output))
+            return 1.0
+
+        with unittest.mock.patch(
+            "torch._inductor.codegen.multi_kernel.benchmarker.benchmark",
+            side_effect=benchmark,
+        ):
+            multi_kernel_call.benchmark_sub_kernels(
+                output, stream=torch.cuda.current_stream().cuda_stream
+            )
+
     def test_softmax(self, expect_multi_kernel=True):
         x = torch.rand(2, 1024).to(GPU_TYPE)
         ref = torch.softmax(x, -1)
