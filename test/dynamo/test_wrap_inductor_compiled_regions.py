@@ -5,7 +5,7 @@ import unittest
 import weakref
 
 import torch
-import torch._dynamo.test_case
+import torch._inductor.test_case
 from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.utils import counters
@@ -71,7 +71,7 @@ def count_ops(
     return gm
 
 
-class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+class TestWrapInductorCompiledRegions(torch._inductor.test_case.TestCase):
     """Tests for wrap_inductor_compiled_regions option"""
 
     @requires_cuda_and_triton
