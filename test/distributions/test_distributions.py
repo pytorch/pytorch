@@ -1251,7 +1251,10 @@ class DistributionsTestCase(TestCase):
         """The tests assume that the validation flag is set."""
         super().setUp()
         torch.distributions.Distribution.set_default_validate_args(True)
-        torch.set_default_device(self.get_primary_device())
+        # get_primary_device() only exists once instantiate_device_type_tests() has
+        # derived the class; GENERIC subclasses stay on the default device.
+        if hasattr(self, "get_primary_device"):
+            torch.set_default_device(self.get_primary_device())
 
     def tearDown(self):
         torch.set_default_device(None)
