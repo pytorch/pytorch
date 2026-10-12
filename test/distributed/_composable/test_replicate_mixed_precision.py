@@ -86,16 +86,19 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             reduce_dtype=None,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
+        orig_dtype = next(ref_model.parameters()).dtype
+        for param in ref_model_bf16.parameters():
+            param.grad_dtype = orig_dtype
         orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
-            self.assertEqual(output.dtype, param_dtype)
+            self.assertEqual(output.dtype, orig_dtype)
 
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         predivide_factor, postdivide_factor, _, _ = _get_gradient_divide_factors(
-            self.process_group, all_reduce_group=None, reduce_dtype=param_dtype
+            self.process_group, all_reduce_group=None, reduce_dtype=orig_dtype
         )
 
         torch.manual_seed(42 + self.rank + 1)

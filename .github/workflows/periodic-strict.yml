@@ -35,69 +35,69 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       check_experiments: lf
 
-  linux-jammy-cuda13_0-py3_10-gcc11-build:
-    name: linux-jammy-cuda13.0-py3.10-gcc11
+  linux-jammy-cuda13_2-py3_11-gcc11-build:
+    name: linux-jammy-cuda13.2-py3.11-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '7.5 8.6 8.9'
       test-matrix: |
         { include: [
-          { config: "periodic", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "periodic", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "periodic", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "periodic", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
         ]}
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
-  linux-jammy-cuda13_0-py3_10-gcc11-test:
-    name: linux-jammy-cuda13.0-py3.10-gcc11
+  linux-jammy-cuda13_2-py3_11-gcc11-test:
+    name: linux-jammy-cuda13.2-py3.11-gcc11
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-cuda13_0-py3_10-gcc11-build
+      - linux-jammy-cuda13_2-py3_11-gcc11-build
       - get-label-type
     with:
-      build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.test-matrix }}
-      python-version: "3.10"
+      build-environment: ${{ needs.linux-jammy-cuda13_2-py3_11-gcc11-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda13_2-py3_11-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_2-py3_11-gcc11-build.outputs.test-matrix }}
+      python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
-  linux-jammy-py3_10-clang21-build:
-    name: linux-jammy-py3.10-clang21
+  linux-jammy-py3_11-clang21-build:
+    name: linux-jammy-py3.11-clang21
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.10-clang21
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
+      build-environment: linux-jammy-py3.11-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "periodic", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "periodic", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "periodic", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "periodic", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
         ]}
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: clang21
     secrets: inherit
 
-  linux-jammy-py3_10-clang21-test:
-    name: linux-jammy-py3.10-clang21
+  linux-jammy-py3_11-clang21-test:
+    name: linux-jammy-py3.11-clang21
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_10-clang21-build
+      - linux-jammy-py3_11-clang21-build
       - get-label-type
     with:
-      build-environment: ${{ needs.linux-jammy-py3_10-clang21-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_10-clang21-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-clang21-build.outputs.test-matrix }}
-      python-version: "3.10"
+      build-environment: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.test-matrix }}
+      python-version: "3.11"
       compiler: clang21
     secrets: inherit
