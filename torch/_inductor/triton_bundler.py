@@ -1,11 +1,11 @@
 import copy
 import dataclasses
-import hashlib
 import logging
 import os
 import shutil
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._utils_internal import justknobs_check
@@ -14,6 +14,10 @@ from torch.utils._ordered_set import OrderedSet
 
 from .runtime.runtime_utils import triton_cache_dir
 from .utils import _IS_WINDOWS, GPU_KERNEL_BIN_EXTS
+
+
+if TYPE_CHECKING:
+    from .runtime.triton_heuristics import StaticTritonCompileResult
 
 
 log = logging.getLogger(__name__)
@@ -212,9 +216,9 @@ class TritonBundler:
 
     _entries: list[TritonBundleEntry] | None = None
     _static_autotuners: list[StaticallyLaunchedAutotuner] | None = None
-    _static_binary_digests: (
-        dict[object, dict[_BinaryArtifactIdentity, OrderedSet[bytes]]] | None
-    ) = None
+    _static_compile_results: dict[object, list["StaticTritonCompileResult"]] | None = (
+        None
+    )
     _winners: dict[object, OrderedSet[str]] | None = None
     _omitted_groups: dict[object, OrderedSet[_TritonCacheGroup]] | None = None
 
@@ -255,7 +259,7 @@ class TritonBundler:
             )
         cls._entries = []
         cls._static_autotuners = []
-        cls._static_binary_digests = {}
+        cls._static_compile_results = {}
         cls._winners = {}
         cls._omitted_groups = {}
 
@@ -268,7 +272,7 @@ class TritonBundler:
         log.debug("TritonBundler.end_compile is called")
         cls._entries = None
         cls._static_autotuners = None
-        cls._static_binary_digests = None
+        cls._static_compile_results = None
         cls._winners = None
         cls._omitted_groups = None
 
@@ -322,16 +326,9 @@ class TritonBundler:
                     new_kernel,
                 )
             )
-            if cls._static_binary_digests is None:
-                raise AssertionError("expected active static binary digests")
-            binary_digests: dict[_BinaryArtifactIdentity, OrderedSet[bytes]] = {}
-            for result in new_kernel.compile_results:
-                digest = getattr(result, "expected_cubin_digest", None)
-                if digest is not None:
-                    binary_digests.setdefault(
-                        result.bundled_artifact_identity(), OrderedSet()
-                    ).add(digest)
-            cls._static_binary_digests[kernel] = binary_digests
+            if cls._static_compile_results is None:
+                raise AssertionError("expected active static compile results")
+            cls._static_compile_results[kernel] = new_kernel.compile_results
 
             # Put the values back since we need it to use now
             kernel.restore_after_unpickle(old_values)
@@ -485,10 +482,10 @@ class TritonBundler:
                     path = os.path.join(entry.directory, entry.kernel_hash)
                     if not os.path.exists(path):
                         continue
-                    binary_digests = (
-                        cls._static_binary_digests.get(entry.autotuner)
+                    compile_results = (
+                        cls._static_compile_results.get(entry.autotuner)
                         if config.use_static_triton_launcher
-                        and cls._static_binary_digests
+                        and cls._static_compile_results
                         else None
                     )
                     trusted = True
@@ -506,30 +503,25 @@ class TritonBundler:
                         except Exception:
                             log.debug("failed to collect triton kernel", exc_info=True)
                             if (
-                                binary_digests is not None
+                                compile_results is not None
                                 and extension in GPU_KERNEL_BIN_EXTS.values()
                             ):
                                 trusted = False
                             continue
 
                         if (
-                            binary_digests is not None
+                            compile_results is not None
                             and extension in GPU_KERNEL_BIN_EXTS.values()
                         ):
-                            expected_digests = OrderedSet()
-                            expected_digests.update(
-                                binary_digests.get(
-                                    (entry.device, entry.kernel_hash, filename),
-                                    (),
-                                )
-                            )
-                            expected_digests.update(
-                                binary_digests.get(
-                                    (None, entry.kernel_hash, filename),
-                                    (),
-                                )
-                            )
-                            if hashlib.sha256(payload).digest() not in expected_digests:
+                            identities = {
+                                (entry.device, entry.kernel_hash, filename),
+                                (None, entry.kernel_hash, filename),
+                            }
+                            if not any(
+                                result.bundled_artifact_identity() in identities
+                                and result.matches_expected_cubin(payload)
+                                for result in compile_results
+                            ):
                                 trusted = False
 
                         try:
