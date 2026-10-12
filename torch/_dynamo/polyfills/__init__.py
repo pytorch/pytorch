@@ -491,13 +491,20 @@ def odict_update(
     # exact dicts, but dispatches keys/__getitem__ and destination __setitem__.
     if type(data) is dict:
         data = list(data.items())
-    elif hasattr(data, "keys"):
-        keys = data.keys()
-        for key in keys:
-            self[key] = data[key]
-        data = ()
-    elif hasattr(data, "items"):
-        data = data.items()
+    else:
+        try:
+            keys = data.keys
+        except AttributeError:
+            try:
+                items = data.items
+            except AttributeError:
+                pass
+            else:
+                data = items()
+        else:
+            for key in keys():
+                self[key] = data[key]
+            data = ()
     for key, value in data:
         self[key] = value
     for key, value in kwargs.items():

@@ -33,7 +33,7 @@ import sys
 import types
 import typing
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, NoReturn, TYPE_CHECKING
+from typing import Any, cast, NoReturn, TYPE_CHECKING
 
 import torch
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
@@ -3559,6 +3559,11 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0]
+            if name in ("keys", "values", "items", "update"):
+                return cast(
+                    VariableTracker,
+                    ConstDictVariable.tp_methods[name](obj, tx, name, args[1:], kwargs),
+                )
             if name in ("__eq__", "__ne__") and isinstance(obj, ConstDictVariable):
                 no_keywords(tx, f"wrapper {name}", kwargs)
                 if len(args) != 2:
