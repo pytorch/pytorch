@@ -163,6 +163,7 @@ def layer_norm_inputs(device, rows, width=1056):
 
 NESTED_CONFIG = {
     "triton.nested_reduction": True,
+    "cat_fuse_computed_input_copies": True,
     "loop_ordering_after_fusion": True,
     "emulate_precision_casts": True,
     "triton.multi_kernel": 0,
@@ -190,6 +191,7 @@ class NestedLaneTestCase(TestCase):
             "loop_ordering_after_fusion": True,
             "split_reductions": False,
             "emulate_precision_casts": True,
+            "cat_fuse_computed_input_copies": True,
             "force_disable_caches": True,
         }
         with config.patch({**settings, "triton.nested_reduction": False}):

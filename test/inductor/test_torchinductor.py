@@ -9396,6 +9396,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 16]), torch.randn([12, 1])))
 
+    @config.patch(cat_fuse_computed_input_copies=True)
     def test_stack_realized_inputs(self):
         # Each input reads x eight times, so it is realized before stack, and
         # its unsqueeze view freezes it. The copy into the stack output should
@@ -9409,6 +9410,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (torch.randn([4096, 16]),))
         assertGeneratedKernelCountEqual(self, 1)
 
+    @config.patch(cat_fuse_computed_input_copies=True)
     def test_stack_realized_input_twice(self):
         # One realized buffer copied into two slices, plus another reader.
         def fn(x):
