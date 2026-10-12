@@ -22,7 +22,6 @@ serialized format:
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
 import logging
 import os
@@ -788,6 +787,16 @@ class CompiledFxGraph(OutputCode):
         if self.current_callable is None:
             raise AssertionError("self.current_callable must not be None")
 
+        # Autotune cache writes happen during the first call. Run it under the
+        # saved compile context, then end the bundler; later calls skip this.
+        if (ctx := self._compile_context) is not None:
+            self._compile_context = None
+            with compile_context(ctx):
+                try:
+                    return self(inputs)
+                finally:
+                    AutotuneCacheBundler.end_compile()
+
         if (
             torch._inductor.debug.RECORD_GRAPH_EXECUTION
             and torch._inductor.debug.GRAPH_EXECUTION_ORDER is not None
@@ -804,42 +813,17 @@ class CompiledFxGraph(OutputCode):
                     "compile_id": compile_id,
                 }
             )
-        compile_context_for_autotune_cache = self._compile_context
-        has_active_autotune_cache_bundler = AutotuneCacheBundler.has_active_compile(
-            compile_context_for_autotune_cache
-        )
-        autotune_cache_context = (
-            compile_context(compile_context_for_autotune_cache)
-            if has_active_autotune_cache_bundler
-            else contextlib.nullcontext()
-        )
-        # Autotune cache writes happen during the first call. End the bundler
-        # while its saved compile context is restored, then clear the saved
-        # context after leaving the compile_context manager.
         try:
-            with autotune_cache_context:
-                try:
-                    # Checking the profiler directly is faster than nullcontext
-                    if torch.autograd.profiler._is_profiler_enabled:
-                        with torch._C._profiler._RecordFunctionFast(
-                            f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
-                            keyword_values={"scope": "user_scope"},
-                        ):
-                            return self.current_callable(inputs)
-                    else:
-                        return self.current_callable(inputs)
-                finally:
-                    get_runtime_metrics_context().finish()
-                    if has_active_autotune_cache_bundler:
-                        AutotuneCacheBundler.end_compile()
+            # Checking the profiler directly is faster than nullcontext
+            if torch.autograd.profiler._is_profiler_enabled:
+                with torch._C._profiler._RecordFunctionFast(
+                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
+                    keyword_values={"scope": "user_scope"},
+                ):
+                    return self.current_callable(inputs)
+            return self.current_callable(inputs)
         finally:
-            if (
-                has_active_autotune_cache_bundler
-                and not AutotuneCacheBundler.has_active_compile(
-                    compile_context_for_autotune_cache
-                )
-            ):
-                self._compile_context = None
+            get_runtime_metrics_context().finish()
 
     def post_compile(
         self,
