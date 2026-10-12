@@ -12,6 +12,7 @@ Run:
 import unittest
 from unittest.mock import MagicMock, patch
 
+from torch.testing._internal.common_device_type import skipMPS
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -225,6 +226,7 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
         result = loaded(x, y)
         torch.testing.assert_close(result, expected)
 
+    @skipMPS  # AOTI on MPS never goes through Triton's CachingAutotuner.save_gpu_kernel
     def test_aoti_schema_populated(self):
         """AOTI compilation should call save_gpu_kernel with a populated schema."""
         import torch._dynamo
