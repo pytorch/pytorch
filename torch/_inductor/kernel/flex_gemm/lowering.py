@@ -12,7 +12,7 @@ import dataclasses
 import functools
 import importlib.util
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, Literal, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -185,8 +185,8 @@ def quack_blockscaled_contract(gemm_fx_node: torch.fx.Node) -> QuackBlockScaledC
 
 def quack_grouped_mm_contract(
     gemm_fx_node: torch.fx.Node,
-) -> tuple[torch.fx.Node, torch.fx.Node, torch.fx.Node]:
-    """Resolve varlen-M/K operands and int32 ``offs[E]`` end offsets.
+) -> tuple[tuple[torch.fx.Node, torch.fx.Node, torch.fx.Node], Literal["m", "k"]]:
+    """Resolve grouped_mm operands and the axis segmented by ``offs[E]`` end offsets.
 
     Varlen-M uses k-major A ``[total_m, K]`` and B ``[E, K, N]``. Varlen-K
     uses m-major A ``[M, total_k]`` and n-major B ``[total_k, N]`` for wgrad.
@@ -205,34 +205,28 @@ def quack_grouped_mm_contract(
         raise NotImplementedError(
             "FlexGEMM QUACK grouped_mm requires offs and no bias or out_dtype"
         )
-    a_meta, b_meta, offs_meta = (node.meta["val"] for node in (mat_a, mat_b, offs))
+    # aten._grouped_mm's meta already requires contiguous 1-D int32 offs.
+    a_meta, b_meta = (node.meta["val"] for node in (mat_a, mat_b))
     if (
         a_meta.ndim != 2
         or b_meta.ndim not in (2, 3)
         or a_meta.dtype not in (torch.bfloat16, torch.float16)
         or b_meta.dtype is not a_meta.dtype
-        or offs_meta.dtype is not torch.int32
-        or offs_meta.ndim != 1
-        or offs_meta.stride(0) != 1
     ):
         raise NotImplementedError(
-            "FlexGEMM QUACK grouped_mm supports only bf16/fp16 2-D A, "
-            "2-D or 3-D B and contiguous 1-D int32 offs"
+            "FlexGEMM QUACK grouped_mm supports only bf16/fp16 2-D A and 2-D or 3-D B"
         )
     if b_meta.ndim == 3:
         if a_meta.stride(-1) != 1:
             raise NotImplementedError("FlexGEMM varlen-M requires k-major A")
-    else:
-        if a_meta.stride(-2) != 1 or b_meta.stride(-1) != 1:
-            raise NotImplementedError(
-                "FlexGEMM varlen-K requires m-major A [M, total_k] and "
-                "n-major B [total_k, N]"
-            )
-        if a_meta.shape[-1] != b_meta.shape[-2]:
-            raise NotImplementedError(
-                "FlexGEMM varlen-K requires equal reduction extents"
-            )
-    return mat_a, mat_b, offs
+        return (mat_a, mat_b, offs), "m"
+    if a_meta.stride(-2) != 1 or b_meta.stride(-1) != 1:
+        raise NotImplementedError(
+            "FlexGEMM varlen-K requires m-major A [M, total_k] and n-major B [total_k, N]"
+        )
+    if a_meta.shape[-1] != b_meta.shape[-2]:
+        raise NotImplementedError("FlexGEMM varlen-K requires equal reduction extents")
+    return (mat_a, mat_b, offs), "k"
 
 
 def flex_gemm_cu_seqlens_benchmark_input(
@@ -493,10 +487,8 @@ def flex_gemm_quack_configs(
         sizevars.optimization_hint(mat2.get_size()[-1]),
         None if output_contraction is None else output_contraction.concat_layout,
         blockscaled=template_config.blockscaled_format is not None,
-        varlen_m=template_config.cu_seqlens_index is not None
-        and template_config.cu_seqlens_kind == "m",
-        varlen_k=template_config.cu_seqlens_index is not None
-        and template_config.cu_seqlens_kind == "k",
+        varlen_m=template_config.varlen_axis == "m",
+        varlen_k=template_config.varlen_axis == "k",
     )
     legal = legal_mod_configs(
         epimod, device, problem, preferred_config=flex_gemm_preferred_config(problem)
@@ -633,7 +625,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     ]
     placeholder_args = dict(zip(placeholders, args, strict=True))
     blockscaled = None
-    varlen_k = False
+    varlen_axis: Literal["m", "k"] | None = None
     mainloop_scale_nodes: tuple[torch.fx.Node, ...] = ()
     if scaled_mm:
         blockscaled = quack_blockscaled_contract(gemm_fx_node)
@@ -641,8 +633,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         mainloop_scale_nodes = blockscaled.tensorwise_scales
         alpha, beta = 1.0, 0.0
     elif grouped_mm:
-        gemm_operand_nodes = quack_grouped_mm_contract(gemm_fx_node)
-        varlen_k = gemm_operand_nodes[1].meta["val"].ndim == 2
+        gemm_operand_nodes, varlen_axis = quack_grouped_mm_contract(gemm_fx_node)
         gemm_fx_node.args = gemm_operand_nodes
         alpha, beta = 1.0, 0.0
     else:
@@ -670,6 +661,14 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         # QuACK's varlen path reads [0, *offs]; pad in-graph so Inductor owns
         # the buffer instead of the runtime allocating during CUDA graph capture.
         gemm_args[2] = constant_pad_nd(gemm_args[2], [1, 0])
+    if varlen_axis == "k":
+        # The contract checked FX metadata; pointwise producers would otherwise
+        # realize contiguous, turning m-major A into K-major storage. The cast
+        # holds because require_stride_order returns a TensorBox for one.
+        for index, order in ((0, [0, 1]), (1, [1, 0])):
+            gemm_args[index] = cast(
+                TensorBox, ir.ExternKernel.require_stride_order(gemm_args[index], order)
+            )
     epilogue_arg_placeholders = (
         *mainloop_scale_nodes,
         *flex_gemm_epilogue_arg_placeholders(subgraph.graph_module, gemm_fx_node),
@@ -760,7 +759,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         epilogue_args = [arg for _, arg in epilogue_pairs]
 
     output_contraction = outputs.output_contraction
-    if varlen_k and output_contraction is not None:
+    if varlen_axis == "k" and output_contraction is not None:
         raise NotImplementedError(
             "FlexGEMM varlen-K does not support output contractions"
         )
@@ -788,7 +787,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         aux_metas = validate_flex_gemm_aux_outputs(
             gemm_op, outputs.aux_outputs, logical_output_size
         )
-    if varlen_k:
+    if varlen_axis == "k":
         for meta in (output_meta, *aux_metas):
             alignment = max(16 // meta.dtype.itemsize, 1)
             if meta.numel() != 0 and any(
@@ -968,8 +967,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         beta=float(beta),
         blockscaled_format=None if blockscaled is None else blockscaled.format,
         quack_config=None,
-        cu_seqlens_index=gemm_input_indices[2] if grouped_mm else None,
-        cu_seqlens_kind="k" if varlen_k else "m",
+        varlen_axis=varlen_axis,
         epilogue_arg_indices=epilogue_arg_indices,
         epilogue_arg_kinds=epilogue_arg_kinds,
         aux_out_indices=aux_out_indices,
@@ -1009,12 +1007,12 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     if tuned:
         quack_configs = flex_gemm_search_space(
             legal_configs,
-            varlen=grouped_mm and not varlen_k,
+            varlen=varlen_axis == "m",
             dense_shape=dense_shape if gemm_op is torch.ops.aten.mm.default else None,
         )
     else:
         default = flex_gemm_default_config(
-            legal_configs, varlen=grouped_mm and not varlen_k, dense_shape=dense_shape
+            legal_configs, varlen=varlen_axis == "m", dense_shape=dense_shape
         )
         quack_configs = (default,)
     log_flex_gemm_artifact(
@@ -1039,7 +1037,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     if grouped_mm:
         input_gen_fns[gemm_input_indices[2]] = functools.partial(
             flex_gemm_cu_seqlens_benchmark_input,
-            total_length=mat1.get_size()[-1] if varlen_k else logical_output_size[0],
+            total_length=mat1.get_size()[-1]
+            if varlen_axis == "k"
+            else logical_output_size[0],
         )
     result, _ = autotune_select_algorithm(
         "flex_gemm_epilogue",
