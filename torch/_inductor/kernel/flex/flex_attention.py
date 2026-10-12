@@ -56,10 +56,8 @@ from .flex_flash_attention import (
     is_trivial_mask_graph,
     is_trivial_score_graph,
 )
-from .flex_flydsl_attention import (
-    create_flydsl_flex_attention_backward_kernel,
-    create_flydsl_flex_attention_kernel,
-)
+from .flex_flydsl_attention import create_flydsl_flex_attention_kernel
+from .flex_flydsl_backward import create_flydsl_flex_attention_backward_kernel
 
 
 if TYPE_CHECKING:

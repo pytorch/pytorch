@@ -1,26 +1,17 @@
 # mypy: allow-untyped-defs
 
-from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
-
-import sympy
 
 import torch
 from torch.nn.attention.flex_attention import _LARGE_SPARSE_BLOCK_SIZE
 
 from ...codegen.flydsl import flydsl_utils
 from ...codegen.flydsl.flydsl_template import FlyDSLTemplate
-from ...codegen.flydsl.flydsl_utils import (
-    _flydsl_runtime_unavailable_reason,
-    runtime_available,
-)
-from ...ir import FixedLayout, Pointwise, ShapeAsConstantBuffer, Subgraph, TensorBox
+from ...ir import FixedLayout, Pointwise
 from ...lowering import empty_strided, full
 from ...select_algorithm import autotune_select_algorithm
 from ...virtualized import ops, V
-from ..vendored_templates.flydsl.kernels.flex_attn_bwd_utils import (
-    MAX_DQ_WORKSPACE_BYTES,
-)
 from .common import (
     construct_strides,
     create_indices_fake,
@@ -40,12 +31,7 @@ flex_flydsl_forward_template = FlyDSLTemplate(
     source=load_flex_template("flydsl_forward"),
 )
 
-flex_flydsl_backward_template = FlyDSLTemplate(
-    name="flex_flydsl_backward", source=load_flex_template("flydsl_backward")
-)
-
 _MAX_BUFFER_BYTES = 1 << 32
-_BWD_METADATA_BLOCK_SIZE = 128
 
 
 def _contiguous_strides(shape):
@@ -102,6 +88,85 @@ def _is_contiguous_shape_stride(
     )
 
 
+@dataclass(frozen=True)
+class _BlockMaskMetadata:
+    count_shape: tuple[int, ...]
+    index_shape: tuple[int, ...]
+    full_count_shape: tuple[int, ...]
+    full_index_shape: tuple[int, ...]
+    full_numel: int
+
+
+def _get_block_mask_metadata(
+    query,
+    kv_num_blocks,
+    kv_indices,
+    full_kv_num_blocks,
+    full_kv_indices,
+    *,
+    prefix: str = "",
+    static_reason: str = "requires statically known BlockMask dimensions",
+) -> tuple[_BlockMaskMetadata | None, str]:
+    nodes = (
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+    )
+    try:
+        shapes = tuple(
+            tuple(V.graph.sizevars.guard_int(item) for item in node.get_size())
+            for node in nodes
+        )
+        full_numel = V.graph.sizevars.guard_int(full_kv_num_blocks.get_numel())
+        dtypes = tuple(node.get_dtype() for node in nodes)
+        devices = tuple(node.get_device() for node in nodes)
+    except (AttributeError, TypeError, ValueError):
+        return None, f"{prefix}{static_reason}"
+
+    if any(dtype != torch.int32 for dtype in dtypes):
+        return None, f"{prefix}requires int32 BlockMask metadata"
+    if any(device != query.get_device() for device in devices):
+        return None, f"{prefix}requires BlockMask metadata on the query device"
+    try:
+        strides = tuple(
+            tuple(V.graph.sizevars.guard_int(item) for item in node.get_stride())
+            for node in nodes
+        )
+    except (AttributeError, NotImplementedError, TypeError, ValueError):
+        return None, f"{prefix}requires statically known BlockMask metadata strides"
+    if not all(
+        _is_contiguous_shape_stride(shape, stride)
+        for shape, stride in zip(shapes, strides)
+    ):
+        return None, f"{prefix}requires contiguous BlockMask metadata"
+    return _BlockMaskMetadata(*shapes, full_numel), ""
+
+
+def _get_mask_program_config(mask_graph, mask_mod_other_buffers):
+    if is_trivial_mask_graph(mask_graph.graph_module):
+        return {
+            "MASK_PROGRAM": (),
+            "MASK_PROGRAM_OUTPUT": 0,
+            "MASK_BUFFER_COUNT": 0,
+            "MASK_BUFFER_SHAPES": (),
+            "MASK_BUFFER_STRIDES": (),
+        }, ""
+    mask_program, reason = lower_flydsl_mask_graph(
+        mask_graph.graph_module,
+        mask_mod_other_buffers,
+    )
+    if mask_program is None:
+        return None, f"unsupported mask_mod: {reason}"
+    return {
+        "MASK_PROGRAM": mask_program.instructions,
+        "MASK_PROGRAM_OUTPUT": mask_program.output,
+        "MASK_BUFFER_COUNT": mask_program.buffer_count,
+        "MASK_BUFFER_SHAPES": mask_program.buffer_shapes,
+        "MASK_BUFFER_STRIDES": mask_program.buffer_strides,
+    }, ""
+
+
 def _is_gfx950_device(device) -> bool:
     if not flydsl_utils.runtime_available() or not torch.cuda.is_available():
         return False
@@ -110,7 +175,7 @@ def _is_gfx950_device(device) -> bool:
     return str(arch).split(":", 1)[0] == "gfx950"
 
 
-def _check_flydsl_common_compatibility(
+def _get_flydsl_common_config(
     *,
     query,
     key,
@@ -118,37 +183,52 @@ def _check_flydsl_common_compatibility(
     subgraph,
     score_mod_other_buffers,
     mask_mod_other_buffers,
-    extra_tensors=(),
+    extra_strides=(),
     allow_mask_mod_buffers: bool = False,
     allow_strided_bhsd: bool = False,
-) -> str:
+) -> tuple[dict[str, tuple[int, ...] | None] | None, str]:
     device = query.get_device()
     if device is None or device.type != "cuda" or not _is_gfx950_device(device):
-        return "requires ROCm gfx950 and the FlyDSL runtime"
+        return None, "requires ROCm gfx950 and the FlyDSL runtime"
     if query.get_dtype() != torch.bfloat16:
-        return f"supports BF16 only, got {query.get_dtype()}"
+        return None, f"supports BF16 only, got {query.get_dtype()}"
     if query.get_dtype() != key.get_dtype() or query.get_dtype() != value.get_dtype():
-        return "requires query, key, and value to have the same dtype"
+        return None, "requires query, key, and value to have the same dtype"
     if not is_trivial_score_graph(subgraph.graph_module):
-        return "supports identity score_mod only"
+        return None, "supports identity score_mod only"
     if score_mod_other_buffers:
-        return "does not support captured score_mod buffers"
+        return None, "does not support captured score_mod buffers"
     if mask_mod_other_buffers and not allow_mask_mod_buffers:
-        return "does not support captured mask_mod buffers"
+        return None, "does not support captured mask_mod buffers"
 
-    tensors = (query, key, value, *extra_tensors)
-    if not all(
-        _get_supported_bhsd_stride(node, allow_strided=allow_strided_bhsd) is not None
-        for node in tensors
-        if node is not None
+    named_tensors = (
+        ("Q_STRIDE", query),
+        ("K_STRIDE", key),
+        ("V_STRIDE", value),
+        *extra_strides,
+    )
+    strides = tuple(
+        None
+        if node is None
+        else _get_supported_bhsd_stride(node, allow_strided=allow_strided_bhsd)
+        for _, node in named_tensors
+    )
+    if any(
+        node is not None and stride is None
+        for (_, node), stride in zip(named_tensors, strides, strict=True)
     ):
         layout = "4D BHSD tensors with contiguous head dimensions"
         if not allow_strided_bhsd:
             layout = "contiguous 4D BHSD tensors"
-        return f"requires {layout}"
-    if not all(_fits_u32_head_slice(node) for node in tensors if node is not None):
-        return "requires every per-head tensor slice to be smaller than 4 GiB"
-    return ""
+        return None, f"requires {layout}"
+    if not all(
+        _fits_u32_head_slice(node) for _, node in named_tensors if node is not None
+    ):
+        return None, "requires every per-head tensor slice to be smaller than 4 GiB"
+
+    return {
+        name: stride for (name, _), stride in zip(named_tensors, strides, strict=True)
+    }, ""
 
 
 def _get_flydsl_flex_attention_forward_config(
@@ -171,12 +251,6 @@ def _get_flydsl_flex_attention_forward_config(
     if full_kv_num_blocks is None or full_kv_indices is None:
         return None, "requires full_kv_num_blocks/full_kv_indices metadata"
 
-    metadata_nodes = (
-        kv_num_blocks,
-        kv_indices,
-        full_kv_num_blocks,
-        full_kv_indices,
-    )
     try:
         b, hq, sq, qk_dim = [
             V.graph.sizevars.guard_int(item) for item in query.get_size()
@@ -187,27 +261,8 @@ def _get_flydsl_flex_attention_forward_config(
         bv, hv, sv, v_dim = [
             V.graph.sizevars.guard_int(item) for item in value.get_size()
         ]
-        mask_shape = [
-            V.graph.sizevars.guard_int(item) for item in kv_num_blocks.get_size()
-        ]
-        index_shape = [
-            V.graph.sizevars.guard_int(item) for item in kv_indices.get_size()
-        ]
-        full_count_shape = [
-            V.graph.sizevars.guard_int(item) for item in full_kv_num_blocks.get_size()
-        ]
-        full_index_shape = [
-            V.graph.sizevars.guard_int(item) for item in full_kv_indices.get_size()
-        ]
-        metadata_shapes = tuple(
-            tuple(V.graph.sizevars.guard_int(item) for item in node.get_size())
-            for node in metadata_nodes
-        )
-        metadata_dtypes = tuple(node.get_dtype() for node in metadata_nodes)
-        metadata_devices = tuple(node.get_device() for node in metadata_nodes)
         sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
         sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
-        full_numel = V.graph.sizevars.guard_int(full_kv_num_blocks.get_numel())
         scale_value = float(scale)
         output_stride = tuple(
             V.graph.sizevars.guard_int(item)
@@ -219,52 +274,38 @@ def _get_flydsl_flex_attention_forward_config(
     except (AttributeError, TypeError, ValueError):
         return None, "requires statically known tensor and BlockMask dimensions"
 
-    if any(dtype != torch.int32 for dtype in metadata_dtypes):
-        return None, "requires int32 BlockMask metadata"
-    if any(device != query.get_device() for device in metadata_devices):
-        return None, "requires BlockMask metadata on the query device"
-    try:
-        metadata_strides = tuple(
-            tuple(V.graph.sizevars.guard_int(item) for item in node.get_stride())
-            for node in metadata_nodes
-        )
-    except (AttributeError, NotImplementedError, TypeError, ValueError):
-        return None, "requires statically known BlockMask metadata strides"
-    if not all(
-        _is_contiguous_shape_stride(shape, stride)
-        for shape, stride in zip(metadata_shapes, metadata_strides)
-    ):
-        return None, "requires contiguous BlockMask metadata"
+    metadata, reason = _get_block_mask_metadata(
+        query,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        static_reason="requires statically known tensor and BlockMask dimensions",
+    )
+    if metadata is None:
+        return None, reason
+    mask_shape = metadata.count_shape
+    index_shape = metadata.index_shape
+    full_count_shape = metadata.full_count_shape
+    full_index_shape = metadata.full_index_shape
 
-    trivial_mask = is_trivial_mask_graph(mask_graph.graph_module)
-    mask_program = None
-    if not trivial_mask:
-        mask_program, mask_reason = lower_flydsl_mask_graph(
-            mask_graph.graph_module,
-            mask_mod_other_buffers,
-        )
-        if mask_program is None:
-            return None, f"unsupported mask_mod: {mask_reason}"
+    mask_config, reason = _get_mask_program_config(mask_graph, mask_mod_other_buffers)
+    if mask_config is None:
+        return None, reason
 
     decode = 0 < sq < 128
-    common_reason = _check_flydsl_common_compatibility(
+    common_config, reason = _get_flydsl_common_config(
         query=query,
         key=key,
         value=value,
         subgraph=subgraph,
         score_mod_other_buffers=score_mod_other_buffers,
         mask_mod_other_buffers=mask_mod_other_buffers,
-        allow_mask_mod_buffers=mask_program is not None,
+        allow_mask_mod_buffers=bool(mask_config["MASK_BUFFER_COUNT"]),
         allow_strided_bhsd=not decode,
     )
-    if common_reason:
-        return None, common_reason
-
-    q_stride = _get_supported_bhsd_stride(query, allow_strided=not decode)
-    k_stride = _get_supported_bhsd_stride(key, allow_strided=not decode)
-    v_stride = _get_supported_bhsd_stride(value, allow_strided=not decode)
-    if q_stride is None or k_stride is None or v_stride is None:
-        return None, "requires supported Q/K/V BHSD strides"
+    if common_config is None:
+        return None, reason
 
     if (bkv, hkv, sk) != (bv, hv, sv):
         return None, "requires key and value to have matching B/Hkv/Sk dimensions"
@@ -290,7 +331,7 @@ def _get_flydsl_flex_attention_forward_config(
     if sparse_q_block_size <= 0 or sparse_kv_block_size <= 0:
         return None, "requires positive sparse block sizes"
 
-    has_full_blocks = full_numel != 0
+    has_full_blocks = metadata.full_numel != 0
     max_full_blocks = 1
     if has_full_blocks:
         if full_count_shape != mask_shape:
@@ -338,21 +379,9 @@ def _get_flydsl_flex_attention_forward_config(
             "MAX_FULL_BLOCKS": max_full_blocks,
             "SPARSE_Q_BLOCK_SIZE": sparse_q_block_size,
             "SPARSE_KV_BLOCK_SIZE": sparse_kv_block_size,
-            "MASK_PROGRAM": (() if mask_program is None else mask_program.instructions),
-            "MASK_PROGRAM_OUTPUT": (0 if mask_program is None else mask_program.output),
-            "MASK_BUFFER_COUNT": (
-                0 if mask_program is None else mask_program.buffer_count
-            ),
-            "MASK_BUFFER_SHAPES": (
-                () if mask_program is None else mask_program.buffer_shapes
-            ),
-            "MASK_BUFFER_STRIDES": (
-                () if mask_program is None else mask_program.buffer_strides
-            ),
+            **mask_config,
+            **common_config,
             "SM_SCALE": scale_value,
-            "Q_STRIDE": q_stride,
-            "K_STRIDE": k_stride,
-            "V_STRIDE": v_stride,
             "O_STRIDE": output_stride,
         },
         "",
@@ -582,540 +611,3 @@ def create_flydsl_flex_attention_kernel(
         subgraph_buffer, mask_graph_buffer
     )
     return out, logsumexp, max_scores
-
-
-def _flydsl_unavailable_message() -> str:
-    reason = _flydsl_runtime_unavailable_reason()
-    if reason is None:
-        reason = "FlyDSL runtime is unavailable"
-    return (
-        f"FlyDSL flex attention backward is unavailable: {reason}. "
-        "It requires ROCm/gfx950 and the optional `flydsl` runtime (0.3.x)."
-    )
-
-
-def _get_flydsl_flex_attention_backward_config(
-    fw_subgraph: Subgraph,
-    mask_graph: Subgraph,
-    query: TensorBox,
-    score_mod_other_buffers: Sequence[TensorBox] | None = None,
-    *,
-    key: TensorBox,
-    value: TensorBox,
-    out: TensorBox | None = None,
-    grad_out: TensorBox | None = None,
-    grad_logsumexp: TensorBox | None = None,
-    mask_mod_other_buffers: Sequence[TensorBox] | None = None,
-    kv_num_blocks: TensorBox | None = None,
-    kv_indices: TensorBox | None = None,
-    full_kv_num_blocks: TensorBox | None = None,
-    full_kv_indices: TensorBox | None = None,
-    scale: float | None = None,
-    sparse_q_block_size: int | None = None,
-    sparse_kv_block_size: int | None = None,
-    dq_accum_fp32: bool = True,
-) -> tuple[dict[str, Any] | None, str]:
-    score_mod_other_buffers = score_mod_other_buffers or ()
-    mask_mod_other_buffers = mask_mod_other_buffers or ()
-
-    if not runtime_available():
-        return None, _flydsl_unavailable_message()
-
-    if torch.version.hip is None:
-        return None, "FlyDSL flex bwd requires ROCm/gfx950"
-
-    device = query.get_device() if hasattr(query, "get_device") else None
-    if device is not None and not _is_gfx950_device(device):
-        return None, "FlyDSL flex bwd requires ROCm gfx950"
-
-    if query.get_dtype() != torch.bfloat16:
-        return (
-            None,
-            f"FlyDSL flex bwd supports bf16 only, got {query.get_dtype()}",
-        )
-
-    if not is_trivial_score_graph(fw_subgraph.graph_module):
-        return None, "FlyDSL flex bwd supports identity score_mod only"
-
-    if score_mod_other_buffers:
-        return None, "FlyDSL flex bwd does not support captured score_mod buffers"
-
-    trivial_mask = is_trivial_mask_graph(mask_graph.graph_module)
-    mask_program = None
-    if not trivial_mask:
-        mask_program, mask_reason = lower_flydsl_mask_graph(
-            mask_graph.graph_module,
-            mask_mod_other_buffers,
-        )
-        if mask_program is None:
-            return None, f"unsupported mask_mod: {mask_reason}"
-
-    common_reason = _check_flydsl_common_compatibility(
-        query=query,
-        key=key,
-        value=value,
-        subgraph=fw_subgraph,
-        score_mod_other_buffers=score_mod_other_buffers,
-        mask_mod_other_buffers=mask_mod_other_buffers,
-        extra_tensors=(out, grad_out),
-        allow_mask_mod_buffers=mask_program is not None,
-        allow_strided_bhsd=True,
-    )
-    if common_reason:
-        return None, f"FlyDSL flex bwd {common_reason}"
-
-    if scale is None:
-        return None, "FlyDSL flex bwd requires static shapes and scale"
-
-    try:
-        b, h, sq, dqk = [V.graph.sizevars.guard_int(item) for item in query.get_size()]
-        bk, hk, sk, dk = [V.graph.sizevars.guard_int(item) for item in key.get_size()]
-        bv, hv, sv, dv = [V.graph.sizevars.guard_int(item) for item in value.get_size()]
-        out_shape = (
-            None
-            if out is None
-            else [V.graph.sizevars.guard_int(item) for item in out.get_size()]
-        )
-        grad_out_shape = (
-            None
-            if grad_out is None
-            else [V.graph.sizevars.guard_int(item) for item in grad_out.get_size()]
-        )
-        block_m = V.graph.sizevars.guard_int(sparse_q_block_size)
-        block_n = V.graph.sizevars.guard_int(sparse_kv_block_size)
-        scale_value = float(scale)
-    except (AttributeError, TypeError, ValueError):
-        return None, "FlyDSL flex bwd requires static shapes and scale"
-
-    if (b, h, sq, dqk) != (bk, hk, sk, dk):
-        return None, "FlyDSL flex bwd currently supports MHA with matching Q/K shapes"
-    if (bv, hv, sv) != (b, h, sq):
-        return None, "FlyDSL flex bwd currently supports MHA with matching B/H/S"
-    if (dqk, dv) not in ((128, 128), (192, 128)):
-        return (
-            None,
-            "FlyDSL flex bwd supports only (QK head dim, V head dim) "
-            "= (128, 128) or (192, 128)",
-        )
-    expected_out_shape = [b, h, sq, dv]
-    if out_shape is not None and out_shape != expected_out_shape:
-        return None, "FlyDSL flex bwd requires OUT shape [B, H, S, Dv]"
-    if grad_out_shape is not None and grad_out_shape != expected_out_shape:
-        return None, "FlyDSL flex bwd requires grad_out shape [B, H, S, Dv]"
-    if out is not None and out.get_dtype() != torch.bfloat16:
-        return None, "FlyDSL flex bwd requires BF16 OUT"
-    if grad_out is not None and grad_out.get_dtype() != torch.bfloat16:
-        return None, "FlyDSL flex bwd requires BF16 grad_out"
-    if block_m != 128 or block_n != 128:
-        return None, "FlyDSL flex bwd currently requires Q/KV block size 128"
-    if sq % 128:
-        return None, "FlyDSL flex bwd requires sequence length divisible by 128"
-    if sq > 16384:
-        return None, "FlyDSL flex bwd currently supports sequence length <= 16384"
-    if grad_logsumexp is not None:
-        return None, "FlyDSL flex bwd does not support gradients through LSE aux"
-    workspace_element_bytes = 4 if dq_accum_fp32 else 2
-    if b * h * sq * dqk * workspace_element_bytes > MAX_DQ_WORKSPACE_BYTES:
-        return None, "FlyDSL flex bwd requires a dQ workspace larger than 16 GiB"
-
-    if (
-        kv_num_blocks is None
-        or kv_indices is None
-        or full_kv_num_blocks is None
-        or full_kv_indices is None
-    ):
-        return (
-            None,
-            "FlyDSL flex bwd requires complete forward BlockMask metadata",
-        )
-    try:
-        count_shape = [
-            V.graph.sizevars.guard_int(item) for item in kv_num_blocks.get_size()
-        ]
-        index_shape = [
-            V.graph.sizevars.guard_int(item) for item in kv_indices.get_size()
-        ]
-        full_count_shape = [
-            V.graph.sizevars.guard_int(item) for item in full_kv_num_blocks.get_size()
-        ]
-        full_index_shape = [
-            V.graph.sizevars.guard_int(item) for item in full_kv_indices.get_size()
-        ]
-        metadata_nodes = (
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-        )
-        metadata_shapes = tuple(
-            tuple(V.graph.sizevars.guard_int(item) for item in node.get_size())
-            for node in metadata_nodes
-        )
-        metadata_dtypes = tuple(node.get_dtype() for node in metadata_nodes)
-        metadata_devices = tuple(node.get_device() for node in metadata_nodes)
-    except (AttributeError, TypeError, ValueError):
-        return None, "FlyDSL flex bwd requires static BlockMask shapes"
-    if any(dtype != torch.int32 for dtype in metadata_dtypes):
-        return None, "FlyDSL flex bwd requires int32 BlockMask metadata"
-    if any(device != query.get_device() for device in metadata_devices):
-        return None, "FlyDSL flex bwd requires BlockMask metadata on the query device"
-    try:
-        metadata_strides = tuple(
-            tuple(V.graph.sizevars.guard_int(item) for item in node.get_stride())
-            for node in metadata_nodes
-        )
-    except (AttributeError, NotImplementedError, TypeError, ValueError):
-        return (
-            None,
-            "FlyDSL flex bwd requires statically known BlockMask metadata strides",
-        )
-    if not all(
-        _is_contiguous_shape_stride(shape, stride)
-        for shape, stride in zip(metadata_shapes, metadata_strides)
-    ):
-        return None, "FlyDSL flex bwd requires contiguous BlockMask metadata"
-    expected_rows = sq // 128
-    if len(count_shape) != 3 or count_shape[2] != expected_rows:
-        return None, "FlyDSL flex bwd requires one BlockMask row per 128 Q rows"
-    mask_batch, mask_heads, _ = count_shape
-    if mask_batch not in (1, b):
-        return None, "FlyDSL flex bwd BlockMask batch dimension must be 1 or B"
-    if mask_heads not in (1, h):
-        return None, "FlyDSL MHA bwd BlockMask head dimension must be 1 or H"
-    if (
-        len(index_shape) != 4
-        or index_shape[:3] != count_shape
-        or full_count_shape != count_shape
-        or len(full_index_shape) != 4
-        or full_index_shape[:3] != count_shape
-        or index_shape[-1] <= 0
-        or full_index_shape[-1] <= 0
-    ):
-        return None, "FlyDSL flex bwd received incompatible BlockMask metadata"
-    max_partial_blocks = index_shape[-1]
-    max_full_blocks = full_index_shape[-1]
-
-    q_stride = _get_supported_bhsd_stride(query, allow_strided=True)
-    k_stride = _get_supported_bhsd_stride(key, allow_strided=True)
-    v_stride = _get_supported_bhsd_stride(value, allow_strided=True)
-    out_stride = (
-        None if out is None else _get_supported_bhsd_stride(out, allow_strided=True)
-    )
-    grad_out_stride = (
-        None
-        if grad_out is None
-        else _get_supported_bhsd_stride(grad_out, allow_strided=True)
-    )
-    if q_stride is None or k_stride is None or v_stride is None:
-        return None, "FlyDSL flex bwd requires supported Q/K/V BHSD strides"
-    if out is not None and out_stride is None:
-        return None, "FlyDSL flex bwd requires supported OUT BHSD strides"
-    if grad_out is not None and grad_out_stride is None:
-        return None, "FlyDSL flex bwd requires supported grad_out BHSD strides"
-
-    return (
-        {
-            "BATCH_SIZE": b,
-            "NUM_HEADS": h,
-            "SEQ_LEN": sq,
-            "QK_HEAD_DIM": dqk,
-            "V_HEAD_DIM": dv,
-            "BLOCK_MASK_BATCH": mask_batch,
-            "BLOCK_MASK_HEADS": mask_heads,
-            "MAX_PARTIAL_BLOCKS": max_partial_blocks,
-            "MAX_FULL_BLOCKS": max_full_blocks,
-            "MASK_PROGRAM": (() if mask_program is None else mask_program.instructions),
-            "MASK_PROGRAM_OUTPUT": (0 if mask_program is None else mask_program.output),
-            "MASK_BUFFER_COUNT": (
-                0 if mask_program is None else mask_program.buffer_count
-            ),
-            "MASK_BUFFER_SHAPES": (
-                () if mask_program is None else mask_program.buffer_shapes
-            ),
-            "MASK_BUFFER_STRIDES": (
-                () if mask_program is None else mask_program.buffer_strides
-            ),
-            "Q_STRIDE": q_stride,
-            "K_STRIDE": k_stride,
-            "V_STRIDE": v_stride,
-            "OUT_STRIDE": out_stride,
-            "DO_STRIDE": grad_out_stride,
-            "SM_SCALE": scale_value,
-        },
-        "",
-    )
-
-
-def create_flydsl_flex_attention_backward_kernel(
-    query: TensorBox,
-    key: TensorBox,
-    value: TensorBox,
-    out: TensorBox,
-    logsumexp: TensorBox,
-    grad_out: TensorBox,
-    grad_logsumexp: TensorBox | None,
-    scale: float,
-    sparse_q_block_size: int,
-    sparse_kv_block_size: int,
-    fw_subgraph: Subgraph | None = None,
-    mask_graph: Subgraph | None = None,
-    score_mod_other_buffers: list[TensorBox] | None = None,
-    mask_mod_other_buffers: list[TensorBox] | None = None,
-    kv_num_blocks: TensorBox | None = None,
-    kv_indices: TensorBox | None = None,
-    full_kv_num_blocks: TensorBox | None = None,
-    full_kv_indices: TensorBox | None = None,
-    dq_accum_fp32: bool = True,
-) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple] | None:
-    """Create a FlyDSL backward kernel, or return None for Triton fallback."""
-    if not isinstance(dq_accum_fp32, bool):
-        raise ValueError("FlyDSL FLYDSL_DQ_ACCUM_FP32 must be a bool")
-    if not runtime_available():
-        return None
-    if fw_subgraph is None or mask_graph is None:
-        raise AssertionError("FlyDSL backward requires the original mod graphs")
-
-    if (
-        sparse_q_block_size == _LARGE_SPARSE_BLOCK_SIZE
-        and sparse_kv_block_size == _LARGE_SPARSE_BLOCK_SIZE
-        and is_trivial_mask_graph(mask_graph.graph_module)
-    ):
-        (
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-        ) = _create_dense_metadata(query, key)
-        sparse_q_block_size = sparse_kv_block_size = 128
-
-    (
-        query,
-        key,
-        value,
-        out,
-        logsumexp,
-        grad_out,
-        kv_num_blocks,
-        kv_indices,
-        full_kv_num_blocks,
-        full_kv_indices,
-    ) = maybe_realize(
-        [
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            grad_out,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-        ]
-    )
-    score_mod_other_buffers = maybe_realize(list(score_mod_other_buffers or []))
-    mask_mod_other_buffers = maybe_realize(list(mask_mod_other_buffers or []))
-    freeze_irnodes(score_mod_other_buffers)
-    freeze_irnodes(mask_mod_other_buffers)
-
-    config, reason = _get_flydsl_flex_attention_backward_config(
-        fw_subgraph,
-        mask_graph,
-        query,
-        key=key,
-        value=value,
-        out=out,
-        grad_out=grad_out,
-        grad_logsumexp=grad_logsumexp,
-        score_mod_other_buffers=score_mod_other_buffers,
-        mask_mod_other_buffers=mask_mod_other_buffers,
-        kv_num_blocks=kv_num_blocks,
-        kv_indices=kv_indices,
-        full_kv_num_blocks=full_kv_num_blocks,
-        full_kv_indices=full_kv_indices,
-        scale=scale,
-        sparse_q_block_size=sparse_q_block_size,
-        sparse_kv_block_size=sparse_kv_block_size,
-        dq_accum_fp32=dq_accum_fp32,
-    )
-    if config is None:
-        return None
-    if (
-        kv_num_blocks is None
-        or kv_indices is None
-        or full_kv_num_blocks is None
-        or full_kv_indices is None
-    ):
-        raise AssertionError("FlyDSL backward requires complete KV metadata")
-
-    batch_size, num_heads, seq_len_q, head_dim = query.get_size()
-    _, num_heads_kv, seq_len_kv, v_head_dim = value.get_size()
-    device = query.get_device()
-    dtype = query.get_dtype()
-    if device is None:
-        raise AssertionError("Device must not be None")
-
-    grad_query_strides = infer_dense_strides(
-        [batch_size, num_heads, seq_len_q, head_dim], query.get_stride()
-    )
-    grad_query = empty_strided(
-        size=[batch_size, num_heads, seq_len_q, head_dim],
-        stride=grad_query_strides,
-        dtype=dtype,
-        device=device,
-    )
-
-    grad_key_strides = infer_dense_strides(
-        [batch_size, num_heads_kv, seq_len_kv, head_dim], key.get_stride()
-    )
-    grad_key = empty_strided(
-        size=[batch_size, num_heads_kv, seq_len_kv, head_dim],
-        stride=grad_key_strides,
-        dtype=dtype,
-        device=device,
-    )
-
-    grad_value_strides = infer_dense_strides(
-        [batch_size, num_heads_kv, seq_len_kv, v_head_dim], value.get_stride()
-    )
-    grad_value = empty_strided(
-        size=[batch_size, num_heads_kv, seq_len_kv, v_head_dim],
-        stride=grad_value_strides,
-        dtype=dtype,
-        device=device,
-    )
-
-    b = config["BATCH_SIZE"]
-    h = config["NUM_HEADS"]
-    s = config["SEQ_LEN"]
-    q_chunks = s // _BWD_METADATA_BLOCK_SIZE
-    kv_chunks = s // _BWD_METADATA_BLOCK_SIZE
-    bh = b * h
-
-    def make_scratch(numel: int, scratch_dtype: torch.dtype) -> TensorBox:
-        return empty_strided(
-            size=[numel],
-            stride=[1],
-            dtype=scratch_dtype,
-            device=device,
-        )
-
-    delta = make_scratch(bh * s, torch.float32)
-    # Dense ranges need no reverse lists. Allocate minimal placeholders for
-    # the common ABI; sparse traversal uses one list per 128-row KV owner.
-    from ..vendored_templates.flydsl.kernels.flex_attn_bwd_utils import (
-        choose_dq_partitions,
-        classify_mask_traversal,
-        MASK_TRAVERSAL_BLOCK_LIST,
-    )
-
-    traversal, _ = classify_mask_traversal(
-        config["MASK_PROGRAM"],
-        config["MASK_PROGRAM_OUTPUT"],
-        config["MASK_BUFFER_SHAPES"],
-        sequence_length=s,
-    )
-    key_rows = 128 if traversal == MASK_TRAVERSAL_BLOCK_LIST else 192
-    config["DQ_ACCUM_FP32"] = dq_accum_fp32
-    workspace_dtype = torch.float32 if dq_accum_fp32 else torch.bfloat16
-    workspace_element_bytes = 4 if dq_accum_fp32 else 2
-    dq_partitions = choose_dq_partitions(
-        bh, s, key_rows, workspace_element_bytes, qk_head_dim=config["QK_HEAD_DIM"]
-    )
-    grad_query_workspace = make_scratch(
-        bh * dq_partitions * s * config["QK_HEAD_DIM"], workspace_dtype
-    )
-    if traversal != MASK_TRAVERSAL_BLOCK_LIST:
-        kv_chunks = q_chunks = 1
-    partial_kv_counts = make_scratch(bh * kv_chunks, torch.int32)
-    partial_kv_indices = make_scratch(bh * kv_chunks * q_chunks, torch.int32)
-    full_kv_counts = make_scratch(bh * kv_chunks, torch.int32)
-    full_kv_indices_scratch = make_scratch(bh * kv_chunks * q_chunks, torch.int32)
-
-    # we use dq as the output layout
-    output_layout = FixedLayout(
-        device=device,
-        dtype=dtype,
-        size=[batch_size, num_heads, seq_len_q, head_dim],
-        stride=[sympy.sympify(s) for s in grad_query.get_stride()],
-    )
-
-    sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
-    sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
-    config["DQ_STRIDE"] = tuple(
-        V.graph.sizevars.guard_int(item) for item in grad_query.get_stride()
-    )
-    config["DK_STRIDE"] = tuple(
-        V.graph.sizevars.guard_int(item) for item in grad_key.get_stride()
-    )
-    config["DV_STRIDE"] = tuple(
-        V.graph.sizevars.guard_int(item) for item in grad_value.get_stride()
-    )
-
-    input_nodes: list[TensorBox] = [
-        query,
-        key,
-        value,
-        out,
-        grad_out,
-        logsumexp,
-        grad_key,
-        grad_value,
-        kv_num_blocks,
-        kv_indices,
-        full_kv_num_blocks,
-        full_kv_indices,
-        delta,
-        grad_query_workspace,
-        partial_kv_counts,
-        partial_kv_indices,
-        full_kv_counts,
-        full_kv_indices_scratch,
-    ]
-
-    mask_buffer_count = config["MASK_BUFFER_COUNT"]
-    if mask_buffer_count:
-        if len(mask_mod_other_buffers or ()) != mask_buffer_count:
-            raise AssertionError("mask_mod capture count changed during lowering")
-        input_nodes.extend(mask_mod_other_buffers or ())
-
-    choices: list[Any] = []
-    error = flex_flydsl_backward_template.maybe_append_choice(
-        choices,
-        input_nodes=input_nodes,
-        layout=output_layout,
-        mutated_inputs=[
-            grad_key,
-            grad_value,
-            delta,
-            grad_query_workspace,
-            partial_kv_counts,
-            partial_kv_indices,
-            full_kv_counts,
-            full_kv_indices_scratch,
-        ],
-        SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
-        SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
-        **config,
-    )
-
-    if not choices:
-        raise RuntimeError(f"FlyDSL template failed: {error}")
-
-    input_gen_fns: dict[int, Callable] = {
-        8: create_num_blocks_fake_generator(kv_indices),
-        9: create_indices_fake,
-        10: create_num_blocks_fake_generator(full_kv_indices),
-        11: create_indices_fake,
-    }
-
-    template_output, _ = autotune_select_algorithm(
-        "flex_flydsl_attention_backward",
-        choices,
-        input_nodes,
-        output_layout,
-        input_gen_fns=input_gen_fns,
-        return_multi_template=False,
-    )
-
-    return (template_output, grad_key, grad_value, tuple())
