@@ -413,13 +413,13 @@ avg_pool3d = _add_docstr(
 avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None) -> Tensor
 
 Applies 3D average-pooling operation in :math:`kT \times kH \times kW` regions by step
-size :math:`sT \times sH \times sW` steps. The number of output features is equal to
-:math:`\lfloor\frac{\text{input planes}}{sT}\rfloor`.
+size :math:`sT \times sH \times sW` steps. The number of output channels is equal to the
+number of input channels.
 
 See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
-    input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT \times iH , iW)`
+    input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
     kernel_size: size of the pooling region. Can be a single number or a
       tuple `(kT, kH, kW)`
     stride: stride of the pooling operation. Can be a single number or a
