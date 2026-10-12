@@ -51,6 +51,7 @@ def flex_gemm_problem(
     *,
     blockscaled: bool = False,
     varlen_m: bool = False,
+    varlen_k: bool = False,
 ) -> Any:
     """Describe a FlexGEMM call (physical GEMM M and N) for QuACK config pruning."""
     from torch._vendor.quack.gemm_runtime.autotune import mod_b_kn, ModProblem
@@ -59,7 +60,7 @@ def flex_gemm_problem(
         device=device,
         m=m,
         n=n,
-        b_kn=mod_b_kn(device, concat_layout),
+        b_kn=not varlen_k and mod_b_kn(device, concat_layout),
         varlen_m=varlen_m,
         blockscaled=blockscaled,
         concat=bool(concat_layout),
@@ -370,19 +371,23 @@ def gemm_epilogue(
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
     output_contraction: FlexGemmOutputContraction | None = None,
     cu_seqlens_m: torch.Tensor | None = None,
+    cu_seqlens_k: torch.Tensor | None = None,
     config: QuackConfigKey,
     stream: int | None = None,
 ) -> torch.Tensor:
-    """Run a dense, block-scaled or varlen-M FlexGEMM call through the vendored QuACK EpiMod.
+    """Run a dense, block-scaled or varlen-M/K call through the vendored QuACK EpiMod.
 
     ``config`` pins the exact GemmConfig Inductor selected at lowering time.
     ``cu_seqlens_m`` (``[0, *offs]``, int32) selects grouped_mm's varlen-M path:
     ``a`` is ``[total_m, K]`` and ``b`` is per-group ``[E, K, N]``. Captured
     row/col vectors are always passed rank-1; QuACK shares a row across groups
-    and offsets a ``[total_m]`` column per group.
+    and offsets a ``[total_m]`` column per group. ``cu_seqlens_k`` instead segments
+    the reduction of ``a[M, total_k] @ b[total_k, N]`` into ``out[E, M, N]``.
     """
     from torch._vendor.quack.gemm_config import GemmConfig
 
+    if cu_seqlens_k is not None and out.numel() == 0:
+        return out
     if blockscaled_format is not None:
         if SFA is None or SFB is None:
             raise RuntimeError("FlexGEMM block-scaled GEMMs require SFA and SFB")
@@ -498,6 +503,7 @@ def gemm_epilogue(
             tuned=False,
             concat_layout=concat_layout,
             cu_seqlens_m=cu_seqlens_m,
+            cu_seqlens_k=cu_seqlens_k,
             compile_dispatch=False,
             **operands,
         )
