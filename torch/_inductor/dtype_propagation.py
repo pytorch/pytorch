@@ -334,6 +334,10 @@ class DtypePropagationOpsHandler:
         return torch.int64
 
     @staticmethod
+    def register_datadep_range(value: DTypeArg, symbol: sympy.Symbol) -> None:
+        return None
+
+    @staticmethod
     def randn(seed: int, offset: int) -> torch.dtype:
         return torch.float
 
