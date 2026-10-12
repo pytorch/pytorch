@@ -3927,7 +3927,16 @@ class GuardBuilder(GuardBuilderBase):
                 if value.pytype is not None:
                     pytype = value.pytype
             elif torch._subclasses.fake_tensor.is_fake_tensor(value):
-                pytype = type(self.get(guard))
+                from torch._dynamo.output_graph import OutputGraph
+
+                if isinstance(self.check_fn_manager.output_graph, OutputGraph):
+                    pytype = type(self.get(guard))
+                else:
+                    # Rebuilding guards from serialized state: the source value
+                    # is the unpickled fake, which is a plain Tensor, so read
+                    # the Parameter marker instead.
+                    is_param = isinstance(value, torch.nn.Parameter)
+                    pytype = torch.nn.Parameter if is_param else torch.Tensor
 
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
@@ -4484,6 +4493,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             pytype,
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
+        if pytype is torch.nn.Parameter:
+            ret._is_param = True
         # A .grad the guards never read is pruned to the _Missing sentinel on
         # the way in (only a training capture has one to prune at all); it was
         # not guarded on, so the rebuilt tensor does not need it, but assigning
@@ -4892,7 +4903,8 @@ class GuardsStatePickler(FunctionPicklerBase):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
                 template_ctx = no_dispatch()
             elif torch._subclasses.fake_tensor.is_fake_tensor(obj):
-                pytype = torch.Tensor
+                is_param = isinstance(obj, torch.nn.Parameter)
+                pytype = torch.nn.Parameter if is_param else torch.Tensor
                 fake_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
                 template_ctx = torch._C._ExcludeDispatchKeyGuard(fake_key)
             with template_ctx:
