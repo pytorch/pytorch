@@ -14,6 +14,7 @@
 
 #include <atomic>
 #include <deque>
+#include <exception>
 #include <vector>
 #include <mutex>
 #include <shared_mutex>
@@ -179,6 +180,10 @@ using c10::CachingDeviceAllocator::HostSegmentInfo;
  * stats_.allocations_mutex_ is innermost: nothing is taken while holding it.
  * When empty_cache() erases a private pool, it holds that pool's
  * free_list_[i].mutex_ together with default_pool_'s.
+ * free_block() is called with no allocator lock held, since it can block for a
+ * long time (cudaFreeHost waits for the work already queued on the current
+ * device): detach_block() takes a block out of its pool under the pool locks,
+ * and detach_then_free() frees it after they are released.
  * external_registrations_mutex_ is independent: never nested with another
  * lock. Released before record_trace() so it does not nest the RingBuffer
  * lock either.
@@ -208,8 +213,9 @@ using c10::CachingDeviceAllocator::HostSegmentInfo;
  * of streams tracked by the specified block. This set of streams is then
  * consumed in the free path.
  *   4) In the empty_cache path, we flush any available blocks into the free
- * list. Remove all element of free list, then remove them from block list and
- * release the associated pinned memory allocation via free_block.
+ * list. Remove all element of free list, then remove them from block list and,
+ * once the locks are released, release the associated pinned memory allocation
+ * via free_block.
  *
  * We generalize the caching host allocator into two parts: interface and
  * implementation. For any new backend looking to integrate with host allocator
@@ -341,7 +347,9 @@ struct CachingHostAllocatorImpl {
     // event processing with a helper thread is not helpful.
     if (!(pinned_use_background_threads() &&
           mempool_id.first == 0 && mempool_id.second == 0)) {
-      process_events(pool, context);
+      detach_then_free([&](std::vector<B*>& detached) {
+        process_events(pool, context, detached);
+      });
     }
 
     // Round up the allocation to the nearest power of two to improve reuse.
@@ -395,7 +403,9 @@ struct CachingHostAllocatorImpl {
             // events only. Private pools never use a background
             // thread because cuda stream capture does not benefit
             // from asynchronous event processing.
-            process_events(default_pool_, nullptr);
+            detach_then_free([&](std::vector<B*>& detached) {
+              process_events(default_pool_, nullptr, detached);
+            });
             std::this_thread::sleep_for(std::chrono::microseconds(100));
           }
         });
@@ -502,7 +512,9 @@ struct CachingHostAllocatorImpl {
 
     if (!events.has_value()) {
       auto& pool = pool_from_block(block);
-      maybe_cache_block(block, pool, context);
+      detach_then_free([&](std::vector<B*>& detached) {
+        maybe_cache_block(block, pool, context, detached);
+      });
     } else if (allocated_during_capture) {
       // pass: No events are ever recorded during stream capture.
 
@@ -543,32 +555,20 @@ struct CachingHostAllocatorImpl {
     return true;
   }
 
-  void free_from_pool(BlockPool &pool) {
-    for (size_t i = 0; i < pool.free_list_.size(); ++i) {
-      std::scoped_lock lock(pool.free_list_[i].mutex_, pool.blocks_mutex_);
-
-      std::vector<B*> blocks_to_remove(pool.free_list_[i].list_.begin(),
-                                       pool.free_list_[i].list_.end());
-      pool.free_list_[i].list_.clear();
-
-      for (auto* block : blocks_to_remove) {
-        destroy_block(block, pool, /*is_active=*/false);
-      }
-    }
-  }
-
   // TODO: Make this take a pool id like in CUDACachingAllocator
   virtual void empty_cache() {
-    process_events(default_pool_, nullptr);
-    free_from_pool(default_pool_);
+    detach_then_free([&](std::vector<B*>& detached) {
+      process_events(default_pool_, nullptr, detached);
+      detach_cached_blocks(default_pool_, detached);
+    });
 
-    {
+    detach_then_free([&](std::vector<B*>& detached) {
       std::unique_lock<std::shared_mutex> lg(instance_mutex_);
       for (auto it = graph_pools_freeable_.begin(); it != graph_pools_freeable_.end();) {
-        process_events(it->second->blocks, nullptr);
-        free_from_pool(it->second->blocks);
+        process_events(it->second->blocks, nullptr, detached);
+        detach_cached_blocks(it->second->blocks, detached);
         // blocks_ is guarded by blocks_mutex_, not instance_mutex_: a
-        // concurrent free() can be destroying this pool's last block
+        // concurrent free() can be detaching this pool's last block
         // (maybe_cache_block above pinned_max_cached_size). It releases
         // blocks_mutex_ last, so seeing blocks_ empty means it is done with
         // the pool.
@@ -595,7 +595,7 @@ struct CachingHostAllocatorImpl {
           ++it;
         }
       }
-    }
+    });
   }
 
   inline size_t size_index(size_t size) {
@@ -764,15 +764,17 @@ struct CachingHostAllocatorImpl {
   }
 
   virtual void process_events(BlockPool& pool,
-                              const std::shared_ptr<c10::GatheredContext>& context) {
-    process_events_for_specific_size(-1, pool, context);
+                              const std::shared_ptr<c10::GatheredContext>& context,
+                              std::vector<B*>& detached) {
+    process_events_for_specific_size(-1, pool, context, detached);
   }
 
   // If size is -1, process all events from backwards until the last unready
   // event. Otherwise, process events for a specific size and on first ready block
   // is found, add it to the free list and return.
   virtual void process_events_for_specific_size(int64_t size, BlockPool& pool,
-                                                const std::shared_ptr<c10::GatheredContext>& context) {
+                                                const std::shared_ptr<c10::GatheredContext>& context,
+                                                std::vector<B*>& detached) {
     size_t event_count = 0;
     size_t max_events = 0;
     {
@@ -851,7 +853,7 @@ struct CachingHostAllocatorImpl {
       if (available) {
         // pool.events_ holds only blocks of pool, so skip pool_from_block():
         // it takes instance_mutex_, which empty_cache() may hold exclusively.
-        maybe_cache_block(block, pool, context);
+        maybe_cache_block(block, pool, context, detached);
         if (size != -1) {
           return;
         }
@@ -864,8 +866,11 @@ struct CachingHostAllocatorImpl {
     return pool;
   }
 
+  // Puts block on the pool's free list or, if it is too large to cache,
+  // detaches it into `detached` (see detach_then_free()).
   void maybe_cache_block(B* block, BlockPool& pool,
-                         const std::shared_ptr<c10::GatheredContext>& context) {
+                         const std::shared_ptr<c10::GatheredContext>& context,
+                         std::vector<B*>& detached) {
     if (C10_UNLIKELY(record_history_.load(std::memory_order_relaxed))) {
       // Unlike other record_trace call sites (where the block is exclusively
       // owned by the calling thread, e.g., just allocated or being freed by
@@ -893,7 +898,9 @@ struct CachingHostAllocatorImpl {
       // must be released last.
       std::lock_guard<std::mutex> gb(pool.blocks_mutex_);
       std::lock_guard<std::mutex> gf(pool.free_list_[index].mutex_);
-      destroy_block(block, pool, /*is_active=*/true);
+      // Push first, so that the block stays in the pool if that throws.
+      detached.push_back(block);
+      detach_block(block, pool, /*is_active=*/true);
     } else {
       std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
       pool.free_list_[index].list_.push_back(block);
@@ -902,21 +909,17 @@ struct CachingHostAllocatorImpl {
     }
   }
 
-  // Remove a block from the pool, free its memory, update stats, and delete it.
-  // Caller must hold both pool.blocks_mutex_ and pool.free_list_[index].mutex_.
+  // Remove a block from the pool and update stats, after which no other thread
+  // can reach it. Caller must hold both pool.blocks_mutex_ and
+  // pool.free_list_[index].mutex_, and leave the block to detach_then_free().
   // When is_active is true, also decrements active stats (for blocks going
   // directly from in-use to freed without being cached first).
-  void destroy_block(B* block, BlockPool& pool, bool is_active) {
+  void detach_block(B* block, BlockPool& pool, bool is_active) {
     auto size = block->size_;
     auto index = size_index(size);
-    auto ptr = reinterpret_cast<size_t>(block->ptr_);
-    auto mempool_id = block->owning_pool_;
 
     pool.blocks_.erase(block);
     pool.ptr_to_block_.erase(block->ptr_);
-    free_block(block);
-
-    record_trace(TraceEntry::SEGMENT_FREE, ptr, size, nullptr, mempool_id, nullptr);
 
     {
       std::lock_guard<std::mutex> g(stats_.allocations_mutex_);
@@ -929,7 +932,58 @@ struct CachingHostAllocatorImpl {
       pool.active_bucket_stats[index].decrease(1);
       pool.active_bytes_bucket_stats[index].decrease(size);
     }
-    delete block;
+  }
+
+  // Moves the cached blocks of pool into detached, see detach_block().
+  void detach_cached_blocks(BlockPool& pool, std::vector<B*>& detached) {
+    for (size_t i = 0; i < pool.free_list_.size(); ++i) {
+      std::scoped_lock lock(pool.free_list_[i].mutex_, pool.blocks_mutex_);
+      auto& list = pool.free_list_[i].list_;
+      // Append first, so that the blocks stay in the pool if that throws.
+      detached.insert(detached.end(), list.begin(), list.end());
+      for (auto* block : list) {
+        detach_block(block, pool, /*is_active=*/false);
+      }
+      list.clear();
+    }
+  }
+
+  // Calls detach(detached), which takes the allocator locks it needs and moves
+  // blocks out of their pools with detach_block(). Then frees and deletes those
+  // blocks with no allocator lock held (see Note [HostAllocator design]), so
+  // the caller must hold none. This happens even if detach or a free_block()
+  // throws, since nothing else can reach the blocks; the first exception is
+  // rethrown afterwards.
+  template <typename F>
+  void detach_then_free(const F& detach) {
+    std::vector<B*> detached;
+    std::exception_ptr error;
+    try {
+      detach(detached);
+    } catch (...) {
+      error = std::current_exception();
+    }
+    for (auto* block : detached) {
+      try {
+        // Before free_block(), after which the address can be allocated again.
+        record_trace(
+            TraceEntry::SEGMENT_FREE,
+            reinterpret_cast<size_t>(block->ptr_),
+            block->size_,
+            nullptr,
+            block->owning_pool_,
+            nullptr);
+        free_block(block);
+      } catch (...) {
+        if (!error) {
+          error = std::current_exception();
+        }
+      }
+      delete block;
+    }
+    if (error) {
+      std::rethrow_exception(error);
+    }
   }
 
   virtual size_t pinned_max_round_threshold() const {
@@ -1374,7 +1428,8 @@ struct TORCH_API HostAllocator : public at::Allocator {
   virtual bool record_event(void* ptr, void* ctx, c10::Stream stream) = 0;
 
   // Frees all cached pinned memory and returns it to the system, clearing the
-  // allocator's internal cache
+  // allocator's internal cache. If another call runs concurrently, this one can
+  // return before the blocks that the other took out of the cache are freed.
   virtual void empty_cache() = 0;
 
   // Returns comprehensive statistics about the allocator's memory usage,
