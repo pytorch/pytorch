@@ -140,7 +140,9 @@ def _get_block_mask_metadata(
         for shape, stride in zip(shapes, strides)
     ):
         return None, f"{prefix}requires contiguous BlockMask metadata"
-    return _BlockMaskMetadata(*shapes, full_numel), ""
+    return _BlockMaskMetadata(
+        shapes[0], shapes[1], shapes[2], shapes[3], full_numel
+    ), ""
 
 
 def _get_mask_program_config(mask_graph, mask_mod_other_buffers):

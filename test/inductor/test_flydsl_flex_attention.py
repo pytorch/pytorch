@@ -1052,6 +1052,212 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
             dq_accum_fp32=dq_accum_fp32,
         )
 
+    @parametrize("qk_dim", (128, 192))
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_long_causal_dq_matches_fp64(self, device, qk_dim):
+        self._require_runtime()
+        sequence_length = 16384
+        # Multiple KV owners contribute to each private dQ partition.
+        query, key, value = _make_qkv(
+            device=device, q_heads=16, seq_q=sequence_length, qk_dim=qk_dim, seed=41
+        )
+        query.requires_grad_()
+        torch.manual_seed(42)
+        grad_output = torch.randn_like(value)
+        block_mask = create_block_mask(
+            lambda batch, head, query_index, key_index: query_index >= key_index,
+            1,
+            1,
+            sequence_length,
+            sequence_length,
+            device=device,
+            BLOCK_SIZE=128,
+        )
+        compiled = torch.compile(
+            lambda q, k, v: flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLYDSL"}
+            ),
+            fullgraph=True,
+        )
+        output, forward_code = run_and_get_code(compiled, query, key, value)
+        gradients, backward_code = run_and_get_code(
+            lambda: torch.autograd.grad(output, query, grad_output)
+        )
+        self.assertIn("build_flex_attn_fwd_module", "\n".join(forward_code))
+        self.assertIn("build_flex_attn_bwd_module", "\n".join(backward_code))
+        grad_query = gradients[0]
+        reference = torch.empty_like(query, dtype=torch.float64)
+        scale = qk_dim**-0.5
+        # Chunk rows and heads to avoid materializing the full S x S matrix.
+        with torch.no_grad():
+            key_positions = torch.arange(sequence_length, device=device)
+            for head in range(query.size(1)):
+                key64 = key[:, head].double()
+                value64 = value[:, head].double()
+                for start in range(0, sequence_length, 256):
+                    end = start + 256
+                    scores = (
+                        query[:, head, start:end].double() @ key64.transpose(-2, -1)
+                    ) * scale
+                    rows = torch.arange(start, end, device=device)
+                    scores.masked_fill_(
+                        rows[:, None] < key_positions[None, :], -float("inf")
+                    )
+                    probability = scores.softmax(-1)
+                    grad_probability = grad_output[
+                        :, head, start:end
+                    ].double() @ value64.transpose(-2, -1)
+                    grad_score = probability * (
+                        grad_probability
+                        - (probability * grad_probability).sum(-1, keepdim=True)
+                    )
+                    reference[:, head, start:end] = (grad_score @ key64) * scale
+        error = grad_query.double() - reference
+        self.assertEqual(grad_query.double(), reference, atol=0.01, rtol=0.02)
+        self.assertLess((error.norm() / reference.norm()).item(), 0.003)
+        late_rows = sequence_length // 2
+        self.assertLess(
+            (
+                error[:, :, late_rows:].norm() / reference[:, :, late_rows:].norm()
+            ).item(),
+            0.003,
+        )
+
+    @parametrize("query_length", (4, 256))
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_gqa_backward_falls_back_to_triton(self, device, query_length):
+        self._require_runtime()
+        query, key, value = _make_qkv(
+            device=device,
+            q_heads=4,
+            kv_heads=2,
+            seq_q=query_length,
+            seq_kv=256,
+            seed=43,
+        )
+        grad_output = torch.randn_like(query)
+        block_mask = create_block_mask(
+            lambda batch, head, query_index, key_index: (
+                query_index + 256 - query_length >= key_index
+            ),
+            1,
+            1,
+            query_length,
+            256,
+            device=device,
+            BLOCK_SIZE=128,
+        )
+
+        def run(backend):
+            inputs = tuple(
+                tensor.detach().clone().requires_grad_()
+                for tensor in (query, key, value)
+            )
+            compiled = torch.compile(
+                lambda q, k, v: flex_attention(
+                    q,
+                    k,
+                    v,
+                    block_mask=block_mask,
+                    enable_gqa=True,
+                    kernel_options={"BACKEND": backend},
+                ),
+                fullgraph=True,
+            )
+            output, forward_code = run_and_get_code(compiled, *inputs)
+            gradients, backward_code = run_and_get_code(
+                lambda: torch.autograd.grad(output, inputs, grad_output)
+            )
+            return output, gradients, "\n".join(forward_code), "\n".join(backward_code)
+
+        output, gradients, forward_code, backward_code = run("FLYDSL")
+        reference, reference_gradients, _, reference_backward_code = run("TRITON")
+        self.assertIn("build_flex_attn_fwd_module", forward_code)
+        self.assertNotIn("build_flex_attn_bwd_module", backward_code)
+        self.assertNotIn("build_flex_attn_bwd_module", reference_backward_code)
+        self.assertIn("triton", backward_code)
+        self.assertEqual(output, reference, atol=0.03, rtol=0.02)
+        for gradient, expected in zip(gradients, reference_gradients):
+            self.assertEqual(gradient, expected, atol=0.03, rtol=0.02)
+
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_lse_aux_backward_falls_back_to_triton(self, device):
+        self._require_runtime()
+        query, key, value = _make_qkv(device=device, seed=44)
+        grad_output = torch.randn_like(value)
+        grad_lse = torch.randn(query.shape[:3], device=device, dtype=torch.float32)
+        block_mask = create_block_mask(
+            lambda batch, head, query_index, key_index: query_index >= key_index,
+            1,
+            1,
+            256,
+            256,
+            device=device,
+            BLOCK_SIZE=128,
+        )
+
+        def run(backend):
+            inputs = tuple(
+                tensor.detach().clone().requires_grad_()
+                for tensor in (query, key, value)
+            )
+            compiled = torch.compile(
+                lambda q, k, v: flex_attention(
+                    q,
+                    k,
+                    v,
+                    block_mask=block_mask,
+                    return_aux=AuxRequest(lse=True),
+                    kernel_options={"BACKEND": backend},
+                ),
+                fullgraph=True,
+            )
+            (output, aux), forward_code = run_and_get_code(compiled, *inputs)
+            gradients, backward_code = run_and_get_code(
+                lambda: torch.autograd.grad(
+                    (output, aux.lse), inputs, (grad_output, grad_lse)
+                )
+            )
+            return gradients, "\n".join(forward_code), "\n".join(backward_code)
+
+        gradients, forward_code, backward_code = run("FLYDSL")
+        reference, _, _ = run("TRITON")
+        self.assertIn("build_flex_attn_fwd_module", forward_code)
+        self.assertNotIn("build_flex_attn_bwd_module", backward_code)
+        self.assertIn("triton", backward_code)
+        for gradient, expected in zip(gradients, reference):
+            self.assertEqual(gradient, expected, atol=0.03, rtol=0.02)
+
+    @parametrize("qk_dim", (128, 192))
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_strided_sliding_window_backward(self, device, qk_dim):
+        self._require_runtime()
+        query, key, value = _make_qkv(
+            device=device,
+            batch=2,
+            q_heads=4,
+            seq_q=512,
+            qk_dim=qk_dim,
+            seed=45,
+            transposed=True,
+        )
+        for tensor in (query, key, value):
+            self.assertFalse(tensor.is_contiguous())
+        block_mask = create_block_mask(
+            lambda batch, head, query_index, key_index: (
+                (query_index >= key_index) & (query_index - key_index < 256)
+            ),
+            2,
+            1,
+            512,
+            512,
+            device=device,
+            BLOCK_SIZE=128,
+        )
+        self._compare_backward(
+            query, key, value, block_mask=block_mask, dq_accum_fp32=True
+        )
+
     @torch._inductor.config.patch({"fx_graph_cache": False})
     def test_gfx950_backward_respects_block_mask_metadata(self, device):
         self._require_runtime()
@@ -1072,7 +1278,7 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
             BLOCK_SIZE=128,
             mask_mod=causal,
             seq_lengths=(256, 256),
-            compute_q_blocks=False,
+            compute_q_blocks=True,
         )
         self._compare_backward(
             query,
