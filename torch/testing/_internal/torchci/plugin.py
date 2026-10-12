@@ -90,8 +90,8 @@ def _failure_summary(test_report: TestReport) -> str:
 
 @dataclass
 class _Run:
-    started: float
-    test: report.TestId | None
+    started: float = 0.0
+    test: report.TestId | None = None
     ended: float = 0.0
     failed_phase: str = ""
     skipped: bool = False
@@ -106,14 +106,6 @@ class _Run:
         return "xpassed" if self.wasxfail else "passed"
 
 
-@dataclass(frozen=True)
-class _SubtestFailure:
-    """A failing subtest's phase and outcome summary, from its report."""
-
-    phase: str
-    summary: str
-
-
 class ReportWriter:
     def __init__(self, path: str, report_uuid: str) -> None:
         self.path = path
@@ -125,12 +117,6 @@ class ReportWriter:
         self.runs: dict[tuple[str, Any], _Run] = {}
         self.rerun_numbers: Counter[str] = Counter()
         self.tests: dict[str, report.TestId | None] = {}
-        # pytest-rerunfailures sends an attempt's setup, call and teardown reports
-        # only once the attempt ends, but pytest-subtests sends a subtest's report
-        # during the call, so a failing subtest can arrive before its run opens.
-        # Keyed like self.runs, it holds a test's first such failure until the
-        # test's setup report opens the run.
-        self.early_subtest_failures: dict[tuple[str, Any], _SubtestFailure] = {}
 
     def pytest_sessionstart(self, session: Session) -> None:
         if _disabled:
@@ -158,25 +144,23 @@ class ReportWriter:
             self._logreport(report)
 
     def _logreport(self, test_report: TestReport) -> None:
+        if test_report.when not in ("setup", "call", "teardown"):
+            return
         nodeid = test_report.nodeid
         key = (nodeid, getattr(test_report, "node", None))
+        # As in junitxml, a test's first report creates its run. That's usually
+        # setup, but pytest-rerunfailures sends an attempt's setup, call and teardown
+        # reports only once the attempt ends, while pytest-subtests sends a
+        # subtest's report during the call, so it can come first.
+        run = self.runs.setdefault(key, _Run())
+        if test_report.when == "setup":
+            test_id = getattr(test_report, _TEST_ID, None)
+            run.started = test_report.start
+            run.test = report.TestId(**test_id) if test_id else self.tests.get(nodeid)
         # A failing subtest fails the run. Both pytest-subtests' SubTestReport and
         # pytest 9's built-in pytest.SubtestReport carry a context; only the latter
         # is public.
         subtest = getattr(test_report, "context", None) is not None
-        if test_report.when == "setup":
-            test_id = getattr(test_report, _TEST_ID, None)
-            test = report.TestId(**test_id) if test_id else self.tests.get(nodeid)
-            opened = self.runs[key] = _Run(test_report.start, test)
-            if failure := self.early_subtest_failures.pop(key, None):
-                opened.failed_phase = failure.phase
-                opened.outcome_summary = failure.summary
-        run = self.runs.get(key)
-        if run is None and subtest and test_report.failed:
-            failure = _SubtestFailure(test_report.when, _failure_summary(test_report))
-            self.early_subtest_failures.setdefault(key, failure)
-        if run is None or test_report.when not in ("setup", "call", "teardown"):
-            return
         run.ended = test_report.stop
         if test_report.failed or test_report.outcome == "rerun":
             if not run.failed_phase:
@@ -197,8 +181,9 @@ class ReportWriter:
     def _finish(self, key: tuple[str, Any], run: _Run) -> None:
         del self.runs[key]
         nodeid = key[0]
-        # No identity: the item isn't a Python test function, or, under xdist, the
-        # worker's writer turned itself off and its setup report came without one.
+        # No identity: the item isn't a Python test function, its setup report never
+        # arrived (the attempt was interrupted), or, under xdist, the worker's writer
+        # turned itself off and its setup report came without one.
         if self.file is not None and run.test is not None:
             record = report.run_record(
                 run.test,
