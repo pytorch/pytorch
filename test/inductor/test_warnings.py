@@ -13,8 +13,6 @@ from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
 from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     run_tests,
-    skipIfXpu,
-    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE

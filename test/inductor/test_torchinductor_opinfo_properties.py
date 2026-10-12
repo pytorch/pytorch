@@ -45,6 +45,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCUDA,
     ops,
 )
@@ -778,7 +779,12 @@ XPU_XFAIL_DICTS = {
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
-    xfail_dicts = ROCM_XFAIL_DICTS if torch.version.hip is not None else XFAIL_DICTS
+    if device_type == "xpu":
+        xfail_dicts = XPU_XFAIL_DICTS
+    elif torch.version.hip is not None:
+        xfail_dicts = ROCM_XFAIL_DICTS
+    else:
+        xfail_dicts = XFAIL_DICTS
     xfails = set(xfail_dicts.get(test_type, {}).get(backend, {}).get(op_name, set()))
     # fbcode's Triton fork + cuBLAS/GPU stack differ from OSS CI, so some combos
     # fail the compiled-vs-eager numerics only in fbcode. Gate on IS_FBCODE (CUDA
@@ -1041,7 +1047,7 @@ class TestOpInfoProperties(TestCase):
     # Run-to-Run Determinism Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1113,7 +1119,7 @@ class TestOpInfoProperties(TestCase):
     # Numerical Equivalence with Eager Mode Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1157,7 +1163,7 @@ class TestOpInfoProperties(TestCase):
     # Exhaustive/Sampled Unary Ufunc Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_unary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1212,7 +1218,7 @@ class TestOpInfoProperties(TestCase):
     # Sampled Binary Ufunc Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_binary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1254,7 +1260,9 @@ class TestOpInfoProperties(TestCase):
         )
 
 
-instantiate_device_type_tests(TestOpInfoProperties, globals(), except_for=["cpu"])
+instantiate_device_type_tests(
+    TestOpInfoProperties, globals(), except_for=["cpu"], allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
