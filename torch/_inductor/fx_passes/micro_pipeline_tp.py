@@ -20,6 +20,7 @@ from ..pattern_matcher import (
     PatternExpr,
     PatternMatcherPass,
 )
+from ..utils import FOLDED_SCALED_MM_OUTPUT_SCALE
 
 
 log = logging.getLogger(__name__)
@@ -68,6 +69,17 @@ def _get_tensor(node: torch.fx.Node) -> torch.Tensor:
     if not isinstance(val, torch.Tensor):
         raise AssertionError(f"expected node val to be a Tensor, got {type(val)}")
     return val
+
+
+def _has_folded_scaled_mm_output_scale(node: torch.fx.Node) -> bool:
+    """Whether a scaled-mm node carries a compiler-created output multiply.
+
+    The symmetric-memory scaled-matmul operators receive ``scale_result`` with
+    its public ATen semantics, which ignore it for BF16 output.  They therefore
+    cannot replace a node whose private marker means that the scale represents
+    an explicit multiply that must be preserved.
+    """
+    return bool(node.meta.get(FOLDED_SCALED_MM_OUTPUT_SCALE, False))
 
 
 @dataclass
@@ -712,6 +724,8 @@ def _find_reshape_mm_reshape(node: torch.fx.Node) -> list[_Matmul]:
     for mm_node in node.users:
         if mm_node.target not in (aten.mm.default, aten._scaled_mm.default):
             continue
+        if _has_folded_scaled_mm_output_scale(mm_node):
+            continue
         for reshape_node in mm_node.users:
             if reshape_node.target != aten.reshape.default:
                 continue
@@ -766,8 +780,35 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> list[_Matmul]:
             matmul = _Matmul.from_match(match=[user])
             matmuls.append(matmul)
         elif user.target is aten._scaled_mm.default:
+            if _has_folded_scaled_mm_output_scale(user):
+                continue
             matmul = _ScaledMatmul.from_match([user])
             matmuls.append(matmul)
+    return matmuls
+
+
+def _get_fusible_all_gather_matmuls(
+    all_gather: _AllGatherMatch,
+) -> list[_Matmul]:
+    """Return the consumer matmuls accepted by all-gather fusion."""
+
+    shard_node = all_gather.shard_node
+    gather_dim = all_gather.gather_dim
+    last_dim = _is_last_dim(_get_tensor(shard_node), gather_dim)
+    if last_dim and _get_tensor(shard_node).shape[-1] < 1024:
+        return []
+
+    matmuls = [
+        matmul
+        for matmul in _find_consumer_matmuls(all_gather.res_node)
+        if all_gather.res_node not in matmul.arg_ancestor_nodes
+    ]
+    if len(matmuls) == 0 or len(OrderedSet(map(type, matmuls))) != 1:
+        return []
+    if last_dim and len(all_gather.res_node.users) > len(matmuls):
+        return []
+    if last_dim and isinstance(matmuls[0], _ScaledMatmul):
+        return []
     return matmuls
 
 
@@ -840,10 +881,9 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         restride_A_shard_for_fused_all_gather_matmul,
     )
 
-    shard_node, ag_node, ag_res_node, gather_dim, group_name = (
+    shard_node, ag_node, gather_dim, group_name = (
         all_gather.shard_node,
         all_gather.ag_node,
-        all_gather.res_node,
         all_gather.gather_dim,
         all_gather.group_name,
     )
@@ -851,40 +891,8 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     if not is_symm_mem_enabled_for_group(group_name):
         return
 
-    filter_matmul = None
-    if _is_last_dim(_get_tensor(shard_node), gather_dim):
-        # Decomposed mms should not be too small
-        if _get_tensor(shard_node).shape[-1] < 1024:
-            return
-
-        # scaled_mm is not supported yet for last dim
-        def _filter_out_scaled_matmul(matmul: _Matmul):
-            return not isinstance(matmul, _ScaledMatmul)
-
-        filter_matmul = _filter_out_scaled_matmul
-
-    # Find consumer matmuls
-    matmuls = _find_consumer_matmuls(ag_res_node)
-
-    # The matmuls are only fusible if non-A args don't depend on the all-gather
-    # result node
-    matmuls = [
-        matmul
-        for matmul in matmuls
-        if all_gather.res_node not in matmul.arg_ancestor_nodes
-    ]
-
-    if len(matmuls) == 0 or len(OrderedSet(map(type, matmuls))) != 1:
-        return
-
-    if _is_last_dim(_get_tensor(shard_node), gather_dim) and len(
-        all_gather.res_node.users
-    ) > len(matmuls):
-        # The result of ag-split-cat is used not only in matmuls.
-        # Then it has to be materialized, which can have overhead.
-        return
-
-    if filter_matmul and not filter_matmul(matmuls[0]):
+    matmuls = _get_fusible_all_gather_matmuls(all_gather)
+    if not matmuls:
         return
 
     # Fuse the all_gather_single with the eligible matmuls
@@ -994,6 +1002,8 @@ def _find_producer_matmul(node: torch.fx.Node) -> _Matmul | None:
     if node.target is aten.mm.default:
         return _Matmul.from_match(match=[node])
     elif node.target is aten._scaled_mm.default:
+        if _has_folded_scaled_mm_output_scale(node):
+            return None
         return _ScaledMatmul.from_match(match=[node])
     elif node.target is aten.reshape.default:
         reshape_node_1 = node
@@ -1002,6 +1012,8 @@ def _find_producer_matmul(node: torch.fx.Node) -> _Matmul | None:
         if not isinstance(mm_node, torch.fx.Node):
             raise AssertionError(f"expected an fx Node, got {type(mm_node)}")
         if mm_node.target not in (aten.mm.default, aten._scaled_mm.default):
+            return None
+        if _has_folded_scaled_mm_output_scale(mm_node):
             return None
 
         reshape_node_0 = mm_node.args[0]
@@ -1017,6 +1029,34 @@ def _find_producer_matmul(node: torch.fx.Node) -> _Matmul | None:
                 match=[reshape_node_0, mm_node, reshape_node_1]
             )
     return None
+
+
+def _get_fusible_reduce_scatter_matmul(
+    reduce_scatter: _ReduceScatterMatch,
+) -> _Matmul | None:
+    """Return the producer matmul accepted by reduce-scatter fusion."""
+
+    input_node = reduce_scatter.input_node
+    matmul = _find_producer_matmul(input_node)
+    if matmul is None:
+        return None
+
+    match_nodes = (
+        reduce_scatter.match.nodes
+        if isinstance(reduce_scatter.match, Match)
+        else reduce_scatter.match
+    )
+    if len(input_node.users) != 1 and not all(
+        user in match_nodes for user in input_node.users
+    ):
+        return None
+    if _is_last_dim(_get_tensor(input_node), reduce_scatter.scatter_dim) and isinstance(
+        matmul, _ScaledMatmul
+    ):
+        return None
+    if reduce_scatter.wait_tensor_node in matmul.arg_ancestor_nodes:
+        return None
+    return matmul
 
 
 def _insert_fused_matmul_reduce_scatter(
@@ -1091,15 +1131,11 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     )
 
     (
-        input_node,
-        _reduce_scatter_node,
         rs_wait_tensor_node,
         reduce_op,
         orig_scatter_dim,
         group_name,
     ) = (
-        reduce_scatter.input_node,
-        reduce_scatter.reduce_scatter_node,
         reduce_scatter.wait_tensor_node,
         reduce_scatter.reduce_op,
         reduce_scatter.scatter_dim,
@@ -1109,44 +1145,10 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     if not is_symm_mem_enabled_for_group(group_name):
         return
 
-    filter_matmul = None
-    if _is_last_dim(_get_tensor(input_node), orig_scatter_dim):
-        # scaled_mm is not supported yet for last dim mm+rs
-        def _filter_out_scaled_matmul(matmul: _Matmul):
-            return not isinstance(matmul, _ScaledMatmul)
-
-        filter_matmul = _filter_out_scaled_matmul
-
-    matmul = _find_producer_matmul(input_node)
+    matmul = _get_fusible_reduce_scatter_matmul(reduce_scatter)
     if matmul is None:
         log.debug(
-            "no producer matmul found for reduce scatter, skipping fuse_matmul_reduce_scatter fusion"
-        )
-        return
-
-    # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
-    # so we can't apply the fusion if the matmul result is used by multiple
-    # users. This is not a fundamental limitation of the fused op and can be
-    # addressed if needed.
-    match_nodes = (
-        reduce_scatter.match.nodes
-        if isinstance(reduce_scatter.match, Match)
-        else reduce_scatter.match
-    )
-    if len(input_node.users) != 1 and not all(
-        user in match_nodes for user in input_node.users
-    ):
-        log.warning(
-            "matmul result has more than one user, skipping fused_matmul_reduce_scatter fusion."
-        )
-        return
-
-    if filter_matmul and not filter_matmul(matmul):
-        return
-
-    if rs_wait_tensor_node in matmul.arg_ancestor_nodes:
-        log.warning(
-            "reduce-scatter result node is an ancestor of matmul, skipping fuse_matmul_reduce_scatter fusion"
+            "no fusible producer matmul found for reduce scatter, skipping fusion"
         )
         return
 
@@ -1296,7 +1298,9 @@ def _get_unexposed_collectives(graph: torch.fx.Graph) -> list[torch.fx.Node]:
     return unexposed_collectives
 
 
-def micro_pipeline_tp_pass(graph: torch.fx.Graph):
+def _get_micro_pipeline_tp_patterns(
+    graph: torch.fx.Graph,
+) -> tuple[list[_AllGatherMatch], list[_ReduceScatterMatch]]:
     all_gathers = find_all_gather_patterns(graph)
     reduce_scatters = find_reduce_scatter_patterns(graph)
 
@@ -1313,6 +1317,28 @@ def micro_pipeline_tp_pass(graph: torch.fx.Graph):
             for x in reduce_scatters
             if x.reduce_scatter_node not in unexposed_collectives
         ]
+    return all_gathers, reduce_scatters
+
+
+def is_micro_pipeline_tp_candidate(node: torch.fx.Node) -> bool:
+    """Whether ``node`` belongs to a matmul this TP pass can structurally fuse."""
+
+    all_gathers, reduce_scatters = _get_micro_pipeline_tp_patterns(node.graph)
+    for all_gather in all_gathers:
+        if any(
+            node in matmul.nodes
+            for matmul in _get_fusible_all_gather_matmuls(all_gather)
+        ):
+            return True
+    for reduce_scatter in reduce_scatters:
+        matmul = _get_fusible_reduce_scatter_matmul(reduce_scatter)
+        if matmul is not None and node in matmul.nodes:
+            return True
+    return False
+
+
+def micro_pipeline_tp_pass(graph: torch.fx.Graph):
+    all_gathers, reduce_scatters = _get_micro_pipeline_tp_patterns(graph)
 
     if not all_gathers and not reduce_scatters:
         log.warning(

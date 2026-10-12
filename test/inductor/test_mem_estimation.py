@@ -11,11 +11,11 @@ from torch._inductor.fx_passes.memory_estimator import (
     MemoryTracker,
 )
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_map_only
+from torch.utils._pytree import tree_leaves
 from torch.utils.weak import WeakIdKeyDictionary
 
 
@@ -40,7 +40,9 @@ class FakeTensorMemoryProfilerMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs is not None else {}
         rs = func(*args, **kwargs)
-        tree_map_only(torch._subclasses.FakeTensor, self.increase_memory_use, rs)
+        for tensor in tree_leaves(rs):
+            if is_fake_tensor(tensor):
+                self.increase_memory_use(tensor)
         return rs
 
     def increase_memory_use(self, tensor):
