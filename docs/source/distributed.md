@@ -729,6 +729,10 @@ if rank == 0:
 
 ```
 
+## Functional collectives
+
+Functional collectives return new tensors instead of mutating their inputs and are traceable by `torch.compile`. See {doc}`distributed.functional_collectives`.
+
 ## Distributed Key-Value Store
 
 The distributed package comes with a distributed key-value store, which can be
