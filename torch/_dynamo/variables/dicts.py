@@ -1061,8 +1061,14 @@ class ConstDictVariable(VariableTracker):
         op: str,
     ) -> VariableTracker:
         # CPython shares dict_richcompare between dict and frozendict.
-        if op not in ("__eq__", "__ne__") or not pyanydict_check(other):
+        try:
+            if op not in ("__eq__", "__ne__") or not pyanydict_check(other):
+                return ConstantVariable.create(NotImplemented)
+        except NotImplementedError:
             return ConstantVariable.create(NotImplemented)
+        if self is other:
+            # Keys and values match by identity; avoid guarding nn.Module hook IDs.
+            return ConstantVariable.create(op == "__eq__")
         if not isinstance(other, (ConstDictVariable, FrozenDictVariable)):
             unimplemented(
                 gb_type="Unsupported dictionary storage",
@@ -1133,11 +1139,16 @@ class OrderedDictVariable(ConstDictVariable):
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         result = ConstDictVariable.tp_richcompare_impl(self, tx, other, op)
-        if op not in ("__eq__", "__ne__") or not isinstance(other, OrderedDictVariable):
+        if (
+            op not in ("__eq__", "__ne__")
+            or self is other
+            or not isinstance(other, OrderedDictVariable)
+        ):
             return result
         if result.as_python_constant() == (op == "__ne__"):
             return result
         # CPython's odict_richcompare checks key order only after dict equality.
+        # Distinct hook dictionaries also need guards: their IDs affect equality.
         for mapping in (self, other):
             if mapping.source:
                 install_guard(mapping.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
