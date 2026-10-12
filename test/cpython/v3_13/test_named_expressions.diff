@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_named_expressions.py b/test/cpython/v3_13/test_named_expressions.py
-index cf44080670d..f95dbae0d57 100644
+index cf44080670dc2e6fe3cebc45f9ce18ccda393956..f95dbae0d57c3acee39b179ac0c9b93c1f91a1eb 100644
 --- a/test/cpython/v3_13/test_named_expressions.py
 +++ b/test/cpython/v3_13/test_named_expressions.py
 @@ -1,8 +1,26 @@

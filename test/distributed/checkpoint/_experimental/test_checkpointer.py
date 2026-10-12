@@ -28,7 +28,11 @@ from torch.distributed.checkpoint._experimental.staging import (
     DefaultStager,
 )
 from torch.distributed.checkpoint._experimental.types import RankInfo
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def subprocess_init_fn(name: str, parent_pid: int) -> None:
@@ -51,6 +55,8 @@ def ckpt_writer_init_fn(**kwargs) -> CheckpointWriter:
 
 class TestCheckpointer(TestCase):
     """Parameterized tests that work with both sync and async checkpointers."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -398,6 +404,8 @@ class TestCheckpointer(TestCase):
 class TestAsyncCheckpointerSpecific(TestCase):
     """Tests specific to AsyncCheckpointer functionality."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Create a temporary directory for checkpoints
@@ -472,7 +480,6 @@ class TestAsyncCheckpointerSpecific(TestCase):
             reader=self.reader,
         )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179976")
     def test_async_returns_futures(self):
         """Test that async save returns futures."""
         checkpointer = self._create_async_checkpointer()

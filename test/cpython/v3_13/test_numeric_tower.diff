@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_numeric_tower.py b/test/cpython/v3_13/test_numeric_tower.py
-index 337682d6bac..85841ef5ea5 100644
+index 337682d6bac96c714a73e8d35c7fb05d4297a6de..85841ef5ea55dd3b3dc5b6f6b7503f24bb5a6804 100644
 --- a/test/cpython/v3_13/test_numeric_tower.py
 +++ b/test/cpython/v3_13/test_numeric_tower.py
 @@ -1,3 +1,23 @@

@@ -96,13 +96,18 @@ class SharedCache(dict):
 shared_cache = SharedCache()
 
 
+# Kept for BC only.
 def rebuild_event(device, handle):
     return torch.cuda.Event.from_ipc_handle(device, handle)
 
 
-def reduce_event(event):
+def _rebuild_event(device, handle, event_cls):
+    return event_cls.from_ipc_handle(device, handle)
+
+
+def _reduce_event(event):
     handle = event.ipc_handle()
-    return (rebuild_event, (event.device, handle))
+    return (_rebuild_event, (event.device, handle, type(event)))
 
 
 def rebuild_tensor(cls, storage, metadata):
@@ -171,9 +176,8 @@ def rebuild_cuda_tensor(
     if storage_handle is None or storage_size_bytes == 0:
         storage = storage_cls(0, dtype=dtype, device=storage_device, _internal=True)
     else:
-        storage = storage_from_cache(
-            storage_cls, (storage_handle, storage_offset_bytes)
-        )
+        cache_key = (storage_device, storage_handle, storage_offset_bytes)
+        storage = storage_from_cache(storage_cls, cache_key)
         if storage is None:
             torch.cuda._lazy_init()
             storage = storage_cls._new_shared_cuda(
@@ -186,9 +190,7 @@ def rebuild_cuda_tensor(
                 event_handle,
                 event_sync_required,
             )
-            shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(
-                storage
-            )
+            shared_cache[cache_key] = StorageWeakRef(storage)
         else:
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
             storage_cls._release_ipc_counter(
@@ -621,7 +623,9 @@ def reduce_storage(storage):
 
 
 def init_reductions():
-    reduction.register(torch.cuda.Event, reduce_event)
+    ipc_event_classes = [torch.cuda.Event, torch.xpu.Event]
+    for event_cls in ipc_event_classes:
+        reduction.register(event_cls, _reduce_event)
 
     for t in torch._storage_classes:
         if t.__name__ == "UntypedStorage":
