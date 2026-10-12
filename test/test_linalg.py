@@ -7199,8 +7199,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @onlyCPU
     @parametrize("x_dtype", [torch.int8, torch.uint8])
     def test__int_mm_cpu_operand_layouts(self, device, x_dtype):
-        # Operands oneDNN's gemm cannot read in place are copied, so none of these
-        # should fail in oneDNN and fall back to the reference gemm, which warns.
         m, k, n = 8, 32, 16
 
         def genf(rows, cols, dtype=torch.int8):
@@ -7213,7 +7211,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertEqual(torch._int_mm(a, b).float(), torch.mm(a.float(), b.float()))
 
         cases = [
-            # size-1 dims whose arbitrary stride is not 1, and neither is the other
+            # size-1 dims whose arbitrary stride is not 1
             (genf(1, 2 * k, x_dtype).as_strided((1, k), (0, 2)), genf(k, n)),
             (genf(m, 3, x_dtype).as_strided((m, 1), (3, 0)), genf(1, n)),
             (genf(m, k, x_dtype), genf(k, 3).as_strided((k, 1), (3, 0))),

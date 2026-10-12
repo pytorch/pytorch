@@ -535,8 +535,7 @@ bool use_mkldnn_matmul(
 }
 
 // How oneDNN's row-major gemm can read `t` in place: as itself ('N') or as its
-// transpose ('T'), with a leading dimension spanning a full row or column. The
-// stride of a size-1 dim is never dereferenced, so it is free to be anything.
+// transpose ('T'), with a leading dimension spanning a full row or column.
 static std::optional<std::pair<char, int64_t>> _blas_layout(const Tensor& t) {
   const int64_t rows = t.size(0), cols = t.size(1);
   if ((cols == 1 || t.stride(1) == 1) && (rows == 1 || t.stride(0) >= cols)) {
@@ -601,8 +600,6 @@ void mkldnn_matmul_i8i8i32(
     const Tensor &result) {
   // x:u8 or s8 * w:s8 -> y:s32
   // both inputs should be 2d
-  // oneDNN's matmul primitive only has a reference kernel for operands its gemm
-  // cannot read in place, so copying them is orders of magnitude faster.
   const Tensor a = _blas_layout(mat1) ? mat1 : mat1.clone(at::MemoryFormat::Preserve);
   const Tensor b = _blas_layout(mat2) ? mat2 : mat2.clone(at::MemoryFormat::Preserve);
   if (a.scalar_type() == at::kByte) {
