@@ -1187,9 +1187,20 @@ class HalideKernel(SIMDKernel):
             if old.stride != new.stride:
                 return False
             if old.size != new.size or old.expr != new.expr:
-                old.size = V.graph.sizevars.evaluate_max(old.size, new.size)
+                # sizes can be kernel arg names (ks0) or graph symbols (s0),
+                # and the shape env only knows the latter
+                old.size = V.graph.sizevars.evaluate_max(
+                    self.unrename_indexing(old.size), self.unrename_indexing(new.size)
+                )
                 old.expr = None
         return True
+
+    def unrename_indexing(self, expr: sympy.Expr) -> sympy.Expr:
+        """Map kernel arg names such as ks0 back to graph symbols"""
+        expr = sympy.sympify(expr)
+        outer = {inner: sym for sym, inner in self.args.sizevars.items()}
+        subs = {s: outer[s.name] for s in expr.free_symbols if s.name in outer}
+        return sympy_subs(expr, subs)
 
     def apply_offset_to_dimension(self, dims, offset):
         if offset == 0:
