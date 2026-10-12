@@ -456,6 +456,11 @@ def can_auto_functionalize(
             continue
         return False
 
+    if isinstance(op, OpOverload) and torch._C._dispatch_has_kernel_for_dispatch_key(
+        op.name(), "Functionalize"
+    ):
+        return False
+
     if len(schema.returns) == 1 and isinstance(schema.returns[0].type, torch.NoneType):
         # Skip schema returns -> None
         return True
@@ -474,8 +479,6 @@ def can_auto_functionalize(
                     continue
                 # Not yet supported: List[Tensor] return.
                 return False
-        if torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), "Functionalize"):
-            return False
     return True
 
 
