@@ -1,7 +1,15 @@
 # Owner(s): ["module: PrivateUse1"]
 
+import multiprocessing
+import unittest
+
 import torch
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class TestStream(TestCase):
@@ -154,6 +162,70 @@ class TestStream(TestCase):
         self.assertEqual(event.device.type, "openreg")
         stream.synchronize()
         self.assertTrue(event.query())
+
+
+@unittest.skipIf(IS_WINDOWS, "OpenReg IPC events require POSIX shared memory")
+class TestOpenRegMultiprocessing(TestCase):
+    @staticmethod
+    def _event_ipc_importer_consumer(handle, p2c, c2p):
+        e1 = torch.Event.from_ipc_handle(
+            torch.accelerator.current_device_index(), handle
+        )
+        c2p.put(0)  # notify parent child is ready
+        p2c.get()  # wait for parent to record the event
+        e1.synchronize()
+        c2p.put(0)  # notify parent synchronization is done
+
+    @staticmethod
+    def _event_ipc_exporter_consumer(handle, p2c, c2p):
+        stream = torch.Stream(device="openreg")
+        e1 = torch.Event.from_ipc_handle(
+            torch.accelerator.current_device_index(), handle
+        )
+        e1.record(stream)
+        c2p.put(0)  # notify parent the event has been recorded
+        p2c.get()  # wait for parent to finish
+
+    def test_event_ipc_importer(self):
+        """Parent records an IPC event; a child process imports the handle
+        and synchronizes on it through the shared event state."""
+        e0 = torch.Event(enable_timing=False, interprocess=True)
+
+        ctx = multiprocessing.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestOpenRegMultiprocessing._event_ipc_importer_consumer,
+            args=(e0.ipc_handle(), p2c, c2p),
+        )
+        p.start()
+
+        c2p.get()  # wait for child to become ready
+        stream = torch.Stream(device="openreg")
+        e0.record(stream)
+        p2c.put(0)  # notify child the event has been recorded
+
+        c2p.get()  # wait for synchronization in child
+        p.join()
+
+    def test_event_ipc_exporter(self):
+        """A child process imports an IPC event and records it; the parent
+        (exporter) synchronizes on it through the shared event state."""
+        e0 = torch.Event(enable_timing=False, interprocess=True)
+
+        ctx = multiprocessing.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestOpenRegMultiprocessing._event_ipc_exporter_consumer,
+            args=(e0.ipc_handle(), p2c, c2p),
+        )
+        p.start()
+
+        c2p.get()  # wait for child to record the event
+        e0.synchronize()
+        p2c.put(0)  # notify child to finish
+        p.join()
 
 
 if __name__ == "__main__":
