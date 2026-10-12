@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+import hashlib
 import logging
 import os
 import shutil
@@ -211,6 +212,9 @@ class TritonBundler:
 
     _entries: list[TritonBundleEntry] | None = None
     _static_autotuners: list[StaticallyLaunchedAutotuner] | None = None
+    _static_binary_digests: (
+        dict[object, dict[_BinaryArtifactIdentity, OrderedSet[bytes]]] | None
+    ) = None
     _winners: dict[object, OrderedSet[str]] | None = None
     _omitted_groups: dict[object, OrderedSet[_TritonCacheGroup]] | None = None
 
@@ -251,6 +255,7 @@ class TritonBundler:
             )
         cls._entries = []
         cls._static_autotuners = []
+        cls._static_binary_digests = {}
         cls._winners = {}
         cls._omitted_groups = {}
 
@@ -263,6 +268,7 @@ class TritonBundler:
         log.debug("TritonBundler.end_compile is called")
         cls._entries = None
         cls._static_autotuners = None
+        cls._static_binary_digests = None
         cls._winners = None
         cls._omitted_groups = None
 
@@ -316,6 +322,16 @@ class TritonBundler:
                     new_kernel,
                 )
             )
+            if cls._static_binary_digests is None:
+                raise AssertionError("expected active static binary digests")
+            binary_digests: dict[_BinaryArtifactIdentity, OrderedSet[bytes]] = {}
+            for result in new_kernel.compile_results:
+                digest = getattr(result, "expected_cubin_digest", None)
+                if digest is not None:
+                    binary_digests.setdefault(
+                        result.bundled_artifact_identity(), OrderedSet()
+                    ).add(digest)
+            cls._static_binary_digests[kernel] = binary_digests
 
             # Put the values back since we need it to use now
             kernel.restore_after_unpickle(old_values)
@@ -469,6 +485,48 @@ class TritonBundler:
                     path = os.path.join(entry.directory, entry.kernel_hash)
                     if not os.path.exists(path):
                         continue
+                    if config.use_static_triton_launcher:
+                        binary_digests = (
+                            cls._static_binary_digests.get(entry.autotuner)
+                            if cls._static_binary_digests
+                            else None
+                        )
+                        trusted = binary_digests is not None
+                        for filename in os.listdir(path):
+                            if (
+                                os.path.splitext(filename)[1]
+                                not in GPU_KERNEL_BIN_EXTS.values()
+                            ):
+                                continue
+                            expected_digests = OrderedSet()
+                            if binary_digests is not None:
+                                expected_digests.update(
+                                    binary_digests.get(
+                                        (entry.device, entry.kernel_hash, filename),
+                                        (),
+                                    )
+                                )
+                                expected_digests.update(
+                                    binary_digests.get(
+                                        (None, entry.kernel_hash, filename),
+                                        (),
+                                    )
+                                )
+                            try:
+                                with open(os.path.join(path, filename), "rb") as file:
+                                    digest = hashlib.sha256(file.read()).digest()
+                            except OSError:
+                                trusted = False
+                                break
+                            if digest not in expected_digests:
+                                trusted = False
+                                break
+                        if not trusted:
+                            log.debug(
+                                "Skipping kernel absent from static snapshot %s",
+                                entry.kernel_hash,
+                            )
+                            continue
                     for filename in os.listdir(path):
                         filepath = os.path.join(path, filename)
                         try:

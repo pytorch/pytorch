@@ -1783,6 +1783,41 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
     @skipIfRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_post_snapshot_winner_is_not_bundled(self):
+        from torch._inductor.runtime.triton_heuristics import triton_hash_to_path_key
+        from torch._inductor.triton_bundler import TritonBundler
+
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"]["grid_type"] = "Grid1D"
+        autotuner = CachingAutotuner(**args)
+
+        with (
+            fresh_cache(),
+            config.patch(
+                bundle_triton_into_fx_graph_cache=True,
+                compile_threads=1,
+                use_static_triton_launcher=True,
+            ),
+        ):
+            TritonBundler.begin_compile()
+            try:
+                autotuner.precompile(static_triton_bundle_key="snapshot")
+                winner = autotuner._precompile_config(triton_config({"x": 512}, 256))
+                autotuner.compile_results.append(winner)
+                winner_hash = triton_hash_to_path_key(winner.kernel.hash)
+                TritonBundler.put_winner(winner_hash, autotuner)
+                bundle, _ = TritonBundler.collect()
+            finally:
+                TritonBundler.end_compile()
+                autotuner.release_benchmark_artifacts()
+
+        self.assertNotIn(
+            winner_hash,
+            {artifacts.kernel_hash for artifacts in bundle.kernel_artifacts},
+        )
+
+    @skipIfRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_mixed_static_results_preserve_trusted_shared_artifact_groups(self):
         from torch._inductor.runtime.runtime_utils import triton_cache_dir
         from torch._inductor.runtime.triton_heuristics import (
