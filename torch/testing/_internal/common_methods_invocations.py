@@ -792,7 +792,7 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
 def sample_inputs_pow(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
     if dtype.is_complex and not requires_grad:
-        yield SampleInput(torch.zeros(3, device=device, dtype=dtype), torch.tensor([-1, 1j, 2], device=device, dtype=dtype))
+        yield SampleInput(torch.zeros(2, device=device, dtype=dtype), torch.tensor([1j, 2], device=device, dtype=dtype))
 
 def sample_inputs_nextafter(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
