@@ -319,7 +319,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             fn(x, mapping),
         )
 
-    def test_unbound_dict_update_unsupported_receiver(self):
+    def test_unbound_dict_update_immutable_receiver(self):
         def identity(value):
             return value
 
@@ -329,10 +329,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         func = partial(identity, value=None)
-        with self.assertRaisesRegex(
-            Unsupported, "trace method `update` of class `type`"
-        ):
+        with self.assertRaises(Unsupported) as exc:
             torch.compile(fn, backend="eager", fullgraph=True)(x, func)
+        self.assertEqual(exc.exception.gb_type, "Unsupported method call")
         self.assertEqual(torch.compile(fn, backend="eager")(x, func), x + 2)
         self.assertEqual(func(), x + 1)
 
