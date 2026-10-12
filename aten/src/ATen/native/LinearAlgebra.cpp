@@ -47,14 +47,12 @@
 #include <ATen/ops/_weight_int8pack_mm_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/addbmm_native.h>
-#include <ATen/ops/addmm.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr.h>
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/argsort.h>
 #include <ATen/ops/as_strided_native.h>
-#include <ATen/ops/baddbmm.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/bmm_native.h>
@@ -204,6 +202,21 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
   set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options());
 }
 
+// The compute_mode overloads check the mode string here, so that it is also
+// validated on meta and fake tensors. Which modes are supported is up to the
+// kernel.
+TORCH_META_FUNC2(addmm, compute_mode)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha) {
+  native::matmul_compute_mode_to_precision(compute_mode, "addmm");
+  ADDMM_META();
+}
+
+TORCH_META_FUNC2(mm, compute_mode)(const Tensor & self, const Tensor & mat2, std::string_view compute_mode) {
+  native::matmul_compute_mode_to_precision(compute_mode, "mm");
+  native::check_mm_shapes(self, mat2, "mm");
+
+  set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options());
+}
+
 TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
   at::native::checkFloatingOrComplex(self, "linalg.vector_norm");
   TORCH_CHECK(!at::isComplexType(scalar_ord.type()), "linalg.vector_norm: Expected a non-complex scalar as the order of norm.");
@@ -325,6 +338,18 @@ TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
 }
 
 TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+  auto self_ = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
+  TORCH_CHECK(self.dtype() == batch1.dtype(), "Input dtypes must be the same, got: input ", self.dtype(), ", batch1: ", batch1.dtype(), ", batch2: ", batch2.dtype());
+  common_checks_baddbmm_bmm(*this, batch1, batch2, beta, alpha, false, *self_);
+}
+
+TORCH_META_FUNC2(bmm, compute_mode)(const Tensor& self, const Tensor& mat2, std::string_view compute_mode) {
+  native::matmul_compute_mode_to_precision(compute_mode, "bmm");
+  common_checks_baddbmm_bmm(*this, self, mat2, Scalar(0.0), Scalar(1.0), true);
+}
+
+TORCH_META_FUNC2(baddbmm, compute_mode)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha) {
+  native::matmul_compute_mode_to_precision(compute_mode, "baddbmm");
   auto self_ = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
   TORCH_CHECK(self.dtype() == batch1.dtype(), "Input dtypes must be the same, got: input ", self.dtype(), ", batch1: ", batch1.dtype(), ", batch2: ", batch2.dtype());
   common_checks_baddbmm_bmm(*this, batch1, batch2, beta, alpha, false, *self_);
@@ -1384,19 +1409,20 @@ static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
   return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
 #endif
-// compute_mode (see MatmulFloat32PrecisionGuard): on CPU, FP32 matmuls can
-// only run in a reduced precision through oneDNN. Returns true if an explicitly
-// requested reduced precision has to be honored, in which case the caller must
-// not take a non-oneDNN path, and raises if oneDNN cannot run it. Call after
-// the early returns that do no matmul, and outside parallel regions since the
-// request is thread-local.
-static bool check_explicit_fp32_matmul_precision_cpu(ScalarType dtype) {
-  const auto p = MatmulFloat32PrecisionGuard::get();
+// compute_mode is the FP32 matmul precision requested for this call (the
+// compute_mode overloads), or std::nullopt for the global setting. The global
+// setting only permits a reduced precision, but a requested one is a
+// requirement. On CPU, FP32 matmuls can only run in a reduced precision through
+// oneDNN. Returns true if a requested reduced precision has to be honored, in
+// which case the caller must not take a non-oneDNN path, and raises if oneDNN
+// cannot run it. Call after the early returns that do no matmul.
+static bool check_explicit_fp32_matmul_precision_cpu(ScalarType dtype, std::optional<Float32Precision> compute_mode) {
+  const auto& p = compute_mode;
   if (!p || *p == Float32Precision::IEEE ||
       (dtype != kFloat && dtype != kComplexFloat)) {
     return false;
   }
-  TORCH_CHECK(dtype == kFloat && use_mkldnn_reduced_f32_matmul(),
+  TORCH_CHECK(dtype == kFloat && use_mkldnn_reduced_f32_matmul(p),
       "compute_mode '", precision2str(*p), "' is not supported for ", dtype,
       " matmuls on this CPU. On CPU, only float32 matmuls can run in a "
       "reduced precision, through oneDNN: 'bf16' needs a CPU with BF16 "
@@ -1404,8 +1430,20 @@ static bool check_explicit_fp32_matmul_precision_cpu(ScalarType dtype) {
   return true;
 }
 
+// cpublas::gemm, passing the FP32 matmul precision requested for this call to
+// the float overload, the only one that can use a reduced precision.
+template <typename scalar_t, typename... Args>
+static void cpublas_gemm_with_precision(std::optional<Float32Precision> compute_mode, Args&&... args) {
+  if constexpr (std::is_same_v<scalar_t, float>) {
+    at::native::cpublas::gemm(std::forward<Args>(args)..., compute_mode);
+  } else {
+    at::native::cpublas::gemm(std::forward<Args>(args)...);
+  }
+}
+
 static void addmm_impl_cpu_(
-    Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
+    Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha,
+    std::optional<Float32Precision> compute_mode = std::nullopt) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
 
   TORCH_CHECK(
@@ -1448,7 +1486,7 @@ static void addmm_impl_cpu_(
 
   // If set, cpublas::gemm below honors it through oneDNN regardless of size.
   [[maybe_unused]] const bool explicit_reduced_f32 =
-      check_explicit_fp32_matmul_precision_cpu(m1.scalar_type());
+      check_explicit_fp32_matmul_precision_cpu(m1.scalar_type(), compute_mode);
 
   if (beta.toComplexDouble() != 0.0 && !self.is_same(result)) {
     result.copy_(self);
@@ -1534,7 +1572,7 @@ static void addmm_impl_cpu_(
          result.scalar_type() == at::ScalarType::BFloat16 ||
          result.scalar_type() == at::ScalarType::Half)) {
       try {
-        mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
+        mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>(), compute_mode);
         // We have dispatched to ACL GEMM for single precision float
         // so do not need to dispatch to BLAS GEMM below
         dispatched = true;
@@ -1553,7 +1591,8 @@ static void addmm_impl_cpu_(
     // Apply BLAS routine
     _AT_DISPATCH_ADDMM_TYPES(result.scalar_type(), "addmm_impl_cpu_", [&]{
           using opmath_t = at::opmath_type<scalar_t>;
-          at::native::cpublas::gemm(
+          cpublas_gemm_with_precision<scalar_t>(
+              compute_mode,
               transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
               transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
               m, n, k,
@@ -1651,6 +1690,17 @@ TORCH_IMPL_FUNC(mm_out_cpu)(const Tensor & self, const Tensor & mat2, const Tens
   {
     addmm_impl_cpu_(const_cast<Tensor&>(result), result, self, mat2, 0, 1);
   }
+}
+
+TORCH_IMPL_FUNC(addmm_compute_mode_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha, const Tensor &result) {
+  auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
+  addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha,
+      matmul_compute_mode_to_precision(compute_mode, "addmm"));
+}
+
+TORCH_IMPL_FUNC(mm_compute_mode_out_cpu)(const Tensor & self, const Tensor & mat2, std::string_view compute_mode, const Tensor & result) {
+  addmm_impl_cpu_(const_cast<Tensor&>(result), result, self, mat2, 0, 1,
+      matmul_compute_mode_to_precision(compute_mode, "mm"));
 }
 
 template <typename scalar_t, bool is_bmm>
@@ -1775,7 +1825,7 @@ static inline void rebind_batch_dim0(
       base.storage_offset() + signed_index * base.strides()[0]);
 }
 
-static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm_out) {
+static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm_out, std::optional<Float32Precision> compute_mode = std::nullopt) {
   // is_bmm_out: true for bmm_out, false for baddbmm_
   // self_or_result is "self" for baddbmm_ and "result" for bmm_out
   Tensor& self_or_result = const_cast<Tensor&>(self_or_result_);
@@ -1801,15 +1851,13 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
     }
   }
 
-  // An explicitly requested reduced precision can only run through oneDNN, so
-  // skip the size heuristics and the fallbacks below. This is checked here
-  // rather than in addmm_impl_cpu_ because the batch loop below may run in a
-  // parallel region, which does not see the thread-local request. With a zero
-  // alpha the product does not contribute, and mkldnn_matmul would skip the
-  // beta scaling, so leave that case to the paths below.
-  if (check_explicit_fp32_matmul_precision_cpu(batch1.scalar_type()) &&
+  // A requested reduced precision can only run through oneDNN, so skip the
+  // size heuristics and the fallbacks below. With a zero alpha the product does
+  // not contribute, and mkldnn_matmul would skip the beta scaling, so leave
+  // that case to the paths below.
+  if (check_explicit_fp32_matmul_precision_cpu(batch1.scalar_type(), compute_mode) &&
       alpha.to<float>() != 0.0f) {
-    mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
+    mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>(), compute_mode);
     return;
   }
 
@@ -1823,9 +1871,9 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
 #if !defined(__aarch64__) || AT_MKLDNN_ACL_ENABLED()
   // Always apply mkldnn heuristic on x86 platform, but on ARM only if compiled with ACL
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
-  if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
+  if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result, compute_mode)) {
     try {
-      mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
+      mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>(), compute_mode);
       return;
     } catch ([[maybe_unused]]const std::exception& e) {
       TORCH_WARN("mkldnn_matmul failed, switching to baddbmm:", e.what());
@@ -1890,7 +1938,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
             rebind_batch_dim0(r, self_or_result, b);
             rebind_batch_dim0(m1v, batch1, b);
             rebind_batch_dim0(m2v, batch2, b);
-            addmm_impl_cpu_(r, r, m1v, m2v, 0, 1);
+            addmm_impl_cpu_(r, r, m1v, m2v, 0, 1, compute_mode);
           }
         };
         // Materialize if COW, since we cannot do so during parallel_for
@@ -1904,7 +1952,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
           rebind_batch_dim0(r, self_or_result, b);
           rebind_batch_dim0(m1v, batch1, b);
           rebind_batch_dim0(m2v, batch2, b);
-          addmm_impl_cpu_(r, r, m1v, m2v, 0, 1);
+          addmm_impl_cpu_(r, r, m1v, m2v, 0, 1, compute_mode);
         }
       }
     } else {
@@ -1918,7 +1966,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
             rebind_batch_dim0(r, self_or_result, b);
             rebind_batch_dim0(m1v, batch1, b);
             rebind_batch_dim0(m2v, batch2, b);
-            r.addmm_(m1v, m2v, beta, alpha);
+            addmm_impl_cpu_(r, r, m1v, m2v, beta, alpha, compute_mode);
           }
         };
         // Materialize if COW, since we cannot do so during parallel_for
@@ -1926,8 +1974,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
         at::parallel_for(0, bs, 1, bmm_fn);
       } else {
         for (const auto b : c10::irange(bs)) {
-          select_batch_dim0(self_or_result, b).addmm_(
-              select_batch_dim0(batch1, b), select_batch_dim0(batch2, b), beta, alpha);
+          auto r = select_batch_dim0(self_or_result, b);
+          addmm_impl_cpu_(r, r, select_batch_dim0(batch1, b), select_batch_dim0(batch2, b), beta, alpha, compute_mode);
         }
       }
     }
@@ -1959,66 +2007,22 @@ TORCH_IMPL_FUNC(bmm_out_cpu)
     }
 }
 
-// compute_mode overloads of mm, addmm, bmm and baddbmm. compute_mode selects
-// the internal precision of an FP32 matmul for this call only, using the same
-// names as torch.backends.*.fp32_precision. It is implemented by installing a
-// thread-local override of the matmul fp32_precision setting around the
-// regular kernel. Whether a mode is supported is decided by the FP32 matmul
-// kernel that ends up running, see MatmulFloat32PrecisionGuard.
-static Float32Precision matmul_compute_mode_to_precision(
-    std::string_view compute_mode,
-    const char* op_name) {
-  if (compute_mode == "ieee") {
-    return Float32Precision::IEEE;
-  } else if (compute_mode == "tf32") {
-    return Float32Precision::TF32;
-  } else if (compute_mode == "bf16") {
-    return Float32Precision::BF16;
-  } else if (compute_mode == "bfx9") {
-    return Float32Precision::BF16X9;
-  }
-  TORCH_CHECK_VALUE(false, op_name, ": unknown compute_mode '", compute_mode,
-      "', expected one of 'ieee', 'tf32', 'bf16' or 'bfx9'");
+TORCH_IMPL_FUNC(baddbmm_compute_mode_out_cpu)
+(const Tensor & self, const Tensor & batch1, const Tensor & batch2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+    const auto p = matmul_compute_mode_to_precision(compute_mode, "baddbmm");
+    bool self_is_conj = result.is_conj();
+    conjugate_mutable_input_if_needed(result, self_is_conj);
+    bmm_out_or_baddbmm_(result, batch1.resolve_conj(), batch2.resolve_conj(), beta, alpha, false, p);
+    conjugate_mutable_input_if_needed(result, self_is_conj);
 }
 
-Tensor mm_compute_mode(const Tensor& self, const Tensor& mat2, std::string_view compute_mode) {
-  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, "mm"));
-  return at::mm(self, mat2);
-}
-
-Tensor& mm_compute_mode_out(const Tensor& self, const Tensor& mat2, std::string_view compute_mode, Tensor& out) {
-  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, "mm"));
-  return at::mm_out(out, self, mat2);
-}
-
-Tensor addmm_compute_mode(const Tensor& self, const Tensor& mat1, const Tensor& mat2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha) {
-  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, "addmm"));
-  return at::addmm(self, mat1, mat2, beta, alpha);
-}
-
-Tensor& addmm_compute_mode_out(const Tensor& self, const Tensor& mat1, const Tensor& mat2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha, Tensor& out) {
-  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, "addmm"));
-  return at::addmm_out(out, self, mat1, mat2, beta, alpha);
-}
-
-Tensor bmm_compute_mode(const Tensor& self, const Tensor& mat2, std::string_view compute_mode) {
-  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, "bmm"));
-  return at::bmm(self, mat2);
-}
-
-Tensor& bmm_compute_mode_out(const Tensor& self, const Tensor& mat2, std::string_view compute_mode, Tensor& out) {
-  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, "bmm"));
-  return at::bmm_out(out, self, mat2);
-}
-
-Tensor baddbmm_compute_mode(const Tensor& self, const Tensor& batch1, const Tensor& batch2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha) {
-  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, "baddbmm"));
-  return at::baddbmm(self, batch1, batch2, beta, alpha);
-}
-
-Tensor& baddbmm_compute_mode_out(const Tensor& self, const Tensor& batch1, const Tensor& batch2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha, Tensor& out) {
-  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, "baddbmm"));
-  return at::baddbmm_out(out, self, batch1, batch2, beta, alpha);
+TORCH_IMPL_FUNC(bmm_compute_mode_out_cpu)
+(const Tensor & batch1, const Tensor & batch2, std::string_view compute_mode, const Tensor & result) {
+    const auto p = matmul_compute_mode_to_precision(compute_mode, "bmm");
+    bool result_is_conj = result.is_conj();
+    conjugate_mutable_input_if_needed(result, result_is_conj);
+    bmm_out_or_baddbmm_(result, batch1.resolve_conj(), batch2.resolve_conj(), Scalar(0.0), Scalar(1.0), true, p);
+    conjugate_mutable_input_if_needed(result, result_is_conj);
 }
 
 Tensor& dot_out(const Tensor& self, const Tensor& other, Tensor& result) {

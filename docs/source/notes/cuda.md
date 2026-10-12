@@ -126,7 +126,8 @@ precision, it raises an error instead of silently using IEEE. On CUDA,
 `compute_mode` supports `ieee`, `tf32` (compute capability 8.0 or later) and
 `bfx9` (NVIDIA CUDA 12.9 or later, float32 only); on CPU, `ieee`, and `tf32`
 and `bf16` where oneDNN supports them on the CPU. It only affects float32 and
-complex64 inputs, and is ignored for other dtypes. Under `torch.compile`,
+complex64 inputs, and is ignored for other dtypes. It is implemented for CPU
+and CUDA tensors, and these calls do not use TunableOp. Under `torch.compile`,
 these calls are not decomposed or fused and run the ATen kernel.
 
 We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.

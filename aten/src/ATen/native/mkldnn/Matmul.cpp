@@ -14,7 +14,8 @@ void mkldnn_matmul(
     const Tensor &mat2,
     const Tensor &result,
     float beta,
-    float alpha) {
+    float alpha,
+    std::optional<at::Float32Precision> fp32_precision) {
   TORCH_CHECK(false, "mkldnn_matmul: ATen not compiled with MKLDNN support");
 }
 
@@ -60,25 +61,28 @@ bool mkldnn_reduced_f32_gemm(
     const float *a, int64_t lda,
     const float *b, int64_t ldb,
     float beta,
-    float *c, int64_t ldc){
+    float *c, int64_t ldc,
+    std::optional<at::Float32Precision> fp32_precision){
       return false;
     }
 
 bool use_mkldnn_bf32_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
-    const Tensor& result) {
+    const Tensor& result,
+    std::optional<at::Float32Precision> fp32_precision) {
     return false;
 }
 
 bool use_mkldnn_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
-    const Tensor& result) {
+    const Tensor& result,
+    std::optional<at::Float32Precision> fp32_precision) {
     return false;
 }
 
-bool use_mkldnn_reduced_f32_matmul() {
+bool use_mkldnn_reduced_f32_matmul(std::optional<at::Float32Precision> fp32_precision) {
     return false;
 }
 
@@ -92,7 +96,8 @@ void mkldnn_matmul_i8i8i32(
 bool use_mkldnn_tf32_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
-    const Tensor& result) {
+    const Tensor& result,
+    std::optional<at::Float32Precision> fp32_precision) {
     return false;
 }
 
@@ -114,14 +119,19 @@ static bool use_mkldnn_fp16_matmul() {
   return at::globalContext().userEnabledMkldnn() && mkldnn_fp16_device_check();
 }
 
-static bool use_mkldnn_bf32_matmul() {
-  return use_mkldnn_bf16_matmul() && at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::BF16;
+static at::Float32Precision mkldnn_fp32_matmul_precision(std::optional<at::Float32Precision> fp32_precision) {
+  return fp32_precision ? *fp32_precision
+                        : at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL);
+}
+
+static bool use_mkldnn_bf32_matmul(std::optional<at::Float32Precision> fp32_precision = std::nullopt) {
+  return use_mkldnn_bf16_matmul() && mkldnn_fp32_matmul_precision(fp32_precision) == at::Float32Precision::BF16;
 }
 
 
-static bool use_mkldnn_tf32_matmul() {
+static bool use_mkldnn_tf32_matmul(std::optional<at::Float32Precision> fp32_precision = std::nullopt) {
 #if defined(__x86_64__) || defined(_M_X64)
-    return cpuinfo_has_x86_amx_fp16() && at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::TF32;
+    return cpuinfo_has_x86_amx_fp16() && mkldnn_fp32_matmul_precision(fp32_precision) == at::Float32Precision::TF32;
 #else
     return false;  // TF32 not supported on power system
 #endif
@@ -160,15 +170,15 @@ mkldnn_gemm(
     const scalar_t *a_data, int64_t lda,
     const scalar_t *b_data, int64_t ldb,
     float beta,
-    scalar_t *c_data, int64_t ldc) {
+    scalar_t *c_data, int64_t ldc,
+    std::optional<at::Float32Precision> fp32_precision = std::nullopt) {
   bool bf16_usable = std::is_same_v<scalar_t, c10::BFloat16> && use_mkldnn_bf16_matmul();
   bool fp16_usable = std::is_same_v<scalar_t, c10::Half> && use_mkldnn_fp16_matmul();
-  bool bf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_bf32_matmul();
-  bool tf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_tf32_matmul();
-  // An explicitly requested reduced FP32 precision (compute_mode) must be
+  bool bf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_bf32_matmul(fp32_precision);
+  bool tf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_tf32_matmul(fp32_precision);
+  // A reduced FP32 precision requested for this call (compute_mode) must be
   // honored, so it skips the size heuristic.
-  bool explicit_reduced_f32 = (bf32_usable || tf32_usable) &&
-      MatmulFloat32PrecisionGuard::get().has_value();
+  bool explicit_reduced_f32 = (bf32_usable || tf32_usable) && fp32_precision.has_value();
   if ( !(bf16_usable || fp16_usable || bf32_usable || tf32_usable) ||
       (m * n * k <= 16 * 16 * 16 && !explicit_reduced_f32) || (alpha == 0.0f)) {
     return false;
@@ -334,8 +344,9 @@ bool mkldnn_reduced_f32_gemm(
     const float *a, int64_t lda,
     const float *b, int64_t ldb,
     float beta,
-    float *c, int64_t ldc){
-      return mkldnn_gemm<float>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+    float *c, int64_t ldc,
+    std::optional<at::Float32Precision> fp32_precision){
+      return mkldnn_gemm<float>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc, fp32_precision);
     }
 
 void mkldnn_matmul(
@@ -343,7 +354,8 @@ void mkldnn_matmul(
     const Tensor &mat2,
     const Tensor &result,
     float beta,
-    float alpha) {
+    float alpha,
+    std::optional<at::Float32Precision> fp32_precision) {
   TORCH_CHECK((mat1.dim() == 2 && mat2.dim() == 2) || // aten::addmm
               (mat1.dim() == 3 && mat2.dim() == 3) || // aten::bmm, aten::baddbmm
               (mat1.dim() == 2 && mat2.dim() == 1) || // aten::mv
@@ -396,8 +408,8 @@ void mkldnn_matmul(
   auto mat1_unsqueezed = mat1.dim() == 1 ? mat1.unsqueeze(0) : mat1;
   auto mat2_unsqueezed = mat2.dim() == 1 ? mat2.unsqueeze(1) : mat2;
   auto result_unsqueezed = result.dim() == 1 ? result.unsqueeze(1) : result;
-  bool bf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_bf32_matmul();
-  bool tf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_tf32_matmul();
+  bool bf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_bf32_matmul(fp32_precision);
+  bool tf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_tf32_matmul(fp32_precision);
 
   ideep::attr_t op_attr;
   // "addmm", "addbmm" "baddbmm" in pytorch allow bias to be 2-D or 3-D tensor
@@ -512,9 +524,10 @@ bool use_mkldnn_fp16_matmul(
 bool use_mkldnn_bf32_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
-    const Tensor& result) {
+    const Tensor& result,
+    std::optional<at::Float32Precision> fp32_precision) {
   return (
-      use_mkldnn_bf32_matmul() && mat1.scalar_type() == kFloat &&
+      use_mkldnn_bf32_matmul(fp32_precision) && mat1.scalar_type() == kFloat &&
       mat2.scalar_type() == kFloat &&
       (!result.defined() || result.scalar_type() == kFloat) &&
       mat1.numel() != 0 && mat2.numel() != 0 && checksize(mat1, mat2));
@@ -523,9 +536,10 @@ bool use_mkldnn_bf32_matmul(
 bool use_mkldnn_tf32_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
-    const Tensor& result) {
+    const Tensor& result,
+    std::optional<at::Float32Precision> fp32_precision) {
   return (
-      use_mkldnn_tf32_matmul() && mat1.scalar_type() == kFloat &&
+      use_mkldnn_tf32_matmul(fp32_precision) && mat1.scalar_type() == kFloat &&
       mat2.scalar_type() == kFloat &&
       (!result.defined() || result.scalar_type() == kFloat) &&
       mat1.numel() != 0 && mat2.numel() != 0 && checksize(mat1, mat2));
@@ -534,16 +548,17 @@ bool use_mkldnn_tf32_matmul(
 bool use_mkldnn_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
-    const Tensor& result) {
+    const Tensor& result,
+    std::optional<at::Float32Precision> fp32_precision) {
   return (
       use_mkldnn_bf16_matmul(mat1, mat2, result) ||
       use_mkldnn_fp16_matmul(mat1, mat2, result) ||
-      use_mkldnn_bf32_matmul(mat1, mat2, result) ||
-      use_mkldnn_tf32_matmul(mat1, mat2, result));
+      use_mkldnn_bf32_matmul(mat1, mat2, result, fp32_precision) ||
+      use_mkldnn_tf32_matmul(mat1, mat2, result, fp32_precision));
 }
 
-bool use_mkldnn_reduced_f32_matmul() {
-  return use_mkldnn_bf32_matmul() || use_mkldnn_tf32_matmul();
+bool use_mkldnn_reduced_f32_matmul(std::optional<at::Float32Precision> fp32_precision) {
+  return use_mkldnn_bf32_matmul(fp32_precision) || use_mkldnn_tf32_matmul(fp32_precision);
 }
 
 static void _mkldnn_matmul_i8i8i32_with_primitive(

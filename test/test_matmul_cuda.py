@@ -434,13 +434,35 @@ class TestMatmulCuda(InductorTestCase):
         if torch.equal(ieee, tf32):
             self.skipTest("TF32 does not change matmul results on this device")
 
-    def test_compute_mode_matches_global_precision(self, device):
+    @blas_library_context("cublas")
+    def test_compute_mode_matches_global_precision_cublas(self, device):
+        self._test_compute_mode_matches_global_precision(device)
+
+    @blas_library_context("cublaslt")
+    def test_compute_mode_matches_global_precision_cublaslt(self, device):
+        self._test_compute_mode_matches_global_precision(device)
+
+    def _test_compute_mode_matches_global_precision(self, device):
         self._skip_unless_tf32_in_effect(device)
-        for name, op, args in self._compute_mode_cases(device):
-            for mode in self._compute_modes():
-                with self.subTest(op=name, compute_mode=mode):
+        complex_cases = [
+            (name, op, [a.to(torch.cfloat) for a in args])
+            for name, op, args in self._compute_mode_cases(device)
+        ]
+        for name, op, args in self._compute_mode_cases(device) + tuple(complex_cases):
+            modes = self._compute_modes()
+            if args[0].is_complex():
+                modes = ("ieee", "tf32")
+            for mode in modes:
+                with self.subTest(op=name, dtype=args[0].dtype, compute_mode=mode):
                     torch.backends.cuda.matmul.fp32_precision = mode
-                    expected = op(*args)
+                    # With the global setting, cuBLASLt ignores TF32 for
+                    # complex64; compute_mode uses cuBLAS to honor it.
+                    with (
+                        blas_library_context("cublas")
+                        if args[0].is_complex() and mode == "tf32"
+                        else contextlib.nullcontext()
+                    ):
+                        expected = op(*args)
                     # The per-call mode must win over a different global setting,
                     # and leave the global setting untouched.
                     other = "tf32" if mode == "ieee" else "ieee"
@@ -451,6 +473,11 @@ class TestMatmulCuda(InductorTestCase):
                     out = torch.empty_like(actual)
                     op(*args, compute_mode=mode, out=out)
                     self.assertEqual(out, expected, atol=0, rtol=0)
+                    # The global setting applies again to the next call.
+                    if not args[0].is_complex():
+                        self.assertEqual(
+                            op(*args), op(*args, compute_mode=other), atol=0, rtol=0
+                        )
 
     def test_compute_mode_backward(self, device):
         self._skip_unless_tf32_in_effect(device)
@@ -526,6 +553,8 @@ class TestMatmulCuda(InductorTestCase):
         a3 = torch.randn(2, 4, 4, device=device)
         with self.assertRaisesRegex(ValueError, "unknown compute_mode 'fast'"):
             torch.mm(a, a, compute_mode="fast")
+        with self.assertRaisesRegex(ValueError, "unknown compute_mode 'fast'"):
+            torch.mm(a.to("meta"), a.to("meta"), compute_mode="fast")
         # Unlike the global setting, an explicit mode the kernel cannot run
         # raises instead of falling back to IEEE.
         with self.assertRaisesRegex(RuntimeError, "'bf16' is not supported on CUDA"):
