@@ -20,21 +20,29 @@ _compiled_cache_lock = threading.Lock()
 
 
 class LazyFlyDSLLauncher:
-    """Build a generated FlyDSL JIT launcher once per Python module."""
+    """Build generated FlyDSL JIT launchers once per process and device."""
 
     def __init__(self, factory: Callable[[], Any]) -> None:
         self._factory = factory
-        self._launcher: Any | None = None
+        self._launchers: dict[tuple[int, str | None, int | None], Any] = {}
         self._lock = threading.Lock()
 
-    def get(self) -> Any:
-        launcher = self._launcher
+    def get(self, device: Any = None) -> Any:
+        device = getattr(device, "device", device)
+        device_type = getattr(device, "type", None)
+        device_index = getattr(device, "index", None)
+        if device_type == "cuda" and device_index is None:
+            import torch
+
+            device_index = torch.cuda.current_device()
+        key = (os.getpid(), device_type, device_index)
+        launcher = self._launchers.get(key)
         if launcher is None:
             with self._lock:
-                launcher = self._launcher
+                launcher = self._launchers.get(key)
                 if launcher is None:
                     launcher = self._factory()
-                    self._launcher = launcher
+                    self._launchers[key] = launcher
         return launcher
 
 

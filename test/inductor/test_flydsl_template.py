@@ -604,12 +604,18 @@ class TestFlyDSLTemplate(TestCase):
         compiled.assert_called_once()
 
     def test_lazy_template_launcher(self):
-        launcher = object()
-        factory = mock.Mock(return_value=launcher)
+        launchers = [object(), object(), object()]
+        factory = mock.Mock(side_effect=launchers)
         lazy_launcher = LazyFlyDSLLauncher(factory)
-        self.assertIs(lazy_launcher.get(), launcher)
-        self.assertIs(lazy_launcher.get(), launcher)
-        factory.assert_called_once()
+        device_0 = SimpleNamespace(type="cuda", index=0)
+        device_1 = SimpleNamespace(type="cuda", index=1)
+        with mock.patch("os.getpid", return_value=100):
+            self.assertIs(lazy_launcher.get(device_0), launchers[0])
+            self.assertIs(lazy_launcher.get(device_0), launchers[0])
+            self.assertIs(lazy_launcher.get(device_1), launchers[1])
+        with mock.patch("os.getpid", return_value=101):
+            self.assertIs(lazy_launcher.get(device_0), launchers[2])
+        self.assertEqual(factory.call_count, 3)
 
     @parametrize("compile_only", (False, True))
     def test_run_flydsl_template(self, compile_only):

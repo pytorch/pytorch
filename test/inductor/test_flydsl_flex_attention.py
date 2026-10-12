@@ -167,6 +167,7 @@ def _evaluate_mask_program(program, b, h, q, kv):
                 "mul": operator.mul,
                 "remainder": operator.mod,
                 "ge": operator.ge,
+                "gt": operator.gt,
                 "lt": operator.lt,
                 "eq": operator.eq,
                 "and": operator.and_,
@@ -531,19 +532,39 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
         )
 
         cases = (
-            ((), 0, MASK_TRAVERSAL_UNMASKED, None),
-            ((("ge", 2, 3),), 4, MASK_TRAVERSAL_DIRECT_RANGE, DIRECT_RANGE_CAUSAL),
+            ((), 0, True, MASK_TRAVERSAL_UNMASKED, None),
+            (
+                (("ge", 2, 3),),
+                4,
+                True,
+                MASK_TRAVERSAL_DIRECT_RANGE,
+                DIRECT_RANGE_CAUSAL,
+            ),
+            ((), 0, False, MASK_TRAVERSAL_BLOCK_LIST, None),
+            (
+                (("ge", 2, 3),),
+                4,
+                False,
+                MASK_TRAVERSAL_BLOCK_LIST,
+                None,
+            ),
             (
                 (("const_i32", 96), ("sub", 2, 3), ("lt", 5, 4)),
                 6,
+                True,
                 MASK_TRAVERSAL_BLOCK_LIST,
                 None,
             ),
         )
-        for instructions, output, traversal, kind in cases:
+        for instructions, output, block_mask_is_dense, traversal, kind in cases:
             with self.subTest(instructions=instructions):
                 self.assertEqual(
-                    classify_mask_traversal(instructions, output, sequence_length=256),
+                    classify_mask_traversal(
+                        instructions,
+                        output,
+                        sequence_length=256,
+                        block_mask_is_dense=block_mask_is_dense,
+                    ),
                     (traversal, kind),
                 )
 
@@ -767,6 +788,17 @@ class TestFlyDSLFlexAttentionLowering(TestCase):
         program, reason = lower_flydsl_mask_graph(graph_module, ())
         self.assertIsNone(program)
         self.assertIn("scalar constant -0.5 is unsupported", reason)
+
+    def test_mask_lowering_full_constant_respects_dtype(self):
+        program, reason = lower_flydsl_mask_graph(
+            _mask_graph(
+                lambda b, h, q, kv: q
+                > torch.full((), 3, dtype=torch.bool, device=q.device)
+            ),
+            (),
+        )
+        self.assertIsNotNone(program, reason)
+        self.assertTrue(_evaluate_mask_program(program, 0, 0, 2, 0))
 
     @parametrize(
         "mask_mod,q,kv,expected",
@@ -1018,6 +1050,36 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
             value,
             block_mask=block_mask,
             dq_accum_fp32=dq_accum_fp32,
+        )
+
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_gfx950_backward_respects_block_mask_metadata(self, device):
+        self._require_runtime()
+        query, key, value = _make_qkv(device=device, seed=25)
+        kv_num_blocks = torch.tensor([[[0, 1]]], device=device, dtype=torch.int32)
+        kv_indices = torch.tensor([[[[0], [1]]]], device=device, dtype=torch.int32)
+        full_kv_num_blocks = torch.zeros_like(kv_num_blocks)
+        full_kv_indices = torch.zeros_like(kv_indices)
+
+        def causal(b, h, q, kv):
+            return q >= kv
+
+        block_mask = BlockMask.from_kv_blocks(
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            BLOCK_SIZE=128,
+            mask_mod=causal,
+            seq_lengths=(256, 256),
+            compute_q_blocks=False,
+        )
+        self._compare_backward(
+            query,
+            key,
+            value,
+            block_mask=block_mask,
+            dq_accum_fp32=True,
         )
 
     @parametrize(

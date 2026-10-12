@@ -75,7 +75,7 @@ def _run_flydsl_forward(
         stream,
     )
     run_flydsl_template(
-        _launcher.get(),
+        _launcher.get(query.device),
         dispatch_args,
         compiler=flyc.compile,
         tensor_converter=flyc.from_torch_tensor,

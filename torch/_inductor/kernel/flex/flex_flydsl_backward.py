@@ -64,6 +64,7 @@ def _get_flydsl_flex_attention_backward_config(
     sparse_q_block_size: int | None = None,
     sparse_kv_block_size: int | None = None,
     dq_accum_fp32: bool = True,
+    block_mask_is_dense: bool = False,
 ) -> tuple[dict[str, Any] | None, str]:
     score_mod_other_buffers = score_mod_other_buffers or ()
     mask_mod_other_buffers = mask_mod_other_buffers or ()
@@ -197,6 +198,7 @@ def _get_flydsl_flex_attention_backward_config(
             "BLOCK_MASK_HEADS": mask_heads,
             "MAX_PARTIAL_BLOCKS": max_partial_blocks,
             "MAX_FULL_BLOCKS": max_full_blocks,
+            "BLOCK_MASK_IS_DENSE": block_mask_is_dense,
             **mask_config,
             **common_config,
             "SM_SCALE": scale_value,
@@ -243,11 +245,12 @@ def create_flydsl_flex_attention_backward_kernel(
     if fw_subgraph is None or mask_graph is None:
         raise AssertionError("FlyDSL backward requires the original mod graphs")
 
-    if (
+    block_mask_is_dense = (
         sparse_q_block_size == _LARGE_SPARSE_BLOCK_SIZE
         and sparse_kv_block_size == _LARGE_SPARSE_BLOCK_SIZE
         and is_trivial_mask_graph(mask_graph.graph_module)
-    ):
+    )
+    if block_mask_is_dense:
         (
             kv_num_blocks,
             kv_indices,
@@ -305,6 +308,7 @@ def create_flydsl_flex_attention_backward_kernel(
         sparse_q_block_size=sparse_q_block_size,
         sparse_kv_block_size=sparse_kv_block_size,
         dq_accum_fp32=dq_accum_fp32,
+        block_mask_is_dense=block_mask_is_dense,
     )
     if config is None:
         return None
@@ -353,6 +357,7 @@ def create_flydsl_flex_attention_backward_kernel(
         config["MASK_PROGRAM_OUTPUT"],
         config["MASK_BUFFER_SHAPES"],
         sequence_length=s,
+        block_mask_is_dense=config["BLOCK_MASK_IS_DENSE"],
     )
     key_rows = 128 if traversal == MASK_TRAVERSAL_BLOCK_LIST else 192
     config["DQ_ACCUM_FP32"] = dq_accum_fp32

@@ -51,6 +51,7 @@ def build_flex_attn_bwd_module(
     mask_program_output=0,
     mask_buffer_shapes=(),
     mask_buffer_strides=(),
+    block_mask_is_dense=False,
     q_stride=None,
     k_stride=None,
     v_stride=None,
@@ -101,6 +102,7 @@ def build_flex_attn_bwd_module(
         mask_program_output,
         mask_buffer_shapes,
         sequence_length=sequence_length,
+        block_mask_is_dense=block_mask_is_dense,
     )
     mask_buffer_count = len(mask_buffer_shapes)
     if mask_traversal not in (

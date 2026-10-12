@@ -158,13 +158,20 @@ def classify_mask_traversal(
     mask_buffer_shapes=(),
     *,
     sequence_length=None,
+    block_mask_is_dense=False,
 ):
     """Return ``(traversal, direct_range_kind)`` for a lowered mask.
 
     This intentionally recognizes capabilities rather than Python function
     names.  Unsupported or ambiguous expressions conservatively use the
-    BlockMask work-list traversal.
+    BlockMask work-list traversal.  Mask expressions alone cannot prove that
+    user-provided BlockMask metadata contains every block allowed by the
+    expression, so direct traversal is safe only for metadata synthesized as
+    dense by this backend.
     """
+
+    if not block_mask_is_dense:
+        return MASK_TRAVERSAL_BLOCK_LIST, None
 
     mask_program = tuple(mask_program)
     if not mask_program and not mask_buffer_shapes:

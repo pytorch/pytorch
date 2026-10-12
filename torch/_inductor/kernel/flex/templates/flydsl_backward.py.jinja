@@ -30,6 +30,7 @@ _launcher = LazyFlyDSLLauncher(
         mask_program_output=MASK_PROGRAM_OUTPUT,
         mask_buffer_shapes=MASK_BUFFER_SHAPES,
         mask_buffer_strides=MASK_BUFFER_STRIDES,
+        block_mask_is_dense=BLOCK_MASK_IS_DENSE,
         q_stride=Q_STRIDE,
         k_stride=K_STRIDE,
         v_stride=V_STRIDE,
@@ -99,7 +100,7 @@ def _run_flydsl_backward(
         stream,
     )
     run_flydsl_template(
-        _launcher.get(),
+        _launcher.get(query.device),
         dispatch_args,
         compiler=flyc.compile,
         tensor_converter=flyc.from_torch_tensor,
