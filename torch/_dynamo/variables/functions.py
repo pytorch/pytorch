@@ -5139,18 +5139,14 @@ class BoundBuiltinMethodVariable(VariableTracker):
             # METH_STATIC functions are already bound, e.g. tuple.__new__.
             codegen.append_output(load_descriptor)
             return
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [load_descriptor, *codegen.create_load_attrs("__get__")]
-            )
-        )
+        codegen.extend_output([load_descriptor, *codegen.create_load_attrs("__get__")])
         if isinstance(descriptor, types.ClassMethodDescriptorType):
             codegen.append_output(codegen.create_load_const(None))
             codegen(self.obj)
-            codegen.extend_output(create_call_function(2, False))
+            codegen.extend_output(create_call_function(2, True))
         else:
             codegen(self.obj)
-            codegen.extend_output(create_call_function(1, False))
+            codegen.extend_output(create_call_function(1, True))
 
 
 class ClassMethodDescriptorVariable(DescriptorVariable):
