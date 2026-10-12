@@ -47,9 +47,7 @@ def get_generator_seed_for_device_type(device_type: str):
     return _get_seed(device_type)
 
 
-class DistTensorRandomInitTest(DTensorTestBase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
+class _DistTensorRandomInitTestMixin:
     def _run_init_op(self, init_op, device_type, *args, **kwargs):
         device_mesh = init_device_mesh(device_type, (self.world_size,))
         shard_spec = [Shard(0)]
@@ -84,8 +82,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
             check_shards_differ(dtensor.full_tensor())
 
-    @with_comms
-    def test_init_ops(self, device):
+    def _test_init_ops(self, device):
         device_type = torch.device(device).type
         self._run_init_op(
             torch.nn.init.kaiming_uniform_,
@@ -107,8 +104,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
                 torch.randint_like, device_type, low=0, high=100, dtype=dtype
             )
 
-    @with_comms
-    def test_multinomial_sharded(self, device):
+    def _test_multinomial_sharded(self, device):
         """Test multinomial with sharded batch dimension."""
         device_type = torch.device(device).type
         device_mesh = init_device_mesh(device_type, (self.world_size,))
@@ -136,6 +132,18 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertEqual(result_last.shape, torch.Size([8, 2]))
         # Output should be Replicate since input was redistributed to Replicate
         self.assertEqual(result_last.placements, (Replicate(),))
+
+
+class DistTensorRandomInitTest(_DistTensorRandomInitTestMixin, DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @with_comms
+    def test_init_ops(self, device):
+        self._test_init_ops(device)
+
+    @with_comms
+    def test_multinomial_sharded(self, device):
+        self._test_multinomial_sharded(device)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -384,6 +392,18 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertEqual(captured_specs[0].stride, (8, 1))
 
 
+class DistTensorRandomInitCPUTest(_DistTensorRandomInitTestMixin, DTensorTestBase):
+    hw_classification = HardwareClassification.CPU
+
+    @with_comms
+    def test_init_ops(self, device):
+        self._test_init_ops(device)
+
+    @with_comms
+    def test_multinomial_sharded(self, device):
+        self._test_multinomial_sharded(device)
+
+
 class DistTensorRandomOpTest(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -600,10 +620,10 @@ class DistTensorRandomOpTest(DTensorTestBase):
             compute_rankwise_if_local_tensor(local_tensor, self.rank)
 
     @with_comms
-    @skip_unless_torch_gpu
-    def test_deterministic_multinomial_1d(self):
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        probs = torch.ones(self.world_size, 64, device=self.device_type)
+    def test_deterministic_multinomial_1d(self, device):
+        device_type = torch.device(device).type
+        device_mesh = DeviceMesh(device_type, torch.arange(self.world_size))
+        probs = torch.ones(self.world_size, 64, device=device_type)
 
         @maybe_run_for_local_tensor
         def check_chunks(tensor, equal):
@@ -1149,6 +1169,10 @@ DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomInitTest,
 )
 
+DistTensorRandomInitCPUTestWithLocalTensor = create_local_tensor_test_class(
+    DistTensorRandomInitCPUTest,
+)
+
 DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomOpTest,
     skipped_tests=[
@@ -1169,6 +1193,11 @@ instantiate_device_type_tests(
     globals(),
     except_for=["cpu"],
     allow_xpu=True,
+)
+instantiate_device_type_tests(
+    DistTensorRandomInitCPUTest,
+    globals(),
+    only_for=["cpu"],
 )
 instantiate_device_type_tests(
     DistTensorRandomOpTest,
@@ -1193,6 +1222,11 @@ instantiate_device_type_tests(
     globals(),
     except_for=["cpu"],
     allow_xpu=True,
+)
+instantiate_device_type_tests(
+    DistTensorRandomInitCPUTestWithLocalTensor,
+    globals(),
+    only_for=["cpu"],
 )
 instantiate_device_type_tests(
     DistTensorRandomOpTestWithLocalTensor,

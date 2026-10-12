@@ -809,6 +809,16 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             backend = self.backend
 
         if not dist.is_backend_available(backend):
+            if ":" in backend:
+                backend_names = (
+                    dist.BackendConfig(dist.Backend(backend))
+                    .get_device_backend_map()
+                    .values()
+                )
+            else:
+                backend_names = [dist.Backend(backend)]
+            if any(name not in dist.Backend.backend_list for name in backend_names):
+                raise RuntimeError(f"Backend {backend} not supported!")
             sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
 
         is_accelerator_test = self.device_type != "cpu"
