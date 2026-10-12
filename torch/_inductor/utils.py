@@ -3200,7 +3200,9 @@ def use_nv_universal_gemm_template(
 
     from .virtualized import V
 
-    if V.aot_compilation:
+    # NVGEMM kernels are launched from the Python wrapper only (see
+    # CuteDSLTemplate.maybe_append_choice for the same gate).
+    if V.aot_compilation or getattr(V.graph, "cpp_wrapper", False):
         return False
 
     if layout.device.type != "cuda" or torch.version.hip:
