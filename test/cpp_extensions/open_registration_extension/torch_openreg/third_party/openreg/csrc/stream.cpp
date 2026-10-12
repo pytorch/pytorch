@@ -2,10 +2,17 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstring>
 #include <mutex>
 #include <queue>
 #include <set>
+#include <sstream>
 #include <thread>
+
+#include <fcntl.h>
+#include <semaphore.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 static std::mutex g_mutex;
 static std::once_flag g_flag;
@@ -24,6 +31,28 @@ struct orEventImpl {
   int device_index = -1;
   bool timing_enabled{false};
   std::chrono::high_resolution_clock::time_point completion_time;
+
+  // Set once this event has been shared across processes via
+  // orEventIpcGetHandle/orEventIpcOpenHandle. The semaphore lives in a POSIX
+  // shared-memory segment, so synchronize() can block on it directly instead
+  // of on `cv`, which cannot be signaled across process boundaries.
+  sem_t* ipc_sem = nullptr;
+  // Only the exporter owns the shared-memory segment's name and is
+  // responsible for unlinking it.
+  std::string ipc_shm_name;
+
+  orEventImpl() = default;
+  orEventImpl(const orEventImpl&) = delete;
+  orEventImpl& operator=(const orEventImpl&) = delete;
+
+  ~orEventImpl() {
+    if (ipc_sem) {
+      munmap(static_cast<void*>(ipc_sem), sizeof(sem_t));
+    }
+    if (!ipc_shm_name.empty()) {
+      shm_unlink(ipc_shm_name.c_str());
+    }
+  }
 };
 
 struct orEvent {
@@ -129,6 +158,10 @@ orError_t orEventRecord(orEvent_t event, orStream_t stream) {
     }
 
     event_impl->cv.notify_all();
+
+    if (event_impl->ipc_sem) {
+      sem_post(event_impl->ipc_sem);
+    }
   };
 
   return openreg::addTaskToStream(stream, record_task);
@@ -139,6 +172,13 @@ orError_t orEventSynchronize(orEvent_t event) {
     return orErrorUnknown;
 
   auto event_impl = event->impl;
+  if (event_impl->ipc_sem) {
+    // A condition_variable cannot be signaled across process boundaries, so
+    // IPC events are synchronized through a shared POSIX semaphore instead.
+    sem_wait(event_impl->ipc_sem);
+    return orSuccess;
+  }
+
   std::unique_lock<std::mutex> lock(event_impl->mtx);
   event_impl->cv.wait(lock, [&] { return event_impl->completed.load(); });
 
@@ -176,6 +216,87 @@ orError_t orEventElapsedTime(float* ms, orEvent_t start, orEvent_t end) {
             duration)
             .count();
 
+  return orSuccess;
+}
+
+orError_t orEventIpcGetHandle(orIpcEventHandle_t* handle, orEvent_t event) {
+  if (!handle || !event)
+    return orErrorUnknown;
+
+  auto event_impl = event->impl;
+  std::lock_guard<std::mutex> lock(event_impl->mtx);
+
+  if (!event_impl->ipc_sem) {
+    // Back this event with a named shared-memory semaphore so another
+    // process can wait on it via orEventIpcOpenHandle.
+    static std::atomic<uint64_t> ipc_event_counter{0};
+    std::ostringstream name_stream;
+    name_stream << "/or_event_" << getpid() << "_"
+                << ipc_event_counter.fetch_add(1);
+    std::string shm_name = name_stream.str();
+
+    int fd = shm_open(shm_name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
+    if (fd < 0)
+      return orErrorUnknown;
+
+    if (ftruncate(fd, sizeof(sem_t)) != 0) {
+      close(fd);
+      shm_unlink(shm_name.c_str());
+      return orErrorUnknown;
+    }
+
+    void* addr = mmap(
+        nullptr, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (addr == MAP_FAILED) {
+      shm_unlink(shm_name.c_str());
+      return orErrorUnknown;
+    }
+
+    auto* sem = static_cast<sem_t*>(addr);
+    if (sem_init(sem, /*pshared=*/1, 0) != 0) {
+      munmap(addr, sizeof(sem_t));
+      shm_unlink(shm_name.c_str());
+      return orErrorUnknown;
+    }
+
+    event_impl->ipc_sem = sem;
+    event_impl->ipc_shm_name = shm_name;
+  }
+
+  std::memset(handle->reserved, 0, OR_IPC_HANDLE_SIZE);
+  std::strncpy(
+      handle->reserved, event_impl->ipc_shm_name.c_str(),
+      OR_IPC_HANDLE_SIZE - 1);
+  return orSuccess;
+}
+
+orError_t orEventIpcOpenHandle(orEvent_t* event, orIpcEventHandle_t handle) {
+  if (!event)
+    return orErrorUnknown;
+
+  // Ensure the shared-memory name is null-terminated regardless of handle
+  // contents received from another process.
+  char shm_name[OR_IPC_HANDLE_SIZE + 1] = {};
+  std::memcpy(shm_name, handle.reserved, OR_IPC_HANDLE_SIZE);
+
+  int fd = shm_open(shm_name, O_RDWR, 0600);
+  if (fd < 0)
+    return orErrorUnknown;
+
+  void* addr =
+      mmap(nullptr, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  close(fd);
+  if (addr == MAP_FAILED)
+    return orErrorUnknown;
+
+  auto impl = std::make_shared<orEventImpl>();
+  orGetDevice(&(impl->device_index));
+  impl->ipc_sem = static_cast<sem_t*>(addr);
+  // The importer maps the exporter's segment but does not own its name, so
+  // it must not unlink it.
+
+  *event = new orEvent{std::move(impl)};
   return orSuccess;
 }
 
