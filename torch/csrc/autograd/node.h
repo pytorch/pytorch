@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/utils/python_stub.h>
 
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/SequenceNumber.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/record_function.h>
