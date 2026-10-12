@@ -19908,7 +19908,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         act = compiled_conv(x)
         act_grad = torch.autograd.grad(act, list(compiled_conv.parameters()), grad_out)
 
-        self.assertEqual((act, act_grad), (ref, ref_grad), atol=1e-3, rtol=1e-3, equal_nan=False)
+        self.assertEqual(
+            (act, act_grad), (ref, ref_grad), atol=1e-3, rtol=1e-3, equal_nan=False
+        )
 
     @xfail_if_mps  # MPS codegen does not emit ReductionHint.OUTER
     def test_inner_reduction_detection(self):
