@@ -119,9 +119,7 @@ class TestTorchbindAOTIDevice(TestCase):
         self.assertEqual(loader.get_custom_objs(), {})
 
 
-instantiate_device_type_tests(
-    TestTorchbindAOTIDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
-)
+instantiate_device_type_tests(TestTorchbindAOTIDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

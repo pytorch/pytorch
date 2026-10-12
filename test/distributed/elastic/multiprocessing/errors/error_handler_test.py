@@ -6,7 +6,6 @@ import json
 import os
 import shutil
 import tempfile
-import unittest
 from unittest.mock import patch
 
 from torch.distributed.elastic.multiprocessing.errors import (
@@ -14,18 +13,27 @@ from torch.distributed.elastic.multiprocessing.errors import (
 )
 from torch.distributed.elastic.multiprocessing.errors.error_handler import ErrorHandler
 from torch.distributed.elastic.multiprocessing.errors.handlers import get_error_handler
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def raise_exception_fn():
     raise RuntimeError("foobar")
 
 
-class GetErrorHandlerTest(unittest.TestCase):
+class GetErrorHandlerTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_get_error_handler(self):
         self.assertTrue(isinstance(get_error_handler(), ErrorHandler))
 
 
-class ErrorHandlerTest(unittest.TestCase):
+class ErrorHandlerTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
@@ -156,3 +164,7 @@ class ErrorHandlerTest(unittest.TestCase):
         with patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": dst_error_file}):
             eh.dump_error_file(src_error_file)
             self.assertTrue(filecmp.cmp(src_error_file, dst_error_file))
+
+
+if __name__ == "__main__":
+    run_tests()
