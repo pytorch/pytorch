@@ -25,6 +25,177 @@ bool use_lru = false;
 #else
 bool use_lru = true;
 #endif
+
+ExtraState* get_extra_state(PyCodeObject* code) {
+  ExtraState* extra = nullptr;
+  _PyCode_GetExtra((PyObject*)code, extra_index, (void**)&extra);
+  return extra;
+}
+
+ExtraState* get_or_init_extra_state(PyCodeObject* code) {
+  ExtraState* extra_state = get_extra_state(code);
+  if (extra_state != nullptr) {
+    return extra_state;
+  }
+  extra_state = new ExtraState(code);
+  NULL_CHECK(extra_state);
+  _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
+  // freed by destroy_extra_state (since we need to pass these objects to C)
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+  return extra_state;
+}
+
+// The region's own bucket, then the default bucket, matching lookup order.
+template <typename Fn>
+void for_each_bucket(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id,
+    Fn&& fn) {
+  int64_t ids_to_search[] = {isolate_recompiles_id, -1};
+  int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
+  for (int i = 0; i < num_ids; i++) {
+    auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
+    if (it != extra_state->cache_entry_map.end()) {
+      fn(ids_to_search[i], it->second);
+    }
+  }
+}
+
+FrameExecStrategy get_region_exec_strategy(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id) {
+  if (isolate_recompiles_id < 0) {
+    return extra_state->strategy;
+  }
+  FrameExecStrategy result{DEFAULT, DEFAULT};
+  auto it = extra_state->region_strategy_map.find(isolate_recompiles_id);
+  if (it != extra_state->region_strategy_map.end()) {
+    result = it->second;
+  }
+  // Isolated regions inherit SKIP from the global strategy (deliberate
+  // "do not trace" marks from skip_code / @torch._dynamo.skip / FX
+  // plumbing / TorchScript __init__ / etc.) but do NOT inherit
+  // RUN_ONLY, which can only come from a prior non-isolated
+  // recompile-limit hit and would otherwise poison every new region.
+  FrameExecStrategy global = extra_state->strategy;
+  if (global.cur_action == FrameAction::SKIP) {
+    result.cur_action = FrameAction::SKIP;
+  }
+  if (global.recursive_action == FrameAction::SKIP) {
+    result.recursive_action = FrameAction::SKIP;
+  }
+  return result;
+}
+
+void set_region_exec_strategy(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id,
+    FrameExecStrategy strategy) {
+  if (isolate_recompiles_id < 0) {
+    extra_state->strategy = strategy;
+  } else {
+    extra_state->region_strategy_map[isolate_recompiles_id] = strategy;
+  }
+}
+
+bool backend_match(PyObject* saved_backend, PyObject* backend) {
+  // Pointer equality check for common case
+  if (saved_backend != backend) {
+    int result = PyObject_RichCompareBool(saved_backend, backend, Py_EQ);
+    // Check for exception
+    if (result == -1) {
+      PyErr_Clear();
+      return false;
+    }
+    return (result == 1);
+  }
+  return true;
+}
+
+bool cache_entry_has_no_guards(
+    const CacheEntry& cache_entry,
+    bool is_skip_guard_eval_unsafe) {
+  if (is_skip_guard_eval_unsafe && cache_entry.diff_guard_root_mgr != nullptr) {
+    return torch::dynamo::root_guard_manager_has_no_guards(
+        cache_entry.diff_guard_root_mgr);
+  }
+  return torch::dynamo::root_guard_manager_has_no_guards(cache_entry.root_mgr);
+}
+
+// Search a region's cache list for a matching entry.
+// Returns the matching CacheEntry, or nullptr if no match.
+// Sets *guard_error = true if a guard evaluation exception occurred.
+CacheEntry* lookup_in_list(
+    std::list<CacheEntry>& entries,
+    FrameLocalsMapping* f_locals,
+    PyObject* backend,
+    bool is_skip_guard_eval_unsafe,
+    bool* guard_error,
+    PyObject** maybe_cached_code) {
+  size_t index = 0;
+  for (CacheEntry& cache_entry : entries) {
+    bool valid = Py_IsFalse(backend) ||
+        backend_match(cache_entry.backend.ptr(), backend);
+
+    if (valid) {
+      try {
+        if (is_skip_guard_eval_unsafe) {
+          valid = cache_entry_has_no_guards(
+                      cache_entry, /*is_skip_guard_eval_unsafe=*/true) ||
+              torch::dynamo::run_root_guard_manager(
+                      cache_entry.diff_guard_root_mgr, f_locals);
+        } else {
+          valid = torch::dynamo::run_root_guard_manager(
+              cache_entry.root_mgr, f_locals);
+        }
+      } catch (py::error_already_set& e) {
+        if (guard_error_hook) {
+          py::handle guard_error_hook_handle(guard_error_hook);
+          py::handle f_locals_dict = (PyObject*)f_locals->to_dict();
+          guard_error_hook_handle(
+              cache_entry.guard_manager,
+              cache_entry.code,
+              f_locals_dict,
+              index,
+              index == entries.size() - 1);
+        }
+        e.restore();
+        *maybe_cached_code = nullptr;
+        *guard_error = true;
+        return nullptr;
+      }
+    }
+    if (valid) {
+      return &cache_entry;
+    }
+    ++index;
+  }
+  return nullptr;
+}
+
+bool try_lookup_without_guard_eval_in_list(
+    std::list<CacheEntry>& entries,
+    PyObject* backend,
+    bool is_skip_guard_eval_unsafe,
+    CacheEntry** found) {
+  for (CacheEntry& cache_entry : entries) {
+    bool valid = Py_IsFalse(backend) ||
+        backend_match(cache_entry.backend.ptr(), backend);
+
+    if (valid) {
+      if (!PyCode_Check(cache_entry.code.ptr())) {
+        continue;
+      }
+      if (cache_entry_has_no_guards(cache_entry, is_skip_guard_eval_unsafe)) {
+        *found = &cache_entry;
+        return true;
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 Py_ssize_t extra_index = -1;
@@ -76,86 +247,6 @@ void ExtraState::invalidate(
   Py_DECREF(this->orig_code);
 }
 
-CacheEntry* extract_cache_entry(
-    ExtraState* extra_state,
-    int64_t isolate_recompiles_id) {
-  if (extra_state == nullptr) {
-    return nullptr;
-  }
-  // Search own bucket first, then fall back to default bucket (-1),
-  // matching lookup() behavior.
-  int64_t ids_to_search[] = {isolate_recompiles_id, -1};
-  int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
-
-  for (int i = 0; i < num_ids; i++) {
-    auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
-    if (it != extra_state->cache_entry_map.end() && !it->second.empty()) {
-      return &it->second.front();
-    }
-  }
-  return nullptr;
-}
-
-FrameState* extract_frame_state(ExtraState* extra_state) {
-  if (extra_state == nullptr) {
-    return nullptr;
-  }
-  return (FrameState*)extra_state->frame_state.ptr();
-}
-
-FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state) {
-  return extra_state->strategy;
-}
-
-void extra_state_set_exec_strategy(
-    ExtraState* extra_state,
-    FrameExecStrategy strategy) {
-  extra_state->strategy = strategy;
-}
-
-FrameExecStrategy extra_state_get_region_exec_strategy(
-    ExtraState* extra_state,
-    int64_t isolate_recompiles_id) {
-  if (isolate_recompiles_id < 0) {
-    return extra_state->strategy;
-  }
-  FrameExecStrategy result{DEFAULT, DEFAULT};
-  auto it = extra_state->region_strategy_map.find(isolate_recompiles_id);
-  if (it != extra_state->region_strategy_map.end()) {
-    result = it->second;
-  }
-  // Isolated regions inherit SKIP from the global strategy (deliberate
-  // "do not trace" marks from skip_code / @torch._dynamo.skip / FX
-  // plumbing / TorchScript __init__ / etc.) but do NOT inherit
-  // RUN_ONLY, which can only come from a prior non-isolated
-  // recompile-limit hit and would otherwise poison every new region.
-  FrameExecStrategy global = extra_state->strategy;
-  if (global.cur_action == FrameAction::SKIP) {
-    result.cur_action = FrameAction::SKIP;
-  }
-  if (global.recursive_action == FrameAction::SKIP) {
-    result.recursive_action = FrameAction::SKIP;
-  }
-  return result;
-}
-
-void extra_state_set_region_exec_strategy(
-    ExtraState* extra_state,
-    int64_t isolate_recompiles_id,
-    FrameExecStrategy strategy) {
-  if (isolate_recompiles_id < 0) {
-    extra_state->strategy = strategy;
-  } else {
-    extra_state->region_strategy_map[isolate_recompiles_id] = strategy;
-  }
-}
-
-ExtraState* get_extra_state(PyCodeObject* code) {
-  ExtraState* extra = nullptr;
-  _PyCode_GetExtra((PyObject*)code, extra_index, (void**)&extra);
-  return extra;
-}
-
 void destroy_extra_state(void* obj) {
   ExtraState* extra = (ExtraState*)obj;
   delete extra;
@@ -167,124 +258,94 @@ void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
-ExtraState* init_and_set_extra_state(PyCodeObject* code) {
-  // Invariant - Extra state should not have been set before, therefore it
-  // should be nullptr.
-  CHECK(get_extra_state(code) == nullptr);
-  ExtraState* extra_state = new ExtraState(code);
-  NULL_CHECK(extra_state);
-  set_extra_state(code, extra_state);
-  // freed by destroy_extra_state (since we need to pass these objects to C)
-  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-  return extra_state;
-}
-
-static bool backend_match(PyObject* saved_backend, PyObject* backend) {
-  // Pointer equality check for common case
-  if (saved_backend != backend) {
-    int result = PyObject_RichCompareBool(saved_backend, backend, Py_EQ);
-    // Check for exception
-    if (result == -1) {
-      PyErr_Clear();
-      return false;
-    }
-    return (result == 1);
+bool get_frame_exec_strategy(
+    PyCodeObject* code,
+    int64_t isolate_recompiles_id,
+    bool create,
+    FrameExecStrategy* strategy) {
+  ExtraState* extra_state =
+      create ? get_or_init_extra_state(code) : get_extra_state(code);
+  if (extra_state == nullptr) {
+    return false;
   }
+  *strategy = get_region_exec_strategy(extra_state, isolate_recompiles_id);
   return true;
 }
 
-static bool cache_entry_has_no_guards(
-    const CacheEntry& cache_entry,
+void set_code_exec_strategy(PyCodeObject* code, FrameExecStrategy strategy) {
+  get_or_init_extra_state(code)->strategy = strategy;
+}
+
+bool try_lookup_without_guard_eval(
+    PyCodeObject* code,
+    PyObject* backend,
+    int64_t isolate_recompiles_id,
+    PyObject** maybe_cached_code,
+    const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
-  if (is_skip_guard_eval_unsafe && cache_entry.diff_guard_root_mgr != nullptr) {
-    return torch::dynamo::root_guard_manager_has_no_guards(
-        cache_entry.diff_guard_root_mgr);
+  ExtraState* extra_state = get_extra_state(code);
+  if (extra_state == nullptr) {
+    *maybe_cached_code = Py_None;
+    return true;
   }
-  return torch::dynamo::root_guard_manager_has_no_guards(cache_entry.root_mgr);
-}
 
-// Search a region's cache list for a matching entry.
-// Returns the matching CacheEntry, or nullptr if no match.
-// Sets *guard_error = true if a guard evaluation exception occurred.
-static CacheEntry* lookup_in_list(
-    std::list<CacheEntry>& entries,
-    FrameLocalsMapping* f_locals,
-    PyObject* backend,
-    bool is_skip_guard_eval_unsafe,
-    bool* guard_error,
-    PyObject** maybe_cached_code) {
-  size_t index = 0;
-  for (CacheEntry& cache_entry : entries) {
-    bool valid = Py_IsFalse(backend) ||
-        backend_match(cache_entry.backend.ptr(), backend);
+  if (!extra_state->precompile_entries.empty()) {
+    // Only the first precompile entry can be safely fast-pathed: a later
+    // guardless entry must not preempt an earlier guarded entry whose guards
+    // may pass.
+    const auto& entry = extra_state->precompile_entries.front();
+    if (torch::dynamo::root_guard_manager_has_no_guards(entry.root_mgr)) {
+      *maybe_cached_code = entry.code.ptr();
+      return true;
+    }
+    return false;
+  }
 
-    if (valid) {
-      try {
-        if (is_skip_guard_eval_unsafe) {
-          valid = cache_entry_has_no_guards(
-                      cache_entry, /*is_skip_guard_eval_unsafe=*/true) ||
-              torch::dynamo::run_root_guard_manager(
-                      cache_entry.diff_guard_root_mgr, f_locals);
-        } else {
-          valid = torch::dynamo::run_root_guard_manager(
-              cache_entry.root_mgr, f_locals);
-        }
-      } catch (py::error_already_set& e) {
-        if (guard_error_hook) {
-          py::handle guard_error_hook_handle(guard_error_hook);
-          py::handle f_locals_dict = (PyObject*)f_locals->to_dict();
-          guard_error_hook_handle(
-              cache_entry.guard_manager,
-              cache_entry.code,
-              f_locals_dict,
-              index,
-              index == entries.size() - 1);
-        }
-        e.restore();
-        *maybe_cached_code = nullptr;
-        *guard_error = true;
-        return nullptr;
+  int64_t ids_to_search[] = {isolate_recompiles_id, -1};
+  int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
+  std::list<CacheEntry>* found_list = nullptr;
+  CacheEntry* found = nullptr;
+
+  for (int i = 0; i < num_ids && found == nullptr; i++) {
+    auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
+    if (it != extra_state->cache_entry_map.end()) {
+      if (!try_lookup_without_guard_eval_in_list(
+              it->second, backend, is_skip_guard_eval_unsafe, &found)) {
+        return false;
+      }
+      if (found) {
+        found_list = &it->second;
       }
     }
-    if (valid) {
-      return &cache_entry;
-    }
-    ++index;
   }
-  return nullptr;
-}
 
-static bool try_lookup_without_guard_eval_in_list(
-    std::list<CacheEntry>& entries,
-    PyObject* backend,
-    bool is_skip_guard_eval_unsafe,
-    CacheEntry** found) {
-  for (CacheEntry& cache_entry : entries) {
-    bool valid = Py_IsFalse(backend) ||
-        backend_match(cache_entry.backend.ptr(), backend);
-
-    if (valid) {
-      if (!PyCode_Check(cache_entry.code.ptr())) {
-        continue;
-      }
-      if (cache_entry_has_no_guards(cache_entry, is_skip_guard_eval_unsafe)) {
-        *found = &cache_entry;
-        return true;
-      }
-      return false;
+  if (found) {
+    if (use_lru) {
+      extra_state->move_to_front(found, *found_list);
     }
+    *maybe_cached_code = found->code.ptr();
+    *trace_annotation = found->trace_annotation.c_str();
+    return true;
   }
+
+  *maybe_cached_code = Py_None;
   return true;
 }
 
 void lookup(
-    ExtraState* extra_state,
+    PyCodeObject* code,
     FrameLocalsMapping* f_locals,
     PyObject* backend,
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
+  ExtraState* extra_state = get_extra_state(code);
+  if (extra_state == nullptr) {
+    *maybe_cached_code = Py_None;
+    return;
+  }
+
   CacheEntry* found = nullptr;
   bool guard_error = false;
 
@@ -333,60 +394,54 @@ void lookup(
   *maybe_cached_code = py::none().ptr();
 }
 
-bool try_lookup_without_guard_eval(
-    ExtraState* extra_state,
-    PyObject* backend,
-    int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
-    bool is_skip_guard_eval_unsafe) {
-  if (!extra_state->precompile_entries.empty()) {
-    // Only the first precompile entry can be safely fast-pathed: a later
-    // guardless entry must not preempt an earlier guarded entry whose guards
-    // may pass.
-    const auto& entry = extra_state->precompile_entries.front();
-    if (torch::dynamo::root_guard_manager_has_no_guards(entry.root_mgr)) {
-      *maybe_cached_code = entry.code.ptr();
-      return true;
-    }
+bool has_relevant_cache_entries(
+    PyCodeObject* code,
+    int64_t isolate_recompiles_id) {
+  ExtraState* extra_state = get_extra_state(code);
+  if (extra_state == nullptr) {
     return false;
   }
-
-  int64_t ids_to_search[] = {isolate_recompiles_id, -1};
-  int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
-  std::list<CacheEntry>* found_list = nullptr;
-  CacheEntry* found = nullptr;
-
-  for (int i = 0; i < num_ids && found == nullptr; i++) {
-    auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
-    if (it != extra_state->cache_entry_map.end()) {
-      if (!try_lookup_without_guard_eval_in_list(
-              it->second, backend, is_skip_guard_eval_unsafe, &found)) {
-        return false;
-      }
-      if (found) {
-        found_list = &it->second;
-      }
-    }
-  }
-
-  if (found) {
-    if (use_lru) {
-      extra_state->move_to_front(found, *found_list);
-    }
-    *maybe_cached_code = found->code.ptr();
-    *trace_annotation = found->trace_annotation.c_str();
-    return true;
-  }
-
-  *maybe_cached_code = Py_None;
-  return true;
+  bool found = false;
+  for_each_bucket(extra_state, isolate_recompiles_id, [&](int64_t, auto&) {
+    found = true;
+  });
+  return found;
 }
 
-CacheEntry* create_cache_entry(
-    ExtraState* extra_state,
+CompileInputs get_compile_inputs(
+    PyCodeObject* code,
+    int64_t isolate_recompiles_id) {
+  ExtraState* extra_state = get_or_init_extra_state(code);
+  CompileInputs inputs;
+  inputs.frame_state = extra_state->frame_state;
+  // Search own bucket first, then fall back to default bucket (-1),
+  // matching lookup() behavior.
+  for_each_bucket(
+      extra_state,
+      isolate_recompiles_id,
+      [&](int64_t, std::list<CacheEntry>& entries) {
+        if (inputs.cache_entry == nullptr && !entries.empty()) {
+          inputs.cache_entry = &entries.front();
+        }
+      });
+  return inputs;
+}
+
+CacheEntry* record_compile_result(
+    PyCodeObject* code,
+    int64_t isolate_recompiles_id,
+    bool apply_to_code,
+    FrameExecStrategy new_strategy,
     PyObject* guarded_code,
     PyObject* backend) {
+  ExtraState* extra_state = get_or_init_extra_state(code);
+  if (apply_to_code) {
+    set_region_exec_strategy(extra_state, isolate_recompiles_id, new_strategy);
+  }
+  if (Py_IsNone(guarded_code)) {
+    return nullptr;
+  }
+
   int64_t id = get_current_isolate_recompiles_id();
   auto& entries = extra_state->cache_entry_list(id);
   std::list<CacheEntry>::iterator new_iter;
@@ -411,11 +466,15 @@ CacheEntry* create_cache_entry(
   return &*new_iter;
 }
 
-py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
+static PyCodeObject* code_from_handle(const py::handle& code_obj) {
   TORCH_CHECK_TYPE(
       py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
       "expected a code object!");
-  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  return (PyCodeObject*)code_obj.ptr();
+}
+
+py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
+  PyCodeObject* code = code_from_handle(code_obj);
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
@@ -476,12 +535,8 @@ PrecompileEntry::PrecompileEntry(py::object gm, py::object c)
 }
 
 void _reset_precompile_entries(const py::handle& code_obj) {
-  TORCH_CHECK_TYPE(
-      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
-      "expected a code object!");
-  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  PyCodeObject* code = code_from_handle(code_obj);
   ExtraState* extra = get_extra_state(code);
-  py::list result;
   if (extra != nullptr) {
     extra->precompile_entries.clear();
   }
@@ -491,15 +546,8 @@ void _load_precompile_entry(
     const py::handle& code_obj,
     py::object guard_manager,
     py::object dynamo_code) {
-  TORCH_CHECK_TYPE(
-      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
-      "expected a code object!");
-  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
-  ExtraState* extra = get_extra_state(code);
-  py::list result;
-  if (extra == nullptr) {
-    extra = init_and_set_extra_state(code);
-  }
+  PyCodeObject* code = code_from_handle(code_obj);
+  ExtraState* extra = get_or_init_extra_state(code);
   auto entry =
       PrecompileEntry(std::move(guard_manager), std::move(dynamo_code));
   extra->precompile_entries.push_back(std::move(entry));
@@ -512,10 +560,7 @@ bool _set_lru_cache(py::object boolean) {
 }
 
 py::list _debug_get_precompile_entries(const py::handle& code_obj) {
-  TORCH_CHECK_TYPE(
-      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
-      "expected a code object!");
-  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  PyCodeObject* code = code_from_handle(code_obj);
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
