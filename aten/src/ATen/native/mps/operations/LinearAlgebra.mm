@@ -635,12 +635,6 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   if (!output.is_contiguous() && !is_macos_26_0_or_newer) {
     return true;
   }
-  // Before macOS 15, an output with a storage offset is gathered into a
-  // temporary that the graph writes and nothing scatters back; the metal
-  // kernels honor the offset.
-  if (needsGather(output)) {
-    return true;
-  }
   // multiplicationWithPrimaryTensor: returns incorrect results if inner size exceeds 2048
   // See https://github.com/pytorch/pytorch/issues/167727#issuecomment-3529308548
   if (c10::isComplexType(self.scalar_type()) && self.size(1) > max_complex_inner_size) {
@@ -658,14 +652,6 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
           "MPS mm implementation has a known issue with this shape, dtype and slice. Dispatching to metal implementation instead. This may impact performance.");
       return true;
     }
-  }
-
-  const bool has_large_size_or_stride = self.stride(0) > max_stride_size || self.stride(1) > max_stride_size ||
-      self.size(0) > max_stride_size || self.size(1) > max_stride_size || other.stride(0) > max_stride_size ||
-      other.stride(1) > max_stride_size || other.size(0) > max_stride_size || other.size(1) > max_stride_size;
-  static const bool is_macos_14_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_14_4);
-  if (!is_macos_14_4_or_newer) {
-    return has_large_size_or_stride;
   }
 
   // On Apple7/8, MPSGraph intermittently corrupts matmuls with a reduction
@@ -1152,21 +1138,15 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
   auto A_sizes = A.sizes();
   int ndim = A.dim();
 
-  Tensor LU = empty_like(A, MemoryFormat::Contiguous);
+  // F-contiguous LU lets lu_factor factor in place
+  Tensor LU = empty(A.mT().sizes(), A.options()).mT();
   Tensor identity = eye(A.size(-2), A.size(-1), A.scalar_type(), A.options().layout(), A.device()).expand_as(A);
   Tensor pivots = empty({A_sizes.begin(), A_sizes.end() - 1}, A.options().dtype(kInt));
-  // need to do this to keep the strides of the result tensor
-  // mps's solve expects row major layout, while inductor
-  // expects result to be column major
-  Tensor tmp = empty_like(A, MemoryFormat::Contiguous);
-  linalg_solve_out_mps_impl(A, identity, true, check_errors, tmp, LU, pivots, info);
-  result.copy_(tmp);
+  linalg_solve_out_mps_impl(A, identity, true, check_errors, result, LU, pivots, info);
 }
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
-  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
-
   using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
   TORCH_CHECK(self.dtype() == other.dtype(),
@@ -1507,134 +1487,129 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 }
 
 static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
-  if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
-    using namespace mps;
+  using namespace mps;
 
-    id<MTLBuffer> aBuffer = getMTLBufferStorage(batch1);
-    id<MTLBuffer> bBuffer = getMTLBufferStorage(batch2);
-    id<MTLBuffer> resBuffer = getMTLBufferStorage(result);
+  id<MTLBuffer> aBuffer = getMTLBufferStorage(batch1);
+  id<MTLBuffer> bBuffer = getMTLBufferStorage(batch2);
+  id<MTLBuffer> resBuffer = getMTLBufferStorage(result);
 
-    MPSStream* mpsStream = getCurrentMPSStream();
-    id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-      @autoreleasepool {
-        mpsStream->endKernelCoalescing();
-        id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      mpsStream->endKernelCoalescing();
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-        uint64_t originalBatchSize = batch1.sizes().size() > 2 ? batch1.size(0) : 1;
-        uint64_t aRows = batch1.size(-2);
-        uint64_t bRows = batch2.size(-2);
-        uint64_t resRows = result.size(-2);
-        uint64_t aCols = batch1.size(-1);
-        uint64_t bCols = batch2.size(-1);
-        uint64_t resCols = result.size(-1);
-        uint64_t aElemSize = batch1.element_size();
-        uint64_t bElemSize = batch2.element_size();
-        uint64_t resElemSize = result.element_size();
-        MPSDataType dtype = getMPSDataType(batch1);
+      uint64_t originalBatchSize = batch1.sizes().size() > 2 ? batch1.size(0) : 1;
+      uint64_t aRows = batch1.size(-2);
+      uint64_t bRows = batch2.size(-2);
+      uint64_t resRows = result.size(-2);
+      uint64_t aCols = batch1.size(-1);
+      uint64_t bCols = batch2.size(-1);
+      uint64_t resCols = result.size(-1);
+      uint64_t aElemSize = batch1.element_size();
+      uint64_t bElemSize = batch2.element_size();
+      uint64_t resElemSize = result.element_size();
+      MPSDataType dtype = getMPSDataType(batch1);
 
-        uint64_t elemInMatrix = resRows * resCols;
-        // if largest supported batch size is zero, we need to split up the computation more
-        uint64_t largestSupportedBatchSize = floor(pow(2, 32) / elemInMatrix);
-        bool tileEachMatmul = largestSupportedBatchSize == 0;
-        uint64_t batchSize = largestSupportedBatchSize > 0 ? std::min(largestSupportedBatchSize, originalBatchSize) : 1;
-        uint64_t lastBatchSize = originalBatchSize % batchSize;
+      uint64_t elemInMatrix = resRows * resCols;
+      // if largest supported batch size is zero, we need to split up the computation more
+      uint64_t largestSupportedBatchSize = floor(pow(2, 32) / elemInMatrix);
+      bool tileEachMatmul = largestSupportedBatchSize == 0;
+      uint64_t batchSize = largestSupportedBatchSize > 0 ? std::min(largestSupportedBatchSize, originalBatchSize) : 1;
+      uint64_t lastBatchSize = originalBatchSize % batchSize;
 
-        uint64_t aRowsTiled = aRows;
-        uint64_t resRowsTiled = resRows;
-        if (tileEachMatmul) {
-          uint64_t maxNumRows = floor(pow(2, 32) / resCols);
-          aRowsTiled = std::min(uint64_t(512), maxNumRows);
-          resRowsTiled = aRowsTiled;
+      uint64_t aRowsTiled = aRows;
+      uint64_t resRowsTiled = resRows;
+      if (tileEachMatmul) {
+        uint64_t maxNumRows = floor(pow(2, 32) / resCols);
+        aRowsTiled = std::min(uint64_t(512), maxNumRows);
+        resRowsTiled = aRowsTiled;
+      }
+      uint64_t lastTileSize = aRows % aRowsTiled;
+
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+
+      auto matmul = [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2];
+
+      MPSShape* aShape = @[ @(batchSize), @(aRowsTiled), @(aCols) ];
+      MPSShape* bShape = @[ @(batchSize), @(bRows), @(bCols) ];
+      MPSShape* resShape = @[ @(batchSize), @(resRowsTiled), @(resCols) ];
+      auto aDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:aShape];
+      aDesc_.preferPackedRows = true;
+      auto bDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:bShape];
+      bDesc_.preferPackedRows = true;
+
+      auto resDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:resShape];
+      resDesc_.preferPackedRows = true;
+
+      getMPSProfiler().beginProfileKernel(matmul, " tiled_bmm_mps", {batch1, batch2}, mpsStream);
+
+      // Descriptors to use for last batch if it exists
+      //.matrices is a readonly property so we need a separate descriptor.
+      MPSNDArrayDescriptor *aDescLastBatch_, *bDescLastBatch_, *resDescLastBatch_;
+      if (lastBatchSize != 0) {
+        aDescLastBatch_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
+                                                                 shape:@[ @(lastBatchSize), @(aRowsTiled), @(aCols) ]];
+        aDescLastBatch_.preferPackedRows = true;
+        bDescLastBatch_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
+                                                                 shape:@[ @(lastBatchSize), @(bRows), @(bCols) ]];
+        bDescLastBatch_.preferPackedRows = true;
+        resDescLastBatch_ =
+            [MPSNDArrayDescriptor descriptorWithDataType:dtype
+                                                   shape:@[ @(lastBatchSize), @(resRowsTiled), @(resCols) ]];
+        resDescLastBatch_.preferPackedRows = true;
+      }
+
+      MPSNDArrayDescriptor *aDescLastTile_, *resDescLastTile_;
+      if (lastTileSize != 0) {
+        aDescLastTile_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
+                                                                shape:@[ @(batchSize), @(lastTileSize), @(aCols) ]];
+        aDescLastTile_.preferPackedRows = true;
+        resDescLastTile_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
+                                                                  shape:@[ @(batchSize), @(lastTileSize), @(resCols) ]];
+        resDescLastTile_.preferPackedRows = true;
+      }
+
+      uint64_t requiredIterations = ceil(float(originalBatchSize) / batchSize);
+      uint64_t requiredTileIterations = ceil(float(aRows) / aRowsTiled);
+      auto aDesc = aDesc_;
+      auto bDesc = bDesc_;
+      auto resDesc = resDesc_;
+      for (const auto i : c10::irange(requiredIterations)) {
+        if (i == requiredIterations - 1 && lastBatchSize != 0) {
+          aDesc = aDescLastBatch_;
+          bDesc = bDescLastBatch_;
+          resDesc = resDescLastBatch_;
         }
-        uint64_t lastTileSize = aRows % aRowsTiled;
-
-        id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-
-        auto matmul = [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2];
-
-        MPSShape* aShape = @[ @(batchSize), @(aRowsTiled), @(aCols) ];
-        MPSShape* bShape = @[ @(batchSize), @(bRows), @(bCols) ];
-        MPSShape* resShape = @[ @(batchSize), @(resRowsTiled), @(resCols) ];
-        auto aDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:aShape];
-        aDesc_.preferPackedRows = true;
-        auto bDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:bShape];
-        bDesc_.preferPackedRows = true;
-
-        auto resDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:resShape];
-        resDesc_.preferPackedRows = true;
-
-        getMPSProfiler().beginProfileKernel(matmul, " tiled_bmm_mps", {batch1, batch2}, mpsStream);
-
-        // Descriptors to use for last batch if it exists
-        //.matrices is a readonly property so we need a separate descriptor.
-        MPSNDArrayDescriptor *aDescLastBatch_, *bDescLastBatch_, *resDescLastBatch_;
-        if (lastBatchSize != 0) {
-          aDescLastBatch_ =
-              [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(lastBatchSize), @(aRowsTiled), @(aCols) ]];
-          aDescLastBatch_.preferPackedRows = true;
-          bDescLastBatch_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
-                                                                   shape:@[ @(lastBatchSize), @(bRows), @(bCols) ]];
-          bDescLastBatch_.preferPackedRows = true;
-          resDescLastBatch_ =
-              [MPSNDArrayDescriptor descriptorWithDataType:dtype
-                                                     shape:@[ @(lastBatchSize), @(resRowsTiled), @(resCols) ]];
-          resDescLastBatch_.preferPackedRows = true;
-        }
-
-        MPSNDArrayDescriptor *aDescLastTile_, *resDescLastTile_;
-        if (lastTileSize != 0) {
-          aDescLastTile_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
-                                                                  shape:@[ @(batchSize), @(lastTileSize), @(aCols) ]];
-          aDescLastTile_.preferPackedRows = true;
-          resDescLastTile_ =
-              [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(batchSize), @(lastTileSize), @(resCols) ]];
-          resDescLastTile_.preferPackedRows = true;
-        }
-
-        uint64_t requiredIterations = ceil(float(originalBatchSize) / batchSize);
-        uint64_t requiredTileIterations = ceil(float(aRows) / aRowsTiled);
-        auto aDesc = aDesc_;
-        auto bDesc = bDesc_;
-        auto resDesc = resDesc_;
-        for (const auto i : c10::irange(requiredIterations)) {
-          if (i == requiredIterations - 1 && lastBatchSize != 0) {
-            aDesc = aDescLastBatch_;
-            bDesc = bDescLastBatch_;
-            resDesc = resDescLastBatch_;
+        for (const auto j : c10::irange(requiredTileIterations)) {
+          if (j == requiredTileIterations - 1 && lastTileSize != 0) {
+            aDesc = aDescLastTile_;
+            resDesc = resDescLastTile_;
           }
-          for (const auto j : c10::irange(requiredTileIterations)) {
-            if (j == requiredTileIterations - 1 && lastTileSize != 0) {
-              aDesc = aDescLastTile_;
-              resDesc = resDescLastTile_;
-            }
-            const uint64_t aArrayOffset = i * batchSize * aCols * aRows + j * aRowsTiled * aCols;
-            const uint64_t bArrayOffset = i * batchSize * bCols * bRows;
-            const uint64_t resArrayOffset = i * batchSize * resCols * resRows + j * resRowsTiled * resCols;
+          const uint64_t aArrayOffset = i * batchSize * aCols * aRows + j * aRowsTiled * aCols;
+          const uint64_t bArrayOffset = i * batchSize * bCols * bRows;
+          const uint64_t resArrayOffset = i * batchSize * resCols * resRows + j * resRowsTiled * resCols;
 
-            auto aMatrix = [[[MPSNDArray alloc] initWithBuffer:aBuffer
-                                                        offset:(batch1.storage_offset() + aArrayOffset) * aElemSize
-                                                    descriptor:aDesc] autorelease];
-            auto bMatrix = [[[MPSNDArray alloc] initWithBuffer:bBuffer
-                                                        offset:(batch2.storage_offset() + bArrayOffset) * bElemSize
-                                                    descriptor:bDesc] autorelease];
-            auto resMatrix =
-                [[[MPSNDArray alloc] initWithBuffer:resBuffer
-                                             offset:(result.storage_offset() + resArrayOffset) * resElemSize
-                                         descriptor:resDesc] autorelease];
-            [matmul encodeToCommandEncoder:computeEncoder
-                             commandBuffer:commandBuffer
-                              sourceArrays:@[ aMatrix, bMatrix ]
-                          destinationArray:resMatrix];
-          }
+          auto aMatrix = [[[MPSNDArray alloc] initWithBuffer:aBuffer
+                                                      offset:(batch1.storage_offset() + aArrayOffset) * aElemSize
+                                                  descriptor:aDesc] autorelease];
+          auto bMatrix = [[[MPSNDArray alloc] initWithBuffer:bBuffer
+                                                      offset:(batch2.storage_offset() + bArrayOffset) * bElemSize
+                                                  descriptor:bDesc] autorelease];
+          auto resMatrix = [[[MPSNDArray alloc] initWithBuffer:resBuffer
+                                                        offset:(result.storage_offset() + resArrayOffset) * resElemSize
+                                                    descriptor:resDesc] autorelease];
+          [matmul encodeToCommandEncoder:computeEncoder
+                           commandBuffer:commandBuffer
+                            sourceArrays:@[ aMatrix, bMatrix ]
+                        destinationArray:resMatrix];
         }
       }
-    });
-    return result;
-  } else {
-    TORCH_CHECK(false, "Tiling of batch matmul for larger than 2**32 entries only available from MacOS15 onwards");
-  }
+    }
+  });
+  return result;
 }
 
 static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
@@ -1666,35 +1641,6 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   if (!result.is_contiguous() && !is_macos_26_0_or_newer) {
     return do_metal_bmm(batch1, batch2, result);
   }
-  // Same pre-macOS-15 crack as use_metal_mm: an output with a storage offset
-  // is gathered into a temporary that nothing scatters back.
-  if (needsGather(result)) {
-    return do_metal_bmm(batch1, batch2, result);
-  }
-
-  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
-  MPSShape* shape = nil;
-  bool doTranspose = false;
-
-  // Handle transposes for the second batch of matrices.
-  // In macOS 15 this is detected automatically (for all shapes/ranks)
-  // through the strided MPS support.
-  if (!is_macOS_15_0_or_newer) {
-    if (batch2.is_view() && !batch2.is_contiguous()) {
-      if (batch2.numel() == batch2._base().numel()) {
-        const IntArrayRef& viewSizes = batch2.sizes();
-
-        // Handle 3D and 4D tensors.
-        // For 4D tensors, first it must have been reshaped from 4D to 3D and then transposed.
-        int32_t baseTransposeStrideDim = batch2._base().dim() == 4 ? -3 : -2;
-        if (batch2._base().stride(0) == batch2.stride(0) &&
-            batch2._base().stride(baseTransposeStrideDim) == batch2.stride(-1)) {
-          shape = @[ @(viewSizes[0]), @(viewSizes[2]), @(viewSizes[1]) ];
-          doTranspose = true;
-        }
-      }
-    }
-  }
 
   // Call tiled implementation if the number of elements exceeds 2^32
   uint64_t resultSize = batch1.size(0) * batch1.size(1) * batch2.size(2);
@@ -1714,8 +1660,7 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   };
 
   @autoreleasepool {
-    std::string key = "bmm_out_mps_impl" + getTensorsStringKey({batch1, batch2}, true, /*exclude_shape*/ true) +
-        std::to_string(doTranspose);
+    std::string key = "bmm_out_mps_impl" + getTensorsStringKey({batch1, batch2}, true, /*exclude_shape*/ true);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto batch1Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch1.scalar_type()));
@@ -1723,10 +1668,6 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
 
       auto batch1TensorOp = batch1.is_conj() ? [mpsGraph conjugateWithTensor:batch1Tensor name:nil] : batch1Tensor;
       auto batch2TensorOp = batch2.is_conj() ? [mpsGraph conjugateWithTensor:batch2Tensor name:nil] : batch2Tensor;
-
-      if (doTranspose) {
-        batch2TensorOp = [mpsGraph transposeTensor:batch2TensorOp dimension:-1 withDimension:-2 name:nil];
-      }
 
       MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:batch1TensorOp
                                                                       secondaryTensor:batch2TensorOp
@@ -1737,7 +1678,7 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
       newCachedGraph->outputTensor_ = productTensor;
     });
     Placeholder batch1Placeholder = Placeholder(cachedGraph->batch1Tensor_, batch1);
-    Placeholder batch2Placeholder = Placeholder(cachedGraph->batch2Tensor_, batch2, shape, !doTranspose);
+    Placeholder batch2Placeholder = Placeholder(cachedGraph->batch2Tensor_, batch2);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
 
     auto feeds = dictionaryFromPlaceholders(batch1Placeholder, batch2Placeholder);
@@ -1750,7 +1691,8 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
 // Metal substitution kernel: one threadgroup per right-hand side, reducing the
 // dot product against the already-solved prefix across the group. conjugate
 // selects adjoint (A^H) instead of plain transpose (A^T) when transpose is set;
-// it is a no-op for real inputs.
+// it is a no-op for real inputs. A must be contiguous; B and out may each be
+// row- or column-major.
 static void triangular_solve_metal(const Tensor& A_,
                                    const Tensor& B_,
                                    bool upper,
@@ -1783,6 +1725,9 @@ static void triangular_solve_metal(const Tensor& A_,
   // Inverse application and its substitution fallback may reread both inputs.
   const auto a = use_small_kernel && A_.is_alias_of(out) ? A_.clone() : A_;
   const auto b = use_small_kernel && B_.is_alias_of(out) ? B_.clone() : B_;
+  TORCH_INTERNAL_ASSERT(is_row_or_column_contiguous(b) && is_row_or_column_contiguous(out));
+  params.b_col_major = !b.is_contiguous();
+  params.x_col_major = !out.is_contiguous();
 
   const uint64_t elem_size = A_.element_size();
   auto stream = getCurrentMPSStream();
@@ -1879,14 +1824,14 @@ static void triangular_solve_blocked(const Tensor& M, bool upper, bool unitriang
   }
 }
 
-static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
-                                                const Tensor& B,
-                                                bool upper,
-                                                bool transpose,
-                                                bool left,
-                                                bool unitriangular,
-                                                Tensor& out,
-                                                bool conjugate = false) {
+static void linalg_solve_triangular_mps_impl(const Tensor& A,
+                                             const Tensor& B,
+                                             bool upper,
+                                             bool transpose,
+                                             bool left,
+                                             bool unitriangular,
+                                             const Tensor& out,
+                                             bool conjugate = false) {
   using namespace mps;
 
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
@@ -1894,7 +1839,11 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   TORCH_CHECK(scalar_type == kFloat || scalar_type == kComplexFloat,
               "linalg.solve_triangular(): MPS only supports float32 and complex64, got ",
               scalar_type);
-  TORCH_CHECK(A.scalar_type() == B.scalar_type(), "linalg.solve_triangular(): A and B must have the same dtype");
+  TORCH_CHECK(c10::canCast(B.scalar_type(), scalar_type),
+              "linalg.solve_triangular(): can't cast B of dtype ",
+              B.scalar_type(),
+              " to A's dtype ",
+              scalar_type);
   // MPS ops get no generated device check and the solvers write into out= directly,
   // so its device and dtype have to be validated here.
   TORCH_CHECK(out.device() == A.device(),
@@ -1909,39 +1858,30 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
               out.scalar_type());
   Tensor A_t, B_t;
   std::tie(B_t, A_t) = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/ nullptr);
-  at::native::resize_output(out, B_t.sizes());
+  // Same layout as linalg_solve_triangular_out on CPU/CUDA and the meta: F-contiguous
+  // unless A is a conjugate transpose.
+  if (A_t.mT().is_contiguous() && A_t.is_conj()) {
+    at::native::resize_output(out, B_t.sizes());
+  } else if (at::native::resize_output_check(out, B_t.sizes())) {
+    out.resize_(B_t.mT().sizes(), MemoryFormat::Contiguous);
+    out.transpose_(-2, -1);
+  }
 
   if (A.numel() == 0 || B.numel() == 0 || out.numel() == 0) {
     out.zero_();
-    return out;
+    return;
   }
 
   // The substitution kernel reads raw elements, so materialize conjugated views.
   Tensor A_ = A_t.is_conj() ? A_t.resolve_conj() : A_t;
-  Tensor B_ = B_t.is_conj() ? B_t.resolve_conj() : B_t;
   if (!A_.is_contiguous()) {
     A_ = A_.clone(at::MemoryFormat::Contiguous);
   }
-  if (!B_.is_contiguous()) {
-    B_ = B_.clone(at::MemoryFormat::Contiguous);
-  }
-
-  // Both solvers write a dense row-major solution, so a strided out needs a temporary.
-  // It is fully overwritten, hence empty rather than a copy of out.
-  Tensor out_ = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
 
   // Fold the side into the transpose rather than materializing op(A): solving
   // X op(A) = B is the same as solving op(A)^T X^T = B^T, so the right case only
   // costs the O(nk) transposes of B and X, never an O(n^2) copy of A.
   const bool kernel_transpose = transpose != !left;
-  // clone, not contiguous(): when B^T is already contiguous the latter aliases
-  // B, and the solve below writes into this buffer.
-  const Tensor Brhs = left ? B_ : B_.mT().clone(at::MemoryFormat::Contiguous);
-  // Brhs is a private temporary in the right case, so the solve runs in place:
-  // the blocked path already works in place, and the kernel reads b[t] before
-  // writing x[t] at every step, taking everything else from threadgroup memory.
-  Tensor X = left ? out_ : Brhs;
-
   // Substitution reads all of A once per right-hand side and runs a chain of n
   // dependent steps; the blocked solve shortens that chain to nb and turns the
   // rest into matmul, which wins for both dtypes. Below a handful of blocks the
@@ -1949,7 +1889,27 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   // nb trades a costlier diagonal-block inverse against fewer trailing matmuls.
   constexpr int64_t kBlockSize = 128;
   constexpr int64_t kMinBlocks = 4;
-  if (A_.size(-1) > kMinBlocks * kBlockSize) {
+  const bool blocked = A_.size(-1) > kMinBlocks * kBlockSize;
+
+  // Both solvers read B and write the solution Y of op(A) Y = B in either
+  // dense row- or column-major layout. Y is out itself for a left solve and
+  // out^T for a right one, so only a strided or conj/neg out needs a temporary.
+  // The blocked solve is the exception: its panel updates are enough faster on
+  // a row-major X to pay for the copy.
+  const auto is_direct = [](const Tensor& t) { return is_row_or_column_contiguous(t) && !t.is_conj() && !t.is_neg(); };
+  const Tensor Y = left ? out : out.mT();
+  Tensor X = is_direct(Y) && (!blocked || Y.is_contiguous()) ? Y : at::empty(Y.sizes(), Y.options());
+  // A right-hand side the solvers cannot read directly is staged in X and solved
+  // in place: the blocked path works in place, and the kernel reads b[t] before
+  // writing x[t] at every step, taking everything else from threadgroup memory.
+  Tensor Brhs = left ? B_t : B_t.mT();
+  // Like on CPU/CUDA, a B of another dtype is converted to A's here; autocast relies on it in backward.
+  if (!is_direct(Brhs) || Brhs.scalar_type() != scalar_type) {
+    X.copy_(Brhs);
+    Brhs = X;
+  }
+
+  if (blocked) {
     Tensor M = kernel_transpose ? A_.mT() : A_;
     if (conjugate) {
       M = M.conj();
@@ -1961,13 +1921,9 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   } else {
     triangular_solve_metal(A_, Brhs, upper, kernel_transpose, conjugate, unitriangular, X);
   }
-  if (!left) {
-    out_.copy_(X.mT());
+  if (!X.is_same(Y)) {
+    Y.copy_(X);
   }
-  if (!out_.is_same(out)) {
-    out.copy_(out_);
-  }
-  return out;
 }
 
 static void unpack_pivots_stub_impl(TensorIterator& iter, const int64_t dim_size, const int64_t max_pivot) {
@@ -2878,17 +2834,22 @@ Tensor& linalg_solve_triangular_mps_out(const Tensor& A,
                                         bool left,
                                         bool unitriangular,
                                         Tensor& out) {
-  return mps::linalg_solve_triangular_mps_impl(A, B, upper, /*transpose=*/false, left, unitriangular, out);
+  mps::linalg_solve_triangular_mps_impl(A, B, upper, /*transpose=*/false, left, unitriangular, out);
+  return out;
 }
 
 Tensor linalg_solve_triangular_mps(const Tensor& A, const Tensor& B, bool upper, bool left, bool unitriangular) {
-  Tensor out = at::empty({0}, A.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
+  Tensor out = at::empty({0}, A.options());
   mps::linalg_solve_triangular_mps_impl(A, B, upper, /*transpose=*/false, left, unitriangular, out);
   return out;
 }
 
 Tensor _cholesky_solve_helper_mps(const Tensor& self, const Tensor& A, bool upper) {
-  auto out = at::empty({0}, self.options().memory_format(MemoryFormat::Contiguous));
+  // A row-major intermediate, which the blocked solve writes without a copy, and
+  // a separate out rather than an in-place second solve, which the small-matrix
+  // kernel would have to clone.
+  auto tmp = at::empty(self.sizes(), self.options());
+  auto out = at::empty({0}, self.options());
   const bool first_transpose = upper;
   const bool second_transpose = !upper;
 
@@ -2900,10 +2861,10 @@ Tensor _cholesky_solve_helper_mps(const Tensor& self, const Tensor& A, bool uppe
                                         first_transpose,
                                         /*left=*/true,
                                         /*unitriangular=*/false,
-                                        out,
+                                        tmp,
                                         /*conjugate=*/first_transpose);
   mps::linalg_solve_triangular_mps_impl(A,
-                                        out,
+                                        tmp,
                                         upper,
                                         second_transpose,
                                         /*left=*/true,
@@ -2922,10 +2883,7 @@ TORCH_IMPL_FUNC(triangular_solve_mps_out)
  const Tensor& result,
  const Tensor& clone_A) {
   clone_A.copy_(A);
-  Tensor out = at::empty({0}, A.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
-  mps::linalg_solve_triangular_mps_impl(A, self, upper, transpose, /*left=*/true, unitriangular, out);
-  result.resize_(out.sizes());
-  result.copy_(out);
+  mps::linalg_solve_triangular_mps_impl(A, self, upper, transpose, /*left=*/true, unitriangular, result);
 }
 
 TORCH_IMPL_FUNC(_linalg_solve_ex_out_mps)

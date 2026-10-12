@@ -1125,6 +1125,16 @@ def lp_pool3d(
     padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool3d` for details.
+
+    Args:
+        input (Tensor): the input tensor.
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int or tuple of int): the size of the pooling window.
+        stride (int or tuple of int, optional): the stride between windows.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -1174,6 +1184,16 @@ def lp_pool2d(
     padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool2d` for details.
+
+    Args:
+        input (Tensor): the input tensor.
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int or tuple of int): the size of the pooling window.
+        stride (int or tuple of int, optional): the stride between windows.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -1220,6 +1240,16 @@ def lp_pool1d(
     padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool1d` for details.
+
+    Args:
+        input (Tensor): the input tensor.
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int): the size of the pooling window.
+        stride (int or tuple of int, optional): the stride between windows.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
