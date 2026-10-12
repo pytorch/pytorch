@@ -47,6 +47,8 @@ from ..bytecode_transformation import (
 )
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
+    handle_observed_exception,
+    ObservedAttributeError,
     raise_observed_exception,
     raise_type_error,
     raise_value_error,
@@ -87,7 +89,7 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .object_protocol import mro_attr_source
+from .object_protocol import generic_getattr, mro_attr_source
 from .user_defined import (
     call_random_fn,
     is_standard_setattr,
@@ -133,6 +135,88 @@ class SuperVariable(VariableTracker):
 
     def python_type(self) -> type:
         return builtins.super
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        no_keywords(tx, "super", kwargs)
+        check_positional(tx, "super", len(args), 0, 2)
+        if args:
+            typevar = args[0]
+            objvar = args[1] if len(args) == 2 else None
+        else:
+            if not tx.f_code.co_argcount:
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): no arguments"]
+                )
+            name = tx.f_code.co_varnames[0]
+            objvar = tx.symbolic_locals.get(name)
+            if name in tx.f_code.co_cellvars:
+                objvar = cast(CellVariable, tx._cellvar(name))._current_contents(tx)
+            if objvar is None or isinstance(objvar, (NullVariable, DeletedVariable)):
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): arg[0] deleted"]
+                )
+            if "__class__" not in tx.f_code.co_freevars:
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): __class__ cell not found"]
+                )
+            typevar = cast(CellVariable, tx._cellvar("__class__"))._current_contents(tx)
+            if typevar is None:
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): empty __class__ cell"]
+                )
+        if not issubclass(typevar.python_type(), type):
+            if not args:
+                msg = f"super(): __class__ is not a type ({typevar.python_type_name()})"
+                raise_observed_exception(RuntimeError, tx, args=[msg])
+            raise_type_error(
+                tx, f"super() argument 1 must be type, not {typevar.python_type_name()}"
+            )
+        type_arg = typevar.as_python_constant()
+        if objvar is not None and objvar.is_constant_none():
+            objvar = None
+        if objvar is not None:
+            obj_type = objvar.python_type()
+            obj_is_type = issubclass(obj_type, type)
+            checked_type = objvar.as_python_constant() if obj_is_type else obj_type
+            # supercheck uses subtype checks without metaclass hooks.
+            valid = type.__subclasscheck__(
+                type_arg, checked_type
+            ) or type.__subclasscheck__(type_arg, obj_type)
+            if not valid:
+                try:
+                    classvar = generic_getattr(tx, objvar, "__class__")
+                    class_type = classvar.get_real_python_backed_value()
+                    if class_type is NO_SUCH_SUBOBJ:
+                        unimplemented(
+                            gb_type="super(): unresolved __class__",
+                            context=f"objvar: {objvar}, classvar: {classvar}",
+                            explanation="Dynamo cannot determine the object's __class__ "
+                            "to validate super() initialization.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+                except ObservedAttributeError:
+                    handle_observed_exception(tx)
+                    class_type = None
+                valid = isinstance(class_type, type) and type.__subclasscheck__(
+                    type_arg, class_type
+                )
+            if not valid:
+                msg = "super(type, obj): obj must be an instance or subtype of type"
+                if sys.version_info >= (3, 13):
+                    kind = "type" if obj_is_type else "instance of"
+                    msg = (
+                        f"super(type, obj): obj ({kind} {checked_type.__name__[:200]}) "
+                        f"is not an instance or subtype of type ({type_arg.__name__[:200]})."
+                    )
+                raise_type_error(tx, msg)
+        self.typevar = typevar
+        self.objvar = objvar
+        return ConstantVariable.create(None)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
