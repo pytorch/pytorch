@@ -54,7 +54,7 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "cpu_operator_benchmark_${{ inputs.test_mode || 'short' }}", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
+          { config: "cpu_operator_benchmark_${{ inputs.test_mode || 'short' }}", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-48-384" },
         ]}
       python-version: "3.10"
       compiler: gcc11
@@ -84,12 +84,12 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-aarch64-py3.11
-      runner: linux.arm64.m7g.4xlarge
+      runner: "l-arm64g4-16-62"
       docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.11-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "cpu_operator_benchmark_short", shard: 1, num_shards: 1, runner: "linux.arm64.m8g.4xlarge" },
+          { config: "cpu_operator_benchmark_short", shard: 1, num_shards: 1, runner: "mt-l-arm64g4-16-62" },
         ]}
       python-version: "3.10"
       compiler: gcc13
