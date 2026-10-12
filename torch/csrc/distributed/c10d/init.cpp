@@ -3279,7 +3279,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "Collectively create a one-sided communication window; all ranks must call in the same order")
           .def_property_readonly(
               "supports_abort_hooks",
-              &::c10d::Backend::supportsAbortHooks,
+              BACKEND_VIRTUAL_PROPERTY(supportsAbortHooks),
               "(test whether the backend supports abort hooks)")
           .def(
               "register_abort_hook",
