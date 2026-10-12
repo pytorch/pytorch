@@ -3862,6 +3862,28 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Kumaraswamy(1.0, 1.0).sample().size(), ())
         self.assertEqual(Kumaraswamy(1.0, 1.0).sample((1,)).size(), (1,))
 
+    def test_kumaraswamy_mode(self):
+        # The mode maximizes the density; it is only defined (and interior)
+        # when concentration1 >= 1, concentration0 >= 1, and not both are 1.
+        xs = torch.linspace(1e-4, 1 - 1e-4, 20001, dtype=torch.double)
+        for a, b in [(2.0, 3.0), (5.0, 5.0), (1.5, 1.0), (1.0, 2.0)]:
+            d = Kumaraswamy(torch.tensor(a).double(), torch.tensor(b).double())
+            expected = xs[d.log_prob(xs).argmax()]
+            self.assertEqual(d.mode, expected, atol=1e-3, rtol=0)
+        for a, b in [(0.5, 3.0), (3.0, 0.5), (1.0, 1.0)]:
+            d = Kumaraswamy(torch.tensor(a), torch.tensor(b))
+            self.assertTrue(torch.isnan(d.mode))
+
+    def test_weibull_mode(self):
+        # For concentration <= 1 the density is decreasing, so the mode is 0.
+        scale = torch.tensor([2.0, 2.0, 2.0, 2.0], dtype=torch.double)
+        conc = torch.tensor([0.5, 1.0, 2.0, 3.5], dtype=torch.double)
+        d = Weibull(scale, conc)
+        xs = torch.linspace(1e-4, 10, 100001, dtype=torch.double)
+        expected = torch.stack([xs[Weibull(s, c).log_prob(xs).argmax()] for s, c in zip(scale, conc)])
+        self.assertEqual(d.mode, expected, atol=1e-3, rtol=0)
+        self.assertEqual(d.mode[:2], torch.zeros(2, dtype=torch.double))
+
     # Kumaraswamy distribution is not implemented in SciPy
     # Hence these tests are explicit
     def test_kumaraswamy_mean_variance(self):
