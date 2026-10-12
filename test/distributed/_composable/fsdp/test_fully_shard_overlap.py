@@ -529,7 +529,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
 
         ep_degree = 2
         efsdp_size = self.world_size // ep_degree
-        comm_sleep_ms = 500
+        comm_sleep_ms = 100
         world_mesh = init_device_mesh(
             device_type.type,
             (self.world_size,),
@@ -541,10 +541,10 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
         dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
         efsdp_mesh_info = FSDPMeshInfo(mesh=sparse_mesh["efsdp"], shard_mesh_dim=0)
         model_args = ModelArgs(
-            n_layers=20,
+            n_layers=10,
             vocab_size=1024,
             max_seq_len=64,
-            dim=1280,
+            dim=256,
             n_heads=16,
             dropout_p=0.0,
             num_experts=2,
@@ -611,7 +611,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             def rep_fwd_bwd():
                 rep_model(inp).sum().backward()  # noqa: F821
 
-            for _ in range(5):
+            for _ in range(2):
                 rep_fwd_bwd()
                 rep_model.zero_grad(set_to_none=True)
             rep_time = _time_fn(rep_fwd_bwd)
@@ -642,17 +642,17 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             def fsdp_fwd_bwd():
                 fsdp_model(inp).sum().backward()
 
-            for _ in range(5):
+            for _ in range(2):
                 fsdp_fwd_bwd()
                 fsdp_model.zero_grad(set_to_none=True)
             fsdp_time = _time_fn(fsdp_fwd_bwd)
             fsdp_model.zero_grad(set_to_none=True)
-        # replicate: 1 all-reduce/block → N+1 serialized waits.
+        # replicate: 1 all-reduce/block → ~N+2 serialized waits.
         # FSDP: 2 reduce-scatters/block (dp + efsdp).
         #   Per-group RS state: dp reduce-scatter overlaps with efsdp's
-        #     wait → ~N+1 waits ≈ replicate (ratio ≈ 1.0).
-        #   Shared RS state: both reduce-scatters serialize → ~2N+1
-        #     waits → ratio ≈ (2N+1)/(N+1) → 1.95 for N=20.
+        #     wait → ~N+2 waits ≈ replicate (ratio ≈ 1.0).
+        #   Shared RS state: both reduce-scatters serialize → ~2N+2
+        #     waits → ratio ≈ (2N+2)/(N+2) → 1.83 for N=10.
         self.assertLess(
             fsdp_time / rep_time,
             1.5,
