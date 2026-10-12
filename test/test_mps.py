@@ -2283,6 +2283,13 @@ class TestMPS(TestCaseMPS):
                                  lambda msg: f"{msg}\naddmm beta=0 propagated {bad} for dtype={dtype}")
                 self.assertEqual(out_m, torch.mm(batch1[0], batch2[0]) * 0.125)
 
+    def test_addmm_beta_zero_alpha_scales_before_rounding(self):
+        a = torch.full((8, 67), 32.0, dtype=torch.float16, device="mps")[:, :64]
+        b = torch.full((8, 64), 32.0, dtype=torch.float16, device="mps").t()
+        bias = torch.full((8, 8), float("nan"), dtype=torch.float16, device="mps")
+        out = torch.addmm(bias, a, b, beta=0, alpha=0.125)
+        self.assertEqual(out, torch.addmm(bias.cpu(), a.cpu(), b.cpu(), beta=0, alpha=0.125))
+
     def test_local_scalar_dense_mps(self):
         x_cpu = torch.randn(1)
         y_mps = x_cpu.to("mps")
