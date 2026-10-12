@@ -9,6 +9,7 @@ from unittest import main, mock, TestCase
 
 import yaml
 from filter_test_configs import (
+    enforce_lf_allowlist,
     filter,
     filter_selected_test_configs,
     get_ghstack_below_count,
@@ -889,6 +890,66 @@ class TestConfigFilter(TestCase):
             "Stack from ghstack (oldest at bottom):\n* #4\n* #3\n* #2\n* __->__ #1\n"
         )
         self.assertEqual(get_ghstack_below_count(bottom_body), 0)
+
+    def test_enforce_lf_allowlist_empty_include_passes_through(self) -> None:
+        matrix = {"include": []}
+        self.assertEqual(enforce_lf_allowlist(matrix, ""), {"include": []})
+
+    def test_enforce_lf_allowlist_non_lf_entry_untouched(self) -> None:
+        """An entry not currently on 'lf-' (already 'mt-', or a ROCm/XPU-style
+        passthrough label) needs no enforcement and must be left completely
+        alone -- even under a restricted allowlist that would reject its bare
+        pod name if it were checked."""
+        matrix = {
+            "include": [
+                {"config": "default", "runner": "mt-l-x86iamx-22-225-h100"},
+                {"config": "default", "runner": "linux.rocm.gpu.2"},
+            ]
+        }
+        result = enforce_lf_allowlist(matrix, "l-x86aavx2-11-41-a10g")
+        runners = [e["runner"] for e in result["include"]]
+        self.assertEqual(runners, ["mt-l-x86iamx-22-225-h100", "linux.rocm.gpu.2"])
+
+    def test_enforce_lf_allowlist_mixed_hardcoded_mt_alongside_dynamic_lf(
+        self,
+    ) -> None:
+        """Regression guard: a job that builds on a dynamically-resolved 'lf-'
+        but hardcodes 'mt-' on specific entries (e.g. H100, as in
+        inductor-periodic.yml) must not have that hardcoded entry re-prefixed
+        to 'mt-mt-...' just because a sibling 'lf-' entry gets force-routed."""
+        matrix = {
+            "include": [
+                {"config": "default", "runner": "lf-l-x86iavx512-8-64"},
+                {"config": "default", "runner": "mt-l-x86iamx-22-225-h100"},
+            ]
+        }
+        result = enforce_lf_allowlist(matrix, "l-x86aavx2-11-41-a10g")
+        runners = [e["runner"] for e in result["include"]]
+        self.assertEqual(runners, ["mt-l-x86iavx512-8-64", "mt-l-x86iamx-22-225-h100"])
+
+    def test_enforce_lf_allowlist_lf_runners_flag_restricts_unlisted_runner(
+        self,
+    ) -> None:
+        matrix = {
+            "include": [{"config": "default", "runner": "lf-l-x86iavx512-16-128"}]
+        }
+        result = enforce_lf_allowlist(matrix, "l-x86aavx2-29-113-a10g")
+        self.assertEqual(result["include"][0]["runner"], "mt-l-x86iavx512-16-128")
+
+    def test_enforce_lf_allowlist_lf_runners_flag_allows_listed_runner(self) -> None:
+        matrix = {
+            "include": [{"config": "default", "runner": "lf-l-x86aavx2-29-113-a10g"}]
+        }
+        result = enforce_lf_allowlist(matrix, "l-x86aavx2-29-113-a10g")
+        self.assertEqual(result["include"][0]["runner"], "lf-l-x86aavx2-29-113-a10g")
+
+    def test_enforce_lf_allowlist_empty_string_is_unrestricted(self) -> None:
+        """An explicit empty --lf-runners means unrestricted."""
+        matrix = {
+            "include": [{"config": "default", "runner": "lf-l-x86iavx512-16-128"}]
+        }
+        result = enforce_lf_allowlist(matrix, "")
+        self.assertEqual(result["include"][0]["runner"], "lf-l-x86iavx512-16-128")
 
 
 if __name__ == "__main__":

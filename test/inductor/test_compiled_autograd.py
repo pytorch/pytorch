@@ -48,6 +48,7 @@ from torch.testing._internal.common_utils import (
     scoped_load_inline,
     skipIfWindows,
     skipIfXpu,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import (
@@ -3194,6 +3195,32 @@ main()
                 b.sum().backward()
 
     @requires_cuda_and_triton
+    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+    def test_chained_cudnn_lstm(self):
+        # https://github.com/pytorch/pytorch/issues/198652
+        # _cudnn_rnn_backward has no meta kernel, so it only traces through the fake
+        # tensor fallback that runs the real kernel, which rejects SymInt arguments.
+        # Compiled autograd feeds the first node its SymInt hidden_size as a dynamic
+        # size, so that node graph breaks; the second one is lowered as an inductor
+        # fallback, which hands the kernel a contiguous copy of the transposed saved
+        # output. miopen_rnn_backward takes a plain int, so on ROCm both nodes lower.
+        def fn():
+            enc = nn.LSTM(8, 8, batch_first=True, device="cuda")
+            dec = nn.LSTM(8, 8, batch_first=True, device="cuda")
+            x = torch.randn(2, 4, 8, device="cuda")
+            target = torch.randn(2, 4, 8, device="cuda")
+            loss = nn.functional.mse_loss(dec(enc(x)[0])[0], target)
+            loss.backward()
+            yield from (p.grad for p in enc.parameters())
+            yield from (p.grad for p in dec.parameters())
+
+        self.check_output_and_recompiles(
+            fn,
+            count=[1, 1] if TEST_WITH_ROCM else [1, 2],
+            compiler_fn=make_compiler_fn(fullgraph=False, dynamic=False),
+        )
+
+    @requires_cuda_and_triton
     def test_cudagraphs_cpu_division(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
 
@@ -5662,7 +5689,6 @@ if IS_S390X:
 # clear_saved_tensors_on_access is incompatible with compiled autograd
 skipped_tests.add("test_clear_saved_tensors_on_access")
 skipped_tests.add("test_clear_saved_tensors_on_access_double_access_error")
-skipped_tests.add("test_forward_traceback_preserves_exception_with_checkpoint")
 skipped_tests.add("test_checkpoint_error_suggests_mark_dynamic")
 skipped_tests.add("test_checkpoint_automatic_dynamic_graph_shadowing")
 skipped_tests.add("test_checkpoint_automatic_dynamic_mark_dynamic_workaround")
