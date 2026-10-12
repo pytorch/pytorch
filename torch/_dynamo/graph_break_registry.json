@@ -679,6 +679,16 @@
       ]
     }
   ],
+  "GB5108": [
+    {
+      "Gb_type": "autograd inputs from an external mapping proxy",
+      "Context": "",
+      "Explanation": "Dynamo cannot identify the underlying mapping or its items/values overrides.",
+      "Hints": [
+        "Construct the mapping proxy inside the compiled region."
+      ]
+    }
+  ],
   "GB0046": [
     {
       "Gb_type": "Encountered torch.is_inference_mode_enabled during tracing",
