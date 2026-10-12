@@ -25,9 +25,13 @@ def forward_block_mn(
     # NB reversed order to since K is transposed
     kv_base_offset = kv_start + kv_offset
     {%- if USE_TMA %}
+    # Descriptor loads require 32-bit coordinates. Decode derives kv_start from
+    # off_t, a program id cast to INDEX_DTYPE, so kv_base_offset may be int64.
+    # Convert the descriptor coordinate here, preserving wide pointer
+    # arithmetic; the cast does not validate coordinate bounds.
     k = tl.load_tensor_descriptor(
         desc_k,
-        [kv_base_offset, 0],
+        [kv_base_offset.to(tl.int32), 0],
     )
     {%- else %}
 
@@ -127,7 +131,7 @@ def forward_block_mn(
     {%- if USE_TMA %}
     v = tl.load_tensor_descriptor(
         desc_v,
-        [kv_base_offset, 0],
+        [kv_base_offset.to(tl.int32), 0],
     )
     {%- else %}
     # Calculate offsets for V loading - reuse kv_base_offset from K loading
