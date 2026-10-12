@@ -5433,7 +5433,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             bwd_node,
             *list(fwd_freevars.keys()),
         )
-        kwargs_for_fn: dict[str, Any] = {
+        kwargs_for_fn: dict[str, list[int] | tuple[torch.dtype | None, ...]] = {
             "non_differentiable_idx": non_differentiable_idx,
             "saved_for_backward_idx": saved_for_backward_idx,
         }

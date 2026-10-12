@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.triton_utils import HAS_GPU, requires_gpu
+from torch.utils._debug_mode import DebugMode
 
 
 device_type = (
@@ -1985,11 +1986,23 @@ class GraphModule(torch.nn.Module):
         # 1 + 2**-9 is exact in fp32 but rounds to 1 in bf16.
         y = torch.full((4,), 1 + 2**-9)
         fn(x, y).sum().backward()
-        self.assertEqual(x.grad, y, atol=0, rtol=0)
-        x.grad = None
-        torch.compile(fn, backend=cnt, fullgraph=True)(x, y).sum().backward()
+        ref_grad, x.grad = x.grad, None
+        out = torch.compile(fn, backend=cnt, fullgraph=True)(x, y).sum()
+        with DebugMode() as debug_mode:
+            out.backward()
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(x.grad, y, atol=0, rtol=0)
+        self.assertEqual(x.grad, ref_grad, atol=0, rtol=0)
+        # The gradient stays fp32: no cast to bf16 and back.
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
+    aten::expand(t: f32[], [4])  ->  t: f32[4]
+    aten::empty_strided([4], [1], dtype=torch.float32, layout=torch.strided, device=cpu, pin_memory=False)  ->  t: f32[4]
+    aten::copy_(t: f32[4], t: f32[4])  ->  t: f32[4]
+    aten::mul.Tensor(t: f32[4], t: f32[4])  ->  t: f32[4]
+    aten::detach(t: f32[4])  ->  t: f32[4]""",
+        )
 
     def test_set_output_grad_dtype_non_tensor_output(self):
         # The traced autograd.Function drops the non-tensor output, so the
@@ -2016,14 +2029,29 @@ class GraphModule(torch.nn.Module):
         # 1 + 2**-9 is exact in fp32 but rounds to 1 in bf16.
         z = torch.full((4,), 1 + 2**-9)
         fn(x, y, z).sum().backward()
-        ref_grads = (x.grad, y.grad)
-        # x's gradient is declared bf16, so rounded; y's is declared fp32.
-        self.assertEqual(ref_grads[0], torch.full((4,), 2.0), atol=0, rtol=0)
-        self.assertEqual(ref_grads[1], 2 * z, atol=0, rtol=0)
-        x.grad = y.grad = None
-        torch.compile(fn, backend=cnt, fullgraph=True)(x, y, z).sum().backward()
+        ref_grads, x.grad, y.grad = (x.grad, y.grad), None, None
+        out = torch.compile(fn, backend=cnt, fullgraph=True)(x, y, z).sum()
+        with DebugMode() as debug_mode:
+            out.backward()
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual((x.grad, y.grad), ref_grads, atol=0, rtol=0)
+        # Only x's gradient, declared bf16, is cast to bf16 and back; y's,
+        # declared fp32, stays fp32.
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
+    aten::expand(t: f32[], [4])  ->  t: f32[4]
+    aten::empty_strided([4], [1], dtype=torch.float32, layout=torch.strided, device=cpu, pin_memory=False)  ->  t: f32[4]
+    aten::copy_(t: f32[4], t: f32[4])  ->  t: f32[4]
+    aten::mul.Tensor(t: f32[4], 2)  ->  t: f32[4]
+    aten::mul.Tensor(t: f32[4], t: f32[4])  ->  t: f32[4]
+    aten::mul.Tensor(t: f32[4], t: f32[4])  ->  t: f32[4]
+    aten::_to_copy(t: f32[4], dtype=torch.bfloat16)  ->  t: bf16[4]
+    aten::_to_copy(t: bf16[4], dtype=torch.float32)  ->  t: f32[4]
+    aten::detach(t: f32[4])  ->  t: f32[4]
+    aten::detach(t: f32[4])  ->  t: f32[4]""",
+        )
 
     def test_mark_non_differentiable(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
