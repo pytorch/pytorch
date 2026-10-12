@@ -39,6 +39,9 @@ def empty_host_cache() -> None:
 
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
+
+    .. note:: Memory cached by a private pool that is still alive, such as a
+        :class:`torch.cuda.HostMemPool` or the pool of a captured graph, is kept.
     """
     torch._C._accelerator_emptyHostCache()
 
