@@ -65,9 +65,7 @@ class TestKernelGeneral(TestCase):
         deco = re.compile(r"@(?:\w+\.)*cute\.kernel\b")
         found = [
             f"{path.name}:{i}"
-            # Exclude the reference implementation.
             for path in sorted(root.glob("*.py"))
-            if path.name != "inner_tree_kernel.py"
             for i, line in enumerate(path.read_text().splitlines(), 1)
             if deco.match(line.strip())
         ]
@@ -108,8 +106,6 @@ class TestKernelGeneral(TestCase):
             for i, line in enumerate(path.read_text().splitlines(), 1)
             if "noqa: S101" in line
         ]
-        # inner_tree_kernel.py is the reference implementation's, not this stack's.
-        offenders = [o for o in offenders if not o.startswith("inner_tree_kernel.py")]
         self.assertEqual(offenders, [])
 
 
