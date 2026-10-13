@@ -718,7 +718,12 @@ class ConvertFrameAssert:
                 ],
             )
 
-        if not has_tensor_in_frame(frame):
+        # A package's resume functions need their guards recorded even when no
+        # tensor survives the graph break, or the artifact cannot tell which
+        # calls it covers.
+        if not has_tensor_in_frame(frame) and not (
+            self._package is not None and self._package.is_resume_code(code)
+        ):
             return ConvertFrameReturn(
                 skip_reason="no tensor-related objects found in frame"
             )
@@ -2022,7 +2027,9 @@ def _compile(
 
     metrics_context = get_metrics_context()
     package_code_context = (
-        package.code_context(code) if package is not None else contextlib.nullcontext()
+        package.code_context(code, globals)
+        if package is not None
+        else contextlib.nullcontext()
     )
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),

@@ -4582,6 +4582,8 @@ class TestPrecompileCapture(TestCase):
 
 
 _GOLDEN_MODULE = """
+import collections
+
 import torch
 
 SCALE = 2
@@ -4622,6 +4624,20 @@ def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
 
 
+Record = collections.namedtuple("Record", ("value", "weight"))
+
+
+def record_helper(y):
+    record = Record(y.sin(), 2)
+    z = record.value * record.weight
+    torch._dynamo.graph_break()
+    return z.cos()
+
+
+def calls_record_helper(model, x):
+    return record_helper(model(x)) + 1
+
+
 RAISE = []
 
 
@@ -4656,6 +4672,27 @@ def records_stance(model, x):
 def tags_compiled(model, x):
     # Adds 1 only in a compiled frame, so a result shows how the call was served.
     return breaking_helper(model(x)) + int(torch.compiler.is_compiling())
+
+
+RESUME_VALUE = [0]
+# Called through an alias so the continuation below names no torch module.
+_ones = torch.ones
+
+
+@torch._dynamo.disable
+def resume_value():
+    return RESUME_VALUE[0]
+
+
+def scalar_continuation(y):
+    value = resume_value()
+    # Only the int crosses the break: the continuation frame holds no tensor.
+    return _ones(3) * value
+
+
+def tensor_free_resume(model, x):
+    y = model(x)
+    return y.sum(dim=0), scalar_continuation(y)
 """
 
 _GOLDEN_LOADER = """
@@ -4804,6 +4841,20 @@ class TestPrecompileDynamoCapture(TestCase):
             load(self.artifact, self.cache)
         calls = [((self.x2,), {}, y2), ((self.x3,), {}, y3)]
         self._serve_in_fresh_process(calls, mode="installed")
+
+    @skipIfCrossRef
+    def test_an_installed_artifact_seeds_unnamed_scope_globals(self):
+        # Inlining namedtuple's exec-generated __new__ roots record_helper's
+        # guards at the ___unnamed_scope_<id>_c<n> key Dynamo mints for globals
+        # no module owns. The key embeds an id() from the capturing process, so
+        # nothing binds it in the serving process unless the install does.
+        fn = self.mod.calls_record_helper
+        tracer = DynamoTracer(require_no_risky_drops=False)
+        with self._capture(fn, backend="eager", tracer=tracer) as cap:
+            y = cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            self.assertIn('SERVING_MODE = "installed"', f.read())
+        self._serve_in_fresh_process([((self.x2,), {}, y)], mode="installed")
 
     @skipIfCrossRef
     @parametrize("compiled", ["calls_breaking_helper", "breaking_helper"])
@@ -4968,6 +5019,47 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("refused", out.stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_an_installed_artifact_refuses_a_miss_on_a_tensor_free_continuation(
+        self,
+    ):
+        # The continuation after the break in scalar_continuation holds only an
+        # int, but its graph depends on it: capture must record its variant,
+        # and a call it does not cover must refuse rather than run eagerly.
+        fn = self.mod.tensor_free_resume
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            self.assertIn('SERVING_MODE = "installed"', f.read())
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "mod = __import__(sys.argv[4])\n"
+            "f = torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "model, x = mod.Model(), torch.randn(2, 4)\n"
+            "torch.testing.assert_close(f(model, x), mod.tensor_free_resume(model, x))\n"
+            "mod.RESUME_VALUE[0] = 1\n"
+            "try:\n"
+            "    f(model, x)\n"
+            "except torch.compiler.PrecompileError as e:\n"
+            "    assert 'no captured variant' in str(e), e\n"
+            "else:\n"
+            "    raise AssertionError('an uncovered call was served')\n"
+            "mod.RESUME_VALUE[0] = 0\n"
+            "torch.testing.assert_close(f(model, x), mod.tensor_free_resume(model, x))\n"
+            "print('refused')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache, self.module_name]
+        out = subprocess.run(
+            [sys.executable, "-c", script, *argv],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("refused", out.stdout)
+
+    @skipIfCrossRef
     def test_an_installed_artifact_passes_the_models_own_errors_through(self):
         # Only Dynamo's fail_on_recompile refusal becomes a PrecompileError; a
         # RuntimeError the served model raises on a covered call is its own.
@@ -5031,6 +5123,45 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(self.model.lin.weight.grad, grads["lin.weight"])
         self.model.load_state_dict(state)
         self._serve_in_fresh_process([((self.x2,), {}, None)], grads)
+
+    def test_a_cold_bundled_autotune_cache_does_not_break_a_training_capture(self):
+        # The bundled autotune remote cache opens one bundle per compile context
+        # and closes it on the first compiled call; the capture lowers the
+        # backward with the forward, before either runs.
+        from torch._inductor.utils import fresh_cache
+
+        single = self.mod.single
+        reference = copy.deepcopy(self.model)
+        expected = single(reference, self.x2)
+        expected.sum().backward()
+        cold = mock.Mock()
+        cold.get.return_value = None
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(bundled_autotune_remote_cache=True),
+            mock.patch(
+                "torch._inductor.runtime.autotune_cache.create_cache",
+                return_value=cold,
+            ),
+        ):
+            with self._capture(single, backend="inductor") as cap:
+                y = cap(self.model, self.x2)
+                y.sum().backward()
+                self.assertTrue(cap.summary().complete)
+            self.assertIs(torch._inductor.config.bundled_autotune_remote_cache, True)
+            with self.assertRaisesRegex(KeyError, "the block's own"):
+                with self._capture(single, backend="inductor") as cap:
+                    raise KeyError("the block's own")
+            self.assertIs(torch._inductor.config.bundled_autotune_remote_cache, True)
+        self.assertEqual(y, expected)
+        for p, ref in zip(self.model.parameters(), reference.parameters()):
+            self.assertEqual(p.grad, ref.grad)
+        self.model.zero_grad()
+        served = load(self.artifact, self.cache)(self.model, self.x2)
+        served.sum().backward()
+        self.assertEqual(served, expected)
+        for p, ref in zip(self.model.parameters(), reference.parameters()):
+            self.assertEqual(p.grad, ref.grad)
 
     def test_save_checkpoints_mid_block(self):
         single = self.mod.single
