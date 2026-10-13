@@ -1202,8 +1202,9 @@ void ProcessTimeSeriesNode(Node* n) {
           hidden_size = c10::ShapeSymbol::fromStaticSize(input1_value / 3);
           break;
         default:
-          throw std::runtime_error(
-              std::string() + "This is not a valid TimeSeries Node with type " +
+          TORCH_CHECK(
+              false,
+              "This is not a valid TimeSeries Node with type ",
               n->kind().toDisplayString());
       }
     } else {
@@ -1893,7 +1894,8 @@ void ONNXShapeTypeInference(
       const_val_copy.copy_(const_val);
       ConstantValueMap::SetValue(value.first, const_val_copy);
     } else {
-      throw std::runtime_error(
+      TORCH_CHECK(
+          false,
           "ONNXShapeTypeInference - Unsupported kind of constant node found.");
     }
   }
@@ -2414,7 +2416,7 @@ static size_t ONNXAssignOutputShape(
         "Model output has unsupported type. See "
         "https://pytorch.org/docs/stable/onnx.html#types. Got type: ";
     msg += THPUtils_typename(output_obj);
-    throw std::runtime_error(msg);
+    TORCH_CHECK(false, msg);
   }
 
   index_check();

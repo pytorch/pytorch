@@ -18,8 +18,8 @@ using namespace c10::metal;
 template <typename T, typename index_t>
 kernel void scatter_set(
     device T* output [[buffer(0)]],
-    constant T* src [[buffer(1)]],
-    constant index_t* index [[buffer(2)]],
+    device const T* src [[buffer(1)]],
+    device const index_t* index [[buffer(2)]],
     constant long* index_sizes [[buffer(3)]],
     constant long* output_strides [[buffer(4)]],
     constant long* src_strides [[buffer(5)]],
@@ -63,8 +63,8 @@ kernel void scatter_set(
 template <typename T, typename index_t>
 kernel void scatter_set_dense(
     device T* output [[buffer(0)]],
-    constant T* src [[buffer(1)]],
-    constant index_t* index [[buffer(2)]],
+    device const T* src [[buffer(1)]],
+    device const index_t* index [[buffer(2)]],
     constant long& inner_size [[buffer(3)]],
     constant long& index_dim_size [[buffer(4)]],
     constant long& output_dim_size [[buffer(5)]],
@@ -96,7 +96,7 @@ template <typename T, typename index_t>
 kernel void scatter_set_dense_value(
     device T* output [[buffer(0)]],
     constant T& value [[buffer(1)]],
-    constant index_t* index [[buffer(2)]],
+    device const index_t* index [[buffer(2)]],
     constant long& inner_size [[buffer(3)]],
     constant long& index_dim_size [[buffer(4)]],
     constant long& output_dim_size [[buffer(5)]],
@@ -225,8 +225,8 @@ kernel void scatter_signbit_xor_long(
 template <typename T, typename index_t, ScatterReduceOp Op>
 kernel void scatter_reduce_dense(
     device T* output [[buffer(0)]],
-    constant T* src [[buffer(1)]],
-    constant index_t* index [[buffer(2)]],
+    device const T* src [[buffer(1)]],
+    device const index_t* index [[buffer(2)]],
     constant long& inner_size [[buffer(3)]],
     constant long& index_dim_size [[buffer(4)]],
     constant long& output_dim_size [[buffer(5)]],
@@ -255,8 +255,8 @@ kernel void scatter_reduce_dense(
 template <typename T, typename index_t, ScatterReduceOp Op>
 kernel void scatter_reduce_strided(
     device T* output [[buffer(0)]],
-    constant T* src [[buffer(1)]],
-    constant index_t* index [[buffer(2)]],
+    device const T* src [[buffer(1)]],
+    device const index_t* index [[buffer(2)]],
     constant long* index_sizes [[buffer(3)]],
     constant long* output_strides [[buffer(4)]],
     constant long* src_strides [[buffer(5)]],
@@ -302,8 +302,8 @@ kernel void scatter_reduce_strided(
 template <typename T, typename index_t>
 kernel void gather_dense(
     device T* output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant index_t* index [[buffer(2)]],
+    device const T* input [[buffer(1)]],
+    device const index_t* index [[buffer(2)]],
     constant long& inner_size [[buffer(3)]],
     constant long& output_dim_size [[buffer(4)]],
     constant long& input_dim_size [[buffer(5)]],
@@ -333,8 +333,8 @@ kernel void gather_dense(
 template <typename T, typename index_t>
 kernel void gather_strided(
     device T* output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant index_t* index [[buffer(2)]],
+    device const T* input [[buffer(1)]],
+    device const index_t* index [[buffer(2)]],
     constant long* sizes [[buffer(3)]],
     constant long* output_strides [[buffer(4)]],
     constant long* input_strides [[buffer(5)]],
@@ -376,8 +376,8 @@ kernel void gather_strided(
       [[host_name("scatter_" #OP "_dense_" #DTYPE "_" #IDXTYPE)]] kernel void \
       scatter_reduce_dense<DTYPE, IDXTYPE, ScatterReduceOp::OP_ENUM>(         \
           device DTYPE * output [[buffer(0)]],                                \
-          constant DTYPE * src [[buffer(1)]],                                 \
-          constant IDXTYPE * index [[buffer(2)]],                             \
+          device const DTYPE* src [[buffer(1)]],                              \
+          device const IDXTYPE* index [[buffer(2)]],                          \
           constant long& inner_size [[buffer(3)]],                            \
           constant long& index_dim_size [[buffer(4)]],                        \
           constant long& output_dim_size [[buffer(5)]],                       \
@@ -388,8 +388,8 @@ kernel void gather_strided(
                        "_" #IDXTYPE)]] kernel void                            \
   scatter_reduce_strided<DTYPE, IDXTYPE, ScatterReduceOp::OP_ENUM>(           \
       device DTYPE * output [[buffer(0)]],                                    \
-      constant DTYPE * src [[buffer(1)]],                                     \
-      constant IDXTYPE * index [[buffer(2)]],                                 \
+      device const DTYPE* src [[buffer(1)]],                                  \
+      device const IDXTYPE* index [[buffer(2)]],                              \
       constant long* index_sizes [[buffer(3)]],                               \
       constant long* output_strides [[buffer(4)]],                            \
       constant long* src_strides [[buffer(5)]],                               \
@@ -404,8 +404,8 @@ kernel void gather_strided(
   template [[host_name("scatter_set_" #DTYPE "_" #IDXTYPE)]] kernel void       \
   scatter_set<DTYPE, IDXTYPE>(                                                 \
       device DTYPE * output [[buffer(0)]],                                     \
-      constant DTYPE * src [[buffer(1)]],                                      \
-      constant IDXTYPE * index [[buffer(2)]],                                  \
+      device const DTYPE* src [[buffer(1)]],                                   \
+      device const IDXTYPE* index [[buffer(2)]],                               \
       constant long* index_sizes [[buffer(3)]],                                \
       constant long* output_strides [[buffer(4)]],                             \
       constant long* src_strides [[buffer(5)]],                                \
@@ -418,8 +418,8 @@ kernel void gather_strided(
   template [[host_name("scatter_set_dense_" #DTYPE "_" #IDXTYPE)]] kernel void \
   scatter_set_dense<DTYPE, IDXTYPE>(                                           \
       device DTYPE * output [[buffer(0)]],                                     \
-      constant DTYPE * src [[buffer(1)]],                                      \
-      constant IDXTYPE * index [[buffer(2)]],                                  \
+      device const DTYPE* src [[buffer(1)]],                                   \
+      device const IDXTYPE* index [[buffer(2)]],                               \
       constant long& inner_size [[buffer(3)]],                                 \
       constant long& index_dim_size [[buffer(4)]],                             \
       constant long& output_dim_size [[buffer(5)]],                            \
@@ -431,7 +431,7 @@ kernel void gather_strided(
   scatter_set_dense_value<DTYPE, IDXTYPE>(                                     \
       device DTYPE * output [[buffer(0)]],                                     \
       constant DTYPE & value [[buffer(1)]],                                    \
-      constant IDXTYPE * index [[buffer(2)]],                                  \
+      device const IDXTYPE* index [[buffer(2)]],                               \
       constant long& inner_size [[buffer(3)]],                                 \
       constant long& index_dim_size [[buffer(4)]],                             \
       constant long& output_dim_size [[buffer(5)]],                            \
@@ -447,8 +447,8 @@ kernel void gather_strided(
   template [[host_name("gather_dense_" #DTYPE "_" #IDXTYPE)]] kernel void   \
   gather_dense<DTYPE, IDXTYPE>(                                             \
       device DTYPE * output [[buffer(0)]],                                  \
-      constant DTYPE * input [[buffer(1)]],                                 \
-      constant IDXTYPE * index [[buffer(2)]],                               \
+      device const DTYPE* input [[buffer(1)]],                              \
+      device const IDXTYPE* index [[buffer(2)]],                            \
       constant long& inner_size [[buffer(3)]],                              \
       constant long& output_dim_size [[buffer(4)]],                         \
       constant long& input_dim_size [[buffer(5)]],                          \
@@ -458,8 +458,8 @@ kernel void gather_strided(
   template [[host_name("gather_strided_" #DTYPE "_" #IDXTYPE)]] kernel void \
   gather_strided<DTYPE, IDXTYPE>(                                           \
       device DTYPE * output [[buffer(0)]],                                  \
-      constant DTYPE * input [[buffer(1)]],                                 \
-      constant IDXTYPE * index [[buffer(2)]],                               \
+      device const DTYPE* input [[buffer(1)]],                              \
+      device const IDXTYPE* index [[buffer(2)]],                            \
       constant long* sizes [[buffer(3)]],                                   \
       constant long* output_strides [[buffer(4)]],                          \
       constant long* input_strides [[buffer(5)]],                           \
@@ -531,3 +531,4 @@ REGISTER_SCATTER_OPS_SET_ADD(float2);
 REGISTER_SCATTER_OPS_SET_ADD(half2);
 
 REGISTER_GATHER_DTYPE(float8_e4m3fn);
+REGISTER_SCATTER_SET_DTYPE(float8_e4m3fn);

@@ -38,6 +38,10 @@ namespace at {
 
 class Tensor;
 
+namespace native::xnnpack::internal {
+TORCH_API void register_backend();
+} // namespace native::xnnpack::internal
+
 enum class TORCH_API Float32MatmulPrecision { HIGHEST, HIGH, MEDIUM };
 
 enum class CuBLASReductionOption : uint8_t {

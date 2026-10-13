@@ -423,10 +423,9 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
       // at::reshape does not support shape dim value to be zero
       assert(shape_a[i] >= -1);
       if (shape_a[i] == 0 && !allowzero) {
-        if (i >= inputTensorValues[0].sizes().size()) {
-          throw std::runtime_error(
-              "Dimension with value 0 exceeds the input size dimensions.");
-        }
+        TORCH_CHECK(
+            i < inputTensorValues[0].sizes().size(),
+            "Dimension with value 0 exceeds the input size dimensions.");
         shape[i] = inputTensorValues[0].sizes()[i];
       } else {
         shape[i] = shape_a[i];
@@ -570,16 +569,14 @@ static std::vector<at::Tensor> getValues(
   for (auto val : node->inputs()) {
     if (val->node()->kind() == prim::Param) {
       auto itr = valsToParamsMap.find(val);
-      if (itr == valsToParamsMap.end()) {
-        throw std::runtime_error(
-            "getValues: Input value not found amongst constant parameters.");
-      }
+      TORCH_CHECK(
+          itr != valsToParamsMap.end(),
+          "getValues: Input value not found amongst constant parameters.");
       inputTensorValues.push_back(itr->second.second.toTensor());
     } else if (val->node()->kind() == onnx::Constant) {
       inputTensorValues.push_back(val->node()->t(attr::value));
     } else {
-      throw std::runtime_error(
-          "getValues: Unsupported kind of constant node found.");
+      TORCH_CHECK(false, "getValues: Unsupported kind of constant node found.");
     }
   }
   TORCH_INTERNAL_ASSERT(inputTensorValues.size() == numInputs);
