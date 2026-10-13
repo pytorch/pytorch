@@ -11062,58 +11062,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertNotIn("L['x'] == 5", message)
         self.assertIn("... and 2 more distinct reason(s) not shown.", message)
 
-    def test_compile_past_precompiled_entries_records_why_they_missed(self):
-        from torch._C._dynamo.eval_frame import (
-            _load_precompile_entry,
-            _reset_precompile_entries,
-        )
-        from torch.testing._internal.logging_utils import (
-            kwargs_to_settings,
-            log_settings,
-        )
-
-        def fn(x):
-            return x + 1
-
-        root = torch._dynamo.guards.RootGuardManager()
-        root.add_lambda_guard(
-            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"], None
-        )
-
-        def injected(x):
-            return x + 102
-
-        # The precompiled entries are not this process's cache entries, so this
-        # compile is not a recompilation.
-        compiled_fn = torch.compile(fn, backend="eager")
-        _load_precompile_entry(
-            fn.__code__,
-            torch._dynamo.guards.GuardManagerWrapper(root),
-            injected.__code__,
-        )
-        torch._dynamo.utils.clear_compilation_metrics()
-        x = torch.randn(3)
-        try:
-            with (
-                log_settings(kwargs_to_settings(recompiles=True)),
-                self.assertLogs("torch._dynamo.convert_frame", level="DEBUG") as logs,
-            ):
-                self.assertEqual(compiled_fn(x), fn(x))
-        finally:
-            _reset_precompile_entries(fn.__code__)
-        reason = torch._dynamo.utils._compilation_metrics[-1].recompile_reason
-        self.assertEqual(
-            reason,
-            "Failed on all 1 precompiled variant(s):\n  [0] isinstance(L['x'], bool)",
-        )
-        self.assertTrue(
-            any(
-                "Compiling function fn" in m and "[0] isinstance(L['x'], bool)" in m
-                for m in logs.output
-            ),
-            logs.output,
-        )
-
     def test_guard_complete_hook_can_reset_hit(self):
         from torch._C._dynamo.eval_frame import set_guard_complete_hook
 
@@ -11176,6 +11124,58 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(
             len(torch._dynamo.eval_frame._debug_get_cache_entry_list(fn.__code__)),
             1,
+        )
+
+    def test_compile_past_precompiled_entries_records_why_they_missed(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+        from torch.testing._internal.logging_utils import (
+            kwargs_to_settings,
+            log_settings,
+        )
+
+        def fn(x):
+            return x + 1
+
+        root = torch._dynamo.guards.RootGuardManager()
+        root.add_lambda_guard(
+            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"], None
+        )
+
+        def injected(x):
+            return x + 102
+
+        # The precompiled entries are not this process's cache entries, so this
+        # compile is not a recompilation.
+        compiled_fn = torch.compile(fn, backend="eager")
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(root),
+            injected.__code__,
+        )
+        torch._dynamo.utils.clear_compilation_metrics()
+        x = torch.randn(3)
+        try:
+            with (
+                log_settings(kwargs_to_settings(recompiles=True)),
+                self.assertLogs("torch._dynamo.convert_frame", level="DEBUG") as logs,
+            ):
+                self.assertEqual(compiled_fn(x), fn(x))
+        finally:
+            _reset_precompile_entries(fn.__code__)
+        reason = torch._dynamo.utils._compilation_metrics[-1].recompile_reason
+        self.assertEqual(
+            reason,
+            "Failed on all 1 precompiled variant(s):\n  [0] isinstance(L['x'], bool)",
+        )
+        self.assertTrue(
+            any(
+                "Compiling function fn" in m and "[0] isinstance(L['x'], bool)" in m
+                for m in logs.output
+            ),
+            logs.output,
         )
 
     def test_shape_and_tuple_equality(self):
