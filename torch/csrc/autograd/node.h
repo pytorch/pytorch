@@ -16,6 +16,11 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 
+#ifdef USE_ROCM
+// For at::ROCmBackwardPassGuard
+#include <ATen/Context.h>
+#endif
+
 #include <algorithm>
 #include <cstdint>
 #include <initializer_list>
