@@ -224,6 +224,12 @@ constexpr int kCountWords = countWords<kMaxFields>();
 constexpr int kEqCap = 2;
 static_assert(kEqCap >= 1, "a single-round slice must never overflow the held equal elements");
 
+// Number of set bits of `ballot` in lanes below the calling lane.
+__device__ __forceinline__ uint32_t laneRank(uint64_t ballot) {
+  uint32_t r = __builtin_amdgcn_mbcnt_lo(static_cast<uint32_t>(ballot), 0u);
+  return __builtin_amdgcn_mbcnt_hi(static_cast<uint32_t>(ballot >> 32), r);
+}
+
 // Inclusive scan of the per-warp counts held by lanes 0..num_warps-1; returns the block total and this warp's
 // exclusive prefix as wave-uniform values. The combine after the barrier is a serial dependency chain, so it
 // is written to minimize dependent cross-lane steps: on GFX9 (wave64, so <= 16 warps per 1024-thread block)
