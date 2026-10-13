@@ -19,6 +19,7 @@ from torch.distributed.tensor._collective_utils import (
     mesh_broadcast,
     mesh_scatter,
     pad_tensor,
+    pad_tensor_to_size,
     shard_dim_alltoall,
     unpad_tensor,
 )
@@ -491,12 +492,12 @@ class Shard(torch._C._distributed.Shard):
 
         # Assume padding (uneven sharding) as general case for unbacked sizes,
         # unless an optimization hint can prove the even-shard branch.
+        logical_dim_size = tensor.size(self.dim)
         is_padded = not _hint_proves_even_shard(
-            tensor.size(self.dim), num_chunks
-        ) and guard_or_true(tensor.size(self.dim) % num_chunks != 0)
-        pad_sizes = None
+            logical_dim_size, num_chunks
+        ) and guard_or_true(logical_dim_size % num_chunks != 0)
         if is_padded:
-            scattered_list, pad_sizes = self._split_tensor(
+            scattered_list, _ = self._split_tensor(
                 tensor, num_chunks, with_padding=True, contiguous=True
             )
             tensor = torch.cat(scattered_list, dim=self.dim)
@@ -508,10 +509,15 @@ class Shard(torch._C._distributed.Shard):
         )
 
         if is_padded:
-            if pad_sizes is None:
-                raise AssertionError
-            output = Shard._maybe_unpad_tensor_with_sizes(
-                self.dim, output, pad_sizes, mesh._sym_get_coordinate(mesh_dim), False
+            local_shard_size, _ = self.local_shard_size_and_offset(
+                logical_dim_size,
+                num_chunks,
+                mesh._sym_get_coordinate(mesh_dim),
+            )
+            output = unpad_tensor(
+                output,
+                self.dim,
+                output.size(self.dim) - local_shard_size,
             )
         return output
 
@@ -532,8 +538,7 @@ class Shard(torch._C._distributed.Shard):
 
         if is_padded:
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
-            pad_size = full_chunk_size - local_tensor.size(self.dim)
-            local_tensor = pad_tensor(local_tensor, self.dim, pad_size)  # type: ignore[bad-argument-type]
+            local_tensor = pad_tensor_to_size(local_tensor, self.dim, full_chunk_size)
 
         if not local_tensor.is_contiguous():
             local_tensor = local_tensor.contiguous()
@@ -600,7 +605,9 @@ class Shard(torch._C._distributed.Shard):
         logical_dim_size = current_logical_shape[self.dim]
 
         local_tensor = self._maybe_pad_tensor(
-            local_tensor, logical_dim_size, num_chunks
+            local_tensor,
+            logical_dim_size,
+            num_chunks,
         )
 
         result = funcol.all_gather_single(
