@@ -95,7 +95,10 @@ if(NOT BUILD_LIBTORCHLESS)
   target_link_libraries(c10 PUBLIC headeronly)
   target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
   target_link_libraries(c10 PRIVATE nlohmann)
-  target_link_libraries(c10 PRIVATE moodycamel)
+  # PUBLIC: c10/util/Semaphore.h includes <moodycamel/concurrentqueue.h> when
+  # std::counting_semaphore is unusable, so consumers of that header need the
+  # include directory as well.
+  target_link_libraries(c10 PUBLIC moodycamel)
 
   if(C10_USE_NUMA)
     message(STATUS "NUMA paths:")
