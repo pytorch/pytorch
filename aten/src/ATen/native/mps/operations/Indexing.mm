@@ -180,6 +180,25 @@ static void index_put_kernel_mps(TensorIterator& iter,
 }
 } // namespace mps
 
+// Validate index in [lower, dim_size) once (one thread per index) on the
+// given encoder, so the following gather/scatter kernel can clamp instead of
+// branch-and-report per element. lower is 0, or -dim_size for ops like
+// index_fill_ that accept wrapped negative indices. Out-of-bounds surfaces as
+// an async AcceleratorError on the next stream sync.
+static void encodeIndexBoundsCheck(id<MTLComputeCommandEncoder> encoder,
+                                   at::mps::MPSStream* stream,
+                                   const Tensor& index,
+                                   int64_t dim_size,
+                                   bool allow_negative_wrap = false) {
+  using namespace mps;
+  auto pso = lib.getPipelineStateForFunc(fmt::format("index_check_bounds_{}", scalarToMetalTypeString(index)));
+  const int64_t lower_bound = allow_negative_wrap ? -dim_size : 0;
+  [encoder setComputePipelineState:pso];
+  mtl_setArgs(encoder, index);
+  mtl_setArgs<1>(encoder, static_cast<uint32_t>(index.stride(0)), dim_size, lower_bound, stream->getErrorBuffer());
+  mtl_dispatch1DJob(encoder, pso, index.numel());
+}
+
 TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
                                     int64_t dim,
                                     const Tensor& index,
@@ -265,6 +284,7 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
+      encodeIndexBoundsCheck(computeEncoder, stream, index, dim_size);
       [computeEncoder setComputePipelineState:indexCopyPSO];
       mtl_setArgs(computeEncoder, result, source, index);
       if (is_dense) {
@@ -543,22 +563,6 @@ static void flip_kernel_mps(TensorIterator& iter, const bool quantized) {
       getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
-}
-
-// Validate index in [0, dim_size) once (one thread per index) on the given
-// encoder, so the following gather/scatter kernel can clamp instead of
-// branch-and-report per element. Out-of-bounds surfaces as an async
-// AcceleratorError on the next stream sync.
-static void encodeIndexBoundsCheck(id<MTLComputeCommandEncoder> encoder,
-                                   at::mps::MPSStream* stream,
-                                   const Tensor& index,
-                                   int64_t dim_size) {
-  using namespace mps;
-  auto pso = lib.getPipelineStateForFunc(fmt::format("index_check_bounds_{}", scalarToMetalTypeString(index)));
-  [encoder setComputePipelineState:pso];
-  mtl_setArgs(encoder, index);
-  mtl_setArgs<1>(encoder, static_cast<uint32_t>(index.stride(0)), dim_size, stream->getErrorBuffer());
-  mtl_dispatch1DJob(encoder, pso, index.numel());
 }
 
 TORCH_IMPL_FUNC(index_add_mps_out)
@@ -900,10 +904,13 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   MPSStream* stream = getCurrentMPSStream();
 
   auto num_threads = source.numel();
+  // For a 0-dim result the only valid index is 0.
+  const int64_t index_bound = result.dim() > 0 ? result.size(dim) : 1;
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
+      encodeIndexBoundsCheck(compute_encoder, stream, index, index_bound);
       auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
           "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
       getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source}, stream);
@@ -1133,6 +1140,7 @@ static void index_fill_mps_kernel(TensorIterator& iter,
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
         auto computeEncoder = stream->commandEncoder();
+        encodeIndexBoundsCheck(computeEncoder, stream, index, dim_size, /*allow_negative_wrap=*/true);
         auto mpsScalar = getMPSScalar(source, self.scalar_type());
         long indices_stride = index.stride(0);
 
@@ -1199,6 +1207,7 @@ static void index_fill_mps_kernel(TensorIterator& iter,
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
         auto computeEncoder = stream->commandEncoder();
+        encodeIndexBoundsCheck(computeEncoder, stream, index, dim_size, /*allow_negative_wrap=*/true);
         auto mpsScalar = getMPSScalar(source, self.scalar_type());
         [computeEncoder setComputePipelineState:indexFillPSO];
         mtl_setArgs(computeEncoder, self, index);
