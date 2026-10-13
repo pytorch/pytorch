@@ -46,16 +46,14 @@ class SessionState {
  private:
   // FBCODE uses folly::F14FastMap which requires values to be moveable.
   // This prevents us from using std::atomic_uint32_t in c10::FastMap.
-#ifdef FBCODE_CAFFE2
   struct AtomicInt {
-    uint32_t value;
+    std::atomic_uint32_t value;
+    AtomicInt(uint32_t x) : value(x) {}
+    AtomicInt(const AtomicInt& other) : value(other.value.load()) {}
     uint32_t fetch_sub(uint32_t x) {
-      return __atomic_fetch_sub(&value, x, __ATOMIC_SEQ_CST);
+      return value.fetch_sub(x);
     }
   };
-#else
-  using AtomicInt = std::atomic_uint32_t;
-#endif
 
   std::atomic_uint32_t workOutstanding_{0};
   std::condition_variable cv_;
