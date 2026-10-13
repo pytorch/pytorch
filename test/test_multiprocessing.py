@@ -1038,8 +1038,15 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
             self.assertEqual(list(tensor), [4, 4, 4, 4])
         p.join()
 
-    def test_event_multiprocess(self):
-        event = torch.cuda.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.cuda.Event, name="cuda_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_multiprocess(self, event_cls):
+        event = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(event.query())
 
         ctx = mp.get_context("spawn")
