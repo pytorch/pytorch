@@ -208,8 +208,8 @@ struct FusedAdamMathFunctor {
     }
     const auto [bias_correction1, bias_correction2_sqrt] =
         [&]() -> std::pair<opmath_t, opmath_t> {
-      auto step_count = static_cast<opmath_t>(
-          *static_cast<const step_t*>(tl.state_steps_addresses[tensor_loc]));
+      auto step_count = static_cast<opmath_t>(*reinterpret_cast<const step_t*>(
+          tl.state_steps_addresses[tensor_loc]));
 
       const opmath_t bias_correction1 =
           1 - at::native::pow_(beta1_opmath, step_count);
@@ -319,10 +319,10 @@ struct FusedAdamMathFunctorMP {
     }
     const auto [bias_correction1, bias_correction2_sqrt] =
         [&]() -> std::pair<double, double> {
-      const auto step_count =
-          *static_cast<const step_t*>(tl.state_steps_addresses[tensor_loc]);
-      const auto bias_correction1 = 1 - at::native::pow_(beta1, step_count);
-      const auto bias_correction2 = 1 - at::native::pow_(beta2, step_count);
+      auto* step_count =
+          reinterpret_cast<const step_t*>(tl.state_steps_addresses[tensor_loc]);
+      const auto bias_correction1 = 1 - at::native::pow_(beta1, *step_count);
+      const auto bias_correction2 = 1 - at::native::pow_(beta2, *step_count);
       const auto bias_correction2_sqrt = std::sqrt(bias_correction2);
       return {bias_correction1, bias_correction2_sqrt};
     }();
@@ -619,88 +619,57 @@ void _fused_adam_cuda_impl_common(
         exp_avgs[0].scalar_type(),
         mp_name,
         AT_WRAP([&]() {
-          if (state_steps[0].scalar_type() == at::kDouble) {
-            multi_tensor_apply_for_fused_optimizer<depth>(
-                tensor_lists,
-                state_steps,
-                FusedAdamMathFunctorMP<
-                    float,
-                    float,
-                    float,
-                    scalar_t,
-                    scalar_t,
-                    std::conditional_t<amsgrad, scalar_t, float>,
-                    depth,
-                    mode,
-                    amsgrad,
-                    double>(),
-                lr_ptr,
-                lr,
-                beta1,
-                beta2,
-                weight_decay,
-                eps,
-                maximize,
-                grad_scale_ptr,
-                found_inf_ptr);
-          } else {
-            multi_tensor_apply_for_fused_optimizer<depth>(
-                tensor_lists,
-                state_steps,
-                FusedAdamMathFunctorMP<
-                    float,
-                    float,
-                    float,
-                    scalar_t,
-                    scalar_t,
-                    std::conditional_t<amsgrad, scalar_t, float>,
-                    depth,
-                    mode,
-                    amsgrad>(),
-                lr_ptr,
-                lr,
-                beta1,
-                beta2,
-                weight_decay,
-                eps,
-                maximize,
-                grad_scale_ptr,
-                found_inf_ptr);
-          }
+          AT_DISPATCH_STEP_TYPES(
+              state_steps[0].scalar_type(),
+              "fused_adam_step_cuda",
+              [&]() {
+                multi_tensor_apply_for_fused_optimizer<depth>(
+                    tensor_lists,
+                    state_steps,
+                    FusedAdamMathFunctorMP<
+                        float,
+                        float,
+                        float,
+                        scalar_t,
+                        scalar_t,
+                        std::conditional_t<amsgrad, scalar_t, float>,
+                        depth,
+                        mode,
+                        amsgrad,
+                        step_t>(),
+                    lr_ptr,
+                    lr,
+                    beta1,
+                    beta2,
+                    weight_decay,
+                    eps,
+                    maximize,
+                    grad_scale_ptr,
+                    found_inf_ptr);
+              });
         }),
         kBFloat16);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf, kBFloat16, params[0].scalar_type(), kernel_name, [&]() {
-          if (state_steps[0].scalar_type() == at::kDouble) {
-            multi_tensor_apply_for_fused_optimizer<depth>(
-                tensor_lists,
-                state_steps,
-                FusedAdamMathFunctor<scalar_t, depth, mode, amsgrad, double>(),
-                lr_ptr,
-                lr,
-                beta1,
-                beta2,
-                weight_decay,
-                eps,
-                maximize,
-                grad_scale_ptr,
-                found_inf_ptr);
-          } else {
-            multi_tensor_apply_for_fused_optimizer<depth>(
-                tensor_lists,
-                state_steps,
-                FusedAdamMathFunctor<scalar_t, depth, mode, amsgrad>(),
-                lr_ptr,
-                lr,
-                beta1,
-                beta2,
-                weight_decay,
-                eps,
-                maximize,
-                grad_scale_ptr,
-                found_inf_ptr);
-          }
+          AT_DISPATCH_STEP_TYPES(
+              state_steps[0].scalar_type(),
+              "fused_adam_step_cuda",
+              [&]() {
+                multi_tensor_apply_for_fused_optimizer<depth>(
+                    tensor_lists,
+                    state_steps,
+                    FusedAdamMathFunctor<scalar_t, depth, mode, amsgrad, step_t>(),
+                    lr_ptr,
+                    lr,
+                    beta1,
+                    beta2,
+                    weight_decay,
+                    eps,
+                    maximize,
+                    grad_scale_ptr,
+                    found_inf_ptr);
+              });
         });
   }
 }
