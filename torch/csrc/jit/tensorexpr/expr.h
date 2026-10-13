@@ -252,9 +252,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return dims_.size();
   }
   ExprPtr dim(size_t index) const {
-    if (index >= ndim()) {
-      throw out_of_range_index();
-    }
+    TORCH_CHECK(index < ndim(), "OUT OF RANGE INDEX");
     return dims_[index];
   }
   std::vector<ExprPtr> dims() const {

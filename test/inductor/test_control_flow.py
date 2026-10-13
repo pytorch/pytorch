@@ -404,14 +404,11 @@ class CondTests(TestCase):
         )
 
     @requires_gpu
+    @torch._functorch.config.patch("donated_buffer", True)
     def test_cond_backward_does_not_reuse_donated_subgraph_input(self):
-        # Regression for a SubgraphLowering donation bug: bw_donated_idxs is
-        # computed for the top-level backward's inputs, but a subgraph's
-        # placeholders live in a different index space. If a SubgraphLowering
-        # inherits those indices, a cond branch input can be classified a
-        # DonatedBuffer and reused in place for an output -- corrupting a saved
-        # tensor the parent backward still holds (here `h`, used after the cond),
-        # yielding grossly wrong gradients. See SubgraphLowering.__init__.
+        # bw_donated_idxs index the top-level backward's placeholders. A backward
+        # cond branch that inherited them would donate (and overwrite) its own
+        # unrelated inputs, corrupting gradients. See SubgraphLowering.__init__.
         device = GPU_TYPE
 
         def model(x, w):
@@ -424,7 +421,7 @@ class CondTests(TestCase):
                 return a.relu() * a
 
             r = torch.cond(h.sum() > 0, true_fn, false_fn, (h,))
-            return ((h + r) * 3.0).sum()  # `h` is live after the cond
+            return ((h + r) * 3.0).sum()
 
         def make():
             return (
@@ -2152,6 +2149,14 @@ class ScanModels:
                 torch.cat(grad_inputs, dim=0) / chunks,
             )
 
+    # One carry and no ys: the while_loop decomposition has a single flat output.
+    class ScanReduceOnly(torch.nn.Module):
+        def forward(self, scan_op, initial, xs):
+            def step(acc, x):
+                return acc + x.sin(), ()
+
+            return scan_op(step, initial, xs)
+
     class ScanWithClamp(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -2418,6 +2423,24 @@ class ScanTests(TestCase):
             device=device,
             dynamic=dynamic,
             autograd=autograd,
+        )
+
+    # Not @requires_gpu: the bug this guards is a CPU-reproducible lowering failure.
+    @parametrize("device", ["cpu"] + ([GPU_TYPE] if HAS_GPU else []))
+    @parametrize("dynamic", [True, False])
+    @parametrize("scan_length", [3, 0])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_scan_single_flat_output(self, device, dynamic, scan_length):
+        # Forward only: eager scan's backward does not support an empty ys.
+        self._run_test(
+            model=ScanModels.ScanReduceOnly(),
+            inputs=(
+                torch.randn(4, 5),
+                torch.randn(scan_length, 4, 5),
+            ),
+            device=device,
+            dynamic=dynamic,
+            autograd=False,
         )
 
 
