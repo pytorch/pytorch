@@ -1486,6 +1486,7 @@ def scaled_mm_v2_constraint(
             if (
                 device == "cuda"
                 and not torch.version.hip
+                and scale.get_dtype() == torch.float32
                 and recipe in (ScalingType.BlockWise1x128, ScalingType.BlockWise128x128)
             ):
                 matrix = operands["self" if side == "a" else "mat2"]
