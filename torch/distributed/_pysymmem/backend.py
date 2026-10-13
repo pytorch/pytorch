@@ -81,14 +81,9 @@ def reduce_op_name(op: ReduceOp | ReduceOp.RedOpType) -> str:
 class _SymmemWork(dist._Work):
     """Async work handle backed by a CUDA event."""
 
-    def __init__(
-        self,
-        event: torch.cuda.Event | None = None,
-        device: torch.device | None = None,
-    ) -> None:
+    def __init__(self, event: torch.cuda.Event | None = None) -> None:
         super().__init__()
         self._event = event
-        self._device = device
 
     def wait(self, timeout: timedelta | None = None) -> bool:
         if self._event is None:
@@ -100,7 +95,7 @@ class _SymmemWork(dist._Work):
             deadline = time.monotonic() + timeout.total_seconds()
             while not self._event.query():
                 if time.monotonic() >= deadline:
-                    raise RuntimeError("Operation timed out!")
+                    raise RuntimeError(f"[symmem] work did not complete in {timeout}")
                 time.sleep(0.001)
 
         self._event = None
@@ -114,6 +109,11 @@ class _SymmemWork(dist._Work):
 
 _DEFAULT_WORKSPACE_BYTES: int = 128 * 1024 * 1024
 _SEND_SLOT_BYTES: int = 64 * 1024
+
+# Options for the internal count-exchange allgathers, which are always
+# completed before the calling collective continues.
+_SYNC_ALLGATHER = AllgatherOptions()
+_SYNC_ALLGATHER.asyncOp = False
 
 
 @dataclass(slots=True)
@@ -199,6 +199,11 @@ class SymmemBackend(C10DBackend):
 
     _resources: _GroupResources | None
 
+    _SUPPORTED_REDUCE_DTYPES: tuple[torch.dtype, ...] = (
+        torch.float32,
+        torch.bfloat16,
+    )
+
     def __init__(
         self,
         dist_backend_opts: _DistributedBackendOptions,
@@ -209,7 +214,6 @@ class SymmemBackend(C10DBackend):
         size = dist_backend_opts.group_size
         timeout = dist_backend_opts.timeout
         super().__init__(rank, size)
-        self._store = store
         self._options = C10DBackend.Options("symmem", timeout=timeout)
         self._timeout = timeout
 
@@ -269,10 +273,10 @@ class SymmemBackend(C10DBackend):
     def _err(self, msg: str) -> RuntimeError:
         return RuntimeError(f"[symmem] {msg}")
 
-    def _check_device(self, tensor: torch.Tensor, name: str = "tensor") -> None:
+    def _check_device(self, tensor: torch.Tensor) -> None:
         if tensor.device != self._device:
             raise self._err(
-                f"{name} device {tensor.device} != backend device {self._device}"
+                f"tensor device {tensor.device} != backend device {self._device}"
             )
 
     @property
@@ -364,8 +368,8 @@ class SymmemBackend(C10DBackend):
         if async_op:
             event = torch.cuda.Event()
             event.record(torch.cuda.current_stream(self._device))
-            return _SymmemWork(event, self._device)
-        return _SymmemWork(None, self._device)
+            return _SymmemWork(event)
+        return _SymmemWork()
 
     @staticmethod
     def _resource_key(group_id: str, device: torch.device) -> _ResourceKey:
@@ -437,26 +441,25 @@ class SymmemBackend(C10DBackend):
     def allreduce(
         self,
         tensor_list: list[torch.Tensor],
-        opts: AllreduceOptions | None = None,
+        opts: AllreduceOptions,
     ) -> _SymmemWork:
         tensor = tensor_list[0]
         self._check_device(tensor)
         if tensor.numel() == 0:
-            return self._make_work(opts.asyncOp if opts else False)
-        op = opts.reduceOp if opts else ReduceOp.SUM
-        result = self._reduce_impl(tensor, op, root=None)
+            return self._make_work(opts.asyncOp)
+        result = self._reduce_impl(tensor, opts.reduceOp, root=None)
         tensor.copy_(result.view(tensor.shape))
-        return self._make_work(opts.asyncOp if opts else False)
+        return self._make_work(opts.asyncOp)
 
     def broadcast(
         self,
         tensor_list: list[torch.Tensor],
-        opts: BroadcastOptions | None = None,
+        opts: BroadcastOptions,
     ) -> _SymmemWork:
         tensor = tensor_list[0]
         self._check_device(tensor)
-        root = opts.rootRank if opts else 0
-        async_op = opts.asyncOp if opts else False
+        root = opts.rootRank
+        async_op = opts.asyncOp
         if tensor.numel() == 0:
             return self._make_work(async_op)
         nbytes = nbytes_of(tensor)
@@ -476,24 +479,18 @@ class SymmemBackend(C10DBackend):
     def reduce(
         self,
         tensor_list: list[torch.Tensor],
-        opts: ReduceOptions | None = None,
+        opts: ReduceOptions,
     ) -> _SymmemWork:
         tensor = tensor_list[0]
         self._check_device(tensor)
-        root = opts.rootRank if opts else 0
-        op = opts.reduceOp if opts else ReduceOp.SUM
-        async_op = opts.asyncOp if opts else False
+        root = opts.rootRank
+        async_op = opts.asyncOp
         if tensor.numel() == 0:
             return self._make_work(async_op)
-        result = self._reduce_impl(tensor, op, root=root)
+        result = self._reduce_impl(tensor, opts.reduceOp, root=root)
         if self._rank == root:
             tensor.copy_(result.view(tensor.shape))
         return self._make_work(async_op)
-
-    _SUPPORTED_REDUCE_DTYPES: tuple[torch.dtype, ...] = (
-        torch.float32,
-        torch.bfloat16,
-    )
 
     def _reduce_impl(
         self,
@@ -504,9 +501,8 @@ class SymmemBackend(C10DBackend):
         op_name = reduce_op_name(op)
         if tensor.dtype not in self._SUPPORTED_REDUCE_DTYPES or op_name != "sum":
             raise self._err(
-                f"symmem backend currently supports SUM on fp32/bf16 only, "
-                f"got op={op_name} dtype={tensor.dtype}. "
-                f"Triton kernel support for other ops/dtypes is planned."
+                f"symmem backend supports SUM on fp32/bf16 only, "
+                f"got op={op_name} dtype={tensor.dtype}"
             )
 
         nbytes = nbytes_of(tensor)
@@ -537,12 +533,12 @@ class SymmemBackend(C10DBackend):
         self,
         output_tensors: list[list[torch.Tensor]],
         input_tensors: list[torch.Tensor],
-        opts: AllgatherOptions | None = None,
+        opts: AllgatherOptions,
     ) -> _SymmemWork:
         tensor = input_tensors[0]
         output_list = output_tensors[0]
         self._check_device(tensor)
-        async_op = opts.asyncOp if opts else False
+        async_op = opts.asyncOp
         if len(output_list) != self._size:
             raise self._err(
                 f"allgather: output_list has {len(output_list)} != size {self._size}"
@@ -565,11 +561,11 @@ class SymmemBackend(C10DBackend):
         self,
         output: torch.Tensor,
         input: torch.Tensor,
-        opts: AllgatherOptions | None = None,
+        opts: AllgatherOptions,
     ) -> _SymmemWork:
         self._check_device(input)
         self._check_device(output)
-        async_op = opts.asyncOp if opts else False
+        async_op = opts.asyncOp
         if output.numel() != input.numel() * self._size:
             raise self._err(
                 f"all_gather_single: output numel {output.numel()} != "
@@ -599,10 +595,7 @@ class SymmemBackend(C10DBackend):
         """Sum n_elements from each peer's scratch into output."""
         op_name = reduce_op_name(op)
         if op_name != "sum":
-            raise self._err(
-                f"reduce_scatter currently supports SUM only, got op={op_name}. "
-                f"Triton kernel support for other ops is planned."
-            )
+            raise self._err(f"symmem backend supports SUM only, got op={op_name}")
         out_flat = output.reshape(-1)
         peer0_buf = cast_buffer(self._peer_scratch(0), output)
         out_flat.copy_(peer0_buf[elem_offset : elem_offset + n_elements])
@@ -614,13 +607,13 @@ class SymmemBackend(C10DBackend):
         self,
         output_tensors: list[torch.Tensor],
         input_tensors: list[list[torch.Tensor]],
-        opts: ReduceScatterOptions | None = None,
+        opts: ReduceScatterOptions,
     ) -> _SymmemWork:
         output = output_tensors[0]
         input_list = input_tensors[0]
         self._check_device(output)
-        op = opts.reduceOp if opts else ReduceOp.SUM
-        async_op = opts.asyncOp if opts else False
+        op = opts.reduceOp
+        async_op = opts.asyncOp
         if len(input_list) != self._size:
             raise self._err(
                 f"reduce_scatter: input_list has {len(input_list)} != size {self._size}"
@@ -649,12 +642,12 @@ class SymmemBackend(C10DBackend):
         self,
         output: torch.Tensor,
         input: torch.Tensor,
-        opts: ReduceScatterOptions | None = None,
+        opts: ReduceScatterOptions,
     ) -> _SymmemWork:
         self._check_device(output)
         self._check_device(input)
-        op = opts.reduceOp if opts else ReduceOp.SUM
-        async_op = opts.asyncOp if opts else False
+        op = opts.reduceOp
+        async_op = opts.asyncOp
         if input.numel() != output.numel() * self._size:
             raise self._err(
                 f"reduce_scatter_single: input numel {input.numel()} != "
@@ -679,11 +672,11 @@ class SymmemBackend(C10DBackend):
         input: torch.Tensor,
         output_split_sizes: list[int],
         input_split_sizes: list[int],
-        opts: AllToAllOptions | None = None,
+        opts: AllToAllOptions,
     ) -> _SymmemWork:
         self._check_device(output)
         self._check_device(input)
-        async_op = opts.asyncOp if opts else False
+        async_op = opts.asyncOp
 
         if not input_split_sizes and not output_split_sizes:
             if input.numel() % self._size != 0:
@@ -740,7 +733,7 @@ class SymmemBackend(C10DBackend):
             dtype=torch.int64,
             device=self._device,
         )
-        self.all_gather_single(all_splits.reshape(-1), my_splits)
+        self.all_gather_single(all_splits.reshape(-1), my_splits, _SYNC_ALLGATHER)
 
         my_input_offsets = [0]
         for i in range(self._size - 1):
@@ -780,9 +773,9 @@ class SymmemBackend(C10DBackend):
         self,
         output_tensors: list[torch.Tensor],
         input_tensors: list[torch.Tensor],
-        opts: AllToAllOptions | None = None,
+        opts: AllToAllOptions,
     ) -> _SymmemWork:
-        async_op = opts.asyncOp if opts else False
+        async_op = opts.asyncOp
         if len(output_tensors) != self._size or len(input_tensors) != self._size:
             raise self._err("alltoall: list lengths must equal size")
 
@@ -809,7 +802,7 @@ class SymmemBackend(C10DBackend):
         all_counts = torch.zeros(
             (self._size, self._size), dtype=torch.int64, device=self._device
         )
-        self.all_gather_single(all_counts.reshape(-1), my_counts)
+        self.all_gather_single(all_counts.reshape(-1), my_counts, _SYNC_ALLGATHER)
 
         scratch_typed = cast_buffer(self._scratch(), dtype_template)
         for i, t in enumerate(input_tensors):
@@ -832,12 +825,12 @@ class SymmemBackend(C10DBackend):
         self,
         output_tensors: list[torch.Tensor],
         input_tensors: list[list[torch.Tensor]],
-        opts: ScatterOptions | None = None,
+        opts: ScatterOptions,
     ) -> _SymmemWork:
         output = output_tensors[0]
         self._check_device(output)
-        root = opts.rootRank if opts else 0
-        async_op = opts.asyncOp if opts else False
+        root = opts.rootRank
+        async_op = opts.asyncOp
         input_list = input_tensors[0] if input_tensors and input_tensors[0] else []
 
         if output.numel() == 0:
@@ -867,12 +860,12 @@ class SymmemBackend(C10DBackend):
         self,
         output_tensors: list[list[torch.Tensor]],
         input_tensors: list[torch.Tensor],
-        opts: GatherOptions | None = None,
+        opts: GatherOptions,
     ) -> _SymmemWork:
         input_tensor = input_tensors[0]
         self._check_device(input_tensor)
-        root = opts.rootRank if opts else 0
-        async_op = opts.asyncOp if opts else False
+        root = opts.rootRank
+        async_op = opts.asyncOp
 
         if input_tensor.numel() == 0:
             return self._make_work(async_op)
@@ -900,9 +893,9 @@ class SymmemBackend(C10DBackend):
         self._group_barrier()
         return self._make_work(async_op)
 
-    def barrier(self, opts: BarrierOptions | None = None) -> _SymmemWork:
+    def barrier(self, opts: BarrierOptions) -> _SymmemWork:
         self._group_barrier()
-        return self._make_work(opts.asyncOp if opts else False)
+        return self._make_work(opts.asyncOp)
 
     def send(
         self, tensor_list: list[torch.Tensor], dst: int, tag: int = 0

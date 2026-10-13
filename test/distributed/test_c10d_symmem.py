@@ -52,7 +52,7 @@ class TestSymmemWork(TestCase):
             "torch.distributed._pysymmem.backend.time.monotonic",
             side_effect=[0.0, 0.01],
         ):
-            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
+            with self.assertRaisesRegex(RuntimeError, "did not complete"):
                 work.wait(timedelta(milliseconds=5))
 
         self.assertIs(work._event, event)
