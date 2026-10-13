@@ -577,6 +577,112 @@ class TestRerunDisabledCodeSkip(TestCase):
         self.assertEqual(proc.returncode, 0, msg=output)
         self.assertEqual("DEVICE_OK" in proc.stdout, True, msg=output)
 
+    def test_copied_unittest_skip_flag_keeps_instantiate_wrapper(self) -> None:
+        # rerun_code_skip calls unittest.skip, which sets __unittest_skip__.
+        # instantiate_test's functools.wraps copies that flag onto the outer
+        # function. The body still needs device and dtype from that outer call.
+        test_dir = Path(__file__).resolve().parent
+        script = textwrap.dedent(
+            """\
+            import functools
+            import importlib.util
+            import os
+            import sys
+            import unittest
+
+            sys.path.insert(0, os.environ["TEST_DIR"])
+            import conftest
+
+            spec = importlib.util.spec_from_file_location(
+                "rerun_code_skip", os.environ["RERUN_CODE_SKIP_PY"]
+            )
+            helper = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(helper)
+
+            ran = []
+            reason = "skipIfRocm: known bug"
+
+            def body(self, device, dtype):
+                ran.append((device, dtype))
+                self.precision = 0
+
+            skipped = helper.rerun_code_skip(reason)(body)
+
+            def _outer(test, param_kwargs):
+                @functools.wraps(test)
+                def instantiated_test(self, param_kwargs=param_kwargs):
+                    guard = self.precision
+                    try:
+                        return test(self, **param_kwargs)
+                    finally:
+                        self.precision = guard
+
+                return instantiated_test
+
+            param_kwargs = {"device": "mps", "dtype": "float32"}
+            outer = _outer(skipped, param_kwargs)
+            if not getattr(skipped, "__unittest_skip__", False):
+                raise SystemExit("rerun_code_skip did not set __unittest_skip__")
+            if skipped.__wrapped__ is not body:
+                raise SystemExit("unittest.skip did not wrap the body")
+            if not getattr(outer, "__unittest_skip__", False):
+                raise SystemExit("wraps did not copy __unittest_skip__")
+            if outer.__wrapped__ is not skipped:
+                raise SystemExit("expected wraps of the unittest.skip function")
+
+            class OnDevice:
+                device_type = "mps"
+                test_device = outer
+
+            class Item:
+                def __init__(self, cls):
+                    self.cls = cls
+                    self.name = "test_device"
+                    self.originalname = "test_device"
+                    self.obj = cls.test_device
+
+            item = Item(OnDevice)
+            if not conftest._enable_unconditional_unittest_skip(item):
+                raise SystemExit("copied skip flag should still rerun")
+            if OnDevice.test_device is not outer:
+                raise SystemExit("instantiate wrapper was replaced with the body")
+            if outer.__wrapped__ is not body:
+                raise SystemExit("outer wrapper was not retargeted at the body")
+            if getattr(outer, "__unittest_skip__", False):
+                raise SystemExit("copied unittest.skip flag was not cleared")
+            case = OnDevice()
+            case.precision = 1
+            try:
+                OnDevice.test_device(case)
+            except TypeError as exc:
+                raise SystemExit(f"device was not passed: {exc}") from exc
+            except unittest.SkipTest as exc:
+                raise SystemExit(f"skip wrapper was still called: {exc}") from exc
+            if ran != [("mps", "float32")]:
+                raise SystemExit(f"ran={ran!r}")
+            if case.precision != 1:
+                raise SystemExit(f"precision={case.precision!r}")
+            got_reason = getattr(item, conftest._CODE_SKIP_REASON_ATTR, None)
+            if got_reason != reason:
+                raise SystemExit(f"reason={got_reason!r}")
+            print("COPIED_FLAG_OK")
+            """
+        )
+        env = os.environ.copy()
+        env["TEST_DIR"] = str(test_dir)
+        env["RERUN_CODE_SKIP_PY"] = str(_HELPER)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=test_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        output = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 0, msg=output)
+        self.assertEqual("COPIED_FLAG_OK" in proc.stdout, True, msg=output)
+
     def test_process_report_records_code_skip_reason(self) -> None:
         sys.path.insert(0, str(_REPO))
         from tools.stats.check_disabled_tests import process_report
@@ -651,6 +757,86 @@ class TestRerunDisabledCodeSkip(TestCase):
         self.assertEqual(code_fail.get("code_skip"), "skipIfWindows: known failure")
         self.assertEqual(code_fail.get("num_green"), 0)
         self.assertEqual(code_fail.get("num_red"), 1)
+
+    def test_empty_skip_is_not_flaky_and_bare_skip_is_not_a_pass(self) -> None:
+        sys.path.insert(0, str(_REPO))
+        import tools.stats.check_disabled_tests as check_disabled
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "report.xml"
+            suite = ET.Element("testsuite")
+
+            def add(name: str, kind: str) -> None:
+                case = ET.SubElement(
+                    suite,
+                    "testcase",
+                    name=name,
+                    classname="pkg.Cls",
+                    file="test_mod.py",
+                )
+                if kind == "empty":
+                    ET.SubElement(case, "skipped", message="")
+                elif kind == "bare":
+                    ET.SubElement(case, "skipped")
+                elif kind == "reason":
+                    ET.SubElement(case, "skipped", message="skipIfRocm: PTX test")
+
+            add("test_empty", "empty")
+            add("test_bare", "bare")
+            add("test_reason", "reason")
+            add("test_pass", "pass")
+            ET.ElementTree(suite).write(report, encoding="unicode")
+            stats = check_disabled.process_report(report)
+
+        empty_id = "test_empty;pkg.Cls;test_mod.py"
+        bare_id = "test_bare;pkg.Cls;test_mod.py"
+        reason_id = "test_reason;pkg.Cls;test_mod.py"
+        pass_id = "test_pass;pkg.Cls;test_mod.py"
+        self.assertEqual(empty_id in stats, False)
+        self.assertEqual(bare_id in stats, False)
+        reason = stats[reason_id]
+        self.assertEqual(reason.get("code_skip"), "skipIfRocm: PTX test")
+        self.assertEqual(reason.get("num_green"), 0)
+        self.assertEqual(reason.get("num_red"), 0)
+        passed = stats[pass_id]
+        self.assertEqual(passed.get("num_green"), 1)
+        self.assertEqual(passed.get("num_red"), 0)
+        self.assertEqual("code_skip" in passed, False)
+
+        uploaded: list[tuple[str, list]] = []
+
+        def fake_upload(
+            workflow_id: int,
+            workflow_run_attempt: int,
+            collection_name: str,
+            documents: list,
+        ) -> None:
+            uploaded.append((collection_name, documents))
+
+        original = check_disabled.upload_workflow_stats_to_s3
+        check_disabled.upload_workflow_stats_to_s3 = fake_upload
+        try:
+            check_disabled.save_results(9, 1, stats)
+        finally:
+            check_disabled.upload_workflow_stats_to_s3 = original
+
+        by_name = dict(uploaded)
+        rerun_docs = by_name["rerun_disabled_tests"]
+        code_docs = by_name["rerun_disabled_code_skips"]
+        rerun_names = {doc["name"] for doc in rerun_docs}
+        code_names = {doc["name"] for doc in code_docs}
+        self.assertEqual(rerun_names, {"test_pass"})
+        self.assertEqual(code_names, {"test_reason"})
+        listed = rerun_docs[0]
+        self.assertEqual(listed["flaky"], False)
+        self.assertEqual(listed["num_green"], 1)
+        self.assertEqual(listed["num_red"], 0)
+        self.assertEqual("code_skip" in listed, False)
+        self.assertEqual("test_empty" in rerun_names, False)
+        self.assertEqual("test_bare" in rerun_names, False)
+        self.assertEqual("test_reason" in rerun_names, False)
+        self.assertEqual("test_empty" in code_names, False)
+        self.assertEqual("test_bare" in code_names, False)
 
     def test_save_results_splits_code_skip_collection(self) -> None:
         sys.path.insert(0, str(_REPO))
