@@ -431,6 +431,29 @@ class StrictNumericsCompileTest(TestCase):
         self.assertIn(torch.ops.aten.softshrink_backward.default, graphs[True])
         self.assertGreaterEqual(metrics.generated_kernel_count, 2)
 
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize(
+        "shapes",
+        (
+            ((2, 3), (1, 3)),
+            ((1, 3), (2, 3)),
+            ((2, 1), (3,)),
+            ((), (2, 3)),
+            ((2, 3), ()),
+        ),
+    )
+    def test_softshrink_strict_backward_broadcast(self, device, numerics, shapes):
+        grad = torch.full(shapes[0], -0.0, device=device, dtype=torch.float32)
+        x = torch.empty(shapes[1], device=device, dtype=torch.float32)
+        x.copy_(torch.arange(x.numel(), device=device).reshape(x.shape) - 0.5)
+        code = self._check_pointwise(
+            partial(torch.ops.aten.softshrink_backward.default, lambd=0.5),
+            (grad, x),
+            numerics,
+            False,
+        )
+        self.assertIn("tl.where", code)
+
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))

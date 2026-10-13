@@ -1497,7 +1497,9 @@ def softshrink(x, lambd=0.5):
     return make_pointwise(fn)(x)
 
 
-@register_lowering(aten.softshrink_backward.default, type_promotion_kind=None)
+@register_lowering(
+    aten.softshrink_backward.default, broadcast=True, type_promotion_kind=None
+)
 def softshrink_backward(grad, x, lambd):
     if not (
         is_strict_cuda_triton(x.get_device())
