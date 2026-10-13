@@ -11921,6 +11921,14 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor([17], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
 
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    def test_grouped_mm_mismatched_dtypes(self, device):
+        a = torch.ones(8, 16, device=device, dtype=torch.float16)
+        b = torch.ones(4, 16, 16, device=device, dtype=torch.bfloat16)
+        offs = torch.tensor([2, 4, 6, 8], device=device, dtype=torch.int32)
+        with self.assertRaisesRegex(RuntimeError, "same dtype"):
+            F.grouped_mm(a, b, offs=offs)
+
     @onlyOn(["cuda", "mps"])
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @serialTest()
