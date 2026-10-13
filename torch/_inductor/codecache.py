@@ -1619,7 +1619,7 @@ class FxGraphHashDetails:
                             kernel
                         )
                     )
-                    do_not_specialize, do_not_specialize_on_alignment = (
+                    do_not_specialize, alignment_exclusions = (
                         user_defined_triton_kernel_specialization(kernel)
                     )
                     constant_args = kernel_side_table.get_constant_args(
@@ -1629,7 +1629,7 @@ class FxGraphHashDetails:
                         (
                             kernel_source,
                             do_not_specialize,
-                            do_not_specialize_on_alignment,
+                            alignment_exclusions,
                             constant_args,
                             configs,
                         )

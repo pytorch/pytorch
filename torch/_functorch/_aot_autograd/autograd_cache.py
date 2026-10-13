@@ -588,11 +588,11 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             source_code = user_defined_triton_kernel_transitive_closure_source_code(
                 kernel
             )
-            do_not_specialize, do_not_specialize_on_alignment = (
+            do_not_specialize, alignment_exclusions = (
                 user_defined_triton_kernel_specialization(kernel)
             )
             triton_kernel_source_codes.append(
-                (source_code, do_not_specialize, do_not_specialize_on_alignment)
+                (source_code, do_not_specialize, alignment_exclusions)
             )
 
         return triton_kernel_source_codes

@@ -1896,9 +1896,7 @@ def helper(x):
             if call.kwargs.get("pointer_range_override") == ()
         )
         self.assertEqual(user_config_call.kwargs["equal_to_1_exclusions"], (2,))
-        self.assertEqual(
-            user_config_call.kwargs["divisible_by_16_exclusions"], (2, 3)
-        )
+        self.assertEqual(user_config_call.kwargs["divisible_by_16_exclusions"], (2, 3))
         if specialization_value == 1:
             code_str = " ".join(code)
             self.assertIn("'specialization_value': 'i32'", code_str)
@@ -1932,9 +1930,7 @@ def helper(x):
         gm = torch.fx.GraphModule({}, graph)
 
         fx_details = FxGraphHashDetails(gm, [], {}, [])
-        self.assertEqual(
-            fx_details.user_defined_triton_source[0][1:3], ((2,), (2, 3))
-        )
+        self.assertEqual(fx_details.user_defined_triton_source[0][1:3], ((2,), (2, 3)))
 
         aot_details = object.__new__(AOTAutogradCacheDetails)
         with patch.object(
@@ -2052,9 +2048,7 @@ def helper(x):
         source = user_defined_triton_kernel_transitive_closure_source_code(
             root_for_global_option_jit_helper
         )
-        self.assertIn(
-            "@triton.jit\ndef global_option_jit_helper_for_codegen", source
-        )
+        self.assertIn("@triton.jit\ndef global_option_jit_helper_for_codegen", source)
         self.assertNotIn("repr=", source)
 
     @unittest.skipUnless(
