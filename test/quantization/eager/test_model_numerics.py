@@ -10,9 +10,12 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestModelNumericsEager(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_float_quant_compare_per_tensor(self):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):

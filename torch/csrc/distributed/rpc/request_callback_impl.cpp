@@ -249,7 +249,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRpcWithErrors(
     py::gil_scoped_acquire acquire;
     e.restore(); // Release ownership on py::objects and also restore
                  // Python Error Indicator.
-    PyErr_Clear(); // Clear the Python Error Indicator as we has
+    PyErr_Clear(); // Clear the Python Error Indicator as we have
                    // recorded the exception in the response message.
     return future;
   } catch (std::exception& e) {
