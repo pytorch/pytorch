@@ -472,6 +472,34 @@ def load(
                         frag[i, l] = rowv[_off(base, i)]
 
 
+@cute.jit
+def load_decoded(
+    mX,
+    obase,
+    tm: cutlass.Constexpr,
+    lane,
+    w,
+    frag,
+    rdivs,
+    rstrides,
+    npairs: cutlass.Constexpr,
+    in_base,
+    base_col=0,
+    bound=None,
+    warp_stride=None,
+):
+    """Gather logical row elements through a mixed-radix storage mapping."""
+    hi = Int32(const_expr(tm.N)) if bound is None else bound
+    for l in cutlass.range_constexpr(tm.loads):
+        base = tm.col_base(lane, w, l, warp_stride) + base_col
+        for i in cutlass.range_constexpr(tm.vec):
+            col = _off(base, i)
+            valid = col < hi
+            logical = col if valid else Int32(0)
+            off = obase + _decode_offset(logical, rdivs, rstrides, npairs)
+            frag[i, l] = mX[off if valid else in_base]
+
+
 def make_fragment(mX, tm) -> cute.Tensor:
     return cute.make_rmem_tensor(cute.make_layout((tm.vec, tm.loads)), mX.element_type)
 
@@ -564,16 +592,16 @@ class TileReduce:
         if order not in ("linear", "inner_tree"):
             raise ValueError(f"order must be 'linear' or 'inner_tree', got {order!r}")
         if order == "inner_tree":
-            if axis != "row" or itree is None:
+            if axis not in ("row", "general") or itree is None:
                 raise ValueError(
-                    "the inner-tree order is a row-axis option and needs a plan"
+                    "the inner-tree order needs a row or general axis and a plan"
                 )
             # The plan maps wpr chunks to wpr // kchunk warps and rows_per_block rows.
             threads_per_row = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
             if itree.stage_e:
                 threads_per_row = WARP
             threads_per_block = threads_per_row * itree.rows_per_block
-        if axis == "general":
+        if axis == "general" and order == "linear":
             # Every block thread folds one output, equivalent to row threads_per_row=threads_per_block.
             threads_per_row = threads_per_block
             nwg = threads_per_block // WARP
@@ -642,8 +670,10 @@ class TileReduce:
             if axis == "row" and order == "linear"
             else None
         )
-        if axis == "row":
-            self.vec = self.tilemap.vec if order == "linear" else itree.vec
+        if order == "inner_tree":
+            self.vec = itree.vec
+        elif axis == "row":
+            self.vec = self.tilemap.vec
         elif axis == "general":
             # Arbitrary strides offer no vector width.
             self.vec = 1
@@ -765,7 +795,19 @@ class TileReduce:
         )
 
     @cute.jit
-    def _fold_itree(self, mX, r, lane_w, warp_id, row_in_block, batch_idx=None):
+    def _fold_itree(
+        self,
+        mX,
+        r,
+        lane_w,
+        warp_id,
+        row_in_block,
+        batch_idx=None,
+        obase=None,
+        rdivs=None,
+        rstrides=None,
+        in_base=None,
+    ):
         """Fold static batch fragments by streaming tree, then batches linearly.
 
         Per-warp results meet in smem via ascending butterfly. Split selects one runtime
@@ -822,7 +864,24 @@ class TileReduce:
                     base = const_expr(it.batches[b][0])
                     bound, wstride = None, None
                 frag = make_fragment(mX, tm)
-                load(mX, r, tm, lane_w, cid, frag, base, bound, wstride)
+                if const_expr(self.axis == "general"):
+                    load_decoded(
+                        mX,
+                        obase,
+                        tm,
+                        lane_w,
+                        cid,
+                        frag,
+                        rdivs,
+                        rstrides,
+                        const_expr(self.npairs_red),
+                        in_base,
+                        base,
+                        bound,
+                        wstride,
+                    )
+                else:
+                    load(mX, r, tm, lane_w, cid, frag, base, bound, wstride)
                 frags.append(frag)
                 bases.append(base)
                 bounds.append(bound)
@@ -1039,7 +1098,12 @@ class TileReduce:
             mIns = [mTma]
         else:
             tma_atom = None
-        if const_expr(self.axis == "general"):
+        if const_expr(self.order == "inner_tree"):
+            # Split inner-tree writes one partial per (output, batch).
+            nout = mOuts[0].shape[0]
+            gx = cute.ceil_div(nout, const_expr(self.rows_per_block))
+            gy = Int32(1)
+        elif const_expr(self.axis == "general"):
             if const_expr(self.wide_output):
                 gx, gy = q, npar
             else:
@@ -1192,6 +1256,15 @@ class TileReduce:
         )
 
         if const_expr(self.order == "inner_tree"):
+            obase = in_base
+            if const_expr(self.axis == "general" and self.npairs_kept > 0):
+                obase = in_base + _decode_offset(
+                    unit,
+                    kdivs,
+                    kstrides,
+                    const_expr(self.npairs_kept),
+                    const_expr(self.wide_output or self.wide_kept),
+                )
             if const_expr(self.itree.shape == "combine"):
                 accs = (self._fold_itree_combine(mIns, unit),)
             elif const_expr(self.itree.stage_e):
@@ -1199,7 +1272,16 @@ class TileReduce:
             else:
                 accs = (
                     self._fold_itree(
-                        mIns[0], unit, lane_w, warp_id, row_in_block, batch_idx
+                        mIns[0],
+                        unit,
+                        lane_w,
+                        warp_id,
+                        row_in_block,
+                        batch_idx,
+                        obase,
+                        rdivs,
+                        rstrides,
+                        in_base,
                     ),
                 )
         elif const_expr(self.axis == "general"):
