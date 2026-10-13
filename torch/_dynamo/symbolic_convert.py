@@ -200,11 +200,7 @@ from .variables.lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .variables.misc import (
-    CellVariable,
-    NullVariable,
-    UnknownVariable,
-)
+from .variables.misc import CellVariable, NullVariable, UnknownVariable
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
     generic_delitem,
