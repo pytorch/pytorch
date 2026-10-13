@@ -671,6 +671,25 @@ class _DynamoCodeCacheEntry:
     bypassed: bool = False
 
 
+def _globals_module_name(namespace: dict[str, Any]) -> str | None:
+    """The ``sys.modules`` key of the module whose namespace IS ``namespace``.
+
+    A file imported under two names is two modules sharing one file, and
+    ``inspect.getmodule`` maps a code object to a module by its file, so it can
+    answer with the other alias, whose globals and functions are not the frame's.
+    """
+    for name in (
+        namespace.get("__name__"),
+        getattr(namespace.get("__spec__"), "name", None),
+    ):
+        if not isinstance(name, str):
+            continue
+        module = sys.modules.get(name)
+        if isinstance(module, types.ModuleType) and vars(module) is namespace:
+            return name
+    return None
+
+
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
     if len(entry.function_names) != 1:
         raise AssertionError(
@@ -738,7 +757,9 @@ def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     )
 
 
-def _get_code_source(code: types.CodeType) -> tuple[str, str]:
+def _get_code_source(
+    code: types.CodeType, module: types.ModuleType | None = None
+) -> tuple[str, str]:
     """
     Given a code object, return a fully qualified name which will be used as
     a serialized handle to access the code object from the new process.
@@ -747,10 +768,12 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
        inside a closure with the wrapper object.
     2. When a function is defined as a nested function, then the code object will be
        stored on the co_consts field of the parent code object by Python compiler.
-    This function handles all of the corner cases above.
+    This function handles all of the corner cases above. ``module`` is where to
+    look, by default the module ``inspect.getmodule`` finds for ``code``.
     """
 
-    module = inspect.getmodule(code)
+    if module is None:
+        module = inspect.getmodule(code)
     if module is None:
         raise PackageError(f"Cannot find module for code {code}")
 
@@ -1220,7 +1243,9 @@ class CompilePackage:
             self._device_types = frozenset((dynamo.device_type,))
         else:
             self._add_function(
-                self._innermost_fn.__code__, self._innermost_fn.__module__
+                self._innermost_fn.__code__,
+                _globals_module_name(self._innermost_fn.__globals__)
+                or self._innermost_fn.__module__,
             )
         self._initialized = True
 
@@ -1272,14 +1297,21 @@ class CompilePackage:
             raise AssertionError("_innermost_fn is not set")
         return CompilePackage.source_id_from_fn(self._innermost_fn)
 
-    def _add_user_function(self, code: types.CodeType) -> None:
-        function_name, code_source = _get_code_source(code)
-        module = inspect.getmodule(code)
+    def _add_user_function(
+        self, code: types.CodeType, global_scope: dict[str, Any] | None = None
+    ) -> None:
+        # The frame's globals name its module exactly; inspect.getmodule only
+        # guesses from the file, which an aliased module shares.
+        module_name = (
+            _globals_module_name(global_scope) if global_scope is not None else None
+        )
+        module = sys.modules[module_name] if module_name else inspect.getmodule(code)
         if module is None:
             raise PackageError(f"Cannot find module for code {code}")
+        function_name, code_source = _get_code_source(code, module)
         self._add_function(
             code,
-            module.__name__,
+            module_name or module.__name__,
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
@@ -1290,14 +1322,16 @@ class CompilePackage:
         return self._current_entry
 
     @contextlib.contextmanager
-    def code_context(self, code: types.CodeType) -> Generator[None, None, None]:
+    def code_context(
+        self, code: types.CodeType, global_scope: dict[str, Any] | None = None
+    ) -> Generator[None, None, None]:
         if self._current_entry is not None:
             raise AssertionError("_current_entry is already set in code_context")
 
         # Sometimes user code cannot be inlined in dynamo resulting in extra user code
         # being compiled. We should record these as when they are actually invoked.
         if code not in self._codes:
-            self._add_user_function(code)
+            self._add_user_function(code, global_scope)
 
         entry = self._codes[code]
         self._current_entry = entry
