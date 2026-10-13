@@ -215,6 +215,20 @@ test_rerun_then_fail      | 2            | failed  | AssertionError: attempt 3 f
 test_no_rerun_needed      | 0            | passed  |""",
         )
 
+    def test_reruns_keep_outcomes(self) -> None:
+        # run_test.py always passes --reruns, under which pytest-rerunfailures sends
+        # an attempt's reports only once it ends. Each test's last run must still
+        # match the run without it.
+        def last_outcomes(raw: str) -> dict[str, str]:
+            runs = (json.loads(line) for line in raw.splitlines()[1:])
+            return {run["case_name"]: run["outcome"] for run in runs}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            args = [str(_PYTEST_SUITE), "--reruns", "2"]
+            _, report = _run_plugin(str(_TEST_DIR), args, Path(tmp) / "suite")
+            raw = report.read_text()
+        self.assertEqual(last_outcomes(raw), last_outcomes(self.raw))
+
     def test_schema(self) -> None:
         report, *runs = (json.loads(line) for line in self.raw.splitlines())
         self.assertEqual(
@@ -245,8 +259,8 @@ test_no_rerun_needed      | 0            | passed  |""",
         self.assertEqual(flags["PYTORCH_CUDA_ALLOC_CONF"], "expandable_segments:True")
         self.assertEqual(flags["OPINFO_RESTRICT_TO_DSL"], "triton")
         self.assertEqual(flags["PYTORCH_TEST_WITH_INDUCTOR"], "")
+        self.assertEqual(flags["TEST_CONFIG"], "report-config")
         self.assertEqual(report["properties"]["build_environment"], "report-build")
-        self.assertEqual(report["properties"]["test_config"], "report-config")
         self.assertEqual(report["properties"]["runner_name"], "report-runner")
         for run in runs:
             _assert_run_line(self, run, self.t0_ms, self.t1_ms)
@@ -303,17 +317,23 @@ TestUnittest    | test_unittest            | test_unittest""",
         )
 
     def test_subtests(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            _, report = _run_plugin(
-                str(_REPORT_TESTDATA), ["subtests_report.py"], Path(tmp) / "subtests"
+        # With --reruns, as run_test.py passes, pytest-rerunfailures sends the
+        # test's setup report after its subtests' reports.
+        for args in ([], ["--reruns", "1"]):
+            with tempfile.TemporaryDirectory() as tmp:
+                _, report = _run_plugin(
+                    str(_REPORT_TESTDATA),
+                    ["subtests_report.py", *args],
+                    Path(tmp) / "subtests",
+                )
+                runs = _runs(report)
+            # One run per test, however many subtests it has.
+            self.assertEqual(
+                [(run["case_name"], run["outcome"]) for run in runs],
+                [("test_failing_subtest", "failed")],
+                args,
             )
-            runs = _runs(report)
-        # One run per test, however many subtests it has.
-        self.assertEqual(
-            [(run["case_name"], run["outcome"]) for run in runs],
-            [("test_failing_subtest", "failed")],
-        )
-        self.assertIn("1 != 0", runs[0]["outcome_summary"])
+            self.assertIn("1 != 0", runs[0]["outcome_summary"])
 
     def test_skip_after_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -548,35 +568,27 @@ class TestReportHelpers(TestCase):
             # The ROCm release, not HIP's version.
             self.assertEqual(environment._accelerator(), ("rocm", "10.1.0"))
 
+    @skipIfTorchDynamo("patches torch.__config__")
     @parametrize(
-        "config, expected",
+        "compiler, expected",
         [
-            # clang defines __GNUC__, so a clang build also prints a GCC line.
-            subtest(
-                (
-                    "  - GCC 4.2\n  - C++ Version: 201703\n  - clang 21.1.0\n",
-                    ("clang", "21"),
-                ),
-                name="clang",
-            ),
-            subtest(
-                ("  - GCC 11.4\n  - C++ Version: 201703\n", ("gcc", "11")), name="gcc"
-            ),
+            subtest((("clang", "21.1.0"), ("clang", "21.1.0")), name="clang"),
+            subtest((("gcc", "11.4"), ("gcc", "11.4")), name="gcc"),
             # _MSC_FULL_VER of MSVC 19.41.34120.
-            subtest(
-                ("  - C++ Version: 201703\n  - MSVC 194134120\n", ("msvc", "19")),
-                name="msvc",
-            ),
-            subtest(("  - C++ Version: 201703\n", ("", "")), name="unknown"),
+            subtest((("msvc", "194134120"), ("msvc", "194134120")), name="msvc"),
+            # A torch that predates torch.__config__._cxx_compiler.
+            subtest((None, ("", "")), name="missing"),
         ],
     )
-    def test_compiler(self, config, expected):
+    def test_compiler(self, compiler, expected):
         environment = importlib.import_module(
             "torch.testing._internal.torchci.environment"
         )
-        self.assertEqual(
-            environment._compiler(f"PyTorch built with:\n{config}"), expected
-        )
+        cxx_compiler = None if compiler is None else (lambda: compiler)
+        with unittest.mock.patch.object(
+            torch.__config__, "_cxx_compiler", cxx_compiler, create=True
+        ):
+            self.assertEqual(environment._compiler(), expected)
 
     def test_windows_os_version(self):
         environment = importlib.import_module(
@@ -637,7 +649,6 @@ class TestReportHelpers(TestCase):
             "driver_version",
             "host_memory_mib",
             "build_environment",
-            "test_config",
             "runner_name",
         }
         self.assertTrue(set(captured.properties) <= property_names)
