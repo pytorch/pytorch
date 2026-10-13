@@ -184,7 +184,7 @@ class CppTemplateKernel(CppKernel):
     def view(self, node, sizes: list[Any]) -> ir.IRNode:
         node = wrap_with_tensorbox(node)
         sizes = parse_expr_with_index_symbols(sizes)
-        return L.view(node, sizes).data  # type: ignore[arg-type]
+        return L.view(node, sizes).data
 
     def permute(self, node, dims):
         node = wrap_with_tensorbox(node)

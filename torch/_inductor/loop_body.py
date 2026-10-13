@@ -19,6 +19,7 @@ from torch.utils._sympy.symbol import SymT
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .ops_handler import DefaultHandler, OpsHandler, WrapperHandler
+from .optimize_loop_body import eliminate_redundant_lowp_round_trips
 from .utils import (
     cache_on_self,
     decompose_index,
@@ -178,6 +179,7 @@ class LoopBody:
             )
         )
         del self.indexing_exprs_name  # not used after _init_with_tracing
+        eliminate_redundant_lowp_round_trips(self)
 
     def _init_with_copy(self, other: LoopBody, args, allow_same_symbol_in_index):
         """
@@ -496,7 +498,7 @@ class LoopBody:
 
     def is_memory_copy(self) -> bool:
         """
-        True of this contains only a single loads and store.
+        True if this contains only a single loads and store.
         Note, this could involve a layout change.
         """
         return (

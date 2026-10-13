@@ -74,25 +74,22 @@ class TORCH_API TensorRef {
 };
 
 template <typename T>
-auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
-  // Return the grad argument in case of a hook with void return type to have an
-  // std::function with Tensor return type
-  static_assert(std::is_same_v<decltype(hook(Tensor())), void>,
-                "Expected hook to return void");
-  return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad_base) {
-    TensorRef grad(grad_base);
-    fn(*grad);
-    return Tensor();
-  });
-}
-
-template <typename T>
-auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
-  return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad_base) {
-    TensorRef grad(grad_base);
-    Tensor ret = fn(*grad);
-    return TensorBase(std::move(ret));
-  });
+unsigned Tensor::register_hook(T&& hook) const {
+  using R = std::invoke_result_t<T, Tensor>;
+  if constexpr (std::is_same_v<R, Tensor>) {
+    return _register_hook([fn = std::forward<T>(hook)](const TensorBase& grad_base) {
+      TensorRef grad(grad_base);
+      Tensor ret = fn(*grad);
+      return TensorBase(std::move(ret));
+    });
+  } else {
+    static_assert(std::is_void_v<R>, "hook must return Tensor or void");
+    return _register_hook([fn = std::forward<T>(hook)](const TensorBase& grad_base) {
+      TensorRef grad(grad_base);
+      fn(*grad);
+      return Tensor();
+    });
+  }
 }
 
 } // namespace at

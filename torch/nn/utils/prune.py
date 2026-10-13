@@ -1391,5 +1391,11 @@ def _compute_norm(t, n, dim):
         dim = dims[dim]
     dims.remove(dim)
 
-    norm = torch.norm(t, p=n, dim=dims)
-    return norm
+    # torch.norm: 'nuc' and 'fro' over a matrix dim are matrix norms;
+    # everything else (numeric n, 'fro' elsewhere) is the flat p-norm.
+    is_matrix_dim = len(dims) == 2
+    if n == "nuc" or (n == "fro" and is_matrix_dim):
+        return torch.linalg.matrix_norm(
+            t, ord=n, dim=dims if is_matrix_dim else (-2, -1)
+        )
+    return torch.linalg.vector_norm(t, ord=2 if n == "fro" else n, dim=dims)

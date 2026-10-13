@@ -10,6 +10,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     TestCase,
     run_tests,
     gradcheck,
@@ -36,6 +37,8 @@ def get_default_value(initial_value, reduction):
 
 
 class TestSegmentReductions(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_common(
         self,
         reduction,
@@ -469,7 +472,7 @@ class TestSegmentReductions(TestCase):
                         initial = 1000
                     elif reduce == 'max':
                         initial = -1000
-                    segment_reduce_args = {x, reduce}
+                    segment_reduce_args = (x, reduce)
                     segment_reduce_kwargs = dict(axis=dim, unsafe=True, initial=initial)
                     if mode == 'lengths':
                         segment_reduce_kwargs[mode] = lengths

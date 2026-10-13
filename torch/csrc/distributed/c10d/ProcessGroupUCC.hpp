@@ -170,7 +170,7 @@ class TORCH_API ProcessGroupUCC : public Backend {
   // Performs a health check by initializing dummy UCC & UCX communicators and
   // then destroying them. This will help indicate and signal any
   // UCC/UCX-related issues prior to the first collective. The actual
-  // initialization and subsequent destruction is ran on a separate thread and
+  // initialization and subsequent destruction is run on a separate thread and
   // the main thread is signalled about timeouts/errors to report to the
   // application.
   void runHealthCheck();
