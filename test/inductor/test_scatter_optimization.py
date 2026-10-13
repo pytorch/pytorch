@@ -202,7 +202,8 @@ class TestScatterOpt(TestCase):
 
     def test_cross_entropy_loss(self):
         """
-        Match full+scatter in CEL and replaces it with a pointwise.
+        The cross-entropy backward is pointwise (nll_loss_backward decomposes to
+        a one-hot select, so there is no full+scatter left to match).
 
         Perf data on an A100 GPU:
         Without the scatter optimization:
@@ -234,7 +235,7 @@ class TestScatterOpt(TestCase):
         if not torch.allclose(ref_grad, act_grad, atol=1e-3, rtol=1e-3):
             raise AssertionError(f"{ref_grad=}\n{act_grad=}")
 
-        self.check_metric()
+        self.check_metric(0)
 
         if DO_PERF_TEST:
             if GPU_TYPE == "xpu":

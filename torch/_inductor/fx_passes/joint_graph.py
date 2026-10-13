@@ -1346,3 +1346,107 @@ def scatter_upon_const_tensor(
     # replace the scatter operation with pointwise equivalent
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl_fn, [shape, background_val, dim, selector, val])
+
+
+def _right_aligned_shape(node, ndim):
+    val = node.meta.get("val") if isinstance(node, torch.fx.Node) else None
+    if not isinstance(val, torch.Tensor) or val.dim() > ndim:
+        return None
+    return [1] * (ndim - val.dim()) + list(val.shape)
+
+
+def _is_arange_in_dim(node, dim, ndim, length):
+    """True if ``node`` is ``iota(length)`` viewed to size ``length`` at ``dim``
+    and 1 elsewhere."""
+    shape = _right_aligned_shape(node, ndim)
+    if shape is None or not all(
+        statically_known_true(sz == (length if d == dim else 1))
+        for d, sz in enumerate(shape)
+    ):
+        return False
+    while node.target in (aten.view.default, aten.unsqueeze.default):
+        node = node.args[0]
+    return (
+        node.target is prims.iota.default
+        and node.kwargs.get("start") == 0
+        and node.kwargs.get("step") == 1
+    )
+
+
+def _one_hot_sum_selector(match):
+    """Returns (selector, length) if the match sums, over ``dim`` of size
+    ``length``, ``where(selector == arange(length), val, 0)`` with selector and
+    val broadcast along ``dim``; otherwise None."""
+    dims = match.kwargs["dim"]
+    one_hot = match.output_node().args[0]
+    one_hot_val = one_hot.meta.get("val")
+    if (
+        len(dims) != 1
+        or not isinstance(one_hot_val, torch.Tensor)
+        or not one_hot_val.dtype.is_floating_point
+    ):
+        return None
+    ndim = one_hot_val.dim()
+    dim = dims[0] % ndim
+    length = one_hot_val.shape[dim]
+
+    def is_broadcast(node):
+        shape = _right_aligned_shape(node, ndim)
+        return shape is not None and statically_known_true(shape[dim] == 1)
+
+    background = match.kwargs["background"]
+    if not (
+        background.target is aten.full.default
+        and background.args[:2] == ([], 0)
+        and is_broadcast(match.kwargs["val"])
+    ):
+        return None
+    for selector, classes in (
+        (match.kwargs["lhs"], match.kwargs["rhs"]),
+        (match.kwargs["rhs"], match.kwargs["lhs"]),
+    ):
+        if is_broadcast(selector) and _is_arange_in_dim(classes, dim, ndim, length):
+            return selector, length
+    return None
+
+
+_one_hot = CallFunction(
+    aten.where.self,
+    CallFunction(aten.eq.Tensor, KeywordArg("lhs"), KeywordArg("rhs")),
+    KeywordArg("val"),
+    KeywordArg("background"),
+    _users=MULTIPLE,
+)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.sum.dim_IntList, _one_hot, KeywordArg("dim"), KeywordArg("keepdim")
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=patterns,
+    extra_check=lambda m: _one_hot_sum_selector(m) is not None,
+)
+def one_hot_sum(match: Match, *, lhs, rhs, val, background, dim, keepdim):
+    """
+    Replace ``sum(where(selector == arange(N), val, 0), dim)`` by the single
+    selected term, avoiding a reduction over ``dim``. Exactly one class can
+    match, and only if selector is in [0, N). Selecting ``val != 0`` keeps the
+    sum's +0 for val == -0.
+
+    This arises in the cross-entropy backward, where log_softmax_backward sums
+    the one-hot gradient from nll_loss_backward over the class dim.
+    """
+    selector, length = _one_hot_sum_selector(match)
+    out_val = match.output_node().meta["val"]
+    reduced_dim = dim[0] % (out_val.dim() + (0 if keepdim else 1))
+
+    def repl(selector, val):
+        selected = (selector >= 0) & (selector < length) & (val != 0)
+        out = torch.where(selected, val, 0).to(out_val.dtype)
+        if not keepdim:
+            out = out.squeeze(reduced_dim)
+        return out.expand(out_val.shape)
+
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(repl, [selector, val])

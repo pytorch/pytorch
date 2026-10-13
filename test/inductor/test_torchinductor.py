@@ -22952,6 +22952,26 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        def test_cross_entropy_backward_has_no_class_reduction(self):
+            # nll_loss_backward's one-hot gradient is summed over the classes by
+            # log_softmax_backward; that sum must fold to the selected term.
+            def fn(x, labels, weight):
+                loss = torch.nn.functional.cross_entropy(
+                    x.float(), labels, weight=weight, ignore_index=-100
+                )
+                return torch.autograd.grad(loss, x)[0]
+
+            x = torch.randn(64, 1000, device=GPU_TYPE, requires_grad=True)
+            labels = torch.randint(0, 1000, (64,), device=GPU_TYPE)
+            labels[::5] = -100
+            for weight in (None, torch.rand(1000, device=GPU_TYPE)):
+                torch._dynamo.reset()
+                result, code = run_and_get_code(torch.compile(fn), x, labels, weight)
+                self.assertEqual(result, fn(x, labels, weight))
+                (backward,) = [c for c in code if "log_softmax_backward" in c]
+                self.assertNotIn("triton_red_", backward)
+                self.assertNotIn("triton_per_", backward)
+
         def test_row_broadcast_pointwise_uses_2d_tiling(self):
             # Per-row operands of a pointwise kernel over long rows should be
             # loaded once per block row ([rows, cols] tiling) rather than
