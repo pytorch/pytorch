@@ -1,12 +1,14 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/group_norm.h>
 
+#include <limits>
 #include <type_traits>
 #include <utility>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/cuda/CUDAMathCompat.h>
@@ -15,11 +17,13 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
+#include <ATen/native/cuda/channels_last_reduce.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
@@ -27,6 +31,22 @@ namespace at::native {
 namespace {
 
 constexpr int kCUDANumThreads = 256;
+// CUDA caps the z extent of a grid; the channels-last reduction kernels walk
+// the batch when N is larger.
+constexpr int64_t kMaxGridZ = 65535;
+// flexible_launch_configs takes int and runs ceil_div on its arguments, so both
+// have to stay far enough below INT_MAX that the intermediate cannot overflow.
+// The reduction extent only feeds grid.y, which saturates at MAX_H_BLOCK long
+// before this bound, so clamping it is purely conservative and the kernels
+// stride over whatever is left.
+constexpr int64_t kMaxReductionExtent =
+    std::numeric_limits<int>::max() / (MAX_BLOCK_SIZE * ELEMENTS_PER_THREAD);
+// The stride extent is different: grid.x is the coverage of the channel axis,
+// so clamping it would leave the channels past the clamp unwritten rather than
+// merely under-parallelized. Only keep ceil_div from overflowing; no real
+// tensor comes near this.
+constexpr int64_t kMaxStrideExtent =
+    std::numeric_limits<int>::max() - MAX_BLOCK_SIZE;
 constexpr int kReduceTileSize = 32;
 
 // Reduce across exactly 32 lanes (offsets 16, 8, 4, 2, 1).
@@ -42,13 +62,37 @@ __inline__ __device__ T ReduceSum32(T val) {
   return val;
 }
 
-template <int VecSize, typename T, typename T_ACC>
+template <typename T, typename PT, typename T_ACC>
+__device__ __forceinline__ void WriteMomentsUnitD(
+    int64_t ng,
+    T_ACC mean_th,
+    T_ACC m2n_th,
+    int64_t count_th,
+    T_ACC eps,
+    PT* __restrict__ mean,
+    PT* __restrict__ rstd,
+    T_ACC* __restrict__ mean_acc,
+    T_ACC* __restrict__ rstd_acc) {
+  const T_ACC rstd_val =
+      c10::cuda::compat::rsqrt(m2n_th / static_cast<T_ACC>(count_th) + eps);
+  mean[ng] = mean_th;
+  rstd[ng] = rstd_val;
+  // The accelerated-precision copies are separate tensors exactly when the
+  // input is reduced precision, which is not the same as PT != T_ACC: under
+  // autocast PT and T_ACC are both float over a half input.
+  if constexpr (!std::is_same_v<T, T_ACC>) {
+    mean_acc[ng] = mean_th;
+    rstd_acc[ng] = rstd_val;
+  }
+}
+
+template <int VecSize, typename T, typename PT, typename T_ACC>
 __global__ void RowwiseMomentsContiguousCUDAKernel(
     int64_t N,
-    T eps,
+    T_ACC eps,
     const T* __restrict__ X,
-    T* __restrict__ mean,
-    T* __restrict__ rstd,
+    PT* __restrict__ mean,
+    PT* __restrict__ rstd,
     T_ACC* __restrict__ mean_acc,
     T_ACC* __restrict__ rstd_acc) {
   using WelfordType = WelfordData<T_ACC, int64_t>;
@@ -86,7 +130,7 @@ __global__ void RowwiseMomentsContiguousCUDAKernel(
   }
   if (threadIdx.x == 0) {
     auto [m2, m1] = welford_op.project(val);
-    T_ACC rstd_val = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
+    T_ACC rstd_val = c10::cuda::compat::rsqrt(m2 + eps);
     mean[i] = m1;
     rstd[i] = rstd_val;
     // save off the accelerated-precision output, if different
@@ -97,16 +141,16 @@ __global__ void RowwiseMomentsContiguousCUDAKernel(
   }
 }
 
-template <int GroupsPerBlock, typename T, typename T_ACC>
+template <int GroupsPerBlock, typename T, typename PT, typename T_ACC>
 __global__ void RowwiseMomentsChannelsLastSmallDCUDAKernel(
     int64_t C,
     int64_t HxW,
     int64_t D,
     int64_t G,
-    T eps,
+    T_ACC eps,
     const T* __restrict__ X,
-    T* __restrict__ mean,
-    T* __restrict__ rstd,
+    PT* __restrict__ mean,
+    PT* __restrict__ rstd,
     T_ACC* __restrict__ mean_acc,
     T_ACC* __restrict__ rstd_acc) {
   using WelfordType = WelfordData<T_ACC, int64_t>;
@@ -147,8 +191,7 @@ __global__ void RowwiseMomentsChannelsLastSmallDCUDAKernel(
     }
     const int64_t ng = n * G + first_group + threadIdx.x;
     auto [m2, m1] = welford_op.project(val);
-    const T_ACC rstd_val =
-        c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
+    const T_ACC rstd_val = c10::cuda::compat::rsqrt(m2 + eps);
     mean[ng] = m1;
     rstd[ng] = rstd_val;
     if constexpr (!std::is_same_v<T, T_ACC>) {
@@ -158,16 +201,16 @@ __global__ void RowwiseMomentsChannelsLastSmallDCUDAKernel(
   }
 }
 
-template <typename T, typename T_ACC>
+template <typename T, typename PT, typename T_ACC>
 __global__ void RowwiseMomentsChannelsLastCUDAKernel(
     int64_t N,
     int64_t C,
     int64_t HxW,
     int64_t D,
-    T eps,
+    T_ACC eps,
     const T* X,
-    T* mean,
-    T* rstd,
+    PT* mean,
+    PT* rstd,
     T_ACC* mean_acc,
     T_ACC* rstd_acc) {
   using WelfordType = WelfordData<T_ACC, int64_t>;
@@ -207,7 +250,7 @@ __global__ void RowwiseMomentsChannelsLastCUDAKernel(
   }
   if (threadIdx.x == 0) {
     auto [m2, m1] = welford_op.project(val);
-    T_ACC rstd_val = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
+    T_ACC rstd_val = c10::cuda::compat::rsqrt(m2 + eps);
     mean[ng] = m1;
     rstd[ng] = rstd_val;
     if constexpr (!std::is_same_v<T, T_ACC>) {
@@ -217,7 +260,128 @@ __global__ void RowwiseMomentsChannelsLastCUDAKernel(
   }
 }
 
-template <typename index_t, typename T, typename T_ACC>
+// Group norm with one group per channel, which is what instance norm lowers to,
+// has D == 1, so the moments of a group are the moments of a single channel.
+// The kernels above parallelize over groups and reduce HxW inside a block,
+// which leaves almost the whole device idle at that shape: with G == C the
+// SmallD grid is only N * ceil(C / GroupsPerBlock). This one reduces the same
+// data with blockDim.x spanning channels, so a warp's reads stay contiguous,
+// and with blockDim.y and gridDim.y splitting HxW so the grid stays wide
+// regardless of C. Partial results are staged and combined by the last block
+// to arrive, following batch_norm's channels-last statistics kernel.
+template <typename T, typename PT, typename T_ACC>
+__global__ void RowwiseMomentsChannelsLastUnitDCUDAKernel(
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    T_ACC eps,
+    const T* __restrict__ X,
+    PT* __restrict__ mean,
+    PT* __restrict__ rstd,
+    T_ACC* __restrict__ mean_acc,
+    T_ACC* __restrict__ rstd_acc,
+    volatile T_ACC* staging_data,
+    int* semaphores) {
+  const int64_t c = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t hw_stride = blockDim.y * gridDim.y;
+  static __shared__ T_ACC shmem_mean[MAX_BLOCK_SIZE];
+  static __shared__ T_ACC shmem_m2n[MAX_BLOCK_SIZE];
+  static __shared__ int64_t shmem_count[MAX_BLOCK_SIZE];
+  __shared__ bool is_last_block_done;
+
+  // gridDim.z is capped at 65535, so walk the batch instead of mapping it one
+  // to one onto blockIdx.z. Every block steps through the same n values, so the
+  // barriers below stay uniform across the block.
+  for (int64_t n = blockIdx.z; n < N; n += gridDim.z) {
+    T_ACC mean_th = 0;
+    T_ACC m2n_th = 0;
+    // int64_t because the merged count reaches HxW, which overflows int for
+    // large volumes.
+    int64_t count_th = 0;
+    if (c < C) {
+      for (int64_t hw = blockIdx.y * blockDim.y + threadIdx.y; hw < HxW;
+           hw += hw_stride) {
+        const T_ACC x = static_cast<T_ACC>(X[(n * HxW + hw) * C + c]);
+        welford_merge_element(
+            count_th, mean_th, m2n_th, int64_t{1}, x, T_ACC(0));
+      }
+    }
+    welford_merge_block_vertical(
+        count_th, mean_th, m2n_th, shmem_count, shmem_mean, shmem_m2n);
+
+    if (gridDim.y == 1) {
+      if (threadIdx.y == 0 && c < C) {
+        WriteMomentsUnitD<T, PT, T_ACC>(
+            n * C + c,
+            mean_th,
+            m2n_th,
+            count_th,
+            eps,
+            mean,
+            rstd,
+            mean_acc,
+            rstd_acc);
+      }
+      // Fall through to the barrier below rather than continuing: shmem is
+      // reused by the next batch element and the vertical merge ends on a read.
+      __syncthreads();
+      continue;
+    }
+
+    volatile T_ACC* staging_mean = staging_data;
+    volatile T_ACC* staging_m2n = &staging_data[C * gridDim.y * N];
+    // The count region is int64_t, hence twice the stride of the two T_ACC
+    // regions ahead of it; the workspace is sized to match.
+    volatile int64_t* staging_count =
+        reinterpret_cast<volatile int64_t*>(&staging_m2n[C * gridDim.y * N]);
+    const int64_t staging_index = (n * gridDim.y + blockIdx.y) * C + c;
+    if (threadIdx.y == 0 && c < C) {
+      staging_mean[staging_index] = mean_th;
+      staging_m2n[staging_index] = m2n_th;
+      staging_count[staging_index] = count_th;
+    }
+    __threadfence();
+    __syncthreads();
+
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+      const int old = atomicAdd(&semaphores[n * gridDim.x + blockIdx.x], 1);
+      is_last_block_done = (old == (gridDim.y - 1));
+    }
+    __syncthreads();
+
+    if (is_last_block_done) {
+      count_th = 0;
+      mean_th = 0;
+      m2n_th = 0;
+      for (int64_t y = threadIdx.y; y < gridDim.y; y += blockDim.y) {
+        const int64_t index = (n * gridDim.y + y) * C + c;
+        const int64_t count_new = c < C ? staging_count[index] : 0;
+        const T_ACC mean_new = c < C ? staging_mean[index] : T_ACC(0);
+        const T_ACC m2n_new = c < C ? staging_m2n[index] : T_ACC(0);
+        welford_merge_element(
+            count_th, mean_th, m2n_th, count_new, mean_new, m2n_new);
+      }
+      welford_merge_block_vertical(
+          count_th, mean_th, m2n_th, shmem_count, shmem_mean, shmem_m2n);
+      if (threadIdx.y == 0 && c < C) {
+        WriteMomentsUnitD<T, PT, T_ACC>(
+            n * C + c,
+            mean_th,
+            m2n_th,
+            count_th,
+            eps,
+            mean,
+            rstd,
+            mean_acc,
+            rstd_acc);
+      }
+    }
+    // shmem and is_last_block_done are reused by the next batch element
+    __syncthreads();
+  }
+}
+
+template <typename index_t, typename T, typename PT, typename T_ACC>
 __global__ void GroupNormBackwardChannelsLastCUDAKernel(
     index_t numel,
     index_t G,
@@ -226,8 +390,8 @@ __global__ void GroupNormBackwardChannelsLastCUDAKernel(
     at::cuda::detail::IntDivider<index_t> D_divider,
     const T* __restrict__ dY,
     const T* __restrict__ X,
-    const T* __restrict__ rstd,
-    const T* __restrict__ gamma,
+    const PT* __restrict__ rstd,
+    const PT* __restrict__ gamma,
     const T_ACC* __restrict__ c2,
     const T_ACC* __restrict__ c3,
     T* __restrict__ dX) {
@@ -247,15 +411,15 @@ __global__ void GroupNormBackwardChannelsLastCUDAKernel(
   }
 }
 
-template <typename T, typename T_ACC>
+template <typename PT, typename T_ACC>
 __global__ void ComputeFusedParamsCUDAKernel(
     int64_t N,
     int64_t C,
     int64_t group,
     const T_ACC* mean,
     const T_ACC* rstd,
-    const T* gamma,
-    const T* beta,
+    const PT* gamma,
+    const PT* beta,
     T_ACC* a,
     T_ACC* b) {
   const int64_t index = ((int64_t)blockIdx.x) * blockDim.x + threadIdx.x;
@@ -269,15 +433,15 @@ __global__ void ComputeFusedParamsCUDAKernel(
   }
 }
 
-template <typename T>
+template <typename T, typename PT>
 __global__ void Compute1dBackwardFusedParamsCUDAKernel(
     int64_t C,
     int64_t group,
     const T* dY,
     const T* X,
-    const T* mean,
-    const T* rstd,
-    const T* gamma,
+    const PT* mean,
+    const PT* rstd,
+    const PT* gamma,
     acc_type<T, true>* c2,
     acc_type<T, true>* c3) {
   using T_ACC = acc_type<T, true>;
@@ -316,17 +480,17 @@ __global__ void Compute1dBackwardFusedParamsCUDAKernel(
   }
 }
 
-template <typename T>
+template <typename T, typename PT>
 __global__ void GammaBeta1dBackwardCUDAKernel1(
     int64_t N,
     int64_t C,
     int64_t group,
     const T* dY,
     const T* X,
-    const T* mean,
-    const T* rstd,
-    T* dgamma,
-    T* dbeta) {
+    const PT* mean,
+    const PT* rstd,
+    PT* dgamma,
+    PT* dbeta) {
   using T_ACC = acc_type<T, true>;
   const int64_t c = ((int64_t)blockIdx.x) * blockDim.x + threadIdx.x;
   if (c < C) {
@@ -354,17 +518,17 @@ __global__ void GammaBeta1dBackwardCUDAKernel1(
   }
 }
 
-template <typename T>
+template <typename T, typename PT>
 __global__ void GammaBeta1dBackwardCUDAKernel2(
     int64_t N,
     int64_t C,
     int64_t group,
     const T* dY,
     const T* X,
-    const T* mean,
-    const T* rstd,
-    T* dgamma,
-    T* dbeta) {
+    const PT* mean,
+    const PT* rstd,
+    PT* dgamma,
+    PT* dbeta) {
   using T_ACC = acc_type<T, true>;
   __shared__ T_ACC g_shared[kReduceTileSize][kReduceTileSize + 1];
   __shared__ T_ACC b_shared[kReduceTileSize][kReduceTileSize + 1];
@@ -490,101 +654,103 @@ __global__ void ComputeInternalGradientsContiguousCUDAKernel(
   }
 }
 
-template <int ChannelsPerBlock, typename T>
+// ds/db are per (n, c) reductions over HxW of a channels-last [N, HxW, C]
+// tensor. blockDim.x spans channels so the global reads of a warp are
+// contiguous, while blockDim.y/gridDim.y split the HxW reduction, which keeps
+// the grid wide even when C is small. Group norm with one group per channel
+// (i.e. instance norm) is exactly that case: it has D == 1, so a kernel
+// parallelized over channels alone would launch only a handful of blocks.
+// The cross-block combine follows batch_norm's channels-last reduction: each
+// gridDim.y slice stages its partial sums and the last slice to arrive
+// accumulates them.
+template <typename T>
 __global__ void ComputeInternalGradientsChannelsLastCUDAKernel(
+    int64_t N,
     int64_t C,
     int64_t HxW,
     const T* __restrict__ dY,
     const T* __restrict__ X,
     acc_type<T, true>* __restrict__ ds,
-    acc_type<T, true>* __restrict__ db) {
+    acc_type<T, true>* __restrict__ db,
+    volatile acc_type<T, true>* staging_data,
+    int* semaphores) {
   using T_ACC = acc_type<T, true>;
-  const int64_t channel_blocks = (C + ChannelsPerBlock - 1) / ChannelsPerBlock;
-  const int64_t n = blockIdx.x / channel_blocks;
-  const int64_t first_channel =
-      (blockIdx.x % channel_blocks) * ChannelsPerBlock;
-  const int64_t local_channel = threadIdx.x % ChannelsPerBlock;
-  const int64_t hw_lane = threadIdx.x / ChannelsPerBlock;
-  const int64_t hw_step = blockDim.x / ChannelsPerBlock;
-  const int64_t c = first_channel + local_channel;
-  T_ACC sum1 = 0;
-  T_ACC sum2 = 0;
-  if (c < C) {
-    for (int64_t hw = hw_lane; hw < HxW; hw += hw_step) {
-      const int64_t index = (n * HxW + hw) * C + c;
-      const T_ACC dy = static_cast<T_ACC>(dY[index]);
-      sum1 += dy * static_cast<T_ACC>(X[index]);
-      sum2 += dy;
-    }
-  }
+  const int64_t c = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t hw_stride = blockDim.y * gridDim.y;
+  static __shared__ T_ACC shmem_ds[MAX_BLOCK_SIZE];
+  static __shared__ T_ACC shmem_db[MAX_BLOCK_SIZE];
+  __shared__ bool is_last_block_done;
 
-  __shared__ T_ACC ds_shared[kCUDANumThreads];
-  __shared__ T_ACC db_shared[kCUDANumThreads];
-  ds_shared[threadIdx.x] = sum1;
-  db_shared[threadIdx.x] = sum2;
-  __syncthreads();
-  if (threadIdx.x < ChannelsPerBlock && first_channel + threadIdx.x < C) {
-    sum1 = 0;
-    sum2 = 0;
-    for (int64_t i = 0; i < hw_step; ++i) {
-      const int64_t index = i * ChannelsPerBlock + threadIdx.x;
-      sum1 += ds_shared[index];
-      sum2 += db_shared[index];
+  for (int64_t n = blockIdx.z; n < N; n += gridDim.z) {
+    T_ACC sum1 = 0;
+    T_ACC sum2 = 0;
+    if (c < C) {
+      for (int64_t hw = blockIdx.y * blockDim.y + threadIdx.y; hw < HxW;
+           hw += hw_stride) {
+        const int64_t index = (n * HxW + hw) * C + c;
+        const T_ACC dy = static_cast<T_ACC>(dY[index]);
+        sum1 += dy * static_cast<T_ACC>(X[index]);
+        sum2 += dy;
+      }
     }
-    const int64_t nc = n * C + first_channel + threadIdx.x;
-    ds[nc] = sum1;
-    db[nc] = sum2;
+    merge_block_vertical_backward(sum1, sum2, shmem_ds, shmem_db);
+
+    if (gridDim.y == 1) {
+      if (threadIdx.y == 0 && c < C) {
+        ds[n * C + c] = sum1;
+        db[n * C + c] = sum2;
+      }
+      // See the matching comment in RowwiseMomentsChannelsLastUnitDCUDAKernel.
+      __syncthreads();
+      continue;
+    }
+
+    volatile T_ACC* staging_ds = staging_data;
+    volatile T_ACC* staging_db = &staging_data[C * gridDim.y * N];
+    const int64_t staging_index = (n * gridDim.y + blockIdx.y) * C + c;
+    if (threadIdx.y == 0 && c < C) {
+      staging_ds[staging_index] = sum1;
+      staging_db[staging_index] = sum2;
+    }
+    __threadfence();
+    __syncthreads();
+
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+      const int old = atomicAdd(&semaphores[n * gridDim.x + blockIdx.x], 1);
+      is_last_block_done = (old == (gridDim.y - 1));
+    }
+    __syncthreads();
+
+    if (is_last_block_done) {
+      sum1 = 0;
+      sum2 = 0;
+      for (int64_t y = threadIdx.y; y < gridDim.y; y += blockDim.y) {
+        const int64_t index = (n * gridDim.y + y) * C + c;
+        sum1 += c < C ? staging_ds[index] : T_ACC(0);
+        sum2 += c < C ? staging_db[index] : T_ACC(0);
+      }
+      merge_block_vertical_backward(sum1, sum2, shmem_ds, shmem_db);
+      if (threadIdx.y == 0 && c < C) {
+        ds[n * C + c] = sum1;
+        db[n * C + c] = sum2;
+      }
+    }
+    __syncthreads();
   }
 }
 
-template <typename T>
-__global__ void ComputeInternalGradientsChannelsLastFallbackCUDAKernel(
-    int64_t C,
-    int64_t HxW,
-    const T* __restrict__ dY,
-    const T* __restrict__ X,
-    acc_type<T, true>* __restrict__ ds,
-    acc_type<T, true>* __restrict__ db) {
-  using T_ACC = acc_type<T, true>;
-  const int64_t nc = blockIdx.x;
-  const int64_t n = nc / C;
-  const int64_t c = nc % C;
-  T_ACC sum1 = 0;
-  T_ACC sum2 = 0;
-  for (int64_t hw = threadIdx.x; hw < HxW; hw += blockDim.x) {
-    const int64_t index = (n * HxW + hw) * C + c;
-    const T_ACC dy = static_cast<T_ACC>(dY[index]);
-    sum1 += dy * static_cast<T_ACC>(X[index]);
-    sum2 += dy;
-  }
-  if (blockDim.x <= C10_WARP_SIZE) {
-    sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
-    sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
-  } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE_UPPER_BOUND];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE_UPPER_BOUND];
-    sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
-    sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
-  }
-  if (threadIdx.x == 0) {
-    ds[nc] = sum1;
-    db[nc] = sum2;
-  }
-}
-
-template <typename T>
+template <typename PT, typename T_ACC>
 __global__ void ComputeBackwardFusedParamsCUDAKernel(
     int64_t C,
     int64_t HxW,
     int64_t group,
-    const T* mean,
-    const T* rstd,
-    const T* gamma,
-    const acc_type<T, true>* ds,
-    const acc_type<T, true>* db,
-    acc_type<T, true>* c2,
-    acc_type<T, true>* c3) {
-  using T_ACC = acc_type<T, true>;
+    const PT* mean,
+    const PT* rstd,
+    const PT* gamma,
+    const T_ACC* ds,
+    const T_ACC* db,
+    T_ACC* c2,
+    T_ACC* c3) {
   const int64_t G = group;
   const int64_t D = C / G;
   const int64_t n = blockIdx.x;
@@ -619,18 +785,17 @@ __global__ void ComputeBackwardFusedParamsCUDAKernel(
   }
 }
 
-template <typename T>
+template <typename PT, typename T_ACC>
 __global__ void GammaBetaBackwardCUDAKernel1(
     int64_t N,
     int64_t C,
     int64_t group,
-    const T* mean,
-    const T* rstd,
-    const acc_type<T, true>* ds,
-    const acc_type<T, true>* db,
-    T* dgamma,
-    T* dbeta) {
-  using T_ACC = acc_type<T, true>;
+    const PT* mean,
+    const PT* rstd,
+    const T_ACC* ds,
+    const T_ACC* db,
+    PT* dgamma,
+    PT* dbeta) {
   const int64_t c = ((int64_t)blockIdx.x) * blockDim.x + threadIdx.x;
   if (c < C) {
     const int64_t G = group;
@@ -654,18 +819,17 @@ __global__ void GammaBetaBackwardCUDAKernel1(
   }
 }
 
-template <typename T>
+template <typename PT, typename T_ACC>
 __global__ void GammaBetaBackwardCUDAKernel2(
     int64_t N,
     int64_t C,
     int64_t group,
-    const T* mean,
-    const T* rstd,
-    const acc_type<T, true>* ds,
-    const acc_type<T, true>* db,
-    T* dgamma,
-    T* dbeta) {
-  using T_ACC = acc_type<T, true>;
+    const PT* mean,
+    const PT* rstd,
+    const T_ACC* ds,
+    const T_ACC* db,
+    PT* dgamma,
+    PT* dbeta) {
   __shared__ T_ACC g_shared[kReduceTileSize][kReduceTileSize + 1];
   __shared__ T_ACC b_shared[kReduceTileSize][kReduceTileSize + 1];
   const int64_t c = ((int64_t)blockIdx.x) * blockDim.x + threadIdx.x;
@@ -743,7 +907,7 @@ __global__ void GammaBetaBackwardCUDAKernel2(
   }
 }
 
-template <typename T, typename T_ACC>
+template <typename T, typename PT, typename T_ACC>
 void GroupNorm1dForward(
     const Tensor& X,
     const Tensor& mean_acc,
@@ -768,7 +932,8 @@ void GroupNorm1dForward(
                     .add_owned_const_input(beta.view({1, G, D}))
                     .build();
     gpu_kernel(
-        iter, [] GPU_LAMBDA(T x, T_ACC mean, T_ACC rstd, T gamma, T beta) -> T {
+        iter,
+        [] GPU_LAMBDA(T x, T_ACC mean, T_ACC rstd, PT gamma, PT beta) -> T {
           return (static_cast<T_ACC>(x) - mean) * rstd *
               static_cast<T_ACC>(gamma) +
               static_cast<T_ACC>(beta);
@@ -783,7 +948,7 @@ void GroupNorm1dForward(
                     .add_owned_input(rstd_acc.view({N, G, 1}))
                     .add_owned_const_input(gamma.view({1, G, D}))
                     .build();
-    gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC mean, T_ACC rstd, T gamma) -> T {
+    gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC mean, T_ACC rstd, PT gamma) -> T {
       return (static_cast<T_ACC>(x) - mean) * rstd * static_cast<T_ACC>(gamma);
     });
   } else if (beta.defined()) {
@@ -796,7 +961,7 @@ void GroupNorm1dForward(
                     .add_owned_input(rstd_acc.view({N, G, 1}))
                     .add_owned_const_input(beta.view({1, G, D}))
                     .build();
-    gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC mean, T_ACC rstd, T beta) -> T {
+    gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC mean, T_ACC rstd, PT beta) -> T {
       return (static_cast<T_ACC>(x) - mean) * rstd + static_cast<T_ACC>(beta);
     });
   } else {
@@ -815,7 +980,7 @@ void GroupNorm1dForward(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template <typename T, typename T_ACC = acc_type<T, true>>
+template <typename T, typename PT, typename T_ACC = acc_type<T, true>>
 void GroupNormKernelImplInternal(
     const Tensor& X,
     const Tensor& gamma,
@@ -824,7 +989,7 @@ void GroupNormKernelImplInternal(
     int64_t C,
     int64_t HxW,
     int64_t group,
-    T eps,
+    double eps,
     Tensor& Y,
     Tensor& mean,
     Tensor& rstd) {
@@ -841,8 +1006,8 @@ void GroupNormKernelImplInternal(
   const auto kAccTypeOpts{
       X.options().dtype(needMeanAcc ? kFloat : X.scalar_type())};
 
-  T* mean_data = mean.mutable_data_ptr<T>();
-  T* rstd_data = rstd.mutable_data_ptr<T>();
+  PT* mean_data = mean.mutable_data_ptr<PT>();
+  PT* rstd_data = rstd.mutable_data_ptr<PT>();
   Tensor mean_acc = needMeanAcc ? at::empty(mean.sizes(), kAccTypeOpts) : mean;
   Tensor rstd_acc = needMeanAcc ? at::empty(rstd.sizes(), kAccTypeOpts) : rstd;
   T_ACC* mean_acc_data = mean_acc.mutable_data_ptr<T_ACC>();
@@ -855,30 +1020,69 @@ void GroupNormKernelImplInternal(
       ? at::cuda::warp_size()
       : cuda_utils::kCUDABlockReduceNumThreads;
   if (channels_last) {
-    if ((D == 1 || D == 2) && G >= 4 &&
-        D * HxW >= cuda_utils::kCUDABlockReduceNumThreads) {
+    if (D == 1) {
+      // One group per channel: the split reduction below writes the group
+      // statistics directly, so no per-channel merge pass is needed.
+      TORCH_CHECK(
+          C <= kMaxStrideExtent,
+          "group_norm: too many channels for the channels_last kernels, got ",
+          C);
+      dim3 block;
+      dim3 grid;
+      flexible_launch_configs(
+          std::min<int64_t>(HxW, kMaxReductionExtent),
+          std::min<int64_t>(C, kMaxStrideExtent),
+          block,
+          grid,
+          /*coop_flag=*/true);
+      grid.z = std::min<int64_t>(N, kMaxGridZ);
+      // mean and m2n as T_ACC, then the counts as int64_t. Two T_ACC slots
+      // per count is tight for float and generous for double.
+      Tensor staging_data;
+      Tensor semaphores;
+      if (grid.y > 1) {
+        staging_data =
+            at::empty({4 * static_cast<int64_t>(grid.y) * N * C}, kAccTypeOpts);
+        semaphores = at::zeros(
+            {static_cast<int64_t>(grid.x) * N}, X.options().dtype(kInt));
+      }
+      RowwiseMomentsChannelsLastUnitDCUDAKernel<T, PT, T_ACC>
+          <<<grid, block, 0, cuda_stream>>>(
+              N,
+              C,
+              HxW,
+              static_cast<T_ACC>(eps),
+              X_data,
+              mean_data,
+              rstd_data,
+              mean_acc_data,
+              rstd_acc_data,
+              grid.y > 1 ? staging_data.mutable_data_ptr<T_ACC>() : nullptr,
+              grid.y > 1 ? semaphores.mutable_data_ptr<int>() : nullptr);
+    } else if (
+        D == 2 && G >= 4 && D * HxW >= cuda_utils::kCUDABlockReduceNumThreads) {
       constexpr int kGroupsPerBlock = 4;
       const int64_t group_blocks = (G + kGroupsPerBlock - 1) / kGroupsPerBlock;
-      RowwiseMomentsChannelsLastSmallDCUDAKernel<kGroupsPerBlock, T, T_ACC>
+      RowwiseMomentsChannelsLastSmallDCUDAKernel<kGroupsPerBlock, T, PT, T_ACC>
           <<<N * group_blocks, kCUDANumThreads, 0, cuda_stream>>>(
               C,
               HxW,
               D,
               G,
-              eps,
+              static_cast<T_ACC>(eps),
               X_data,
               mean_data,
               rstd_data,
               mean_acc_data,
               rstd_acc_data);
     } else {
-      RowwiseMomentsChannelsLastCUDAKernel<T, T_ACC>
+      RowwiseMomentsChannelsLastCUDAKernel<T, PT, T_ACC>
           <<<N * G, num_threads, 0, cuda_stream>>>(
               N,
               C,
               HxW,
               D,
-              eps,
+              static_cast<T_ACC>(eps),
               X_data,
               mean_data,
               rstd_data,
@@ -889,15 +1093,15 @@ void GroupNormKernelImplInternal(
     Tensor a = at::empty({N, C}, kAccTypeOpts);
     Tensor b = at::empty({N, C}, kAccTypeOpts);
     const int64_t B = (N * C + kCUDANumThreads - 1) / kCUDANumThreads;
-    ComputeFusedParamsCUDAKernel<T, T_ACC>
+    ComputeFusedParamsCUDAKernel<PT, T_ACC>
         <<<B, kCUDANumThreads, 0, cuda_stream>>>(
             N,
             C,
             G,
             mean_acc_data,
             rstd_acc_data,
-            gamma.defined() ? gamma.const_data_ptr<T>() : nullptr,
-            beta.defined() ? beta.const_data_ptr<T>() : nullptr,
+            gamma.defined() ? gamma.const_data_ptr<PT>() : nullptr,
+            beta.defined() ? beta.const_data_ptr<PT>() : nullptr,
             a.mutable_data_ptr<T_ACC>(),
             b.mutable_data_ptr<T_ACC>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -919,20 +1123,20 @@ void GroupNormKernelImplInternal(
   if (D * HxW % kVecSize == 0 &&
       memory::can_vectorize_up_to<T>(reinterpret_cast<const char*>(X_data)) >=
           kVecSize) {
-    RowwiseMomentsContiguousCUDAKernel<kVecSize, T, T_ACC>
+    RowwiseMomentsContiguousCUDAKernel<kVecSize, T, PT, T_ACC>
         <<<N * G, num_threads, 0, cuda_stream>>>(
             D * HxW,
-            eps,
+            static_cast<T_ACC>(eps),
             X_data,
             mean_data,
             rstd_data,
             mean_acc_data,
             rstd_acc_data);
   } else {
-    RowwiseMomentsContiguousCUDAKernel<1, T, T_ACC>
+    RowwiseMomentsContiguousCUDAKernel<1, T, PT, T_ACC>
         <<<N * G, num_threads, 0, cuda_stream>>>(
             D * HxW,
-            eps,
+            static_cast<T_ACC>(eps),
             X_data,
             mean_data,
             rstd_data,
@@ -942,7 +1146,7 @@ void GroupNormKernelImplInternal(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   if (HxW == 1) {
-    GroupNorm1dForward<T, T_ACC>(
+    GroupNorm1dForward<T, PT, T_ACC>(
         X, mean_acc, rstd_acc, gamma, beta, N, C, G, Y);
   } else if (!gamma.defined() && !beta.defined()) {
     auto iter = TensorIteratorConfig()
@@ -959,8 +1163,9 @@ void GroupNormKernelImplInternal(
   } else {
     Tensor a = at::empty({N, C}, kAccTypeOpts);
     Tensor b = at::empty({N, C}, kAccTypeOpts);
-    const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
-    const T* beta_data = beta.defined() ? beta.const_data_ptr<T>() : nullptr;
+    const PT* gamma_data =
+        gamma.defined() ? gamma.const_data_ptr<PT>() : nullptr;
+    const PT* beta_data = beta.defined() ? beta.const_data_ptr<PT>() : nullptr;
     T_ACC* a_data = a.mutable_data_ptr<T_ACC>();
     T_ACC* b_data = b.mutable_data_ptr<T_ACC>();
 
@@ -968,7 +1173,7 @@ void GroupNormKernelImplInternal(
     // using manual kernel here. Make it using gpu_kernel_multiple_outputs once
     // the issue fixed.
     const int64_t B = (N * C + kCUDANumThreads - 1) / kCUDANumThreads;
-    ComputeFusedParamsCUDAKernel<T, T_ACC>
+    ComputeFusedParamsCUDAKernel<PT, T_ACC>
         <<<B, kCUDANumThreads, 0, cuda_stream>>>(
             N,
             C,
@@ -1008,28 +1213,29 @@ void GroupNormKernelImpl(
     Tensor& Y,
     Tensor& mean,
     Tensor& rstd) {
+  // The stat tensors are allocated in the param dtype (see param_scalar_type in
+  // group_norm.cpp), so a param dtype wider than the input is the mixed-dtype
+  // case (fp32 affine params over a reduced-precision input, e.g. autocast).
+  // Keep gamma/beta/stats in that dtype instead of reading them as the input
+  // dtype, which would downcast fp32 params to fp16/bf16.
+  const bool mixed_type = mean.scalar_type() != X.scalar_type();
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
       X.scalar_type(),
       "GroupNormKernelImpl",
       [&]() {
-        GroupNormKernelImplInternal<scalar_t>(
-            X,
-            gamma,
-            beta,
-            N,
-            C,
-            HxW,
-            group,
-            static_cast<scalar_t>(eps),
-            Y,
-            mean,
-            rstd);
+        if (mixed_type) {
+          GroupNormKernelImplInternal<scalar_t, acc_type<scalar_t, true>>(
+              X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
+        } else {
+          GroupNormKernelImplInternal<scalar_t, scalar_t>(
+              X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
+        }
       });
 }
 
-template <typename T>
+template <typename T, typename PT>
 void GroupNorm1dBackward(
     const Tensor& dY,
     const Tensor& X,
@@ -1047,12 +1253,13 @@ void GroupNorm1dBackward(
   const int64_t D = C / G;
   const T* dY_data = dY.const_data_ptr<T>();
   const T* X_data = X.const_data_ptr<T>();
-  const T* mean_data = mean.const_data_ptr<T>();
-  const T* rstd_data = rstd.const_data_ptr<T>();
+  const PT* mean_data = mean.const_data_ptr<PT>();
+  const PT* rstd_data = rstd.const_data_ptr<PT>();
 
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX.defined()) {
-    const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
+    const PT* gamma_data =
+        gamma.defined() ? gamma.const_data_ptr<PT>() : nullptr;
     const auto kAccType =
         (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
         ? kFloat
@@ -1064,7 +1271,7 @@ void GroupNorm1dBackward(
     const int64_t num_threads = (C / G) < cuda_utils::kCUDABlockReduceNumThreads
         ? at::cuda::warp_size()
         : cuda_utils::kCUDABlockReduceNumThreads;
-    Compute1dBackwardFusedParamsCUDAKernel<T>
+    Compute1dBackwardFusedParamsCUDAKernel<T, PT>
         <<<dim3(N, G), num_threads, 0, cuda_stream>>>(
             C,
             G,
@@ -1091,7 +1298,7 @@ void GroupNorm1dBackward(
                       .build();
       gpu_kernel(
           iter,
-          [] GPU_LAMBDA(T dy, T x, T rstd, T gamma, T_ACC c2, T_ACC c3) -> T {
+          [] GPU_LAMBDA(T dy, T x, PT rstd, PT gamma, T_ACC c2, T_ACC c3) -> T {
             const T_ACC c1 =
                 static_cast<T_ACC>(rstd) * static_cast<T_ACC>(gamma);
             return c1 * static_cast<T_ACC>(dy) + c2 * static_cast<T_ACC>(x) +
@@ -1109,7 +1316,7 @@ void GroupNorm1dBackward(
                       .add_owned_const_input(c3.view({N * G, 1}))
                       .build();
       gpu_kernel(
-          iter, [] GPU_LAMBDA(T dy, T x, T rstd, T_ACC c2, T_ACC c3) -> T {
+          iter, [] GPU_LAMBDA(T dy, T x, PT rstd, T_ACC c2, T_ACC c3) -> T {
             const T_ACC c1 = static_cast<T_ACC>(rstd);
             return c1 * static_cast<T_ACC>(dy) + c2 * static_cast<T_ACC>(x) +
                 c3;
@@ -1117,20 +1324,22 @@ void GroupNorm1dBackward(
     }
   }
   if (dgamma.defined() || dbeta.defined()) {
-    T* dgamma_data = dgamma.defined() ? dgamma.mutable_data_ptr<T>() : nullptr;
-    T* dbeta_data = dbeta.defined() ? dbeta.mutable_data_ptr<T>() : nullptr;
+    PT* dgamma_data =
+        dgamma.defined() ? dgamma.mutable_data_ptr<PT>() : nullptr;
+    PT* dbeta_data = dbeta.defined() ? dbeta.mutable_data_ptr<PT>() : nullptr;
     if (N <= 128) {
       const int64_t B = (C + kCUDANumThreads - 1) / kCUDANumThreads;
-      GammaBeta1dBackwardCUDAKernel1<T><<<B, kCUDANumThreads, 0, cuda_stream>>>(
-          N,
-          C,
-          G,
-          dY_data,
-          X_data,
-          mean_data,
-          rstd_data,
-          dgamma_data,
-          dbeta_data);
+      GammaBeta1dBackwardCUDAKernel1<T, PT>
+          <<<B, kCUDANumThreads, 0, cuda_stream>>>(
+              N,
+              C,
+              G,
+              dY_data,
+              X_data,
+              mean_data,
+              rstd_data,
+              dgamma_data,
+              dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       const int64_t B = (C + kReduceTileSize - 1) / kReduceTileSize;
@@ -1139,7 +1348,7 @@ void GroupNorm1dBackward(
       // reduce for each col in the tile. So here the blockDim must be (32, 16).
       constexpr int kThreadX = kReduceTileSize;
       constexpr int kThreadY = kReduceTileSize / 2;
-      GammaBeta1dBackwardCUDAKernel2<T>
+      GammaBeta1dBackwardCUDAKernel2<T, PT>
           <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
               N,
               C,
@@ -1155,7 +1364,7 @@ void GroupNorm1dBackward(
   }
 }
 
-template <typename T>
+template <typename T, typename PT>
 void GroupNormBackwardKernelImplInternal(
     const Tensor& dY,
     const Tensor& X,
@@ -1181,14 +1390,14 @@ void GroupNormBackwardKernelImplInternal(
 
   const T* dY_data = dY.const_data_ptr<T>();
   const T* X_data = X.const_data_ptr<T>();
-  const T* mean_data = mean.const_data_ptr<T>();
-  const T* rstd_data = rstd.const_data_ptr<T>();
-  const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
+  const PT* mean_data = mean.const_data_ptr<PT>();
+  const PT* rstd_data = rstd.const_data_ptr<PT>();
+  const PT* gamma_data = gamma.defined() ? gamma.const_data_ptr<PT>() : nullptr;
   const bool channels_last = X.is_contiguous(at::MemoryFormat::ChannelsLast) ||
       X.is_contiguous(at::MemoryFormat::ChannelsLast3d);
 
   if (HxW == 1 && !channels_last) {
-    GroupNorm1dBackward<T>(
+    GroupNorm1dBackward<T, PT>(
         dY, X, mean, rstd, gamma, N, C, G, dX, dgamma, dbeta);
     return;
   }
@@ -1207,19 +1416,39 @@ void GroupNormBackwardKernelImplInternal(
       ? warp_size
       : cuda_utils::kCUDABlockReduceNumThreads;
   if (channels_last) {
-    constexpr int kChannelsPerBlock = 16;
-    if (C >= kChannelsPerBlock &&
-        HxW >= cuda_utils::kCUDABlockReduceNumThreads) {
-      const int64_t channel_blocks =
-          (C + kChannelsPerBlock - 1) / kChannelsPerBlock;
-      ComputeInternalGradientsChannelsLastCUDAKernel<kChannelsPerBlock, T>
-          <<<N * channel_blocks, kCUDANumThreads, 0, cuda_stream>>>(
-              C, HxW, dY_data, X_data, ds_data, db_data);
-    } else {
-      ComputeInternalGradientsChannelsLastFallbackCUDAKernel<T>
-          <<<N * C, num_threads, 0, cuda_stream>>>(
-              C, HxW, dY_data, X_data, ds_data, db_data);
+    TORCH_CHECK(
+        C <= kMaxStrideExtent,
+        "group_norm backward: too many channels for the channels_last kernels, got ",
+        C);
+    dim3 block;
+    dim3 grid;
+    flexible_launch_configs(
+        std::min<int64_t>(HxW, kMaxReductionExtent),
+        std::min<int64_t>(C, kMaxStrideExtent),
+        block,
+        grid,
+        /*coop_flag=*/true);
+    grid.z = std::min<int64_t>(N, kMaxGridZ);
+    // Only the multi-slice path needs to stage partial sums across blocks.
+    Tensor staging_data;
+    Tensor semaphores;
+    if (grid.y > 1) {
+      staging_data =
+          at::empty({2 * static_cast<int64_t>(grid.y) * N * C}, ds.options());
+      semaphores = at::zeros(
+          {static_cast<int64_t>(grid.x) * N}, X.options().dtype(kInt));
     }
+    ComputeInternalGradientsChannelsLastCUDAKernel<T>
+        <<<grid, block, 0, cuda_stream>>>(
+            N,
+            C,
+            HxW,
+            dY_data,
+            X_data,
+            ds_data,
+            db_data,
+            grid.y > 1 ? staging_data.mutable_data_ptr<T_ACC>() : nullptr,
+            grid.y > 1 ? semaphores.mutable_data_ptr<int>() : nullptr);
   } else {
     constexpr int kVecSize = 16 / sizeof(T);
     if (HxW % kVecSize == 0 &&
@@ -1252,7 +1481,7 @@ void GroupNormBackwardKernelImplInternal(
                       .add_owned_const_input(rstd.view({N, G, 1}))
                       .add_owned_const_input(gamma.view({1, G, D}))
                       .build();
-      gpu_kernel(iter, [] GPU_LAMBDA(T rstd, T gamma) -> T_ACC {
+      gpu_kernel(iter, [] GPU_LAMBDA(PT rstd, PT gamma) -> T_ACC {
         return static_cast<T_ACC>(rstd) * static_cast<T_ACC>(gamma);
       });
     }
@@ -1260,7 +1489,7 @@ void GroupNormBackwardKernelImplInternal(
     num_threads = (C / G) < cuda_utils::kCUDABlockReduceNumThreads
         ? warp_size
         : cuda_utils::kCUDABlockReduceNumThreads;
-    ComputeBackwardFusedParamsCUDAKernel<T>
+    ComputeBackwardFusedParamsCUDAKernel<PT, T_ACC>
         <<<dim3(N, G), num_threads, 0, cuda_stream>>>(
             C,
             HxW,
@@ -1279,7 +1508,7 @@ void GroupNormBackwardKernelImplInternal(
       const int64_t blocks = (numel + kCUDANumThreads - 1) / kCUDANumThreads;
       if (at::cuda::detail::canUse32BitIndexMath(X)) {
         using index_t = uint32_t;
-        GroupNormBackwardChannelsLastCUDAKernel<index_t, T, T_ACC>
+        GroupNormBackwardChannelsLastCUDAKernel<index_t, T, PT, T_ACC>
             <<<blocks, kCUDANumThreads, 0, cuda_stream>>>(
                 static_cast<index_t>(numel),
                 static_cast<index_t>(G),
@@ -1295,7 +1524,7 @@ void GroupNormBackwardKernelImplInternal(
                 dX.mutable_data_ptr<T>());
       } else {
         using index_t = int64_t;
-        GroupNormBackwardChannelsLastCUDAKernel<index_t, T, T_ACC>
+        GroupNormBackwardChannelsLastCUDAKernel<index_t, T, PT, T_ACC>
             <<<blocks, kCUDANumThreads, 0, cuda_stream>>>(
                 numel,
                 G,
@@ -1346,21 +1575,23 @@ void GroupNormBackwardKernelImplInternal(
     }
   }
   if (dgamma.defined() || dbeta.defined()) {
-    T* dgamma_data = dgamma.defined() ? dgamma.mutable_data_ptr<T>() : nullptr;
-    T* dbeta_data = dbeta.defined() ? dbeta.mutable_data_ptr<T>() : nullptr;
+    PT* dgamma_data =
+        dgamma.defined() ? dgamma.mutable_data_ptr<PT>() : nullptr;
+    PT* dbeta_data = dbeta.defined() ? dbeta.mutable_data_ptr<PT>() : nullptr;
     if (N <= 128) {
       // For small batch size, do colwise reduce directly.
       const int64_t B = (C + kCUDANumThreads - 1) / kCUDANumThreads;
-      GammaBetaBackwardCUDAKernel1<T><<<B, kCUDANumThreads, 0, cuda_stream>>>(
-          N,
-          C,
-          G,
-          mean_data,
-          rstd_data,
-          ds_data,
-          db_data,
-          dgamma_data,
-          dbeta_data);
+      GammaBetaBackwardCUDAKernel1<PT, T_ACC>
+          <<<B, kCUDANumThreads, 0, cuda_stream>>>(
+              N,
+              C,
+              G,
+              mean_data,
+              rstd_data,
+              ds_data,
+              db_data,
+              dgamma_data,
+              dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       const int64_t B = (C + kReduceTileSize - 1) / kReduceTileSize;
@@ -1369,7 +1600,7 @@ void GroupNormBackwardKernelImplInternal(
       // reduce for each col in the tile. So here the blockDim must be (32, 16).
       constexpr int kThreadX = kReduceTileSize;
       constexpr int kThreadY = kReduceTileSize / 2;
-      GammaBetaBackwardCUDAKernel2<T>
+      GammaBetaBackwardCUDAKernel2<PT, T_ACC>
           <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
               N,
               C,
@@ -1398,14 +1629,25 @@ void GroupNormBackwardKernelImpl(
     Tensor& dX,
     Tensor& dgamma,
     Tensor& dbeta) {
+  // Mixed dtype (fp32 stats/affine params over a reduced-precision input, e.g.
+  // autocast): keep the params in their own dtype instead of the input's. See
+  // the matching comment in GroupNormKernelImpl.
+  const bool mixed_type = mean.scalar_type() != X.scalar_type();
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
       X.scalar_type(),
       "GroupNormBackwardKernelImpl",
       [&]() {
-        GroupNormBackwardKernelImplInternal<scalar_t>(
-            dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+        if (mixed_type) {
+          GroupNormBackwardKernelImplInternal<
+              scalar_t,
+              acc_type<scalar_t, true>>(
+              dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+        } else {
+          GroupNormBackwardKernelImplInternal<scalar_t, scalar_t>(
+              dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+        }
       });
 }
 
