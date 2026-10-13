@@ -209,22 +209,44 @@ def _assert_per_layer_fused_and_extern(test, all_strs, num_layers, prefix):
 class TestFqnAnnotationCodegen(TestCase):
     """Checks the mark_kernels() calls in the generated wrapper code."""
 
-    def _mark_kernels_args(
-        self, model, *inputs, annotate=True, fullgraph=True
-    ) -> list[str]:
+    def _wrapper_code(self, model, *inputs, annotate=True, fullgraph=True) -> str:
         with (
             config.patch({"triton.cudagraph_kernel_annotations": annotate}),
             torch.no_grad(),
         ):
             compiled = torch.compile(model, fullgraph=fullgraph)
             _, codes = run_and_get_code(compiled, *inputs)
-        return re.findall(r"mark_kernels\('([^']*)'\)", "\n".join(codes))
+        return "\n".join(codes)
+
+    def _mark_kernels_args(self, model, *inputs, **kwargs) -> list[str]:
+        code = self._wrapper_code(model, *inputs, **kwargs)
+        return re.findall(r"mark_kernels\('([^']*)'\)", code)
 
     def test_each_layer_has_fused_triton_and_extern_annotation(self):
         model = OuterModel(dim=64, num_layers=2).cuda()
         x = torch.randn(1, 64, device="cuda")
         all_strs = self._mark_kernels_args(model, x)
         _assert_per_layer_fused_and_extern(self, all_strs, 2, "L.model.layers.")
+
+    def test_every_kernel_call_annotated(self):
+        # Kernels that only serve an extern op, such as the channels-last
+        # copies of a convolution's input and weight, carry its FQN too.
+        model = CNNEnsemble(n=2).cuda()
+        x = torch.randn(4, 3, 32, 32, device="cuda")
+        lines = self._wrapper_code(model, x).splitlines()
+        unannotated = []
+        for i, line in enumerate(lines):
+            if not re.search(r"\.run\(|= extern_kernels\.|^\s+extern_kernels\.", line):
+                continue
+            indent = len(line) - len(line.lstrip())
+            parent = next(
+                p
+                for p in reversed(lines[:i])
+                if p.strip() and len(p) - len(p.lstrip()) < indent
+            )
+            if "mark_kernels(" not in parent:
+                unannotated.append(line.strip())
+        self.assertEqual(unannotated, [])
 
     def test_no_annotations_when_flag_off(self):
         model = OuterModel(dim=64, num_layers=2).cuda()

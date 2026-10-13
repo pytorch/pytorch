@@ -3736,12 +3736,18 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
     the transitively accumulated origins. This prevents over-attribution to ops
     that are only read, not computed, by the kernel, and correctly records all
     original layers fused into a single kernel.
+
+    FQNs already claimed by an extern kernel are dropped, so a fused kernel is
+    not labeled with the extern op beside it. If that leaves nothing (e.g. the
+    channels-last copies of a convolution's input and weight), the kernel only
+    does work for that extern op and is labeled with its FQN.
     """
     fqn_map: dict[str, str] = V.graph.fx_fqn_map
     extern_fqns: OrderedSet[str] = V.graph.fx_extern_fqns
     log.debug("get_fused_kernel_module_fqn: snodes=%d", len(scheduler_nodes))
 
     module_names: OrderedSet[str] = OrderedSet()
+    extern_claimed: OrderedSet[str] = OrderedSet()
     for snode in scheduler_nodes:
         if snode.node is None:
             continue
@@ -3753,9 +3759,10 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
             compute_nodes = [lowering_node] if lowering_node is not None else []
         for fx_node in compute_nodes:
             fqn = fqn_map.get(fx_node.name)
-            if fqn and fqn not in extern_fqns:
-                module_names.add(fqn)
+            if fqn:
+                (extern_claimed if fqn in extern_fqns else module_names).add(fqn)
 
+    module_names = module_names or extern_claimed
     result = " + ".join(f"L.{fqn}" for fqn in module_names) if module_names else None
     log.debug("get_fused_kernel_module_fqn: result=%s", result)
     return result
