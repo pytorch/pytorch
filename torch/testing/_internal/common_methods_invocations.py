@@ -12294,9 +12294,9 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestTorchFunctionRedispatchOpsDevice', 'test_redispatch',
                             device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
 
-                # MPS arange does not support complex dtypes yet
-                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
-                             dtypes=(torch.complex64, torch.complex128)),
+               # MPS arange does not support complex dtypes yet
+               DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
+                            dtypes=(torch.complex64, torch.complex128)),
            )),
     OpInfo('cauchy',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.cauchy_, inp, *args, **kwargs),
