@@ -16431,7 +16431,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = make_tensor((5, 6, 7), dtype=torch.float32, device=self.device)
         out = torch.empty((5, 10, 8), device=self.device) if with_out else None
         eager_out = out.clone() if with_out else None
-        reference = torch.fft.irfftn(x.double(), dim=-2).float()
+        reference = torch.fft.irfftn(x.cpu().double(), dim=-2).float().to(self.device)
         compiled = torch.compile(fn)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
