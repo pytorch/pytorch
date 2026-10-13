@@ -415,7 +415,9 @@ bool to_will_alias(
       is_null_or_equal_to(layout, self.layout()) &&
       is_null_or_equal_to(device, self.device()) && !copy &&
       (memory_format == MemoryFormat::Preserve ||
-       self.suggest_memory_format() == memory_format);
+       (memory_format == MemoryFormat::Contiguous
+            ? self.is_contiguous()
+            : self.suggest_memory_format() == memory_format));
 }
 
 static inline Tensor to_impl(
