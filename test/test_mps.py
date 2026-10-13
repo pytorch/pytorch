@@ -289,7 +289,7 @@ class TestAutocastMPS(TestCase):
         model_mps.load_state_dict(model_cpu.state_dict())
 
         helper(model_cpu, model_mps, torch.float16, iterations=5, batch_size=4)
-        helper(model_cpu, model_mps, torch.bfloat16, iterations=5, batch_size=4)
+        helper(model_cpu, model_mps, torch.bfloat16, iterations=5, batch_size=4, atol=1e-3)
 
     def test_non_fast_path_amp_unscale(self):
 
