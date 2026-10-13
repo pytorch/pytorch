@@ -178,9 +178,9 @@ std::string c10_retrieve_device_side_assertion_info() {
             << std::endl;
         oss << "  Backtrace of kernel launch site = ";
         if (launch_registry.gather_launch_stacktrace) {
-          oss << "Launch stacktracing disabled." << std::endl;
-        } else {
           oss << '\n' << launch_info.launch_stacktrace << std::endl;
+        } else {
+          oss << "Launch stacktracing disabled." << std::endl;
         }
       } else {
         oss << "  CPU launch site info: Unavailable, the circular queue wrapped around. Increase `CUDAKernelLaunchRegistry::max_size`."
