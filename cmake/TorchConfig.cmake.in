@@ -157,6 +157,10 @@ set_target_properties(torch PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${TORCH_INCLUDE_DIRS}"
 )
 
+if(MSVC)
+  set_property(TARGET torch APPEND PROPERTY INTERFACE_COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:/Zc:preprocessor>")
+endif()
+
 # CMake only reports compile features after CXX has been enabled.
 if(CMAKE_CXX_COMPILER_LOADED)
   # The feature can be absent because CMake does not recognize it or the compiler does not support the standard.
