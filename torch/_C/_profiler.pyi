@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Literal, TypeAlias
+from typing import Literal, TypeAlias
 
 from torch._C import device, dtype, layout
 
@@ -245,7 +245,7 @@ class _ApproximateClockToUnixTimeConverter:
     def to_unix_ns(self, t: int) -> int: ...
 
 def _get_approximate_time() -> int: ...
-def _xpu_available_metrics(device_uuid: bytes) -> list[dict[str, Any]]: ...
+def _xpu_available_metrics(device_uuid: bytes) -> list[tuple[str, list[str]]]: ...
 
 # GIL-free Cuspy buffer pool (torch/csrc/profiler/cuspy/cuspy_native).
 # Exposed as the torch._C._profiler._cuspy submodule.

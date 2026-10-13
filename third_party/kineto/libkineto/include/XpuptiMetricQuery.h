@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace libkineto {
@@ -19,22 +20,10 @@ namespace libkineto {
 constexpr std::size_t kXpuDeviceUuidSize = 16;
 using XpuDeviceUuid = std::array<uint8_t, kXpuDeviceUuidSize>;
 
-struct XpuMetricInfo {
-  std::string name;
-  std::string description;
-  std::string unit;
-  std::string metricType;
-  std::string valueType;
-};
+// A metric group's name and the names of its metrics.
+using XpuMetricGroupNames = std::pair<std::string, std::vector<std::string>>;
 
-struct XpuMetricGroupInfo {
-  std::string name;
-  std::string description;
-  bool scopeCompatible{false};
-  std::vector<XpuMetricInfo> metrics;
-};
-
-std::vector<XpuMetricGroupInfo> xpuptiAvailableMetrics(
+std::vector<XpuMetricGroupNames> xpuptiAvailableMetrics(
     const XpuDeviceUuid& deviceUuid);
 
 } // namespace libkineto

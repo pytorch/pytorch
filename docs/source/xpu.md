@@ -128,8 +128,6 @@
     :nosignatures:
 
      available_metrics
-     XpuMetric
-     XpuMetricGroup
 ```
 
 ```{eval-rst}

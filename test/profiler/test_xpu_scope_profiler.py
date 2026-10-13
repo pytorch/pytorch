@@ -206,12 +206,15 @@ class XpuScopeProfilerTest(TestCase):
         self.assertEqual(
             groups, torch.xpu.profiler.available_metrics(torch.xpu.current_device())
         )
-        for group in groups:
-            self.assertIsInstance(group, torch.xpu.profiler.XpuMetricGroup)
-            self.assertTrue(group.name)
-            for metric in group.metrics:
-                self.assertIsInstance(metric, torch.xpu.profiler.XpuMetric)
-                self.assertTrue(metric.name)
+        with self.assertRaises(TypeError):
+            groups[""] = ()  # type: ignore[index]
+        for group, names in groups.items():
+            self.assertIsInstance(group, str)
+            self.assertTrue(group)
+            self.assertTrue(names)
+            for name in names:
+                self.assertIsInstance(name, str)
+                self.assertTrue(name)
 
         with self.assertRaisesRegex(RuntimeError, "does not support metrics"):
             torch._C._profiler._xpu_available_metrics(bytes(16))
@@ -219,11 +222,12 @@ class XpuScopeProfilerTest(TestCase):
         if not self.required_paranoid_settings():
             self.skipTest("paranoid settings missing")
 
-        scope_groups = [g for g in groups if g.scope_compatible and g.metrics]
-        if not scope_groups:
+        if not groups:
             self.skipTest("device has no event-based metric group")
 
-        names = [metric.name for metric in scope_groups[0].metrics[:2]]
+        # Metrics collected together must come from one group.
+        group_name, group_metrics = next(iter(groups.items()))
+        names = list(group_metrics[:2])
         a = torch.rand([100, 200]).to("xpu")
         b = torch.rand([200, 300]).to("xpu")
         with torch.profiler.profile(
@@ -237,7 +241,9 @@ class XpuScopeProfilerTest(TestCase):
         count_metrics = sum(
             event.key.startswith("metrics: ") for event in p.key_averages()
         )
-        self.assertGreater(count_metrics, 0)
+        self.assertGreater(
+            count_metrics, 0, f"no metric events for {names} from group {group_name}"
+        )
 
 
 if __name__ == "__main__":
