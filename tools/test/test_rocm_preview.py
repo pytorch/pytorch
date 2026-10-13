@@ -115,8 +115,9 @@ print(status, end="")
                 or event_name == "workflow_dispatch"
             )
             tag = f"rocm-preview{'-treehash' if hashed else ''}"
+            hub = "hub.docker.com"
             env["EXPECTED_URL"] = (
-                f"https://hub.docker.com/v2/repositories/"
+                f"https://{hub}/v2/repositories/"
                 f"pytorch/manylinux2_28-builder/tags/{tag}"
             )
             result = subprocess.run(
