@@ -63,7 +63,6 @@ def capture() -> Environment:
         "driver_version": driver,
         "host_memory_mib": _host_memory_mib(),
         "build_environment": os.environ.get("BUILD_ENVIRONMENT", ""),
-        "test_config": os.environ.get("TEST_CONFIG", ""),
         "runner_name": os.environ.get("RUNNER_NAME", ""),
     }
     return Environment(
