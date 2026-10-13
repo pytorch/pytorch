@@ -4602,7 +4602,8 @@ class InstructionTranslatorBase(
             self, "{:" + fmt_spec.as_python_constant() + "}"
         )
 
-        self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
+        format_fn = VariableTracker.build(self, str.format)
+        self.call_function(format_fn, [fmt_var, value], {})
 
     @break_graph_if_unsupported(
         push=True,
@@ -5146,7 +5147,7 @@ class InstructionTranslatorBase(
         elif inst.argval == 7:
             # INTRINSIC_TYPEVAR
             v = self.pop().as_python_constant()
-            tv = variables.TypingVariable(TypeVar(v))
+            tv = VariableTracker.build(self, TypeVar(v))
             self.push(tv)
         else:
             unimplemented(
