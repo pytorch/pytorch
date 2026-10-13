@@ -173,7 +173,7 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
   const int64_t oheight = gradOutput.size(-2);
   const int64_t owidth = gradOutput.size(-1);
 
-  max_pool3d_backward_shape_check(
+  pool3d_backward_shape_check(
     input,
     gradOutput,
     indices,
