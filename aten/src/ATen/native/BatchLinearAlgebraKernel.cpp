@@ -553,7 +553,7 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
 template <typename scalar_t>
 void apply_geqp3(const at::Tensor& input, const at::Tensor& tau, const at::Tensor& P) {
 #if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(false, "Calling torch.geqp3 on a CPU tensor requires compiling ",
+  TORCH_CHECK(false, "Calling torch.linalg.qr_piv on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
     auto input_data = input.data_ptr<scalar_t>();
@@ -572,16 +572,14 @@ void apply_geqp3(const at::Tensor& input, const at::Tensor& tau, const at::Tenso
     scalar_t wkopt;
 
     using value_t = typename c10::scalar_value_type<scalar_t>::type;
-    at::Tensor rwork;
-    value_t* rwork_ptr = nullptr;
-
-    if constexpr ( std::is_same_v<scalar_t, c10::complex<double>> || std::is_same_v<scalar_t, c10::complex<float>> ) {
-        rwork = at::empty({2 * n}, input.options().dtype(c10::toRealValueType(input.scalar_type())));
-        rwork_ptr = rwork.mutable_data_ptr<value_t>();
-        lapackGeqp3<scalar_t>( m, n, input_data, lda, P_data, tau_data, &wkopt, lwork, rwork_ptr, &info );
-    } else {  // double and float
-        lapackGeqp3<scalar_t>( m, n, input_data, lda, P_data, tau_data, &wkopt, lwork, &info );
+    // rwork is just used for the complex decomposition
+    auto rwork = std::vector<value_t>{};
+    if (input.is_complex()) {
+        rwork.resize(2 * n);
     }
+    auto* const rwork_ptr = rwork.data();
+
+    lapackGeqp3<scalar_t, value_t>(m, n, input_data, lda, P_data, tau_data, &wkopt, lwork, rwork_ptr, &info);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
 
     lwork = lapack_work_to_int(wkopt);
@@ -592,11 +590,7 @@ void apply_geqp3(const at::Tensor& input, const at::Tensor& tau, const at::Tenso
         scalar_t* input_working_ptr = &input_data[b * input_matrix_stride];
         scalar_t* tau_working_ptr = &tau_data[b * tau_stride];
         int* p_working_ptr = &P_data[b * n];
-        if constexpr ( std::is_same_v<scalar_t, c10::complex<double>> || std::is_same_v<scalar_t, c10::complex<float>> ) {
-            lapackGeqp3<scalar_t>(m, n, input_working_ptr, lda, p_working_ptr, tau_working_ptr, work_ptr, lwork, rwork_ptr, &info);
-        } else {  // double and float
-            lapackGeqp3<scalar_t>(m, n, input_working_ptr, lda, p_working_ptr, tau_working_ptr, work_ptr, lwork, &info);
-        }
+        lapackGeqp3<scalar_t, value_t>(m, n, input_working_ptr, lda, p_working_ptr, tau_working_ptr, work_ptr, lwork, rwork_ptr, &info);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
     }
 #endif

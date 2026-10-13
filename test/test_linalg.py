@@ -4371,8 +4371,9 @@ class TestLinalg(TestCase):
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
         for mode in 'complete', 'reduced', 'r':
             for m, n in [(5, 7), (7, 5)]:
-                # Distinct singular values keep the pivot pattern stable under the
-                # tiny perturbations gradcheck uses for its finite differences.
+                # Full rank is required for differentiability. The pivot pattern stays stable under
+                # gradcheck's small perturbations as long as the column norms that pivoting compares
+                # are well separated, which holds with high probability for random inputs.
                 inp = make_fullrank(m, n, device=device, dtype=dtype, requires_grad=True)
                 if mode == 'complete' and m > n:
                     q, r, p = torch.linalg.qr_piv(inp, mode=mode)
@@ -4393,7 +4394,7 @@ class TestLinalg(TestCase):
                     def fn(A, mode=mode):
                         q, r, _ = torch.linalg.qr_piv(A, mode=mode)
                         return q, r
-                    self.assertTrue(torch.autograd.gradcheck(fn, (inp,), check_undefined_grad=False, check_forward_ad=True))
+                    self.assertTrue(torch.autograd.gradcheck(fn, (inp,), check_forward_ad=True))
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
@@ -4799,7 +4800,6 @@ class TestLinalg(TestCase):
         # correctly reveals the exact rank via a zero trailing R block --
         # complementary to test_qr_piv_rank_revealing's near-rank-deficient
         # case, with genuinely independent random matrices per batch entry.
-        torch.manual_seed(0)
         batch, m, n, r = (3,), 6, 5, 2
         U = torch.randn(*batch, m, r, dtype=dtype, device=device)
         V = torch.randn(*batch, r, n, dtype=dtype, device=device)

@@ -325,10 +325,10 @@ extern "C" void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau
 extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
 
 // geqp3
-extern "C" void zgeqp3_(int* m, int* n, std::complex<double>* a, int* lda, int* jpvt, std::complex<double>* tau, std::complex<double>* work, int* lwork, double* rwork, int* info);
-extern "C" void cgeqp3_(const int* m, const int* n, std::complex<float>* a, const int* lda, int* jpvt, std::complex<float>* tau, std::complex<float>* work, const int* lwork, float* rwork, int* info);
-extern "C" void dgeqp3_(const int* m, const int* n, double* a, const int* lda, int* jpvt, double* tau, double* work, const int* lwork, int* info);
-extern "C" void sgeqp3_(const int* m, const int* n, float* a, const int* lda, int* jpvt, float* tau, float* work, const int* lwork, int* info);
+extern "C" void zgeqp3_(int *m, int *n, std::complex<double> *a, int *lda, int *jpvt, std::complex<double> *tau, std::complex<double> *work, int *lwork, double *rwork, int *info);
+extern "C" void cgeqp3_(int *m, int *n, std::complex<float> *a, int *lda, int *jpvt, std::complex<float> *tau, std::complex<float> *work, int *lwork, float *rwork, int *info);
+extern "C" void dgeqp3_(int *m, int *n, double *a, int *lda, int *jpvt, double *tau, double *work, int *lwork, int *info);
+extern "C" void sgeqp3_(int *m, int *n, float *a, int *lda, int *jpvt, float *tau, float *work, int *lwork, int *info);
 #endif
 
 // ormqr
@@ -768,15 +768,10 @@ TORCH_META_FUNC(linalg_qr_piv)(
 
   // -------- P output --------
   // Format: P is a vector of length n for each batch element.
-  std::vector<int64_t> P_shape;
-  P_shape.reserve(A.dim());
-  // batch dimensions first
-  for (int i = 0; i < A.dim() - 2; ++i) {
-      P_shape.push_back(A.size(i));
-  }
-  P_shape.push_back(n); // final dimension: n
+  auto P_shape = DimVector(A.sizes().slice(0, A.dim() - 1));
+  P_shape.back() = n;
 
-  // P is always real integer type, contiguous, C (column major) ordered
+  // P is always real integer type, contiguous, C (row major) ordered
   auto P_strides = at::native::batched_matrix_contiguous_strides(P_shape, /*f-contig=*/false);
   set_output_strided( 2, P_shape, P_strides, A.options().dtype(at::kLong));
 }
@@ -1049,19 +1044,19 @@ template<> void lapackOrgqr<float>(int m, int n, int k, float *a, int lda, float
   sorgqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
 }
 
-template <> void lapackGeqp3<c10::complex<double>>(int m, int n, c10::complex<double>* a, int lda, int* jpvt, c10::complex<double>* tau, c10::complex<double>* work, int lwork, double* rwork, int* info) {
+template<> void lapackGeqp3<c10::complex<double>, double>(int m, int n, c10::complex<double> *a, int lda, int *jpvt, c10::complex<double> *tau, c10::complex<double> *work, int lwork, double *rwork, int *info) {
   zgeqp3_(&m, &n, reinterpret_cast<std::complex<double>*>(a), &lda, jpvt, reinterpret_cast<std::complex<double>*>(tau), reinterpret_cast<std::complex<double>*>(work), &lwork, rwork, info);
 }
 
-template <> void lapackGeqp3<c10::complex<float>>(int m, int n, c10::complex<float>* a, int lda, int* jpvt, c10::complex<float>* tau, c10::complex<float>* work, int lwork, float* rwork, int* info) {
+template<> void lapackGeqp3<c10::complex<float>, float>(int m, int n, c10::complex<float> *a, int lda, int *jpvt, c10::complex<float> *tau, c10::complex<float> *work, int lwork, float *rwork, int *info) {
   cgeqp3_(&m, &n, reinterpret_cast<std::complex<float>*>(a), &lda, jpvt, reinterpret_cast<std::complex<float>*>(tau), reinterpret_cast<std::complex<float>*>(work), &lwork, rwork, info);
 }
 
-template <> void lapackGeqp3<double>(int m, int n, double* a, int lda, int* jpvt, double* tau, double* work, int lwork, int* info) {
+template<> void lapackGeqp3<double>(int m, int n, double *a, int lda, int *jpvt, double *tau, double *work, int lwork, double *rwork, int *info) {
   dgeqp3_(&m, &n, a, &lda, jpvt, tau, work, &lwork, info);
 }
 
-template <> void lapackGeqp3<float>(int m, int n, float* a, int lda, int* jpvt, float* tau, float* work, int lwork, int* info) {
+template<> void lapackGeqp3<float>(int m, int n, float *a, int lda, int *jpvt, float *tau, float *work, int lwork, float *rwork, int *info) {
   sgeqp3_(&m, &n, a, &lda, jpvt, tau, work, &lwork, info);
 }
 
@@ -2905,6 +2900,8 @@ TORCH_IMPL_FUNC(linalg_qr_piv_out)(
         jpvt_sizes.assign(A.sizes().begin(), A.sizes().end() - 2);
         jpvt_sizes.push_back(n);
     }
+    // geqp3 treats a nonzero jpvt[j] on input as "column j is fixed and goes first",
+    // so jpvt must be zero-initialized for all columns to be free to pivot.
     Tensor jpvt = at::zeros(jpvt_sizes, A.options().dtype(at::kInt));
 
     // ----- GEQP3 (pivoted QR) -----
