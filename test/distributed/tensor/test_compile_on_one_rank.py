@@ -626,6 +626,36 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             x = torch.randn(8, device="cuda")
             self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
 
+    @staticmethod
+    def _repro_storage_line(dev):
+        from torch._dynamo.debug_utils import InputWriter
+
+        with torch.cuda.device(dev):
+            w = InputWriter(None)
+            w.storage(torch.randn(4, device=f"cuda:{dev}").untyped_storage())
+            return "\n".join(w._lines)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_repro_writer_omits_current_device_index(self):
+        # fx_graph_runnable records each input storage's device. Writing the concrete
+        # index makes every rank's repro differ, and makes a rank-N repro unrunnable
+        # anywhere with fewer than N+1 GPUs. Under CooR the inputs are on the current
+        # accelerator by invariant, so an index-less device reproduces the same compile
+        # and is portable -- the reader puts the storage on whatever device is current.
+        self.assertNotIn("index=", self._repro_storage_line(0))
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_repro_writer_storage_identical_across_devices(self):
+        self.assertEqual(self._repro_storage_line(0), self._repro_storage_line(1))
+
+    @requires_multigpu
+    def test_repro_writer_keeps_device_index_without_coor(self):
+        # Outside CooR several devices can be live, so the repro must say which one.
+        self.assertIn("index=0", self._repro_storage_line(0))
+        self.assertNotEqual(self._repro_storage_line(0), self._repro_storage_line(1))
+
     # ---- the fx graph cache key must not encode which rank compiled ----
     # The key is computed before post_grad runs, so the graph it hashes is the
     # device-agnostic AOT one. The device index reaches the key only through
@@ -2236,6 +2266,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @parametrize("origin", ("input", "factory"))
     def test_device_observations_track_current_device_under_coor(self, origin):
         from torch._dynamo.testing import CompileCounterWithBackend
+        from torch._inductor.utils import fresh_cache
 
         def f(x):
             y = torch.zeros(x.shape, device=x.device) if origin == "factory" else x
@@ -2249,13 +2280,14 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         cnt = CompileCounterWithBackend("inductor")
         torch._dynamo.reset()
-        compiled = torch.compile(f, backend=cnt, fullgraph=True)
-        with torch.accelerator.device_index(0):
-            x = torch.zeros(1, device=f"{device_type}:0")
-            self.assertEqual(compiled(x), f(x))
-        with torch.accelerator.device_index(1):
-            x = torch.zeros(1, device=f"{device_type}:1")
-            self.assertEqual(compiled(x), f(x))
+        with fresh_cache():
+            compiled = torch.compile(f, backend=cnt, fullgraph=True)
+            with torch.accelerator.device_index(0):
+                x = torch.zeros(1, device=f"{device_type}:0")
+                self.assertEqual(compiled(x), f(x))
+            with torch.accelerator.device_index(1):
+                x = torch.zeros(1, device=f"{device_type}:1")
+                self.assertEqual(compiled(x), f(x))
 
         self.assertEqual(cnt.frame_count, 1)
 
