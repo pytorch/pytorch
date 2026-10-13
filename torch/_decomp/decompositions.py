@@ -498,6 +498,16 @@ def huber_loss_backward_out(
     return _safe_copy_out(copy_from=result, copy_to=grad_input, exact_dtype=True)
 
 
+@torch.jit.unused
+def _class_index_dtype(num_classes: int) -> torch.dtype:
+    """int32 if every class index provably fits in it, else int64."""
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    if statically_known_true(num_classes <= torch.iinfo(torch.int32).max):
+        return torch.int32
+    return torch.int64
+
+
 def _nll_loss_backward(
     grad_output: Tensor,
     self: Tensor,
@@ -517,8 +527,6 @@ def _nll_loss_backward(
     if self.dim() == 1 and target.dim() > 0:
         target = target[0]
 
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
-
     # grad_input is -grad_output at the target class and zero elsewhere. Build
     # it as a pointwise one-hot select rather than a scatter into zeros, so
     # every other class is exactly zero. Targets outside [0, num_classes),
@@ -534,11 +542,11 @@ def _nll_loss_backward(
     if weight is not None:
         grad_output = grad_output * weight[torch.where(in_range, target, 0)]
 
-    index_dtype = (
-        torch.int32
-        if statically_known_true(num_classes <= torch.iinfo(torch.int32).max)
-        else torch.int64
-    )
+    # TorchScript compiles this decomposition for jvp; keep int64 there.
+    if torch.jit.is_scripting():
+        index_dtype = torch.int64
+    else:
+        index_dtype = _class_index_dtype(num_classes)
     target = torch.where(in_range, target, -1).to(index_dtype)
     classes_shape = [1] * self.dim()
     classes_shape[channel_dim] = num_classes
