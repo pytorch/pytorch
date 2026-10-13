@@ -34,6 +34,7 @@ struct EmbeddingBagBackwardParams {
   ::c10::metal::array<idx_type_t, 2> max_indices_strides;
   idx_type_t per_sample_weights_stride;
   idx_type_t feature_size;
+  idx_type_t num_weights;
   EmbeddingBagMode mode;
   int64_t padding_idx;
   bool use_per_sample_weights;
@@ -45,5 +46,6 @@ struct EmbeddingBagPerSampleWeightsBackwardParams {
   ::c10::metal::array<idx_type_t, 2> weight_strides;
   idx_type_t per_sample_weights_grad_stride;
   idx_type_t feature_size;
+  idx_type_t num_weights;
   int64_t padding_idx;
 };

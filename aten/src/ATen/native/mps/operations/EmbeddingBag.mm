@@ -219,6 +219,7 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
   params.use_per_sample_weights = use_per_sample_weights;
   params.per_sample_weights_stride = use_per_sample_weights ? per_sample_weights_opt->stride(0) : 0;
   params.feature_size = output_grad.size(1);
+  params.num_weights = safe_downcast<uint32_t, int64_t>(num_weights);
   params.mode = static_cast<EmbeddingBagMode>(mode);
   params.padding_idx = padding_idx;
 
@@ -279,6 +280,7 @@ Tensor _embedding_bag_per_sample_weights_backward_mps(const Tensor& output_grad,
 
   params.per_sample_weights_grad_stride = per_sample_weights_grad.stride(0);
   params.feature_size = feature_size;
+  params.num_weights = safe_downcast<uint32_t, int64_t>(weight.size(0));
   params.padding_idx = padding_idx;
 
   auto num_threads = num_indices * feature_size;
