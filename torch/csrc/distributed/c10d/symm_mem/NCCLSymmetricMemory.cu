@@ -3,6 +3,7 @@
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
 
 #include <algorithm>
+#include <stdexcept>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
@@ -501,6 +502,9 @@ void** NCCLSymmetricMemory::get_buffer_ptrs_dev() {
 #ifdef USE_ROCM
   pai_->check_peer_pointers();
 #endif
+  #ifndef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    TORCH_CHECK(false, "Device pointers are not available in NCCL < 2.28");
+  #endif
   return pai_->buffers_dev_;
 }
 
@@ -508,6 +512,9 @@ void** NCCLSymmetricMemory::get_signal_pad_ptrs_dev() {
 #ifdef USE_ROCM
   pai_->check_peer_pointers();
 #endif
+  #ifndef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    TORCH_CHECK(false, "Device pointers are not available in NCCL < 2.28");
+  #endif
   return pai_->signal_pads_dev_;
 }
 
