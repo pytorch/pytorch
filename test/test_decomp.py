@@ -1342,7 +1342,6 @@ class DecompOneOffTests(TestCase):
                 rtol=1e-2,
             )
 
-    @onlyCUDA
     @skipIfCrossRef
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_native_dropout_backward_opmath(self, device, dtype):
