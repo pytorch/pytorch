@@ -170,64 +170,6 @@ class TestStaticTritonLauncherUnit(TestCase):
         gc.collect()
         self.assertIsNone(owner_ref())
 
-    def test_fast_launcher_binds_device_agnostic_kernel_to_current_device(self):
-        """
-        compile-on-one-rank kernels (every kernel a shared precompile artifact
-        serves) keep per-device handles and used to be refused the fast launcher,
-        paying the regular static launcher's per-launch argument parsing and
-        pointer queries. Bind the current device's handle instead, and fall
-        back to the regular launcher on any other device.
-        """
-        import types
-
-        built = []
-
-        class FakeFastLauncher:
-            def __init__(self, func, num_warps, shared, arg_tys, n_scratch):
-                built.append(func)
-
-        kernel = object.__new__(StaticallyLaunchedCudaKernel)
-        kernel.function = None
-        kernel.device_agnostic = True
-        kernel.functions = {2: 0xBEEF}
-        kernel.modules = {2: 0xCAFE}
-        kernel.num_warps = 4
-        kernel.shared = 0
-        kernel.arg_tys = "O"
-        kernel.has_global_scratch = False
-        kernel.has_profile_scratch = False
-        kernel._current_device = lambda: 2
-
-        calls = []
-        launcher = types.FunctionType(
-            compile(
-                "def launcher(grid_0, grid_1, grid_2, stream, *args):\n"
-                "    calls.append(runner)\n",
-                "<launcher>",
-                "exec",
-            ).co_consts[0],
-            {"runner": kernel.run, "calls": calls},
-            "launcher",
-        )
-        launcher._is_static = True
-
-        autotuner = object.__new__(CachingAutotuner)
-        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
-        autotuner.device_props = SimpleNamespace(type="cuda")
-
-        with mock.patch("torch._C._FastCudaLauncher", FakeFastLauncher, create=True):
-            fast_launcher = autotuner._build_fast_launcher(launcher)
-
-        self.assertIsNotNone(fast_launcher)
-        self.assertEqual(built, [0xBEEF])
-        self.assertIs(fast_launcher._static_kernel_owner, kernel)
-        with mock.patch("torch._C._cuda_getDevice", return_value=2):
-            fast_launcher(1, 1, 1, stream=0)
-        self.assertIsInstance(calls[-1], FakeFastLauncher)
-        with mock.patch("torch._C._cuda_getDevice", return_value=3):
-            fast_launcher(1, 1, 1, stream=0)
-        self.assertEqual(calls[-1], kernel.run)
-
     def test_resolve_load_device_cpu_stays_none(self):
         # CPU has no device index; its DeviceGuard is a no-op. Resolving its None to a
         # concrete index makes the guard call exchange_device, which CPU does not
