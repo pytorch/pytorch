@@ -910,7 +910,19 @@ A minimal single-process backend:
 ```{testcode}
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import _create_work_from_future
+
+
+class MyWork(dist._Work):
+    def __init__(self, result):
+        super().__init__()
+        self._future = torch.futures.Future()
+        self._future.set_result(result)
+
+    def wait(self, timeout):
+        return True
+
+    def get_future(self):
+        return self._future
 
 
 class MyBackend(dist._Backend):
@@ -924,9 +936,7 @@ class MyBackend(dist._Backend):
     def allreduce(self, tensors, opts):
         # A real backend communicates here; with one rank, SUM is a no-op.
         self.num_allreduces += 1
-        future = torch.futures.Future()
-        future.set_result(tensors)
-        return _create_work_from_future(future)
+        return MyWork(tensors)
 
 
 dist.Backend.register_backend("my_backend", MyBackend, devices=["cpu"])
@@ -948,6 +958,17 @@ called with `(store, group_rank, group_size, timeout)`, or with
 `(dist_backend_opts, pg_options)` when `extended_api=True`. It runs for every
 process group created with the backend, including subgroups from
 {func}`~torch.distributed.new_group`.
+
+**Entry points.** Instead of calling `register_backend` on import, a package
+can declare a `torch.distributed.backends` entry point naming a zero-argument
+function that calls `register_backend`. It is loaded the first time the backend
+name is used, for example by `init_process_group("my_backend")`. The entry
+point name must match the registered backend name.
+
+```toml
+[project.entry-points."torch.distributed.backends"]
+my_backend = "my_package:register_backend"
+```
 
 **Methods.** Override the collectives the backend supports; the rest raise an
 error naming the backend. Arguments match the C++ virtuals, with options
@@ -975,10 +996,10 @@ objects such as `AllreduceOptions`:
 | `barrier(opts)`, `monitored_barrier(opts, wait_all_ranks)` | {func}`~torch.distributed.barrier`, {func}`~torch.distributed.monitored_barrier` |
 
 **Work.** Collectives return a `Work`, except `monitored_barrier`;
-`recv_anysource` and `end_coalescing` may return `None`. For a completed or
-future-backed operation, use `_create_work_from_future(future)`. For custom
-completion semantics, subclass `torch.distributed._Work` and override
-`wait(timeout)` and `get_future()`.
+`recv_anysource` and `end_coalescing` may return `None`. Subclass
+`dist._Work` and override `wait(timeout)` and `get_future()`, as with `MyWork`
+above. Other `Work` methods can't be overridden from Python, so `is_completed()`
+always returns `False`.
 
 **Capabilities.** Features are opted into with read-only properties, for
 example `supports_splitting`, `supports_coalescing` and `supports_shrinking`,
