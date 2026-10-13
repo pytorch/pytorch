@@ -8394,6 +8394,15 @@ class TestMPS(TestCaseMPS):
         rc_f = x.cfloat().sqrt().chalf()
         self.assertEqual(rc_h, rc_f)
 
+        # Small numerics: when |im| << |re|, computing the smaller component as
+        # sqrt((|z| - |re|) / 2) cancels catastrophically and returns ~0. Compare
+        # components separately, as a complex-magnitude check would hide the error.
+        for dtype in (torch.cfloat, torch.chalf):
+            x = torch.tensor([1 + 1e-4j, -1 + 1e-4j, 1 - 1e-4j, -1 - 1e-4j], dtype=dtype)
+            rc = torch.view_as_real(x.to('mps').sqrt().cpu())
+            ref = torch.view_as_real(x.cfloat().sqrt().to(dtype))
+            self.assertEqual(rc, ref)
+
     # Test selu, elu, celu
     def test_elu(self):
         def helper(shape, alpha=1.0, memory_format=torch.contiguous_format):
