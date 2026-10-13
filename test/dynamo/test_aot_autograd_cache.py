@@ -395,8 +395,10 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if device == "cuda" and dtype == torch.bfloat16 and not (
-            SM80OrLater or torch.version.hip
+        if (
+            device == "cuda"
+            and dtype == torch.bfloat16
+            and not (SM80OrLater or torch.version.hip)
         ):
             raise unittest.SkipTest("requires SM80 or later")
 
@@ -1890,8 +1892,10 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if device == "cuda" and dtype == torch.bfloat16 and not (
-            SM80OrLater or torch.version.hip
+        if (
+            device == "cuda"
+            and dtype == torch.bfloat16
+            and not (SM80OrLater or torch.version.hip)
         ):
             raise unittest.SkipTest("requires CUDA SM80 or later")
 
@@ -1999,8 +2003,10 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if device == "cuda" and dtype == torch.bfloat16 and not (
-            SM80OrLater or torch.version.hip
+        if (
+            device == "cuda"
+            and dtype == torch.bfloat16
+            and not (SM80OrLater or torch.version.hip)
         ):
             raise unittest.SkipTest("requires CUDA SM80 or later")
 
@@ -2424,8 +2430,10 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if device == "cuda" and dtype == torch.bfloat16 and not (
-            SM80OrLater or torch.version.hip
+        if (
+            device == "cuda"
+            and dtype == torch.bfloat16
+            and not (SM80OrLater or torch.version.hip)
         ):
             raise unittest.SkipTest("requires SM80 or later")
 

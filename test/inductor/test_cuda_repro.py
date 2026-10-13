@@ -2972,7 +2972,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     tl.store(out_ptr0 + (x3), tmp2, xmask)""",
         )
 
-    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(
+        not (SM80OrLater or torch.version.hip), "uses bfloat16 which requires SM >= 80"
+    )
     @skipCUDAIf(
         not (SM90OrLater or torch.version.hip),
         "needs at least 6 GiB of GPU memory headroom",

@@ -2092,7 +2092,9 @@ class CommonTemplate:
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
 
-    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(
+        not (SM80OrLater or torch.version.hip), "uses bfloat16 which requires SM >= 80"
+    )
     def test_scatter_bf16(self):
         def fn(inp, src, index):
             return inp.scatter_add(0, index, src)
@@ -17749,7 +17751,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(fn(x), torch.tensor(15, device=self.device))
         self.common(fn, (x,))
 
-    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(
+        not (SM80OrLater or torch.version.hip), "uses bfloat16 which requires SM >= 80"
+    )
     @parametrize(
         "dtype_x, dtype_y",
         list(itertools.product(test_dtypes, test_dtypes)),
@@ -17871,7 +17875,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         actual = torch.compile(fn)(x)
         self.assertEqual(ref, actual)
 
-    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(
+        not (SM80OrLater or torch.version.hip), "uses bfloat16 which requires SM >= 80"
+    )
     @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
     def test_bfloat16_to_int16(self):
         def fn(a, b):

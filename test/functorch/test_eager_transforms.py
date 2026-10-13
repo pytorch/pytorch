@@ -5545,7 +5545,8 @@ class TestCompileTransformsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @expectedFailureIf(
-        (IS_WINDOWS and TEST_CUDA) or (TEST_CUDA and not (SM70OrLater or torch.version.hip))
+        (IS_WINDOWS and TEST_CUDA)
+        or (TEST_CUDA and not (SM70OrLater or torch.version.hip))
     )
     @unittest.skipIf(
         TEST_CUDA_MEM_LEAK_CHECK,

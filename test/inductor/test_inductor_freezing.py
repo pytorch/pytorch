@@ -501,8 +501,10 @@ class OptimizeForInferenceTemplate(TestCase):
             if self.device == "cpu" and dtype == torch.float16:
                 continue
 
-            if self.device == GPU_TYPE and dtype == torch.bfloat16 and not (
-                SM80OrLater or torch.version.hip
+            if (
+                self.device == GPU_TYPE
+                and dtype == torch.bfloat16
+                and not (SM80OrLater or torch.version.hip)
             ):
                 continue
 
@@ -548,8 +550,10 @@ class OptimizeForInferenceTemplate(TestCase):
             if self.device == "cpu" and dtype == torch.float16:
                 continue
 
-            if self.device == GPU_TYPE and dtype == torch.bfloat16 and not (
-                SM80OrLater or torch.version.hip
+            if (
+                self.device == GPU_TYPE
+                and dtype == torch.bfloat16
+                and not (SM80OrLater or torch.version.hip)
             ):
                 continue
 
