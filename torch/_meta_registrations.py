@@ -7383,7 +7383,7 @@ def _check_scaled_mm_sizes(
             num_k_blocks_check = ceil_div(_k, 32)
             is_blockwise_scaling = (
                 scale_a.numel() == m * num_k_blocks_check
-                and scale_b.numel() == n * num_k_blocks_check
+                or scale_b.numel() == n * num_k_blocks_check
             )
 
         if scale_a.numel() == 1 and scale_b.numel() == 1:
@@ -7473,19 +7473,6 @@ def _check_scaled_mm_sizes(
                 lambda: "For rowwise scaling, both scales must be float32. For blockwise scaling, both scales must be float32, or (XPU only) float8_e8m0fnu.",
             )
             is_e8m0fnu_scale = scale_a.dtype == torch.float8_e8m0fnu
-            if is_e8m0fnu_scale:
-                num_k_blocks_1x32 = ceil_div(_k, 32)
-                a_is_blockwise_1x32 = scale_a.numel() == m * num_k_blocks_1x32
-                b_is_blockwise_1x32 = scale_b.numel() == n * num_k_blocks_1x32
-                torch._check(
-                    a_is_blockwise_1x32 == b_is_blockwise_1x32,
-                    lambda: (
-                        "For (BlockWise1x32, BlockWise1x32) scaling, scale_a should have "
-                        f"{m * num_k_blocks_1x32} elements and scale_b should have {n * num_k_blocks_1x32} elements, "
-                        f"but got scale_a.numel()={scale_a.numel()} and scale_b.numel()={scale_b.numel()}, "
-                        "only one of which matches the expected BlockWise1x32 element count."
-                    ),
-                )
             # for rowwise scaling, enforce 2D input tensors
             torch._check(
                 scale_a.dim() == 2 and scale_b.dim() == 2,
