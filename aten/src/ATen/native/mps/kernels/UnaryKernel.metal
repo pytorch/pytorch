@@ -248,17 +248,7 @@ struct asin_functor {
       return T(M_PI_F / 2, 0);
     else if (x.x == -1 && x.y == 0)
       return T(M_PI_F / -2, 0);
-    auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
-    // calculate sqrt
-    // modulus
-    auto m = precise::sqrt(sqrt_val.x * sqrt_val.x + sqrt_val.y * sqrt_val.y);
-    // real part: sqrt((m + a)/2)
-    auto real_part = precise::sqrt((m + sqrt_val.x) * .5);
-    // imaginary part: sign(b) * sqrt((m - a)/2)
-    auto imag_part = copysign(
-        static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
-        sqrt_val.y);
-    auto atan_val = div(x, T(real_part, imag_part));
+    auto atan_val = div(x, c10::metal::sqrt(T(1, 0) - c10::metal::mul(x, x)));
     // calculate atan (see atan_functor)
     auto coef = div(T(1, 0), T(0, 2));
     auto log_arg =
@@ -292,17 +282,7 @@ struct acos_functor {
       return T(M_PI_F, 0);
     else if (x.x == -1 && x.y == 0)
       return T(-M_PI_F, 0);
-    auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
-    // calculate sqrt
-    // modulus
-    auto m = precise::sqrt(sqrt_val.x * sqrt_val.x + sqrt_val.y * sqrt_val.y);
-    // real part: sqrt((m + a)/2)
-    auto real_part = precise::sqrt((m + sqrt_val.x) * .5);
-    // imaginary part: sign(b) * sqrt((m - a)/2)
-    auto imag_part = copysign(
-        static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
-        sqrt_val.y);
-    auto atan_val = div(x, T(real_part, imag_part));
+    auto atan_val = div(x, c10::metal::sqrt(T(1, 0) - c10::metal::mul(x, x)));
     // calculate atan (see atan_functor)
     auto coef = div(T(1, 0), T(0, 2));
     auto log_arg =
@@ -535,14 +515,7 @@ struct sqrt_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // modulus
-    auto m = precise::sqrt(x.x * x.x + x.y * x.y);
-    // real part: sqrt((m + a)/2)
-    auto real_part = precise::sqrt((m + x.x) * .5);
-    // imaginary part: sign(b) * sqrt((m - a)/2)
-    auto imag_part = copysign(
-        static_cast<decltype(x.y)>(precise::sqrt((m - x.x) * .5)), x.y);
-    return T(real_part, imag_part);
+    return c10::metal::sqrt(x);
   }
 };
 
