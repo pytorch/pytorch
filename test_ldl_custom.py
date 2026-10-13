@@ -990,6 +990,24 @@ class TestLDLCustomKernel(TestCase):
         self.assertTrue(torch.equal(info, clean_info))
         self.assertEqual(LD.tril(), clean_LD.tril())
 
+    @parametrize("bad", [float("nan"), float("inf"), -float("inf")])
+    @parametrize("batch", [(), (3,)])
+    @parametrize("n", [1, 2, 33, 65, 300, 4100])
+    @dtypes(torch.complex64, torch.complex128)
+    def test_nonfinite_imag_diagonal_is_ignored(self, device, dtype, n, batch, bad):
+        """The imaginary part of a Hermitian diagonal is ignored even when it is not
+        finite: it must reach neither the real part (e.g. via beta * C = (1 + 0i) * C
+        in the trailing GEMM, as 0 * inf is NaN) nor the pivot search."""
+        torch.manual_seed(n)
+        A = indefinite(n, batch, dtype, device)
+        dirty = A.clone()
+        dirty.diagonal(dim1=-2, dim2=-1).imag.fill_(bad)
+        clean_LD, clean_piv, clean_info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        LD, piv, info = torch.linalg.ldl_factor_ex(dirty, hermitian=True)
+        self.assertTrue(torch.equal(piv, clean_piv))
+        self.assertTrue(torch.equal(info, clean_info))
+        self.assertEqual(LD.tril(), clean_LD.tril())
+
     @parametrize("n", [33, 65])
     @dtypes(torch.float64, torch.complex128)
     def test_batched_leading_dimension(self, device, dtype, n):
@@ -1118,17 +1136,21 @@ class TestLDLCustomKernel(TestCase):
         self.assertEqual(piv.shape, A.shape[:-1])
         self.assertEqual(info.shape, A.shape[:-2])
 
-    @onlyCUDA
     @parametrize("batch", [(), (3,), (2, 3), (0,), (2, 0), (0, 3)])
     @dtypes(*floating_and_complex_types())
     def test_n1(self, device, dtype, batch):
-        """n == 1 is a shortcut: pivot is 1 and info flags an exactly zero entry."""
+        """n == 1 is a shortcut: pivot is 1 and info flags an exactly zero entry. As
+        in LAPACK (the CPU instance) and MAGMA, the imaginary part of a Hermitian
+        diagonal is ignored, so a purely imaginary entry is singular too."""
         A = make_tensor((*batch, 1, 1), dtype=dtype, device=device)
         A.view(-1)[::2] = 0
+        if dtype.is_complex:
+            A.view(-1)[1::4] = 1j
         LD, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
-        self.assertEqual(LD, A)
+        expected = A.real.to(dtype) if dtype.is_complex else A
+        self.assertEqual(LD, expected)
         self.assertEqual(piv, torch.ones_like(piv))
-        self.assertEqual(info, (A == 0).squeeze(-1).squeeze(-1).to(torch.int32))
+        self.assertEqual(info, (expected == 0).squeeze(-1).squeeze(-1).to(torch.int32))
 
     @parametrize("batch", [(), (3,), (2, 3), (0,), (2, 0), (0, 3)])
     @dtypes(*floating_and_complex_types())

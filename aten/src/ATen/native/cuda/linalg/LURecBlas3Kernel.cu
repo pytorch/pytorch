@@ -1443,6 +1443,10 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
   }
   if (n == 1) {
     // The only pivot is the lone entry, and it is singular iff it is zero.
+    // As in LAPACK, the imaginary part of a Hermitian diagonal is ignored.
+    if (hermitian && LD.is_complex()) {
+      LD.imag().zero_();
+    }
     pivots.fill_(1);
     info.copy_(LD.eq(0).squeeze(-1).squeeze(-1));
     return;
