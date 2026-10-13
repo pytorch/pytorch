@@ -19,14 +19,16 @@
 #include <torch/csrc/profiler/api.h>
 
 #ifdef USE_KINETO
-#include <XpuptiMetricQuery.h>
-
 // Forward declarations so we don't have to include `libkineto.h` in a header.
 namespace libkineto {
 class GenericTraceActivity;
 struct CpuTraceBuffer;
 class ActivityTraceInterface;
 } // namespace libkineto
+#endif
+
+#if defined(USE_KINETO) && defined(HAS_XPUPTI)
+#include <XpuptiMetricQuery.h>
 #endif
 
 namespace torch {
@@ -140,8 +142,8 @@ void logInvariantViolation(
     const std::string& profile_id,
     const std::string& group_profile_id);
 
-#ifdef USE_KINETO
-TORCH_API std::vector<libkineto::XpuMetricGroupInfo> xpuAvailableMetrics(
+#if defined(USE_KINETO) && defined(HAS_XPUPTI)
+TORCH_API std::vector<libkineto::XpuMetricGroupNames> xpuAvailableMetrics(
     const libkineto::XpuDeviceUuid& deviceUuid);
 #endif
 

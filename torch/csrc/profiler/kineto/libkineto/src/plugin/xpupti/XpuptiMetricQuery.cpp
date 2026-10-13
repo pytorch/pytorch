@@ -29,57 +29,9 @@ static_assert(kXpuDeviceUuidSize == PTI_MAX_DEVICE_UUID_SIZE);
 constexpr std::string_view kMetricsHint =
     "Querying XPU metrics may require ZET_ENABLE_METRICS=1 in the environment";
 
-inline std::string metricTypeToString(pti_metric_type type) {
-  switch (type) {
-    case PTI_METRIC_TYPE_DURATION:
-      return "duration";
-    case PTI_METRIC_TYPE_EVENT:
-      return "event";
-    case PTI_METRIC_TYPE_EVENT_WITH_RANGE:
-      return "event_with_range";
-    case PTI_METRIC_TYPE_THROUGHPUT:
-      return "throughput";
-    case PTI_METRIC_TYPE_TIMESTAMP:
-      return "timestamp";
-    case PTI_METRIC_TYPE_FLAG:
-      return "flag";
-    case PTI_METRIC_TYPE_RATIO:
-      return "ratio";
-    case PTI_METRIC_TYPE_RAW:
-      return "raw";
-    case PTI_METRIC_TYPE_IP:
-      return "ip";
-    default:
-      return "unknown";
-  }
-}
-
-inline std::string metricValueTypeToString(pti_metric_value_type type) {
-  switch (type) {
-    case PTI_METRIC_VALUE_TYPE_UINT32:
-      return "uint32";
-    case PTI_METRIC_VALUE_TYPE_UINT64:
-      return "uint64";
-    case PTI_METRIC_VALUE_TYPE_FLOAT32:
-      return "float32";
-    case PTI_METRIC_VALUE_TYPE_FLOAT64:
-      return "float64";
-    case PTI_METRIC_VALUE_TYPE_BOOL8:
-      return "bool8";
-    case PTI_METRIC_VALUE_TYPE_STRING:
-      return "string";
-    case PTI_METRIC_VALUE_TYPE_UINT8:
-      return "uint8";
-    case PTI_METRIC_VALUE_TYPE_UINT16:
-      return "uint16";
-    default:
-      return "unknown";
-  }
-}
-
 } // namespace
 
-std::vector<XpuMetricGroupInfo> xpuptiAvailableMetrics(
+std::vector<XpuMetricGroupNames> xpuptiAvailableMetrics(
     const XpuDeviceUuid& deviceUuid) {
   const auto devices = getMetricsDevices(kMetricsHint);
 
@@ -107,32 +59,23 @@ std::vector<XpuMetricGroupInfo> xpuptiAvailableMetrics(
   XPUPTI_CALL(
       ptiMetricsGetMetricGroups(device->_handle, groups.get(), &groupCount));
 
-  std::vector<XpuMetricGroupInfo> result;
-  result.reserve(groupCount);
+  // Only event-based groups can be collected by the XPUPTI scope profiler, and
+  // metrics collected together must all belong to one group.
+  std::vector<XpuMetricGroupNames> result;
   for (uint32_t g = 0; g < groupCount; ++g) {
     const auto& group = groups[g];
-    XpuMetricGroupInfo& groupInfo = result.emplace_back();
-    groupInfo.name = group._name;
-    groupInfo.description = group._description;
-    // Only event-based groups can be collected by the XPUPTI scope profiler.
-    groupInfo.scopeCompatible =
-        group._type == PTI_METRIC_GROUP_TYPE_EVENT_BASED;
-    if (group._metric_count == 0) {
+    if (group._type != PTI_METRIC_GROUP_TYPE_EVENT_BASED ||
+        group._metric_count == 0) {
       continue;
     }
-
     auto metrics =
         std::make_unique<pti_metric_properties_t[]>(group._metric_count);
     XPUPTI_CALL(ptiMetricsGetMetricsProperties(group._handle, metrics.get()));
-    groupInfo.metrics.reserve(group._metric_count);
+    auto& [groupName, metricNames] = result.emplace_back();
+    groupName = group._name;
+    metricNames.reserve(group._metric_count);
     for (uint32_t m = 0; m < group._metric_count; ++m) {
-      const auto& metric = metrics[m];
-      groupInfo.metrics.push_back(
-          {metric._name,
-           metric._description,
-           metric._units,
-           metricTypeToString(metric._metric_type),
-           metricValueTypeToString(metric._value_type)});
+      metricNames.emplace_back(metrics[m]._name);
     }
   }
   return result;

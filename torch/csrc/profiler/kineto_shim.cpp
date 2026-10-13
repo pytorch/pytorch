@@ -516,19 +516,12 @@ void logInvariantViolation(
 #endif // USE_KINETO
 }
 
-#ifdef USE_KINETO
-std::vector<libkineto::XpuMetricGroupInfo> xpuAvailableMetrics(
+#if defined(USE_KINETO) && defined(HAS_XPUPTI)
+std::vector<libkineto::XpuMetricGroupNames> xpuAvailableMetrics(
     const libkineto::XpuDeviceUuid& deviceUuid) {
-#ifdef HAS_XPUPTI
   return libkineto::xpuptiAvailableMetrics(deviceUuid);
-#else
-  TORCH_CHECK(
-      false,
-      "XPU metric queries require a PyTorch build with XPU profiling support "
-      "(USE_XPU=1)");
-#endif
 }
-#endif // USE_KINETO
+#endif
 
 } // namespace profiler::impl::kineto
 
