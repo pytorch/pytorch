@@ -96,6 +96,39 @@ class TestCOWCUDA(TestCase):
         torch.cuda.current_stream(device).wait_stream(side)
         self.assertEqual(out, torch.full_like(out, 2))
 
+    def test_record_stream(self, device):
+        side = torch.cuda.Stream(device=device)
+        x = torch.ones(1 << 20, device=device)
+        y = x._lazy_clone()
+        side.wait_stream(torch.cuda.current_stream(device))
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(SLEEP_CYCLES)
+            out = x * 2
+        x.record_stream(side)
+        del x, y
+        scratch = torch.empty(1 << 20, device=device)
+        scratch.fill_(99)
+        torch.cuda.current_stream(device).wait_stream(side)
+        self.assertEqual(out, torch.full_like(out, 2))
+
+    def test_record_stream_after_materialize(self, device):
+        # The read of x on side was enqueued before x was materialized, so
+        # it reads the data x was materialized from.
+        side = torch.cuda.Stream(device=device)
+        x = torch.ones(1 << 20, device=device)
+        y = x._lazy_clone()
+        side.wait_stream(torch.cuda.current_stream(device))
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(SLEEP_CYCLES)
+            out = x * 2
+        x.add_(1)
+        x.record_stream(side)
+        del x, y
+        scratch = torch.empty(1 << 20, device=device)
+        scratch.fill_(99)
+        torch.cuda.current_stream(device).wait_stream(side)
+        self.assertEqual(out, torch.full_like(out, 2))
+
     def test_materialized_keeps_data_until_released(self, device):
         x = torch.ones(1 << 20, device=device)
         nbytes = x.nbytes

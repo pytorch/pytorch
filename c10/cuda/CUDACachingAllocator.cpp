@@ -1,6 +1,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <c10/core/RingBuffer.h>
+#include <c10/core/impl/COW.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
@@ -5352,10 +5353,17 @@ class NativeCachingAllocator : public CUDAAllocator {
     // we have implemented reference counting based sharing mechanism to
     // guarantee tensors won't be accidentally freed by one process while
     // they are still being used in another
-    if (ptr.get_deleter() != &local_raw_delete)
+    //
+    // A copy-on-write DataPtr shares the data of another DataPtr, which may
+    // have come from this instance.
+    const bool is_cow = c10::impl::cow::is_cow_data_ptr(ptr);
+    if (ptr.get_deleter() != &local_raw_delete && !is_cow)
       return;
 
     Block* block = get_allocated_block(ptr.get());
+    if (is_cow && block == nullptr) {
+      return;
+    }
     // block must not be null reaching here
     TORCH_INTERNAL_ASSERT(block != nullptr, "No allocated block can be found");
     device_allocator[block->device]->recordStream(block, stream);

@@ -149,7 +149,7 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
 
   std::optional<Stream> stream;
   if (is_stream_ordered(data_ptr)) {
-    if (storage.extra_meta_ && storage.extra_meta_->cow_materialized_from_) {
+    if (storage.cow_materialized_from() != nullptr) {
       return eager_clone(storage);
     }
     stream = sharing_stream(storage, simple);
