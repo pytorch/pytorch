@@ -4792,9 +4792,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    def test_head_dim_512_default_configs(self, device):
+    @common_utils.parametrize("qk_head_dim", [64, 512])
+    def test_head_dim_512_default_configs(self, device, qk_head_dim):
         # https://github.com/triton-lang/triton/issues/10309
-        self.run_test(_identity, torch.bfloat16, device, B, H, S, 512)
+        self.run_test(_identity, torch.bfloat16, device, B, H, S, qk_head_dim, V_D=512)
 
     @supported_platform
     def test_GQA_causal_mask(self, device):
