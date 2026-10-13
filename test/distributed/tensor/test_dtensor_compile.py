@@ -2787,14 +2787,16 @@ class outer_fn(torch.nn.Module):
         h1 = dt._stable_hash_for_caching()
         self.assertNotEqual(h0, h1)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    @unittest.skipIf(
+        torch.accelerator.device_count() < 2, "requires 2 accelerator devices"
+    )
     def test_stable_hash_for_caching_cuda_ranks(self):
         # Exercise the exact scenario from #188390: two DTensors with identical
-        # global specs but local tensors on cuda:0 vs cuda:1 must produce
+        # global specs but local tensors on device 0 vs device 1 must produce
         # different AOTAutograd cache keys.
-        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
-        local0 = torch.empty(2, 4, device="cuda:0")
-        local1 = torch.empty(2, 4, device="cuda:1")
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
+        local0 = torch.empty(2, 4, device=f"{device_type}:0")
+        local1 = torch.empty(2, 4, device=f"{device_type}:1")
         dt0 = DTensor.from_local(local0, mesh, [Shard(0)], run_check=False)
         dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
         h0, h1 = dt0._stable_hash_for_caching(), dt1._stable_hash_for_caching()
