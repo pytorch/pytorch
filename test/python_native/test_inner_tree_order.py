@@ -347,9 +347,8 @@ class TestInnerTreeOrder(TestCase):
             (cutlass.Float32, torch.float32),
             (cutlass.Float64, torch.float64),
         ):
-            got = kg.reduce_dim(
-                T.SumOps(acc=acc), key, x, [1], dtype, order="inner_tree"
-            )
+            with _order_on():
+                got = kg.reduce_dim(T.SumOps(acc=acc), key, x, [1], dtype)
             self.assertEqual(got, x.sum(dim=1, dtype=dtype))
 
     def test_multi_field_and_two_output_traits_under_the_order(self):
