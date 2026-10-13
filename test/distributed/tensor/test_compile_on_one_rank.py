@@ -2308,5 +2308,54 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
         self.assertTrue(_baked_pg_constants(gm))
 
 
+@unittest.skipIf(not dist.is_available(), "distributed not available")
+@instantiate_parametrized_tests
+class TestCompileOnOneRankMeshGroup(TestCase):
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=2)
+        self.mesh = init_device_mesh("cpu", (2,), mesh_dim_names=("replicate",))
+
+    def tearDown(self):
+        dist.destroy_process_group()
+        torch._dynamo.reset()
+        super().tearDown()
+
+    @staticmethod
+    def _fn(x, mesh, dim):
+        import torch.distributed._functional_collectives as funcol
+
+        return funcol.all_reduce(x, "sum", mesh.get_group(dim))
+
+    @parametrize("dim", (None, 0, "replicate"))
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_mesh_group_aot_uses_live_mesh(self, dim):
+        from torch._dynamo.testing import AotEagerAndRecordGraphs
+
+        x = torch.ones(4)
+        expected = self._fn(x, self.mesh, dim)
+        backend = AotEagerAndRecordGraphs()
+        compiled = torch.compile(self._fn, backend=backend, fullgraph=True)
+
+        self.assertEqual(compiled(x, self.mesh, dim), expected)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        graph = backend.fw_graphs[0]
+        lookups = [
+            node
+            for node in graph.graph.nodes
+            if node.op == "call_function"
+            and node.target is torch.ops._dtensor.mesh_get_process_group.default
+        ]
+        self.assertEqual(len(lookups), 1)
+        self.assertEqual(lookups[0].args[0].op, "placeholder")
+        baked_pgs = [
+            node.target
+            for node in graph.graph.nodes
+            if node.op == "get_attr"
+            and isinstance(getattr(graph, node.target), dist.ProcessGroup)
+        ]
+        self.assertEqual(baked_pgs, [])
+
+
 if __name__ == "__main__":
     run_tests()
