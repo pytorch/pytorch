@@ -73,6 +73,7 @@ from ._activation_checkpointing.knapsack import (
     ilp_knapsack,
 )
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
+from ._activation_checkpointing.min_cut import minimum_cut
 from ._aot_autograd.descriptors import (
     AOTOutput,
     SavedForBackwardsAOTOutput,
@@ -2666,6 +2667,8 @@ def solve_min_cut(
         cannot_save_reason is None for finite weights, or a string explaining
         why the node cannot be saved for infinite weights.
         """
+        if node.meta.get("aot_runtime_epilogue_input_mutation", False):
+            return math.inf, "input mutation replayed after forward"
         if (
             config.treat_parameters_as_free_to_save
             and node in static_lifetime_input_nodes
@@ -2946,7 +2949,7 @@ def solve_min_cut(
                         heapq.heappush(fusible, (node_info.get_fw_order(user), user))
 
     try:
-        cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
+        cut_value, partition = minimum_cut(nx_graph, "source", "sink")
     except nx.NetworkXUnbounded as unbounded_exc:
         # Check if structured tracing is enabled (for production job debugging via tlparse)
         structured_tracing_enabled = bool(trace_log.handlers)
@@ -3152,9 +3155,8 @@ def _find_infinite_capacity_path(
             if neighbor in visited:
                 continue
             edge_data = nx_graph[node][neighbor]
-            capacity = edge_data.get("capacity", 0)
-            # Check for infinite capacity (either math.inf or INT_INF)
-            if capacity == math.inf or capacity == INT_INF:
+            capacity = edge_data.get("capacity", math.inf)
+            if capacity == math.inf:
                 reason = edge_data.get("reason", "unknown")
                 new_edge = (node, neighbor, reason)
                 new_path = edge_path + [new_edge]
@@ -3526,7 +3528,10 @@ def choose_saved_values_set(
             ban_if_materialized_backward=False,
             ban_if_not_in_allowlist=False,
         )
-    if memory_budget == 0:
+    if memory_budget == 0 and not any(
+        node.meta.get("aot_runtime_epilogue_input_mutation", False)
+        for node in node_info.inputs
+    ):
         return node_info.inputs
 
     runtime_optimized_saved_values, _ = solve_min_cut(

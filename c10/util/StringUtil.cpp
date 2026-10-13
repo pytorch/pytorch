@@ -1,7 +1,7 @@
+#include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 
 #include <cstdint>
-#include <stdexcept>
 #include <string>
 
 #ifdef _WIN32
@@ -55,16 +55,12 @@ static uint32_t decode_utf16_char(
   if (high < 0xD800 || high > 0xDFFF) {
     return high;
   }
-  if (high > 0xDBFF) {
-    throw std::range_error("invalid UTF-16: unpaired low surrogate");
-  }
-  if (it == end) {
-    throw std::range_error("invalid UTF-16: truncated surrogate pair");
-  }
+  TORCH_CHECK_VALUE(high <= 0xDBFF, "invalid UTF-16: unpaired low surrogate");
+  TORCH_CHECK_VALUE(it != end, "invalid UTF-16: truncated surrogate pair");
   const char16_t low = static_cast<char16_t>(*it++);
-  if (low < 0xDC00 || low > 0xDFFF) {
-    throw std::range_error("invalid UTF-16: unpaired high surrogate");
-  }
+  TORCH_CHECK_VALUE(
+      low >= 0xDC00 && low <= 0xDFFF,
+      "invalid UTF-16: unpaired high surrogate");
   return 0x10000 + ((static_cast<uint32_t>(high) - 0xD800) << 10) +
       (static_cast<uint32_t>(low) - 0xDC00);
 }

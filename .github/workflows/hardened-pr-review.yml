@@ -129,6 +129,10 @@ env:
 
 jobs:
   capture:
+    # `no automated review` opts the PR out entirely: no review on any trigger,
+    # including a fresh `in progress` label. Stage 2 re-checks it against the
+    # API (OPT_OUT_LABEL there), so a label added after this run still stops
+    # the review.
     if: |
       github.repository == 'pytorch/pytorch' &&
       !github.event.pull_request.draft &&
@@ -137,7 +141,8 @@ jobs:
         (github.event.action != 'labeled' &&
          contains(github.event.pull_request.labels.*.name, 'in progress') &&
          !contains(github.event.pull_request.labels.*.name, 'ready for review'))
-      )
+      ) &&
+      !contains(github.event.pull_request.labels.*.name, 'no automated review')
     # `github.event_name` is a CONSTANT while this file has one trigger, and it
     # is here for the run this file does not produce. `pull_request` reads the
     # workflow from the PULL REQUEST'S OWN REF, so a PR that adds its own copy

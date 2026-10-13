@@ -49,7 +49,6 @@ from torch._inductor.kernel.gemm_epilogue import (
     NormalizedReduction,
 )
 from torch._inductor.kernel.gemm_epilogue_analysis import (
-    build_output_contraction_plan,
     GemmLocalReduceAnalysis,
     GemmOutputLocalReducePlan,
     GemmOutputPlan,
@@ -62,6 +61,7 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
     GemmEpilogueCuteDSLOpOverrides,
     lower_gemm_epilogue_fx_node,
 )
+from torch._inductor.kernel.gemm_epilogue_layout import build_output_contraction_plan
 from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
@@ -441,14 +441,6 @@ class FlexGemmCuteDSLOpOverrides(GemmEpilogueCuteDSLOpOverrides):
     @staticmethod
     def clamp_max(x: Any, max: Any) -> Any:
         return FlexGemmCuteDSLOpOverrides.minimum(x, max)
-
-    @staticmethod
-    def sigmoid(x: Any) -> Any:
-        return CuteDSLOpOverrides.sigmoid(x)
-
-    @staticmethod
-    def erf(x: Any) -> Any:
-        return CuteDSLOpOverrides.erf(x)
 
 
 @dataclasses.dataclass(frozen=True)
