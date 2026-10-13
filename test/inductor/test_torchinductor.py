@@ -22952,6 +22952,22 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        def test_small_broadcast_read_does_not_split_inner_reduction(self):
+            # The per-group mask is a broadcast (outer-strided) read, but it is
+            # much smaller than the contiguous rows being reduced, so this must
+            # stay an unsplit inner reduction (one kernel).
+            def fn(x, mask):
+                masked = x.view(4096, 8, 32).masked_fill(
+                    mask.unsqueeze(-1), float("-inf")
+                )
+                return masked.flatten(1).amax(-1)
+
+            x = torch.randn(4096, 256, device=GPU_TYPE)
+            mask = torch.rand(4096, 8, device=GPU_TYPE) < 0.5
+            result, code = run_and_get_code(torch.compile(fn), x, mask)
+            self.assertEqual(result, fn(x, mask))
+            self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+
         @config.patch({"triton.decompose_sort_ops": True})
         def test_topk_decompose_sort_ops(self):
             def fn(a):
