@@ -12108,8 +12108,9 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("input_requires_grad", [False, True])
     def test_grid_sample_2d_backward_rocm_grad_input_memory_format(
             self, device, shape, layout, out_hw, grad_output_cl, input_requires_grad):
-        # Eager and Fake strides depend only on input layout, including mixed
-        # layouts, generic fallbacks, singleton dimensions and empty tensors.
+        # Eager and Fake gradients stay contiguous for every input layout,
+        # including the channels-last scratch path, mixed layouts, generic
+        # fallbacks, singleton dimensions and empty tensors.
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         fmt = torch.channels_last if layout == "channels_last" else torch.contiguous_format
@@ -12130,9 +12131,7 @@ class TestNNDeviceType(NNTestCase):
                 fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t for t in args)
             fake = bw(*fake_args)
         if input_requires_grad:
-            grad_fmt = (torch.preserve_format if inp.is_contiguous(memory_format=torch.channels_last)
-                        else torch.contiguous_format)
-            expected = torch.empty_like(inp, memory_format=grad_fmt)
+            expected = torch.empty_like(inp, memory_format=torch.contiguous_format)
             self.assertEqual(eager[0].stride(), expected.stride())
         else:
             self.assertIsNone(eager[0])
@@ -12159,8 +12158,9 @@ class TestNNDeviceType(NNTestCase):
         # The channel-parallel kernel needs one block per output point, which HIP
         # bounds by gridDim.x * blockDim.x <= UINT32_MAX. Past that bound the
         # kernel is ineligible and dispatch falls back to the generic kernel.
-        # Output layout must still follow the input. Out-of-bounds nearest
-        # samples avoid atomic contention while exercising the large launch.
+        # The fallback must still zero its contiguous gradient. Out-of-bounds
+        # nearest samples avoid atomic contention while exercising the large
+        # launch.
         bw = torch.ops.aten.grid_sampler_2d_backward.default
         channels = 5                         # lanes rounds up to 8
         w_out = (2**32 - 1) // 8 + 2         # just past the global work-size bound
@@ -12171,7 +12171,7 @@ class TestNNDeviceType(NNTestCase):
         grid = torch.full((1, 1, w_out, 2), 2, device=device, dtype=torch.half)
         args = (grad_output, inp, grid, 1, 0, False, [True, True])
         grad_input = bw(*args)[0]
-        self.assertEqual(grad_input.stride(), inp.stride())
+        self.assertTrue(grad_input.is_contiguous())
         self.assertEqual(grad_input, torch.zeros_like(inp))
 
         # Meta has no launch-extent dependency.
@@ -12182,7 +12182,7 @@ class TestNNDeviceType(NNTestCase):
                 for t in args)
             fake_grad_input = bw(*fake_args)[0]
         self.assertEqual(fake_grad_input.stride(), grad_input.stride(),
-                         msg="meta must preserve layout across launch fallback")
+                         msg="meta must match eager across launch fallback")
 
     @onlyCUDA
     @largeTensorTest("20GB", device="cuda")
@@ -12288,6 +12288,32 @@ class TestNNDeviceType(NNTestCase):
             grad_grid = bw(grad_output, inp, grid, 1, 0, False, [True, True])[1]
             self.assertEqual(grad_grid, torch.zeros_like(grad_grid),
                              msg=f"nearest grid gradient must be zero (W={width})")
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific backward path")
+    @dtypes(torch.half, torch.bfloat16)
+    def test_grid_sample_2d_backward_rocm_low_precision_grid_grad(self, device, dtype):
+        # The grid gradient sums over channels. Summing in the input dtype
+        # stalls (FP16 1024 + 0.5 rounds back to 1024) or overflows before
+        # opposite channels cancel. On gfx1250, reduced-precision calls must
+        # keep the opmath reduction whether or not grad_input is requested.
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        stall = (torch.tensor([[0., 1.], [0., 1.]]).expand(1, 2048, 2, 2),
+                 torch.ones(1, 2048, 1, 1), torch.contiguous_format, [2048., 0.])
+        cancel = (torch.tensor([[-60000., 60000.], [-60000., 60000.]]).expand(1, 2, 2, 2),
+                  torch.tensor([1., -1.]).reshape(1, 2, 1, 1), torch.channels_last, [0., 0.])
+        exact = "gfx1250" in torch.cuda.get_device_properties(device).gcnArchName
+        for inp, grad_output, fmt, expected in (stall, cancel):
+            inp = inp.to(device, dtype).contiguous(memory_format=fmt)
+            grad_output = grad_output.to(device, dtype).contiguous(memory_format=fmt)
+            grid = torch.zeros(1, 1, 1, 2, device=device, dtype=dtype)
+            grid_only = bw(grad_output, inp, grid, 0, 0, False, [False, True])[1]
+            both = bw(grad_output, inp, grid, 0, 0, False, [True, True])[1]
+            self.assertEqual(grid_only, both, atol=0, rtol=0,
+                             msg="grad_grid must not depend on whether grad_input is requested")
+            if exact:
+                self.assertEqual(grid_only.flatten().float().cpu(), torch.tensor(expected),
+                                 atol=0, rtol=0)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)

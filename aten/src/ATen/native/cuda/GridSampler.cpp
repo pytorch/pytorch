@@ -1,9 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/GridSampler.h>
 #include <utility>
-#ifdef USE_ROCM
-#include <ATen/core/TensorBase.h>
-#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -19,8 +16,6 @@
 #endif
 
 namespace at::native {
-
-
 
 Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
                             int64_t interpolation_mode, int64_t padding_mode,
@@ -52,14 +47,20 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
                               const Tensor& grid, int64_t interpolation_mode, int64_t padding_mode,
                               bool align_corners, std::array<bool, 2> output_mask) {
   auto input_requires_grad = output_mask[0];
+#ifdef USE_ROCM
+  // The channel-parallel kernel coalesces its atomics only into a
+  // channels-last gradient (6.57 ms -> 0.79 ms for large-C channels-last
+  // backward). The returned gradient stays contiguous on every architecture,
+  // so eligible calls accumulate into a channels-last scratch and copy it out.
+  Tensor grad_input_scratch;
+#endif
   Tensor grad_input = ([&]() {
     if (input_requires_grad) {
 #ifdef USE_ROCM
-      // Channels-last gradients coalesce the channel-parallel atomics
-      // (6.57 ms -> 0.79 ms for large-C channels-last backward). Both kernels
-      // support these strides, so allocation depends only on the input layout.
-      if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-        return input.new_empty_strided_symint(input.sym_sizes(), input.sym_strides()).zero_();
+      if (rocm_grid_sampler_2d_backward_use_channels_last_scratch(input, grid)) {
+        grad_input_scratch = input.new_empty_strided(input.sizes(), input.strides()).zero_();
+        // Fully overwritten by the copy below, so it needs no zeroing.
+        return at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       }
 #endif
       return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -68,6 +69,15 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
     }
   })();
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+#ifdef USE_ROCM
+  if (grad_input_scratch.defined()) {
+    launch_grid_sampler_2d_backward_kernel(
+        grad_input_scratch, grad_grid, grad_output, input,
+        grid, interpolation_mode, padding_mode, align_corners, output_mask);
+    grad_input.copy_(grad_input_scratch);
+    return std::make_tuple(std::move(grad_input), std::move(grad_grid));
+  }
+#endif
   launch_grid_sampler_2d_backward_kernel(
       grad_input, grad_grid, grad_output, input,
       grid, interpolation_mode, padding_mode, align_corners, output_mask);

@@ -424,6 +424,21 @@ namespace {
         kHipMaxGlobalWorkSize / rocm_grid_sampler_2d_backward_lanes(num_channels);
   }
 
+  // Enable the channel-parallel mapping only on the measured architecture.
+  bool rocm_grid_sampler_2d_backward_arch_supported(c10::DeviceIndex device) {
+    static const std::vector<std::string> supported_archs = {"gfx1250"};
+    return at::detail::getCUDAHooks().isGPUArch(supported_archs, device);
+  }
+
+  // The generic kernel accumulates the grid gradient in scalar_t, which loses
+  // or overflows FP16/BF16 sums across channels; the channel-lane kernel
+  // accumulates and reduces in opmath_t. Reduced-precision calls keep the
+  // channel-lane kernel even where FP32 timing favours the generic kernel, so
+  // that requesting grad_input does not change grad_grid.
+  bool rocm_grid_sampler_2d_backward_needs_opmath_reduction(ScalarType dtype) {
+    return dtype == ScalarType::Half || dtype == ScalarType::BFloat16;
+  }
+
   // ROCm channel-lane mapping with a parallel grid-gradient reduction.
   //
   // Same work decomposition as grid_sampler_2d_backward_kernel_rocm_channel_lane
@@ -816,11 +831,13 @@ namespace {
     index_t gOut_sC = grad_output.strides[1];
     index_t gOut_sH = grad_output.strides[2];
     index_t gOut_sW = grad_output.strides[3];
-    // gInp_* (and NC_offset below) are not really needed if input_requires_grad is false.
-    index_t gInp_sN = 0;
-    index_t gInp_sC = 0;
-    index_t gInp_sH = 0;
-    index_t gInp_sW = 0;
+    // gInp_* (and NC_offset below) are assigned and read only when
+    // input_requires_grad is true. Leaving them unset otherwise keeps the
+    // grid-gradient-only code generation unchanged.
+    index_t gInp_sN;
+    index_t gInp_sC;
+    index_t gInp_sH;
+    index_t gInp_sW;
     if (input_requires_grad) {
       gInp_sN = grad_input.strides[0];
       gInp_sC = grad_input.strides[1];
@@ -863,12 +880,12 @@ namespace {
 
         scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0);
         const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
-        index_t NC_offset = n * gInp_sN;
         const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
-        for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
+        for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, gOut_ptr_NCHW += gOut_sC) {
           const scalar_t gOut = *gOut_ptr_NCHW;
 
           if (input_requires_grad) {
+            const index_t NC_offset = n * gInp_sN + c * gInp_sC;
             // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
             safe_add_2d(grad_input.data, iy_nw, ix_nw, gInp_sH, gInp_sW, inp_H, inp_W, nw * gOut, NC_offset, grad_input_memory_span);
             safe_add_2d(grad_input.data, iy_ne, ix_ne, gInp_sH, gInp_sW, inp_H, inp_W, ne * gOut, NC_offset, grad_input_memory_span);
@@ -952,11 +969,12 @@ namespace {
         scalar_t giy = static_cast<scalar_t>(0);
 
         const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
-        index_t NC_offset = n * gInp_sN;
         const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
 
-        for (index_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, NC_offset += gInp_sC, inp_ptr_NC+= inp_sC) {
+        for (index_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, inp_ptr_NC+= inp_sC) {
           const scalar_t gOut = *gOut_ptr_NCHW;
+          // Only read when input_requires_grad; the strides are unset otherwise.
+          const index_t NC_offset = input_requires_grad ? n * gInp_sN + c * gInp_sC : 0;
 
           #pragma unroll 4
           for (index_t i = 0; i < 4; ++i) {
@@ -1393,6 +1411,27 @@ static void launch_grid_sampler_2d_backward_generic(
 
 
 
+#ifdef USE_ROCM
+bool rocm_grid_sampler_2d_backward_use_channels_last_scratch(
+    const TensorBase &input, const TensorBase &grid) {
+  // Mirrors the dispatch below for a channels-last grad_input with input
+  // strides. At C=2 the scratch zeroing and copy cost more than the channel
+  // parallelism gains on gfx1250 (4x2x16x16 input, 512 points: +8.6% versus
+  // the generic kernel), so the scratch path starts at C=3, except for
+  // reduced precision, which needs the channel-lane grid-gradient reduction.
+  const auto C = input.size(1);
+  const int64_t min_channels =
+      rocm_grid_sampler_2d_backward_needs_opmath_reduction(input.scalar_type()) ? 2 : 3;
+  if (C < min_channels || !input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+    return false;
+  }
+  const int64_t nblocks_nhw = input.size(0) * grid.size(1) * grid.size(2);
+  return rocm_grid_sampler_2d_backward_use_channel_lane(
+             C, /*channels_last=*/true, nblocks_nhw) &&
+      rocm_grid_sampler_2d_backward_arch_supported(input.get_device());
+}
+#endif
+
 void launch_grid_sampler_2d_backward_kernel(
     const TensorBase &grad_input, const TensorBase &grad_grid,
     const TensorBase &grad_output, const TensorBase &input,
@@ -1419,18 +1458,20 @@ void launch_grid_sampler_2d_backward_kernel(
   const int64_t nblocks_nhw = N * H * W;
 
   // Reject small channel counts before inspecting layouts or device properties.
-  // Allocation and Meta depend only on input layout, not this dispatch decision.
   bool eligible = C >= 2;
   if (eligible) {
     const bool channels_last =
         input.is_contiguous(at::MemoryFormat::ChannelsLast) &&
         (!input_requires_grad ||
          grad_input.is_contiguous(at::MemoryFormat::ChannelsLast));
-    // Enable the channel-parallel mapping only on the measured architecture.
-    static const std::vector<std::string> supported_archs = {"gfx1250"};
-    eligible = rocm_grid_sampler_2d_backward_use_channel_lane(
+    // Without channels-last input the channel-parallel kernel only pays off
+    // when it also scatters grad_input; FP32 grid-gradient-only calls measured
+    // slower than the generic kernel on gfx1250 (+65% for the ticket shape).
+    eligible = (channels_last || input_requires_grad ||
+                rocm_grid_sampler_2d_backward_needs_opmath_reduction(input.scalar_type())) &&
+        rocm_grid_sampler_2d_backward_use_channel_lane(
                    C, channels_last, nblocks_nhw) &&
-        at::detail::getCUDAHooks().isGPUArch(supported_archs, input.get_device());
+        rocm_grid_sampler_2d_backward_arch_supported(input.get_device());
   }
   if (!eligible) {
     launch_grid_sampler_2d_backward_generic(
