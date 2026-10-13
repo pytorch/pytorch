@@ -3,6 +3,8 @@
 Handoff notes for `torch.linalg.ldl_factor(x, hermitian=True)` on the
 `nikitaved/ldl_factor` branch. Written to be picked up on another machine.
 
+**Next session: start with the TODO list in section 10.**
+
 Last updated after the second round of work (batching moved into the kernel
 file, `n = 0/1`, the last-column fix, the cooperative-panel tests, the standalone
 kernel harness, and the LAPACK-style accuracy tests). Recent history:
@@ -217,10 +219,10 @@ at the `info` update in the kernel records this; there is deliberately **no
 test** that requires it. `test_zero_row_col_completes` requires only completion
 and an in-range `info`.
 
-**Debug scaffolding still in the tree.** `ldl_factor_kernel` has a `// DEBUG`
-comment, odd brace/indent formatting, and the hermitian branch wired directly to
-the custom kernel with no dtype/size/availability condition. Needs a real
-dispatch policy before landing (undecided).
+**Dispatch (intended, not implemented).** `hermitian=True` should go to the custom
+kernel under both the default and the `cusolver` backends, with `magma` still
+going to MAGMA. Today only the `cusolver` case is wired (the `// DEBUG` comment is
+gone; the odd brace formatting is upstream's).
 
 **`check_errors=True` on singular input** raises
 `INTERNAL ASSERT FAILED ... Unknown error code: 1` from
@@ -422,6 +424,10 @@ from the second round; none of them matter.)
 | `trace_zero.py` | pinpoints which operation perturbs a zero column |
 | `wpanel.py`, `herm.py` | `W` scheme + the `D`-symmetrization finding |
 | `nbsweep.py`, `control.py`, `pd.py`, `cabs1.py` | supporting experiments |
+| `resid_vs_ref.py`, `ratio_trend.py` | GB200: custom residual vs CPU LDL and cuSOLVER LU |
+| `bound_mutation.py` | the residual bound still catches a 30·eps perturbation |
+| `huge_probe.py` | per-phase time/memory of a `test_huge` case, cooperative grid sizes from a profiler trace |
+| `nan_argmax.py` | single NaN in the argmax vs grid size (TODO 10.2, not run yet) |
 
 **`cabs1`:** the reference implementation's `.abs()` is wrong for complex. LAPACK
 and the kernel both use `cabs1 = |re| + |im|`. With `.abs()` the reference
@@ -456,3 +462,115 @@ Things that cost real time and would cost it again:
   advance will spin forever on a regression).
 - **A background job and `pkill -f` share a process list with your own shell:**
   matching on a word that is in your own command line kills the shell.
+
+---
+
+## 10. TODO (next session)
+
+State at the end of the GB200 session:
+- **Committed:** `0bbcef0`. The full suite passes on it on GB200 (10928 tests, 52 min).
+- **Uncommitted:** the `n == 1` fix (10.1.2), the new `test_n1`, and the new
+  `test_nonfinite_imag_diagonal_is_ignored`.
+
+### 10.1 Bugs, in order
+
+1. **2x2 pivot forms `det(D)` directly. Confirmed, not fixed.**
+   - The panel kernel computes `det = D00·D11 − D01·D10` and divides by it.
+     Past ~sqrt(finfo.max) the product overflows; below ~sqrt(finfo.tiny) it
+     underflows.
+   - Overflow gives `x / inf = 0`: finite, plausible-looking garbage with
+     `info = 0`. Underflow gives the same, or `det == 0` and a false `info > 0`.
+   - Measured on `zero_diagonal`, n=64, against CPU LAPACK (residual ~1 at every
+     scale):
+
+     | dtype | wrong, info=0 | false info=1 |
+     |---|---|---|
+     | float64 | scale ≥ 1e153 (resid 8e13-1e15) and 1e-160 to 1e-162 (resid 4e9-2e13) | scale 1e-165 |
+     | float32 | scale ≥ 1e19 (resid 2e6) and 1e-21 (resid 10.8) | scale ≤ 1e-23 |
+
+   - Fix: LAPACK's scaled form (`zhetf2`/`zlahef`). With `d21 = A(k+1,k)`:
+     `d11 = A(k+1,k+1)/d21`, `d22 = A(k,k)/conj(d21)`, `t = 1/(d11·d22 − 1)`,
+     `d21 = t/d21`. No raw determinant is formed.
+   - Singularity: then test what LAPACK tests (`max(absakk, colmax) == 0`),
+     not `|det| == 0`.
+   - Test: `zero_diagonal` and `indefinite` at scales up to 1e±160 (f64) and
+     1e±21 (f32). Compare `info` with CPU and check the residual. The existing
+     `huge_scale`/`tiny_scale` (1e±30, 1e±15) are far inside the safe range,
+     which is why nothing caught this.
+   - Remember to refresh the standalone copy of the kernel.
+2. **`n == 1` ignored the Hermitian imaginary part. Fixed in the working tree;
+   rebuild and run `-k test_n1_`.**
+   - For `[[1j]]` CUDA returned `LD = 1j, info = 0`; CPU LAPACK and MAGMA return
+     `LD = 0, info = 1`.
+   - The fix zeroes `LD.imag()` in the shortcut. `test_n1` now expects LAPACK's
+     semantics and also runs on CPU as a cross-check.
+3. **Ignore `Im(diag)` at entry, for every n. Agreed, not applied yet.**
+   - Add `LD.diagonal(0, -2, -1).imag().zero_()` for complex Hermitian input,
+     before the `n == 1` shortcut, which then reduces to `pivots.fill_(1)` + `info`.
+   - Concern: an Inf/NaN in an ignored imaginary part could reach the real part
+     through `beta·C = (1+0i)·C` in the trailing GEMM (`0·inf = NaN`), unless
+     cuBLAS special-cases `beta == 1`.
+   - `test_nonfinite_imag_diagonal_is_ignored` was written to tell. Its run on the
+     build without the entry fix is pending: compare its result before and after.
+   - The realification inside the kernel (`update_rowcol`) stays either way: the
+     GEMM updates themselves leave rounding-level imaginary parts on the diagonal.
+
+### 10.2 Missing tests: non-finite input
+
+`test_nonfinite_input` only checks no crash, pivots in range and `0 <= info <= n`.
+`test_panel_nonfinite_column` only checks grid invariance for a full NaN/Inf column.
+Missing:
+
+- **Single NaN among finite candidates: grid dependence.** `AGGREGATE_ARGMAX`
+  never replaces a NaN once it holds one (`other > NaN` and `other == NaN` are
+  both false), so whether the NaN or the true maximum wins depends on the
+  reduction order. That would make the first pivot depend on the grid and break
+  the "bit-identical for every grid" invariant.
+  - LAPACK's `i?amax` skips NaN unless it is the first element.
+  - `agent_space/nan_argmax.py` checks this on the standalone copy (NaN at rows
+    1/300/2000/4099 of column 0, n=4100) but was **not run yet**.
+  - If confirmed, decide the semantics (match `i?amax`?) and make the reduction
+    order-independent.
+- **NaN propagation contract.** If the CPU result has a non-finite entry, the
+  CUDA one must too; never finite garbage from non-finite input.
+- **Positions not covered yet:**
+  - Only in the trailing block S, so the value arrives through the deferred GEMM
+    or the out-of-panel replay.
+  - On the diagonal: a NaN `a_kk` fails the alpha test.
+  - On the last diagonal entry (the last-column path).
+  - In the imaginary part of an off-diagonal only (cabs1 = |re| + |im|).
+  - `-inf`.
+  - `+inf` and `-inf` in one column (`inf − inf` in the updates).
+  - Inf as the chosen pivot: 1x1 gives `L = x/inf = 0`; 2x2 gives `det` = inf or
+    NaN (overlaps 10.1.1).
+- **`info` for non-finite input.** Assert it equals CPU's (expected 0: NaN and
+  Inf are not zero pivots), and that `check_errors=True` does not raise.
+- **Batched isolation.** A NaN in one batch element leaves the others bitwise
+  equal to factoring them alone. The mirror step now runs on the whole batch at
+  once.
+- **Non-finite junk in the ignored upper triangle.** Extend
+  `test_only_lower_triangle_is_read`, whose junk is finite today.
+- `ldl_solve` on CUDA (real dtypes) with a non-finite `LD` from the kernel: no
+  crash. Minor.
+
+### 10.3 Missing tests: other
+
+- **Subnormal input** (e.g. f32 entries ~1e-40). Compare with CPU in case
+  anything on the GPU path (cuBLAS GEMM?) flushes denormals.
+- **Near-overflow complex magnitude.** cabs1 = |re| + |im| overflows at about
+  finfo.max / 2. LAPACK uses the same cabs1, so compare with CPU rather than
+  expect success.
+- **Memory regression test.** Peak device memory of `ldl_factor_ex` must stay at
+  input + 2 copies (+ slack) for every dtype, single and batched. This guards
+  `conj_physical_()` and the scoped temporary (section 4). Measure after a
+  warm-up call: the first call allocates cuBLAS/cuSOLVER workspaces.
+- **Default backend.** Once dispatch is extended (section 5), run the suite
+  under the default backend too (parametrize `setUp`), and assert that `magma`
+  still reaches MAGMA.
+- **Residual factor.** On `integer_valued`, `test_cooperative_panel` n=8193 sits
+  at 1.33x LU against the 1.5 bound (section 7). Keep 1.5, or go to 2.0, which
+  still flags a 30·eps perturbation by 4-7x?
+- **Cooperative fallback (optional).** Force `cudaErrorCooperativeLaunchTooLarge`
+  with a few-SM green context. Needs `cuda.bindings` in the `kernel` env.
+- **Upstream, separate from this branch:** `check_errors=True` on singular input
+  hits an INTERNAL ASSERT (section 5). Report it.
