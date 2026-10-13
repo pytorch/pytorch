@@ -1219,6 +1219,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
     # ===== Cache internals: insertion order, fallback, shared bucket =====
 
     @torch._dynamo.config.patch(recompile_limit=2, automatic_dynamic_shapes=False)
+    @torch._dynamo.testing.lru_cache_reordering(True)
     def test_isolate_recompiles_insertion_order_per_region(self):
         """New entries are added at the front of their region's list.
         Interleaved compilations across regions don't mix ordering.
@@ -1268,6 +1269,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(_get_cache_entries_for_region(f, id_b)), 2)
 
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    @torch._dynamo.testing.lru_cache_reordering(True)
     def test_isolate_recompiles_lru_move_to_front(self):
         """On a cache hit, the matched entry moves to the front of its
         region's list (LRU). Verify by inspecting compile_id ordering

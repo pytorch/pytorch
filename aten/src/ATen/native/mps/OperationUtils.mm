@@ -381,8 +381,7 @@ static void check_mps_shape(MPSShape* shape) {
 }
 
 bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI, bool checkLinearOffset) {
-  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
-  if ((!tensor.is_contiguous() || tensor.storage_offset()) && useMPSStridedAPI && is_macOS_15_0_or_newer) {
+  if ((!tensor.is_contiguous() || tensor.storage_offset()) && useMPSStridedAPI) {
     auto storage_numel = tensor.storage().nbytes() / tensor.element_size() - tensor.storage_offset();
     if (storage_numel > std::numeric_limits<int32_t>::max()) {
       return true;
@@ -487,10 +486,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   // extract the pointer to MTLBuffer from the Tensor's storage
   id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
 
-  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
-  // Use gather kernel to solve strides for macOS < 15.0
-  // Starting with macOS 15.0, MPS supports native strides directly in the kernels
-  if (!is_macOS_15_0_or_newer || !useMPSStridedAPI) {
+  if (!useMPSStridedAPI) {
     if ((!src.is_contiguous() || src.storage_offset()) && gatherTensorData) {
       // Materialize the view; "_tensor" retains it for as long as other ops use it. Carrying src's
       // conj/neg bits over makes the copy a plain restride, so the bits stay lazy for the ops below
@@ -515,7 +511,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
 
   // Tensor is contiguous and has no storage offset.
   // Wrap it directly inside MPSGraphTensorData
-  if ((_tensor.is_contiguous() && !_tensor.storage_offset()) || !useMPSStridedAPI || !is_macOS_15_0_or_newer) {
+  if ((_tensor.is_contiguous() && !_tensor.storage_offset()) || !useMPSStridedAPI) {
     auto shape = mpsShape_ ? mpsShape_ : getMPSShape(_tensor);
     check_mps_shape(shape);
     if (!_tensor.storage_offset()) {
@@ -838,15 +834,9 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   if (!options) {
     options = [[MTLCompileOptions new] autorelease];
     [options setLanguageVersion:static_cast<MTLLanguageVersion>(metal_language_version())];
-    if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
-      options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
-      options.mathFloatingPointFunctions =
-          fast_math ? MTLMathFloatingPointFunctionsFast : MTLMathFloatingPointFunctionsPrecise;
-    } else {
-      C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
-      [options setFastMathEnabled:fast_math ? YES : NO];
-      C10_DIAGNOSTIC_POP()
-    }
+    options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
+    options.mathFloatingPointFunctions =
+        fast_math ? MTLMathFloatingPointFunctionsFast : MTLMathFloatingPointFunctionsPrecise;
   }
 
   const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
@@ -1060,9 +1050,8 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
   // Prefer the ILP inner_contiguous kernel over the per-element strided one once
   // the contiguous inner run amortizes the per-run outer-offset calc.
-  bool inner_contiguous =
-      !is_contiguous && !alpha.has_value() && iter.shape()[0] >= INNER_CONTIGUOUS_MIN_EXTENT && isInnerContiguous(iter);
-  if (!is_contiguous && !alpha.has_value() && force_flavor) {
+  bool inner_contiguous = !is_contiguous && iter.shape()[0] >= INNER_CONTIGUOUS_MIN_EXTENT && isInnerContiguous(iter);
+  if (!is_contiguous && force_flavor) {
     if (*force_flavor == "strided")
       inner_contiguous = false;
     else if (*force_flavor == "inner_contiguous")
@@ -1183,7 +1172,11 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
           mtl_dispatch2DJob(computeEncoder, cplState, (static_cast<NSUInteger>(inner_bytes) + 15) / 16, outer);
         } else {
           const std::array<uint32_t, 2> packed = {static_cast<uint32_t>(iter.ndim() - 1), inner};
-          mtl_setBytes(computeEncoder, packed, bindInnerContiguousOuter(computeEncoder, iter, 2, {1, 0}));
+          const auto packed_idx = bindInnerContiguousOuter(computeEncoder, iter, 2, {1, 0});
+          mtl_setBytes(computeEncoder, packed, packed_idx);
+          if (alpha) {
+            mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), packed_idx + 1);
+          }
           const auto inner_tiles =
               (static_cast<NSUInteger>(inner) + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD;
           mtl_dispatch2DJob(computeEncoder, cplState, inner_tiles, outer);
