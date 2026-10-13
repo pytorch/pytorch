@@ -692,6 +692,8 @@ class BaseListVariable(VariableTracker):
         saved = list(self.items)
         self.items.clear()
 
+        from .builder import SourcelessBuilder
+
         class _TracedKey:
             # Compares through Dynamo so user-defined __lt__ (e.g. from
             # functools.cmp_to_key) is traced like CPython's timsort,
@@ -700,10 +702,9 @@ class BaseListVariable(VariableTracker):
                 self.key = key
 
             def __lt__(self, other: "_TracedKey") -> bool:
-                # Internal comparison semantics must ignore trace-rule overrides.
-                result = variables.BuiltinVariable(operator.lt).call_function(
-                    tx, [self.key, other.key], {}
-                )
+                result = SourcelessBuilder.create_internal_builtin(
+                    operator.lt
+                ).call_function(tx, [self.key, other.key], {})
                 if not result.is_python_constant():
                     unimplemented(
                         gb_type="sort with non-constant keys",
