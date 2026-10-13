@@ -1,8 +1,12 @@
 #include <c10/core/impl/COW.h>
 
 #include <c10/core/Allocator.h>
+#include <c10/core/DeviceGuard.h>
+#include <c10/core/Event.h>
 #include <c10/core/StorageImpl.h>
+#include <c10/core/StreamGuard.h>
 #include <c10/core/impl/COWDeleter.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ParallelGuard.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -27,6 +31,64 @@ at::DataPtr copy_data_ptr(at::DataPtr const& data_ptr) {
   TORCH_INTERNAL_ASSERT(ctx != nullptr);
   ctx->increment_refcount();
   return make_data_ptr(data_ptr, *ctx);
+}
+
+// Whether copy-on-write data is read and copied by work enqueued on streams.
+// See "Stream-ordered devices" in README-cow.md. (Empty storages have no data
+// to read.)
+bool is_stream_ordered(const DataPtr& data_ptr) {
+  return data_ptr.device().is_cuda() && data_ptr.get() != nullptr;
+}
+
+bool same_stream(
+    const DeviceGuardImplInterface* impl,
+    const Stream& a,
+    const Stream& b) {
+  return impl->getStreamNativeHandle(a) == impl->getStreamNativeHandle(b);
+}
+
+// Returns the stream on which the stream-ordered data of `storage` can be
+// shared, or nullopt if a lazy clone must copy it eagerly instead.
+std::optional<Stream> sharing_stream(const StorageImpl& storage, bool simple) {
+  const DataPtr& data_ptr = storage.data_ptr();
+  const auto* impl = getDeviceGuardImpl(data_ptr.device().type());
+  const Stream current = impl->getStream(data_ptr.device());
+  // Materializing during capture is not supported, so a lazy clone made
+  // during capture could never be written.
+  if (impl->isStreamCapturing(current)) {
+    return std::nullopt;
+  }
+  if (simple) {
+    const auto info = storage.allocator() == nullptr
+        ? std::nullopt
+        : storage.allocator()->allocation_stream_info(data_ptr.get());
+    // Graph replays write private pool memory behind our back.
+    if (!info || info->private_pool ||
+        !same_stream(impl, info->stream, current)) {
+      return std::nullopt;
+    }
+  } else {
+    const auto* ctx = data_ptr.cast_context<COWDeleterContext>(cow_deleter);
+    if (!same_stream(impl, *ctx->stream(), current)) {
+      return std::nullopt;
+    }
+  }
+  return current;
+}
+
+c10::intrusive_ptr<StorageImpl> eager_clone(StorageImpl& storage) {
+  // Storages of external data may not have an allocator.
+  Allocator* allocator = storage.allocator() != nullptr
+      ? storage.allocator()
+      : GetAllocator(storage.device_type());
+  c10::DeviceGuard guard(storage.device());
+  return make_storage_impl(
+      StorageImpl::use_byte_size_t(),
+      storage.sym_nbytes(),
+      allocator->clone(storage.data_ptr().get(), storage.nbytes()),
+      allocator,
+      storage.resizable(),
+      storage.device_type());
 }
 
 } // namespace
@@ -75,30 +137,46 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
   //    context. This is not supported, so we just return null.
   //
   //    No locking is required in this case.
+  //
+  // On stream-ordered devices, we instead clone eagerly whenever the data
+  // cannot be shared safely; see "Stream-ordered devices" in README-cow.md.
+
+  const bool simple = has_simple_data_ptr(storage);
+  if (!simple && !is_cow_data_ptr(data_ptr)) {
+    // Case 3)
+    return nullptr;
+  }
+
+  std::optional<Stream> stream;
+  if (is_stream_ordered(data_ptr)) {
+    if (storage.cow_materialized_from() != nullptr) {
+      return eager_clone(storage);
+    }
+    stream = sharing_stream(storage, simple);
+    if (!stream) {
+      return eager_clone(storage);
+    }
+  }
 
   std::optional<DataPtr> new_data_ptr; // must be set below
 
-  if (has_simple_data_ptr(storage)) {
+  if (simple) {
     // Case 1) We have a simple data pointer: wrap it.
     std::unique_ptr<void, DeleterFnPtr> original_ctx =
         storage._mutable_data_ptr_no_checks().move_context();
 
     // Save this for the result.
     new_data_ptr = make_data_ptr(
-        data_ptr, *new cow::COWDeleterContext(std::move(original_ctx)));
+        data_ptr, *new cow::COWDeleterContext(std::move(original_ctx), stream));
 
     // Update this storage to the new copy on write context.
     storage.set_data_ptr_noswap(copy_data_ptr(*new_data_ptr));
     storage.set_materializer(&materialize_cow);
-  } else if (is_cow_data_ptr(data_ptr)) {
+  } else {
     // Case 2): there is already a copy on write context. Just return a
     // new storage impl.
     TORCH_INTERNAL_ASSERT(storage.has_materializer());
     new_data_ptr = copy_data_ptr(data_ptr);
-  } else {
-    // Case 3) There is a context and it's not copy-on-write. Nothing
-    // we can do here.
-    return nullptr;
   }
 
   TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
@@ -122,6 +200,39 @@ void materialize_cow(StorageImpl* storage) {
 
   auto* ctx = data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);
   TORCH_INTERNAL_ASSERT(ctx != nullptr);
+
+  if (const auto& stream = ctx->stream()) {
+    // Stream-ordered data may still be read by work that was enqueued through
+    // any reference to it, including references which have since been
+    // freed. So we can neither steal it nor free it yet. Copy it on the
+    // current stream into an allocation on the allocation stream, which the
+    // storage's users synchronize with before freeing it, and keep our
+    // reference to the data until then.
+    c10::DeviceGuard device_guard(data_ptr.device());
+    const auto* impl = getDeviceGuardImpl(data_ptr.device().type());
+    const Stream current = impl->getStream(data_ptr.device());
+    TORCH_CHECK(
+        !impl->isStreamCapturing(current) && !impl->isStreamCapturing(*stream),
+        "Cannot write to a lazily cloned tensor during CUDA graph capture "
+        "when it was cloned outside of the capture. Use clone() instead of "
+        "_lazy_clone(), or write to it before capture.");
+    DataPtr copy;
+    {
+      c10::StreamGuard stream_guard(*stream);
+      copy = storage->allocator()->allocate(storage->nbytes());
+    }
+    if (!same_stream(impl, current, *stream)) {
+      // The allocation is only ready for use on the allocation stream.
+      c10::Event ready(data_ptr.device().type());
+      ready.record(*stream);
+      ready.block(current);
+    }
+    storage->allocator()->copy_data(
+        copy.mutable_get(), data_ptr.get(), storage->nbytes());
+    storage->get_extra_meta().cow_materialized_from_ =
+        storage->set_data_ptr_no_materialize(std::move(copy));
+    return;
+  }
 
   auto result = ctx->decrement_refcount();
 

@@ -2058,7 +2058,7 @@ class TestCompositeCompliance(TestCase):
                 else f"Keyword argument '{idx_or_kw}'"
             ) + f" during {backward_or_forward} call"
 
-            if is_strided_tensor(arg):
+            if is_strided_tensor(arg) and id(arg) in lazily_cloned:
                 self.assertTrue(
                     torch._C._is_cow_tensor(arg_raw),
                     msg=(
@@ -2102,6 +2102,29 @@ class TestCompositeCompliance(TestCase):
                         ),
                     )
 
+        lazily_cloned = set()
+        # Lazy clones can be eager on CUDA when the input was already lazily
+        # cloned and then written to, e.g. by the sample input generator.
+        # Keep the inputs alive so that their storage addresses stay unique.
+        inputs_lazily_cloned = []
+
+        def lazy_clone(arg):
+            result = torch._lazy_clone(arg)
+            if torch._C._is_cow_tensor(result):
+                lazily_cloned.add(id(result))
+            else:
+                self.assertTrue(
+                    arg.device.type == "cuda"
+                    and any(
+                        torch._C._storage_address(arg)
+                        == torch._C._storage_address(prev)
+                        for prev in inputs_lazily_cloned
+                    ),
+                    msg="lazy clone was unexpectedly not COW",
+                )
+            inputs_lazily_cloned.append(arg)
+            return result
+
         for sample in samples:
             args_raw = [sample.input] + list(sample.args)
             kwargs_raw = sample.kwargs
@@ -2109,13 +2132,14 @@ class TestCompositeCompliance(TestCase):
             args = []
             kwargs_copy = {}
             kwargs = {}
+            lazily_cloned.clear()
 
             # Convert strided tensor inputs to COW tensors and make copies of
             # all inputs
             for arg in args_raw:
                 if is_strided_tensor(arg):
                     args_copy.append(arg.detach().clone())
-                    args.append(torch._lazy_clone(arg))
+                    args.append(lazy_clone(arg))
                 else:
                     if torch.is_tensor(arg):
                         args_copy.append(arg.detach().clone())
@@ -2126,7 +2150,7 @@ class TestCompositeCompliance(TestCase):
             for kw, arg in kwargs_raw.items():
                 if is_strided_tensor(arg):
                     kwargs_copy[kw] = arg.detach().clone()
-                    kwargs[kw] = torch._lazy_clone(arg)
+                    kwargs[kw] = lazy_clone(arg)
                 else:
                     if torch.is_tensor(arg):
                         kwargs_copy[kw] = arg.detach().clone()
@@ -2179,7 +2203,7 @@ class TestCompositeCompliance(TestCase):
                     # Convert output grads to COW tensors and make copies
                     for output_grad in output_grads_raw:
                         output_grads_copy.append(output_grad.detach().clone())
-                        output_grads.append(torch._lazy_clone(output_grad))
+                        output_grads.append(lazy_clone(output_grad))
 
                     torch.autograd.grad(
                         results,

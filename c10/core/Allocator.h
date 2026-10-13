@@ -5,10 +5,12 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/Stream.h>
 #include <c10/core/alignment.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
@@ -20,6 +22,15 @@
 namespace c10 {
 
 using CaptureId_t = unsigned long long;
+
+// Stream ordering of an allocation; see Allocator::allocation_stream_info.
+struct AllocationStreamInfo {
+  // The stream whose work the allocator orders reuse of the memory after.
+  Stream stream;
+  // Whether the allocation comes from a private pool (e.g. a CUDA graph's).
+  bool private_pool;
+};
+
 // first is set if the instance is created by CUDAGraph::capture_begin.
 // second is set if the instance is created by at::cuda::graph_pool_handle.
 using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
@@ -222,8 +233,19 @@ struct C10_API Allocator {
   //
   // Requires: src and dest were allocated by this allocator
   // Requires: src and dest both have length >= count
+  //
+  // Allocators for stream-ordered devices (e.g. CUDA) enqueue the copy on the
+  // current stream, which also makes it part of an ongoing graph capture.
   virtual void copy_data(void* dest, const void* src, std::size_t count)
       const = 0;
+
+  // Returns the stream ordering of an allocation made by this allocator, or
+  // nullopt if unknown. Lazy clones of allocations without this information
+  // on stream-ordered devices are copied eagerly.
+  virtual std::optional<AllocationStreamInfo> allocation_stream_info(
+      const void* /*ptr*/) const {
+    return std::nullopt;
+  }
 
  protected:
   // Uses `std::memcpy` to copy data.

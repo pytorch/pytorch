@@ -1,6 +1,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <c10/core/RingBuffer.h>
+#include <c10/core/impl/COW.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
@@ -5352,10 +5353,17 @@ class NativeCachingAllocator : public CUDAAllocator {
     // we have implemented reference counting based sharing mechanism to
     // guarantee tensors won't be accidentally freed by one process while
     // they are still being used in another
-    if (ptr.get_deleter() != &local_raw_delete)
+    //
+    // A copy-on-write DataPtr shares the data of another DataPtr, which may
+    // have come from this instance.
+    const bool is_cow = c10::impl::cow::is_cow_data_ptr(ptr);
+    if (ptr.get_deleter() != &local_raw_delete && !is_cow)
       return;
 
     Block* block = get_allocated_block(ptr.get());
+    if (is_cow && block == nullptr) {
+      return;
+    }
     // block must not be null reaching here
     TORCH_INTERNAL_ASSERT(block != nullptr, "No allocated block can be found");
     device_allocator[block->device]->recordStream(block, stream);
@@ -5808,8 +5816,24 @@ class NativeCachingAllocator : public CUDAAllocator {
     return "native";
   }
   void copy_data(void* dest, const void* src, std::size_t count) const final {
-    C10_CUDA_CHECK(
-        cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
+    C10_CUDA_CHECK(cudaMemcpyAsync(
+        dest,
+        src,
+        count,
+        cudaMemcpyDeviceToDevice,
+        cuda::getCurrentCUDAStream()));
+  }
+
+  std::optional<AllocationStreamInfo> allocation_stream_info(
+      const void* ptr) const override {
+    Block* block =
+        const_cast<NativeCachingAllocator*>(this)->get_allocated_block(ptr);
+    if (!block) {
+      return std::nullopt;
+    }
+    return AllocationStreamInfo{
+        cuda::getStreamFromExternal(block->stream, block->device),
+        block->pool->owner_PrivatePool != nullptr};
   }
 };
 

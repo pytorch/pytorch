@@ -19,10 +19,14 @@ namespace c10 {
 C10_API void warnDeprecatedDataPtr();
 
 // Used in StorageImpl to store extra metadata.
-// Currently used only for storing a custom error message
-// used when throwing an exception when data_ptr is accessed.
 struct C10_API StorageExtraMeta {
+  // A custom error message used when throwing an exception when data_ptr is
+  // accessed.
   std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
+  // The copy-on-write DataPtr a stream-ordered storage was materialized from.
+  // Work enqueued before materialization may still read it, so it is kept
+  // until the storage is freed. See README-cow.md.
+  DataPtr cow_materialized_from_;
 };
 
 namespace impl::cow {
@@ -98,6 +102,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   void reset() {
     data_ptr_.clear();
+    clear_cow_materialized_from();
     size_bytes_ = 0;
     size_bytes_is_heap_allocated_ = false;
   }
@@ -106,6 +111,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // unnecessary; don't forget to change that if needed!
   void release_resources() override {
     data_ptr_.clear();
+    clear_cow_materialized_from();
   }
 
   void incref_pyobject() const noexcept final;
@@ -297,6 +303,13 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return &pyobj_slot_;
   }
 
+  // See StorageExtraMeta::cow_materialized_from_.
+  const DataPtr* cow_materialized_from() const {
+    return extra_meta_ && extra_meta_->cow_materialized_from_
+        ? &extra_meta_->cow_materialized_from_
+        : nullptr;
+  }
+
   StorageExtraMeta& get_extra_meta() {
     if (!extra_meta_) {
       extra_meta_ = std::make_unique<StorageExtraMeta>();
@@ -375,6 +388,12 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
  private:
+  void clear_cow_materialized_from() {
+    if (extra_meta_) {
+      extra_meta_->cow_materialized_from_.clear();
+    }
+  }
+
   void refresh_has_data_ptr_check() {
     has_mutable_data_ptr_check_ = (materialize_fn_ != nullptr) ||
         throw_on_mutable_data_ptr_ || warn_deprecated_on_mutable_data_ptr_ ||

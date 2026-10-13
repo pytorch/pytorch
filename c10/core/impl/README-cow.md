@@ -65,3 +65,63 @@ We implement this by taking a shared lock when copying the data and
 taking an exclusive lock when stealing the data. The exclusive lock
 acquisition ensures that all pending shared locks are finished before
 we steal the data.
+
+Stream-ordered devices
+----------------------
+On devices like CUDA, reads of a tensor are enqueued on streams and run
+asynchronously, and the host-side refcount of a copy-on-write context
+says nothing about whether they have finished. We want a lazy clone to
+be safe to use under the same synchronization a user would need for an
+ordinary clone made on the current stream. Two things could break
+that:
+
+1) Stealing the data into a write. The last reference to materialize
+   would normally take the data without copying it. But another
+   reference, even one that has been freed, may have reads of the data
+   pending on some other stream; a user of an ordinary clone would not
+   have ordered those with writes to a different tensor. (Recording a
+   stream for a freed tensor only defers the reuse of its memory; it
+   does not order other writes to it.)
+
+2) Freeing the data too early. When a reference materializes, it
+   copies the data and drops its reference to it. If that was the last
+   reference, the data is freed while reads enqueued through the
+   materialized reference may still be pending. The user only promised
+   to synchronize those reads before freeing that tensor, not before
+   writing to it.
+
+So on stream-ordered devices we never steal: materialization always
+copies, on the current stream, into a new allocation. The materialized
+storage keeps its reference to the shared data until the storage itself
+is freed (`StorageExtraMeta::cow_materialized_from_`). A lazy clone of
+such a storage copies eagerly instead of creating another
+copy-on-write context.
+
+Synchronizing with the lifetime of a tensor means synchronizing with
+the stream it was allocated on: the caching allocator orders reuse of
+its memory after the work on that stream. For the shared data to obey
+the same rule, every reference to it must have the same allocation
+stream. So lazy clones are only made on the stream the data was
+allocated on, and the copy made by materialization is allocated on that
+stream as well; otherwise, the lazy clone copies eagerly.
+
+Lazy clones also copy eagerly when the allocator cannot tell us the
+allocation stream, when the data is in a private memory pool (such as a
+CUDA graph's, which graph replays write to), and during CUDA graph
+capture. Materializing during capture is an error: the copy would be
+replayed with every replay of the graph.
+
+CUDA graphs can also read and write memory outside their private pool,
+like graph inputs, without us knowing. A lazy clone of such memory made
+after capture changes when a replay writes the memory, and a replay
+keeps reading the old address of a graph input which later materializes
+after being lazily cloned. Callers must not lazily clone memory that
+graphs use. Freeing shared data whose allocation stream is being
+captured is not supported either.
+
+`record_stream()` on a lazy clone records the stream for the shared
+data, so it is honored when the shared data is freed. On a materialized
+storage, it also records the stream for the data it was materialized
+from, which uses enqueued before materialization read. (Code which
+records streams with the caching allocator directly, at the time of
+use, records them for the data that use reads.)
