@@ -38,8 +38,6 @@ set(EigenBlas_SRCS
   ${EIGEN_BLAS_SRC_DIR}/f2c/stbmv.c
   ${EIGEN_BLAS_SRC_DIR}/f2c/ctbmv.c
   ${EIGEN_BLAS_SRC_DIR}/f2c/ztbmv.c
-  ${EIGEN_BLAS_SRC_DIR}/f2c/d_cnjg.c
-  ${EIGEN_BLAS_SRC_DIR}/f2c/r_cnjg.c
   ${EIGEN_BLAS_SRC_DIR}/f2c/complexdots.c
 )
 
