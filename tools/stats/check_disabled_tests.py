@@ -92,13 +92,16 @@ def process_report(
         # do not count it as a pass. A bypassed test that then passes or fails
         # is not a JUnit skip. record_property("code_skip", reason) shows up
         # as a <property> on that case: keep the reason and still count it.
+        # <skipped/> has no attributes, so process_xml_element returns {}.
+        # That dict is false. Presence, not truthiness, means the test skipped.
+        skipped_present = "skipped" in parsed_test_case
         skipped = parsed_test_case.get("skipped", None)
 
         # NB: Regular ONNX tests could return a list of subskips here where each item in the
         # list is a skipped message.  In the context of rerunning disabled tests, we could
         # ignore this case as returning a list of subskips only happens when tests are run
         # normally
-        if skipped and type(skipped) is list:
+        if skipped_present and type(skipped) is list:
             continue
 
         name = parsed_test_case.get("name", "")
@@ -109,18 +112,35 @@ def process_report(
             continue
 
         disabled_test_id = SEPARATOR.join([name, classname, filename])
+
+        skip_message = ""
+        if isinstance(skipped, dict):
+            raw_message = skipped.get("message", "")
+            if not isinstance(raw_message, str):
+                raw_message = str(raw_message)
+            skip_message = raw_message
+        # Accounting skips embed num_red. Any other skip is a code skip.
+        # An empty message, including <skipped/>, is not a pass and is not
+        # recorded: a 0/0 row in rerun_disabled_tests is flaky and blocks
+        # the closer. A real reason is stored here and uploaded only to
+        # rerun_disabled_code_skips.
+        if skipped_present and "num_red" not in skip_message:
+            text = skip_message.strip()
+            if not text:
+                continue
+            if disabled_test_id not in all_tests:
+                all_tests[disabled_test_id] = {
+                    "num_green": 0,
+                    "num_red": 0,
+                }
+            _merge_code_skip(all_tests[disabled_test_id], text)
+            continue
+
         if disabled_test_id not in all_tests:
             all_tests[disabled_test_id] = {
                 "num_green": 0,
                 "num_red": 0,
             }
-
-        skip_message = ""
-        if isinstance(skipped, dict):
-            skip_message = skipped.get("message", "")
-        if skipped and "num_red" not in skip_message:
-            _merge_code_skip(all_tests[disabled_test_id], skip_message)
-            continue
 
         # Check if the test is a failure
         failure = parsed_test_case.get("failure", None)

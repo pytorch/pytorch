@@ -517,12 +517,12 @@ def _code_raises_skiptest(code: Any) -> bool:
 
 
 def _is_skiptest_wrapper(fn: Any) -> bool:
-    # Device helpers raise SkipTest and often leave __unittest_skip_why__ unset.
-    # The original test body is not a functools wrap, so peeling stops on it.
+    # A skip wrapper raises SkipTest and wraps the next function. The body
+    # does neither, so peeling stops there. __unittest_skip__ is not enough:
+    # functools.wraps copies that flag from unittest.skip onto
+    # instantiated_test, which passes device and dtype and does not raise.
     if fn is None:
         return False
-    if getattr(fn, "__unittest_skip__", False):
-        return True
     code = getattr(fn, "__code__", None)
     if code is None or "SkipTest" not in getattr(code, "co_names", ()):
         return False
