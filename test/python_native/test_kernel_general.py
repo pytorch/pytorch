@@ -221,8 +221,6 @@ class TestKernelGeneral(TestCase):
             for i, line in enumerate(path.read_text().splitlines(), 1)
             if "noqa: S101" in line
         ]
-        # inner_tree_kernel.py is the reference implementation's, not this stack's.
-        offenders = [o for o in offenders if not o.startswith("inner_tree_kernel.py")]
         self.assertEqual(offenders, [])
 
 
