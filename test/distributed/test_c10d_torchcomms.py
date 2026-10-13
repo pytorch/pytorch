@@ -257,7 +257,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
     def test_new_group_bare_default_backend_is_auto_qualified(self, device):
-        backend = self.backend(torch.device(device).type)
+        backend = self.backend(self.device_type)
         ranks = list(range(self.world_size))
         ng = dist.new_group(ranks=ranks, backend=backend)
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
@@ -265,11 +265,9 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
     def test_new_group_qualified_backend_passes_through(self, device):
-        backend = self.backend(torch.device(device).type)
+        backend = self.backend(self.device_type)
         ranks = list(range(self.world_size))
-        ng = dist.new_group(
-            ranks=ranks, backend=f"{torch.device(device).type}:{backend}"
-        )
+        ng = dist.new_group(ranks=ranks, backend=f"{self.device_type}:{backend}")
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
@@ -367,7 +365,7 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
 
     def test_default_pg_has_cuda_backend(self, device):
         default_pg = dist.distributed_c10d._get_default_group()
-        cuda_be = default_pg._get_backend(torch.device(torch.device(device).type))
+        cuda_be = default_pg._get_backend(torch.device(device))
         self.assertIsNotNone(cuda_be)
 
     def test_allreduce_on_auto_qualified_pg(self, device):
@@ -385,7 +383,7 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
     def test_bound_device_id_is_set(self, device):
         default_pg = dist.distributed_c10d._get_default_group()
         self.assertIsNotNone(default_pg.bound_device_id)
-        self.assertEqual(default_pg.bound_device_id.type, torch.device(device).type)
+        self.assertEqual(default_pg.bound_device_id.type, self.device_type)
 
     def test_monitored_barrier_on_multi_backend_group(self, device):
         # A device-bound world reports a multi-backend string from get_backend
@@ -414,7 +412,9 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
 
         name = "tc_gate_stub"
         if name not in dist.Backend.backend_list:
-            dist.Backend.register_backend(name, _creator, devices=["cpu", "cuda"])
+            dist.Backend.register_backend(
+                name, _creator, devices=["cpu", self.device_type]
+            )
 
         ranks = list(range(self.world_size))
         g = dist.new_group(ranks=ranks, backend=name)
@@ -586,33 +586,33 @@ class TestTorchCommsHandlesBackend(TestCase):
             create=True,
         )
 
-    def test_unavailable_returns_false(self, device):
+    def test_unavailable_returns_false(self):
         with self._patch(available=False, built=["nccl"]):
             self.assertFalse(c10d._torchcomms_handles_backend("nccl"))
             self.assertFalse(c10d._torchcomms_handles_backend(None))
 
-    def test_none_backend_inherits_parent(self, device):
+    def test_none_backend_inherits_parent(self):
         with self._patch(built=[]):
             self.assertTrue(c10d._torchcomms_handles_backend(None))
 
-    def test_builtin_backend(self, device):
+    def test_builtin_backend(self):
         with self._patch(built=["nccl"]):
             self.assertTrue(c10d._torchcomms_handles_backend("nccl"))
 
-    def test_registered_backend(self, device):
+    def test_registered_backend(self):
         with self._patch(registered=["myadapter"]):
             self.assertTrue(c10d._torchcomms_handles_backend("myadapter"))
 
-    def test_custom_backend_falls_through(self, device):
+    def test_custom_backend_falls_through(self):
         with self._patch(built=["nccl"]):
             self.assertFalse(c10d._torchcomms_handles_backend("mooncake"))
             self.assertFalse(c10d._torchcomms_handles_backend("ucc"))
 
-    def test_case_insensitive(self, device):
+    def test_case_insensitive(self):
         with self._patch(built=["nccl"]):
             self.assertTrue(c10d._torchcomms_handles_backend("NCCL"))
 
-    def test_nccl_lazy_is_own_backend(self, device):
+    def test_nccl_lazy_is_own_backend(self):
         # nccl-lazy is a distinct built torchcomms backend, not aliased to nccl:
         # it is handled iff nccl-lazy itself is built/registered.
         with self._patch(built=["nccl-lazy"]):
@@ -622,15 +622,15 @@ class TestTorchCommsHandlesBackend(TestCase):
         with self._patch(built=[]):
             self.assertFalse(c10d._torchcomms_handles_backend("nccl-lazy"))
 
-    def test_qualified_all_handled(self, device):
+    def test_qualified_all_handled(self):
         with self._patch(built=["gloo", "nccl"]):
             self.assertTrue(c10d._torchcomms_handles_backend("cpu:gloo,cuda:nccl"))
 
-    def test_qualified_one_unhandled_falls_through(self, device):
+    def test_qualified_one_unhandled_falls_through(self):
         with self._patch(built=["gloo"]):
             self.assertFalse(c10d._torchcomms_handles_backend("cpu:gloo,cuda:mooncake"))
 
-    def test_empty_parts_are_skipped(self, device):
+    def test_empty_parts_are_skipped(self):
         with self._patch(built=["nccl"]):
             self.assertTrue(c10d._torchcomms_handles_backend("nccl,"))
             self.assertTrue(c10d._torchcomms_handles_backend(" nccl , "))
@@ -729,7 +729,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         )
         self.assertEqual(cap["device"], torch.device("cuda"))
 
-    def test_torchcomm_rank_size_seeded_from_group(self, device):
+    def test_torchcomm_rank_size_seeded_from_group(self):
         cap = self._drive_member(
             backend="nccl",
             device_id=torch.device("cuda:1"),
@@ -739,7 +739,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         self.assertEqual(cap["rank_env"], "2")
         self.assertEqual(cap["size_env"], "7")
 
-    def test_torchcomm_rank_size_restored_after_call(self, device):
+    def test_torchcomm_rank_size_restored_after_call(self):
         saved = {k: os.environ.get(k) for k in ("TORCHCOMM_RANK", "TORCHCOMM_SIZE")}
         try:
             for k in ("TORCHCOMM_RANK", "TORCHCOMM_SIZE"):
@@ -814,12 +814,12 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
             )
         return res, split_src
 
-    def test_non_member_skips_nocolor_split_under_torchcomms(self, device):
+    def test_non_member_skips_nocolor_split_under_torchcomms(self):
         res, split_src = self._drive_non_member(torchcomms_enabled=True)
         self.assertEqual(res, (dist.GroupMember.NON_GROUP_MEMBER, None))
         split_src.perform_nocolor_split.assert_not_called()
 
-    def test_non_member_performs_nocolor_split_without_torchcomms(self, device):
+    def test_non_member_performs_nocolor_split_without_torchcomms(self):
         # Contrast: with TorchComms disabled the NCCL-style path still requires
         # non-members to issue the no-color split to stay in sync.
         res, split_src = self._drive_non_member(torchcomms_enabled=False)
@@ -1093,7 +1093,7 @@ class TestC10dGroupNameHashSalt(TestCase):
         for i in range(n):
             c10d._world.pg_names[object()] = c10d.GroupName(f"dummy_{i}")
 
-    def test_hash_salt_uses_group_count(self, device):
+    def test_hash_salt_uses_group_count(self):
         # Same ranks, different group_count -> different name (salt is live).
         ranks = [0, 1, 2, 3]
         c10d._world.group_count = 5
@@ -1102,7 +1102,7 @@ class TestC10dGroupNameHashSalt(TestCase):
         name_b = c10d._hash_ranks_to_str(ranks)
         self.assertNotEqual(name_a, name_b)
 
-    def test_hash_independent_of_pg_names_length(self, device):
+    def test_hash_independent_of_pg_names_length(self):
         # ROOT-CAUSE regression: the hash must NOT depend on len(_world.pg_names),
         # the quantity that diverges across ranks under asymmetric membership.
         ranks = [0, 1, 2, 3]
@@ -1113,7 +1113,7 @@ class TestC10dGroupNameHashSalt(TestCase):
         name_many = c10d._hash_ranks_to_str(ranks)
         self.assertEqual(name_few, name_many)
 
-    def test_two_asymmetric_ranks_agree_on_name(self, device):
+    def test_two_asymmetric_ranks_agree_on_name(self):
         # The deadlock scenario end-to-end through _process_group_name: two ranks
         # that made the SAME sequence of group-creation calls (equal group_count)
         # but registered a DIFFERENT number of PGs must compute the same name.
@@ -1130,23 +1130,23 @@ class TestC10dGroupNameHashSalt(TestCase):
         name_non_member = c10d._process_group_name(ranks, use_hashed_name=True)
         self.assertEqual(name_member, name_non_member)
 
-    def test_process_group_name_increments_on_hashed_path(self, device):
+    def test_process_group_name_increments_on_hashed_path(self):
         c10d._world.group_count = 10
         c10d._process_group_name([0, 1], use_hashed_name=True)
         self.assertEqual(c10d._world.group_count, 11)
 
-    def test_process_group_name_increments_on_nonhashed_path(self, device):
+    def test_process_group_name_increments_on_nonhashed_path(self):
         c10d._world.group_count = 20
         c10d._process_group_name([0, 1], use_hashed_name=False)
         self.assertEqual(c10d._world.group_count, 21)
 
-    def test_nonhashed_name_is_group_count_before_increment(self, device):
+    def test_nonhashed_name_is_group_count_before_increment(self):
         c10d._world.group_count = 42
         name = c10d._process_group_name([0, 1], use_hashed_name=False)
         self.assertEqual(name, "42")
         self.assertEqual(c10d._world.group_count, 43)
 
-    def test_repeated_hashed_same_ranks_get_distinct_names(self, device):
+    def test_repeated_hashed_same_ranks_get_distinct_names(self):
         # Two distinct PGs over identical ranks must get distinct names; the salt
         # advancing on the hashed path (fixed by this commit) is what
         # disambiguates them. Before the fix the hashed path left group_count
@@ -1261,7 +1261,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
             c10d.destroy_process_group(pg)
         return pg
 
-    def test_shared_comm_finalized_once(self, device):
+    def test_shared_comm_finalized_once(self):
         # gloo scenario: one _BackendWrapper/comm shared across cuda and cpu.
         comm = _FakeComm()
         wrapper = _FakeBackendWrapper(comm)
@@ -1270,7 +1270,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         pg.shutdown.assert_called_once()
         self.assertNotIn(pg, c10d._world.pg_map)
 
-    def test_same_comm_distinct_wrappers_finalized_once(self, device):
+    def test_same_comm_distinct_wrappers_finalized_once(self):
         # Dedup keys on comm identity, not wrapper identity: two distinct
         # _BackendWrapper objects sharing one comm still finalize it once.
         comm = _FakeComm()
@@ -1280,7 +1280,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         self.assertEqual(comm.finalize_calls, 1)
         pg.shutdown.assert_called_once()
 
-    def test_distinct_comms_each_finalized_once(self, device):
+    def test_distinct_comms_each_finalized_once(self):
         comm_a, comm_b = _FakeComm(), _FakeComm()
         self._drive_destroy(
             {"cuda": _FakeBackendWrapper(comm_a), "cpu": _FakeBackendWrapper(comm_b)}
@@ -1288,7 +1288,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         self.assertEqual(comm_a.finalize_calls, 1)
         self.assertEqual(comm_b.finalize_calls, 1)
 
-    def test_non_backendwrapper_backend_is_skipped(self, device):
+    def test_non_backendwrapper_backend_is_skipped(self):
         # A non-_BackendWrapper backend must not be finalized; the wrapped comm
         # still finalizes exactly once.
         comm = _FakeComm()
@@ -1297,7 +1297,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         )
         self.assertEqual(comm.finalize_calls, 1)
 
-    def test_destroy_subgroup_keeps_other_live_comms_tracked(self, device):
+    def test_destroy_subgroup_keeps_other_live_comms_tracked(self):
         world_pg = self._register_pg({}, name="world_pg")
         comm_a, comm_b = _FakeComm(), _FakeComm()
         subgroup_a = self._register_pg(
@@ -1339,9 +1339,7 @@ instantiate_device_type_tests(
 class TestC10dTorchCommsBackendConfig(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    def test_registered_device_qualified_torchcomms_backend_uses_custom_type(
-        self, device
-    ):
+    def test_registered_device_qualified_torchcomms_backend_uses_custom_type(self):
         backend_name = "tc_test_backend"
         self.assertNotIn(backend_name, dist.Backend.backend_type_map)
 
@@ -1364,7 +1362,6 @@ class TestC10dTorchCommsBackendConfig(TestCase):
 
     def test_unregistered_device_qualified_backend_with_torchcomms_keeps_gloo_type(
         self,
-        device,
     ):
         backend_name = "tc_test_backend"
         self.assertNotIn(backend_name, dist.Backend.backend_type_map)
@@ -1388,7 +1385,6 @@ class TestC10dTorchCommsBackendConfig(TestCase):
 
     def test_registered_device_qualified_backend_without_torchcomms_keeps_gloo_type(
         self,
-        device,
     ):
         backend_name = "tc_test_backend"
         self.assertNotIn(backend_name, dist.Backend.backend_type_map)
