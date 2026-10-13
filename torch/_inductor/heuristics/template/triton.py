@@ -1456,6 +1456,14 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
         )
 
 
+def _flex_needs_small_blocks(capability: tuple[int, int], head_dim: int) -> bool:
+    # Triton miscompiles flex attention on sm_10x for head_dim > 256 when a
+    # block dim is >= 64 (fwd BLOCK_M; bwd BLOCK_N1/BLOCK_M2), faulting with
+    # "misaligned address" or "unspecified launch failure".
+    # https://github.com/triton-lang/triton/issues/10309
+    return capability[0] == 10 and head_dim > 256
+
+
 class CUDAConfigHeuristic(BaseConfigHeuristic):
     """
     Child class for CUDA device specific gemm/flex attention/conv/ configs.
@@ -1531,12 +1539,20 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         self, head_dim: int, seq_len: sympy.Expr, dtype: Any
     ) -> list[FlexConfig]:
         capability = torch.cuda.get_device_capability()
+        prune_large_blocks = _flex_needs_small_blocks(capability, head_dim)
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_fwd_configs
-            flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
+                flex_attn_fwd_configs = self.exhaustive_flex_attn_fwd_configs
+            else:
+                flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
+            if prune_large_blocks:
+                flex_attn_fwd_configs = [
+                    c for c in flex_attn_fwd_configs if c.block_m < 64
+                ]
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return flex_attn_fwd_configs
 
         if head_dim <= 256:
             if dtype == torch.float32:
@@ -1560,11 +1576,12 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = self.a100_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
+        elif dtype == torch.float32:
+            default_config = FlexConfig(32, 16, 3, 4)
+        elif prune_large_blocks:
+            default_config = FlexConfig(32, 32, 2, 4)
         else:
-            if dtype == torch.float32:
-                default_config = FlexConfig(32, 16, 3, 4)
-            else:
-                default_config = FlexConfig(64, 32, 3, 4)
+            default_config = FlexConfig(64, 32, 3, 4)
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
@@ -1578,8 +1595,17 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_bwd_configs
-            flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+                flex_attn_bwd_configs = self.exhaustive_flex_attn_bwd_configs
+            else:
+                flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+            if _flex_needs_small_blocks(capability, head_dim):
+                flex_attn_bwd_configs = [
+                    c
+                    for c in flex_attn_bwd_configs
+                    if max(c.block_m1, c.block_n1, c.block_m2, c.block_n2) < 64
+                ]
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return flex_attn_bwd_configs
 
         major, minor = capability
         if dtype == torch.float32:

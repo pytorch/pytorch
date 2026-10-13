@@ -4791,6 +4791,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(_rel_bias, dtype, device, B, H, S, head_dim, B, H, S, head_dim)
 
     @supported_platform
+    @skip_on_cpu
+    def test_head_dim_512_default_configs(self, device):
+        # https://github.com/triton-lang/triton/issues/10309
+        self.run_test(_identity, torch.bfloat16, device, B, H, S, 512)
+
+    @supported_platform
     def test_GQA_causal_mask(self, device):
         def mask_mod(b, h, q, kv):
             return q >= kv
