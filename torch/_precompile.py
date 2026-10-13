@@ -2738,7 +2738,7 @@ class PrecompiledModule(PrecompiledRunnable):
 
 
 def _make_inlined_forward(
-    python_code: str, *, warn: bool = True, allow_serve_time_compiles: bool = False
+    python_code: str, *, warn: bool = True
 ) -> Callable[..., object]:
     """Fallback: execute the self-contained python string (JITs kernels).
 
@@ -2759,9 +2759,6 @@ def _make_inlined_forward(
             "programming model], invariant 7)."
         )
     module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
-    if allow_serve_time_compiles:
-        # Read by _build_installed_forward while the exec below installs.
-        module_ns["_ALLOW_SERVE_TIME_COMPILES"] = True
     exec(compile(python_code, "<precompile>", "exec"), module_ns)
     return cast("Callable[..., object]", module_ns["forward"])
 
@@ -3036,11 +3033,7 @@ def _read_artifact(
 
 
 def _runnable_from_pair(
-    python_code: str,
-    cache: bytes,
-    *,
-    allow_serve_time_compiles: bool = False,
-    _trusted: bool = False,
+    python_code: str, cache: bytes, *, _trusted: bool = False
 ) -> PrecompiledRunnable:
     """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair.
 
@@ -3064,14 +3057,6 @@ def _runnable_from_pair(
     # TRACER is absent on make_fx artifacts predating the tag; the cache envelope
     # defaults the same way, so an older pair still matches.
     tracer = cast(str, meta.get("TRACER", "make_fx"))
-    installed = meta["SERVING_MODE"] == "installed"
-    if allow_serve_time_compiles and not installed:
-        raise PrecompileError(
-            "allow_serve_time_compiles=True applies only to an installed artifact "
-            '(SERVING_MODE = "installed"), which serves through Dynamo; this '
-            "artifact is standalone and has no compiler behind it. Load it without "
-            "the flag, or recapture to cover the calls it misses."
-        )
 
     # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes
     # are the inductor save_cache_artifacts bundle, used below to prime the kernel
@@ -3154,11 +3139,9 @@ def _runnable_from_pair(
     # input/model validation) and JITs the kernels -- which hit the primed cache when
     # the bundle above loaded, so the "cache" path is exec-with-warm-kernels rather than
     # a separate runtime.
-    forward = _make_inlined_forward(
-        python_code,
-        warn=not _trusted,
-        allow_serve_time_compiles=allow_serve_time_compiles,
-    )
+    forward = _make_inlined_forward(python_code, warn=not _trusted)
+
+    installed = meta["SERVING_MODE"] == "installed"
     return PrecompiledModule._from_loaded(forward, backend=backend, installed=installed)
 
 
@@ -3301,10 +3284,7 @@ def capture(
 
 
 def load(
-    artifact_path: str | os.PathLike[str],
-    cache_path: str | os.PathLike[str],
-    *,
-    allow_serve_time_compiles: bool = False,
+    artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
 ) -> PrecompiledRunnable:
     """Reconstruct a runnable from the two files a precompile capture wrote.
 
@@ -3356,14 +3336,6 @@ def load(
     frames after load adds live entries that serve the calls the installed
     ones miss.
 
-    ``allow_serve_time_compiles=True`` opts an installed artifact out of the
-    refusal: a call no captured variant covers compiles with the artifact's
-    backend, as ``torch.compile`` would, under the process-wide stance like any
-    other compile, and the compile records which guard each captured variant
-    failed as its recompile reason (``TORCH_LOGS="recompiles"``). The captured
-    variants are still served first. A standalone artifact has no compiler
-    behind it, so passing the flag for one raises ``PrecompileError``.
-
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
@@ -3374,6 +3346,4 @@ def load(
     """
     torch._C._log_api_usage_once("torch.compiler.precompile.load")
     python_code, cache = _read_artifact(artifact_path, cache_path)
-    return _runnable_from_pair(
-        python_code, cache, allow_serve_time_compiles=allow_serve_time_compiles
-    )
+    return _runnable_from_pair(python_code, cache)

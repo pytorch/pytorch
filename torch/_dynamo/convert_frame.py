@@ -40,7 +40,6 @@ import random  # noqa: F401 -- eval_frame_cpp.cpp imports random at runtime; tor
 import subprocess
 import sys
 import tempfile
-import textwrap
 import threading
 import time
 import traceback
@@ -106,7 +105,6 @@ from .code_context import code_context
 from .eval_frame import (
     _get_cache_entries_for_region,
     _get_total_cache_entry_count,
-    _precompile_no_match_message,
     add_skip_reason,
     always_optimize_code_objects,
     Constraint,
@@ -207,7 +205,6 @@ if typing.TYPE_CHECKING:
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
-recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 
 
 compile_lock = threading.RLock()
@@ -721,12 +718,7 @@ class ConvertFrameAssert:
                 ],
             )
 
-        # A package's resume functions need their guards recorded even when no
-        # tensor survives the graph break, or the artifact cannot tell which
-        # calls it covers.
-        if not has_tensor_in_frame(frame) and not (
-            self._package is not None and self._package.is_resume_code(code)
-        ):
+        if not has_tensor_in_frame(frame):
             return ConvertFrameReturn(
                 skip_reason="no tensor-related objects found in frame"
             )
@@ -1708,30 +1700,6 @@ def compile_frame(  # type: ignore[return]
             raise
 
 
-def _precompile_miss_reason(frame: DynamoFrameType) -> str | None:
-    """Why a frame with precompiled entries is being compiled anyway.
-
-    Precompiled entries are not this process's cache entries, so a call that
-    misses all of them is not counted as a recompilation and would otherwise
-    record no reason.
-    """
-    from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-
-    entries = _debug_get_precompile_entries(frame.f_code)
-    if not entries:
-        return None
-    message = _precompile_no_match_message(entries, frame.f_locals)
-    code = frame.f_code
-    recompiles_log.debug(
-        "Compiling function %s in %s:%d\n%s",
-        code.co_name,
-        code.co_filename,
-        code.co_firstlineno,
-        textwrap.indent(message, "    "),
-    )
-    return message
-
-
 def _compile(
     code: CodeType,
     globals: dict[str, object],
@@ -2054,9 +2022,7 @@ def _compile(
 
     metrics_context = get_metrics_context()
     package_code_context = (
-        package.code_context(code, globals)
-        if package is not None
-        else contextlib.nullcontext()
+        package.code_context(code) if package is not None else contextlib.nullcontext()
     )
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
@@ -2088,8 +2054,6 @@ def _compile(
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
-        elif frame:
-            recompile_reason = _precompile_miss_reason(frame)
         metrics_context.update_outer(
             {
                 "recompile_reason": recompile_reason,
