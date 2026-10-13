@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import contextlib
 import functools
 import gc
@@ -29,8 +30,10 @@ from torch._dynamo.package import (
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
+    load_guards_state,
 )
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.precompile_package import default_guard_filter_fn
 from torch._dynamo.symbolic_convert import _import_module
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
@@ -151,6 +154,9 @@ class _DescriptorCodeOwner:
 # global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
 PKG_DYN_ROWS = torch.randn(4, 3)
 torch._dynamo.mark_dynamic(PKG_DYN_ROWS, 0)
+
+# namedtuple builds __new__ with exec into a namespace no module owns.
+PkgRecord = collections.namedtuple("PkgRecord", ("value", "weight"))
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -591,6 +597,60 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertEqual(installed - set(scope), set())
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(expected, compiled_fn(*args))
+
+    def test_install_seeds_unnamed_scope_globals_shared_by_packages(self):
+        # Inlining PkgRecord.__new__ roots guards at the ___unnamed_scope_<id>_c<n>
+        # key Dynamo mints for its globals. The key embeds an id() from the
+        # compiling process, so a loading process has no binding for it and every
+        # call misses on a KeyError unless install() seeds it. Two packages
+        # loaded from one artifact seed the same key, and the first to uninstall
+        # must leave it to the other.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            record = PkgRecord(x.sin(), 2)
+            return record.value * record.weight
+
+        x = torch.randn(4)
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(fn)(x)
+        names = {
+            name
+            for entry in package.cache_entry().codes
+            for guarded in entry.guarded_codes
+            for name in load_guards_state(
+                guarded.guards_state
+            ).output_graph.global_scope
+            if name.startswith("___unnamed_scope_")
+        }
+        self.assertTrue(names)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        scope = fn.__globals__
+        # What a fresh process sees.
+        for name in names:
+            scope.pop(name, None)
+
+        first, backends = ctx.load_package(fn, self.path())
+        first.install(backends)
+        seeded = {name: scope[name] for name in names}
+        second, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=second)(fn)
+        second.install(backends)
+        self.assertEqual({name: scope[name] for name in names}, seeded)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), fn(x))
+
+        first.uninstall()
+        for name in names:
+            self.assertIs(scope[name], seeded[name])
+        second.uninstall()
+        self.assertFalse(names & scope.keys())
 
     def test_uninstall_keeps_a_global_it_did_not_bind(self):
         # An aot_compile load seeds the __import_* aliases its kept guards are
