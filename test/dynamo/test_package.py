@@ -1015,42 +1015,6 @@ def add(x, y):
 class TestPackageAccelerator(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_set_up_class_failure_releases_patches(self):
-        # setUpClass() patches two configs through an ExitStack, and unittest
-        # does not call tearDownClass() when setUpClass() raises -- so the
-        # except block is the only thing releasing them. Without that release
-        # the patches leak into every later test class in the process, which
-        # shows up as order-dependent failures far from here (exactly what CI
-        # cannot catch).
-        #
-        # This lives in the accelerator class because it is the class that owns
-        # the ExitStack, and because this class carries no config-patch class
-        # decorator: TestPackage is decorated with both patches, which would
-        # keep the values True and hide a leak from an assertion.
-        accelerator = _PreInstantiateAccelerator
-        bundled_key = "bundled_autograd_cache"
-        baseline = (
-            getattr(functorch_config, bundled_key),
-            torch._dynamo.config.strict_precompile,
-        )
-        with patch(
-            "torch._dynamo.test_case.TestCase.setUpClass",
-            side_effect=RuntimeError("setUpClass failure"),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "setUpClass failure"):
-                accelerator.setUpClass()
-        # The failing setUpClass applied both patches to its body and the except
-        # block released them again, so both configs are back to what they were
-        # before it ran. Without that release the values stay patched here --
-        # and leak into every later test class in the process.
-        self.assertEqual(
-            (
-                getattr(functorch_config, bundled_key),
-                torch._dynamo.config.strict_precompile,
-            ),
-            baseline,
-        )
-
     _package_config_stack = None
 
     @classmethod
@@ -1658,9 +1622,51 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         compiled_fn(x)
 
 
+class TestAcceleratorSetUpClassReleasesPatches(torch._inductor.test_case.TestCase):
+    """Lives outside both package classes on purpose.
+
+    Neither can host a value-based leak test: TestPackage carries
+    @functorch_config.patch / @torch._dynamo.config.patch as class decorators,
+    and TestPackageAccelerator patches the same two configs in its own
+    setUpClass, which the device-type variants inherit. In both places the
+    environment value is exactly what a leaked patch would produce, so the
+    assertion could not tell "released" from "leaked".
+
+    This class patches nothing, and the fixed values below hold both configs at
+    False for the duration of the call, so released reads False and leaked
+    reads True.
+    """
+
+    def test_set_up_class_failure_releases_patches(self):
+        accelerator = _PreInstantiateAccelerator
+
+        def failing_super_set_up_class():
+            # Both patches must already be applied when super() runs, otherwise
+            # the except block has nothing to release. Pin that ordering too:
+            # moving the enter_context calls below super().setUpClass() would
+            # leave the configs untouched and should turn this test red.
+            self.assertTrue(functorch_config.bundled_autograd_cache)
+            self.assertTrue(torch._dynamo.config.strict_precompile)
+            raise RuntimeError("setUpClass failure")
+
+        with patch.object(functorch_config, "bundled_autograd_cache", False), patch.object(
+            torch._dynamo.config, "strict_precompile", False
+        ), patch(
+            "torch._dynamo.test_case.TestCase.setUpClass",
+            side_effect=failing_super_set_up_class,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "setUpClass failure"):
+                accelerator.setUpClass()
+            # setUpClass applied both patches and then failed; the except block
+            # has to have released them, or they leak into every later test
+            # class in the process.
+            self.assertFalse(functorch_config.bundled_autograd_cache)
+            self.assertFalse(torch._dynamo.config.strict_precompile)
+
+
 # Kept under its own name because instantiate_device_type_tests below removes
 # TestPackageAccelerator from this module's globals, and the setUpClass
-# regression test in TestPackage has to call setUpClass on the class itself.
+# regression test above has to call setUpClass on the class itself.
 _PreInstantiateAccelerator = TestPackageAccelerator
 
 
