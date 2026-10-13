@@ -174,7 +174,19 @@ class ImageHandler:
         self.imagespec = imagespec.lower()
 
     def __call__(self, extension, data):
-        if extension.lower() not in ["jpg", "jpeg", "png", "ppm", "pgm", "pbm", "pnm"]:
+        # Keep in sync with common image formats accepted by torchvision.datasets.folder.IMG_EXTENSIONS
+        # (subset that PIL can decode for this handler).
+        if extension.lower() not in [
+            "jpg",
+            "jpeg",
+            "png",
+            "ppm",
+            "pgm",
+            "pbm",
+            "pnm",
+            "tif",
+            "tiff",
+        ]:
             return None
 
         try:
