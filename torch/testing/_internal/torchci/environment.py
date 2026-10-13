@@ -1,9 +1,7 @@
 """Machine identity, TestEnvironment flags and properties for the report line.
 The only PyTorch-aware module of the writer. capture() runs in the test process
 before its tests, so it creates no device context (no torch.cuda lazy init) and
-doesn't call torch.accelerator, either of which tests can observe. Nor does it call
-torch.__config__.show() on accelerator builds, which initializes the device runtime
-and so poisons fork; see export_compiler."""
+doesn't call torch.accelerator, either of which tests can observe."""
 
 from __future__ import annotations
 
@@ -11,7 +9,6 @@ import contextlib
 import json
 import os
 import platform
-import re
 import subprocess
 import sys
 import sysconfig
@@ -20,11 +17,6 @@ from pathlib import Path
 from typing import Any
 
 import torch
-
-
-# run_test.py passes the compiler that built torch to test processes in these; see
-# export_compiler.
-COMPILER_ENV_VARS = ("TORCHCI_CC_COMPILER", "TORCHCI_CC_COMPILER_VERSION")
 
 
 @dataclass
@@ -56,8 +48,8 @@ def capture() -> Environment:
     from torch.testing._internal.common_utils import TestEnvironment
 
     os_name, os_version, os_release = _os()
+    cc_compiler, cc_version = _compiler()
     accelerator, acc_version = _accelerator()
-    cc_compiler, cc_version = _build_compiler(accelerator)
     device_count = _device_count(accelerator)
     device_name, memory, driver = _device(accelerator) if device_count else ("", "", "")
     cpu_capability = torch.backends.cpu.get_cpu_capability().lower().replace(" ", "")
@@ -119,45 +111,15 @@ def _python_version() -> str:
     return f"{sys.version_info.major}.{sys.version_info.minor}{free_threaded}"
 
 
-def _compiler(config: str) -> tuple[str, str]:
-    # clang builds also print a GCC line (clang defines __GNUC__), so check clang
-    # and MSVC first.
-    for name, pattern in (("clang", r"clang"), ("msvc", r"MSVC"), ("gcc", r"GCC")):
-        match = re.search(rf"^  - {pattern} (\S+)", config, re.MULTILINE)
-        if match:
-            version = match.group(1)
-            # MSVC prints _MSC_FULL_VER, e.g. 194134120 for 19.41.
-            major = version[:2] if name == "msvc" else version.split(".")[0]
-            return name, major
-    return "", ""
-
-
-def export_compiler() -> None:
-    """Put the compiler that built torch in the environment of the test processes
-    this process starts. torch.__config__.show() probes each accelerator's hooks,
-    which initializes the device runtime (CUDA's driver, through cudaGetDeviceCount)
-    and so poisons fork in the process that calls it. Call it only in a launcher
-    that starts tests as new programs (fork and exec, or spawn), like run_test.py,
-    never in a test process."""
-    try:
-        compiler = _compiler(torch.__config__.show())
-    except Exception:
-        compiler = ("", "")
-    os.environ.update(zip(COMPILER_ENV_VARS, compiler))
-
-
-def _build_compiler(accelerator: str) -> tuple[str, str]:
-    if all(name in os.environ for name in COMPILER_ENV_VARS):
-        return os.environ[COMPILER_ENV_VARS[0]], os.environ[COMPILER_ENV_VARS[1]]
-    # Without export_compiler, only a build without a device runtime can read it
-    # here. show() also raises for a backend registered without its full hooks
-    # (test_cpp_extensions_aot's MAIA).
-    if accelerator in ("cuda", "rocm", "xpu"):
+def _compiler() -> tuple[str, str]:
+    # Not torch.__config__.show(), whose device checks initialize the device runtime
+    # and so poison fork. A torch that predates _cxx_compiler records no compiler.
+    cxx_compiler = getattr(torch.__config__, "_cxx_compiler", None)
+    if cxx_compiler is None:
         return "", ""
-    try:
-        return _compiler(torch.__config__.show())
-    except Exception:
-        return "", ""
+    name, version = cxx_compiler()
+    # MSVC's version is _MSC_FULL_VER, e.g. 194134120 for 19.41.
+    return name, version[:2] if name == "msvc" else version.split(".")[0]
 
 
 def _accelerator() -> tuple[str, str]:
