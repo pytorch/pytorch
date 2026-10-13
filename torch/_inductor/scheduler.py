@@ -81,6 +81,7 @@ from .utils import (
     cache_on_self,
     cache_on_self_and_args,
     cmp,
+    collective_config_value_key,
     decompose_index,
     device_need_guard,
     fx_node_crosses_devices,
@@ -512,10 +513,6 @@ class MixOrderReduction:
                 fallback_value=False,
             ):
                 return False
-
-            # Don't gate on the nrow/ncol ratio: mix-order reduction can also
-            # be helpful on relatively flat inputs, and a `nrow >= ncol * 2`
-            # gate would reject profitable shapes.
 
             # Need enough rows to split the other reduction across; too few
             # gives insufficient parallelism to justify the fusion overhead.
@@ -3586,6 +3583,11 @@ def get_estimate_runtime_cache_key_from_snode(snode: BaseSchedulerNode) -> str:
         (python_kernel_name,)
         + tuple(tuple(a.get_size()) if _is_tensor_ir(a) else None for a in flat_args)
     )
+    if is_collective(snode.node):
+        # Collective configs change runtime.
+        for arg in snode.node.constant_args:  # type: ignore[union-attr]
+            if isinstance(arg, dict):
+                cache_key += str(collective_config_value_key(arg))
     return cache_key
 
 

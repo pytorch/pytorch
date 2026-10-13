@@ -1938,7 +1938,9 @@ def _make_uvm_pool():
             if result[0] == _runtime.cudaError_t.cudaErrorMemoryAllocation:
                 return 0
             ptr = int(
-                _check_cuda_bindings(result, operation=f"cudaMallocManaged({size})")
+                _check_cuda_bindings(
+                    result, msg=f"CUDA error in cudaMallocManaged({size})"
+                )
             )
             try:
                 if _device_supports_uvm_advise(device, _runtime):
@@ -1949,7 +1951,7 @@ def _make_uvm_pool():
                             _runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
                             device,
                         ),
-                        operation="cudaMemAdvise(SetPreferredLocation)",
+                        msg="CUDA error in cudaMemAdvise(SetPreferredLocation)",
                     )
                     _check_cuda_bindings(
                         _mem_advise(
@@ -1958,17 +1960,23 @@ def _make_uvm_pool():
                             _runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
                             device,
                         ),
-                        operation="cudaMemAdvise(SetAccessedBy)",
+                        msg="CUDA error in cudaMemAdvise(SetAccessedBy)",
                     )
             except Exception:
-                _check_cuda_bindings(_runtime.cudaFree(ptr), operation="cudaFree")
+                _check_cuda_bindings(
+                    _runtime.cudaFree(ptr),
+                    msg="CUDA error in cudaFree while cleaning up after cudaMemAdvise failure",
+                )
                 raise
             return ptr
 
     def _uvm_free(ptr, size, device, _stream, _runtime=_rt):
         if ptr:
             with torch.cuda.device(device):
-                _check_cuda_bindings(_runtime.cudaFree(ptr), operation="cudaFree")
+                _check_cuda_bindings(
+                    _runtime.cudaFree(ptr),
+                    msg="CUDA error in cudaFree while releasing a UVM allocation",
+                )
 
     return MemPool.from_py_allocator(_uvm_alloc, _uvm_free)
 

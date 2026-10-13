@@ -53,7 +53,7 @@ unset. An unset flag that is on by default or implication is `"1"`.
 
 The report `properties` writer emits these keys when their values are nonempty:
 `torch_version`, `os_release`, `device_memory_mib`, `driver_version`,
-`host_memory_mib`, `build_environment`, `test_config`, and `runner_name`.
+`host_memory_mib`, `build_environment`, and `runner_name`.
 `host_memory_mib` is the cgroup v2 memory limit when one is set, otherwise
 physical RAM; it is omitted where neither is available.
 
