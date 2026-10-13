@@ -3156,6 +3156,14 @@ tensor.
 Args:
     mask (BoolTensor): the boolean mask
     value (float): the value to fill in with
+
+Example::
+
+    >>> tensor = torch.tensor([[1, 2], [3, 4]])
+    >>> mask = torch.tensor([[True, False], [False, True]])
+    >>> tensor.masked_fill_(mask, 0)
+    tensor([[0, 2],
+            [3, 0]])
 """,
 )
 
@@ -6560,6 +6568,17 @@ add_docstr_all(
 masked_fill(mask, value) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_fill_`
+
+Example::
+
+    >>> tensor = torch.tensor([[1, 2], [3, 4]])
+    >>> mask = torch.tensor([[True, False], [False, True]])
+    >>> tensor.masked_fill(mask, 0)
+    tensor([[0, 2],
+            [3, 0]])
+    >>> tensor
+    tensor([[1, 2],
+            [3, 4]])
 """,
 )
 
