@@ -10949,11 +10949,85 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         try:
             with torch.compiler.set_stance("fail_on_recompile"):
                 with self.assertRaisesRegex(
-                    RuntimeError, "Failed on the following precompiled guards:"
-                ):
+                    RuntimeError, r"Failed on all 1 precompiled variant\(s\)"
+                ) as ctx:
                     compiled_fn(*args)
+            # The failing guard, not the entry's whole guard tree.
+            self.assertIn("[0] isinstance(L['x'], bool)", str(ctx.exception))
+            self.assertNotIn("TREE_GUARD_MANAGER", str(ctx.exception))
         finally:
             _reset_precompile_entries(fn.__code__)
+
+    def test_fail_on_recompile_names_the_failing_shape_clauses(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+
+        def fn(x):
+            return x + 1
+
+        # Shape guards are one lambda guard listing every clause.
+        root = torch._dynamo.guards.RootGuardManager()
+        root.add_lambda_guard(
+            lambda L: L["x"].size(0) >= 2 and L["x"].size(1) == 2,
+            ["L['x'].size(0) >= 2", "L['x'].size(1) == 2"],
+            None,
+        )
+        guard_manager = torch._dynamo.guards.GuardManagerWrapper(root)
+        guard_manager.global_scope = {"G": {}}
+        guard_manager.closure_vars = {}
+
+        def injected(x):
+            return x + 2
+
+        compiled_fn = torch.compile(fn, backend="eager")
+        _load_precompile_entry(fn.__code__, guard_manager, injected.__code__)
+        try:
+            with torch.compiler.set_stance("fail_on_recompile"):
+                with self.assertRaisesRegex(
+                    RuntimeError, r"Failed on all 1 precompiled variant\(s\)"
+                ) as ctx:
+                    compiled_fn(torch.randn(3, 5))
+            self.assertIn("[0] L['x'].size(1) == 2", str(ctx.exception))
+            self.assertNotIn("size(0)", str(ctx.exception))
+        finally:
+            _reset_precompile_entries(fn.__code__)
+
+    def test_fail_on_recompile_groups_precompiled_entries_by_reason(self):
+        from torch._dynamo.eval_frame import _precompile_no_match_message
+
+        def entry(reason=None, raises=None):
+            manager = mock.Mock()
+            if raises is not None:
+                manager.check_verbose.side_effect = raises
+            else:
+                manager.check_verbose.return_value = types.SimpleNamespace(
+                    result=False, verbose_code_parts=[reason]
+                )
+            return types.SimpleNamespace(guard_manager=manager)
+
+        # Five entries failing on one submodule must not hide the sixth, which
+        # fails on something else.
+        entries = [entry("KeyError on L['self']._modules['pma']")] * 5 + [
+            entry("L['self'].n_heads == 4"),
+            entry(raises=ValueError("boom")),
+            entry("KeyError on L['self']._modules['pma']"),
+        ]
+        message = _precompile_no_match_message(entries, {})
+        self.assertEqual(
+            message,
+            "Failed on all 8 precompiled variant(s):\n"
+            "  [0-4, 7] KeyError on L['self']._modules['pma']\n"
+            "  [5] L['self'].n_heads == 4\n"
+            "  [6] <guard check raised ValueError: boom>",
+        )
+
+        many = [entry(f"L['x'] == {i}") for i in range(7)]
+        message = _precompile_no_match_message(many, {})
+        self.assertIn("[4] L['x'] == 4", message)
+        self.assertNotIn("L['x'] == 5", message)
+        self.assertIn("... and 2 more distinct reason(s) not shown.", message)
 
     def test_shape_and_tuple_equality(self):
         def fn(x, y, t):

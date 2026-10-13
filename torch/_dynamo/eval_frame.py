@@ -280,6 +280,93 @@ class _RecompileRefusedError(RuntimeError):
     """Raised by a ``_RefuseRecompileCallback`` instead of compiling."""
 
 
+_PRECOMPILE_REASONS_REPORTED = 5
+
+
+def _failing_guard_parts(
+    guard_manager: Any, f_locals: dict[str, Any], parts: Sequence[Any]
+) -> Sequence[Any]:
+    """
+    Symbolic shape guards are installed as a single lambda guard whose
+    verbose_code_parts is every clause, so a failure reports all of them.
+    Re-evaluate clause by clause, as get_guard_fail_reason_helper does, to
+    name the ones that rejected this call; fall back to all parts.
+    """
+    global_scope = getattr(guard_manager, "global_scope", None)
+    closure_vars = getattr(guard_manager, "closure_vars", None)
+    if global_scope is None or closure_vars is None:
+        return parts
+    scope = {"L": f_locals, "G": global_scope.get("G"), **closure_vars}
+    failed = []
+    for part in parts:
+        try:
+            ok = eval(str(part), dict(global_scope), scope)
+        except Exception:
+            continue
+        if ok is False:
+            failed.append(part)
+        elif isinstance(ok, str):
+            failed.append(ok)
+    return failed or parts
+
+
+def _precompile_rejection(entry: Any, f_locals: dict[str, Any]) -> str:
+    """The guard that rejected this call, for one precompiled entry."""
+    # The report is built because the call already missed; a guard that raises
+    # on re-evaluation must not replace it.
+    try:
+        reason = entry.guard_manager.check_verbose(f_locals)
+    except Exception as e:
+        return f"<guard check raised {type(e).__name__}: {e}>"
+    # A passing check has no failing parts to name: the call raced an install,
+    # or the guard is not deterministic.
+    if getattr(reason, "result", False):
+        return "<matched on re-check>"
+    parts = getattr(reason, "verbose_code_parts", None) or [str(reason)]
+    if len(parts) > 1:
+        parts = _failing_guard_parts(entry.guard_manager, f_locals, parts)
+    return "; ".join(str(p) for p in parts)
+
+
+def _index_ranges(indices: Sequence[int]) -> str:
+    """``[0, 1, 2, 5]`` -> ``"0-2, 5"``."""
+    spans: list[list[int]] = []
+    for i in indices:
+        if spans and i == spans[-1][1] + 1:
+            spans[-1][1] = i
+        else:
+            spans.append([i, i])
+    return ", ".join(str(a) if a == b else f"{a}-{b}" for a, b in spans)
+
+
+def _precompile_no_match_message(
+    entries: Sequence[Any], f_locals: dict[str, Any]
+) -> str:
+    """
+    Why the precompiled entries rejected this call, one line per distinct reason.
+
+    A precompile artifact carries one entry per captured variant, and each
+    entry's guard_manager repr is the whole guard tree, so printing them runs
+    to megabytes for a real model. This names only the failing guard of each
+    entry. Variants of one frame often share their first failing guard, so
+    entries are grouped by reason, and the reasons named are capped.
+    """
+    if not entries:
+        return ""
+    by_reason: dict[str, list[int]] = {}
+    for i, entry in enumerate(entries):
+        by_reason.setdefault(_precompile_rejection(entry, f_locals), []).append(i)
+    lines = [f"Failed on all {len(entries)} precompiled variant(s):"]
+    for reason, indices in list(by_reason.items())[:_PRECOMPILE_REASONS_REPORTED]:
+        lines.append(f"  [{_index_ranges(indices)}] {reason}")
+    if len(by_reason) > _PRECOMPILE_REASONS_REPORTED:
+        lines.append(
+            f"  ... and {len(by_reason) - _PRECOMPILE_REASONS_REPORTED} more "
+            "distinct reason(s) not shown."
+        )
+    return "\n".join(lines)
+
+
 class _FailOnRecompileCallback:
     """Serves cached entries but raises instead of compiling.
 
@@ -336,10 +423,10 @@ class _FailOnRecompileCallback:
                     f"triggered by the following guard failure(s):\n{failures}"
                 )
                 message += f"\n{textwrap.indent(guard_failure_details, '    ')}"
-        if len(precompile_entries) > 0:
-            message += "\nFailed on the following precompiled guards: "
-            for entry in precompile_entries:
-                message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
+        if precompile_entries:
+            message += "\n" + _precompile_no_match_message(
+                precompile_entries, frame.f_locals
+            )
         raise self._error(message)
 
 

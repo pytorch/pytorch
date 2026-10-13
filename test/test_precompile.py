@@ -4715,6 +4715,10 @@ try:
     f(model, saved["calls"][0][0][0].double())
 except torch.compiler.PrecompileError as e:
     assert "no captured variant" in str(e), e
+    if f.installed:
+        # Dynamo names the failing guard of each variant, not its guard tree.
+        assert "dtype mismatch" in str(e), e
+        assert "TREE_GUARD_MANAGER" not in str(e), e
 else:
     raise AssertionError("an uncovered call was served")
 print("served", mod.STANCES)
