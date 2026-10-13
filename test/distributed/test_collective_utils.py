@@ -218,9 +218,8 @@ class TestUtils(TestCase):
 
     def test_check_rng_sync_internal_dispatch(self):
         # cuda/xpu generators use the Philox (seed, offset) check; every other
-        # device (cpu and third-party privateuse1 backends such as Ascend NPU)
-        # must fall back to comparing full generator state tensors instead of
-        # raising NotImplementedError.
+        # device (cpu and out-of-tree accelerators) must fall back to comparing
+        # full generator state tensors instead of raising NotImplementedError.
         import torch.distributed.collective_utils as collective_utils
 
         group = mock.sentinel.group
@@ -230,7 +229,6 @@ class TestUtils(TestCase):
             ("cpu", False),
             ("mtia", False),
             ("privateuse1", False),
-            ("npu", False),
         ]:
             with self.subTest(device_type=device_type):
                 generator = mock.MagicMock()

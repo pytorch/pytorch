@@ -324,10 +324,10 @@ def _check_rng_sync_internal(
         # a (seed, offset) pair.
         return _check_philox_rng_sync(generator, group)
     else:
-        # All other devices (cpu, privateuse1 backends such as Ascend NPU, ...)
-        # fall back to comparing the full generator state tensors instead of
-        # raising NotImplementedError, keeping this check usable by any backend
-        # whose ``get_state()`` returns a tensor.
+        # All other devices (cpu and out-of-tree accelerators) fall back to
+        # comparing the full generator state tensors instead of raising
+        # NotImplementedError, keeping this check usable by any backend whose
+        # ``get_state()`` returns a tensor.
         return _check_full_state_rng_sync(generator, group)
 
 
