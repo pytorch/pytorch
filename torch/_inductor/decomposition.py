@@ -171,13 +171,34 @@ def topk_small_k(self, k, dim=-1, largest=True, sorted=True):
     Inductor fuses into a single persistent reduction instead of falling back
     to ATen's radix-select/sort kernels.
 
-    Each element gets a unique int64 key: an order-preserving encoding of its
-    value in the high 32 bits and its reversed index in the low 32 bits. The
-    max key is the largest value, with ties going to the lowest index, and a
-    selected key is replaced by INT64_MIN, below every real key, so it is never
-    picked again (even when the row holds -inf). As in ATen, NaN ranks above
-    all numbers, and -0 and +0 compare equal. Results come out in descending
-    order, so the decomposition also serves sorted=True.
+    Small k is common in MoE routers, where each token picks its top 1 to 16
+    experts (possibly after a group-limited selection), over short rows of
+    experts. A general radix select or sort is a poor fit there, so emitting
+    a selection specialized for small k pays off.
+
+    Why a packed int64 key: each round must return a value *and* its index
+    with a deterministic tie-break, and must then remove the picked element.
+    Removing it by overwriting the value with -inf is not enough, because the
+    row may already hold -inf (MoE routers mask out experts with -inf) or ties,
+    and a later round could pick the same element again. Instead, every
+    element gets a unique int64 key:
+
+        key = ordered_bits(value) << 32 | (n - 1 - index)
+
+    - ordered_bits maps a float to an int32 with the same ordering: the bit
+      pattern of a non-negative float already sorts correctly as an integer,
+      and flipping the magnitude bits of negative floats reverses theirs. This
+      is the same conversion ATen's radix-select topk uses
+      (TopKTypeConfig<float>::convert), and as there NaN ranks above every
+      number and +0 ranks above -0.
+    - The reversed index in the low bits makes all keys distinct and sends ties
+      to the lowest index. Packing a value and an index into one 64-bit word is
+      a common GPU idiom (e.g. argmax via a single 64-bit atomicMax).
+
+    One int64 amax per round then yields the next value, its index and the
+    tie-break at once, and removal sets that key to INT64_MIN, which is below
+    every real key (even -inf's), so it can never be picked again. Results come
+    out in descending order, so the decomposition also serves sorted=True.
     """
     from torch.fx.experimental.symbolic_shapes import statically_known_true
 
@@ -200,9 +221,10 @@ def topk_small_k(self, k, dim=-1, largest=True, sorted=True):
         return NotImplemented
 
     x = self.float()
-    # Canonicalize NaN to rank highest and -0 to +0 before taking bits.
-    x = torch.where(torch.isnan(x), float("nan"), torch.where(x == 0, 0.0, x))
+    # One canonical (positive) NaN, so every NaN ranks highest.
+    x = torch.where(torch.isnan(x), float("nan"), x)
     bits = x.view(torch.int32).to(torch.int64)
+    # Order-preserving float -> int: flip the magnitude bits of negatives.
     ordered = torch.where(bits < 0, bits ^ 0x7FFFFFFF, bits)
     index_shape = [1] * self.dim()
     index_shape[dim] = n
@@ -212,9 +234,12 @@ def topk_small_k(self, k, dim=-1, largest=True, sorted=True):
     values, indices = [], []
     for _ in range(k):
         max_key = key.amax(dim, keepdim=True)
+        # Decode the index from the low bits; take the value from the input so
+        # its original bits (e.g. a NaN payload) are returned.
         selected = (n - 1) - (max_key & 0xFFFFFFFF)
         indices.append(selected)
         values.append(torch.gather(self, dim, selected))
+        # Keys are unique, so this removes exactly the selected element.
         key = torch.where(key == max_key, torch.iinfo(torch.int64).min, key)
     return torch.cat(values, dim), torch.cat(indices, dim)
 
