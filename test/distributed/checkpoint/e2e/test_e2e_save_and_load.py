@@ -389,6 +389,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
 
 class TestCheckpointOrderingAndOverwrite(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = NUM_DEVICES
 
     @classmethod
@@ -476,12 +477,13 @@ class TestCheckpointOrderingAndOverwrite(DTensorContinuousTestBase):
                 storage_writer=DCP.FileSystemWriter(self.temp_dir, overwrite=False),
             )
 
+
 class TestNoCPU(DTensorTestBase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def backend(self):
-        return "nccl"
+        return dist.get_default_backend_for_device(self.device_type)
 
     @skip_if_lt_x_gpu(NUM_DEVICES)
     @with_comms
@@ -590,7 +592,6 @@ class TestInitStateDict(DTensorTestBase):
 instantiate_device_type_tests(
     TestE2ESaveAndLoad,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 if __name__ == "__main__":
