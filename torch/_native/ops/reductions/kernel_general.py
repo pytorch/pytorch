@@ -747,9 +747,7 @@ def _reduce_all(
         res = xc.reduce_row_xcta(trait, trait_key, xf, out_dtypes[0], flatten=True)
         res = None if res is None else (res,)
     else:
-        res = xc.reduce_row_xcta_2out(
-            trait, trait_key, xf, out_dtypes, flatten=True
-        )
+        res = xc.reduce_row_xcta_2out(trait, trait_key, xf, out_dtypes, flatten=True)
     if res is not None:
         return res
     # If xcta declines, grid-stride any L without reshaping or extent-dependent compile cost.
