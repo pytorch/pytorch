@@ -1496,12 +1496,16 @@ class DistributedDataParallel(Module, Joinable):
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self.module)
 
+    def _getstate_without_process_group(self):
+        attrs = copy.copy(self.__dict__)
+        # Absent on a shell that was already restored without them.
+        for name in ("process_group", "reducer", "logger"):
+            attrs.pop(name, None)
+        return attrs
+
     def __getstate__(self):
         self._check_default_group()
-        attrs = copy.copy(self.__dict__)
-        del attrs["process_group"]
-        del attrs["reducer"]
-        del attrs["logger"]
+        attrs = self._getstate_without_process_group()
         # broadcast_buffers is a property; include it for backward compat.
         attrs["broadcast_buffers"] = self.forward_sync_buffers
         return attrs
