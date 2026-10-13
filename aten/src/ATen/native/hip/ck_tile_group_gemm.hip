@@ -124,22 +124,24 @@ namespace at::hip::detail {
 		template <>
 		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t> {
 			// Tuned on MI355X (gfx950). Classes that share a tile alias the same type, so they share one instantiation.
+			// Prefer the 32x32x16 MFMA. 256x256 tiles must use K_Tile 32 with it: at K_Tile 64 the 256 accumulators plus
+			// the double-buffered A/B fragments exceed 512 registers and the ROCm 10.1 compiler spills heavily.
 			// Forward and dX (2D x 3D, 3D x 3D): row-major A, K % 64 == 0
-			using ForwardN256 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, false, false, false>; // N % 256 == 0
+			using ForwardN256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 2, false, false, false>; // N % 256 == 0
 			using ForwardN128 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, false, false>; // N % 128 == 0
-			using ForwardN64 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false>; // N % 64 == 0; beat 256x64 and 64x64 tiles
-			using ForwardN32 = ForwardN64; // N % 32 == 0; beat 256x32 and 128x32 tiles
-			using ForwardN16 = ForwardN64; // N % 16 == 0; beat 256x16 tiles
+			using ForwardN64 = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, true, false>; // N % 64 == 0
+			using ForwardN32 = ForwardN64; // N % 32 == 0
+			using ForwardN16 = ForwardN64; // N % 16 == 0
 			using ForwardN8 = ForwardN64; // N % 8 == 0
 			using ForwardUnalignedN = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false, false, 0, 1>; // N % 8 != 0, C width 1 for odd N
 
 			// dW (2D x 2D, jagged K)
-			using WeightGradNM256 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, false, false, true>; // M, N % 256 == 0
-			using WeightGradNM128 = CkTileGroupGemmConfig<128, 128, 64, 16, 16, 32, 2, 2, false, false, true>; // M, N % 128 == 0
-			using WeightGradNM64 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, true, true, true>; // M, N % 64 == 0
-			using WeightGradNM32 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true>; // M, N % 32 == 0
-			using WeightGradNM16 = WeightGradNM32; // M, N % 16 == 0
-			using WeightGradNM8 = WeightGradNM32; // M, N % 8 == 0
+			using WeightGradNM256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 2, false, false, true>; // M, N % 256 == 0
+			using WeightGradNM128 = CkTileGroupGemmConfig<128, 128, 64, 32, 32, 16, 2, 2, false, false, true>; // M, N % 128 == 0
+			using WeightGradNM64 = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, true, true, true>; // M, N % 64 == 0
+			using WeightGradNM32 = WeightGradNM64; // M, N % 32 == 0
+			using WeightGradNM16 = WeightGradNM64; // M, N % 16 == 0
+			using WeightGradNM8 = WeightGradNM64; // M, N % 8 == 0
 
 			// Anything the classes above reject: K % 64 != 0, column-major A, jagged N (3D x 2D)
 			using FallbackEvenN = CkTileGroupGemmConfig<256, 256, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>; // even N, C width 2
@@ -147,6 +149,7 @@ namespace at::hip::detail {
 			// M or N not a multiple of 8: the host alignment check rejects these for 16-bit types, so this is never selected today
 			using WeightGradUnaligned = FallbackOddN;
 		};
+
 
 		// fp16 has the same element size and MFMA shapes as bf16
 		template <>
