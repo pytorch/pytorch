@@ -55,13 +55,14 @@ if ! spin lint -- --force-color --tee-json=lint.json ${ADDITIONAL_LINTRUNNER_ARG
     RC=1
 fi
 
-# Advisory pass: run advisory linters separately so their findings are reported
-# in the log with their own severity, without affecting the job status.
+# Advisory pass: run advisory linters separately so their findings are reported as
+# ::notice annotations without affecting the job status. GitHub has no "advice"
+# level, so advisory findings are surfaced as notices.
 # `spin lint` exits non-zero when findings are present, so ignore its exit code.
 if [[ "${LINTER_GROUP:-}" == "other" ]]; then
     echo "Running advisory linters: ${ADVISORY_LINTERS} (findings do not fail this job)"
     spin lint -- --force-color --output json --take "${ADVISORY_LINTERS}" ${CHANGED_FILES} \
-        | jq --raw-input --raw-output 'fromjson? | "::\(.severity) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))' \
+        | jq --raw-input --raw-output 'fromjson? | "::notice file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))' \
         || true
 fi
 
