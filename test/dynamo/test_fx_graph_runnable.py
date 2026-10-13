@@ -203,7 +203,9 @@ class FxGraphRunnableTestBase:
             self.assertEqual(
                 res.returncode,
                 0,
-                lambda msg: f"{msg}\nStandalone fx_graph_runnable failed:\nSTDERR:\n{res.stderr}",
+                lambda msg: (
+                    f"{msg}\nStandalone fx_graph_runnable failed:\nSTDERR:\n{res.stderr}"
+                ),
             )
 
 
@@ -743,6 +745,7 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
         torch.compile(f)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
+
 instantiate_device_type_tests(
     FxGraphRunnableTritonCudaTest,
     globals(),
@@ -806,7 +809,9 @@ class TestFxGraphRunnableMultiProcessGroup(TestCase):
             self.assertEqual(
                 result.returncode,
                 0,
-                lambda msg: f"{msg}\nGenerated repro failed to execute:\nSTDERR:\n{result.stderr}",
+                lambda msg: (
+                    f"{msg}\nGenerated repro failed to execute:\nSTDERR:\n{result.stderr}"
+                ),
             )
 
         finally:
