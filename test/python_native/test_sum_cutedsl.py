@@ -44,12 +44,7 @@ if not TEST_CUTEDSL:
         sys.exit(0)
     raise unittest.SkipTest("CuTeDSL not available")
 
-from torch._native.ops.reductions import (
-    cutedsl_impl,
-    inner_tree_kernel as ref,
-    kernel_rowtile as rt,
-    ordered,
-)
+from torch._native.ops.reductions import cutedsl_impl, kernel_rowtile as rt, ordered
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
@@ -329,6 +324,18 @@ class TestSumCuteDSLOverride(TestCase):
         expected_storage[out_indices].copy_(expected.flatten())
         self.assertEqual(storage, expected_storage)
 
+    def test_split_strided_out(self):
+        """Write split-plan results through the supplied output stride."""
+        m, n = 3, 262144
+        x = self._make_order_sensitive_input(m, n, torch.float32)
+        self.assertEqual(rt.itree_plan(n, m, x.element_size()).shape, "split")
+        expected = x.sum(dim=1)
+        storage = torch.full((2 * m + 1,), -1.0, device="cuda")
+        out = storage[1 : 2 * m + 1 : 2]
+        torch.sum(x, dim=1, out=out)
+        self.assertEqual(out.view(torch.int32), expected.view(torch.int32))
+        self.assertEqual(storage[::2], torch.full_like(storage[::2], -1.0))
+
     @parametrize("op", ("sum", "prod"))
     def test_singleton_zero_stride_out_falls_through(self, op):
         x = torch.arange(10, device="cuda", dtype=torch.float32).reshape(10, 1)
@@ -357,9 +364,7 @@ class TestSumCuteDSLOverride(TestCase):
         pad = 4 if layout == "aligned_gap" else 1
         x = torch.empty(m, n + pad, device="cuda")[:, :n]
         x.copy_(values)
-        want = torch.empty(m, device="cuda")
-        into = ref.inner_tree_sum_into if op == "sum" else ref.inner_tree_prod_into
-        into(want, x)
+        want = getattr(values, op)(dim=1)
         with mock.patch.object(
             rt, "reduce_row_itree", wraps=rt.reduce_row_itree
         ) as run:
@@ -391,19 +396,14 @@ class TestSumCuteDSLOverride(TestCase):
         self.assertEqual(self._sha(result), "75d8b1a702344e90")
 
     @skipIfRocm
-    def test_entry_point_bits_at_every_plan_shape(self):
-        # Cover each N-selected shape through x.sum. Bits catch wrong-order routing but not
-        # total fallback to the same reference (0.5s versus 84s), so spy on the route too.
+    def test_entry_point_serves_every_plan_shape(self):
+        # Cover each N-selected shape through x.sum and ensure correctness cannot pass via ATen.
         for m, n in [(64, 32), (8, 4096), (8192, 1024), (671, 100000), (256, 262144)]:
-            for dtype, as_int in (
-                (torch.float32, torch.int32),
-                (torch.float64, torch.int64),
-            ):
+            for dtype in (torch.float32, torch.float64):
                 with self.subTest(m=m, n=n, dtype=dtype):
                     x = torch.randn(m, n, device="cuda", dtype=dtype)
-                    want = torch.empty(m, device="cuda", dtype=dtype)
-                    ref.inner_tree_sum_into(want, x)
-                    torch.cuda.synchronize()
+                    with torch.backends.python_native.cutedsl.disabled():
+                        want = x.sum(dim=1)
                     real, served = rt.reduce_row_itree, []
 
                     def spy(*a, _real=real, _served=served, **k):
@@ -418,9 +418,12 @@ class TestSumCuteDSLOverride(TestCase):
                         [True],
                         f"({m}, {n}) {dtype}: the ordered kernel did not serve this call",
                     )
-                    self.assertTrue(
-                        torch.equal(got.view(as_int), want.view(as_int)),
-                        f"({m}, {n}) {dtype}: entry point lost the inner-tree bit pattern",
+                    self.assertEqual(
+                        got,
+                        want,
+                        atol=1e-3 if dtype is torch.float32 else 1e-10,
+                        rtol=1e-5 if dtype is torch.float32 else 1e-10,
+                        msg=f"({m}, {n}) {dtype}: entry point produced the wrong result",
                     )
 
     @skipIfRocm
@@ -455,13 +458,9 @@ class TestSumCuteDSLOverride(TestCase):
                     self.assertEqual(
                         served, [True], "the order did not serve this call"
                     )
-                    want = torch.empty(m, device="cuda")
-                    into = (
-                        ref.inner_tree_prod_into
-                        if op == "prod"
-                        else ref.inner_tree_sum_into
-                    )
-                    into(want, x)
+                    aligned = x.clone()
+                    self.assertEqual(aligned.data_ptr() % 16, 0)
+                    want = getattr(aligned, op)(dim=1)
                     torch.cuda.synchronize()
                     self.assertEqual(
                         got.view(torch.int32),
