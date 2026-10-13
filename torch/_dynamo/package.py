@@ -26,6 +26,7 @@ import platform
 import shutil
 import sys
 import types
+import weakref
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
 from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
@@ -52,6 +53,23 @@ if TYPE_CHECKING:
 
 
 _CODE_CACHE = WeakIdKeyDictionary()
+
+# The key Dynamo mints for the globals of an inlined frame that belong to no
+# module (install_global_by_id in get_globals_source_and_value).
+_UNNAMED_SCOPE_PREFIX = "___unnamed_scope_"
+
+
+@dataclasses.dataclass
+class _SeededGlobal:
+    """A minted global packages bound into a module, and the live ones reading it."""
+
+    value: object
+    owners: "weakref.WeakSet[CompilePackage]"
+
+
+# module -> name -> _SeededGlobal. Two packages loaded from one artifact seed the
+# same key, so the binding has to outlive every package but the last to leave.
+_SEEDED_GLOBALS: WeakIdKeyDictionary = WeakIdKeyDictionary()
 
 
 def _code_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -1109,6 +1127,7 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
+        self._seeded_globals: list[tuple[types.ModuleType, str]] = []
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
 
@@ -1388,6 +1407,32 @@ class CompilePackage:
         if record:
             self._installed_globals.setdefault(module, []).append(name)
 
+    def _seed_unnamed_scopes(
+        self, module: types.ModuleType, global_scope: dict[str, Any]
+    ) -> None:
+        # The key embeds id() of a dict in the tracing process, so no module in
+        # a fresh process binds it, and every guard rooted at it fails with a
+        # KeyError. The artifact carries the dict itself; bind that.
+        by_name = _SEEDED_GLOBALS.setdefault(module, {})
+        for name, value in global_scope.items():
+            if not name.startswith(_UNNAMED_SCOPE_PREFIX):
+                continue
+            # A compile in this process that bound the key owns it through a
+            # CleanupHook, which would delete it from under these guards once
+            # its code object is collected.
+            CleanupHook.disown(module.__dict__, name)
+            seeded = by_name.get(name)
+            if name not in module.__dict__:
+                seeded = _SeededGlobal(value, weakref.WeakSet())
+                by_name[name] = seeded
+                module.__dict__[name] = value
+            elif seeded is None or module.__dict__[name] is not seeded.value:
+                # Not a package's binding: whoever wrote it owns it.
+                continue
+            if self not in seeded.owners:
+                seeded.owners.add(self)
+                self._seeded_globals.append((module, name))
+
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
@@ -1398,6 +1443,18 @@ class CompilePackage:
                 module.__dict__.pop(name, None)
 
         self._installed_globals = {}
+
+        for module, name in self._seeded_globals:
+            by_name = _SEEDED_GLOBALS.get(module, {})
+            seeded = by_name.get(name)
+            if seeded is None:
+                continue
+            seeded.owners.discard(self)
+            if not seeded.owners:
+                del by_name[name]
+                if module.__dict__.get(name) is seeded.value:
+                    del module.__dict__[name]
+        self._seeded_globals = []
 
         _reset_precompile_entries(self._innermost_fn.__code__)
 
@@ -1495,6 +1552,9 @@ class CompilePackage:
                     with dynamo_timed("precompile_load_guards"):
                         guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
+                    self._seed_unnamed_scopes(
+                        module, guards_state.output_graph.global_scope
+                    )
                     # The installed builtins dict might be absent from the runtime
                     # while loading guards. Populate it if it's missing.
                     if (
