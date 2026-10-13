@@ -47,11 +47,12 @@ class ShardedGradScaler(GradScaler):
     """
     ShardedGradScaler helps perform gradient scaling in a shard aware manner. It extends
     functionality from GradScaler:
+
     * Supports PyTorch DDP and FSDP implementations
     * Support CPU offloaded tensors (as used in fully sharded data parallel[FSDP])
     * Supports the custom Mixed Precision loss dtype (fp16, bf16) that FSDP returns
     * Sync inf/nan for scaled gradient tensors on any torch.device (where tensors are placed) across
-    nodes
+      nodes
 
     Example::
 
@@ -129,6 +130,7 @@ class ShardedGradScaler(GradScaler):
     def scale(
         self, outputs: torch.Tensor | Iterable[torch.Tensor]
     ) -> torch.Tensor | Iterable[torch.Tensor]:
+        """Multiply ``outputs`` by the scale factor. See :meth:`torch.amp.GradScaler.scale`."""
         if not self._enabled:
             return outputs
 
@@ -233,6 +235,11 @@ class ShardedGradScaler(GradScaler):
         return per_device_found_inf._per_device_tensors
 
     def unscale_(self, optimizer: torch.optim.Optimizer) -> None:
+        """Unscale ``optimizer``'s gradients and all-reduce the found-inf flags over ``process_group``.
+
+        See :meth:`torch.amp.GradScaler.unscale_`. Collective: every rank in
+        ``process_group`` must call it.
+        """
         if not self._enabled:
             return
 
