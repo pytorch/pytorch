@@ -20,7 +20,6 @@ from torch.utils._ordered_set import OrderedSet
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
-GPU_BENCHMARK_DEVICE_TYPES = ("cuda", "xpu", "mtia")
 _CALLABLE_PROFILE_EVENT_NAME = "_CALLABLE"
 
 
@@ -31,16 +30,9 @@ T = TypeVar("T")
 
 
 def _get_default_gpu_device_type() -> str:
-    avail_gpus = [
-        device_type
-        for device_type in GPU_BENCHMARK_DEVICE_TYPES
-        if getattr(torch, device_type).is_available()
-    ]
-    if len(avail_gpus) > 1:
-        raise AssertionError(
-            f"expected at most one available GPU type, got {avail_gpus}"
-        )
-    return "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    from torch._inductor.utils import get_gpu_type
+
+    return get_gpu_type()
 
 
 def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
