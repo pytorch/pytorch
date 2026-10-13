@@ -532,18 +532,6 @@ def _torchci_report_args(reports_dir: str | None) -> list[str]:
     return [f"--save-torchci-reports={reports_dir}"]
 
 
-def _export_torchci_compiler(reports_dir: str | None) -> None:
-    # A test process can't read the compiler without poisoning fork, but this
-    # process starts every test as a new program; see export_compiler.
-    if not HAS_TORCHCI_REPORTS or not reports_dir:
-        return
-    from torch.testing._internal.torchci import environment
-
-    # The installed torch may predate export_compiler.
-    if hasattr(environment, "export_compiler"):
-        environment.export_compiler()
-
-
 def _torchci_reports_default() -> str | None:
     # The CI jobs that write reports by default, widening until it's all of CI.
     # upload-test-artifacts uploads this folder.
@@ -2440,7 +2428,6 @@ def main():
     check_pip_packages()
 
     options = parse_args()
-    _export_torchci_compiler(options.save_torchci_reports)
     tests_to_include_env = os.environ.get("TESTS_TO_INCLUDE", "").strip()
     if tests_to_include_env:
         # Parse env var tests to module names (strips .py suffix and ::method)
