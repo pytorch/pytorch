@@ -592,7 +592,7 @@ class _KinetoProfile:
                 observer = self._cuspy_profiler_observer
                 self._collective_hooks = register_collective_annotation_hooks(
                     observer._push_collective_kernel_metadata,
-                    observer._pop_collective_kernel_metadata,
+                    observer.pop_annotation,
                 )
 
         if self.profile_memory:

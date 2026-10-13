@@ -387,7 +387,7 @@ class CuspyObserver:
 
         Pushes a new external correlation id and keys ``metadata`` on it, so the
         fields land on every kernel this thread launches until the matching
-        :meth:`_pop_collective_kernel_metadata`. The kernels keep the name of their
+        :meth:`pop_annotation`. The kernels keep the name of their
         enclosing ``record_function`` scope: name resolution walks up from the
         unnamed collective id.
         """
@@ -399,8 +399,6 @@ class CuspyObserver:
         if ext_id is None:
             return
         torch._C._profiler._cuspy.metadata_put_external(json.dumps(metadata), ext_id)
-
-    _pop_collective_kernel_metadata = pop_annotation
 
     def annotation_names(self, *, reset: bool = False) -> dict[int, str]:
         """Snapshot of the ``external_id -> name`` map pushed so far; pass

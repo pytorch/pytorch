@@ -27,14 +27,9 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    from contextlib import AbstractContextManager
-
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
     from torch.cuda import _POOL_HANDLE, MemPool
-    from torch.distributed._collective_annotations import (
-        CollectiveAnnotationHandle,
-        CollectiveMetadata,
-    )
+    from torch.distributed._collective_annotations import CollectiveAnnotationHandle
     from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
     from torch.utils.hooks import RemovableHandle
 
@@ -1316,7 +1311,6 @@ class graph:
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
         self._enable_annotations = enable_annotations
-        self._collective_kernel_scopes: list[AbstractContextManager[None]] = []
         self._collective_hooks: CollectiveAnnotationHandle | None = None
         self.check_input_liveness = check_input_liveness
 
@@ -1457,15 +1451,13 @@ class graph:
             _set_annotation_backend(backend)
             if self._enable_annotations and torch.distributed.is_available():
                 from torch.distributed._collective_annotations import (
-                    register_collective_annotation_hooks,
+                    register_graph_capture_annotation_hooks,
                 )
 
-                self._collective_hooks = register_collective_annotation_hooks(
-                    self._push_collective_kernel_metadata,
-                    self._pop_collective_kernel_metadata,
-                )
+                self._collective_hooks = register_graph_capture_annotation_hooks()
         except BaseException:
-            self._unset_collective_hooks()
+            if self._collective_hooks is not None:
+                self._collective_hooks.remove()
             _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
             try:
@@ -1475,27 +1467,6 @@ class graph:
                 pass
             self.stream_ctx.__exit__(None, None, None)
             raise
-
-    def _push_collective_kernel_metadata(self, metadata: CollectiveMetadata) -> None:
-        from torch.cuda._graph_annotations import mark_kernels
-
-        # Backward attribution would tag whatever autograd node launched the
-        # collective, not the collective itself.
-        scope = mark_kernels(metadata, backward=False)
-        scope.__enter__()
-        self._collective_kernel_scopes.append(scope)
-
-    def _pop_collective_kernel_metadata(self) -> None:
-        self._collective_kernel_scopes.pop().__exit__(None, None, None)
-
-    def _unset_collective_hooks(self) -> None:
-        if self._collective_hooks is not None:
-            self._collective_hooks.remove()
-            self._collective_hooks = None
-        # A collective that raised skipped its pop. Close its scope, innermost first,
-        # so it does not stay the ambient annotation for later captures.
-        while self._collective_kernel_scopes:
-            self._collective_kernel_scopes.pop().__exit__(None, None, None)
 
     def __exit__(self, *args: object) -> None:
         from torch.cuda import _graph_node_callbacks
@@ -1534,7 +1505,8 @@ class graph:
             # Annotation recording is capture-scoped; clear it unconditionally. disarm() is
             # idempotent, so repeating it here just covers a capture that raised before the
             # call above (it must not stay armed past this context either way).
-            self._unset_collective_hooks()
+            if self._collective_hooks is not None:
+                self._collective_hooks.remove()
             _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()

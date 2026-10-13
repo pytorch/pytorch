@@ -7,6 +7,7 @@ per-collective pre/post hooks instead.
 """
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from typing import TypeAlias
 
 from torch._C._distributed_c10d import PreHookArgs, ProcessGroup
@@ -79,9 +80,8 @@ def _collective_metadata(info: _GroupInfo, args: PreHookArgs) -> CollectiveMetad
         # P2P ops advance a separate counter the group does not expose, so no Seq.
         # Like record_param_comms, "Rank" is the peer's group rank here.
         metadata["Rank"] = args.root
-        if 0 <= args.root < len(info.ranks):
-            key = "Dst Rank" if op == "SEND" else "Src Rank"
-            metadata[key] = info.ranks[args.root]
+        key = "Dst Rank" if op == "SEND" else "Src Rank"
+        metadata[key] = info.ranks[args.root]
     else:
         metadata["Rank"] = info.rank
         # The hook fires before the backend bumps its counter.
@@ -129,8 +129,7 @@ def register_collective_annotation_hooks(
     Groups created after this call are not hooked, and collectives inside
     ``_coalescing_manager`` or a batched ``batch_isend_irecv`` are not annotated:
     their kernels launch when the group ends, outside any hook. c10d skips the post
-    hook, and so the ``pop``, of a collective that raises; callers clean up any push
-    left open when they remove the hooks.
+    hook, and so the ``pop``, of a collective that raises.
 
     Each call gets its own hooks, so registrations can overlap (e.g. a graph capture
     inside a Cuspy window). c10d does not lock its hook maps, so register and remove
@@ -154,3 +153,24 @@ def register_collective_annotation_hooks(
         group.register_pre_hook(id(handle), pre_hook)
         group.register_post_hook(id(handle), lambda _: pop())
     return handle
+
+
+def register_graph_capture_annotation_hooks() -> CollectiveAnnotationHandle:
+    """Register hooks that tag the kernels a CUDA graph capture records for each
+    collective, via ``mark_kernels``. Used by ``torch.cuda.graph``."""
+    from torch.cuda._graph_annotations import mark_kernels
+
+    # The scope a collective's push opened, until its pop closes it.
+    scopes: list[AbstractContextManager[None]] = []
+
+    def push(metadata: CollectiveMetadata) -> None:
+        # Backward attribution would tag whatever autograd node launched the
+        # collective, not the collective itself.
+        scope = mark_kernels(metadata, backward=False)
+        scope.__enter__()
+        scopes.append(scope)
+
+    def pop() -> None:
+        scopes.pop().__exit__(None, None, None)
+
+    return register_collective_annotation_hooks(push, pop)
