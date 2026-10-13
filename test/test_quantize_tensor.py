@@ -523,7 +523,7 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
         rtne_scales, rtne_qdata = to_mxfp8_reference(
             input, swizzle_type=SwizzleType.SWIZZLE_32_4_4
         )
-        self.assertEqual(scales.view(torch.uint8), rtne_scales.view(torch.uint8))
+        self.assertEqual(scales, rtne_scales)
         unswizzled = from_blocked(qdata, scales, 32)
         reconstructed = from_blocked_format(qdata, unswizzled)
         rtne_reconstructed = from_blocked_format(rtne_qdata, unswizzled)
@@ -591,16 +591,16 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                 outputs = []
                 for op, (scales, qdata) in enumerate(captured):
                     # verify results from cuda graph match eager
-                    scale_bytes = scales.view(torch.uint8).clone()
-                    qdata_bytes = qdata.view(torch.uint8).clone()
+                    captured_scales = scales.clone()
+                    captured_qdata = qdata.clone()
                     expected_scales, expected_qdata = expected[replay * num_ops + op]
-                    self.assertEqual(scale_bytes, expected_scales.view(torch.uint8))
-                    self.assertEqual(qdata_bytes, expected_qdata.view(torch.uint8))
+                    self.assertEqual(captured_scales, expected_scales)
+                    self.assertEqual(captured_qdata, expected_qdata)
                     reconstructed = from_blocked_format(qdata, scales)
                     self.assertGreater(
                         compute_error(input.float(), reconstructed.float()).item(), 15.0
                     )
-                    outputs.append((scale_bytes, qdata_bytes))
+                    outputs.append((captured_scales, captured_qdata))
                 replays.append(outputs)
 
             for op in range(num_ops):
@@ -650,15 +650,15 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
             # verify RNG state did not change
             self.assertEqual(generator.get_offset(), offset)
             # verify results from cuda graph match expected result from eager mode
-            scale_bytes = scales.view(torch.uint8).clone()
-            qdata_bytes = qdata.view(torch.uint8).clone()
-            self.assertEqual(scale_bytes, expected_scales.view(torch.uint8))
-            self.assertEqual(qdata_bytes, expected_qdata.view(torch.uint8))
+            captured_scales = scales.clone()
+            captured_qdata = qdata.clone()
+            self.assertEqual(captured_scales, expected_scales)
+            self.assertEqual(captured_qdata, expected_qdata)
             reconstructed = from_blocked_format(qdata, scales)
             self.assertGreater(
                 compute_error(input.float(), reconstructed.float()).item(), 15.0
             )
-            replays.append((scale_bytes, qdata_bytes))
+            replays.append((captured_scales, captured_qdata))
 
         self.assertEqual(replays[0], replays[1])
         self.assertFalse(torch.equal(replays[0][1], replays[2][1]))
