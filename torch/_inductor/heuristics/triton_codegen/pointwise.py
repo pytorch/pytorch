@@ -15,7 +15,6 @@ from torch._inductor.heuristics.registry import (
     register_codegen_heuristic,
 )
 from torch._inductor.runtime.hints import TileHint, TRITON_MAX_BLOCK
-from torch._inductor.runtime.triton_compat import Config
 
 
 if TYPE_CHECKING:
@@ -97,10 +96,14 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
             triton_config_fn(size_hints, 256, 4),
         ]
         if size_hints["x"] >= 2048:
+            from torch._inductor.runtime.triton_heuristics import config_from_dict
+
             # One warp per 2048-wide row segment (64 elements per thread), which
             # suits compute-heavy rows; triton_config would raise it to 4 warps.
             configs.append(
-                Config({"XBLOCK": 2048, "YBLOCK": 1}, num_warps=1, num_stages=1)
+                config_from_dict(
+                    {"XBLOCK": 2048, "YBLOCK": 1, "num_warps": 1, "num_stages": 1}
+                )
             )
         return [*configs, *hinted_configs]
 
