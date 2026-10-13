@@ -54,8 +54,10 @@ TORCH_CUDA_CPP_API void count_launch();
 // launches of each side_aware_kernel instantiation time both paths with CUDA
 // events (see use_side); once those events have completed, the faster path
 // per byte is used for good. Calibration falls back to the default path for
-// good if its samples span two devices or are still pending after
-// kMaxPendingLaunches further launches. Both paths give bitwise identical
+// good if its samples span two devices or a sample's stop event is still
+// unrecorded after kMaxPendingLaunches further launches. Until the samples have
+// run on the GPU, launches use the default kernel, so a burst of asynchronous
+// launches right after the first ones runs default until the GPU catches up. Both paths give bitwise identical
 // results. PYTORCH_SIDE_AWARE_CALIBRATE=0 skips this (always side).
 class TORCH_CUDA_CPP_API Calibration {
  public:

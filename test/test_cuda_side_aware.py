@@ -29,7 +29,7 @@ class TestSideAware(TestCase):
             allocator = torch.cuda.memory.LocalityInterleavedAllocator()
         except RuntimeError as e:  # no locality domains (driver or cuda.bindings < 13.4), or not two
             raise unittest.SkipTest(str(e)) from e
-        cls.pool = torch.cuda.MemPool(allocator.allocator(), no_split=True)
+        cls.pool = torch.cuda.MemPool(allocator.allocator())  # default splitting
 
     def setUp(self):
         self.prev = torch._C._cuda_get_side_aware()
@@ -92,11 +92,27 @@ class TestSideAware(TestCase):
         self.assertEqual(n_small, 0)
         self.assertEqual(n_offset, 0)
 
-    def test_arena_alignment(self):
+    def test_offset_operands_take_side_path(self):
+        # Tensors that start mid-chunk (views here; split segments in practice) still use the side path, with
+        # partial first and last chunks, and stay bitwise identical.
         with torch.cuda.use_mem_pool(self.pool):
-            ts = [torch.empty(n, device="cuda") for n in (1, 12345, 3 << 20)]
-        for t in ts:
-            self.assertEqual(t.data_ptr() % (4 << 20), 0)
+            buf = torch.randn(2 * self.N + (1 << 20), device="cuda")
+            a = buf[4 : 4 + self.N]  # 16 B past an absolute 64 KiB boundary
+            off = (self.N + 12348) // 4 * 4  # another 16 B-aligned, not 64 KiB-aligned offset
+            b = buf[off : off + self.N]
+            torch._C._cuda_set_side_aware(False)
+            ref, _ = self._launches(lambda: a + b)
+            torch._C._cuda_set_side_aware(True)
+            gots, n_on = self._launches(lambda: [a + b for _ in range(4)])
+        self.assertGreater(n_on, 0)
+        for got in gots:
+            self.assertTrue(torch.equal(got.view(torch.int32), ref.view(torch.int32)))
+
+    def test_small_tensors_pack(self):
+        # With splitting, small tensors share segments instead of each taking a whole 4 MiB block.
+        with torch.cuda.use_mem_pool(self.pool):
+            ts = [torch.empty(256, device="cuda") for _ in range(1000)]  # 1 KiB each
+        self.assertLessEqual(len({t.data_ptr() >> 22 for t in ts}), 2)
 
 
 if __name__ == "__main__":

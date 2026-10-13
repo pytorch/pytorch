@@ -1847,7 +1847,8 @@ class LocalityInterleavedAllocator(_CUDAAllocator):
 
     Allocations come from one arena per device whose 2 MiB page at ``addr`` is
     backed by locality domain ``(addr >> 21) & 1``, so
-    ``side(addr) = (addr >> 21) & 1``, and start 4 MiB aligned. Large contiguous
+    ``side(addr) = (addr >> 21) & 1``; segments start 4 MiB aligned and the pool may split
+    them as usual (the side-aware schedule handles tensors that start anywhere). Large contiguous
     elementwise kernels whose operands all come from the arena use a side-aware
     schedule (toggle with ``torch._C._cuda_set_side_aware``), with
     bitwise-identical results. Requires CUDA driver and cuda.bindings 13.4+.
@@ -1858,7 +1859,7 @@ class LocalityInterleavedAllocator(_CUDAAllocator):
 
     Example::
 
-        >>> pool = torch.cuda.MemPool(LocalityInterleavedAllocator().allocator(), no_split=True)
+        >>> pool = torch.cuda.MemPool(LocalityInterleavedAllocator().allocator())
         >>> with torch.cuda.use_mem_pool(pool):
         ...     x = torch.randn(1 << 28, device="cuda")
 

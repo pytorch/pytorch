@@ -303,13 +303,12 @@ bool Calibration::use_side(
     }
     return side;
   }
-  // Every sample is issued; until all stops are recorded and have run, keep
-  // the default kernel, and give up after kMaxPendingLaunches.
-  if (++pending_ > kMaxPendingLaunches) {
-    return decide(false);
-  }
+  // Every sample is issued; keep the default kernel until the samples have run.
+  // A stop that is never recorded (its launch threw) would wait forever, so
+  // give up after kMaxPendingLaunches; recorded samples that the GPU has not
+  // reached yet (cudaErrorNotReady below) always complete, so keep polling.
   if (recorded_.load(std::memory_order_acquire) < kTimed) {
-    return false;
+    return ++pending_ > kMaxPendingLaunches ? decide(false) : false;
   }
   double best[2] = {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity()};
   for (int i = 0; i < kTimed; ++i) {

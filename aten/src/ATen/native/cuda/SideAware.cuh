@@ -7,11 +7,13 @@
 //
 // Tensors from torch.cuda.memory.LocalityInterleavedAllocator lie in a
 // registered side-striped range (SideAwareState.h), where
-// side(addr) = (addr >> 21) & 1. The work unit is a 64 KiB chunk of the
-// PRIMARY operand (the widest element type, ties to the output), i.e. one
-// element range in every operand, sent to the primary's side. Other operands
-// share that side when they start at the same offset within 4 MiB (e.g. all at
-// block starts); otherwise only locality is lost, not correctness.
+// side(addr) = (addr >> 21) & 1. The work unit is one absolute 64 KiB block of
+// address space of the PRIMARY operand (the widest element type, ties to the
+// output), i.e. one element range in every operand, sent to that block's side.
+// The primary can start anywhere (e.g. after other blocks in a split segment):
+// its first and last chunks are then partial. Other operands share the side
+// when they start at the same offset within 4 MiB; otherwise only locality is
+// lost, not correctness.
 // Persistent CTAs (2 x 512 threads per SM) claim chunks from the queue of their
 // SM's side and steal from the other queue when theirs is empty. Output
 // elements are independent and computed by the same functor, so results are
@@ -42,9 +44,12 @@ constexpr unsigned kStepsPerChunk = kChunkBytes / 16 / kThreads; // 16 B steps p
 constexpr size_t kMinPrimaryBytes = size_t(64) << 20; // below this the claim cost does not pay
 
 // Chunk g = addr >> 16 lies on side (g / kChunksPerPage) & 1 (absolute index).
+// Chunk c of the tensor is absolute chunk first + c and holds primary elements
+// [c * E - head, (c + 1) * E - head), clipped to [0, n) (E = elements per chunk).
 struct Chunking {
-  uint64_t first; // absolute chunk of the primary's first element
-  uint64_t per_side[2], before[2]; // side-s chunks inside the tensor / below `first`
+  uint64_t first; // absolute chunk holding the primary's first element
+  uint64_t head; // primary elements of chunk `first` before the tensor starts
+  uint64_t per_side[2], before[2]; // side-s chunks spanned by the tensor / below `first`
 };
 
 __host__ __device__ inline uint64_t side_chunks_below(uint64_t abs_chunk, int side) {
@@ -169,16 +174,21 @@ __global__ void __launch_bounds__(kThreads, kCtasPerSm) side_aware_kernel(
   constexpr size_t kStride = size_t(kThreads) * kVec;
   constexpr size_t kChunkElems = kChunkBytes / kWidest;
   for_each_side_chunk(ctx, chunking, [&](uint64_t chunk) {
-    const size_t begin = size_t(chunk) * kChunkElems;
-    const size_t end = begin + kChunkElems < n ? begin + kChunkElems : n;
-    if (end - begin == kChunkElems) {
+    // Chunk start relative to the tensor; negative only for the first chunk.
+    const int64_t start = int64_t(chunk * kChunkElems) - int64_t(chunking.head);
+    const size_t begin = start < 0 ? 0 : size_t(start);
+    const size_t end = size_t(start) + kChunkElems < n ? size_t(start + int64_t(kChunkElems)) : n;
+    // A full chunk starts on an absolute 64 KiB boundary of the primary, so
+    // every operand (16 B aligned at its base, checked by the gate) is vector
+    // aligned there too.
+    if (start >= 0 && end - begin == kChunkElems) {
 #pragma unroll
       for (unsigned step = 0; step < kStepsPerChunk; step += kGroup) {
         const size_t elem = begin + (size_t(step) * kThreads + threadIdx.x) * kVec;
         compute_store<kVec, kGroup>(
             f, out, elem, kStride, load_group<In, kVec, kGroup>(in, elem, kStride)...);
       }
-    } else { // the tensor's last, partial chunk
+    } else { // the tensor's first or last chunk, partial
       for (size_t e = begin + threadIdx.x; e < end; e += kThreads) {
         out[e] = f(in[e]...);
       }
@@ -225,7 +235,6 @@ bool try_launch_impl(
     }
   }
   Context ctx;
-  if (primary % kChunkBytes != 0) return reject("primary not 64 KiB aligned", 0);
   if (!get_context(stream, &ctx)) return reject("no context (capture or invalid SM map)", 0);
   static Calibration calibration; // one per functor/type instantiation
   size_t bytes = 0;
@@ -237,9 +246,9 @@ bool try_launch_impl(
     timer.calibration = &calibration;
     return reject("calibrated (or calibrating) to the default kernel", 0);
   }
-  const uint64_t chunk_elems = kChunkBytes / kWidest;
-  const uint64_t count = (n + chunk_elems - 1) / chunk_elems;
-  Chunking chunking{primary / kChunkBytes, {}, {}};
+  const uint64_t first = primary / kChunkBytes;
+  const uint64_t count = (primary + n * kWidest - 1) / kChunkBytes - first + 1;
+  Chunking chunking{first, (primary % kChunkBytes) / kWidest, {}, {}};
   for (int side = 0; side < 2; ++side) {
     chunking.before[side] = side_chunks_below(chunking.first, side);
     chunking.per_side[side] =
