@@ -151,7 +151,7 @@ def _quantize_tensor_dual_impl(
         _blockscaled_tma_impl(
             input,
             "dim_km",
-            False,
+            scaling_type_use_square_block_size,
             True,
             stochastic_rounding=stochastic_rounding,
             random_key=random_key,

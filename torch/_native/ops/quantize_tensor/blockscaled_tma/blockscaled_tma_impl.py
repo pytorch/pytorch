@@ -164,9 +164,10 @@ def _validate_and_normalize_blockscaled_tma(
     if input.data_ptr() % _INPUT_ALIGNMENT_BYTES != 0:
         raise ValueError("blockscaled TMA requires a 16-byte-aligned input")
 
-    if is_square_scaling:
-        if quant_orientation != "dim_k":
-            raise ValueError("square scaling currently supports only dim-k output")
+    if is_square_scaling and quant_orientation == "dim_m":
+        raise ValueError(
+            "square scaling currently supports only dim-k or dim-km output"
+        )
     M, K = input.shape
     if is_square_scaling and M % 32 != 0:
         raise ValueError("32x32 requires M % 32 == 0")

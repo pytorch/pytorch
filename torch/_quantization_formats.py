@@ -108,9 +108,5 @@ def _quantize_tensor_dual_validate_inputs(
             swizzle_type == SwizzleType.SWIZZLE_32_4_4.value,
             lambda: "dual mxfp8 quantization currently requires SWIZZLE_32_4_4",
         )
-        torch._check_value(
-            not scaling_type_use_square_block_size,
-            lambda: "dual mxfp8 quantization does not yet support 32x32 MXFP8 scaling",
-        )
     else:
         raise AssertionError(f"Unsupported {quant_format=}")

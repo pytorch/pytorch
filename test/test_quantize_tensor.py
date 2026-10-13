@@ -196,6 +196,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales.flatten(), scales_ref.flatten())
 
+    @parametrize("scaling_type_use_square_block_size", (False, True))
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     @parametrize(
         "shape",
@@ -203,20 +204,28 @@ class TestMXFP8ReferenceNumerics(TestCase):
         name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
     )
     @skipIfNoCuteDSL
-    def test_to_mx_rceil_dim_km(self, input_dtype, shape, device):
+    def test_to_mx_rceil_dim_km(
+        self, scaling_type_use_square_block_size, input_dtype, shape, device
+    ):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
-        qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference(
-            data_hp, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
-        )
-        qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference(
-            data_hp.t().contiguous(),
-            **_MXFP8_KWARGS,
-            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
-        )
+        if scaling_type_use_square_block_size:
+            qdata_k_ref, scales_k_ref = mxfp8_32x32_swizzle_f(data_hp)
+            qdata_m_ref, scales_m_ref = mxfp8_32x32_swizzle_f(data_hp.t().contiguous())
+            scales_k_ref = scales_k_ref.view(torch.float8_e8m0fnu)
+            scales_m_ref = scales_m_ref.view(torch.float8_e8m0fnu)
+        else:
+            qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference(
+                data_hp, **_MXFP8_SWIZZLED_KWARGS
+            )
+            qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference(
+                data_hp.t().contiguous(), **_MXFP8_SWIZZLED_KWARGS
+            )
         qdata_k, scales_k, qdata_m, scales_m = F.quantize_tensor_dual(
-            data_hp, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
+            data_hp,
+            **_MXFP8_SWIZZLED_KWARGS,
+            scaling_type_use_square_block_size=scaling_type_use_square_block_size,
         )
         self.assertEqual(qdata_k, qdata_k_ref)
         self.assertEqual(qdata_m, qdata_m_ref)
@@ -327,19 +336,24 @@ class TestMXFP8ReferenceNumerics(TestCase):
             self.assertEqual(output.device, data_hp.device)
             self.assertEqual(output.numel(), 0)
 
+    @parametrize("scaling_type_use_square_block_size", (False, True))
     @parametrize(
         "shape",
         ((0, 32), (32, 0), (0, 0)),
         name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
     )
     @skipIfNoCuteDSL
-    def test_to_mx_rceil_dim_km_empty(self, shape, device):
+    def test_to_mx_rceil_dim_km_empty(
+        self, scaling_type_use_square_block_size, shape, device
+    ):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         M, K = shape
         data_hp = torch.empty(shape, dtype=torch.bfloat16, device=device)
         outputs = F.quantize_tensor_dual(
-            data_hp, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
+            data_hp,
+            **_MXFP8_SWIZZLED_KWARGS,
+            scaling_type_use_square_block_size=scaling_type_use_square_block_size,
         )
         expected_shapes = (
             (M, K),
@@ -402,15 +416,20 @@ class TestMXFP8ReferenceNumerics(TestCase):
             compute_error(mat_a.float() @ mat_b.float(), out.float()).item(), 15.0
         )
 
+    @parametrize("scaling_type_use_square_block_size", (False, True))
     @skipIfNoCuteDSL
-    def test_quantize_tensor_dual_compile(self, device):
+    def test_quantize_tensor_dual_compile(
+        self, scaling_type_use_square_block_size, device
+    ):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         input = torch.randn((160, 192), dtype=torch.bfloat16, device=device)
 
         def fn(x):
             return F.quantize_tensor_dual(
-                x, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
+                x,
+                **_MXFP8_SWIZZLED_KWARGS,
+                scaling_type_use_square_block_size=scaling_type_use_square_block_size,
             )
 
         expected = fn(input)
@@ -563,10 +582,13 @@ class TestQuantizeTensorMeta(TestCase):
         self.assertEqual(tuple(qdata.shape), (160, 32))
         self.assertEqual(tuple(scales.shape), (2, 1, 32, 16))
 
-    def test_dual_meta_shapes(self):
+    @parametrize("scaling_type_use_square_block_size", (False, True))
+    def test_dual_meta_shapes(self, scaling_type_use_square_block_size):
         input = torch.empty((160, 288), dtype=torch.bfloat16, device="meta")
         outputs = F.quantize_tensor_dual(
-            input, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
+            input,
+            **_MXFP8_SWIZZLED_KWARGS,
+            scaling_type_use_square_block_size=scaling_type_use_square_block_size,
         )
         self.assertEqual(
             tuple(tuple(output.shape) for output in outputs),
