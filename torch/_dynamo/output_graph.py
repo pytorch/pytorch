@@ -1232,12 +1232,6 @@ class OutputGraph(OutputGraphCommon):
             self.guards.add(
                 GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
             )
-        if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-            self.guards.add(
-                GlobalStateSource().make_guard(
-                    GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS
-                )
-            )
 
     def maybe_install_saved_tensors_hooks_subgraphs(self) -> list[str] | None:
         if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
@@ -2950,10 +2944,29 @@ class OutputGraph(OutputGraphCommon):
 
             dce_hop_extra_outputs(gm)
 
+            # Saved tensors hooks can only affect a graph that records autograd.
+            # Guarding on them otherwise recompiles e.g. a no_grad optimizer step
+            # when it is later called inside a hooks context.
+            records_autograd = any(
+                isinstance(t, torch.Tensor) and t.grad_fn is not None
+                for node in self.graph.nodes
+                if node.op != "placeholder"
+                for t in pytree.tree_leaves(node.meta.get("example_value"))
+            )
+            if (
+                records_autograd
+                and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+            ):
+                self.guards.add(
+                    GlobalStateSource().make_guard(
+                        GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS
+                    )
+                )
+
             # Saved tensors hooks are not used by the graph.
             # GraphModule by default only copies used in the graph submodules.
             # Copying them into the result graph manually.
-            if self.saved_tensors_hooks_subgraph_names:
+            if records_autograd and self.saved_tensors_hooks_subgraph_names:
                 for subgraph_name in self.saved_tensors_hooks_subgraph_names:
                     setattr(gm, subgraph_name, getattr(root, subgraph_name))
 
