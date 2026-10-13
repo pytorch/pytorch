@@ -2,8 +2,10 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/Reduction.h>
+#include <ATen/native/Resize.h>
 #include <torch/cuda.h>
 #include <ATen/test/test_assert.h>
+#include <c10/core/CPUAllocator.h>
 #include <c10/util/irange.h>
 #include <c10/util/CallOnce.h>
 
@@ -549,4 +551,82 @@ TEST(BasicTest, TestForBlobStridesOverflow) {
   ASSERT_THROWS(
       at::for_blob(storage.data(), {2,}).strides({huge,}).options(c10::TensorOptions(kInt)).make_tensor());
 #endif
+}
+
+namespace {
+
+// Fails allocations above max_nbytes; used only by the StorageImpl under test
+// (no global SetCPUAllocator).
+struct FailLargeCPUAllocator final : at::Allocator {
+  explicit FailLargeCPUAllocator(size_t max_nbytes) : max_nbytes_(max_nbytes) {}
+
+  at::DataPtr allocate(size_t nbytes) override {
+    TORCH_CHECK(
+        nbytes <= max_nbytes_,
+        "Forced CPU allocation failure for testing");
+    return c10::GetDefaultCPUAllocator()->allocate(nbytes);
+  }
+
+  at::DeleterFnPtr raw_deleter() const override {
+    return c10::GetDefaultCPUAllocator()->raw_deleter();
+  }
+
+  void copy_data(void* dest, const void* src, std::size_t count) const override {
+    c10::GetDefaultCPUAllocator()->copy_data(dest, src, count);
+  }
+
+  size_t max_nbytes_;
+};
+
+at::Tensor tensor_with_allocator(FailLargeCPUAllocator& allocator, int64_t value) {
+  auto storage = c10::make_intrusive<c10::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      /*size_bytes=*/sizeof(int64_t),
+      &allocator,
+      /*resizable=*/true);
+  auto t = at::empty({0}, at::dtype(at::kLong)).set_(
+      at::Storage(std::move(storage)), /*storage_offset=*/0, /*size=*/{1}, /*stride=*/{1});
+  t.fill_(value);
+  return t;
+}
+
+} // namespace
+
+// Regression for https://github.com/pytorch/pytorch/issues/194047
+TEST(BasicTest, ResizeFailedAllocationPreservesMetadataCPU) {
+  FailLargeCPUAllocator allocator(/*max_nbytes=*/1024);
+  auto t = tensor_with_allocator(allocator, /*value=*/123);
+
+  ASSERT_THROWS(t.resize_({100000}));
+
+  ASSERT_EQ(t.sizes(), IntArrayRef({1}));
+  ASSERT_EQ(t.strides(), IntArrayRef({1}));
+  ASSERT_EQ(t.storage().nbytes(), sizeof(int64_t));
+  ASSERT_EQ(t.item<int64_t>(), 123);
+}
+
+TEST(BasicTest, ResizeFailedStridedAllocationPreservesMetadataCPU) {
+  FailLargeCPUAllocator allocator(/*max_nbytes=*/1024);
+  auto t = tensor_with_allocator(allocator, /*value=*/123);
+  const int64_t stride = 1;
+
+  ASSERT_THROWS(at::native::resize_impl_cpu_(
+      t.unsafeGetTensorImpl(),
+      /*size=*/{100000},
+      /*stride=*/IntArrayRef(&stride, 1),
+      /*resize_storage=*/true));
+
+  ASSERT_EQ(t.sizes(), IntArrayRef({1}));
+  ASSERT_EQ(t.strides(), IntArrayRef({1}));
+  ASSERT_EQ(t.storage().nbytes(), sizeof(int64_t));
+  ASSERT_EQ(t.item<int64_t>(), 123);
+}
+
+TEST(BasicTest, ResizeZeroToNonzeroGrowsStorageCPU) {
+  auto t = at::empty({0}, at::dtype(at::kLong));
+  ASSERT_EQ(t.numel(), 0);
+  t.resize_({10});
+  ASSERT_EQ(t.sizes(), IntArrayRef({10}));
+  ASSERT_EQ(t.numel(), 10);
+  ASSERT_GE(t.storage().nbytes(), 10 * sizeof(int64_t));
 }
