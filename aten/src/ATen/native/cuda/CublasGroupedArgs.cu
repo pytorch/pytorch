@@ -18,14 +18,11 @@ namespace at::native {
 
 namespace {
 
-constexpr int kMaxGroupedGemmGroups = 1024;
-
 template <typename IndexType>
 __global__ void populate_cublas_grouped_args_kernel(
     const int32_t* __restrict__ offs,
     int64_t base_A, int64_t base_B, int64_t base_D,
     IndexType cublas_m, IndexType cublas_n, IndexType cublas_k,
-    IndexType k_multiplier,
     bool m_is_delta, bool n_is_delta, bool k_is_delta,
     IndexType lda_val, IndexType ldb_val, IndexType ldd_val,
     int64_t a_offs_stride, int64_t a_idx_stride,
@@ -36,8 +33,6 @@ __global__ void populate_cublas_grouped_args_kernel(
     int64_t* __restrict__ APtr_out, int64_t* __restrict__ BPtr_out, int64_t* __restrict__ DPtr_out,
     int64_t* __restrict__ alphaPtr_out, int64_t* __restrict__ betaPtr_out,
     float* __restrict__ alpha_ptr, float* __restrict__ beta_ptr,
-    const float* __restrict__ alpha_scale_a,
-    const float* __restrict__ alpha_scale_b,
     int64_t base_scale_a, int64_t base_scale_b,
     int64_t scale_a_bytes, int64_t scale_b_bytes,
     int64_t scale_a_stride_bytes, int64_t scale_b_stride_bytes,
@@ -48,7 +43,7 @@ __global__ void populate_cublas_grouped_args_kernel(
   int i = threadIdx.x;
 
   if (i == 0) {
-    *alpha_ptr = alpha_scale_a == nullptr ? 1.0f : *alpha_scale_a * *alpha_scale_b;
+    *alpha_ptr = 1.0f;
     *beta_ptr = 0.0f;
   }
 
@@ -66,21 +61,17 @@ __global__ void populate_cublas_grouped_args_kernel(
       CUDA_KERNEL_ASSERT(end <= cublas_n && "expected offset to be less than tensor size\n");
     } else if (k_is_delta) {
       CUDA_KERNEL_ASSERT(end <= cublas_k && "expected offset to be less than tensor size\n");
-      CUDA_KERNEL_ASSERT(
-          delta % k_multiplier == 0 &&
-          "expected float4 reduction offsets to be divisible by 2\n");
     }
 
     if (i < blockDim.x - 1) {
-      const int64_t storage_delta = k_is_delta ? delta / k_multiplier : delta;
       if (a_offs_stride != 0) {
         CUDA_KERNEL_ASSERT(
-            (storage_delta * a_offs_stride) % 16 == 0 &&
+            (static_cast<int64_t>(delta) * a_offs_stride) % 16 == 0 &&
             "expected input tensor dynamic dimension byte size to be non-negative multiple of 16\n");
       }
       if (b_offs_stride != 0) {
         CUDA_KERNEL_ASSERT(
-            (storage_delta * b_offs_stride) % 16 == 0 &&
+            (static_cast<int64_t>(delta) * b_offs_stride) % 16 == 0 &&
             "expected input tensor dynamic dimension byte size to be non-negative multiple of 16\n");
       }
       if ((m_is_delta || n_is_delta) && d_offs_stride != 0) {
@@ -107,9 +98,8 @@ __global__ void populate_cublas_grouped_args_kernel(
   ldb_out[i] = ldb_val;
   ldd_out[i] = ldd_val;
 
-  const int64_t storage_group_start = k_is_delta ? group_start / k_multiplier : group_start;
-  APtr_out[i] = base_A + storage_group_start * a_offs_stride + i * a_idx_stride;
-  BPtr_out[i] = base_B + storage_group_start * b_offs_stride + i * b_idx_stride;
+  APtr_out[i] = base_A + group_start * a_offs_stride + i * a_idx_stride;
+  BPtr_out[i] = base_B + group_start * b_offs_stride + i * b_idx_stride;
   DPtr_out[i] = base_D + group_start * d_offs_stride + i * d_idx_stride;
 
   // Store device pointer as int64_t — cublasLt grouped GEMM expects
@@ -123,17 +113,17 @@ __global__ void populate_cublas_grouped_args_kernel(
   const bool scan_a = (scalePtrA_out != nullptr) && (scale_a_stride_bytes == 0);
   const bool scan_b = (scalePtrB_out != nullptr) && (scale_b_stride_bytes == 0);
   if (scan_a || scan_b) {
-    __shared__ int64_t s_a[kMaxGroupedGemmGroups];
-    __shared__ int64_t s_b[kMaxGroupedGemmGroups];
-    const int64_t inner_a = scale_inner ? scale_inner : delta;
-    const int64_t inner_b = scale_inner ? scale_inner : delta;
+    extern __shared__ int64_t scale_scan[];
+    int64_t* s_a = scale_scan;
+    int64_t* s_b = scale_scan + blockDim.x;
+    const int64_t inner = scale_inner ? scale_inner : delta;
     const int64_t outer_a = scale_a_outer ? scale_a_outer : delta;
     const int64_t outer_b = scale_b_outer ? scale_b_outer : delta;
     const int64_t size_a = scan_a
-        ? cublas_grouped_scale_size_bytes(scale_layout_a, inner_a, outer_a)
+        ? cublas_grouped_scale_size_bytes(scale_layout_a, inner, outer_a)
         : 0;
     const int64_t size_b = scan_b
-        ? cublas_grouped_scale_size_bytes(scale_layout_b, inner_b, outer_b)
+        ? cublas_grouped_scale_size_bytes(scale_layout_b, inner, outer_b)
         : 0;
     s_a[i] = size_a;
     s_b[i] = size_b;
@@ -187,7 +177,6 @@ void launch_populate_cublas_grouped_args(
     const int32_t* offs,
     int64_t base_A, int64_t base_B, int64_t base_D,
     int64_t cublas_m, int64_t cublas_n, int64_t cublas_k,
-    int64_t k_multiplier,
     bool m_is_delta, bool n_is_delta, bool k_is_delta,
     int64_t lda_val, int64_t ldb_val, int64_t ldd_val,
     int64_t a_offs_stride, int64_t a_idx_stride,
@@ -200,7 +189,6 @@ void launch_populate_cublas_grouped_args(
     CublasGroupedScaleLayout scale_layout_b,
     int64_t scale_inner, int64_t scale_a_outer, int64_t scale_b_outer,
     int64_t* scalePtrA_out, int64_t* scalePtrB_out,
-    const float* alpha_scale_a, const float* alpha_scale_b,
     cudaStream_t stream) {
   IndexType* m_arr   = reinterpret_cast<IndexType*>(args.buf.data_ptr());
   IndexType* n_arr   = m_arr + batchCount;
@@ -225,10 +213,12 @@ void launch_populate_cublas_grouped_args(
   args.ldbArray = ldb_arr;
   args.lddArray = ldd_arr;
 
-  populate_cublas_grouped_args_kernel<IndexType><<<1, batchCount, 0, stream>>>(
+  const bool scan_scales = (scalePtrA_out != nullptr && scale_a_stride_bytes == 0) ||
+      (scalePtrB_out != nullptr && scale_b_stride_bytes == 0);
+  const size_t shared_bytes = scan_scales ? 2 * batchCount * sizeof(int64_t) : 0;
+  populate_cublas_grouped_args_kernel<IndexType><<<1, batchCount, shared_bytes, stream>>>(
       offs, base_A, base_B, base_D,
       static_cast<IndexType>(cublas_m), static_cast<IndexType>(cublas_n), static_cast<IndexType>(cublas_k),
-      static_cast<IndexType>(k_multiplier),
       m_is_delta, n_is_delta, k_is_delta,
       static_cast<IndexType>(lda_val), static_cast<IndexType>(ldb_val), static_cast<IndexType>(ldd_val),
       a_offs_stride, a_idx_stride,
@@ -239,7 +229,6 @@ void launch_populate_cublas_grouped_args(
       args.APtrArray, args.BPtrArray, args.DPtrArray,
       args.alphaPtrArray, args.betaPtrArray,
       args.alphaScalar, args.betaScalar,
-      alpha_scale_a, alpha_scale_b,
       base_scale_a, base_scale_b,
       scale_a_bytes, scale_b_bytes,
       scale_a_stride_bytes, scale_b_stride_bytes,
@@ -261,9 +250,7 @@ cublasGroupedArgs::cublasGroupedArgs(
     const std::optional<Tensor>& scale_a,
     const std::optional<Tensor>& scale_b,
     const std::optional<CublasGroupedScaleLayout>& scale_layout_a,
-    const std::optional<CublasGroupedScaleLayout>& scale_layout_b,
-    const std::optional<Tensor>& alpha_scale_a,
-    const std::optional<Tensor>& alpha_scale_b) {
+    const std::optional<CublasGroupedScaleLayout>& scale_layout_b) {
   const bool a_is_2d = mat1.dim() == 2;
   const bool b_is_2d = mat2.dim() == 2;
   if (a_is_2d || b_is_2d) {
@@ -281,11 +268,9 @@ cublasGroupedArgs::cublasGroupedArgs(
 
   const int64_t cublas_m = mat1.size(-2);
   const int64_t cublas_n = mat2.size(-1);
-  const int64_t storage_k = std::min(mat1.size(-1), mat2.size(-2));
-  const int64_t k_multiplier = mat1.scalar_type() == at::kFloat4_e2m1fn_x2 ? 2 : 1;
-  const int64_t cublas_k = storage_k * k_multiplier;
-  const int64_t lda_val = (transa == 'n' ? mat1.stride(-2) : mat1.stride(-1)) * k_multiplier;
-  const int64_t ldb_val = (transb == 'n' ? mat2.stride(-2) : mat2.stride(-1)) * k_multiplier;
+  const int64_t cublas_k = std::min(mat1.size(-1), mat2.size(-2));
+  const int64_t lda_val = transa == 'n' ? mat1.stride(-2) : mat1.stride(-1);
+  const int64_t ldb_val = transb == 'n' ? mat2.stride(-2) : mat2.stride(-1);
   const int64_t ldd_val = c.stride(-2);
   const int64_t int32_max = std::numeric_limits<int32_t>::max();
   TORCH_INTERNAL_ASSERT(
@@ -302,9 +287,6 @@ cublasGroupedArgs::cublasGroupedArgs(
         scale_layout_a.has_value() && scale_layout_b.has_value(),
         "Scale layout must be provided when scale tensors are provided");
   }
-  TORCH_CHECK(
-      alpha_scale_a.has_value() == alpha_scale_b.has_value(),
-      "Both alpha scales must be provided together");
 
   const auto mata_layout = scale_layout_a.value_or(CublasGroupedScaleLayout::Scalar);
   const auto matb_layout = scale_layout_b.value_or(CublasGroupedScaleLayout::Scalar);
@@ -436,7 +418,7 @@ cublasGroupedArgs::cublasGroupedArgs(
   launch(
       *this, batchCount, offs_ptr,
       base_A, base_B, base_D,
-      cublas_m, cublas_n, cublas_k, k_multiplier,
+      cublas_m, cublas_n, cublas_k,
       m_is_delta, n_is_delta, k_is_delta,
       lda_val, ldb_val, ldd_val,
       a_offs_stride, a_idx_stride,
@@ -448,8 +430,6 @@ cublasGroupedArgs::cublasGroupedArgs(
       mata_layout, matb_layout,
       scale_inner, scale_a_outer, scale_b_outer,
       scaleAPtrArray, scaleBPtrArray,
-      alpha_scale_a ? alpha_scale_a->const_data_ptr<float>() : nullptr,
-      alpha_scale_b ? alpha_scale_b->const_data_ptr<float>() : nullptr,
       stream);
 }
 
