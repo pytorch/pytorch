@@ -502,7 +502,9 @@ def helper(x):
         # The compatibility API composes collection and formatting.
         self.assertEqual(
             source,
-            render_user_defined_triton_kernel_transitive_closure(source_modules),
+            render_user_defined_triton_kernel_transitive_closure(
+                source_modules, decorate_root=True
+            ),
         )
 
     @unittest.skipUnless(

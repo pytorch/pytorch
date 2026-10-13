@@ -755,9 +755,6 @@ def user_defined_triton_kernel_transitive_closure(
     if epilogue_fusion:
         kernel_src = epilogue_fusion[1]
     source = IndentedBuffer()
-    # Inductor supplies entry-point specialization and compiler options directly,
-    # so the root JITFunction's decorator options are not consumed on this path.
-    source.writeline("@triton.jit")
     source.splice(kernel_src, strip=True)
     add_source_module(None, source)
     # global constexpr vars handled above
@@ -782,9 +779,7 @@ def user_defined_triton_kernel_transitive_closure(
                 if isinstance(symbol, JITFunction):
                     source = IndentedBuffer()
                     source.newline()
-                    source.splice(
-                        _triton_jit_decorator_from_source(symbol), strip=True
-                    )
+                    source.splice(_triton_jit_decorator_from_source(symbol), strip=True)
                     source.splice(symbol.src, strip=True)
                     add_source_module(symbol, source, symbol_name)
                     symbols_included.add(symbol_name)
@@ -882,12 +877,17 @@ def render_user_defined_triton_kernel_transitive_closure(
     source_modules: Sequence[TritonKernelSource],
     *,
     imported_modules: Sequence[str] = (),
+    decorate_root: bool = False,
 ) -> str:
     """Render collected Triton sources and their required global bindings."""
 
     rendered: list[str] = []
-    for source_module in source_modules:
+    for index, source_module in enumerate(source_modules):
         if source_module.module_name not in imported_modules:
+            if index == 0 and decorate_root:
+                # Inductor supplies entry-point specialization and compiler options
+                # directly, so only the bare decorator is used for compilation.
+                rendered.append("@triton.jit\n")
             rendered.append(source_module.source)
         rendered.extend(
             f"{symbol_name} = {source_name}\n"
@@ -904,7 +904,9 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     source_modules = user_defined_triton_kernel_transitive_closure(
         kernel, epilogue_fusion
     )
-    return render_user_defined_triton_kernel_transitive_closure(source_modules)
+    return render_user_defined_triton_kernel_transitive_closure(
+        source_modules, decorate_root=True
+    )
 
 
 def user_defined_triton_kernel_specialization(
