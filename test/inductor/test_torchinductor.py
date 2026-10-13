@@ -22968,6 +22968,68 @@ if RUN_GPU:
             self.assertEqual(result, fn(x, mask))
             self.assertEqual(" ".join(code).count("@triton.jit"), 1)
 
+        def test_topk_small_k(self):
+            def reference(x, k, dim):
+                # Stable descending order; NaN ranks highest and -0 == +0.
+                key = torch.where(x.isnan(), float("inf"), x.float())
+                key = torch.where(key == 0, 0.0, key)
+                order = torch.sort(key, dim=dim, descending=True, stable=True).indices
+                nan_first = torch.gather(x.isnan().to(torch.int8), dim, order)
+                order = torch.gather(
+                    order,
+                    dim,
+                    torch.sort(
+                        nan_first, dim=dim, descending=True, stable=True
+                    ).indices,
+                )
+                indices = order.narrow(dim, 0, k)
+                return torch.gather(x, dim, indices), indices
+
+            specials = torch.tensor(
+                [float("inf"), -float("inf"), float("nan"), 0.0, -0.0, 1.0, 1.0],
+                device=GPU_TYPE,
+            )
+            for shape, k, dim, dtype, special in [
+                ((256, 8, 32), 2, -1, torch.float32, False),
+                ((256, 256), 8, -1, torch.bfloat16, False),
+                ((64, 16), 16, -1, torch.float32, False),
+                ((16, 128, 3), 3, 1, torch.float32, False),
+                ((512, 64), 8, -1, torch.float32, True),
+                ((512, 64), 8, -1, torch.bfloat16, True),
+            ]:
+                x = torch.randn(shape, device=GPU_TYPE)
+                if special:
+                    pick = specials[
+                        torch.randint(0, len(specials), shape, device=GPU_TYPE)
+                    ]
+                    x = torch.where(torch.rand(shape, device=GPU_TYPE) < 0.5, pick, x)
+                x = x.to(dtype)
+                torch._dynamo.reset()
+                (values, indices), code = run_and_get_code(
+                    torch.compile(lambda t: torch.topk(t, k, dim=dim)), x
+                )
+                self.assertNotIn("aten.topk.default(", " ".join(code))
+                ref_values, ref_indices = reference(x, k, dim)
+                self.assertEqual(indices, ref_indices)
+                self.assertTrue(
+                    torch.equal(
+                        values.view(
+                            torch.int16 if dtype == torch.bfloat16 else torch.int32
+                        ),
+                        ref_values.view(
+                            torch.int16 if dtype == torch.bfloat16 else torch.int32
+                        ),
+                    )
+                )
+
+            # Ties between -0 and +0 go to the lowest index, keeping the sign.
+            x = torch.zeros(64, 32, device=GPU_TYPE)
+            x = torch.where(torch.rand(64, 32, device=GPU_TYPE) < 0.5, -x, x)
+            x[:, 20:] = -1.0
+            values, indices = torch.compile(lambda t: torch.topk(t, 4, dim=-1))(x)
+            self.assertEqual(indices, torch.arange(4, device=GPU_TYPE).expand(64, 4))
+            self.assertEqual(torch.signbit(values), torch.signbit(x[:, :4]))
+
         @config.patch({"triton.decompose_sort_ops": True})
         def test_topk_decompose_sort_ops(self):
             def fn(a):
