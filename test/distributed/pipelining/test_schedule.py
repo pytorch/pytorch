@@ -1525,6 +1525,56 @@ class ScheduleTest(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
+    def test_post_metadata_inference_cleanup(self):
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        device = torch.device("cpu")
+        x = torch.randn(2, 4, device=device)
+        target = torch.randn_like(x)
+        try:
+            dynamic_stage = PipelineStage(torch.nn.Linear(4, 4), 0, 1, device)
+            dynamic_schedule = ScheduleGPipe(
+                dynamic_stage,
+                n_microbatches=1,
+                loss_fn=torch.nn.MSELoss(),
+            )
+            cleanup_calls = 0
+
+            def cleanup() -> None:
+                nonlocal cleanup_calls
+                self.assertIsNone(dynamic_stage._metadata_inference_buffer_backup)
+                self.assertIsNone(dynamic_stage._fwd_outputs_for_bwd_meta)
+                cleanup_calls += 1
+
+            handle = dynamic_schedule.register_post_metadata_inference_cleanup(cleanup)
+            dynamic_schedule.step(x, target=target)
+            self.assertEqual(cleanup_calls, 1)
+            dynamic_schedule.step(x, target=target)
+            self.assertEqual(cleanup_calls, 1)
+
+            handle.remove()
+            dynamic_schedule.eval(x, target=target)
+            self.assertEqual(cleanup_calls, 1)
+
+            static_module = torch.nn.Linear(4, 4)
+            static_stage = PipelineStage(
+                static_module,
+                0,
+                1,
+                device,
+                input_args=x,
+                output_args=static_module(x),
+            )
+            static_schedule = ScheduleGPipe(static_stage, n_microbatches=1)
+            static_cleanup = MagicMock()
+            static_schedule.register_post_metadata_inference_cleanup(static_cleanup)
+            static_schedule.step(x)
+            static_cleanup.assert_not_called()
+        finally:
+            torch.distributed.destroy_process_group()
+
     @parametrize(
         "ScheduleClass",
         [
