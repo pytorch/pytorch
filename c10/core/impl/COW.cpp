@@ -1,8 +1,10 @@
 #include <c10/core/impl/COW.h>
 
 #include <c10/core/Allocator.h>
+#include <c10/core/DeviceGuard.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/core/impl/COWDeleter.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ParallelGuard.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -142,6 +144,22 @@ void materialize_cow(StorageImpl* storage) {
             result));
     // We don't need to consume the result, it's just a shared lock ensuring
     // that the data will remain while we copy it.
+    //
+    // The copy may be asynchronous (e.g., on CUDA it is enqueued on the
+    // current stream), so the shared lock only covers enqueueing it. This is
+    // safe because we assume that all users of the data use the same stream:
+    // a later steal (and subsequent mutation) or free of the source is
+    // ordered after the copy. See "Asynchronous reads" in README-cow.md.
+    //
+    // Allocation and the current stream are per device, so make sure we
+    // allocate and copy on the storage's device, which need not be the
+    // current one (e.g., Tensor.data_ptr() from Python sets no device guard).
+    const c10::Device device = data_ptr.device();
+    std::optional<c10::Device> guard_device;
+    if (device.has_index() && c10::impl::hasDeviceGuardImpl(device.type())) {
+      guard_device = device;
+    }
+    c10::OptionalDeviceGuard device_guard(guard_device);
     new_data_ptr =
         storage->allocator()->clone(data_ptr.get(), storage->nbytes());
   }
