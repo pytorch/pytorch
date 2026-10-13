@@ -576,6 +576,17 @@ static PyObject* THPModule_cxxFlags(PyObject* module, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_cxxCompiler(PyObject* module, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto [name, version] = at::get_cxx_compiler();
+  auto tuple = PyTuple_New(2);
+  TORCH_CHECK_PYTHON(tuple);
+  PyTuple_SET_ITEM(tuple, 0, THPUtils_packString(name));
+  PyTuple_SET_ITEM(tuple, 1, THPUtils_packString(version));
+  return tuple;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_parallelInfo(PyObject* module, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(at::get_parallel_info());
@@ -2080,6 +2091,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_show_config", THPModule_showConfig, METH_NOARGS, nullptr},
     {"_cxx_flags", THPModule_cxxFlags, METH_NOARGS, nullptr},
+    {"_cxx_compiler", THPModule_cxxCompiler, METH_NOARGS, nullptr},
     {"_parallel_info", THPModule_parallelInfo, METH_NOARGS, nullptr},
     {"_get_cpu_capability", THPModule_getCpuCapability, METH_NOARGS, nullptr},
     {"_set_backcompat_broadcast_warn",
