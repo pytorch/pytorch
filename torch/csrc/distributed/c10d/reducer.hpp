@@ -106,6 +106,9 @@ class TORCH_API Reducer {
   // don't need to be copied from buckets as the optimizer would've already
   // been applied.
   void set_optimizer_in_backward() {
+    TORCH_CHECK(
+        !static_graph_recovery_,
+        "Static graph recovery does not support optimizer in backward.");
     optim_in_backward_ = true;
   }
 
@@ -175,6 +178,11 @@ class TORCH_API Reducer {
 
   // Delay all reduce to be after all gradients' calculation is complete.
   void delay_all_reduce();
+
+  void set_static_graph_recovery();
+
+  // Finish pending buckets after the outer backward completes.
+  void recover_unused_parameters();
 
   void set_mixed_precision_param_dtype(c10::ScalarType dtype);
 
@@ -541,6 +549,8 @@ class TORCH_API Reducer {
   int div_factor_;
 
   bool static_graph_;
+
+  bool static_graph_recovery_{false};
 
   bool skip_all_reduce_unused_params_;
 
