@@ -58,6 +58,8 @@ typedef struct VISIBILITY_HIDDEN PrecompileEntry {
   py::object guard_manager;
   py::object code;
   void* root_mgr;
+  // Same clock as CacheEntry::recency.
+  uint64_t recency{0};
 
   PrecompileEntry(py::object gm, py::object c);
 } PrecompileEntry;
@@ -182,8 +184,8 @@ void lookup(
     bool is_skip_guard_eval_unsafe,
     CacheLookupResult* result);
 
-// Whether the region or the default bucket has any entries, for
-// guard_complete_hook.
+// Whether the frame has precompile entries, or the region or the default
+// bucket has any cache entries, for guard_complete_hook.
 bool has_relevant_cache_entries(
     PyCodeObject* code,
     int64_t isolate_recompiles_id);

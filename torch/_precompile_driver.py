@@ -618,6 +618,10 @@ def _build_multigraph_forward():
             manager = load_guard_manager(guards_state, target, scope)
             body = SerializedCode.to_code_object(guarded["dynamo_code"])
             variants.append((manager, body))
+        # Dynamo's cache serves the newest compile first and moves a hit to the
+        # front, so a call that two variants both admit gets the variant
+        # torch.compile would serve. Mirror both.
+        variants.reverse()
 
         # Calls are bound to f_locals the way Python binds them (keyword-only,
         # *args and **kwargs included); the transformed bytecode keeps the
@@ -644,8 +648,10 @@ def _build_multigraph_forward():
             # A tag-safe root's fast path (GuardManager::check_nopybind) can
             # refuse without running its tree and disarms itself; check twice.
             for _ in range(2):
-                for manager, variant in bound:
+                for i, (manager, variant) in enumerate(bound):
                     if manager.check(f_locals):
+                        if i:
+                            bound.insert(0, bound.pop(i))
                         return variant(*args, **kwargs)
             raise _PrecompileError(
                 f"precompile: no captured variant of {target.co_name!r} matches this "
@@ -738,7 +744,9 @@ def _build_installed_forward():
     callback is a _RefuseRecompileCallback bound at load, which
     _callback_from_stance keeps even under stances that would compile, so, as
     for a standalone artifact, a call no captured variant covers raises instead
-    of compiling.
+    of compiling. load(allow_serve_time_compiles=True) presets
+    _ALLOW_SERVE_TIME_COMPILES in this module's globals to keep the ordinary
+    compiling callback instead.
     """
     import base64
     import importlib
@@ -809,7 +817,11 @@ def _build_installed_forward():
                 f"would still serve any call the installed entries miss: load this "
                 f"artifact in a fresh process."
             )
-        context = torch._dynamo.optimize(BACKEND, package=package)
+        allow_compiles = globals().get("_ALLOW_SERVE_TIME_COMPILES", False)
+        # A serve-time compile is not part of the artifact: record it nowhere.
+        context = torch._dynamo.optimize(
+            BACKEND, package=None if allow_compiles else package
+        )
         if not isinstance(context, OptimizeContext):
             raise _PrecompileError(
                 "precompile: an installed artifact serves through Dynamo, which is "
@@ -819,7 +831,8 @@ def _build_installed_forward():
         # The refusal is this callable's own callback, not the process-global
         # stance, so other threads' compiles are unaffected. It must be bound
         # before context(fn), which captures the callback when it wraps.
-        context.callback = _RefuseRecompileCallback(context.callback)
+        if not allow_compiles:
+            context.callback = _RefuseRecompileCallback(context.callback)
         compiled = context(fn)
         package.install(package_state["backends"])
     except _PrecompileError:
