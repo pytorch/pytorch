@@ -5387,10 +5387,11 @@ class TestTorchDeviceType(TestCase):
         clone += torch.ones(1, device=device, dtype=dtype)
 
         # Writing to `clone` should materialize it, so it should no longer
-        # be COW. However, since `clone`'s storage is the only COW storage
-        # left that holds a reference to the original data pointer, this
-        # materialization should not actually cause a copy--it should
-        # just reuse the original data pointer.
+        # be COW. Since `clone`'s storage is the only COW storage left that
+        # holds a reference to the original data pointer, this materialization
+        # should not actually cause a copy on CPU--it should just reuse the
+        # original data pointer. On CUDA, it copies, since reads of the
+        # original data enqueued through `t` may still be pending.
 
         self.assertFalse(torch._C._is_cow_tensor(t))
         self.assertFalse(torch._C._is_cow_tensor(view))
@@ -5402,7 +5403,10 @@ class TestTorchDeviceType(TestCase):
 
         self.assertTrue(torch._C._data_address(t) == t_new_data_addr)
         self.assertTrue(torch._C._data_address(view) == t_new_data_addr)
-        self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
+        if self.device_type == "cuda":
+            self.assertTrue(torch._C._data_address(clone) != orig_data_ptr)
+        else:
+            self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
 
     @skipXLA
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))

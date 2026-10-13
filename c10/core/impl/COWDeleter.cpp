@@ -9,8 +9,9 @@ void cow::cow_deleter(void* ctx) {
 }
 
 cow::COWDeleterContext::COWDeleterContext(
-    std::unique_ptr<void, DeleterFnPtr> data)
-    : data_(std::move(data)) {
+    std::unique_ptr<void, DeleterFnPtr> data,
+    std::optional<Stream> stream)
+    : data_(std::move(data)), stream_(stream) {
   // We never wrap a COWDeleterContext.
   TORCH_INTERNAL_ASSERT(data_.get_deleter() != cow::cow_deleter);
 }
