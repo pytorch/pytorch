@@ -315,6 +315,9 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         tensor = symm_mem.empty(numel, dtype=torch.float32, device=self.device)
         tensor.fill_(-1)
         hdl = symm_mem.rendezvous(tensor, group=group_name)
+        # rank 1 writes into rank 0's buffer below, so rank 0's fill_(-1) must
+        # land first.
+        hdl.barrier()
 
         if self.rank == 0:
             hdl.wait_signal(src_rank=1)
@@ -624,6 +627,8 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
 
         symm_mem.rendezvous(inp, group=group_name)
         symm_mem.rendezvous(out, group=group_name)
+        # Peers write into `out`, so every rank's fill_(-1) must land first.
+        dist.barrier()
         torch.ops.symm_mem.nvshmem_all_to_all(inp, out, group_name)
 
         expected = torch.cat(
