@@ -13,6 +13,10 @@ from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
+# The annotation hooks only register on NCCL groups; let them hook these Gloo groups.
+_RUNS_CUDA_ON_NCCL = "torch.distributed._collective_annotations._runs_cuda_on_nccl"
+
+
 class TestProcessGroupHooks(MultiProcContinuousTest):
     """
     Verify that pre/post collective hooks registered on a ProcessGroup fire for
@@ -155,7 +159,8 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         ws = self.world_size
         peer = (self.rank + 1) % ws
         push, pop = mock.Mock(), mock.Mock()
-        handle = register_collective_annotation_hooks(push, pop, _include_non_nccl=True)
+        with mock.patch(_RUNS_CUDA_ON_NCCL, return_value=True):
+            handle = register_collective_annotation_hooks(push, pop)
         try:
             dist.all_reduce(torch.ones(3))
             dist.all_gather_into_tensor(torch.zeros(2 * ws), torch.ones(2))
@@ -202,9 +207,8 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
     def test_collective_annotation_hooks(self):
         group = dist.new_group()
         calls = mock.Mock()
-        handle = register_collective_annotation_hooks(
-            calls.push, calls.pop, _include_non_nccl=True
-        )
+        with mock.patch(_RUNS_CUDA_ON_NCCL, return_value=True):
+            handle = register_collective_annotation_hooks(calls.push, calls.pop)
         dist.all_reduce(torch.ones(1), group=group)
         handle.remove()
         handle.remove()  # idempotent

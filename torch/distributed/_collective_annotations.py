@@ -120,14 +120,11 @@ class CollectiveAnnotationHandle:
 def register_collective_annotation_hooks(
     push: Callable[[CollectiveMetadata], None],
     pop: Callable[[], None],
-    *,
-    _include_non_nccl: bool = False,
 ) -> CollectiveAnnotationHandle:
     """Hook every existing process group that runs CUDA collectives on NCCL, so that
     each of its collectives calls ``push(metadata)`` just before it launches its
     kernels and ``pop()`` just after. ``push`` must attach ``metadata`` to every
     kernel the calling thread launches until the matching ``pop``.
-    ``_include_non_nccl`` hooks the other groups too (for tests).
 
     Groups created after this call are not hooked, and collectives inside
     ``_coalescing_manager`` or a batched ``batch_isend_irecv`` are not annotated:
@@ -140,11 +137,7 @@ def register_collective_annotation_hooks(
     steps. Other groups, such as async checkpointing's Gloo group, are never hooked.
     """
     handle = CollectiveAnnotationHandle(
-        [
-            group
-            for group in _world.pg_names
-            if _include_non_nccl or _runs_cuda_on_nccl(group)
-        ]
+        [group for group in _world.pg_names if _runs_cuda_on_nccl(group)]
     )
     for group in handle._groups:
         info = _GroupInfo(group)
