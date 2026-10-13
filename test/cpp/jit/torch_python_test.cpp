@@ -70,7 +70,7 @@ void testTorchSaveError() {
   try {
     torch::jit::load("eager_value.pt");
     passed = false;
-  } catch (const std::exception& c) {
+  } catch (const std::exception&) {
   }
   // Ensure torch::jit::load did not run
   AT_ASSERT(passed);
