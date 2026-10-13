@@ -1111,7 +1111,9 @@ class TestOptimRenewed(TestCase):
                         optimizers[1].state[params[1]][key],
                     )
 
-    def _test_fused_step_metadata(self, device, dtype, optim_info, amsgrad, sizes):
+    def _test_fused_step_metadata(
+        self, device, dtype, optim_info, amsgrad, sizes, step_dtype
+    ):
         kwargs = {"lr": 0.01}
         if optim_info.optim_cls is torch.optim.Adagrad:
             if amsgrad:
@@ -1126,7 +1128,6 @@ class TestOptimRenewed(TestCase):
         for i, (param, reference) in enumerate(zip(params, references, strict=True)):
             param.grad = torch.full_like(param, 0.25)
             reference.grad = torch.full_like(reference, 0.25)
-            step_dtype = torch.float64 if i % 2 == 0 else torch.float32
             for p, optim in ((param, optimizer), (reference, reference_optimizer)):
                 state = optim.state[p]
                 state["step"] = torch.tensor(i % 4 + 1, device=device, dtype=step_dtype)
@@ -1147,6 +1148,7 @@ class TestOptimRenewed(TestCase):
 
     @onlyCUDA
     @parametrize("amsgrad", [False, True])
+    @parametrize("step_dtype", [torch.float32, torch.float64])
     @optims(
         [
             o
@@ -1155,13 +1157,18 @@ class TestOptimRenewed(TestCase):
         ],
         dtypes=[torch.float32],
     )
-    def test_fused_mixed_step_dtypes(self, device, dtype, optim_info, amsgrad):
+    def test_fused_step_dtype_tensor_rollover(
+        self, device, dtype, optim_info, amsgrad, step_dtype
+    ):
         # Exceed the tensor metadata capacity for both CUDA argument-size limits.
-        self._test_fused_step_metadata(device, dtype, optim_info, amsgrad, [4] * 337)
+        self._test_fused_step_metadata(
+            device, dtype, optim_info, amsgrad, [4] * 337, step_dtype
+        )
 
     @onlyCUDA
     @largeTensorTest("6GB", "cuda")
     @parametrize("amsgrad", [False, True])
+    @parametrize("step_dtype", [torch.float32, torch.float64])
     @optims(
         [
             o
@@ -1170,12 +1177,16 @@ class TestOptimRenewed(TestCase):
         ],
         dtypes=[torch.float32],
     )
-    def test_fused_step_dtype_chunk_rollover(self, device, dtype, optim_info, amsgrad):
+    def test_fused_step_dtype_chunk_rollover(
+        self, device, dtype, optim_info, amsgrad, step_dtype
+    ):
         large_args = not TEST_WITH_ROCM and int(torch.version.cuda.split(".")[0]) >= 13
         max_blocks = 2240 if large_args else 320
-        # Carry the float64 step metadata into the next launch for the same tensor.
+        # Carry the step pointer into the next launch for the same tensor.
         sizes = [(max_blocks + 1) * 65536, 4]
-        self._test_fused_step_metadata(device, dtype, optim_info, amsgrad, sizes)
+        self._test_fused_step_metadata(
+            device, dtype, optim_info, amsgrad, sizes, step_dtype
+        )
 
     @onlyCUDA
     @optims(

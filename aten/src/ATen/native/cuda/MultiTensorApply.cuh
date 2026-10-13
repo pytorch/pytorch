@@ -125,17 +125,9 @@ struct FusedOptimizerTensorListMetadata {
   const void* addresses[n][max_tensors_per_launch];
   int64_t numel_for_tensor[max_tensors_per_launch];
   const void* state_steps_addresses[max_tensors_per_launch];
-  bool state_steps_is_double[max_tensors_per_launch];
   block_index_t block_to_tensor[max_blocks_per_launch];
   int32_t block_to_chunk[max_blocks_per_launch];
   int32_t start_tensor_this_launch;
-
-  __device__ __forceinline__ double state_step(int tensor_loc) const {
-    const auto* address = state_steps_addresses[tensor_loc];
-    return state_steps_is_double[tensor_loc]
-        ? *static_cast<const double*>(address)
-        : *static_cast<const float*>(address);
-  }
 };
 
 template <typename T, typename U, typename... ArgTypes>
@@ -376,12 +368,6 @@ void multi_tensor_apply_for_fused_optimizer(
     }
     tensorListMeta.state_steps_addresses[loc_tensor_info] =
         state_steps[tensor_index].const_data_ptr();
-    const auto step_dtype = state_steps[tensor_index].scalar_type();
-    TORCH_CHECK(
-        step_dtype == at::kFloat || step_dtype == at::kDouble,
-        "state_steps must have dtype float32 or float64");
-    tensorListMeta.state_steps_is_double[loc_tensor_info] =
-        step_dtype == at::kDouble;
     tensorListMeta.numel_for_tensor[loc_tensor_info] =
         tensor_lists[0][tensor_index].numel();
     for (const auto& d : c10::irange(depth)) {
@@ -424,8 +410,6 @@ void multi_tensor_apply_for_fused_optimizer(
               tensorListMeta.numel_for_tensor[loc_tensor_info - 1];
           tensorListMeta.state_steps_addresses[0] =
               tensorListMeta.state_steps_addresses[loc_tensor_info - 1];
-          tensorListMeta.state_steps_is_double[0] =
-              tensorListMeta.state_steps_is_double[loc_tensor_info - 1];
           for (const auto& d : c10::irange(depth)) {
             tensorListMeta.addresses[d][0] =
                 tensorListMeta.addresses[d][loc_tensor_info - 1];

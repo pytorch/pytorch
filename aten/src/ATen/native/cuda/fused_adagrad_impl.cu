@@ -34,18 +34,33 @@ void _fused_adagrad_cuda_impl_(
       params[0].scalar_type(),
       "fused_adagrad_kernel_cuda",
       [&]() {
-        multi_tensor_apply_for_fused_optimizer<3>(
-            tensor_lists,
-            state_steps,
-            FusedAdagradMathFunctor<scalar_t>(),
-            lr_ptr, // unused
-            lr,
-            lr_decay,
-            weight_decay,
-            eps,
-            maximize,
-            grad_scale_ptr,
-            found_inf_ptr);
+        if (state_steps[0].scalar_type() == at::kDouble) {
+          multi_tensor_apply_for_fused_optimizer<3>(
+              tensor_lists,
+              state_steps,
+              FusedAdagradMathFunctor<scalar_t, double>(),
+              lr_ptr, // unused
+              lr,
+              lr_decay,
+              weight_decay,
+              eps,
+              maximize,
+              grad_scale_ptr,
+              found_inf_ptr);
+        } else {
+          multi_tensor_apply_for_fused_optimizer<3>(
+              tensor_lists,
+              state_steps,
+              FusedAdagradMathFunctor<scalar_t>(),
+              lr_ptr, // unused
+              lr,
+              lr_decay,
+              weight_decay,
+              eps,
+              maximize,
+              grad_scale_ptr,
+              found_inf_ptr);
+        }
       });
 }
 
@@ -76,18 +91,33 @@ void _fused_adagrad_cuda_impl_(
       params[0].scalar_type(),
       "fused_adagrad_kernel_cuda",
       [&]() {
-        multi_tensor_apply_for_fused_optimizer<3>(
-            tensor_lists,
-            state_steps,
-            FusedAdagradMathFunctor<scalar_t>(),
-            lr_ptr,
-            1.0, // unused
-            lr_decay,
-            weight_decay,
-            eps,
-            maximize,
-            grad_scale_ptr,
-            found_inf_ptr);
+        if (state_steps[0].scalar_type() == at::kDouble) {
+          multi_tensor_apply_for_fused_optimizer<3>(
+              tensor_lists,
+              state_steps,
+              FusedAdagradMathFunctor<scalar_t, double>(),
+              lr_ptr,
+              1.0, // unused
+              lr_decay,
+              weight_decay,
+              eps,
+              maximize,
+              grad_scale_ptr,
+              found_inf_ptr);
+        } else {
+          multi_tensor_apply_for_fused_optimizer<3>(
+              tensor_lists,
+              state_steps,
+              FusedAdagradMathFunctor<scalar_t>(),
+              lr_ptr,
+              1.0, // unused
+              lr_decay,
+              weight_decay,
+              eps,
+              maximize,
+              grad_scale_ptr,
+              found_inf_ptr);
+        }
       });
 }
 
