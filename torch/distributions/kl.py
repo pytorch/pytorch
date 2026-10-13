@@ -232,7 +232,11 @@ def _kl_beta_beta(p, q):
 def _kl_binomial_binomial(p, q):
     # from https://math.stackexchange.com/questions/2214993/
     # kullback-leibler-divergence-for-binomial-distributions-p-and-q
-    if (p.total_count < q.total_count).any():
+    # This data-dependent check is skipped under torch.compile (dynamo already
+    # disables distribution argument validation during compilation); when
+    # q.total_count > p.total_count is traced, the p >= q formula below is
+    # silently evaluated on that unsupported input instead of raising.
+    if not torch.compiler.is_compiling() and (p.total_count < q.total_count).any():
         raise NotImplementedError(
             "KL between Binomials where q.total_count > p.total_count is not implemented"
         )
