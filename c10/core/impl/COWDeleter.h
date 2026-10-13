@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Event.h>
 #include <c10/core/Stream.h>
 #include <c10/macros/Export.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -13,8 +14,13 @@
 
 namespace c10::impl::cow {
 
-// A COWDeleterContext object is used as the `ctx` argument for DataPtr
-// to implement a Copy-on-write (COW) DataPtr.
+struct COWCompletion {
+  explicit COWCompletion(DeviceType device_type) : event(device_type) {}
+  Event event;
+  std::unique_ptr<COWCompletion> next;
+};
+
+// Shared ownership and completion dependencies for one backing allocation.
 class C10_API COWDeleterContext {
  public:
   // Creates an instance, holding the pair of data and original
@@ -26,8 +32,7 @@ class C10_API COWDeleterContext {
   explicit COWDeleterContext(
       std::unique_ptr<void, DeleterFnPtr> data,
       std::optional<Stream> stream = std::nullopt,
-      uint64_t capture_id = 0,
-      bool capture_local = false);
+      uint64_t capture_id = 0);
 
   bool is_unique() const {
     return refcount_ == 1;
@@ -41,9 +46,7 @@ class C10_API COWDeleterContext {
     return capture_id_;
   }
 
-  bool capture_local() const {
-    return capture_local_;
-  }
+  void wait_for_completion(Stream stream);
 
   // Increments the current refcount.
   void increment_refcount();
@@ -59,13 +62,14 @@ class C10_API COWDeleterContext {
 
   // Represents the last reference to the context.
   //
-  // This will be returned by decrement_refcount when it is the last
-  // reference remaining and after any pending copies have completed.
+  // Returned for the last reference. CUDA materialization must establish
+  // completion dependencies before taking ownership.
   using LastReference = std::unique_ptr<void, DeleterFnPtr>;
 
   // Decrements the refcount, returning a handle indicating what to
   // do with it.
-  std::variant<NotLastReference, LastReference> decrement_refcount();
+  std::variant<NotLastReference, LastReference> decrement_refcount(
+      std::unique_ptr<COWCompletion> completion = nullptr);
 
  private:
   // The destructor is hidden, this should only ever be used within
@@ -79,15 +83,28 @@ class C10_API COWDeleterContext {
   // contract of references which have already escaped to callers.
   std::optional<Stream> stream_;
   uint64_t capture_id_;
-  bool capture_local_;
+  std::unique_ptr<COWCompletion> completions_;
+  bool needs_stream_wait_ = false;
 };
 
-// `cow_deleter` is used as the `ctx_deleter` for DataPtr to implement a COW
-// DataPtr.
-//
-// Warning: This should only be called on a pointer to a COWDeleterContext that
-// was allocated on the heap with `new`, because when the refcount reaches 0,
-// the context is deleted with `delete`.
+// Each DataPtr has its own reference, which follows it into retired storage
+// metadata on materialization. Access after record_done starts a new use.
+struct C10_API COWReference {
+  explicit COWReference(COWDeleterContext* context = nullptr) : ctx(context) {}
+  ~COWReference();
+
+  void record_done();
+  std::variant<
+      COWDeleterContext::NotLastReference,
+      COWDeleterContext::LastReference>
+  release();
+
+  COWDeleterContext* ctx;
+  std::atomic<bool> completed = false;
+  std::unique_ptr<COWCompletion> completion;
+};
+
+// Deletes a heap-allocated COWReference.
 C10_API void cow_deleter(void* ctx);
 
 } // namespace c10::impl::cow

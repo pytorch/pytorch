@@ -3583,6 +3583,22 @@ Call this whenever a new thread is created in order to propagate values from
       "Checks if a tensor's data pointer is COW");
 
   py_module.def(
+      "_cow_record_done",
+      [](const at::Tensor& tensor) {
+        TORCH_CHECK(
+            !tensor.key_set().has(c10::DispatchKey::Python),
+            "_cow_record_done is not defined for Python tensor subclasses");
+        c10::impl::cow::record_done(*tensor.storage().unsafeGetStorageImpl());
+      },
+      py::arg("tensor"),
+      "Record completion of this storage's CUDA COW uses on the current stream. "
+      "Join all earlier uses, including uses through aliases and saved pointers, "
+      "onto this stream first. Retired backing allocations are released; an "
+      "active COW reference remains until materialization or destruction. "
+      "Later data access cancels its completion. Saved pointers covered by this "
+      "call must not be used again. CPU and ordinary storage are unchanged.");
+
+  py_module.def(
       "_get_cudnn_batch_norm_reserve_space_size",
       [](const at::Tensor& input, bool training) {
 #ifdef USE_CUDA

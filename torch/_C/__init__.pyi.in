@@ -78,6 +78,8 @@ from torch.xpu import _POOL_HANDLE as XPU_POOL_HANDLE
 
 # This module is defined in torch/csrc/Module.cpp
 
+def _cow_record_done(tensor: Tensor) -> None: ...
+
 K = TypeVar("K")  # noqa: PYI001
 T = TypeVar("T")  # noqa: PYI001
 S = TypeVar("S", bound=torch.Tensor)  # noqa: PYI001
