@@ -8787,24 +8787,7 @@ def _meta_grouped_mm_common(
     # _grouped_mm_validate_inputs() in aten/src/ATen/native/GroupedMMUtils.h and
     # _scaled_grouped_mm_cuda() in aten/src/ATen/native/cuda/GroupedBlas.cpp.
 
-    use_scaled_cublaslt_grouped_gemm = (
-        scaled
-        and _should_use_scaled_cublaslt_grouped_gemm(
-            mat_a, mat_b, scale_a, scale_b, offs, out_dtype
-        )
-    )
-
-    if use_scaled_cublaslt_grouped_gemm:
-        fp8_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2)
-        torch._check(
-            mat_a.dtype in fp8_dtypes
-            and mat_b.dtype in fp8_dtypes
-            and (
-                mat_a.dtype == torch.float8_e4m3fn or mat_b.dtype == torch.float8_e4m3fn
-            ),
-            lambda: f"Expected at least one E4M3 FP8 input for cuBLASLt scaled grouped GEMM, got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
-        )
-    elif scaled:
+    if scaled:
         fp8_dtype = torch.float8_e4m3fn
         if (
             torch.version.hip
@@ -8824,10 +8807,6 @@ def _meta_grouped_mm_common(
         torch._check(
             mat_b.dtype in (torch.bfloat16, torch.float32, torch.float16),
             lambda: f"Expected mat_b to be Float32, BFloat16 or Float16 matrix, got {mat_b.dtype}.",
-        )
-        torch._check(
-            mat_b.dtype == mat_a.dtype,
-            lambda: f"Expected mat_b dtype to match mat_a dtype, got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
         )
 
     torch._check(
@@ -8905,52 +8884,6 @@ def _meta_grouped_mm_common(
         )
 
         def check_scale(scale_name, scale, mat, scaled_dim, scale_multiplier=1):
-            if use_scaled_cublaslt_grouped_gemm:
-                batch_count = (
-                    offs.shape[0]
-                    if offs is not None and (mat_a_is_2d or mat_b_is_2d)
-                    else mat_a.shape[0]
-                )
-                if is_mxfp8:
-                    torch._check(
-                        scale.is_contiguous(),
-                        lambda: f"Expected {scale_name} to be contiguous.",
-                    )
-                    is_a = scaled_dim == 0
-                    inner = mat.shape[-1] if is_a else mat.shape[-2]
-                    outer = mat.shape[-2] if is_a else mat.shape[-1]
-                    # See cublas_grouped_scale_size_bytes in CublasGroupedScaleUtils.cuh.
-                    scale_cols = ((inner + 127) // 128) * 4
-                    scale_rows = ((outer + 127) // 128) * 128
-                    scale_size = scale_rows * scale_cols
-                    if mat.dim() == 3:
-                        torch._check(
-                            scale.dim() == 2
-                            and scale.shape[0] == batch_count
-                            and scale.shape[1] == scale_size,
-                            lambda: f"Expected {scale_name} to have shape ({batch_count}, {scale_size}), got {scale.shape}.",
-                        )
-                    else:
-                        # 2D inputs have data-dependent per-group extents along the
-                        # jagged dim, so the exact concatenated blocked-scale size is
-                        # unknown here. The per-group padded sizes sum to at
-                        # least the size computed from the total dimensions.
-                        torch._check(
-                            scale.numel() >= scale_size,
-                            lambda: f"Expected {scale_name} to have at least {scale_size} elements, got {scale.numel()}.",
-                        )
-                else:
-                    groupwise = scale.numel() != 1 and scale.numel() == batch_count
-                    torch._check(
-                        scale.numel() == 1 or groupwise,
-                        lambda: f"Expected {scale_name} to have either one element or one element per group ({batch_count}), got {scale.numel()} elements.",
-                    )
-                    if groupwise:
-                        torch._check(
-                            scale.dim() == 1 and scale.is_contiguous(),
-                            lambda: f"Expected groupwise {scale_name} to be 1D and contiguous, got {scale.dim()}D with stride {scale.stride()}.",
-                        )
-                return
             if mat.dim() == 2:
                 torch._check(
                     scale.is_contiguous(),
@@ -9050,13 +8983,7 @@ def _meta_grouped_mm_common(
         lambda: "Bias tensor provided, but it is not supported yet.",
     )
 
-    if use_scaled_cublaslt_grouped_gemm:
-        torch._check(
-            out_dtype is None
-            or out_dtype in (torch.bfloat16, torch.float16, torch.float32),
-            lambda: "If output dtype provided, cuBLASLt scaled grouped GEMM requires torch.bfloat16, torch.float16, or torch.float32.",
-        )
-    elif scaled:
+    if scaled:
         torch._check(
             out_dtype is None or out_dtype == torch.bfloat16,
             lambda: "If output dtype provided, it must be torch.bfloat16.",
@@ -9069,97 +8996,6 @@ def _meta_grouped_mm_common(
         )
 
     return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
-
-
-def _grouped_mm_cublaslt_supported(
-    mat_a: Tensor, mat_b: Tensor, offs: Tensor | None
-) -> bool:
-    if device_hint(mat_a) != "cuda" or device_hint(mat_b) != "cuda":
-        return False
-    if not torch.cuda.is_available():
-        return False
-    mat_a_is_2d = mat_a.dim() == 2
-    mat_b_is_2d = mat_b.dim() == 2
-    batch_count = (
-        offs.size(0)
-        if offs is not None and (mat_a_is_2d or mat_b_is_2d)
-        else mat_a.size(0)
-    )
-    if batch_count < 1 or batch_count > 1024:
-        return False
-    device_capability = torch.cuda.get_device_capability()
-    cuda_version: tuple[int, int] = (0, 0)
-    if torch.version.cuda:
-        parts = torch.version.cuda.split(".")
-        cuda_version = (int(parts[0]), int(parts[1]))
-    return cuda_version >= (13, 3) and (9 <= device_capability[0] <= 11)
-
-
-# Mirror should_use_scaled_cublaslt_grouped_gemm in aten/src/ATen/native/cuda/GroupedBlas.cpp
-def _should_use_scaled_cublaslt_grouped_gemm(
-    mat_a: Tensor,
-    mat_b: Tensor,
-    scale_a: Tensor,
-    scale_b: Tensor,
-    offs: Tensor | None,
-    out_dtype: torch.dtype | None,
-) -> bool:
-    if not torch.version.cuda:
-        return False
-    cuda_version = tuple(map(int, torch.version.cuda.split(".")[:2]))
-    # Device support and the [1, 1024] group-count bound.
-    if cuda_version < (13, 4) or not _grouped_mm_cublaslt_supported(mat_a, mat_b, offs):
-        return False
-
-    mat_a_is_2d = mat_a.dim() == 2
-    mat_b_is_2d = mat_b.dim() == 2
-    batch_count = (
-        offs.shape[0]
-        if offs is not None and (mat_a_is_2d or mat_b_is_2d)
-        else mat_a.shape[0]
-    )
-
-    def scaling_type(scale: Tensor) -> str | None:
-        # Tensorwise float32 scales, shared or per group.
-        if scale.dtype == torch.float32:
-            if scale.numel() == 1:
-                return "TensorWise"
-            if scale.dim() == 1 and scale.numel() == batch_count:
-                return "TensorWise"
-        elif scale.dtype == torch.float8_e8m0fnu:
-            return "BlockWise1x32"
-        return None
-
-    scaling_a = scaling_type(scale_a)
-    scaling_b = scaling_type(scale_b)
-    if scaling_a is None or scaling_b is None:
-        return False
-    torch._check(
-        scaling_a == scaling_b,
-        lambda: f"cuBLASLt grouped GEMM requires a supported scale recipe pair; got {scaling_a} and {scaling_b}",
-    )
-
-    if scaling_a == "TensorWise" and scaling_b == "TensorWise":
-        torch._check(
-            scale_a.numel() == scale_b.numel(),
-            lambda: "cuBLASLt grouped GEMM requires matching scale layouts: both scales must be single values or both must have one value per group",
-        )
-    if scaling_a == "BlockWise1x32":
-        if not torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm:
-            return False
-        if torch.cuda.get_device_capability()[0] == 9:
-            return False
-
-    fp8_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2)
-    if not (
-        mat_a.dtype in fp8_dtypes
-        and mat_b.dtype in fp8_dtypes
-        and (mat_a.dtype == torch.float8_e4m3fn or mat_b.dtype == torch.float8_e4m3fn)
-    ):
-        return False
-
-    resolved_out_dtype = out_dtype if out_dtype is not None else torch.bfloat16
-    return resolved_out_dtype in (torch.bfloat16, torch.float16, torch.float32)
 
 
 @register_meta(aten._grouped_mm)

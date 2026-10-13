@@ -55,12 +55,13 @@ C10_HOST_DEVICE inline int64_t cublas_grouped_scale_size_bytes(
     case CublasGroupedScaleLayout::Block128x128F32:
       return at::round_up(at::ceil_div(inner, int64_t{128}), int64_t{4}) *
           at::ceil_div(outer, int64_t{128}) * sizeof(float);
+    // Min block size 16, outer dim padded to 4, inner dim padded to 128 or 512
     case CublasGroupedScaleLayout::Vec32MnK4UE8M0:
-      return at::round_up(outer, int64_t{4}) *
-          at::ceil_div(inner, int64_t{128}) * sizeof(int32_t);
+      return 16 * at::ceil_div(outer, int64_t{4}) *
+          at::ceil_div(inner, int64_t{128});
     case CublasGroupedScaleLayout::Vec128MnK4UE8M0:
-      return at::round_up(outer, int64_t{4}) *
-          at::ceil_div(inner, int64_t{512}) * sizeof(int32_t);
+      return 16 * at::ceil_div(outer, int64_t{4}) *
+          at::ceil_div(inner, int64_t{512});
   }
   return 0;
 }
