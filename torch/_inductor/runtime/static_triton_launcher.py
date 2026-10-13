@@ -593,14 +593,68 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         self.modules = {}
 
 
+_STATIC_LAUNCHER_REGISTRY: dict[str, type[StaticallyLaunchedTritonKernel]] = {}
+
+
+def register_statically_launched_kernel(
+    device_type: str,
+    kernel_cls: type[StaticallyLaunchedTritonKernel],
+    *,
+    override: bool = False,
+) -> None:
+    """Register a device-type specific static Triton kernel launcher.
+
+    Backends (e.g. privateuse1 devices such as NPU) that implement a
+    StaticallyLaunchedTritonKernel subclass can register it here instead of
+    patching this dispatch.
+
+    Args:
+        device_type: torch.device.type string (e.g. "cuda", "hip", "xpu").
+        kernel_cls: a StaticallyLaunchedTritonKernel subclass that can launch
+            kernels compiled for device_type.
+        override: allow overriding an existing registration.
+    """
+    if not isinstance(device_type, str) or not device_type:
+        raise ValueError(
+            "device_type must be a non-empty string matching torch.device.type"
+        )
+    # Guard against non-class inputs before issubclass (its native TypeError
+    # message "must be a class" doesn't say whether the value is a valid class).
+    if not isinstance(kernel_cls, type) or not issubclass(
+        kernel_cls, StaticallyLaunchedTritonKernel
+    ):
+        raise TypeError(
+            "kernel_cls must be a StaticallyLaunchedTritonKernel subclass, "
+            "got " + str(kernel_cls)
+        )
+    if not override and device_type in _STATIC_LAUNCHER_REGISTRY:
+        raise ValueError(
+            "Static launcher for device_type '" + device_type + "' already registered"
+        )
+    _STATIC_LAUNCHER_REGISTRY[device_type] = kernel_cls
+
+
+# Register the built-in static launchers explicitly, mirroring the
+# register_benchmarker pattern in benchmarking.py.
+register_statically_launched_kernel("cuda", StaticallyLaunchedCudaKernel)
+register_statically_launched_kernel("hip", StaticallyLaunchedCudaKernel)
+register_statically_launched_kernel("xpu", StaticallyLaunchedXpuKernel)
+
+
 def statically_launched_kernel_by_device(
     kernel: CompiledKernel, device_type: str = "cuda"
 ) -> StaticallyLaunchedTritonKernel:
-    if device_type in ("cuda", "hip"):
-        return StaticallyLaunchedCudaKernel(kernel)
-    elif device_type == "xpu":
-        return StaticallyLaunchedXpuKernel(kernel)
-    else:
+    kernel_cls = _STATIC_LAUNCHER_REGISTRY.get(device_type)
+    if kernel_cls is None:
+        supported = ", ".join(sorted(_STATIC_LAUNCHER_REGISTRY))
         raise NotImplementedError(
-            f"Device type {device_type} is not supported for static launcher"
+            "Device type " + device_type + " is not registered for static launcher. "
+            "Registered device types: " + supported + ". Backends can register one via "
+            "register_statically_launched_kernel()."
         )
+    return kernel_cls(kernel)
+
+
+def is_registered_static_launch_device(device_type: str) -> bool:
+    """Return whether a static Triton kernel launcher is registered for device_type."""
+    return device_type in _STATIC_LAUNCHER_REGISTRY

@@ -1104,9 +1104,10 @@ include(ExternalProject)
 
 # ---[ Dependencies ---[ FBGEMM doesn't work on x86 32bit and
 # CMAKE_SYSTEM_PROCESSOR thinks its 64bit
-if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|aarch64)$")
+if(USE_FBGEMM AND (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|x86_64|aarch64)$"
+                   OR CMAKE_SIZEOF_VOID_P EQUAL 4))
   message(WARNING
-    "x86_64 or aarch64 required for FBGEMM. "
+    "64-bit x86 or aarch64 required for FBGEMM. "
     "Not compiling with FBGEMM. "
     "Turn this warning off by USE_FBGEMM=OFF.")
   set(USE_FBGEMM OFF)
@@ -1389,6 +1390,11 @@ if(NOT MSVC)
   if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
+  endif()
+  if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
+    # Suppress GCC's warning without changing the value of
+    # std::hardware_destructive_interference_size in public headers.
+    append_cxx_flag_if_supported("-Wno-interference-size" CMAKE_CXX_FLAGS)
   endif()
   # needed for compat with newer versions of clang that use C++20 mangling rules
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18)
