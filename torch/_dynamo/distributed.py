@@ -14,8 +14,6 @@ is properly initialized, making it safe to import and use this module even in
 non-distributed scenarios.
 """
 
-from datetime import timedelta
-
 import torch.distributed as dist
 
 from . import config
@@ -24,12 +22,6 @@ from . import config
 _COMPILE_PG: dist.ProcessGroup | None = None
 _GUARD_PG: dist.ProcessGroup | None = None
 _COMPILE_SYNC_PG: dist.ProcessGroup | None = None
-
-
-def _default_pg_timeout() -> timedelta:
-    # Left to itself, _new_group_with_tag picks the global default timeout
-    # constant rather than the timeout the default group was configured with.
-    return dist.distributed_c10d._get_process_group_timeout()
 
 
 def get_compile_pg() -> dist.ProcessGroup | None:
@@ -57,8 +49,10 @@ def get_guard_pg() -> dist.ProcessGroup | None:
     if dist.is_available() and dist.is_initialized():
         global _GUARD_PG
         if _GUARD_PG is None:
+            # Left to itself, _new_group_with_tag picks the global default timeout
+            # constant rather than the timeout the default group was configured with.
             guard_pg = dist.distributed_c10d._new_group_with_tag(
-                timeout=_default_pg_timeout(),
+                timeout=dist.distributed_c10d._get_process_group_timeout(),
                 pg_tag="pt2_guard_pg",
             )
             if guard_pg == dist.GroupMember.NON_GROUP_MEMBER:
@@ -98,7 +92,7 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
                 )
             compile_sync_pg = dist.distributed_c10d._new_group_with_tag(
                 backend="gloo",
-                timeout=_default_pg_timeout(),
+                timeout=dist.distributed_c10d._get_process_group_timeout(),
                 pg_tag="pt2_compile_sync_pg",
             )
             if compile_sync_pg == dist.GroupMember.NON_GROUP_MEMBER:
