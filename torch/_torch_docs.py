@@ -1407,10 +1407,10 @@ Converts :attr:`obj` to a tensor.
 5. a scalar
 6. a sequence of scalars
 
-When :attr:`obj` is a tensor, NumPy array, or DLPack capsule the returned tensor will,
-by default, have the same requires_grad as :attr:`obj` (defaulting to False), have the
-same datatype, be on the same device, and share memory with it. These properties can be
-controlled with the :attr:`dtype`, :attr:`device`, :attr:`copy`, and
+When :attr:`obj` is a tensor, NumPy array, or object with DLPack support the returned
+tensor will, by default, have the same requires_grad as :attr:`obj` (defaulting to False),
+have the same datatype, be on the same device, and share memory with it. These properties
+can be controlled with the :attr:`dtype`, :attr:`device`, :attr:`copy`, and
 :attr:`requires_grad` keyword arguments. If the returned tensor is of a different
 datatype, on a different device, or a copy is requested then it will not share its
 memory with :attr:`obj`. If :attr:`requires_grad` is ``True`` (or ``None``, and
@@ -1418,13 +1418,14 @@ memory with :attr:`obj`. If :attr:`requires_grad` is ``True`` (or ``None``, and
 a gradient, and if :attr:`obj` is also a tensor with an autograd history then the
 returned tensor will have the same history.
 
-When :attr:`obj` is not a tensor, NumPy array, or DLPack capsule but implements Python's
-buffer protocol then the buffer is interpreted as an array of bytes grouped according to
-the size of the datatype passed to the :attr:`dtype` keyword argument. If no :attr:`dtype`
-is passed then it is inferred from the buffer's format, and an error is raised if the
-format cannot be mapped to a PyTorch datatype, in which case :attr:`dtype` must be passed
-explicitly. The returned tensor will have the specified (or inferred) datatype and, by
-default, be on the CPU device and share memory with the buffer.
+When :attr:`obj` is not a tensor, NumPy array, or object with DLPack support (or its
+``__dlpack__`` export fails) but implements Python's buffer protocol then the buffer is
+interpreted as an array of bytes grouped according to the size of the datatype passed to
+the :attr:`dtype` keyword argument. If no :attr:`dtype` is passed then it is inferred from
+the buffer's format, and an error is raised if the format cannot be mapped to a PyTorch
+datatype, in which case :attr:`dtype` must be passed explicitly. The returned tensor will
+have the specified (or inferred) datatype and, by default, be on the CPU device and share
+memory with the buffer.
 
 When :attr:`obj` is a NumPy scalar, the returned tensor will be a 0-dimensional tensor on
 the CPU and that doesn't share its memory (i.e. ``copy=True``). By default datatype will
@@ -1440,8 +1441,8 @@ current default device, and not share its memory.
     :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
     :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
     implement the buffer protocol.
-    :func:`torch.from_dlpack` creates a tensor that always shares memory from
-    DLPack capsules.
+    :func:`torch.from_dlpack` creates a tensor that shares memory with objects with
+    DLPack support.
 
 Args:
     obj (object): a tensor, NumPy array, an object with DLPack support (a ``__dlpack__``
