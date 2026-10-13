@@ -503,6 +503,20 @@ def disable_caching_autotuner_plugins() -> Generator[None, None, None]:
         _plugin_suppression.value = prev
 
 
+# Attributes a launcher carries that wrappers built around it (the fast launcher
+# and its device binding) must copy, or callers reading them silently lose them.
+_LAUNCHER_ATTRS = (
+    "config",
+    "n_regs",
+    "n_spills",
+    "shared",
+    "cache_hash",
+    "store_cubin",
+    "_is_static",
+    "_expected_positional_count",
+)
+
+
 class CachingAutotunerPlugin:
     """Base class for ``CachingAutotuner`` plugins.
 
@@ -2670,6 +2684,27 @@ class CachingAutotuner(KernelInterface):
                 "'stream' must be passed as a keyword argument."
             ) from None
 
+    @staticmethod
+    def _bind_to_device(
+        fast: LauncherType, fallback: LauncherType, device: int
+    ) -> LauncherType:
+        """Take ``fast`` (bound to one device's function) only on that device.
+
+        A device-agnostic kernel can be launched on several devices in one
+        process, but the fast launcher bakes in one device's function pointer.
+        """
+
+        def launcher(*args: Any, stream: int) -> Any:
+            if torch._C._cuda_getDevice() == device:
+                return fast(*args, stream=stream)
+            return fallback(*args, stream=stream)
+
+        for attr in (*_LAUNCHER_ATTRS, "_static_kernel_owner"):
+            val = getattr(fast, attr, None)
+            if val is not None:
+                setattr(launcher, attr, val)
+        return launcher
+
     def _build_fast_launcher(self, launcher: LauncherType) -> LauncherType | None:
         """Try to build a _FastCudaLauncher-backed version of the launcher.
 
@@ -2749,20 +2784,9 @@ class CachingAutotuner(KernelInterface):
                 new_globals,
                 launcher.__name__,
             )
-            # Copy launcher attributes to the new function object.
-            # NOTE: If new attributes are added to launchers in the future,
-            # they must be added here too — otherwise the fast launcher will
-            # silently drop them.
-            for attr in (
-                "config",
-                "n_regs",
-                "n_spills",
-                "shared",
-                "cache_hash",
-                "store_cubin",
-                "_is_static",
-                "_expected_positional_count",
-            ):
+            # NOTE: new launcher attributes must be added to _LAUNCHER_ATTRS,
+            # otherwise the fast launcher silently drops them.
+            for attr in _LAUNCHER_ATTRS:
                 val = getattr(launcher, attr, None)
                 if val is not None:
                     setattr(new_launcher, attr, val)
@@ -2777,7 +2801,7 @@ class CachingAutotuner(KernelInterface):
             new_launcher._static_kernel_owner = kernel  # type: ignore[attr-defined]
             if device is None:
                 return new_launcher
-            return _bind_to_device(new_launcher, launcher, device)
+            return self._bind_to_device(new_launcher, launcher, device)
         except (AttributeError, TypeError, KeyError, ValueError):
             # Expected failures - silent fallback is OK.
             # ValueError is raised when nArgs > MAX_ARGS in the C extension.
@@ -5693,33 +5717,3 @@ class RoundRobinComboKernelGrid(ComboKernelGrid):
         if xnumels_x_dim:
             exprs.append(self.ceildiv(self.maximum(xnumels_x_dim), meta.get("XBLOCK")))
         return f"({self.maximum(exprs)}) * {num_kernels}"
-
-
-def _bind_to_device(
-    fast: LauncherType, fallback: LauncherType, device: int
-) -> LauncherType:
-    """Take ``fast`` (bound to one device's function) only on that device.
-
-    A device-agnostic kernel can be launched on several devices in one process,
-    but the fast launcher bakes in one device's function pointer.
-    """
-    def launcher(*args: Any, stream: int) -> Any:
-        if torch._C._cuda_getDevice() == device:
-            return fast(*args, stream=stream)
-        return fallback(*args, stream=stream)
-
-    for attr in (
-        "config",
-        "n_regs",
-        "n_spills",
-        "shared",
-        "cache_hash",
-        "store_cubin",
-        "_is_static",
-        "_expected_positional_count",
-        "_static_kernel_owner",
-    ):
-        val = getattr(fast, attr, None)
-        if val is not None:
-            setattr(launcher, attr, val)
-    return launcher
