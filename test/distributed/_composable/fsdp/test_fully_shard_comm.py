@@ -74,6 +74,7 @@ from torch.distributed.fsdp.experimental import (
 from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
+from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
 from torch.profiler import profile, ProfilerActivity
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
@@ -579,7 +580,11 @@ class TestFullyShardDefaultAllGatherOutputFn(TestCase):
             # e.g. the deprecated resize of a mismatched out=
             warnings.simplefilter("error")
             _default_all_gather_output_fn(
-                torch.arange(4.0, device=device), [output], [2], [1], 2
+                torch.arange(4.0, device=device),
+                [output],
+                split_sizes=[2],
+                outer_sizes=[1],
+                world_size=2,
             )
         expected = torch.tensor([0.0, 1, 2, 3, -1, -1, -1, -1], device=device)
         self.assertEqual(output, expected)
@@ -605,7 +610,11 @@ class TestFullyShardDefaultAllGatherOutputFn(TestCase):
 
         with RecordCatDtypes():
             _default_all_gather_output_fn(
-                all_gather_output, outputs, [16, 4], [2, 1], 2
+                all_gather_output,
+                outputs,
+                split_sizes=[16, 4],
+                outer_sizes=[2, 1],
+                world_size=2,
             )
         self.assertEqual(outputs[0].view(2, 4), torch.cat(chunks, dim=1))
         self.assertEqual(outputs[1], torch.cat(tags))
@@ -672,10 +681,10 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         grad_refs: list[weakref.ReferenceType[torch.Tensor]] = []
         num_alive_grads: list[int] = []
 
-        def all_gather_output_fn(output, outputs, split_sizes, outer_sizes, ws):
+        def all_gather_output_fn(output, outputs, **sizes):
             self.assertFalse(torch.is_grad_enabled())
-            all_gather_calls.append((list(split_sizes), list(outer_sizes), ws))
-            _default_all_gather_output_fn(output, outputs, split_sizes, outer_sizes, ws)
+            all_gather_calls.append(sizes)
+            _default_all_gather_output_fn(output, outputs, **sizes)
 
         def reduce_scatter_input_fn(unsharded_grads, shard_dims, world_size):
             # Copies that only the returned copy-in holds
@@ -710,7 +719,8 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
             ref_param.grad.div_(self.world_size)
             self.assertEqual(param.grad.full_tensor(), ref_param.grad)
         # The Shard(1) weights' padded sharded sizes are (8, 2) and (4, 2)
-        self.assertEqual(all_gather_calls, [([16, 2, 8, 1], [8, 1, 4, 1], 4)])
+        sizes = {"split_sizes": [16, 2, 8, 1], "outer_sizes": [8, 1, 4, 1]}
+        self.assertEqual(all_gather_calls, [{**sizes, "world_size": 4}])
         self.assertEqual(copy_in_numels, [27 * self.world_size])
         # FSDP frees the copy-in, and with it the gradient copies, before the
         # reduce-scatter
@@ -722,6 +732,11 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         )
         with self.assertRaisesRegex(TypeError, "unexpected keyword argument"):
             model(inp).sum().backward()
+        # The defaults take the sizes by keyword too
+        with self.assertRaisesRegex(TypeError, "positional"):
+            _default_reduce_scatter_input_fn([], [], 1)
+        with self.assertRaisesRegex(TypeError, "positional"):
+            _default_all_gather_output_fn(torch.empty(0), [], [], [], 1)
 
     @skip_if_lt_x_gpu(1)
     def test_post_forward_shard_dim1_parity(self):
@@ -739,9 +754,12 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         fully_shard(
             model, reshard_after_forward=2, shard_placement_fn=lambda param: Shard(1)
         )
-        inp = torch.randn((2, 16), device=device_type)
+        # The input gradient reads the all-gathered first weight
+        inp = torch.randn((2, 16), device=device_type, requires_grad=True)
+        ref_inp = inp.detach().clone().requires_grad_()
         model(inp).sum().backward()
-        ref_model(inp).sum().backward()
+        ref_model(ref_inp).sum().backward()
+        self.assertEqual(inp.grad, ref_inp.grad)
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
             if ref_param.grad is None:
                 continue
@@ -786,7 +804,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         fully_shard(model, reshard_after_forward=True)
         calls = []
         model.set_all_gather_layout(
-            DefaultAllGatherLayout(lambda *args: calls.append(args))
+            DefaultAllGatherLayout(lambda *args, **kwargs: calls.append(args))
         )
         with torch.no_grad():
             for _ in range(2):
@@ -810,6 +828,26 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
             group = fully_shard.state(model)._fsdp_param_group
             self.assertEqual(group._all_gather_process_group.size(), 2)
             self.assertEqual(model(inp), ref_model(inp))
+
+
+class TestFullyShardPostForwardDTensor(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 8
+
+    @skip_if_lt_x_gpu(1)
+    def test_post_forward_reshard_dtensor(self):
+        mesh = init_device_mesh(device_type.type, (4, 2), mesh_dim_names=("dp", "tp"))
+        model = nn.Sequential(nn.Linear(8, 8, device=device_type))
+        parallelize_module(model[0], mesh["tp"], ColwiseParallel())
+        fully_shard(model, mesh=mesh["dp"], reshard_after_forward=2)
+        msg = "Resharding 0.weight to smaller mesh is not supported for DTensor parameters yet"
+        with self.assertRaisesRegex(NotImplementedError, re.escape(msg)):
+            model(torch.randn((2, 8), device=device_type))
+        # Direct callers of to_sharded_post_forward hit the same limit
+        fsdp_param = fully_shard.state(model)._fsdp_param_group.fsdp_params[0]
+        with self.assertRaisesRegex(NotImplementedError, "not supported for DTensor"):
+            fsdp_param.to_sharded_post_forward()
 
 
 class TestFullyShardCustomAllocation(FSDPTestMultiThread):

@@ -1005,16 +1005,15 @@ class FSDPParam:
         self.sharded_state = ShardedState.SHARDED
 
     def check_post_forward_reshard(self) -> None:
-        name = self._param_fqn or self._module_info.param_name
         if self.is_dtensor:
             raise NotImplementedError(
-                f"Resharding {name} to smaller mesh is not supported for DTensor "
-                "parameters yet"
+                f"Resharding {self._display_name} to smaller mesh is not supported "
+                "for DTensor parameters yet"
             )
         if (num_outputs := len(self.all_gather_outputs)) > 1:
             raise NotImplementedError(
-                f"Resharding {name} to smaller mesh is not supported for all-gather "
-                f"extensions with {num_outputs} inputs yet"
+                f"Resharding {self._display_name} to smaller mesh is not supported "
+                f"for all-gather extensions with {num_outputs} inputs yet"
             )
         if self.post_forward_mesh_info is None:
             raise AssertionError("Expected post_forward_mesh_info to not be None")
@@ -1029,10 +1028,31 @@ class FSDPParam:
             # flat chunks of the unsharded data, match dim-0 chunks only if the
             # world size divides dim 0
             raise NotImplementedError(
-                f"Resharding the Shard({shard_dim}) parameter {name} to {world_size} "
-                f"ranks after forward requires dim 0 of its size "
+                f"Resharding the Shard({shard_dim}) parameter {self._display_name} to "
+                f"{world_size} ranks after forward requires dim 0 of its size "
                 f"{tuple(self._orig_size)} to be divisible by {world_size}"
             )
+        if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
+            # The post-forward parameter views a rank chunk of the extension's
+            # output, so the largest post-forward shard must fit in a chunk
+            output = self.all_gather_outputs[0]
+            rows = -(-self._orig_size[0] // world_size)
+            shard_numel = rows * math.prod(self._orig_size[1:])
+            if output.numel() // world_size < shard_numel:
+                raise NotImplementedError(
+                    f"Resharding {self._display_name} to smaller mesh needs "
+                    f"post-forward shards of up to {shard_numel} elements, but its "
+                    f"all-gather extension output has {output.numel() // world_size} "
+                    "per rank"
+                )
+            if self.sharded_param.requires_grad and not (
+                output.is_floating_point() or output.is_complex()
+            ):
+                raise NotImplementedError(
+                    f"Resharding {self._display_name} to smaller mesh needs a "
+                    "floating or complex all-gather extension output to require "
+                    f"gradients, but its output has dtype {output.dtype}"
+                )
 
     def to_sharded_post_forward(self) -> None:
         if self.is_dtensor:
@@ -1204,10 +1224,9 @@ class FSDPParam:
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
-                name = self._param_fqn or self._module_info.param_name
                 raise NotImplementedError(
-                    f"All-gathering the post-forward shard of {name} is not "
-                    "supported for all-gather extensions yet"
+                    f"All-gathering the post-forward shard of {self._display_name} is "
+                    "not supported for all-gather extensions yet"
                 )
             all_gather_input = _to_dtype_if_needed(
                 cast(torch.Tensor, self._sharded_post_forward_param_data),
@@ -1219,18 +1238,20 @@ class FSDPParam:
     def _get_extension_all_gather_inputs(
         self, inputs: Sequence[torch.Tensor | AllGatherInput], check_padding: bool
     ) -> list[torch.Tensor]:
-        # Records and plain tensors get keys of different lengths
-        try:
-            key = tuple(
-                [
-                    (operator.index(inp.dim), inp.tensor.size(), inp.tensor.dtype)
-                    if isinstance(inp, AllGatherInput)
-                    else (inp.size(), inp.dtype)
-                    for inp in inputs
-                ]
-            )
-        except TypeError:  # a non-integer dim, which the layouts check rejects
-            key = None
+        # Records and plain tensors get keys of different lengths. Invalid record
+        # dims are keyed as None, which the layouts check rejects before caching.
+        key = tuple(
+            [
+                (
+                    dim if type(dim := inp.dim) is int else _record_dim(dim),
+                    inp.tensor.size(),
+                    inp.tensor.dtype,
+                )
+                if isinstance(inp, AllGatherInput)
+                else (inp.size(), inp.dtype)
+                for inp in inputs
+            ]
+        )
         layouts = self._extension_layouts_by_key.get(key)
         if layouts is None:
             shard_dim = self.fsdp_placement.dim
@@ -1247,7 +1268,7 @@ class FSDPParam:
                 shard_dim=shard_dim,
                 padded_sharded_size=self.padded_sharded_param_size,
                 require_padded_size=check_padding and uneven,
-                param_name=self._param_fqn or self._module_info.param_name,
+                param_name=self._display_name,
             )
             if self.all_gather_outputs:
                 # Bounded for payloads whose sizes keep changing
@@ -1259,6 +1280,11 @@ class FSDPParam:
             (inp.tensor if isinstance(inp, AllGatherInput) else inp).view(-1)
             for inp in inputs
         ]
+
+    @property
+    def _display_name(self) -> str:
+        # The FQN is set in lazy init
+        return self._param_fqn or self._module_info.param_name
 
     @property
     def unsharded_param(self) -> nn.Parameter:  # ND
@@ -1518,6 +1544,17 @@ def _get_dtensor_spec_with_dtype(spec: DTensorSpec, dtype: torch.dtype) -> DTens
     )
 
 
+def _record_dim(dim: Any) -> int | None:
+    # Tensor dims count as invalid, since converting them would sync in every
+    # lookup of the cached layouts
+    if isinstance(dim, torch.Tensor):
+        return None
+    try:
+        return operator.index(dim)
+    except TypeError:
+        return None
+
+
 def _get_all_gather_output_layout(
     input_size: torch.Size,
     dim: int,
@@ -1552,7 +1589,8 @@ def _get_all_gather_output_layouts(
             f"but {len(all_gather_outputs)} on its first call"
         )
     # The copy-out reassembles the rows of Tensor inputs along a nonzero shard
-    # dim, reading them as the padded sharded parameter's rows
+    # dim, reading them as the padded sharded parameter's rows. The rules for
+    # those rows also hold where a single rank copies them flat.
     leading_dims = padded_sharded_size[:shard_dim]
     shard_outer_size = math.prod(leading_dims)
     reassembled = shard_world_size > 1 and shard_outer_size > 1
@@ -1564,11 +1602,8 @@ def _get_all_gather_output_layouts(
         output = all_gather_outputs[i] if all_gather_outputs else None
         if is_record:
             ndim = max(len(size), 1)
-            dim = inp.dim
-            # Tensor dims would sync on every lookup of the cached layouts
-            if not isinstance(dim, torch.Tensor) and hasattr(dim, "__index__"):
-                dim = operator.index(dim)
-            if not isinstance(dim, int) or not -ndim <= dim < ndim:
+            dim = _record_dim(inp.dim)
+            if dim is None or not -ndim <= dim < ndim:
                 raise ValueError(
                     f"AllGatherInput {i} of {param_name} has dim {inp.dim!r}, which "
                     f"is invalid for size {tuple(size)}"
@@ -1590,7 +1625,7 @@ def _get_all_gather_output_layouts(
                 and output.dtype != torch.uint8
             )
             if (
-                reassembled
+                shard_outer_size > 1
                 and size.numel()
                 and not typed_bytes
                 and size.numel() != padded_sharded_size.numel()
@@ -1616,15 +1651,15 @@ def _get_all_gather_output_layouts(
             continue
         # Records keep their element count and dtype. Tensor inputs may become
         # byte views of their outputs, and shrink to fill a prefix of them unless
-        # the copy-out reassembles their rows or a zero trailing dim fixes their
-        # output size.
+        # they have rows to reassemble or a zero trailing dim fixes their output
+        # size.
         byte_view = not is_record and tensor.dtype == torch.uint8
         if tensor.dtype != output.dtype and not byte_view:
             raise ValueError(
                 f"All-gather input {i} of {param_name} must keep the dtype "
                 f"{output.dtype} of its first call, but has dtype {tensor.dtype}"
             )
-        exact = is_record or reassembled or 0 in size[1:]
+        exact = is_record or shard_outer_size > 1 or 0 in size[1:]
         nbytes = tensor.nbytes * shard_world_size
         fits = nbytes == output.nbytes if exact else nbytes <= output.nbytes
         if not fits:
