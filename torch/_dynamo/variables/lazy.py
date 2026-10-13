@@ -108,12 +108,13 @@ class ComputedLazyCache:
 
         if any_symbolic:
             # The precomputed constant is stale; recompute symbolically
-            from .builtin import BuiltinVariable
+            from .builder import SourcelessBuilder
 
             tx = InstructionTranslator.current_tx()
             realized_args = [arg.realize() for arg in self.args]
-            # This stored internal operator must ignore trace-rule overrides.
-            self.vt = BuiltinVariable(self.op).call_function(tx, realized_args, {})
+            self.vt = SourcelessBuilder.create_internal_builtin(self.op).call_function(
+                tx, realized_args, {}
+            )
         else:
             self.vt = ConstantVariable.create(self.value)
 
