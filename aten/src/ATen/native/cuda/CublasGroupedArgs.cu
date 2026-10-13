@@ -18,8 +18,6 @@ namespace at::native {
 
 namespace {
 
-constexpr int kMaxGroupedGemmGroups = 1024;
-
 template <typename IndexType>
 __global__ void populate_cublas_grouped_args_kernel(
     const int32_t* __restrict__ offs,
@@ -123,17 +121,17 @@ __global__ void populate_cublas_grouped_args_kernel(
   const bool scan_a = (scalePtrA_out != nullptr) && (scale_a_stride_bytes == 0);
   const bool scan_b = (scalePtrB_out != nullptr) && (scale_b_stride_bytes == 0);
   if (scan_a || scan_b) {
-    __shared__ int64_t s_a[kMaxGroupedGemmGroups];
-    __shared__ int64_t s_b[kMaxGroupedGemmGroups];
-    const int64_t inner_a = scale_inner ? scale_inner : delta;
-    const int64_t inner_b = scale_inner ? scale_inner : delta;
+    extern __shared__ int64_t scale_scan[];
+    int64_t* s_a = scale_scan;
+    int64_t* s_b = scale_scan + blockDim.x;
+    const int64_t inner = scale_inner ? scale_inner : delta;
     const int64_t outer_a = scale_a_outer ? scale_a_outer : delta;
     const int64_t outer_b = scale_b_outer ? scale_b_outer : delta;
     const int64_t size_a = scan_a
-        ? cublas_grouped_scale_size_bytes(scale_layout_a, inner_a, outer_a)
+        ? cublas_grouped_scale_size_bytes(scale_layout_a, inner, outer_a)
         : 0;
     const int64_t size_b = scan_b
-        ? cublas_grouped_scale_size_bytes(scale_layout_b, inner_b, outer_b)
+        ? cublas_grouped_scale_size_bytes(scale_layout_b, inner, outer_b)
         : 0;
     s_a[i] = size_a;
     s_b[i] = size_b;
@@ -225,7 +223,10 @@ void launch_populate_cublas_grouped_args(
   args.ldbArray = ldb_arr;
   args.lddArray = ldd_arr;
 
-  populate_cublas_grouped_args_kernel<IndexType><<<1, batchCount, 0, stream>>>(
+  const bool scan_scales = (scalePtrA_out != nullptr && scale_a_stride_bytes == 0) ||
+      (scalePtrB_out != nullptr && scale_b_stride_bytes == 0);
+  const size_t shared_bytes = scan_scales ? 2 * batchCount * sizeof(int64_t) : 0;
+  populate_cublas_grouped_args_kernel<IndexType><<<1, batchCount, shared_bytes, stream>>>(
       offs, base_A, base_B, base_D,
       static_cast<IndexType>(cublas_m), static_cast<IndexType>(cublas_n), static_cast<IndexType>(cublas_k),
       static_cast<IndexType>(k_multiplier),

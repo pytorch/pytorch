@@ -997,20 +997,21 @@ Tensor& _scaled_mnk4(
 #ifndef USE_ROCM
   _check_mnk4_support();
   TORCH_CHECK_VALUE(
-      scaled_blas::is_mnk4_input_pair(mat_a.scalar_type(), mat_b.scalar_type()),
+      scaled_blas::is_valid_cublaslt_input_pair(mat_a.scalar_type(), mat_b.scalar_type()),
       "mat_a and mat_b must be float8_e4m3fn or float8_e5m2 tensors, with at least one float8_e4m3fn input, got: ",
       mat_a.scalar_type(),
       " and ",
       mat_b.scalar_type());
   const auto packed_k = scaling_type == ScalingType::BlockWise1x32 ? 128 : 512;
-  const auto expected_a_elems = round_up<int64_t>(mat_a.size(0), 4) * ceil_div<int64_t>(mat_a.size(1), packed_k);
-  const auto expected_b_elems = round_up<int64_t>(mat_b.size(1), 4) * ceil_div<int64_t>(mat_b.size(0), packed_k);
+  // Min block size 16, M/N padded to 4, K padded to 128 for 1x32 mode or 512 for 1x128 mode
+  const auto expected_a_elems = 16 * ceil_div<int64_t>(mat_a.size(0), 4) * ceil_div<int64_t>(mat_a.size(1), packed_k);
+  const auto expected_b_elems = 16 * ceil_div<int64_t>(mat_b.size(1), 4) * ceil_div<int64_t>(mat_b.size(0), packed_k);
   TORCH_CHECK_VALUE(
-      scale_a.scalar_type() == kInt && scale_a.is_contiguous() && scale_a.numel() == expected_a_elems,
-      "For packed MNxK4 scaling scale_a must be a contiguous int32 tensor with ", expected_a_elems, " elements");
+      scale_a.scalar_type() == kFloat8_e8m0fnu && scale_a.is_contiguous() && scale_a.numel() == expected_a_elems,
+      "For packed MNxK4 scaling scale_a must be a contiguous float8_e8m0fnu tensor with ", expected_a_elems, " elements");
   TORCH_CHECK_VALUE(
-      scale_b.scalar_type() == kInt && scale_b.is_contiguous() && scale_b.numel() == expected_b_elems,
-      "For packed MNxK4 scaling scale_b must be a contiguous int32 tensor with ", expected_b_elems, " elements");
+      scale_b.scalar_type() == kFloat8_e8m0fnu && scale_b.is_contiguous() && scale_b.numel() == expected_b_elems,
+      "For packed MNxK4 scaling scale_b must be a contiguous float8_e8m0fnu tensor with ", expected_b_elems, " elements");
   TORCH_CHECK_VALUE(
       reinterpret_cast<uintptr_t>(scale_a.const_data_ptr()) % 16 == 0,
       "For packed MNxK4 scaling scale_a must have a 16-byte aligned data pointer");
@@ -1018,7 +1019,7 @@ Tensor& _scaled_mnk4(
       reinterpret_cast<uintptr_t>(scale_b.const_data_ptr()) % 16 == 0,
       "For packed MNxK4 scaling scale_b must have a 16-byte aligned data pointer");
   return _scaled_gemm(
-      mat_a, mat_b, scale_a, scale_b, scaling_type, scaling_type, SwizzleType::NO_SWIZZLE, SwizzleType::NO_SWIZZLE, bias, use_fast_accum, out, epilogue);
+      mat_a, mat_b, scale_a, scale_b, scaling_type, scaling_type, SwizzleType::SWIZZLE_MNxK4, SwizzleType::SWIZZLE_MNxK4, bias, use_fast_accum, out, epilogue);
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(false, "packed MNxK4 scaling is not supported on ROCm");
 #endif
@@ -1692,9 +1693,11 @@ void scaled_mm_cuda_v2_impl(
       mat_a.scalar_type(),
       scale_recipe_a_enum,
       scale_a_ref,
+      swizzle_a_enum,
       mat_b.scalar_type(),
       scale_recipe_b_enum,
-      scale_b_ref);
+      scale_b_ref,
+      swizzle_b_enum);
   TORCH_CHECK_VALUE(
     gemm_impl != ScaledGemmImplementation::NONE,
     "Invalid scaling configuration.\n"
@@ -1704,7 +1707,7 @@ void scaled_mm_cuda_v2_impl(
     "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (", ceil_div<int64_t>(mat_a.size(0), 128), ", ", ceil_div<int64_t>(mat_a.size(1), 128), ") and scale_b should be (", ceil_div<int64_t>(mat_b.size(0), 128), ", ", ceil_div<int64_t>(mat_b.size(1), 128), "), and both should be near-inner-dim-major (with 16-byte aligned strides).\n"
     "- For Blockwise 1x32 scaling, a and b should be float8, scales should be float8_e8m0fnu, scale_a should have ", round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_a.size(1), 32), 4), " elements and scale_b should have ", round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_b.size(0), 32), 4), " elements, and both should be contiguous.\n"
     "- For Blockwise 1x16 scaling, a and b should be float4 (packed 2x), scales should be float8_e4m3fn, scale_a should have ", round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_a.size(1) * 2, 16), 4), " elements and scale_b should have ", round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_b.size(0) * 2, 16), 4), " elements, and both should be contiguous.\n"
-    "- For BlockWise1x32 or BlockWise1x128 packed MNxK4 scaling, a and b should be float8 and both scales should be contiguous int32 tensors with NO_SWIZZLE.\n"
+    "- For BlockWise1x32 or BlockWise1x128 packed MNxK4 scaling, a and b should be float8 and both scales should be contiguous float8_e8m0fnu tensors with SWIZZLE_MNxK4.\n"
     "Got mat_a.dtype()=", mat_a.scalar_type(), ", scale_a[0].dtype()=", scale_a[0].scalar_type(), ", scale_a[0].size()=", scale_a[0].sizes(), ", scale_a[0].stride()=", scale_a[0].strides(), ", ",
     "mat_b.dtype()=", mat_b.scalar_type(), ", scale_b[0].dtype()=", scale_b[0].scalar_type(), ", scale_b[0].size()=", scale_b[0].sizes(), " and scale_b[0].stride()=", scale_b[0].strides()
   );
@@ -1714,8 +1717,8 @@ void scaled_mm_cuda_v2_impl(
       gemm_impl == ScaledGemmImplementation::MNK4_1x128) {
     TORCH_CHECK_VALUE(
         swizzle_a_enum.size() == 1 && swizzle_b_enum.size() == 1 &&
-            swizzle_a_enum[0] == SwizzleType::NO_SWIZZLE && swizzle_b_enum[0] == SwizzleType::NO_SWIZZLE,
-        "For packed MNxK4 scaling swizzle_a and swizzle_b must each be NO_SWIZZLE");
+            swizzle_a_enum[0] == SwizzleType::SWIZZLE_MNxK4 && swizzle_b_enum[0] == SwizzleType::SWIZZLE_MNxK4,
+        "For packed MNxK4 scaling swizzle_a and swizzle_b must each be SWIZZLE_MNxK4");
   }
 
 
