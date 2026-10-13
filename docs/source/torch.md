@@ -1187,4 +1187,6 @@ This feature is a prototype and may have compatibility breaking changes in the f
 :hidden: true
 
 torch.aliases.md
+torch.e.md
+torch.pi.md
 ```
