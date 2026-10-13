@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <link rel="canonical" href="${to_uri}">
+    <!-- Preserve the query string and anchor, which meta refresh drops. -->
+    <script>window.location.replace("${to_uri}" + window.location.search + window.location.hash);</script>
+    <noscript><meta http-equiv="refresh" content="0; url=${to_uri}"></noscript>
+  </head>
+</html>

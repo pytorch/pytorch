@@ -53,6 +53,9 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from redirects import redirects  # noqa: F401
 
 
+redirect_html_template_file = "_templates/redirect.html"
+
+
 # -- General configuration ------------------------------------------------
 
 # Add any Sphinx extension module names here, as strings. They can be
@@ -475,7 +478,7 @@ coverage_ignore_functions = [
     "recv",
     "reduce",
     "reduce_scatter",
-    # deprecated aliases of all_gather_single / reduce_scatter_single /
+    # back-compat aliases of all_gather_single / reduce_scatter_single /
     # gather_single
     "all_gather_into_tensor",
     "gather_into_tensor",
