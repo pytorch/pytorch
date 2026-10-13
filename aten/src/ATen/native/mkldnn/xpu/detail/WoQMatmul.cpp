@@ -33,7 +33,7 @@ void woq_matmul_int4_impl(
   // xxx_usr_md would describe the real layout of inputs
   auto m1_usr_dt = get_onednn_dtype(m1); // e.g., half <==> f16
   auto m2_usr_dt = get_onednn_dtype(m2); // int32 tensor, pack 8 int4
-  auto scale_usr_dt = get_onednn_dtype(scale_); // bf16
+  auto scale_usr_dt = get_onednn_dtype(scale_); // bf16, fp16, or f32
   auto zp_usr_dt = get_onednn_dtype(zp_); // s8 expected currently
   auto dst_usr_dt = get_onednn_dtype(dst); // bf16
 
@@ -76,7 +76,7 @@ void woq_matmul_int4_impl(
   // Tell oneDNN the weight dtype we want manipulate is u4,
   // library needs infer how to unpack u4 data based on the m2_usr_md (s32).
   auto m2_dt = dnnl::memory::data_type::u4;
-  auto scale_dt = scale_usr_dt; // bf16
+  auto scale_dt = scale_usr_dt; // bf16, fp16, or f32
   // Tell oneDNN the zp dtype we want manipulate is s8
   // library needs infer how to unpack s8 data based on the m2_usr_md.
   auto zp_dt = zp_usr_dt; // should be s8, currently
@@ -252,6 +252,7 @@ void woq_matmul_int4_impl_cache(
       ldc,
       device_id,
       f_attr,
+      scale.scalar_type(),
       group_size,
       zp_group_size);
 
@@ -297,7 +298,7 @@ void woq_matmul_int4(
     Tensor& result, // torchao: [M, K], dtype: fp16,bf16
     const Tensor& mat1_, // torchao: [M, K], dtype: fp16,bf16
     const Tensor& mat2_, // torchao quantized weight, [K/8, N], dtype: uint4x8
-    const Tensor& scale, // torchao: [K/group_size, N], dtype: fp16,bf16
+    const Tensor& scale, // torchao: [K/group_size, N], dtype: fp16,bf16,fp32
     const Tensor& zp, // torchao: [K/group_size, N], dtype: int8
     int64_t group_size,
     bool pri_cache) {
