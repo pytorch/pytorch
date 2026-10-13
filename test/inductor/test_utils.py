@@ -1,10 +1,11 @@
 # Owner(s): ["module: inductor"]
 
 import builtins
-import importlib.util
+import math
 import os
 import sys
 import tempfile
+import types
 import unittest
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -13,11 +14,17 @@ from unittest import mock
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
+from torch._dynamo import device_interface as di
 from torch._dynamo.device_interface import DeviceInterface
 from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
-from torch._inductor import config as inductor_config
+from torch._inductor import config as inductor_config, utils as inductor_utils
+from torch._inductor.analysis.device_info import (
+    _device_mapping,
+    DeviceInfo,
+    register_device_info,
+)
 from torch._inductor.compile_fx import _get_subgraph_names
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
@@ -27,7 +34,18 @@ from torch._inductor.fx_utils import (
     get_fake,
 )
 from torch._inductor.utils import (
+    _get_device_dram_gbps,
+    _get_device_info_key,
+    _get_device_tflops,
+    _gpu_types,
+    _infer_scale_swizzle_impl,
+    device_need_guard,
+    ensure_nv_universal_gemm_available,
+    get_device_dram_gbps,
     get_device_tflops,
+    get_gpu_dram_gbps,
+    get_gpu_type,
+    is_gpu,
     load_template,
     python_subprocess_env,
     sympy_str,
@@ -35,18 +53,189 @@ from torch._inductor.utils import (
 )
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.nn.functional import ScalingType, SwizzleType
 from torch.ops import aten
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
 from torch.utils import _triton as triton_utils
 from torch.utils._sympy.functions import Identity
+
+
+class _TestDeviceInterface(DeviceInterface):
+    class Worker(DeviceInterface.Worker):
+        properties: dict[torch.device, object] = {}
+        error: Exception | None = None
+
+        @classmethod
+        def get_device_properties(cls, device=None):
+            if cls.error is not None:
+                raise cls.error
+            return cls.properties[device]
+
+
+class _TestDeviceInfoTestCase(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.device = torch.device("privateuseone:0")
+        _TestDeviceInterface.Worker.properties = {}
+        _TestDeviceInterface.Worker.error = None
+
+        device_interfaces_patcher = mock.patch.dict(di.device_interfaces)
+        device_interfaces_patcher.start()
+        self.addCleanup(device_interfaces_patcher.stop)
+        di.register_interface_for_device("privateuseone", _TestDeviceInterface)
+
+        device_mapping_patcher = mock.patch.dict(_device_mapping)
+        device_mapping_patcher.start()
+        self.addCleanup(device_mapping_patcher.stop)
+
+
+class TestDeviceDramBandwidth(_TestDeviceInfoTestCase):
+    def setUp(self):
+        super().setUp()
+
+        _get_device_dram_gbps.cache_clear()
+        get_gpu_dram_gbps.cache_clear()
+        self.addCleanup(_get_device_dram_gbps.cache_clear)
+        self.addCleanup(get_gpu_dram_gbps.cache_clear)
+
+    def test_get_device_info_key_uses_mapping_arch_then_name(self):
+        for properties, expected in (
+            ({"name": "test_device", "arch": "test_arch"}, "test_arch"),
+            ({"name": None, "arch": "test_arch"}, "test_arch"),
+            ({"name": "test_device", "arch": None}, "test_device"),
+        ):
+            with self.subTest(properties=properties):
+                _TestDeviceInterface.Worker.properties = {self.device: properties}
+                self.assertEqual(_get_device_info_key(self.device), expected)
+
+    def test_get_device_dram_gbps_uses_registered_device_info(self):
+        _TestDeviceInterface.Worker.properties = {self.device: {"arch": "test_arch"}}
+        register_device_info(
+            "test_arch", DeviceInfo(tops={}, dram_bw_gbs=123.0, dram_gb=1.0)
+        )
+        self.assertEqual(get_device_dram_gbps(self.device), 123.0)
+
+    def test_get_device_dram_gbps_none_tracks_current_accelerator(self):
+        other_device = torch.device("privateuseone:1")
+        _TestDeviceInterface.Worker.properties = {
+            self.device: {"arch": "test_arch_0"},
+            other_device: {"arch": "test_arch_1"},
+        }
+        register_device_info(
+            "test_arch_0", DeviceInfo(tops={}, dram_bw_gbs=100.0, dram_gb=1.0)
+        )
+        register_device_info(
+            "test_arch_1", DeviceInfo(tops={}, dram_bw_gbs=101.0, dram_gb=1.0)
+        )
+        with mock.patch(
+            "torch._inductor.utils._current_accelerator_device",
+            side_effect=[self.device, other_device],
+        ):
+            self.assertEqual(get_device_dram_gbps(), 100.0)
+            self.assertEqual(get_device_dram_gbps(), 101.0)
+
+    def test_get_device_dram_gbps_missing_name_skips_datasheet(self):
+        _TestDeviceInterface.Worker.properties = {self.device: {}}
+        with (
+            mock.patch(
+                "torch._inductor.utils.datasheet_dram_bw_gbs"
+            ) as datasheet_dram_bw_gbs,
+            self.assertLogs("torch._inductor.utils", level="WARNING"),
+        ):
+            bandwidth = get_device_dram_gbps(self.device)
+
+        self.assertIsNone(bandwidth)
+        datasheet_dram_bw_gbs.assert_not_called()
+
+    def test_get_device_dram_gbps_property_query_not_implemented_returns_none(self):
+        _TestDeviceInterface.Worker.error = NotImplementedError("unavailable")
+        with (
+            mock.patch(
+                "torch._inductor.utils.datasheet_dram_bw_gbs"
+            ) as datasheet_dram_bw_gbs,
+            self.assertLogs("torch._inductor.utils", level="WARNING"),
+        ):
+            bandwidth = get_device_dram_gbps(self.device)
+
+        self.assertIsNone(bandwidth)
+        datasheet_dram_bw_gbs.assert_not_called()
+
+    def test_get_device_dram_gbps_warns_for_unknown_device(self):
+        _TestDeviceInterface.Worker.properties = {
+            self.device: {"arch": "unknown_test_arch"}
+        }
+        with self.assertLogs("torch._inductor.utils", level="WARNING") as logs:
+            bandwidth = get_device_dram_gbps(self.device)
+
+        self.assertIsNone(bandwidth)
+        self.assertIn("reported key: unknown_test_arch", logs.output[0])
+        self.assertIn("returning None", logs.output[0])
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    def test_get_device_dram_gbps_triton_fallback_uses_device_index(self):
+        with mock.patch(
+            "torch._inductor.utils._get_device_info_key",
+            return_value=None,
+        ):
+            for device_name, expected_index in (
+                ("cuda", None),
+                ("cuda:0", 0),
+                ("cuda:1", 1),
+                ("xpu", None),
+                ("xpu:0", 0),
+                ("xpu:1", 1),
+            ):
+                with (
+                    self.subTest(device=device_name),
+                    mock.patch(
+                        "triton.testing.get_dram_gbps", return_value=321.0
+                    ) as fallback,
+                ):
+                    self.assertEqual(
+                        get_device_dram_gbps(torch.device(device_name)),
+                        321.0,
+                    )
+                    fallback.assert_called_once_with(expected_index)
+
+    def test_get_gpu_dram_gbps_is_cached(self):
+        with mock.patch(
+            "torch._inductor.utils.datasheet_dram_bw_gbs",
+            return_value=123.0,
+        ) as datasheet_dram_bw_gbs:
+            self.assertEqual(get_gpu_dram_gbps(), 123.0)
+            self.assertEqual(get_gpu_dram_gbps(), 123.0)
+
+        datasheet_dram_bw_gbs.assert_called_once_with()
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    def test_get_gpu_dram_gbps_preserves_triton_fallback(self):
+        """Use Triton's active-device bandwidth query when no datasheet value exists."""
+        with (
+            mock.patch(
+                "torch._inductor.utils.datasheet_dram_bw_gbs",
+                return_value=None,
+            ),
+            mock.patch("triton.testing.get_dram_gbps", return_value=321.0) as fallback,
+        ):
+            self.assertEqual(get_gpu_dram_gbps(), 321.0)
+
+        fallback.assert_called_once_with()
 
 
 class TestUtils(TestCase):
@@ -345,6 +534,29 @@ class TestUtils(TestCase):
         self.assertTrue(type(ret) is float)
 
 
+class TestDeviceTflopsTritonFallback(TestCase):
+    def setUp(self):
+        super().setUp()
+        _get_device_tflops.cache_clear()
+        self.addCleanup(_get_device_tflops.cache_clear)
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
+    def test_get_device_tflops_triton_fallback_magnitude(self):
+        # The Triton fallback feeds max_clock_rate() (MHz) into triton's tflops
+        # helpers, which are dimensioned in kHz. Getting that wrong under-reports
+        # peak throughput by 1000x, which a type-only assertion cannot catch, so
+        # pin the magnitude too. Measured fp16 values: the worst pre-fix case is
+        # ~1.06 (MI300X) and the smallest post-fix case is ~312 (A100), so 10.0
+        # clears the former by ~10x and sits far below the latter.
+        with mock.patch.object(inductor_utils, "datasheet_tops", return_value=None):
+            ret = get_device_tflops(torch.float16)
+        self.assertGreater(ret, 10.0)
+
+
 instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
 
 
@@ -380,7 +592,258 @@ class TestLoadTemplate(TestCase):
         self.assertIn("bad.py.jinja", str(cm.exception))
 
 
-class TestRuntimeEstimation(TestCase):
+class TestRuntimeEstimation(_TestDeviceInfoTestCase):
+    def setUp(self):
+        super().setUp()
+        _get_device_tflops.cache_clear()
+        self.addCleanup(_get_device_tflops.cache_clear)
+
+    def test_roofline_estimate_uses_exported_tuple_metadata(self):
+        from torch._functorch._aot_autograd.streams import get_roofline_estimate
+
+        class MaxDimModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.max(x, dim=0)
+
+        exported = torch.export.export(MaxDimModule(), (torch.randn(2, 2),))
+        node = next(
+            node
+            for node in exported.graph_module.graph.nodes
+            if node.target == torch.ops.aten.max.dim
+        )
+        self.assertIsInstance(node.meta["val"], tuple)
+
+        with (
+            mock.patch(
+                "torch._functorch._aot_autograd.streams.get_transfer_time",
+                return_value=1.0,
+            ) as get_transfer_time,
+            mock.patch(
+                "torch._functorch._aot_autograd.streams.get_compute_time",
+                return_value=2.0,
+            ) as get_compute_time,
+        ):
+            self.assertEqual(get_roofline_estimate(node), 2.0 / 1e6)
+
+        self.assertEqual(
+            get_transfer_time.call_args.kwargs["device"], torch.device("cpu")
+        )
+        self.assertEqual(
+            get_compute_time.call_args.kwargs["device"], torch.device("cpu")
+        )
+
+    def test_get_device_tflops_uses_registered_device_info(self):
+        _TestDeviceInterface.Worker.properties = {self.device: {"arch": "test_arch"}}
+        register_device_info(
+            "test_arch",
+            DeviceInfo(
+                tops={torch.bfloat16: 321.0},
+                dram_bw_gbs=1.0,
+                dram_gb=1.0,
+            ),
+        )
+        self.assertEqual(
+            get_device_tflops(torch.bfloat16, device=self.device),
+            321.0,
+        )
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_get_device_tflops_cuda_fallback_uses_device_index(self):
+        device = torch.device("cuda:1")
+        with (
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                return_value=None,
+            ),
+            mock.patch("torch.cuda.get_device_capability", return_value=(8, 0)),
+            mock.patch(
+                "torch._inductor.utils.inspect.signature",
+                return_value=types.SimpleNamespace(parameters={"clock_rate": object()}),
+            ),
+            mock.patch(
+                "torch._utils_internal.max_clock_rate", return_value=123.0
+            ) as max_clock_rate,
+            mock.patch(
+                "triton.testing.get_max_tensorcore_tflops", return_value=456.0
+            ) as get_max_tensorcore_tflops,
+        ):
+            self.assertEqual(
+                get_device_tflops(torch.float16, device=device),
+                456.0,
+            )
+
+        max_clock_rate.assert_called_once_with(1)
+        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123000.0, 1)
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_get_device_tflops_cuda_fallback_uses_current_device(self):
+        device = torch.device("cuda")
+        with (
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                return_value=None,
+            ),
+            mock.patch("torch.cuda.get_device_capability", return_value=(8, 0)),
+            mock.patch("torch.cuda.current_device", return_value=1) as current_device,
+            mock.patch(
+                "torch._inductor.utils.inspect.signature",
+                return_value=types.SimpleNamespace(parameters={"clock_rate": object()}),
+            ),
+            mock.patch(
+                "torch._utils_internal.max_clock_rate", return_value=123.0
+            ) as max_clock_rate,
+            mock.patch(
+                "triton.testing.get_max_tensorcore_tflops", return_value=456.0
+            ) as get_max_tensorcore_tflops,
+        ):
+            self.assertEqual(
+                get_device_tflops(torch.float16, device=device),
+                456.0,
+            )
+
+        current_device.assert_called_once_with()
+        max_clock_rate.assert_called_once_with(1)
+        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123000.0, 1)
+
+    def test_get_device_tflops_unindexed_device_tracks_current_device(self):
+        device_interface = mock.Mock()
+        device_interface.Worker.current_device.side_effect = [0, 1]
+        with (
+            mock.patch(
+                "torch._inductor.utils.get_interface_for_device",
+                return_value=device_interface,
+            ),
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                side_effect=["gpu 0", "gpu 1"],
+            ) as get_device_info_key,
+            mock.patch(
+                "torch._inductor.utils.datasheet_tops",
+                side_effect=[100.0, 101.0],
+            ),
+        ):
+            device = torch.device("cuda")
+            self.assertEqual(get_device_tflops(torch.float16, device), 100.0)
+            self.assertEqual(get_device_tflops(torch.float16, device), 101.0)
+
+        self.assertEqual(
+            [call.args[0] for call in get_device_info_key.call_args_list],
+            [
+                torch.device("cuda:0"),
+                torch.device("cuda:1"),
+            ],
+        )
+
+    def test_get_device_tflops_none_tracks_current_accelerator(self):
+        with (
+            mock.patch(
+                "torch._inductor.utils._current_accelerator_device",
+                side_effect=[torch.device("mtia:0"), torch.device("mtia:1")],
+            ),
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                side_effect=["mtia:0", "mtia:1"],
+            ),
+        ):
+            register_device_info(
+                "mtia:0",
+                DeviceInfo(
+                    tops={torch.bfloat16: 100.0},
+                    dram_bw_gbs=1.0,
+                    dram_gb=1.0,
+                ),
+            )
+            register_device_info(
+                "mtia:1",
+                DeviceInfo(
+                    tops={torch.bfloat16: 101.0},
+                    dram_bw_gbs=1.0,
+                    dram_gb=1.0,
+                ),
+            )
+            self.assertEqual(get_device_tflops(torch.bfloat16), 100.0)
+            self.assertEqual(get_device_tflops(torch.bfloat16), 101.0)
+
+    def test_get_device_tflops_unknown_device_returns_zero(self):
+        with mock.patch("torch._inductor.utils.datasheet_tops") as datasheet_tops:
+            self.assertEqual(
+                get_device_tflops(torch.float32, device=torch.device("meta")),
+                0.0,
+            )
+
+        datasheet_tops.assert_not_called()
+
+    def test_get_device_tflops_unavailable_cuda_returns_zero(self):
+        with (
+            mock.patch("torch._inductor.utils._get_device_info_key", return_value=None),
+            mock.patch("torch.cuda.is_available", return_value=False),
+            mock.patch("torch.cuda.get_device_capability") as get_capability,
+        ):
+            self.assertEqual(
+                get_device_tflops(torch.float32, device=torch.device("cuda")),
+                0.0,
+            )
+
+        get_capability.assert_not_called()
+
+    def test_flops_to_ns_gpu_type_takes_precedence_over_device(self):
+        from torch.utils._runtime_estimation import flops_to_ns
+
+        with (
+            mock.patch(
+                "torch.utils._runtime_estimation.datasheet_tops",
+                return_value=100.0,
+            ) as datasheet_tops,
+            mock.patch(
+                "torch.utils._runtime_estimation.get_device_tflops"
+            ) as get_tflops,
+        ):
+            result_ns = flops_to_ns(
+                150_000.0,
+                torch.float32,
+                gpu_type="NVIDIA H100",
+                device=torch.device("mtia"),
+            )
+
+        datasheet_tops.assert_called_once_with(
+            torch.float32,
+            is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32",
+            device_name="NVIDIA H100",
+        )
+        get_tflops.assert_not_called()
+        self.assertEqual(result_ns, 1.0)
+
+    def test_get_transfer_time_uses_requested_device(self):
+        from torch.utils._runtime_estimation import get_transfer_time
+
+        device = torch.device("mtia")
+        tensor = torch.ones(2)
+        with mock.patch(
+            "torch.utils._runtime_estimation.get_device_dram_gbps",
+            return_value=4.0,
+        ) as get_bandwidth:
+            result_ns = get_transfer_time([tensor], [], device=device)
+
+        get_bandwidth.assert_called_once_with(device)
+        self.assertEqual(result_ns, 2.0)
+
+    def test_get_transfer_time_missing_bandwidth_returns_zero(self):
+        from torch.utils._runtime_estimation import get_transfer_time
+
+        with mock.patch(
+            "torch.utils._runtime_estimation.get_device_dram_gbps",
+            return_value=None,
+        ):
+            self.assertEqual(get_transfer_time([torch.ones(2)], []), 0.0)
+
     def test_get_compute_time_units(self):
         """TFLOPS-to-FLOPS/s conversion must use 1e12, not 1e15."""
         from unittest.mock import patch
@@ -406,27 +869,66 @@ class TestRuntimeEstimation(TestCase):
         expected_ns = (expected_macs / (0.75 * known_tflops * 1e12)) * 1e9
         self.assertAlmostEqual(result_ns, expected_ns)
 
+    def test_get_compute_time_uses_requested_device(self):
+        from torch.utils._runtime_estimation import get_compute_time
+
+        device = torch.device("mtia:1")
+        a = torch.randn(2, 2)
+        b = torch.randn(2, 2)
+        out = torch.mm(a, b)
+
+        with mock.patch(
+            "torch.utils._runtime_estimation.get_device_tflops",
+            return_value=1000.0,
+        ) as get_tflops:
+            get_compute_time(
+                torch.ops.aten.mm,
+                (a, b),
+                {},
+                out,
+                {torch.float32},
+                device=device,
+            )
+
+        get_tflops.assert_called_once_with(torch.float32, device=device)
+
 
 class TestFP4Support(TestCase):
     """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
 
+    def test_ensure_nv_universal_gemm_import_error(self):
+        from torch._inductor import utils
+
+        utils.ensure_nv_universal_gemm_available.cache_clear()
+        self.addCleanup(utils.ensure_nv_universal_gemm_available.cache_clear)
+        with (
+            mock.patch.object(utils.importlib.util, "find_spec", return_value=object()),
+            mock.patch.object(
+                utils, "_ensure_fp4_dtype_registered", side_effect=ImportError
+            ),
+        ):
+            self.assertFalse(utils.ensure_nv_universal_gemm_available())
+
     @unittest.skipIf(
-        not torch.cuda.is_available()
-        or importlib.util.find_spec("cutlass_api") is None,
-        "requires CUDA and cutlass_api",
+        not (torch.cuda.is_available() and ensure_nv_universal_gemm_available()),
+        "requires CUDA and cutlass.operators",
     )
     def test_ensure_fp4_dtype_registered(self):
-        """_ensure_fp4_dtype_registered should patch cutlass_api for FP4."""
+        """_ensure_fp4_dtype_registered should map torch FP4 to cutlass.Float4E2M1FN."""
         from torch._inductor.utils import _ensure_fp4_dtype_registered
 
         _ensure_fp4_dtype_registered()
         import cutlass
-        import cutlass_api.utils
+        import cutlass.operators.utils.dtype
 
-        result = cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
+        result = cutlass.operators.utils.dtype.cutlass_type_from_torch_type(
+            torch.float4_e2m1fn_x2
+        )
         self.assertEqual(result, cutlass.Float4E2M1FN)
 
-        result_fp32 = cutlass_api.utils.cutlass_type_from_torch_type(torch.float32)
+        result_fp32 = cutlass.operators.utils.dtype.cutlass_type_from_torch_type(
+            torch.float32
+        )
         self.assertEqual(result_fp32, cutlass.Float32)
 
     def test_rand_strided_fp4(self):
@@ -1259,6 +1761,297 @@ class TestHasTriton(TestCase):
         # if the ordering regresses, _GPUTooOldForTriton escapes instead of False.
         iface = _make_triton_interface(capable=False, raise_exc=_GPUTooOldForTriton())
         self.assertFalse(self._run([("fake", iface)]))
+
+
+class _GpuWithStream(DeviceInterface):
+    class Stream:  # overrides the base sentinel Stream -> exposes_streams() True
+        pass
+
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+
+class _GpuNoStream(DeviceInterface):
+    # deliberately does NOT define Stream: inherits the base sentinel (mps-like)
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+
+class _GpuUnavailable(DeviceInterface):
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+    @staticmethod
+    def is_available() -> bool:
+        return False
+
+
+class _NonGpu(DeviceInterface):
+    # is_gpu() NOT overridden: inherits the base default of False
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+
+class _GpuOnlyClassified(DeviceInterface):
+    # Overrides nothing but is_gpu(): a partially-implemented out-of-tree
+    # interface whose other base-class methods (is_available, device_count,
+    # ...) raise NotImplementedError. Registry-driven consumers must treat
+    # it as unavailable rather than propagate the error.
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+
+class TestDeviceClassification(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._registered = []
+        get_gpu_type.cache_clear()
+
+    def tearDown(self):
+        # GPU_TYPES is an import-time snapshot and never refreshes, so tests
+        # patch it rather than mutate it; only get_gpu_type() caches at all.
+        for name in self._registered:
+            di.device_interfaces.pop(name, None)
+        get_gpu_type.cache_clear()
+        super().tearDown()
+
+    def _register(self, name, iface):
+        di.register_interface_for_device(name, iface)
+        self._registered.append(name)
+
+    # ---- is_gpu() default on the base class ----
+    def test_base_is_gpu_defaults_false(self):
+        self.assertFalse(DeviceInterface.is_gpu())
+        self.assertFalse(_NonGpu.is_gpu())
+        self.assertTrue(_GpuWithStream.is_gpu())
+
+    # ---- exposes_streams(): sentinel comparison, NOT None ----
+    def test_exposes_streams_true_when_stream_overridden(self):
+        self.assertTrue(_GpuWithStream.exposes_streams())
+
+    def test_exposes_streams_false_via_base_sentinel_not_none(self):
+        # _GpuNoStream.Stream IS the base sentinel (same object, not None).
+        # exposes_streams() must compare against the sentinel, not None;
+        # otherwise this card would be wrongly reported as stream-capable.
+        self.assertIs(_GpuNoStream.Stream, DeviceInterface.Stream)
+        self.assertIsNotNone(_GpuNoStream.Stream)
+        self.assertFalse(_GpuNoStream.exposes_streams())
+
+    # ---- is_gpu(device) ----
+    def test_is_gpu_none_returns_false(self):
+        self.assertFalse(is_gpu(None))
+
+    def test_is_gpu_unregistered_returns_false(self):
+        self.assertFalse(is_gpu("definitely_not_a_device"))
+
+    def test_is_gpu_registered(self):
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakecpu", _NonGpu)
+        # GPU_TYPES snapshots at inductor import; patch it with a fresh scan
+        # so is_gpu() sees the fixtures.
+        with mock.patch.object(inductor_utils, "GPU_TYPES", _gpu_types()):
+            self.assertTrue(is_gpu("fakegpu"))
+            self.assertFalse(is_gpu("fakecpu"))
+
+    # ---- device_need_guard(device) ----
+    def test_device_need_guard(self):
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakemps", _GpuNoStream)
+        self._register("fakecpu", _NonGpu)
+        with mock.patch.object(inductor_utils, "GPU_TYPES", _gpu_types()):
+            self.assertTrue(device_need_guard("fakegpu"))
+            self.assertFalse(device_need_guard("fakemps"))  # gpu but no stream
+            self.assertFalse(device_need_guard("fakecpu"))
+            self.assertFalse(device_need_guard("definitely_not_a_device"))
+
+    # ---- _gpu_types() ----
+    def test_gpu_types_filters_indexed_and_non_gpu(self):
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakegpu:0", _GpuWithStream)
+        self._register("fakecpu", _NonGpu)
+        result = _gpu_types()
+        self.assertIn("fakegpu", result)
+        self.assertNotIn("fakegpu:0", result)
+        self.assertNotIn("fakecpu", result)
+
+    def test_gpu_types_is_an_import_time_snapshot(self):
+        # GPU_TYPES is scanned exactly once, when inductor is imported;
+        # registering afterwards is documented as unsupported and must not be
+        # reflected (see register_interface_for_device).
+        first = get_gpu_type()
+        self._register("acc", _GpuWithStream)
+        self.assertIn("acc", _gpu_types())  # a fresh scan does see it
+        self.assertNotIn("acc", inductor_utils.GPU_TYPES)  # the snapshot does not
+        self.assertFalse(is_gpu("acc"))
+        # Clear the cache so this re-evaluates over the frozen snapshot rather
+        # than trivially hitting functools.cache.
+        get_gpu_type.cache_clear()
+        self.assertEqual(get_gpu_type(), first)
+
+    def test_gpu_types_consumer_resolves_out_of_tree_via_registry(self):
+        # A third-party PrivateUse1 backend (here "acc") registers a GPU-class
+        # DeviceInterface but exposes no torch.acc submodule, so GPU_TYPES
+        # consumers must resolve through the registry, not getattr(torch, name).
+        # Drive the real consumers so reverting their fixes fails this test.
+        import torch._inductor.fx_passes.freezing_patterns as freezing_patterns
+        from torch._inductor.fx_passes.freezing_patterns import _addmm_pattern_device
+        from torch.testing._internal.inductor_utils import _is_multigpu
+
+        self._register("acc", _GpuWithStream)
+        self.assertFalse(hasattr(torch, "acc"))
+        self.assertIn("acc", _gpu_types())  # the registry scan resolves it
+        # Each consumer module holds its own binding of the GPU_TYPES snapshot,
+        # so patch the consumer's binding directly.
+        with mock.patch.object(freezing_patterns, "GPU_TYPES", ["acc"]):
+            self.assertEqual(_addmm_pattern_device(), "acc")
+        # The fake interface has no device_count: must be False, not raise.
+        self.assertFalse(_is_multigpu("acc"))
+
+    def test_is_multigpu_tolerates_unimplemented_is_available(self):
+        from torch.testing._internal.inductor_utils import _is_multigpu
+
+        # is_available() itself is unimplemented (base raises): _is_multigpu
+        # feeds HAS_MULTIGPU at module import, so it must return False, not
+        # raise (or importing the test-support module dies).
+        self._register("fakeraw", _GpuOnlyClassified)
+        self.assertFalse(_is_multigpu("fakeraw"))
+
+    # ---- get_gpu_type() ----
+    def test_get_gpu_type_single_available(self):
+        self._register("fakegpu", _GpuWithStream)
+        with mock.patch.object(inductor_utils, "GPU_TYPES", ["fakegpu"]):
+            self.assertEqual(get_gpu_type(), "fakegpu")
+
+    def test_get_gpu_type_none_available_falls_back_to_cuda(self):
+        # No available GPU type: falls back to "cuda" before ever consulting
+        # the current accelerator.
+        self._register("fakegpu", _GpuUnavailable)
+        with mock.patch.object(inductor_utils, "GPU_TYPES", ["fakegpu"]):
+            self.assertEqual(get_gpu_type(), "cuda")
+
+    def test_get_gpu_type_multiple_disambiguates_without_assert(self):
+        # Old code asserted len(avail) <= 1; this test would crash there.
+        # New code uses current_accelerator() to disambiguate instead.
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakegpu2", _GpuWithStream)
+        acc = types.SimpleNamespace(type="fakegpu2")
+        with (
+            mock.patch.object(inductor_utils, "GPU_TYPES", ["fakegpu", "fakegpu2"]),
+            mock.patch("torch.accelerator.current_accelerator", return_value=acc),
+        ):
+            self.assertEqual(get_gpu_type(), "fakegpu2")
+
+    def test_get_gpu_type_skips_unimplemented_is_available(self):
+        # A partially-implemented interface must be skipped, not crash the
+        # availability scan.
+        self._register("fakeraw", _GpuOnlyClassified)
+        with mock.patch.object(inductor_utils, "GPU_TYPES", ["fakeraw"]):
+            self.assertEqual(get_gpu_type(), "cuda")
+
+    def test_get_gpu_type_stable_fallback_when_accelerator_disagrees(self):
+        # >1 available and current_accelerator() names none of them: the pick
+        # must be stable (sorted), not positional registry order.
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakegpu2", _GpuWithStream)
+        acc = types.SimpleNamespace(type="unrelated")
+        with (
+            mock.patch.object(inductor_utils, "GPU_TYPES", ["fakegpu2", "fakegpu"]),
+            mock.patch("torch.accelerator.current_accelerator", return_value=acc),
+        ):
+            with self.assertLogs("torch._inductor.utils", level="WARNING"):
+                self.assertEqual(get_gpu_type(), "fakegpu")
+
+    def test_in_tree_gpu_types_unchanged(self):
+        # The registry scan replaces a hardcoded GPU_TYPES literal, so pin the
+        # in-tree result: dropping an is_gpu() override would otherwise shift
+        # the classification silently, with no test in the repo failing.
+        known = {"cuda", "xpu", "mtia", "mps", "cpu", "tpu"}
+        self.assertEqual(set(_gpu_types()) & known, {"cuda", "xpu", "mtia", "mps"})
+        # MPS is GPU-class but exposes no Stream, so it takes no stream guard.
+        self.assertFalse(device_need_guard("mps"))
+        self.assertFalse(is_gpu("cpu"))
+        self.assertFalse(is_gpu("cuda:0"))
+
+
+@instantiate_parametrized_tests
+class TestScaleSwizzleInference(TestCase):
+    """`_infer_scale_swizzle_impl` names a scale layout from a scale's shape and count.
+
+    The two ROCm MX layouts hold the same number of scales wherever their
+    paddings coincide, so a tie has to resolve to NO_SWIZZLE: that is what v1
+    `_scaled_mm` and every pre-gfx950 arch take, and 32x8 callers pass the
+    swizzle explicitly. Runs on any host; the gfx950 probe is mocked.
+
+    Unswizzled scales keep the (rows, k_blocks) shape they are computed in;
+    `to_blocked` hands back the 32x8 buffer flattened.
+    """
+
+    def _infer(self, mat_size, scale_size, mat_dtype, prefers_32_8):
+        with (
+            mock.patch.object(torch.version, "hip", "7.14.0"),
+            mock.patch(
+                "torch._inductor.utils._prefers_swizzle_32_8",
+                return_value=prefers_32_8,
+            ),
+        ):
+            return _infer_scale_swizzle_impl(
+                mat_size=mat_size,
+                scale_size=scale_size,
+                scale_numel=math.prod(scale_size),
+                mat_dtype=mat_dtype,
+                scale_dtype=torch.float8_e8m0fnu,
+                eq_fn=lambda a, b: a == b,
+            )
+
+    # fp4 packs two values per element, so its mat sizes are half of fp8's for
+    # the same K in elements.
+    @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])
+    def test_mx_layout_tie_is_no_swizzle(self, mat_dtype):
+        packed = mat_dtype == torch.float4_e2m1fn_x2
+        # K in elements = 256, where both layouts hold 1024 scales, so neither
+        # shape a caller can arrive with is enough to pick 32x8.
+        mat_size = (128, 128 if packed else 256)
+        for scale_size in [(128, 8), (1024,)]:
+            with self.subTest(scale_size=scale_size):
+                self.assertEqual(
+                    self._infer(mat_size, scale_size, mat_dtype, prefers_32_8=True),
+                    (ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE),
+                )
+
+    @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])
+    def test_mx_32_8_inferred_when_counts_differ(self, mat_dtype):
+        packed = mat_dtype == torch.float4_e2m1fn_x2
+        # K in elements = 128: 512 scales unswizzled, 1024 in the 32x8 layout.
+        mat_size = (128, 64 if packed else 128)
+        self.assertEqual(
+            self._infer(mat_size, (128, 4), mat_dtype, prefers_32_8=True),
+            (ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE),
+        )
+        self.assertEqual(
+            self._infer(mat_size, (1024,), mat_dtype, prefers_32_8=True),
+            (ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_8),
+        )
+
+    @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])
+    def test_mx_32_8_count_is_no_layout_off_gfx950(self, mat_dtype):
+        packed = mat_dtype == torch.float4_e2m1fn_x2
+        mat_size = (128, 64 if packed else 128)
+        self.assertEqual(
+            self._infer(mat_size, (1024,), mat_dtype, prefers_32_8=False), (None, None)
+        )
 
 
 if __name__ == "__main__":

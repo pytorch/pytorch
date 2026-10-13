@@ -20,6 +20,7 @@ from .base import VariableTracker
 from .builtin import (
     BaseBuiltinVariable,
     BuiltinVariable,
+    ByteArrayBuiltinVariable,
     DictBuiltinVariable,
     GetAttrBuiltinVariable,
     HasAttrBuiltinVariable,
@@ -59,6 +60,8 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
+    DictKeysVariable,
+    DictValuesVariable,
     DictViewVariable,
     DunderDictVariable,
     MappingProxyVariable,
@@ -66,6 +69,14 @@ from .dicts import (
     OrderedDictVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable
+from .exception import (
+    AttributeErrorVariable,
+    ExceptionVariable,
+    FrameSummaryVariable,
+    NameErrorVariable,
+    StopIterationVariable,
+    TracebackVariable,
+)
 from .functions import (
     BaseUserFunctionVariable,
     BoundBuiltinMethodVariable,
@@ -121,39 +132,38 @@ from .iter import (
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    ByteArrayIteratorVariable,
+    ByteArrayVariable,
     DequeIteratorVariable,
     DequeReverseIteratorVariable,
     DequeVariable,
     ListIteratorVariable,
+    ListReverseIteratorVariable,
     ListVariable,
     RangeVariable,
+    SizeVariable,
     SliceVariable,
     TupleIteratorVariable,
     TupleVariable,
 )
 from .memory import CUDAMemPoolContextVariable, CUDAMemPoolVariable
 from .misc import (
-    AttributeErrorVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     CallMethodVariable,
     CellVariable,
     ContextVarVariable,
     DeletedVariable,
-    ExceptionVariable,
     GetAttrVariable,
     LambdaVariable,
-    NameErrorVariable,
     NewGlobalVariable,
     NumpyVariable,
     ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
-    StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
-    TracebackVariable,
     TypingVariable,
     UnknownVariable,
     WeakRefVariable,
@@ -189,6 +199,7 @@ from .tensor import (
     UntypedStorageVariable,
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+from .torch_function import TensorWithTFOverrideVariable
 from .user_defined import (
     DefaultDictVariable,
     FrozenDataClassVariable,
@@ -200,12 +211,15 @@ from .user_defined import (
     StructSequenceVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
+    UserDefinedDefaultDictVariable,
     UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedExceptionObjectVariable,
+    UserDefinedFrozensetVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedOrderedDictVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
     UserDefinedVariable,
@@ -220,8 +234,11 @@ __all__ = [
     "BackwardHookVariable",
     "BaseBuiltinVariable",
     "BaseListVariable",
-    "CallMethodVariable",
     "BuiltinVariable",
+    "ByteArrayBuiltinVariable",
+    "ByteArrayIteratorVariable",
+    "ByteArrayVariable",
+    "CallMethodVariable",
     "CatchWarningsCtxManagerVariable",
     "CellVariable",
     "ConstantVariable",
@@ -259,6 +276,7 @@ __all__ = [
     "LazyVariableTracker",
     "ListBuiltinVariable",
     "ListIteratorVariable",
+    "ListReverseIteratorVariable",
     "ListVariable",
     "MappingProxyVariable",
     "NameErrorVariable",

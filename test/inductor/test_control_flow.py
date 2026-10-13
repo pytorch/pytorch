@@ -1408,6 +1408,22 @@ class WhileLoopTests(TestCase):
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
     @requires_gpu
+    def test_while_loop_cpp_wrapper(self):
+        def fn(x):
+            def cond_fn(a):
+                return a.sum() > 100
+
+            def body_fn(a):
+                return (a * 0.5,)
+
+            return torch.while_loop(cond_fn, body_fn, (x,))
+
+        x = torch.full((4,), 26.0, device=GPU_TYPE, dtype=torch.float32)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True, options={"cpp_wrapper": True})(x)
+        self.assertEqual(actual, expected)
+
+    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     @parametrize("autograd", [False, True])
@@ -2098,6 +2114,14 @@ class ScanModels:
                 torch.cat(grad_inputs, dim=0) / chunks,
             )
 
+    # One carry and no ys: the while_loop decomposition has a single flat output.
+    class ScanReduceOnly(torch.nn.Module):
+        def forward(self, scan_op, initial, xs):
+            def step(acc, x):
+                return acc + x.sin(), ()
+
+            return scan_op(step, initial, xs)
+
     class ScanWithClamp(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -2364,6 +2388,24 @@ class ScanTests(TestCase):
             device=device,
             dynamic=dynamic,
             autograd=autograd,
+        )
+
+    # Not @requires_gpu: the bug this guards is a CPU-reproducible lowering failure.
+    @parametrize("device", ["cpu"] + ([GPU_TYPE] if HAS_GPU else []))
+    @parametrize("dynamic", [True, False])
+    @parametrize("scan_length", [3, 0])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_scan_single_flat_output(self, device, dynamic, scan_length):
+        # Forward only: eager scan's backward does not support an empty ys.
+        self._run_test(
+            model=ScanModels.ScanReduceOnly(),
+            inputs=(
+                torch.randn(4, 5),
+                torch.randn(scan_length, 4, 5),
+            ),
+            device=device,
+            dynamic=dynamic,
+            autograd=False,
         )
 
 
