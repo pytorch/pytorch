@@ -4602,7 +4602,7 @@ class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
 
         pg = get_compile_sync_pg()
         device = torch.device(c10d.distributed_c10d._get_object_coll_device(pg))
-        self.assertEqual(pg._get_backend(device).options._timeout, timeout)
+        self.assertEqual(c10d.get_backend_impl(pg, device).options._timeout, timeout)
 
 
 class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):

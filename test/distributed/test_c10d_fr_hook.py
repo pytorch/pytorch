@@ -844,7 +844,7 @@ class AbstractFlightRecorderHookTest:
         # first and keep working -- only the dump-on-failure trigger is lost,
         # recording is unaffected.
         pg = self._init_pg()
-        backend = pg._get_backend(self.device)
+        backend = dist.get_backend_impl(pg, self.device)
         supported = self.backend_name == "nccl2"
         self.assertEqual(pg.supports_abort_hooks, supported)
         self.assertEqual(backend.supports_abort_hooks, supported)
@@ -872,7 +872,7 @@ class AbstractFlightRecorderHookTest:
         # so attach() must ask first. A backend without them still records; it
         # only loses the ability to say a collective finished.
         pg = self._init_pg()
-        backend = pg._get_backend(self.device)
+        backend = dist.get_backend_impl(pg, self.device)
         self.assertEqual(pg.supports_completion_hooks, self._push_completion)
         self.assertEqual(backend.supports_completion_hooks, self._push_completion)
 
@@ -1391,7 +1391,7 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
         # The backend's own name, which is what decides whether it records
         # itself. Asserting on it rather than on the env var is the point: the
         # default this variable implies has changed before.
-        backend = pg._get_backend(torch.device("cuda", self.rank))
+        backend = dist.get_backend_impl(pg, torch.device("cuda", self.rank))
         return pg, backend.name()
 
     def test_nccl_name_built_on_nccl2_is_hooked(self):

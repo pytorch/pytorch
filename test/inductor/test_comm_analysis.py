@@ -193,10 +193,10 @@ class TestNcclEstimateDeviceResolution(TestCase):
                 default_device = _get_pg_default_device(pg)
             self.assertEqual(default_device, torch.device("cpu"))
 
-            nccl_backend = pg._get_backend(torch.device("cuda"))
+            nccl_backend = dist.get_backend_impl(pg, torch.device("cuda"))
             self.assertTrue(nccl_backend._supports_time_estimate)
 
-            gloo_backend = pg._get_backend(torch.device("cpu"))
+            gloo_backend = dist.get_backend_impl(pg, torch.device("cpu"))
             self.assertFalse(gloo_backend._supports_time_estimate)
         finally:
             self._destroy_pg()
@@ -208,7 +208,7 @@ class TestNcclEstimateDeviceResolution(TestCase):
         torch.cuda.set_device(0)
         pg, group_name, group_size = self._init_pg_real_store("nccl")
         try:
-            backend = pg._get_backend(torch.device("cuda"))
+            backend = dist.get_backend_impl(pg, torch.device("cuda"))
             self.assertTrue(backend._supports_time_estimate)
         finally:
             self._destroy_pg()

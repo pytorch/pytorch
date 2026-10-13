@@ -67,7 +67,7 @@ class ProcessGroupAllocMixin:
         dtype: torch.dtype,
         device: torch.device,
     ) -> torch.Tensor:
-        backend = self._group._get_backend(device)
+        backend = dist.get_backend_impl(self._group, device)
         if backend.supports_tensor_alloc(device):
             size_1d = math.prod(int(s) for s in size)
             return backend.allocate_tensor(size_1d, dtype=dtype, device=device)

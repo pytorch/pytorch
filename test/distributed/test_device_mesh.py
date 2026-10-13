@@ -413,7 +413,9 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(device_mesh.ndim, 1)
         self.assertEqual(device_mesh.size(), 1)
         self.assertEqual(device_mesh.mesh_dim_names, ("dp",))
-        backend = device_mesh.get_all_groups()[0]._get_backend(torch.device("cuda"))
+        backend = dist.get_backend_impl(
+            device_mesh.get_all_groups()[0], torch.device("cuda")
+        )
         self.assertIsInstance(backend, torch._C._distributed_c10d.FakeProcessGroup)
 
     @with_comms
@@ -793,11 +795,9 @@ class InitDeviceMeshTest(DTensorTestBase):
         )
 
         def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
-            return (
-                mesh.get_group(dim_idx)
-                ._get_backend(torch.device(self.device_type))
-                .options
-            )
+            return dist.get_backend_impl(
+                mesh.get_group(dim_idx), torch.device(self.device_type)
+            ).options
 
         # Fake pg only have BackendType as BackendType::CUSTOM.
         self.assertEqual(mesh.get_group(0)._get_backend_name(), "custom")
@@ -839,11 +839,9 @@ class InitDeviceMeshTest(DTensorTestBase):
         )
 
         def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
-            return (
-                mesh.get_group(dim_idx)
-                ._get_backend(torch.device(self.device_type))
-                .options
-            )
+            return dist.get_backend_impl(
+                mesh.get_group(dim_idx), torch.device(self.device_type)
+            ).options
 
         self.assertIsNone(get_opts(mesh, 0))
         self.assertEqual(get_opts(mesh, 1).fake_option, 42)
@@ -1712,7 +1710,9 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         )
         # This API directly calls the pybind API, so we need to manually track the comm for finalization.
         _world.comms.append(
-            split_group_2._get_backend(torch.device(self.device_type)).get_comm()
+            dist.get_backend_impl(
+                split_group_2, torch.device(self.device_type)
+            ).get_comm()
         )
         gpu_tensor = torch.ones(3, 3, device=self.device_type)
         dist.all_reduce(gpu_tensor, group=split_group_2)
