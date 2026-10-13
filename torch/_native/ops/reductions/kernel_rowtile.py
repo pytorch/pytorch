@@ -723,11 +723,13 @@ def _run_itree(
             (cute.sym_int64(divisibility=align // itemsize), 1),
             assumed_align=align,
         )
+
     def fake_1d(t, strided=False, align=None):
         dt = torch2cute[t.dtype]
         if strided:
             return cute.runtime.make_fake_tensor(dt, (_L.sym(),), (cute.sym_int64(),))
         return _L.fake_compact(dt, (_L.sym(),), align=align)
+
     if itree.shape != "split":
         outs = results()
         strided_outs = tuple(o.stride(0) != 1 for o in outs)
