@@ -573,6 +573,91 @@ graph():
         with self.assertRaisesRegex(RuntimeError, "empty stack"):
             torch._C._dynamo_restore_local_dispatch_key_set()
 
+    @torch._dynamo.config.patch(
+        error_on_dynamo_callback_in_fullgraph_compiled_code=True
+    )
+    def test_compile_wrapper_restores_state_on_fullgraph_error(self):
+        # The "found no compiled frames" error is raised from compile_wrapper's
+        # finally; the wrapper's other state must still be restored.
+        from torch._C._dynamo.eval_frame import set_fullgraph_error_on_nested_compile
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class YoloMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.ops.aten.mul.Tensor(args[0], args[1])
+
+        def error_on_nested_compile():
+            prior = set_fullgraph_error_on_nested_compile(False)
+            set_fullgraph_error_on_nested_compile(prior)
+            return prior
+
+        x = torch.ones(5)
+        self.assertTrue(torch._dynamo.config.automatic_dynamic_shapes)
+        self.assertFalse(error_on_nested_compile())
+        with YoloMode():
+            with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
+                torch.compile(
+                    torch.add, backend="eager", fullgraph=True, dynamic=False
+                )(x, x)
+        self.assertTrue(torch._dynamo.config.automatic_dynamic_shapes)
+        self.assertFalse(error_on_nested_compile())
+
+        # An early exit before the compiled call must also restore it.
+        compiled = torch.compile(lambda t: t + 1, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(RuntimeError, "FX to symbolically trace"):
+            torch.fx.symbolic_trace(lambda t: compiled(t))
+        self.assertFalse(error_on_nested_compile())
+
+    def test_compile_wrapper_cleanup_is_lifo_and_exception_safe(self):
+        # dynamic=False and the backend context are both enter/exit hooks of
+        # compile_wrapper and both set automatic_dynamic_shapes. Their cleanups
+        # must run in reverse order, and all of them must run even if a later
+        # hook fails to enter or exit.
+        events = []
+
+        class BackendCtx:
+            def __init__(self, fail_enter, fail_exit):
+                self.fail_enter = fail_enter
+                self.fail_exit = fail_exit
+
+            def __enter__(self):
+                events.append("enter")
+                if self.fail_enter:
+                    raise RuntimeError("enter failed")
+                self.prior = torch._dynamo.config.automatic_dynamic_shapes
+                torch._dynamo.config.automatic_dynamic_shapes = True
+
+            def __exit__(self, *exc):
+                torch._dynamo.config.automatic_dynamic_shapes = self.prior
+                events.append("exit")
+                if self.fail_exit:
+                    raise RuntimeError("exit failed")
+
+        x = torch.randn(3)
+        for fail_enter, fail_exit, expected_events in (
+            (False, False, ["enter", "exit"]),
+            (False, True, ["enter", "exit"]),
+            (True, False, ["enter"]),
+        ):
+            with self.subTest(fail_enter=fail_enter, fail_exit=fail_exit):
+                torch._dynamo.reset()
+                events.clear()
+
+                def backend(gm, example_inputs):
+                    return gm
+
+                backend.backend_ctx_ctor = functools.partial(
+                    BackendCtx, fail_enter, fail_exit
+                )
+                fn = torch._dynamo.optimize(backend, dynamic=False)(lambda t: t + 1)
+                if fail_enter or fail_exit:
+                    with self.assertRaisesRegex(RuntimeError, "failed"):
+                        fn(x)
+                else:
+                    self.assertEqual(fn(x), x + 1)
+                self.assertEqual(events, expected_events)
+                self.assertTrue(torch._dynamo.config.automatic_dynamic_shapes)
+
     def test_tracing_context_tls_defaults_present(self):
         # The _guards thread-local defaults tracing_context/compile_context to
         # None per thread, so the hot-path try_get() calls (once per compiled
