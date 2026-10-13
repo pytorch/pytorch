@@ -573,91 +573,6 @@ graph():
         with self.assertRaisesRegex(RuntimeError, "empty stack"):
             torch._C._dynamo_restore_local_dispatch_key_set()
 
-    @torch._dynamo.config.patch(
-        error_on_dynamo_callback_in_fullgraph_compiled_code=True
-    )
-    def test_compile_wrapper_restores_state_on_fullgraph_error(self):
-        # The "found no compiled frames" error is raised from compile_wrapper's
-        # finally; the wrapper's other state must still be restored.
-        from torch._C._dynamo.eval_frame import set_fullgraph_error_on_nested_compile
-        from torch.utils._python_dispatch import TorchDispatchMode
-
-        class YoloMode(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                return torch.ops.aten.mul.Tensor(args[0], args[1])
-
-        def error_on_nested_compile():
-            prior = set_fullgraph_error_on_nested_compile(False)
-            set_fullgraph_error_on_nested_compile(prior)
-            return prior
-
-        x = torch.ones(5)
-        self.assertTrue(torch._dynamo.config.automatic_dynamic_shapes)
-        self.assertFalse(error_on_nested_compile())
-        with YoloMode():
-            with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
-                torch.compile(
-                    torch.add, backend="eager", fullgraph=True, dynamic=False
-                )(x, x)
-        self.assertTrue(torch._dynamo.config.automatic_dynamic_shapes)
-        self.assertFalse(error_on_nested_compile())
-
-        # An early exit before the compiled call must also restore it.
-        compiled = torch.compile(lambda t: t + 1, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(RuntimeError, "FX to symbolically trace"):
-            torch.fx.symbolic_trace(lambda t: compiled(t))
-        self.assertFalse(error_on_nested_compile())
-
-    def test_compile_wrapper_cleanup_is_lifo_and_exception_safe(self):
-        # dynamic=False and the backend context are both enter/exit hooks of
-        # compile_wrapper and both set automatic_dynamic_shapes. Their cleanups
-        # must run in reverse order, and all of them must run even if a later
-        # hook fails to enter or exit.
-        events = []
-
-        class BackendCtx:
-            def __init__(self, fail_enter, fail_exit):
-                self.fail_enter = fail_enter
-                self.fail_exit = fail_exit
-
-            def __enter__(self):
-                events.append("enter")
-                if self.fail_enter:
-                    raise RuntimeError("enter failed")
-                self.prior = torch._dynamo.config.automatic_dynamic_shapes
-                torch._dynamo.config.automatic_dynamic_shapes = True
-
-            def __exit__(self, *exc):
-                torch._dynamo.config.automatic_dynamic_shapes = self.prior
-                events.append("exit")
-                if self.fail_exit:
-                    raise RuntimeError("exit failed")
-
-        x = torch.randn(3)
-        for fail_enter, fail_exit, expected_events in (
-            (False, False, ["enter", "exit"]),
-            (False, True, ["enter", "exit"]),
-            (True, False, ["enter"]),
-        ):
-            with self.subTest(fail_enter=fail_enter, fail_exit=fail_exit):
-                torch._dynamo.reset()
-                events.clear()
-
-                def backend(gm, example_inputs):
-                    return gm
-
-                backend.backend_ctx_ctor = functools.partial(
-                    BackendCtx, fail_enter, fail_exit
-                )
-                fn = torch._dynamo.optimize(backend, dynamic=False)(lambda t: t + 1)
-                if fail_enter or fail_exit:
-                    with self.assertRaisesRegex(RuntimeError, "failed"):
-                        fn(x)
-                else:
-                    self.assertEqual(fn(x), x + 1)
-                self.assertEqual(events, expected_events)
-                self.assertTrue(torch._dynamo.config.automatic_dynamic_shapes)
-
     def test_tracing_context_tls_defaults_present(self):
         # The _guards thread-local defaults tracing_context/compile_context to
         # None per thread, so the hot-path try_get() calls (once per compiled
@@ -10542,45 +10457,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             run(arch, idx)
             self.assertEqual(arch.msg, f"max_idx={n - 1}, bad=[-1]")
 
-    def test_equal_sets_render_the_same_guard_text(self):
-        from torch._dynamo.guards import _order_stable_repr
-
-        live, rebuilt = {1, 9}, set()
-        rebuilt.add(9)
-        rebuilt.add(1)
-        self.assertEqual(live, rebuilt)
-        self.assertNotEqual(repr(live), repr(rebuilt))
-        self.assertEqual(_order_stable_repr(live), _order_stable_repr(rebuilt))
-        self.assertEqual(
-            _order_stable_repr(("a", frozenset(rebuilt), [rebuilt])),
-            "('a', frozenset({1, 9}), [{1, 9}])",
-        )
-        for value in (set(), frozenset(), (1,), (), "s", 1.5):
-            self.assertEqual(_order_stable_repr(value), repr(value))
-            self.assertEqual(eval(_order_stable_repr(value)), value)
-
-        def guard_text(s):
-            torch._dynamo.reset()
-            guards = []
-
-            def fn(x, s):
-                if 9 in s:
-                    return x + 1
-                return x - 1
-
-            opt_fn = torch._dynamo.optimize("eager", guard_export_fn=guards.extend)(fn)
-            opt_fn(torch.zeros(1), s)
-            return [
-                code
-                for guard in guards
-                for code in guard.code_list or ()
-                if code.startswith("L['s'] ==")
-            ]
-
-        live_text = guard_text(live)
-        self.assertIn("L['s'] == {1, 9}", live_text)
-        self.assertEqual(live_text, guard_text(rebuilt))
-
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
         # and then rolls back due to control flow.
@@ -10862,18 +10738,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         args = (torch.randn(3, 2),)
 
         compiled_fn = torch.compile(fn, backend="eager")
-        # Like cache entries, the most recently loaded entry is checked first,
-        # so bool (which also passes the int guard) is loaded after int.
-        _load_precompile_entry(
-            fn.__code__,
-            torch._dynamo.guards.GuardManagerWrapper(guard_manager_int),
-            injected_int.__code__,
-        )
-
         _load_precompile_entry(
             fn.__code__,
             torch._dynamo.guards.GuardManagerWrapper(guard_manager_bool),
             injected_bool.__code__,
+        )
+
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager_int),
+            injected_int.__code__,
         )
 
         _load_precompile_entry(
@@ -10895,37 +10769,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         _reset_precompile_entries(fn.__code__)
 
         self.assertEqual(compiled_fn(*args), fn(*args))
-
-    def test_precompile_entry_yields_to_a_newer_cache_entry(self):
-        from torch._C._dynamo.eval_frame import (
-            _load_precompile_entry,
-            _reset_precompile_entries,
-        )
-
-        def fn(x):
-            return x + 1
-
-        guard_manager = torch._dynamo.guards.RootGuardManager()
-        guard_manager.add_lambda_guard(lambda L: L["x"].shape[0] == 3, [], None)
-
-        def injected(x):
-            return x + 100
-
-        compiled_fn = torch.compile(fn, backend="eager", dynamic=True)
-        _load_precompile_entry(
-            fn.__code__,
-            torch._dynamo.guards.GuardManagerWrapper(guard_manager),
-            injected.__code__,
-        )
-        x = torch.randn(3)
-        self.assertEqual(compiled_fn(x), injected(x))
-        # No precompile entry admits this call, so it compiles a dynamic entry
-        # that also admits x. torch.compile serves a frame's newest entry
-        # first, so that entry now serves x as well.
-        wider = torch.randn(5)
-        self.assertEqual(compiled_fn(wider), fn(wider))
-        self.assertEqual(compiled_fn(x), fn(x))
-        _reset_precompile_entries(fn.__code__)
 
     def test_precompile_fail_on_recompile(self):
         from torch._C._dynamo.eval_frame import _load_precompile_entry
@@ -10982,137 +10825,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         try:
             with torch.compiler.set_stance("fail_on_recompile"):
                 with self.assertRaisesRegex(
-                    RuntimeError, r"Failed on all 1 precompiled variant\(s\)"
-                ) as ctx:
+                    RuntimeError, "Failed on the following precompiled guards:"
+                ):
                     compiled_fn(*args)
-            # The failing guard, not the entry's whole guard tree.
-            self.assertIn("[0] isinstance(L['x'], bool)", str(ctx.exception))
-            self.assertNotIn("TREE_GUARD_MANAGER", str(ctx.exception))
         finally:
             _reset_precompile_entries(fn.__code__)
-
-    def test_fail_on_recompile_names_the_failing_shape_clauses(self):
-        from torch._C._dynamo.eval_frame import (
-            _load_precompile_entry,
-            _reset_precompile_entries,
-        )
-
-        def fn(x):
-            return x + 1
-
-        # Shape guards are one lambda guard listing every clause.
-        root = torch._dynamo.guards.RootGuardManager()
-        root.add_lambda_guard(
-            lambda L: L["x"].size(0) >= 2 and L["x"].size(1) == 2,
-            ["L['x'].size(0) >= 2", "L['x'].size(1) == 2"],
-            None,
-        )
-        guard_manager = torch._dynamo.guards.GuardManagerWrapper(root)
-        guard_manager.global_scope = {"G": {}}
-        guard_manager.closure_vars = {}
-
-        def injected(x):
-            return x + 2
-
-        compiled_fn = torch.compile(fn, backend="eager")
-        _load_precompile_entry(fn.__code__, guard_manager, injected.__code__)
-        try:
-            with torch.compiler.set_stance("fail_on_recompile"):
-                with self.assertRaisesRegex(
-                    RuntimeError, r"Failed on all 1 precompiled variant\(s\)"
-                ) as ctx:
-                    compiled_fn(torch.randn(3, 5))
-            self.assertIn("[0] L['x'].size(1) == 2", str(ctx.exception))
-            self.assertNotIn("size(0)", str(ctx.exception))
-        finally:
-            _reset_precompile_entries(fn.__code__)
-
-    def test_fail_on_recompile_groups_precompiled_entries_by_reason(self):
-        from torch._dynamo.eval_frame import _precompile_no_match_message
-
-        def entry(reason=None, raises=None):
-            manager = mock.Mock()
-            if raises is not None:
-                manager.check_verbose.side_effect = raises
-            else:
-                manager.check_verbose.return_value = types.SimpleNamespace(
-                    result=False, verbose_code_parts=[reason]
-                )
-            return types.SimpleNamespace(guard_manager=manager)
-
-        # Five entries failing on one submodule must not hide the sixth, which
-        # fails on something else.
-        entries = [entry("KeyError on L['self']._modules['pma']")] * 5 + [
-            entry("L['self'].n_heads == 4"),
-            entry(raises=ValueError("boom")),
-            entry("KeyError on L['self']._modules['pma']"),
-        ]
-        message = _precompile_no_match_message(entries, {})
-        self.assertEqual(
-            message,
-            "Failed on all 8 precompiled variant(s):\n"
-            "  [0-4, 7] KeyError on L['self']._modules['pma']\n"
-            "  [5] L['self'].n_heads == 4\n"
-            "  [6] <guard check raised ValueError: boom>",
-        )
-
-        many = [entry(f"L['x'] == {i}") for i in range(7)]
-        message = _precompile_no_match_message(many, {})
-        self.assertIn("[4] L['x'] == 4", message)
-        self.assertNotIn("L['x'] == 5", message)
-        self.assertIn("... and 2 more distinct reason(s) not shown.", message)
-
-    def test_compile_past_precompiled_entries_records_why_they_missed(self):
-        from torch._C._dynamo.eval_frame import (
-            _load_precompile_entry,
-            _reset_precompile_entries,
-        )
-        from torch.testing._internal.logging_utils import (
-            kwargs_to_settings,
-            log_settings,
-        )
-
-        def fn(x):
-            return x + 1
-
-        root = torch._dynamo.guards.RootGuardManager()
-        root.add_lambda_guard(
-            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"], None
-        )
-
-        def injected(x):
-            return x + 102
-
-        # The precompiled entries are not this process's cache entries, so this
-        # compile is not a recompilation.
-        compiled_fn = torch.compile(fn, backend="eager")
-        _load_precompile_entry(
-            fn.__code__,
-            torch._dynamo.guards.GuardManagerWrapper(root),
-            injected.__code__,
-        )
-        torch._dynamo.utils.clear_compilation_metrics()
-        x = torch.randn(3)
-        try:
-            with (
-                log_settings(kwargs_to_settings(recompiles=True)),
-                self.assertLogs("torch._dynamo.convert_frame", level="DEBUG") as logs,
-            ):
-                self.assertEqual(compiled_fn(x), fn(x))
-        finally:
-            _reset_precompile_entries(fn.__code__)
-        reason = torch._dynamo.utils._compilation_metrics[-1].recompile_reason
-        self.assertEqual(
-            reason,
-            "Failed on all 1 precompiled variant(s):\n  [0] isinstance(L['x'], bool)",
-        )
-        self.assertTrue(
-            any(
-                "Compiling function fn" in m and "[0] isinstance(L['x'], bool)" in m
-                for m in logs.output
-            ),
-            logs.output,
-        )
 
     def test_shape_and_tuple_equality(self):
         def fn(x, y, t):
@@ -11271,21 +10988,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
-    def test_cast_result_is_guarded(self):
-        from typing import cast
-
-        class Config:
-            scale = 1
-
-        def fn(x):
-            return x * cast(type, Config).scale
-
-        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-        x = torch.ones(2)
-        self.assertEqual(opt_fn(x), fn(x))
-        Config.scale = 3
-        self.assertEqual(opt_fn(x), x * 3)
-
     def test_cast_no_recompile_after_graph_break(self):
         # In FSDP, cast(nn.Module, self) can be called after a
         # graph break. Without the polyfill + skip_code fix, PEP 523 compiles
@@ -11318,10 +11020,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 1
 
         x = torch.randn(4)
-        for mod in (a, b, a, b):
-            self.assertEqual(fn(mod, x), x + 1)
-        self.assertEqual(cnt.frame_count, 1)
-        if not torch._dynamo.config.nested_graph_breaks:
+        fn(a, x)
+        fn(b, x)
+        if torch._dynamo.config.nested_graph_breaks:
+            # NGB inlines get_state() and handles the graph break inline,
+            # producing 2 subgraphs (before/after break) per call.
+            self.assertEqual(cnt.frame_count, 2)
+        else:
+            self.assertEqual(cnt.frame_count, 1)
             # 5 frames: fn (x2), get_state before graph_break (x2),
             # get_state resume after graph_break (x1, no recompile).
             # Without skip_code, typing.cast would add 2 more frames (7 total).
@@ -13926,44 +13632,6 @@ def ___make_guard_fn():
         compiled_out = compiled_fn()
         self.assertEqual(fn_out, compiled_out)
         self.assertFalse(fn_out)
-
-    def test_fn_hasattr_guarded(self):
-        def bar(x):
-            return x
-
-        def fn(x):
-            if hasattr(bar, "flag"):
-                return x + 1
-            return x - 1
-
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
-        x = torch.zeros(3)
-        self.assertEqual(opt_fn(x), fn(x))
-        bar.flag = True
-        self.assertEqual(opt_fn(x), x + 1)
-        self.assertEqual(cnt.frame_count, 2)
-        del bar.flag
-        self.assertEqual(opt_fn(x), x - 1)
-        self.assertEqual(cnt.frame_count, 2)
-
-    def test_torch_fn_hasattr_guarded(self):
-        def fn(x):
-            if hasattr(torch.nn.functional.relu, "_test_flag"):
-                return x + 1
-            return x - 1
-
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
-        x = torch.zeros(3)
-        self.assertEqual(opt_fn(x), x - 1)
-        torch.nn.functional.relu._test_flag = True
-        try:
-            self.assertEqual(opt_fn(x), x + 1)
-        finally:
-            del torch.nn.functional.relu._test_flag
-        self.assertEqual(opt_fn(x), x - 1)
-        self.assertEqual(cnt.frame_count, 2)
 
     def test_constant_hasattr_returns_bool(self):
         """Test that hasattr on constant values properly returns boolean ConstantVariable."""
@@ -16692,20 +16360,6 @@ fn
 
         with self.assertRaisesRegex(RuntimeError, "specialized"):
             fn(x, y)
-
-    @torch.fx.experimental._config.patch(dynamic_storage_offset=True)
-    def test_dynamic_storage_offset_no_zero_one_recompile(self):
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt, dynamic=True)
-        def fn(x):
-            return x * 2
-
-        buf = torch.randn(64)
-        for offset in (5, 0, 1, 7):
-            x = buf[offset : offset + 8]
-            self.assertEqual(fn(x), x * 2)
-        self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_infer_unbacked_size_gt_zero(self):

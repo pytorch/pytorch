@@ -26,7 +26,6 @@ import platform
 import shutil
 import sys
 import types
-import weakref
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
 from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
@@ -53,23 +52,6 @@ if TYPE_CHECKING:
 
 
 _CODE_CACHE = WeakIdKeyDictionary()
-
-# The key Dynamo mints for the globals of an inlined frame that belong to no
-# module (install_global_by_id in get_globals_source_and_value).
-_UNNAMED_SCOPE_PREFIX = "___unnamed_scope_"
-
-
-@dataclasses.dataclass
-class _SeededGlobal:
-    """A minted global packages bound into a module, and the live ones reading it."""
-
-    value: object
-    owners: "weakref.WeakSet[CompilePackage]"
-
-
-# module -> name -> _SeededGlobal. Two packages loaded from one artifact seed the
-# same key, so the binding has to outlive every package but the last to leave.
-_SEEDED_GLOBALS: WeakIdKeyDictionary = WeakIdKeyDictionary()
 
 
 def _code_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -554,23 +536,13 @@ def load_guard_manager(
     # globals serialized with the artifact, which only None selects.
     from .output_graph import OutputGraphCommon
 
-    try:
-        return torch._dynamo.guards.CheckFunctionManager(
-            target_code,
-            OutputGraphCommon(guards_state.output_graph),
-            shape_code_parts=guards_state.shape_code_parts,
-            runtime_global_scope=runtime_global_scope,
-            guard_build_local_state=getattr(guards_state, "local_state", None),
-        ).guard_manager
-    except (AttributeError, IndexError, KeyError, TypeError) as e:
-        # A guard source that does not resolve against the scope serialized
-        # with it otherwise surfaces as a bare lookup error from deep inside
-        # the guard builder, naming neither the frame nor the artifact.
-        raise PackageError(
-            f"Cannot rebuild the serialized guards for {target_code.co_name} "
-            f"({target_code.co_filename}:{target_code.co_firstlineno}): "
-            f"{type(e).__name__}: {e}"
-        ) from e
+    return torch._dynamo.guards.CheckFunctionManager(
+        target_code,
+        OutputGraphCommon(guards_state.output_graph),
+        shape_code_parts=guards_state.shape_code_parts,
+        runtime_global_scope=runtime_global_scope,
+        guard_build_local_state=getattr(guards_state, "local_state", None),
+    ).guard_manager
 
 
 _BackendId = NewType("_BackendId", str)  # __compiled_fn
@@ -671,25 +643,6 @@ class _DynamoCodeCacheEntry:
     bypassed: bool = False
 
 
-def _globals_module_name(namespace: dict[str, Any]) -> str | None:
-    """The ``sys.modules`` key of the module whose namespace IS ``namespace``.
-
-    A file imported under two names is two modules sharing one file, and
-    ``inspect.getmodule`` maps a code object to a module by its file, so it can
-    answer with the other alias, whose globals and functions are not the frame's.
-    """
-    for name in (
-        namespace.get("__name__"),
-        getattr(namespace.get("__spec__"), "name", None),
-    ):
-        if not isinstance(name, str):
-            continue
-        module = sys.modules.get(name)
-        if isinstance(module, types.ModuleType) and vars(module) is namespace:
-            return name
-    return None
-
-
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
     if len(entry.function_names) != 1:
         raise AssertionError(
@@ -757,9 +710,7 @@ def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     )
 
 
-def _get_code_source(
-    code: types.CodeType, module: types.ModuleType | None = None
-) -> tuple[str, str]:
+def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     """
     Given a code object, return a fully qualified name which will be used as
     a serialized handle to access the code object from the new process.
@@ -768,30 +719,20 @@ def _get_code_source(
        inside a closure with the wrapper object.
     2. When a function is defined as a nested function, then the code object will be
        stored on the co_consts field of the parent code object by Python compiler.
-    This function handles all of the corner cases above. ``module`` is where to
-    look, by default the module ``inspect.getmodule`` finds for ``code``.
+    This function handles all of the corner cases above.
     """
 
-    if module is None:
-        module = inspect.getmodule(code)
+    module = inspect.getmodule(code)
     if module is None:
         raise PackageError(f"Cannot find module for code {code}")
 
     toplevel: Any = module
-    search_module_tree = sys.version_info < (3, 11)
-    if not search_module_tree:
+    if sys.version_info >= (3, 11):
         parts = code.co_qualname.split(".")
 
         for part in parts:
             if not hasattr(toplevel, part):
-                # co_qualname is fixed at compile time and names where the def
-                # statement ran: a factory deleted afterwards, or one that
-                # exec'd it under a module's filename. The function can still
-                # be reachable from the module under a rewritten __qualname__,
-                # so search the module the way Python < 3.11 always does.
-                toplevel = module
-                search_module_tree = True
-                break
+                _raise_resolution_error(code, toplevel)
             toplevel = getattr(toplevel, part)
             if (
                 inspect.isfunction(toplevel)
@@ -856,7 +797,7 @@ def _get_code_source(
                         toplevel = obj
                         return f".__closure__[{i}].cell_contents{res}"
 
-        if search_module_tree:
+        if sys.version_info < (3, 11):
             if inspect.ismodule(obj):
                 for value in obj.__dict__.values():
                     if not (
@@ -1168,7 +1109,6 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        self._seeded_globals: list[tuple[types.ModuleType, str]] = []
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
 
@@ -1218,9 +1158,6 @@ class CompilePackage:
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
-            self._resume_codes = {
-                code for code, entry in self._codes.items() if entry.install_to_global
-            }
             for key, code in self._codes.items():
                 if code.bypassed:
                     # install() skips a bypassed entry entirely, so its guarded
@@ -1246,9 +1183,7 @@ class CompilePackage:
             self._device_types = frozenset((dynamo.device_type,))
         else:
             self._add_function(
-                self._innermost_fn.__code__,
-                _globals_module_name(self._innermost_fn.__globals__)
-                or self._innermost_fn.__module__,
+                self._innermost_fn.__code__, self._innermost_fn.__module__
             )
         self._initialized = True
 
@@ -1300,21 +1235,14 @@ class CompilePackage:
             raise AssertionError("_innermost_fn is not set")
         return CompilePackage.source_id_from_fn(self._innermost_fn)
 
-    def _add_user_function(
-        self, code: types.CodeType, global_scope: dict[str, Any] | None = None
-    ) -> None:
-        # The frame's globals name its module exactly; inspect.getmodule only
-        # guesses from the file, which an aliased module shares.
-        module_name = (
-            _globals_module_name(global_scope) if global_scope is not None else None
-        )
-        module = sys.modules[module_name] if module_name else inspect.getmodule(code)
+    def _add_user_function(self, code: types.CodeType) -> None:
+        function_name, code_source = _get_code_source(code)
+        module = inspect.getmodule(code)
         if module is None:
             raise PackageError(f"Cannot find module for code {code}")
-        function_name, code_source = _get_code_source(code, module)
         self._add_function(
             code,
-            module_name or module.__name__,
+            module.__name__,
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
@@ -1325,16 +1253,14 @@ class CompilePackage:
         return self._current_entry
 
     @contextlib.contextmanager
-    def code_context(
-        self, code: types.CodeType, global_scope: dict[str, Any] | None = None
-    ) -> Generator[None, None, None]:
+    def code_context(self, code: types.CodeType) -> Generator[None, None, None]:
         if self._current_entry is not None:
             raise AssertionError("_current_entry is already set in code_context")
 
         # Sometimes user code cannot be inlined in dynamo resulting in extra user code
         # being compiled. We should record these as when they are actually invoked.
         if code not in self._codes:
-            self._add_user_function(code, global_scope)
+            self._add_user_function(code)
 
         entry = self._codes[code]
         self._current_entry = entry
@@ -1410,9 +1336,6 @@ class CompilePackage:
         )
         self._resume_codes.add(python_code)
 
-    def is_resume_code(self, code: types.CodeType) -> bool:
-        return code in self._resume_codes
-
     def add_import_source(self, alias: str, module_name: str) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_import_source")
@@ -1465,32 +1388,6 @@ class CompilePackage:
         if record:
             self._installed_globals.setdefault(module, []).append(name)
 
-    def _seed_unnamed_scopes(
-        self, module: types.ModuleType, global_scope: dict[str, Any]
-    ) -> None:
-        # The key embeds id() of a dict in the tracing process, so no module in
-        # a fresh process binds it, and every guard rooted at it fails with a
-        # KeyError. The artifact carries the dict itself; bind that.
-        by_name = _SEEDED_GLOBALS.setdefault(module, {})
-        for name, value in global_scope.items():
-            if not name.startswith(_UNNAMED_SCOPE_PREFIX):
-                continue
-            # A compile in this process that bound the key owns it through a
-            # CleanupHook, which would delete it from under these guards once
-            # its code object is collected.
-            CleanupHook.disown(module.__dict__, name)
-            seeded = by_name.get(name)
-            if name not in module.__dict__:
-                seeded = _SeededGlobal(value, weakref.WeakSet())
-                by_name[name] = seeded
-                module.__dict__[name] = value
-            elif seeded is None or module.__dict__[name] is not seeded.value:
-                # Not a package's binding: whoever wrote it owns it.
-                continue
-            if self not in seeded.owners:
-                seeded.owners.add(self)
-                self._seeded_globals.append((module, name))
-
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
@@ -1501,18 +1398,6 @@ class CompilePackage:
                 module.__dict__.pop(name, None)
 
         self._installed_globals = {}
-
-        for module, name in self._seeded_globals:
-            by_name = _SEEDED_GLOBALS.get(module, {})
-            seeded = by_name.get(name)
-            if seeded is None:
-                continue
-            seeded.owners.discard(self)
-            if not seeded.owners:
-                del by_name[name]
-                if module.__dict__.get(name) is seeded.value:
-                    del module.__dict__[name]
-        self._seeded_globals = []
 
         _reset_precompile_entries(self._innermost_fn.__code__)
 
@@ -1610,9 +1495,6 @@ class CompilePackage:
                     with dynamo_timed("precompile_load_guards"):
                         guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
-                    self._seed_unnamed_scopes(
-                        module, guards_state.output_graph.global_scope
-                    )
                     # The installed builtins dict might be absent from the runtime
                     # while loading guards. Populate it if it's missing.
                     if (
