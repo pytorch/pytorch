@@ -447,7 +447,7 @@ def mutable_mapping_update(
     /,
     **kwargs: Any,
 ) -> None:
-    # Unlike odict_update, this legacy constructor path still lacks mapping-like support.
+    # Unlike odict_update's keys-attribute probe, this requires a Mapping instance.
     if isinstance(data, Mapping):
         # Merge standard mapping with PyMapping_Items
         for key, value in data.items():
