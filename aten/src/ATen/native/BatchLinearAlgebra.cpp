@@ -2874,8 +2874,7 @@ TORCH_IMPL_FUNC(linalg_qr_piv_out)(
     auto [compute_q, reduced_mode] = at::native::_parse_qr_piv_mode(mode);
 
     // tau
-    auto tau_shape = A.sizes().vec();
-    tau_shape.pop_back();
+    auto tau_shape = DimVector(A.sizes().slice(0, A.dim() - 1));
     tau_shape.back() = k;
     auto tau = A.new_empty(tau_shape);
 
@@ -2891,18 +2890,11 @@ TORCH_IMPL_FUNC(linalg_qr_piv_out)(
         QR = at::native::cloneBatchedColumnMajor(A);
     }
 
-    std::vector<int64_t> jpvt_sizes;
-    if (A.dim() == 2) {
-        // non-batched: single pivot vector of length n
-        jpvt_sizes = {n};
-    } else {
-        // batched: batch_dims + (n)
-        jpvt_sizes.assign(A.sizes().begin(), A.sizes().end() - 2);
-        jpvt_sizes.push_back(n);
-    }
+    auto jpvt_shape = DimVector(A.sizes().slice(0, A.dim() - 1));
+    jpvt_shape.back() = n;
     // geqp3 treats a nonzero jpvt[j] on input as "column j is fixed and goes first",
     // so jpvt must be zero-initialized for all columns to be free to pivot.
-    Tensor jpvt = at::zeros(jpvt_sizes, A.options().dtype(at::kInt));
+    Tensor jpvt = at::zeros(jpvt_shape, A.options().dtype(at::kInt));
 
     // ----- GEQP3 (pivoted QR) -----
     geqp3_stub(A.device().type(), QR, tau, jpvt);
