@@ -71,7 +71,11 @@ class TestExtendedCUDAIsAvail(TestCase):
             if nvml_avail:
                 _ = torch.cuda.is_available()
             else:
-                with patch.object(torch.cuda, "_device_count_nvml", return_value=-1):
+                # ROCm counts devices with amdsmi; CUDA uses NVML.
+                with (
+                    patch.object(torch.cuda, "_device_count_nvml", return_value=-1),
+                    patch.object(torch.cuda, "_device_count_amdsmi", return_value=-1),
+                ):
                     _ = torch.cuda.is_available()
             with multiprocessing.get_context("fork").Pool(1) as pool:
                 in_bad_fork = pool.apply(TestExtendedCUDAIsAvail.in_bad_fork_test)
