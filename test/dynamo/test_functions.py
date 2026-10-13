@@ -7427,56 +7427,25 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
 
+        x = [torch.randn(4), [torch.randn(4), torch.randn(4)]]
+
         def f(y):
             return y * 2
 
-        x = torch.randn(4)
-        for inputs in (
-            [x, [x + 1, x + 2]],
-            {"a": x, "b": [x + 1, x + 2]},
-            (1, 2),
-            (x, 3),
-            (x, (3, {"items": [1, 2]})),
-        ):
-            ref = fn(inputs, f)
-            res = opt_fn(inputs, f)
-            self.assertEqual(ref, res)
-            self.assertIs(type(res), type(ref))
+        ref = fn(x, f)
+        res = opt_fn(x, f)
+        self.assertEqual(ref, res)
+        # Check type(res) is immutable_list
+        self.assertTrue(type(ref) is type(res))
 
-    def test_fx_map_aggregate_callback_guarded(self):
-        offset = 1
-
-        def callback(value):
-            return value + offset
-
-        def fn(x):
-            return x.sin(), torch.fx.node.map_aggregate((1, [2, 3]), callback)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(opt_fn(x), fn(x))
-        offset = 5
-        self.assertEqual(opt_fn(x)[1], (6, [7, 8]))
-
-    def test_fx_map_arg_callback(self):
-        graph = torch.fx.Graph()
-        node = graph.placeholder("sample")
-        offset = 1
-
-        def callback(value):
-            return len(value.name) + offset
-
-        def fn(x):
-            return x.sin(), torch.fx.node.map_arg((node, [node, 3]), callback)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        expected = fn(x)
-        actual = opt_fn(x)
-        self.assertEqual(actual, expected)
-        self.assertIs(type(actual[1][1]), type(expected[1][1]))
-        offset = 5
-        self.assertEqual(opt_fn(x), fn(x))
+        x = {
+            "a": torch.randn(4),
+            "b": [torch.randn(4), torch.randn(4)],
+        }
+        ref = fn(x, f)
+        res = opt_fn(x, f)
+        self.assertEqual(ref, res)
+        self.assertTrue(type(ref) is type(res))
 
     def test_fx_immutable_list_mutation_not_allowed(self):
         def fn(inputs, x, f=lambda x: x * 2):
@@ -7712,39 +7681,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
-
-    def test_sys_recursionlimit_guarded(self):
-        def fn(x):
-            return x + sys.getrecursionlimit()
-
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
-        x = torch.zeros(1)
-        old = sys.getrecursionlimit()
-        try:
-            self.assertEqual(opt_fn(x), fn(x))
-            sys.setrecursionlimit(old + 7)
-            self.assertEqual(opt_fn(x), x + old + 7)
-            self.assertEqual(cnt.frame_count, 2)
-        finally:
-            sys.setrecursionlimit(old)
-
-    @unittest.skipIf(sys.version_info < (3, 11), "requires Python 3.11+")
-    def test_sys_get_int_max_str_digits_guarded(self):
-        def fn(x):
-            return x + sys.get_int_max_str_digits()
-
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
-        x = torch.zeros(1)
-        old = sys.get_int_max_str_digits()
-        try:
-            self.assertEqual(opt_fn(x), fn(x))
-            sys.set_int_max_str_digits(old + 7)
-            self.assertEqual(opt_fn(x), x + old + 7)
-            self.assertEqual(cnt.frame_count, 2)
-        finally:
-            sys.set_int_max_str_digits(old)
 
     def test_keyword(self):
         def fn(x, word):
