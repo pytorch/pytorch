@@ -13633,6 +13633,44 @@ def ___make_guard_fn():
         self.assertEqual(fn_out, compiled_out)
         self.assertFalse(fn_out)
 
+    def test_fn_hasattr_guarded(self):
+        def bar(x):
+            return x
+
+        def fn(x):
+            if hasattr(bar, "flag"):
+                return x + 1
+            return x - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(3)
+        self.assertEqual(opt_fn(x), fn(x))
+        bar.flag = True
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(cnt.frame_count, 2)
+        del bar.flag
+        self.assertEqual(opt_fn(x), x - 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_torch_fn_hasattr_guarded(self):
+        def fn(x):
+            if hasattr(torch.nn.functional.relu, "_test_flag"):
+                return x + 1
+            return x - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(3)
+        self.assertEqual(opt_fn(x), x - 1)
+        torch.nn.functional.relu._test_flag = True
+        try:
+            self.assertEqual(opt_fn(x), x + 1)
+        finally:
+            del torch.nn.functional.relu._test_flag
+        self.assertEqual(opt_fn(x), x - 1)
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_constant_hasattr_returns_bool(self):
         """Test that hasattr on constant values properly returns boolean ConstantVariable."""
 
