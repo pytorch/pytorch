@@ -3267,8 +3267,15 @@ class TestXPUMultiprocessing(TestCase):
         p2c.put(0)  # notify child to finish
         p.join()
 
-    def test_event_multiprocess(self):
-        event = torch.xpu.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.xpu.Event, name="xpu_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_multiprocess(self, event_cls):
+        event = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(event.query())
 
         ctx = mp.get_context("spawn")
