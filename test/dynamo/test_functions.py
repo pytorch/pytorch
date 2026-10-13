@@ -6321,6 +6321,42 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(hasattr(method, "source_fn"))
         self.assertIs(method.get_source(), im_func.get_source())
 
+    def test_bound_builtin_method_qualname_renamed_in_frame(self):
+        class D(dict):
+            pass
+
+        inst_bound = D(t=torch.ones(1)).get
+        cls_bound = D.fromkeys
+
+        def fn(x):
+            D.__qualname__ = "Renamed"
+            return x + 1, inst_bound.__qualname__, cls_bound.__qualname__
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertEqual(expected[1:], ("Renamed.get", "Renamed.fromkeys"))
+        D.__qualname__ = "D"
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), expected)
+
+    def test_bound_builtin_method_getset(self):
+        class D(dict):
+            pass
+
+        d = D(a=torch.ones(1))
+        s = {1}
+        bounds = (d.get, s.add, (1,).count, dict.fromkeys, tuple.__new__)
+
+        def fn(x):
+            out = [x + 1, bounds[0].__self__ is d, bounds[1].__self__ is s]
+            for b in bounds:
+                out += [b.__name__, b.__qualname__, b.__doc__, b.__text_signature__]
+            return out
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     # generate_pycode cannot reconstruct a TensorPropertySource, which is what
     # a symbolic size input is sourced by; the dynamic_shapes variant therefore
     # cannot run this, with or without a method involved.
