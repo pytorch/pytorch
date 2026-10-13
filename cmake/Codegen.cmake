@@ -473,29 +473,30 @@ if(INTERN_BUILD_ATEN_OPS)
       configure_file("${PROJECT_SOURCE_DIR}/cmake/IncludeSource.cpp.in" ${NEW_IMPL})
       set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp} PARENT_SCOPE) # Create list of copies
       list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
-      if(MSVC)
-        set(EXTRA_FLAGS "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
-      else(MSVC)
-        set(EXTRA_FLAGS "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
-      endif(MSVC)
+      separate_arguments(_compile_options NATIVE_COMMAND "${FLAGS}")
+      set(_compile_definitions
+        "CPU_CAPABILITY=${CPU_CAPABILITY}"
+        "CPU_CAPABILITY_${CPU_CAPABILITY}")
 
       # Only parallelize the SortingKernel for now to avoid side effects
       if(${NAME} STREQUAL "native/cpu/SortingKernel.cpp" AND NOT MSVC AND USE_OMP)
-        string(APPEND EXTRA_FLAGS " -D_GLIBCXX_PARALLEL")
+        list(APPEND _compile_definitions "_GLIBCXX_PARALLEL")
       endif()
 
       # Disable certain warnings for GCC-9.X
       if(CMAKE_COMPILER_IS_GNUCXX)
         if(("${NAME}" STREQUAL "native/cpu/GridSamplerKernel.cpp") AND ("${CPU_CAPABILITY}" STREQUAL "DEFAULT"))
           # See https://github.com/pytorch/pytorch/issues/38855
-          set(EXTRA_FLAGS "${EXTRA_FLAGS} -Wno-uninitialized")
+          list(APPEND _compile_options "-Wno-uninitialized")
         endif()
         if("${NAME}" STREQUAL "native/quantized/cpu/kernels/QuantizedOpKernels.cpp")
           # See https://github.com/pytorch/pytorch/issues/38854
-          set(EXTRA_FLAGS "${EXTRA_FLAGS} -Wno-deprecated-copy")
+          list(APPEND _compile_options "-Wno-deprecated-copy")
         endif()
       endif()
-      set_source_files_properties(${NEW_IMPL} PROPERTIES COMPILE_FLAGS "${FLAGS} ${EXTRA_FLAGS}")
+      set_source_files_properties(${NEW_IMPL} PROPERTIES
+        COMPILE_DEFINITIONS "${_compile_definitions}"
+        COMPILE_OPTIONS "${_compile_options}")
     endfunction()
     foreach(IMPL ${cpu_kernel_cpp_in})
       file(RELATIVE_PATH NAME "${PROJECT_SOURCE_DIR}/aten/src/ATen/" "${IMPL}")
