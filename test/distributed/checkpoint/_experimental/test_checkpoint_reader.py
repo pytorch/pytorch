@@ -18,22 +18,6 @@ from torch.testing._internal.common_utils import (
 
 
 class _CheckpointReaderTestBase(TestCase):
-    def _get_state_dict(self) -> dict[str, Any]:
-        return {
-            "model": {
-                "weight": torch.randn(10, 5),
-                "bias": torch.randn(5),
-                "test_list": [torch.randn(2), torch.randn(2)],
-            },
-            "optimizer": {
-                "param_groups": [
-                    {"lr": 0.01, "test_list": [torch.randn(2), torch.randn(2)]}
-                ]
-            },
-            "epoch": 5,
-            "step": 1000,
-        }
-
     def setUp(self):
         super().setUp()
         # Create a temporary directory for test checkpoints
@@ -51,7 +35,20 @@ class _CheckpointReaderTestBase(TestCase):
         )
 
         # Create a test state dictionary
-        self.state_dict = self._get_state_dict()
+        self.state_dict = {
+            "model": {
+                "weight": torch.randn(10, 5),
+                "bias": torch.randn(5),
+                "test_list": [torch.randn(2), torch.randn(2)],
+            },
+            "optimizer": {
+                "param_groups": [
+                    {"lr": 0.01, "test_list": [torch.randn(2), torch.randn(2)]}
+                ]
+            },
+            "epoch": 5,
+            "step": 1000,
+        }
 
         # Create a test checkpoint file
         self.checkpoint_path = os.path.join(self.temp_dir, "checkpoint")
@@ -64,6 +61,7 @@ class _CheckpointReaderTestBase(TestCase):
     def tearDown(self):
         # Clean up the temporary directory
         shutil.rmtree(self.temp_dir)
+        super().tearDown()
 
 
 class TestCheckpointReader(_CheckpointReaderTestBase):
