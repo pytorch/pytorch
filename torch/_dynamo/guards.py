@@ -259,7 +259,8 @@ _COW_TENSOR_UNSUPPORTED = object()
 def _try_is_cow_tensor(value: object) -> bool | object:
     if not isinstance(value, torch.Tensor):
         return _COW_TENSOR_UNSUPPORTED
-    if torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python):
+    is_python = torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python)
+    if is_python or torch._subclasses.fake_tensor.is_fake_tensor(value):
         return _COW_TENSOR_UNSUPPORTED
     return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
 
@@ -780,24 +781,10 @@ class GuardManagerWrapper:
             return body.getvalue()
 
     def check(self, x: Any) -> bool:
-        # RootGuardManager::check_nopybind_template disables the TorchFunction
-        # TLS for its accessors and restores it on every exit but a throw, which
-        # would leave the calling thread disabled: put it back on that exit.
-        torch_function_state = torch._C._get_torch_function_state()
-        try:
-            return self.root.check(x)
-        except BaseException:
-            torch._C._set_torch_function_state(torch_function_state)
-            raise
+        return self.root.check(x)
 
     def check_verbose(self, x: Any) -> GuardDebugInfo:
-        # check_verbose_nopybind has the same non-RAII exit as check() above.
-        torch_function_state = torch._C._get_torch_function_state()
-        try:
-            return self.root.check_verbose(x)
-        except BaseException:
-            torch._C._set_torch_function_state(torch_function_state)
-            raise
+        return self.root.check_verbose(x)
 
     def populate_code_parts_for_debugging(self) -> None:
         # This should be called when the guard manager is fully populated
@@ -1050,6 +1037,15 @@ def _guard_device_index_is_current(
         return False
     acc = torch.accelerator.current_accelerator()
     return acc is not None and value.device.type == acc.type
+
+
+def _stream_is_current(stream: torch.Stream) -> bool:
+    # Identity only: the stream's type is guarded separately, while subclasses such
+    # as torch.cuda.Stream override __eq__ to compare types too.
+    acc = torch.accelerator.current_accelerator()
+    if acc is None or stream.device.type != acc.type:
+        return False
+    return torch.Stream.__eq__(stream, get_current_stream(torch.device(acc.type)))
 
 
 def get_tensor_guard_code_part(
@@ -3093,6 +3089,33 @@ class GuardBuilder(GuardBuilderBase):
         return
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            value.device.type,
+            _stream_is_current(value),
+        ),
+        eval_fn=lambda value, metadata: value.device.type == metadata[0]
+        and _stream_is_current(value) == metadata[1],
+    )
+    def CURRENT_STREAM_MATCH(self, guard: Guard) -> None:
+        ref = self.arg_ref(guard)
+        value = self.get(guard)
+        device_type = value.device.type
+        expected = _stream_is_current(value)
+
+        def guard_fn(stream: torch.Stream) -> bool:
+            return (
+                stream.device.type == device_type
+                and _stream_is_current(stream) == expected
+            )
+
+        relation = "==" if expected else "!="
+        code = f"{ref} {relation} ___get_current_stream(torch.device('{device_type}'))"
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+        self._set_guard_export_info(guard, [code])
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
         eval_fn=lambda value, metadata: constants_identical(value, metadata),
     )
@@ -3551,6 +3574,28 @@ class GuardBuilder(GuardBuilderBase):
             self.check_fn_manager.torch_function_mode_stack,
             ["___check_torch_function_mode_stack()"],
             guard.user_stack,
+        )
+
+    # Global state guard — not source-specific, checked separately at runtime.
+    @skip_guard_check_spec
+    def FX_ANNOTATION(self, guard: Guard) -> None:
+        """Guard on the torch.fx.traceback annotation active at frame entry."""
+        output_graph = self.check_fn_manager.output_graph
+        if output_graph is None:
+            raise AssertionError("check_fn_manager.output_graph must not be None")
+        annotation = output_graph.fx_annotation
+        code = [f"torch.fx.traceback._get_current_annotation() == {annotation!r}"]
+        self._set_guard_export_info(guard, code)
+
+        get_annotation = torch.fx.traceback._get_current_annotation
+
+        # If == raises (e.g. multi-element tensor values), LAMBDA_GUARD treats it
+        # as a guard failure, so the frame recompiles.
+        def fn(x: object) -> bool:
+            return get_annotation() == annotation
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     # Global state guard — not source-specific, checked separately at runtime.
@@ -6441,6 +6486,20 @@ def make_dupe_guard(
             # However, this should always be a sound guard to add here.
             return functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source)
     return None
+
+
+def install_not_in_instance_dict_guard(source: Source, name: str) -> None:
+    """
+    Guard that `name` stays absent from the instance __dict__ of the object at
+    `source`. Python reads the instance __dict__ before nn.Module.__getattr__
+    (or a user __getattr__), so a value resolved from the registries or through
+    such a hook is only valid while the dict lacks `name`.
+    """
+    install_guard(
+        source.make_guard(
+            functools.partial(GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name)
+        )
+    )
 
 
 def install_guard(*guards: Guard, skip: int = 0) -> None:

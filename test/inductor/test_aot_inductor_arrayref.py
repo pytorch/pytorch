@@ -1,6 +1,4 @@
 # Owner(s): ["module: inductor"]
-import copy
-import functools
 import os
 import sys
 import unittest
@@ -11,13 +9,17 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_CI,
     IS_FBCODE,
     IS_WINDOWS,
+    xfailIf,
 )
+
+# TORCHINDUCTOR_LITE_MODE=1 (the inductor_aoti_fallback CI config) falls back to
+# ATen for every op; see LITE_MODE_TEST_FAILURES below.
+LITE_MODE = os.environ.get("TORCHINDUCTOR_LITE_MODE") == "1"
 
 
 if IS_WINDOWS and IS_CI:
@@ -38,6 +40,7 @@ try:
             code_check_count,
         )
         from .test_torchinductor import (
+            copy_tests,
             define_custom_op_for_test,
             target_assert_alignment_regex,
             TestFailure,
@@ -51,6 +54,7 @@ try:
             code_check_count,
         )
         from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+            copy_tests,
             define_custom_op_for_test,
             target_assert_alignment_regex,
             TestFailure,
@@ -76,34 +80,6 @@ def fail_minimal_arrayref_interface(is_skip=False):
         ("cpu_with_stack_allocation_and_minimal_arrayref_interface",),
         is_skip=is_skip,
     )
-
-
-def _attach_aoti_template_tests(
-    template_cls, host_cls, failure_suffix, test_failures=None
-):
-    for name, value in template_cls.__dict__.items():
-        if not name.startswith("test_"):
-            continue
-
-        @functools.wraps(value)
-        def new_test(self, value=value):
-            return value(self)
-
-        new_test.__dict__ = copy.deepcopy(value.__dict__)
-        # Template parametrization was expanded before this module imported it.
-        new_test.__dict__.pop("parametrize_fn", None)
-
-        tf = test_failures and test_failures.get(name)
-        if tf and failure_suffix in tf.suffixes:
-            skip_func = (
-                unittest.skip("Skipped!") if tf.is_skip else unittest.expectedFailure
-            )
-            new_test = skip_func(new_test)
-
-        setattr(host_cls, name, new_test)
-
-    if hasattr(template_cls, "is_dtype_supported"):
-        host_cls.is_dtype_supported = template_cls.is_dtype_supported
 
 
 class AOTInductorArrayRefTestsTemplate(AOTInductorTestsTemplate):
@@ -366,9 +342,55 @@ CPU_TEST_FAILURES = {
     "test_seq": fail_stack_allocation(is_skip=True),
 }
 
+# Additional failures under lite mode, tracked in
+# https://github.com/pytorch/pytorch/issues/199205
+LITE_MODE_TEST_FAILURES = {
+    # Unsupported return type SymIntType for aten.sym_numel
+    "test_size_with_unbacked_add_expr": fail_stack_allocation(),
+    # SerializeError: Empty list with type number nyi
+    "test_buffer_mutation_and_force_mmap_weights": fail_stack_allocation(),
+    "test_conv_freezing": fail_stack_allocation(),
+    "test_deconv_freezing": fail_stack_allocation(),
+    "test_freezing": fail_stack_allocation(),
+    "test_linear_freezing": fail_stack_allocation(),
+    # Runtime assert is not emitted
+    "test_aoti_runtime_asserts_backed_symint": fail_stack_allocation(),
+    # Profiler and debug printer instrumentation is not emitted for fallbacks
+    "test_aoti_debug_printer_codegen": fail_stack_allocation(),
+    "test_aoti_debug_printer_cpp_kernel": fail_stack_allocation(),
+    "test_aoti_profiler_enable_kernel_profile_True_enable_kernel_context_guard_False": fail_stack_allocation(),
+    "test_aoti_profiler_enable_kernel_profile_True_enable_kernel_context_guard_True": fail_stack_allocation(),
+    "test_aoti_profiler_input_shapes": fail_stack_allocation(),
+    "test_aoti_profiler_multi_output_fallback_input_shapes": fail_stack_allocation(),
+    "test_aoti_profiler_tensor_list_input_shapes": fail_stack_allocation(),
+    "test_kernel_profile_every_kernel_has_context": fail_stack_allocation(),
+    "test_kernel_profile_index_put_fallback": fail_stack_allocation(),
+    "test_kernel_profile_scatter_fallback": fail_stack_allocation(),
+    "test_kernel_profile_scatter_fallback_arg_order": fail_stack_allocation(),
+    "test_kernel_profile_template_kernel": fail_stack_allocation(),
+    # C++ compile error
+    "test_quanatized_int8_linear": fail_stack_allocation(),
+    # Wrong results
+    "test_return_view_constant": fail_stack_allocation(),
+    # Expects split/cat merge passes, which lite mode disables
+    "test_simple_split": fail_stack_allocation(),
+}
+
+if LITE_MODE:
+    # These pass in lite mode
+    for name in (
+        "test_cond_unbacked_symint_predicate",
+        "test_while_loop_with_mixed_device_dynamic_False",
+        "test_while_loop_with_mixed_device_dynamic_True",
+        "test_while_loop_with_pytree_inputs",
+    ):
+        del CPU_TEST_FAILURES[name]
+    CPU_TEST_FAILURES.update(LITE_MODE_TEST_FAILURES)
+
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
     hw_classification = HardwareClassification.CPU
+
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -378,14 +400,11 @@ class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
     use_minimal_arrayref_interface = False
 
 
-_attach_aoti_template_tests(
+copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleCpuWithStackAllocation,
     "cpu_with_stack_allocation",
     CPU_TEST_FAILURES,
-)
-instantiate_device_type_tests(
-    AOTInductorTestABICompatibleCpuWithStackAllocation, globals(), only_for="cpu"
 )
 
 
@@ -393,6 +412,7 @@ class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterf
     TestCase
 ):
     hw_classification = HardwareClassification.CPU
+
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -407,28 +427,25 @@ if IS_FBCODE:
     # and terminal output say pass), but the process will segfault.  This only
     # happens in OSS CI and is fine internally.
     # See https://github.com/pytorch/pytorch/issues/123691
-    _attach_aoti_template_tests(
+    copy_tests(
         AOTInductorTestsTemplate,
         AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface,
         "cpu_with_stack_allocation_and_minimal_arrayref_interface",
         CPU_TEST_FAILURES,
     )
-    _attach_aoti_template_tests(
+    copy_tests(
         AOTInductorArrayRefTestsTemplate,
         AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface,
         "cpu_with_stack_allocation_and_minimal_arrayref_interface",
         CPU_TEST_FAILURES,
-    )
-    instantiate_device_type_tests(
-        AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface,
-        globals(),
-        only_for="cpu",
     )
 
 
 class TestCppWrapperCpuSelection(TestCase):
     hw_classification = HardwareClassification.CPU
 
+    # https://github.com/pytorch/pytorch/issues/199205
+    @xfailIf(LITE_MODE)
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_fallback_alignment_assert_with_stack_allocation(self):
         def slice2d(x):
@@ -474,7 +491,7 @@ class TestCppWrapperCpuSelection(TestCase):
         with self.assertRaisesRegex(RuntimeError, expected_error):
             aoti_module(*sample)
 
-    def test_cpu_cpp_wrapper_follows_current_stack_allocation_config(self, device):
+    def test_cpu_cpp_wrapper_follows_current_stack_allocation_config(self):
         # Regression test: the CPU cpp wrapper class (CppWrapperCpu vs
         # CppWrapperCpuArrayRef) must track the current allow_stack_allocation
         # config at each compile. It used to be frozen at the process's first
@@ -493,17 +510,14 @@ class TestCppWrapperCpuSelection(TestCase):
         init_backend_registration()
         with config.patch({"aot_inductor.allow_stack_allocation": True}):
             self.assertIs(
-                get_wrapper_codegen_for_device(device, cpp_wrapper=True),
+                get_wrapper_codegen_for_device("cpu", cpp_wrapper=True),
                 CppWrapperCpuArrayRef,
             )
         with config.patch({"aot_inductor.allow_stack_allocation": False}):
             self.assertIs(
-                get_wrapper_codegen_for_device(device, cpp_wrapper=True),
+                get_wrapper_codegen_for_device("cpu", cpp_wrapper=True),
                 CppWrapperCpu,
             )
-
-
-instantiate_device_type_tests(TestCppWrapperCpuSelection, globals(), only_for="cpu")
 
 
 if __name__ == "__main__":
