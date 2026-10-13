@@ -484,8 +484,32 @@ def _softshrink_autograd(x: torch.Tensor, lambd: float = 0.5) -> torch.Tensor:
 @register_decomposition(aten.softshrink.default)
 def softshrink(x: torch.Tensor, lambd: float = 0.5) -> torch.Tensor:
     if is_strict_cuda_triton(x.device) and x.dtype == torch.float32:
+        if isinstance(lambd, torch.SymFloat):
+            limit = torch.finfo(x.dtype).max
+            message = f"lambda must be in range [0, {limit}] for input dtype {x.dtype}, but found {lambd}"
+            torch._check(lambd >= 0, lambda: message)
+            torch._check(lambd <= limit, lambda: message)
+            # Tensorify add to round the symbolic threshold before comparisons.
+            bound = x.new_zeros(()) + lambd
+            outside = torch.where(x < -bound, x + bound, 0)
+            result = torch.where(x > bound, x - bound, outside)
+            return torch.where(torch.isnan(x), x, result)
         return NotImplemented
     return _softshrink_default_decomp(x, lambd)
+
+
+@register_decomposition(aten.softshrink_backward.default)
+def softshrink_backward(
+    grad: torch.Tensor, x: torch.Tensor, lambd: float
+) -> torch.Tensor:
+    if (
+        is_strict_cuda_triton(x.device)
+        and x.dtype == grad.dtype == torch.float32
+        and isinstance(lambd, torch.SymFloat)
+    ):
+        bound = x.new_zeros(()) + lambd
+        return torch.where((x >= -bound) & (x <= bound), 0, grad)
+    return NotImplemented
 
 
 def _preserve_bf16x9_matmul(arg_index, arg_name):
