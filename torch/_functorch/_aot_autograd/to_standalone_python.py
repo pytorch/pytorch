@@ -828,7 +828,14 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     strides has static sizes, and treating it as static would silently specialize the
     artifact to the example strides. (Unbacked symints appearing only in intermediates,
     not on any placeholder, are still missed here, but such a graph fails loudly
-    downstream when emit_value rejects the still-symbolic metadata.)"""
+    downstream when emit_value rejects the still-symbolic metadata.)
+
+    Both metadata keys are checked, as a union. make_fx writes the fake only under "val".
+    The graph Dynamo hands a torch.compile backend carries it only under "example_value";
+    Dynamo's export paths stamp "val" as well, so "val" alone does not identify a make_fx
+    graph. A symbolic fake under either key makes the graph dynamic even if the other key
+    holds a static one (split_module copies the whole meta dict, so both can coexist). The
+    follow-up Dynamo tracer will feed backend graphs here."""
     import torch
 
     def _is_symbolic(v: Any) -> bool:
@@ -837,15 +844,16 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     for node in gm.graph.nodes:
         if node.op != "placeholder":
             continue
-        val = node.meta.get("val")
-        if _is_symbolic(val):
-            return True
-        if isinstance(val, torch.Tensor) and (
-            any(_is_symbolic(s) for s in val.shape)
-            or any(_is_symbolic(s) for s in val.stride())
-            or _is_symbolic(val.storage_offset())
-        ):
-            return True
+        for key in ("val", "example_value"):
+            val = node.meta.get(key)
+            if _is_symbolic(val):
+                return True
+            if isinstance(val, torch.Tensor) and (
+                any(_is_symbolic(s) for s in val.shape)
+                or any(_is_symbolic(s) for s in val.stride())
+                or _is_symbolic(val.storage_offset())
+            ):
+                return True
     return False
 
 

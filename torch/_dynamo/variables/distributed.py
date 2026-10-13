@@ -31,7 +31,7 @@ from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
-from .base import GetSet, Method, VariableTracker
+from .base import GetSet, Method, readonly_setter, VariableTracker
 
 
 if TYPE_CHECKING:
@@ -73,7 +73,7 @@ class DistributedVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
-    def richcompare_impl(self, tx, other, op):
+    def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -151,8 +151,8 @@ class WorldMetaClassVariable(DistributedVariable):
         return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER, source)
 
     tp_getset = {
-        "WORLD": GetSet(_world_getset, None),
-        "NON_GROUP_MEMBER": GetSet(_non_group_member_getset, None),
+        "WORLD": GetSet(_world_getset, readonly_setter),
+        "NON_GROUP_MEMBER": GetSet(_non_group_member_getset, readonly_setter),
     }
 
 

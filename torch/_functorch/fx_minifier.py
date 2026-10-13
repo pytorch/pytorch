@@ -24,6 +24,10 @@ if TYPE_CHECKING:
 is_tuple = object()
 
 
+class MinifierSanityCheckFailed(RuntimeError):
+    pass
+
+
 @dataclass
 class LoadTensorMeta:
     size: tuple[int, ...]
@@ -246,7 +250,7 @@ def minifier(
 
     ConcreteProp(fail_f, writer=writer, skip_offload=skip_offload).propagate(*inps)
     if not skip_sanity and not graph_fails(failing_graph, inps):
-        raise RuntimeError("Input graph did not fail the tester")
+        raise MinifierSanityCheckFailed("Input graph did not fail the tester")
     print(f"Started off with {cur_size} nodes", file=sys.stderr)
 
     def _register_strategy(
