@@ -29,7 +29,7 @@ class TestSideAware(TestCase):
             allocator = torch.cuda.memory.LocalityInterleavedAllocator()
         except RuntimeError as e:  # no locality domains (driver or cuda.bindings < 13.4), or not two
             raise unittest.SkipTest(str(e)) from e
-        cls.pool = torch.cuda.MemPool(allocator.allocator())  # default splitting
+        cls.pool = allocator.pool()  # default splitting
 
     def setUp(self):
         self.prev = torch._C._cuda_get_side_aware()
