@@ -1271,6 +1271,7 @@ def entry(x):
 
         package = self._round_trip_under_fail_on_recompile(module.entry, torch.randn(4))
         self.assertEqual(package.cache_entry().codes[0].python_module, name)
+
     def test_reset_keeps_nonrecursive_disable_wrapper_skipped(self):
         # A bound method's innermost fn is the shared non-recursive disable
         # wrapper, so installing this package enrolls the wrapper's code in

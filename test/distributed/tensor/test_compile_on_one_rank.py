@@ -12,7 +12,9 @@ from unittest.mock import patch
 import torch
 import torch.compiler.config as compiler_config
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
+from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
@@ -2192,10 +2194,12 @@ instantiate_parametrized_tests(TestCompileOnOneRankDeviceAsParameter)
 
 
 def _baked_pg_constants(gm):
-    """get_attr nodes that resolve to a torchbind ProcessGroup baked onto the gm.
+    """get_attr nodes that resolve to a ProcessGroup baked onto the gm.
 
-    These are unserializable: torch.classes.c10d.ProcessGroup has no
-    __getstate__, so GraphPickler.dumps fails on them.
+    make_fx bakes a torchbind ProcessGroup; Dynamo + AOTAutograd bakes the
+    Python ProcessGroup as an opaque object. Both are unserializable:
+    torch.classes.c10d.ProcessGroup has no __getstate__, so GraphPickler.dumps
+    fails on them.
     """
     out = []
     for node in gm.graph.nodes:
@@ -2204,7 +2208,9 @@ def _baked_pg_constants(gm):
         val = gm
         for part in node.target.split("."):
             val = getattr(val, part)
-        if isinstance(val, torch.ScriptObject) and "ProcessGroup" in val._type().name():
+        if isinstance(val, dist.ProcessGroup) or (
+            isinstance(val, torch.ScriptObject) and "ProcessGroup" in val._type().name()
+        ):
             out.append(node.target)
     return out
 
@@ -2313,8 +2319,9 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
 class TestCompileOnOneRankMeshGroup(TestCase):
     def setUp(self):
         super().setUp()
-        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=2)
-        self.mesh = init_device_mesh("cpu", (2,), mesh_dim_names=("replicate",))
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        self.mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("replicate",))
+        self.mesh_2d = init_device_mesh("cpu", (2, 2), mesh_dim_names=("dp", "tp"))
 
     def tearDown(self):
         dist.destroy_process_group()
@@ -2323,21 +2330,27 @@ class TestCompileOnOneRankMeshGroup(TestCase):
 
     @staticmethod
     def _fn(x, mesh, dim):
-        import torch.distributed._functional_collectives as funcol
-
         return funcol.all_reduce(x, "sum", mesh.get_group(dim))
 
-    @parametrize("dim", (None, 0, "replicate"))
+    @parametrize(
+        "mesh_attr,dim,dim_index",
+        [
+            ("mesh", None, 0),
+            ("mesh", 0, 0),
+            ("mesh", "replicate", 0),
+            ("mesh_2d", 1, 1),
+            ("mesh_2d", "tp", 1),
+        ],
+    )
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_mesh_group_aot_uses_live_mesh(self, dim):
-        from torch._dynamo.testing import AotEagerAndRecordGraphs
-
+    def test_mesh_group_aot_uses_live_mesh(self, mesh_attr, dim, dim_index):
+        mesh = getattr(self, mesh_attr)
         x = torch.ones(4)
-        expected = self._fn(x, self.mesh, dim)
+        expected = self._fn(x, mesh, dim)
         backend = AotEagerAndRecordGraphs()
         compiled = torch.compile(self._fn, backend=backend, fullgraph=True)
 
-        self.assertEqual(compiled(x, self.mesh, dim), expected)
+        self.assertEqual(compiled(x, mesh, dim), expected)
         self.assertEqual(len(backend.fw_graphs), 1)
         graph = backend.fw_graphs[0]
         lookups = [
@@ -2348,13 +2361,8 @@ class TestCompileOnOneRankMeshGroup(TestCase):
         ]
         self.assertEqual(len(lookups), 1)
         self.assertEqual(lookups[0].args[0].op, "placeholder")
-        baked_pgs = [
-            node.target
-            for node in graph.graph.nodes
-            if node.op == "get_attr"
-            and isinstance(getattr(graph, node.target), dist.ProcessGroup)
-        ]
-        self.assertEqual(baked_pgs, [])
+        self.assertEqual(lookups[0].args[1], dim_index)
+        self.assertEqual(_baked_pg_constants(graph), [])
 
 
 if __name__ == "__main__":
