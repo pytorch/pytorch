@@ -572,7 +572,7 @@ class NNModuleVariable(VariableTracker):
                         subobj.__func__,
                         source=source and AttrSource(source, "__func__"),
                     ),
-                    variables.UserDefinedObjectVariable(type(base)),
+                    VariableTracker.build(tx, type(base)),
                     source=source,
                 )
             elif istype(subobj, staticmethod):
