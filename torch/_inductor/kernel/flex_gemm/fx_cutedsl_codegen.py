@@ -30,7 +30,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
     FlexGemmLocalReduceGeometry,
     INDEXED_OUTPUT_STORE_ARG_NAME,
-    LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
     LOCAL_REDUCE_FINALIZE_CAPTURE_ERROR,
     LOCAL_REDUCE_FRAGMENT_WIDTH,
@@ -696,17 +695,6 @@ def epimod_projected_reduction(
     )
 
 
-def epimod_reduction_spec(
-    node: torch.fx.Node,
-    aliases: tuple[torch.fx.Node, ...],
-    reduction: NormalizedGemmReduction,
-) -> FlexGemmEpiModReductionSpec:
-    """Translate one normalized FX reduction into QuACK semantics."""
-    if isinstance(reduction, NormalizedReduction) and reduction.dtype is not None:
-        raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
-    return FlexGemmEpiModReductionSpec(node, aliases, reduction)
-
-
 def epimod_state_projection(
     state: FlexGemmEpiModReductionSpec,
     candidate: FlexGemmEpiModReductionSpec,
@@ -764,7 +752,7 @@ def epimod_local_reduce_spec(
         else:
             group[1].extend((node, *projection_aliases))
     reduction_specs = tuple(
-        epimod_reduction_spec(nodes[0], tuple(nodes), reduction)
+        FlexGemmEpiModReductionSpec(nodes[0], tuple(nodes), reduction)
         for reduction, nodes in alias_groups.values()
     )
     matches = analysis.local_reduce.matches
@@ -798,31 +786,19 @@ def epimod_local_reduce_spec(
         spec = FlexGemmEpiModLocalReduceSpec(sink)
     elif len(reduction_specs) == 2:
         inner_spec, outer_spec = reduction_specs
-        inner_node, outer_node = inner_spec.node, outer_spec.node
-        inner = (
-            inner_spec.reduction
-            if isinstance(inner_spec.reduction, NormalizedReduction)
-            else None
-        )
-        outer = (
-            outer_spec.reduction
-            if isinstance(outer_spec.reduction, NormalizedReduction)
-            else None
-        )
-        outer_source = None if outer is None else outer.source
-        reduction_nodes = (inner_node, outer_node)
+        inner, outer = inner_spec.reduction, outer_spec.reduction
         if (
             local_reduce.feeds_main
             or geometry.axis != 1
             or geometry.group > LOCAL_REDUCE_FRAGMENT_WIDTH
             or geometry.group & (geometry.group - 1)
-            or any(matches[node].geometry != geometry for node in reduction_nodes)
-            or any(spec.reduce_planes != 1 for spec in reduction_specs)
-            or inner is None
+            or any(matches[spec.node].geometry != geometry for spec in reduction_specs)
+            or not isinstance(inner, NormalizedReduction)
+            or not isinstance(outer, NormalizedReduction)
             or not inner.keepdim
-            or not isinstance(outer_source, torch.fx.Node)
-            or not is_shape_preserving_pointwise_node(outer_source)
-            or not analysis.local_reduce.graph.depends_on(outer_source, inner_node)
+            or not isinstance(outer.source, torch.fx.Node)
+            or not is_shape_preserving_pointwise_node(outer.source)
+            or not analysis.local_reduce.graph.depends_on(outer.source, inner_spec.node)
         ):
             raise NotImplementedError(
                 "FlexGEMM EpiMod supports two grouped reductions only when they "
