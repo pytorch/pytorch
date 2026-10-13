@@ -2056,7 +2056,7 @@ class TestFXNumericSuiteCoreAPIsAccelerator(FXNumericSuiteQuantizationTestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_extract_weights_on_device(self, device):
+    def test_extract_weights(self, device):
         # Note: this is not using quantization because quantized kernels do not
         # work on all devices yet.
         m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
@@ -2066,7 +2066,7 @@ class TestFXNumericSuiteCoreAPIsAccelerator(FXNumericSuiteQuantizationTestCase):
             results, 'a', 'b', compute_sqnr, 'sqnr')
         self.assert_ns_compare_dict_valid(results)
 
-    def test_add_loggers_on_device(self, device):
+    def test_add_loggers(self, device):
         # Note: this is not using quantization because quantized kernels do not
         # work on all devices yet.
         m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
@@ -2081,7 +2081,7 @@ class TestFXNumericSuiteCoreAPIsAccelerator(FXNumericSuiteQuantizationTestCase):
         extend_logger_results_with_comparison(
             act_compare_dict, 'a', 'b', compute_sqnr, 'sqnr')
 
-    def test_add_shadow_loggers_on_device(self, device):
+    def test_add_shadow_loggers(self, device):
         # Note: this is not using quantization because quantized kernels do not
         # work on all devices yet.
         m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
@@ -2940,7 +2940,7 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             qconfig_dict=qconfig_dict,
             should_log_inputs=False)
 
-instantiate_device_type_tests(TestFXNumericSuiteCoreAPIsAccelerator, globals())
+instantiate_device_type_tests(TestFXNumericSuiteCoreAPIsAccelerator, globals(), except_for="cpu")
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
