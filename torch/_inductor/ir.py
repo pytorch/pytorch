@@ -9683,19 +9683,6 @@ class ExternKernelNode:
     node: export_schema.Node
 
 
-# The _quantized ops with a hand-written C shim (see shim.h). Other _quantized
-# ops, e.g. wrapped_quantized_linear left undecomposed in lite mode, use the
-# proxy executor.
-_QUANTIZED_OPS_WITH_C_SHIM = OrderedSet(
-    [
-        "_quantized._wrapped_linear_prepack.default",
-        "_quantized._wrapped_quantized_linear_prepacked.default",
-        "_quantized.wrapped_fbgemm_linear_fp16_weight.default",
-        "_quantized.wrapped_fbgemm_pack_gemm_matrix_fp16.default",
-    ]
-)
-
-
 class FallbackKernel(ExternKernelAlloc):
     """
     A class that represents a fallback kernel for handling operators that are not
@@ -10153,9 +10140,6 @@ class FallbackKernel(ExternKernelAlloc):
             # Internal Quantized Fallback Ops
             if not isinstance(kernel, torch._ops.OpOverload):
                 raise AssertionError(type(kernel))
-            self.use_runtime_dispatch = (
-                V.graph.cpp_wrapper and str(kernel) not in _QUANTIZED_OPS_WITH_C_SHIM
-            )
         elif V.graph.cpp_wrapper:
             # For non-aten OpOverload, i.e. custom ops
             # If the op is in custom_ops_to_c_shims, generate direct function call
@@ -10286,7 +10270,7 @@ class FallbackKernel(ExternKernelAlloc):
 
             return str(kernel) not in inductor_fallback_ops
         if kernel.namespace == "_quantized":
-            return str(kernel) not in _QUANTIZED_OPS_WITH_C_SHIM
+            return False
         return kernel not in config.aot_inductor.custom_ops_to_c_shims
 
     @staticmethod
@@ -12399,6 +12383,16 @@ class _CollectiveKernel(FallbackKernel):
             return packed
 
 
+def _drop_shim_config(args: Sequence[Any]) -> Sequence[Any]:
+    # The all_reduce C shims predate the optional config argument.
+    if not V.graph.cpp_wrapper:
+        return args
+    *args, config = args
+    if config is not None:
+        raise NotImplementedError("cpp_wrapper does not support collective configs")
+    return args
+
+
 class _AllReduce_Kernel(_CollectiveKernel):
     def __init__(
         self,
@@ -12421,6 +12415,11 @@ class _AllReduce_Kernel(_CollectiveKernel):
             unbacked_bindings=unbacked_bindings,
         )
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce_")
+
+    def fill_non_provided_args(
+        self, args: Sequence[Any], kwargs: dict[str, Any]
+    ) -> Sequence[Any]:
+        return _drop_shim_config(super().fill_non_provided_args(args, kwargs))
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
