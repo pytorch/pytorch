@@ -40,15 +40,15 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch._quantization_formats import (
+from torch._refs import _broadcast_shapes, _maybe_broadcast
+from torch.fx.experimental import _config as exp_config
+from torch.utils import _pytree as pytree
+from torch.utils._quantize_tensor_validation import (
     _get_quant_format,
     _quantize_tensor_dual_validate_inputs,
     _quantize_tensor_validate_inputs,
     _TensorQuantFormat,
 )
-from torch._refs import _broadcast_shapes, _maybe_broadcast
-from torch.fx.experimental import _config as exp_config
-from torch.utils import _pytree as pytree
 
 
 _T = TypeVar("_T")
