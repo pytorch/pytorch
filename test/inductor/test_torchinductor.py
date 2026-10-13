@@ -22952,6 +22952,59 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        @unittest.skipIf(
+            not (
+                torch.cuda.is_available()
+                and torch.version.hip is None
+                and torch.cuda.get_device_capability()[0] == 10
+            ),
+            "exp_f32x2 needs sm_10x",
+        )
+        def test_exp_f32x2_matches_libdevice_exp(self):
+            import torch._inductor.codegen.triton as triton_codegen
+
+            def fn(x):
+                return torch.exp(x)
+
+            x = torch.randn(1024, device=GPU_TYPE)
+            _, code = run_and_get_code(torch.compile(fn), x)
+            self.assertIn("triton_helpers.exp_f32x2(", " ".join(code))
+            with config.patch({"eager_numerics.disable_ftz": True}):
+                torch._dynamo.reset()
+                _, code = run_and_get_code(torch.compile(fn), x)
+                self.assertNotIn("exp_f32x2", " ".join(code))
+
+            # Bitwise equal to libdevice.exp for every float32 bit pattern.
+            chunk = 1 << 26
+            bits = torch.arange(chunk, device=GPU_TYPE, dtype=torch.int64)
+            torch._dynamo.reset()
+            paired = torch.compile(fn, dynamic=False)
+            reference = torch.compile(lambda x: torch.exp(x), dynamic=False)
+            # Compile the reference without caches: its graph equals `paired`'s,
+            # and the cache key does not see the patched codegen choice.
+            with (
+                unittest.mock.patch.object(
+                    triton_codegen, "_use_exp_f32x2", lambda: False
+                ),
+                config.patch(force_disable_caches=True),
+            ):
+                _, code = run_and_get_code(
+                    reference, bits.to(torch.int32).view(torch.float32)
+                )
+            self.assertNotIn("exp_f32x2", " ".join(code))
+            for start in range(0, 1 << 32, chunk):
+                x = (bits + start).to(torch.int32).view(torch.float32)
+                self.assertTrue(
+                    torch.equal(
+                        paired(x).view(torch.int32), reference(x).view(torch.int32)
+                    )
+                )
+
+            # Scalars and float64 fall back to libdevice.exp.
+            for inp in (torch.tensor(0.5, device=GPU_TYPE), x[:1].double()):
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn)(inp), fn(inp))
+
         def test_cross_entropy_backward_has_no_class_reduction(self):
             # nll_loss_backward's one-hot gradient is summed over the classes by
             # log_softmax_backward; that sum must fold to the selected term.

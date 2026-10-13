@@ -1291,6 +1291,19 @@ def get_dtype_handler() -> DtypePropagationOpsHandler:
     return DtypePropagationOpsHandler()
 
 
+def _use_exp_f32x2() -> bool:
+    """True if triton_helpers.exp_f32x2 can replace libdevice.exp: it relies on
+    the packed f32x2 instructions of data-center Blackwell (sm_10x) and, like
+    libdevice.exp under Triton's default, flushes denormals."""
+    device = V.graph.get_current_device_or_throw()
+    return (
+        device.type == "cuda"
+        and torch.version.hip is None
+        and not config.eager_numerics.disable_ftz
+        and torch.cuda.get_device_capability(device)[0] == 10
+    )
+
+
 def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
     """
     Codegen helper to upcast arguments to float32, depending on the config and dtype.
@@ -1582,8 +1595,9 @@ class TritonOverrides(OpOverrides):
         """
         if config.use_fast_math:
             return f"tl_math.exp({x})"
-        else:
-            return f"libdevice.exp({x})"
+        if _use_exp_f32x2():
+            return f"triton_helpers.exp_f32x2({x})"
+        return f"libdevice.exp({x})"
 
     @staticmethod
     @maybe_upcast_float32()
