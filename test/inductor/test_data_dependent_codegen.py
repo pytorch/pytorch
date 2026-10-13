@@ -4,11 +4,18 @@ from unittest import skipUnless
 
 import torch
 from torch._inductor import config, ir
+from torch._inductor.codecache import PyCodeCache
 from torch._inductor.debug import DebugContext
 from torch._inductor.graph import GraphLowering
 from torch._inductor.scheduler import FusedSchedulerNode
 from torch._inductor.virtualized import ops, V
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    TEST_CUDA,
+    TestCase,
+)
 
 
 @skipUnless(TEST_CUDA, "CUDA is required")
@@ -182,6 +189,106 @@ class TestDataDependentCodegen(TestCase):
             self.assertIn("for r0_offset in tl.range(", wrapper.value)
             self.assertIn("tl.sum(", wrapper.value)
             self.assertNotIn("tl.load(out_ptr", wrapper.value)
+
+
+class TestDataDependentNestedCodegen(TestCase):
+    # The larger input spans multiple J and K blocks, with empty rows and depths.
+    @parametrize(
+        "row_counts,depth_counts",
+        [
+            ([2, 0, 1], [1, 0, 2]),
+            ([35, 0, 3], [65] + [0] * 15 + [3] + [0] * 17 + [2, 1, 0, 66]),
+        ],
+    )
+    def test_nested_csf_add_bias(self, device, row_counts, depth_counts):
+        device = torch.device(device)
+        row_lengths = torch.tensor(row_counts, device=device)
+        depth_lengths = torch.tensor(depth_counts, device=device)
+        offsets = torch.cat([row_lengths.new_zeros(1), row_lengths.cumsum(0)])
+        depths = torch.cat([depth_lengths.new_zeros(1), depth_lengths.cumsum(0)])
+        values = torch.arange(
+            1, sum(depth_counts) + 1, dtype=torch.float32, device=device
+        )
+        bias = torch.tensor([10, 20, 30], dtype=values.dtype, device=device)
+        j_range = ir.DataDependentRange("j")
+        k_range = ir.DataDependentRange("k")
+
+        def reference():
+            result = torch.empty_like(values)
+            for b in range(3):
+                for j in range(int(row_lengths[b])):
+                    parent = int(offsets[b]) + j
+                    for k in range(int(depth_lengths[parent])):
+                        address = int(depths[parent]) + k
+                        result[address] = values[address] + bias[b]
+            return result
+
+        def output_indexer(index):
+            b, j, k = index
+            parent = ops.load("offsets", b) + ops.index_expr(j, torch.int64)
+            parent = ops.indirect_indexing(
+                parent, depth_lengths.numel(), wrap_neg=False
+            )
+            return ops.load("depths", parent) + ops.index_expr(k, torch.int64)
+
+        def inner_fn(index):
+            b, j, k = index
+            ops.register_datadep_range(ops.load("row_lengths", b), j_range)
+            parent = ops.load("offsets", b) + ops.index_expr(j, torch.int64)
+            parent = ops.indirect_indexing(
+                parent, depth_lengths.numel(), wrap_neg=False
+            )
+            ops.register_datadep_range(ops.load("depth_lengths", parent), k_range)
+            address = ops.indirect_indexing(
+                output_indexer(index), values.numel(), wrap_neg=False
+            )
+            return ops.load("values", address) + ops.load("bias", b)
+
+        inputs = {
+            "offsets": offsets,
+            "depths": depths,
+            "row_lengths": row_lengths,
+            "depth_lengths": depth_lengths,
+            "values": values,
+            "bias": bias,
+        }
+        graph = GraphLowering(torch.fx.symbolic_trace(lambda: 0))
+        with (
+            V.set_graph_handler(graph),
+            DebugContext(),
+            config.patch(benchmark_fusion=False),
+        ):
+            for name, tensor in inputs.items():
+                buffer = ir.InputBuffer(
+                    name=name,
+                    layout=ir.FixedLayout(device, tensor.dtype, list(tensor.shape)),
+                )
+                graph.graph_inputs[name] = ir.TensorBox.create(buffer)
+                graph.graph_inputs_original[name] = buffer
+                graph.graph_input_names.append(name)
+
+            result = ir.Pointwise.create(
+                device=device,
+                dtype=values.dtype,
+                inner_fn=inner_fn,
+                ranges=[3, j_range, k_range],
+                flat_size=[values.numel()],
+                output_indexer=output_indexer,
+            )
+            result.realize()
+            result.data.data.decide_layout()
+            graph.graph_outputs = [result]
+            wrapper, _ = graph.codegen()
+
+        module = PyCodeCache.load(wrapper.value)
+        (actual,) = module.call([inputs[name] for name in graph.graph_input_names])
+        torch.cuda.synchronize()
+        self.assertEqual(actual, reference())
+
+
+instantiate_device_type_tests(
+    TestDataDependentNestedCodegen, globals(), only_for="cuda"
+)
 
 
 if __name__ == "__main__":

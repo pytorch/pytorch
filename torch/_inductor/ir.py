@@ -1500,7 +1500,11 @@ class Reduction(Loops):
             self.reduction_type,
             self.inner_fn(vars, reduction_vars),
         )
-        ops.store_reduction(output_name or "unnamed", indexer(vars), value)
+        addr = (self.output_indexer or indexer)(vars)
+        if isinstance(addr, OpsValue):
+            sizes = cast(Sequence[_IntLike], self.flat_size)
+            addr = ops.indirect_indexing(addr, sympy_product(sizes), wrap_neg=False)
+        ops.store_reduction(output_name or "unnamed", addr, value)
 
     def index_length(self) -> int:
         return len(self.ranges) + len(self.reduction_ranges)

@@ -3519,7 +3519,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._named_constants: dict[str, str] = {}
         self._named_constant_defs: IndentedBuffer = IndentedBuffer()
         self.outside_loop_vars = OrderedSet[Any]()
-        self.datadep_ranges: dict[sympy.Symbol, CSEVariable] = {}
+        self.datadep_range_code: dict[sympy.Expr, IndentedBuffer] = {}
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.block_ptr_to_buffer = dict[str, str]()
@@ -4059,26 +4059,32 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.codegen_reduction_indices(self.body)
 
     def register_datadep_range(self, value, symbol):
-        if symbol in self.datadep_ranges:
+        if symbol in self.datadep_range_code:
             return
-        self.datadep_ranges[symbol] = value
         tree = next(tree for tree in self.range_trees if tree.numel == symbol)
 
-        # The bound is computed before entering its loop:
+        # Each bound is computed just before entering its own loop:
         #
-        #     length = load(lengths + b)
-        #     for jstart in range(length):
-        #         compute(b, jstart)
+        #     j_length = load(row_lengths + b)
+        #     for j in range(j_length):
+        #         k_length = load(depth_lengths + offsets[b] + j)
+        #         for k in range(k_length):
+        #             compute(b, j, k)
         #
-        # Keep each B lane's bound for masking inside the loop.
-        self.body.splice(self.indexing_code)
-        self.body.splice(self.loads)
-        self.body.splice(self.compute)
+        # Keep the calculations preceding each marker until codegen_body emits
+        # that loop. The K bound can then use J's current index and mask.
+        code = IndentedBuffer()
+        self.datadep_range_code[symbol] = code
+        code.splice(self.indexing_code)
+        code.splice(self.loads)
+        code.splice(self.compute)
         self.indexing_code.clear()
         self.loads.clear()
         self.compute.clear()
         # Reduction block constants are already declared at kernel initialization.
-        self.body.writeline(f"{tree.prefix}numel = {value}")
+        # The numel argument is a scalar placeholder. A nested bound can be a
+        # tensor over its parent lanes, so give it a separate local name.
+        code.writeline(f"{tree.prefix}bound = {value}")
         self.outside_loop_vars.add(value)
 
     def need_numel_args(self):
@@ -7456,6 +7462,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         elif len(loop_trees) > 0:
             # Write the loop headers.
+            # An inner loop ignores masked lanes of every enclosing loop.
+            parent_masks = [
+                parent.mask_name()
+                for parent in self.range_trees
+                if parent.grid_dim is not None
+            ]
             for level, tree in enumerate(loop_trees):
                 with self.body.indent(offset=level):
                     prefix = tree.prefix
@@ -7464,12 +7476,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
                     )
                     if tree.is_datadep:
-                        parent_masks = " & ".join(
-                            parent.mask_name()
-                            for parent in self.range_trees
-                            if parent.grid_dim is not None
-                        )
-                        loop_end = f"tl.max(tl.where({parent_masks}, {prefix}numel, 0))"
+                        self.body.splice(self.datadep_range_code[tree.numel])
+                        masks = " & ".join(parent_masks)
+                        loop_end = f"tl.max(tl.where({masks}, {prefix}bound, 0))"
                     # Conditionalize pipelining on HIP for Triton due to
                     # reports of numerical inaccuracies on older Triton
                     if torch.version.hip and get_triton_version() > (3, 2):
@@ -7481,6 +7490,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     )
                 with self.body.indent(offset=level + 1):
                     self.iteration_ranges_codegen_header(tree, self.body)
+                parent_masks.append(tree.mask_name())
 
             # The innermost loop performs the reduction.
             with self.body.indent(offset=len(loop_trees)):
@@ -8774,7 +8784,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             code.writeline(self.create_constant_mask(entry))
         elif not (x == "x" and self.mix_order_reduction):
             # mix order reduction should generate xmask inside the loop
-            code.writeline(f"{entry.mask_name()} = {entry.name} < {x}numel")
+            bound = f"{x}bound" if entry.is_datadep else f"{x}numel"
+            code.writeline(f"{entry.mask_name()} = {entry.name} < {bound}")
 
 
 class FusedUserDefinedTritonKernel(TritonKernel):
