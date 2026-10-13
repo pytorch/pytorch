@@ -7682,6 +7682,39 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_sys_recursionlimit_guarded(self):
+        def fn(x):
+            return x + sys.getrecursionlimit()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(1)
+        old = sys.getrecursionlimit()
+        try:
+            self.assertEqual(opt_fn(x), fn(x))
+            sys.setrecursionlimit(old + 7)
+            self.assertEqual(opt_fn(x), x + old + 7)
+            self.assertEqual(cnt.frame_count, 2)
+        finally:
+            sys.setrecursionlimit(old)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires Python 3.11+")
+    def test_sys_get_int_max_str_digits_guarded(self):
+        def fn(x):
+            return x + sys.get_int_max_str_digits()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(1)
+        old = sys.get_int_max_str_digits()
+        try:
+            self.assertEqual(opt_fn(x), fn(x))
+            sys.set_int_max_str_digits(old + 7)
+            self.assertEqual(opt_fn(x), x + old + 7)
+            self.assertEqual(cnt.frame_count, 2)
+        finally:
+            sys.set_int_max_str_digits(old)
+
     def test_keyword(self):
         def fn(x, word):
             if keyword.iskeyword(word):

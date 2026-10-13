@@ -13633,6 +13633,44 @@ def ___make_guard_fn():
         self.assertEqual(fn_out, compiled_out)
         self.assertFalse(fn_out)
 
+    def test_fn_hasattr_guarded(self):
+        def bar(x):
+            return x
+
+        def fn(x):
+            if hasattr(bar, "flag"):
+                return x + 1
+            return x - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(3)
+        self.assertEqual(opt_fn(x), fn(x))
+        bar.flag = True
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(cnt.frame_count, 2)
+        del bar.flag
+        self.assertEqual(opt_fn(x), x - 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_torch_fn_hasattr_guarded(self):
+        def fn(x):
+            if hasattr(torch.nn.functional.relu, "_test_flag"):
+                return x + 1
+            return x - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(3)
+        self.assertEqual(opt_fn(x), x - 1)
+        torch.nn.functional.relu._test_flag = True
+        try:
+            self.assertEqual(opt_fn(x), x + 1)
+        finally:
+            del torch.nn.functional.relu._test_flag
+        self.assertEqual(opt_fn(x), x - 1)
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_constant_hasattr_returns_bool(self):
         """Test that hasattr on constant values properly returns boolean ConstantVariable."""
 
@@ -16360,6 +16398,20 @@ fn
 
         with self.assertRaisesRegex(RuntimeError, "specialized"):
             fn(x, y)
+
+    @torch.fx.experimental._config.patch(dynamic_storage_offset=True)
+    def test_dynamic_storage_offset_no_zero_one_recompile(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def fn(x):
+            return x * 2
+
+        buf = torch.randn(64)
+        for offset in (5, 0, 1, 7):
+            x = buf[offset : offset + 8]
+            self.assertEqual(fn(x), x * 2)
+        self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_infer_unbacked_size_gt_zero(self):
