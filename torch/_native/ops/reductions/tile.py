@@ -29,15 +29,21 @@ def align_bytes(N: int, itemsize: int) -> int:
     return vec_size(N, itemsize) * itemsize
 
 
-def _decode_offset(linear, divs, strides, npairs):
-    # Mixed-radix flat offset with only pair count compiled. linear < 2**31 keeps
-    # div/mod Int32; stride products use Int64. Callers omit empty decodes.
-    rem = Int32(linear)
+def _decode_offset(
+    linear, divs, strides, npairs, native_div: cutlass.Constexpr = False
+):
+    # Mixed-radix flat offset with only pair count compiled.
+    rem = linear
+    if npairs == 0:
+        return cutlass.Int64(0)
     if npairs == 1:
         return cutlass.Int64(rem) * strides[0]
     off = cutlass.Int64(0)
     for j in range(npairs - 1):
-        q, r = divmod(rem, divs[j])
+        if const_expr(native_div):
+            q, r = rem // divs[j], rem % divs[j]
+        else:
+            q, r = divmod(rem, divs[j])
         off = off + cutlass.Int64(r) * strides[j]
         rem = q
     return off + cutlass.Int64(rem) * strides[npairs - 1]
@@ -65,7 +71,7 @@ class TileMap:
         warp_major: bool = False,
         vec: int | None = None,
         exact: bool | None = None,
-    ):
+    ) -> None:
         # Cross-warp butterflies require a power-of-two warp count or drop partials.
         nw = threads_per_row // WARP
         if threads_per_row != 1 and (threads_per_row % WARP or nw & (nw - 1)):
@@ -96,7 +102,7 @@ class TileMap:
         self.wide_ok = N % self.vec == 0
 
     @property
-    def sig(self):
+    def sig(self) -> tuple[Any, ...]:
         return (
             self.N,
             self.vec,
@@ -111,7 +117,7 @@ class TileMap:
         """Alignment to declare for THIS tile (element width when the wide load is off)."""
         return self.vec * itemsize if self.wide_ok else itemsize
 
-    def strides(self):
+    def strides(self) -> tuple[int, int, int]:
         """(lane, warp, load) strides; warp_major swaps the warp/load assignment."""
         if self.threads_per_row == 1:
             return (0, 0, self.vec)
@@ -146,6 +152,7 @@ def fold_decoded(
     in_base,
     chunk_base,
     gidx: cutlass.Constexpr = "r",
+    native_div: cutlass.Constexpr = False,
 ):
     """Grid-stride one output using mixed-radix addressing.
 
@@ -161,28 +168,45 @@ def fold_decoded(
         if const_expr(gidx == "flat"):
             acc = reduce_fn(
                 acc,
-                acc_dt(mX[obase + _decode_offset(base_r, rdivs, rstrides, npairs)]),
-                Int32(obase + _decode_offset(base_r, rdivs, rstrides, npairs)),
+                acc_dt(
+                    mX[
+                        obase
+                        + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
+                    ]
+                ),
+                Int32(
+                    obase + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
+                ),
                 True,
             )
         elif const_expr(gidx == "chunk"):
             acc = reduce_fn(
                 acc,
-                acc_dt(mX[obase + _decode_offset(base_r, rdivs, rstrides, npairs)]),
+                acc_dt(
+                    mX[
+                        obase
+                        + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
+                    ]
+                ),
                 chunk_base + base_r,
                 True,
             )
         else:
             acc = reduce_fn(
                 acc,
-                acc_dt(mX[obase + _decode_offset(base_r, rdivs, rstrides, npairs)]),
+                acc_dt(
+                    mX[
+                        obase
+                        + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
+                    ]
+                ),
                 base_r,
                 True,
             )
         base_r = base_r + threads_per_block
     # Invalid lanes read in_base because overhanging chunks may put obase out of range.
     valid = base_r < rb
-    off = obase + _decode_offset(base_r, rdivs, rstrides, npairs)
+    off = obase + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
     off_s = off if valid else in_base
     val = acc_dt(mX[off_s])
     if const_expr(gidx == "flat"):
@@ -524,13 +548,17 @@ class TileReduce:
         pc=True,
         npairs_red=0,
         npairs_kept=0,
+        wide_count=False,
+        wide_output=False,
+        wide_red=False,
+        wide_kept=False,
         gidx_from="r",
         flat_tail=False,
         ragged_chunk=False,
         order="linear",
         # Duck-typed because its driver-owned type would invert the dependency.
         itree: Any = None,
-    ):
+    ) -> None:
         if axis not in ("row", "col", "general"):
             raise ValueError(f"axis must be 'row', 'col' or 'general', got {axis!r}")
         if order not in ("linear", "inner_tree"):
@@ -592,6 +620,10 @@ class TileReduce:
         # Compile-time fold_decoded policy.
         self.npairs_red = npairs_red
         self.npairs_kept = npairs_kept
+        self.wide_count = wide_count
+        self.wide_output = wide_output
+        self.wide_red = wide_red
+        self.wide_kept = wide_kept
         self.gidx_from = gidx_from
         self.flat_tail = flat_tail
         self.ragged_chunk = ragged_chunk
@@ -629,14 +661,14 @@ class TileReduce:
         self.tiler = (threads_per_block, N)  # TMA box: threads_per_block whole rows
 
     @property
-    def tilemap(self):
+    def tilemap(self) -> TileMap:
         # Only linear row folds own one tile; inner-tree plans own one per batch.
         if self.tm is None:
             raise AssertionError(f"no tile on the {self.axis} axis")
         return self.tm
 
     @property
-    def cache_sig(self):
+    def cache_sig(self) -> tuple[Any, ...]:
         # Only TMA keys N because its box is static; runtime paths share a vector class.
         return (
             self.axis,
@@ -653,6 +685,10 @@ class TileReduce:
             self.N if self.use_tma else 0,
             self.npairs_red,
             self.npairs_kept,
+            self.wide_count,
+            self.wide_output,
+            self.wide_red,
+            self.wide_kept,
             self.gidx_from,
             self.flat_tail,
             self.ragged_chunk,
@@ -1004,9 +1040,11 @@ class TileReduce:
         else:
             tma_atom = None
         if const_expr(self.axis == "general"):
-            # Read one-block-per-output grid live to serve any output count.
-            gx = mOuts[0].shape[0]
-            gy = Int32(1)
+            if const_expr(self.wide_output):
+                gx, gy = q, npar
+            else:
+                gx = mOuts[0].shape[0]
+                gy = Int32(1)
         elif const_expr(self.axis == "row"):
             # Split inner-tree writes (row, batch) partials, so count outputs, not input rows.
             nout = (
@@ -1022,10 +1060,22 @@ class TileReduce:
             gy = Int32(1) if const_expr(self.combine) else npar
         # Build V2 divisors in the MLIR context so .divisor crosses the kernel boundary.
         rdivs = (
-            [cute.FastDivmodDivisorV2(e) for e in rexts] if rexts is not None else None
+            rexts
+            if const_expr(self.wide_count or self.wide_red)
+            else (
+                [cute.FastDivmodDivisorV2(e) for e in rexts]
+                if rexts is not None
+                else None
+            )
         )
         kdivs = (
-            [cute.FastDivmodDivisorV2(e) for e in kexts] if kexts is not None else None
+            kexts
+            if const_expr(self.wide_output or self.wide_kept)
+            else (
+                [cute.FastDivmodDivisorV2(e) for e in kexts]
+                if kexts is not None
+                else None
+            )
         )
         self.kernel(
             mIns,
@@ -1070,6 +1120,7 @@ class TileReduce:
         # one extra Int32 slowed column fold 1.27x (8.2 to 10.4us at (65536, 256)).
         tx, _, _ = cute.arch.thread_idx()
         bx, by, _ = cute.arch.block_idx()
+        grid_x = cute.arch.grid_dim()[0] if const_expr(self.wide_output) else Int32(0)
         trait = self.trait
         chunk_base = Int32(0)  # nonzero only under ragged_chunk, for gidx_from "chunk"
         batch_idx = None  # split shape only: which batch of the row this block folds
@@ -1110,9 +1161,15 @@ class TileReduce:
                 alive = raw < Int32(mOuts[0].shape[0])
         elif const_expr(self.axis == "general"):
             # One block per output, folded by every thread.
-            raw = Int32(bx)
+            raw = (
+                Int64(bx) + Int64(by) * Int64(grid_x)
+                if const_expr(self.wide_output)
+                else Int32(bx)
+            )
             lane = Int32(tx)
-            alive = True
+            alive = (
+                raw < Int64(mOuts[0].shape[0]) if const_expr(self.wide_output) else True
+            )
         elif const_expr(self.axis == "row"):
             raw = Int32(bx) * const_expr(self.rows_per_block) + Int32(
                 tx // const_expr(self.threads_per_row)
@@ -1124,7 +1181,15 @@ class TileReduce:
             lane = Int32(0)  # the col mapping gives every output group its own thread
             alive = raw < nchunks
         # Clamp dead threads to unit 0 and discard them at store, avoiding predicated loads.
-        unit = raw if alive else Int32(0)
+        unit = (
+            raw
+            if alive
+            else (
+                Int64(0)
+                if const_expr(self.axis == "general" and self.wide_output)
+                else Int32(0)
+            )
+        )
 
         if const_expr(self.order == "inner_tree"):
             if const_expr(self.itree.shape == "combine"):
@@ -1142,7 +1207,11 @@ class TileReduce:
             obase = in_base
             if const_expr(self.npairs_kept > 0):
                 obase = in_base + _decode_offset(
-                    unit, kdivs, kstrides, const_expr(self.npairs_kept)
+                    unit,
+                    kdivs,
+                    kstrides,
+                    const_expr(self.npairs_kept),
+                    const_expr(self.wide_output or self.wide_kept),
                 )
             rb = nchunks
             if const_expr(self.flat_tail):
@@ -1152,11 +1221,15 @@ class TileReduce:
                 left = left if left < c64 else c64  # noqa: FURB136 -- no DSL builtin min
                 zero = cutlass.Int64(0)
                 left = left if left > zero else zero  # noqa: FURB136 -- no builtin max
-                rb = cutlass.Int32(left)
+                rb = (
+                    cutlass.Int64(left)
+                    if const_expr(self.wide_count)
+                    else cutlass.Int32(left)
+                )
             elif const_expr(self.ragged_chunk):
                 # Clamp each short final chunk. The fastest kept pair gives its step index
                 # for either row or column splitting.
-                _, cc = divmod(Int32(unit), kdivs[0])
+                _, cc = divmod(unit, kdivs[0])
                 c = cutlass.Int64(cc)
                 cnt = cutlass.Int64(nchunks)
                 chunk_base = Int32(c * cnt)  # this chunk's first step, for gidx
@@ -1165,7 +1238,11 @@ class TileReduce:
                 left = left if left < c64 else c64  # noqa: FURB136 -- no builtin min
                 zero = cutlass.Int64(0)
                 left = left if left > zero else zero  # noqa: FURB136 -- no builtin max
-                rb = cutlass.Int32(left)
+                rb = (
+                    cutlass.Int64(left)
+                    if const_expr(self.wide_count)
+                    else cutlass.Int32(left)
+                )
             if const_expr(self.combine):
                 accs = (
                     fold_partials_run(
@@ -1174,7 +1251,7 @@ class TileReduce:
                         obase,
                         rb,
                         const_expr(self.threads_per_block),
-                        lane,
+                        Int64(lane) if const_expr(self.wide_count) else lane,
                         in_base,
                     ),
                 )
@@ -1189,10 +1266,11 @@ class TileReduce:
                         const_expr(self.npairs_red),
                         rb,
                         const_expr(self.threads_per_block),
-                        lane,
+                        Int64(lane) if const_expr(self.wide_count) else lane,
                         in_base,
                         chunk_base,
                         const_expr(self.gidx_from),
+                        const_expr(self.wide_count or self.wide_red),
                     ),
                 )
             accs = (merge_lanes(trait, accs[0], const_expr(self.threads_per_row)),)
