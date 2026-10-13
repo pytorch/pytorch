@@ -16,5 +16,4 @@ C10_HOST_DEVICE inline bool cublas_grouped_scale_uses_pointer_array(
   return layout != CublasGroupedScaleLayout::Scalar;
 }
 
-
 } // namespace at::native

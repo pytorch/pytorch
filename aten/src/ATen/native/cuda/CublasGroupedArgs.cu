@@ -18,8 +18,6 @@ namespace at::native {
 
 namespace {
 
-constexpr int kMaxGroupedGemmGroups = 1024;
-
 template <typename IndexType>
 __global__ void populate_cublas_grouped_args_kernel(
     const int32_t* __restrict__ offs,
@@ -301,9 +299,11 @@ cublasGroupedArgs::cublasGroupedArgs(
   const int64_t base_scale_a = scale_a ? reinterpret_cast<int64_t>(scale_a->data_ptr()) : 0;
   const int64_t base_scale_b = scale_b ? reinterpret_cast<int64_t>(scale_b->data_ptr()) : 0;
   const int64_t scale_a_stride_bytes = mata_needs_ptr
-      ? scale_a->stride(0) * scale_a->element_size() : 0;
+      ? scale_a->stride(0) * scale_a->element_size()
+      : 0;
   const int64_t scale_b_stride_bytes = matb_needs_ptr
-      ? scale_b->stride(0) * scale_b->element_size() : 0;
+      ? scale_b->stride(0) * scale_b->element_size()
+      : 0;
 
   // For per-group scales, point to the device-side pointer arrays
   // instead of the raw data pointer

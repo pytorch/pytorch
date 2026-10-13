@@ -2,7 +2,7 @@
 
 #include <ATen/BlasBackend.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/native/cuda/CublasGroupedScaleUtils.cuh>
+#include <ATen/native/cuda/CublasGroupedScaleUtils.h>
 #include <optional>
 
 #if !defined(USE_ROCM)
