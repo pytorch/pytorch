@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_CUDA,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -475,6 +476,13 @@ class ProcessGroupNCCL2DictConfigTest(_ProcessGroupNCCL2OptionsTest):
         dist.all_reduce(tensor, config={"max_ctas": None, "vendor_options": ()})
         self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
 
+    # Remove once ncclCollConfig is enabled on ROCm. NCCL2_HAS_COLL_CONFIG
+    # still excludes USE_ROCM; that enablement is a separate change.
+    @unittest.skipIf(
+        TEST_WITH_ROCM,
+        "per-collective ncclCollConfig is compiled out on ROCm; "
+        "enablement is tracked separately",
+    )
     @requires_nccl()
     @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
     @skip_if_lt_x_gpu(2)
