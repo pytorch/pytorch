@@ -16,43 +16,67 @@ from torch.nn.functional import scaled_mm, ScalingType, SwizzleType
 _STAT_CHOICES = ("median", "mean", "min", "max", "p10", "p90")
 _BENCH_SETTLE_SECONDS = 0.1
 
-# (num_experts, hidden_size, expert intermediate size, top_k), from each
-# model's Hugging Face config.json. Each expert computes
-# (silu(x @ W_gate) * (x @ W_up)) @ W_down; as in torchtitan's GroupedLinear
-# (torchtitan/models/common/linear.py), W_gate and W_up are fused, giving one
-# up GEMM with N = 2 * intermediate, K = hidden and one down GEMM with
-# N = hidden, K = intermediate, over M = tokens * top_k routed rows.
-_MOE_MODELS = {
-    "Mixtral-8x7B": (8, 4096, 14336, 2),
-    "Llama-4-Scout": (16, 5120, 8192, 1),
-    "DeepSeek-V3": (256, 7168, 2048, 8),
-    "gpt-oss-120b": (128, 2880, 2880, 4),
-    "Qwen3-235B-A22B": (128, 4096, 1536, 8),
+# DeepSeek-V3 shapes (hidden 7168, expert intermediate 2048, 256 experts): G=1
+# dense and G=256 routed, from decode to large prefill.
+_DEFAULT_GMNK = {
+    "2d_3d": [
+        [1, 4, 4096, 7168],
+        [256, 1024, 4096, 7168],
+        [1, 128, 4096, 7168],
+        [256, 32768, 4096, 7168],
+        [1, 1024, 4096, 7168],
+        [256, 262144, 4096, 7168],
+        [1, 4, 2048, 7168],
+        [256, 1024, 2048, 7168],
+        [1, 128, 2048, 7168],
+        [256, 32768, 2048, 7168],
+        [1, 1024, 2048, 7168],
+        [256, 262144, 2048, 7168],
+        [1, 4, 7168, 2048],
+        [256, 1024, 7168, 2048],
+        [1, 128, 7168, 2048],
+        [256, 32768, 7168, 2048],
+        [1, 1024, 7168, 2048],
+        [256, 262144, 7168, 2048],
+        [1, 2048, 4096, 7168],
+        [1, 4096, 4096, 7168],
+        [1, 8192, 4096, 7168],
+    ],
+    "2d_2d": [
+        [1, 7168, 4096, 128],
+        [1, 7168, 4096, 1024],
+        [1, 7168, 4096, 2048],
+        [1, 7168, 4096, 4096],
+        [1, 7168, 4096, 8192],
+        [1, 7168, 2048, 128],
+        [1, 7168, 2048, 1024],
+        [1, 2048, 7168, 128],
+        [1, 2048, 7168, 1024],
+        [256, 7168, 2048, 32768],
+        [256, 7168, 2048, 262144],
+        [256, 2048, 7168, 32768],
+        [256, 2048, 7168, 262144],
+    ],
+    "3d_3d": [
+        [1, 2048, 2048, 7168],
+        [1, 8192, 2048, 7168],
+        [1, 32768, 2048, 7168],
+        [1, 131072, 2048, 7168],
+        [256, 2048, 2048, 7168],
+        [256, 8192, 2048, 7168],
+        [256, 32768, 2048, 7168],
+        [256, 131072, 2048, 7168],
+        [1, 2048, 7168, 2048],
+        [1, 8192, 7168, 2048],
+        [1, 32768, 7168, 2048],
+        [1, 131072, 7168, 2048],
+        [256, 2048, 7168, 2048],
+        [256, 8192, 7168, 2048],
+        [256, 32768, 7168, 2048],
+        [256, 131072, 7168, 2048],
+    ],
 }
-_MOE_TOKENS = (256, 16384)
-
-
-def _moe_model_gmnk(row_align):
-    # Each expert's routed rows are padded to row_align, so no group is empty.
-    gmnk = []
-    for experts, hidden, intermediate, top_k in _MOE_MODELS.values():
-        # DeepSeek blockwise scaling quantizes both in 128-blocks, which drops
-        # gpt-oss-120b's 2880.
-        if hidden % 128 or intermediate % 128:
-            continue
-        for tokens in _MOE_TOKENS:
-            rows_per_expert = round_up(-(-tokens * top_k // experts), row_align)
-            m = experts * rows_per_expert
-            gmnk.append([experts, m, 2 * intermediate, hidden])
-            gmnk.append([experts, m, hidden, intermediate])
-    return gmnk
-
-
-def _default_gmnk(layout, lhs_block):
-    # Splitting K, or a 128x128 A recipe, needs 128-aligned group starts.
-    if layout == "2d_2d":
-        return [[g, n, k, m] for g, m, n, k in _moe_model_gmnk(128)]
-    return _moe_model_gmnk(128 if lhs_block == 128 else 32)
+_DEFAULT_GMNK["3d_2d"] = _DEFAULT_GMNK["3d_3d"]
 
 
 _MIN_REF_GROUP_M = 128
@@ -777,7 +801,7 @@ def benchmark_deepseek_scaled_grouped_mm(
     if grouping not in ("balanced", "random"):
         raise ValueError(f"grouping must be 'balanced' or 'random', got {grouping}")
     if gmnk is None:
-        gmnk = _default_gmnk(layout, lhs_block)
+        gmnk = _DEFAULT_GMNK[layout]
 
     if not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] != 9:
         raise SystemExit("This benchmark requires a Hopper (SM90) GPU.")
@@ -939,7 +963,7 @@ if __name__ == "__main__":
         default=None,
         help=(
             "Problem sizes as G,M,N,K (space-separated, M = total rows across the group). "
-            "Defaults to MoE model shapes."
+            "Defaults to DeepSeek-V3 shapes for the chosen layout."
         ),
     )
     parser.add_argument("--seed", type=int, default=0)
