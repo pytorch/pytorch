@@ -13,11 +13,6 @@ from torch._vendor.quack.cute_dsl_utils import torch2cute_dtype_map
 from torch._vendor.quack.epilogue.ops import assume_stride_divisibility, ColVecSelect
 
 
-_CUTE_TO_TORCH_DTYPE = {
-    cute_dtype: torch_dtype for torch_dtype, cute_dtype in torch2cute_dtype_map.items()
-}
-
-
 class _ExactColVecSelectParams(NamedTuple):
     tensor: object
     logical_n: object
@@ -35,11 +30,10 @@ class ExactColVecSelect(ColVecSelect):
     def __init__(self, name, idx_op, *, output_dtype):
         super().__init__(name, idx_op)
         self.output_dtype = output_dtype
-        if output_dtype not in _CUTE_TO_TORCH_DTYPE:
+        if output_dtype not in torch2cute_dtype_map:
             raise ValueError(
                 f"ColVecSelect {name!r}: unsupported output dtype {output_dtype}"
             )
-        self._sink_dtype = _CUTE_TO_TORCH_DTYPE[output_dtype]
 
     def config_key(self):
         return (self.idx_op.cache_key(), self.output_dtype)
@@ -49,7 +43,7 @@ class ExactColVecSelect(ColVecSelect):
         return {self.name: _ExactColVecSelectParams(tensor, gemm.caller_n)}
 
     def sink_alloc_dtype(self):
-        return self._sink_dtype
+        return self.output_dtype
 
     def host_validate(
         self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args, **_
@@ -77,7 +71,7 @@ class ExactColVecSelect(ColVecSelect):
             )
         if value.stride(-1) != 1:
             raise ValueError(f"sink '{self.name}' must have unit innermost stride")
-        if torch2cute_dtype_map.get(value.dtype) != self.output_dtype:
+        if value.dtype != self.output_dtype:
             raise ValueError(
                 f"sink '{self.name}' must have dtype {self.output_dtype}, got {value.dtype}"
             )
