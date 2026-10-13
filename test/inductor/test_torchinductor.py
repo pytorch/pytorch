@@ -22952,6 +22952,20 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        def test_row_broadcast_pointwise_uses_2d_tiling(self):
+            # Per-row operands of a pointwise kernel over long rows should be
+            # loaded once per block row ([rows, cols] tiling) rather than
+            # gathered per element from a flattened index.
+            def fn(x, label, col):
+                return torch.where(col == label, x, 0)
+
+            x = torch.randn(64, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+            label = torch.randint(0, 4096, (64, 1), device=GPU_TYPE)
+            col = torch.arange(4096, device=GPU_TYPE)
+            result, code = run_and_get_code(torch.compile(fn), x, label, col)
+            self.assertEqual(result, fn(x, label, col))
+            self.assertIn("ynumel", " ".join(code))
+
         def test_small_broadcast_read_does_not_split_inner_reduction(self):
             # The per-group mask is a broadcast (outer-strided) read, but it is
             # much smaller than the contiguous rows being reduced, so this must
