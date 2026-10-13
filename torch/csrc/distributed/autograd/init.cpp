@@ -165,8 +165,8 @@ Example::
     >>> import torch.distributed.autograd as dist_autograd
     >>> with dist_autograd.context() as context_id:
     >>>     pred = model.forward()
-    >>>     loss = loss_func(pred, loss)
-    >>>     dist_autograd.backward(context_id, loss)
+    >>>     loss = loss_func(pred, target)
+    >>>     dist_autograd.backward(context_id, [loss])
 )",
       py::arg("contextId"),
       py::arg("roots"),

@@ -95,11 +95,11 @@ framework, RRef framework and distributed autograd.
 The following APIs allow users to remotely execute functions as well as create
 references (RRefs) to remote data objects. In these APIs, when passing a
 ``Tensor`` as an argument or a return value, the destination worker will try to
-create a ``Tensor`` with the same meta (i.e., shape, stride, etc.). We
-intentionally disallow transmitting CUDA tensors because it might crash if the
-device lists on source and destination workers do not match. In such cases,
-applications can always explicitly move the input tensors to CPU on the caller
-and move it to the desired devices on the callee if necessary.
+create a ``Tensor`` with the same meta (i.e., shape, stride, etc.). Sending
+CUDA tensors requires a device map configured via the ``device_maps`` argument
+or {meth}`~torch.distributed.rpc.TensorPipeRpcBackendOptions.set_device_map`.
+Otherwise, move the tensors to CPU on the caller and to the desired device on
+the callee.
 
 ```{eval-rst}
 .. autofunction:: rpc_sync
@@ -224,9 +224,8 @@ parameters during training. See {ref}`remote-reference-protocol` for more
 details.
 
 ```{eval-rst}
-.. autoclass:: PyRRef(RRef)
+.. autoclass:: RRef
     :members:
-    :inherited-members:
 ```
 
 ```{toctree}

@@ -107,7 +107,7 @@ From the user's perspective the autograd context is setup as follows:
 import torch.distributed.autograd as dist_autograd
 with dist_autograd.context() as context_id:
   loss = model.forward()
-  dist_autograd.backward(context_id, loss)
+  dist_autograd.backward(context_id, [loss])
 ```
 
 It is important to note that your model's forward pass must be invoked within
