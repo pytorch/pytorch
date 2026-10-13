@@ -33,7 +33,9 @@ from ..bytecode_transformation import (
     create_instruction,
 )
 from ..exc import (
+    handle_observed_exception,
     ObservedException,
+    ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -70,9 +72,11 @@ from .base import (
 from .constant import ConstantVariable
 from .iter import IteratorVariable
 from .object_protocol import (
+    generic_getiter,
     generic_richcompare_bool,
     maybe_get_python_type,
     pyindex_check,
+    pyiter_next,
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
     pynumber_index,
@@ -2435,28 +2439,36 @@ class ByteArrayVariable(VariableTracker):
         # traced iterator unconsumed.
         if isinstance(iterable, ConstantVariable):
             values = iterable.as_python_constant()
+        elif issubclass(maybe_get_python_type(iterable), bytes):
+            # CPython reads a buffer before it considers __iter__, so a bytes
+            # subclass that overrides __iter__ is still extended from its
+            # buffer. Raw-buffer access is not modeled here: decline.
+            return None
         elif vt_is_iterable(iterable):
             values = []
-            non_constant = False
-
-            def add(item: VariableTracker) -> None:
-                nonlocal non_constant
+            iterator = generic_getiter(tx, iterable)
+            # CPython asks the argument for a length hint (default 32) once it
+            # has the iterator and before it reads any item.
+            variables.BuiltinVariable(operator.length_hint).call_function(
+                tx, [iterable, ConstantVariable.create(32)], {}
+            )
+            # One item at a time, like CPython: a bad byte must leave the rest
+            # of the iterator unread, and __index__ may grow the iterable.
+            while True:
+                try:
+                    item = pyiter_next(tx, iterator)
+                except ObservedUserStopIteration:
+                    handle_observed_exception(tx)
+                    break
                 item = pynumber_index(tx, item)
                 if not item.is_python_constant():
-                    non_constant = True
-                    return
+                    return None
                 value = item.as_python_constant()
-                # Like CPython, stop at the first out-of-range byte instead of
-                # draining the rest of the iterable first.
                 if not 0 <= value < 256:
                     raise_observed_exception(
                         ValueError, tx, args=["byte must be in range(0, 256)"]
                     )
                 values.append(value)
-
-            unpack_and_apply_fn(tx, iterable, add)
-            if non_constant:
-                return None
         else:
             raise_type_error(
                 tx, f"can't extend bytearray with {iterable.python_type_name()}"

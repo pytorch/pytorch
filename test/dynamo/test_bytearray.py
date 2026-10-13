@@ -439,6 +439,85 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             f(bytearray()),
         )
 
+    def test_extend_leaves_iterator_tail_after_bad_byte(self):
+        def f(x):
+            y = x + 1
+            it = iter([1, 300, 2])
+            dst = bytearray()
+            try:
+                dst.extend(it)
+            except ValueError:
+                pass
+            return y, next(it, "done"), dst
+
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(f, backend="eager", fullgraph=True)(x)[1:], f(x)[1:]
+        )
+
+    def test_extend_sees_list_growth_during_index(self):
+        class Grow:
+            def __init__(self, items):
+                self.items = items
+
+            def __index__(self):
+                if len(self.items) < 3:
+                    self.items.append(7)
+                return 1
+
+        def f(x):
+            y = x + 1
+            items = []
+            items.append(Grow(items))
+            dst = bytearray()
+            dst.extend(items)
+            return y, dst
+
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(f, backend="eager", fullgraph=True)(x)[1], f(x)[1]
+        )
+
+    def test_extend_bytes_subclass_reads_the_buffer(self):
+        # CPython reads the buffer before it looks at __iter__.
+        class Raw(bytes):
+            def __iter__(self):
+                return iter((9,))
+
+        def f(x, value):
+            y = x + 1
+            dst = bytearray(b"q")
+            dst.extend(value)
+            return y, dst
+
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(f, backend="eager")(x, Raw(b"ab"))[1], f(x, Raw(b"ab"))[1]
+        )
+
+    def test_extend_asks_for_a_length_hint_first(self):
+        class Items:
+            def __iter__(self):
+                return iter((1,))
+
+            def __length_hint__(self):
+                raise ValueError("hint failed")
+
+        def f(x, items):
+            y = x + 1
+            dst = bytearray()
+            try:
+                dst.extend(items)
+            except ValueError as e:
+                return y, str(e)
+            return y, dst
+
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(f, backend="eager", fullgraph=True)(x, Items())[1],
+            f(x, Items())[1],
+        )
+
     def test_append_extend_arg_mutation(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f(ba, x):
@@ -461,15 +540,19 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             ba.append(1)
             x = x * 2
             torch._dynamo.graph_break()
+            x = x + 3
             ba.extend(ba)
             return x - 1
 
         b = bytearray(b"a")
-        self.assertEqual(f(b, torch.ones(1)), torch.full((1,), 3.0))
+        self.assertEqual(f(b, torch.ones(1)), torch.full((1,), 6.0))
         self.assertEqual(b, bytearray(b"a\x01a\x01"))
         # One frame on each side of the explicit graph break: append and extend
-        # are traced, and their mutations are replayed on the input.
+        # are traced, and their mutations are replayed on the input. Each
+        # mutation has a tensor op on both sides, so a graph break at either
+        # one would split its frame and add a third.
         self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 4)
 
     def test_repr(self):
         @torch.compile(backend="eager")
