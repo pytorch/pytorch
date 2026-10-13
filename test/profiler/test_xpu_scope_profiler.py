@@ -147,11 +147,17 @@ class XpuScopeProfilerTest(TestCase):
         b = torch.rand([200, 300]).to("xpu")
         # Hardware metrics are requested through the fine-grained activity dict:
         # {ProfilerActivity.XPU: [<metric names>]} enables the XPUPTI scope
-        # profiler and forwards the metric names to it.
+        # profiler and forwards the metric names to it. The dict collects only
+        # what it lists, so XPU_RUNTIME is listed for the check below.
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
-                {torch.profiler.ProfilerActivity.XPU: self.metrics_names},
+                {
+                    torch.profiler.ProfilerActivity.XPU: [
+                        "XPU_RUNTIME",
+                        *self.metrics_names,
+                    ]
+                },
             ],
         ) as p:
             r1 = torch.matmul(a, b)
