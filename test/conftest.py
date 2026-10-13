@@ -557,21 +557,56 @@ def _wrapper_skip_reason(fn: Any) -> str:
     return _closure_skip_reason(fn)
 
 
-def _peel_rerun_skip_wrappers(item: Any, fn: Any) -> Any:
-    # instantiate_test wraps the device skip. One peel leaves that skip in
-    # place, so keep going until the wrapper that raises SkipTest is gone.
+def _unwrap_skiptest_chain(item: Any, fn: Any) -> Any:
     seen: set[int] = set()
     current = fn
-    while current is not None and id(current) not in seen:
+    while (
+        current is not None
+        and id(current) not in seen
+        and _is_skiptest_wrapper(current)
+    ):
         seen.add(id(current))
+        _remember_code_skip_reason(item, _wrapper_skip_reason(current))
         wrapped = getattr(current, "__wrapped__", None)
         if wrapped is None:
             break
-        if not (_is_skiptest_wrapper(current) or _is_skiptest_wrapper(wrapped)):
-            break
-        _remember_code_skip_reason(item, _wrapper_skip_reason(current))
         current = wrapped
     return current
+
+
+def _retarget_outer_wrapper(outer: Any, body: Any) -> None:
+    # instantiated_test calls the closed-over test, not __wrapped__.
+    # Point that cell at the body so device and dtype are still passed.
+    previous = getattr(outer, "__wrapped__", None)
+    closure = getattr(outer, "__closure__", None)
+    if closure and previous is not None:
+        for cell in closure:
+            try:
+                contents = cell.cell_contents
+            except ValueError:
+                continue
+            if contents is previous:
+                cell.cell_contents = body
+    try:
+        outer.__wrapped__ = body
+    except (AttributeError, TypeError):
+        return
+
+
+def _peel_rerun_skip_wrappers(item: Any, fn: Any) -> Any:
+    # instantiated_test does not raise SkipTest. It calls the device skip
+    # as test(self, **param_kwargs) and restores numeric tolerance. Remove
+    # only that inner skip and leave the outer wrapper in place. A skip
+    # with no outer instantiate wrapper still peels down to the body.
+    if fn is not None and not _is_skiptest_wrapper(fn):
+        wrapped = getattr(fn, "__wrapped__", None)
+        if _is_skiptest_wrapper(wrapped):
+            body = _unwrap_skiptest_chain(item, wrapped)
+            if body is not wrapped:
+                _retarget_outer_wrapper(fn, body)
+            return fn
+        return fn
+    return _unwrap_skiptest_chain(item, fn)
 
 
 def _pytest_skip_reason(markers: list[Any]) -> str:
@@ -666,11 +701,12 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
 
     Unconditional unittest.skip, pytest.mark.skip, and known-failure code
     skips are kept and their skip is cleared so the body runs. Device
-    instantiation wraps the skip again; matching devices peel every
-    SkipTest wrapper so the body runs, and that reason is stored for the
-    report. A class skip stays cleared for every method. The reason is
-    copied onto the item first. skipIf and other capability skips are
-    not cleared and do not get a code_skip property.
+    instantiation wraps the skip again. On a matching device the outer
+    instantiate wrapper stays and only the inner SkipTest wrapper is
+    removed, so device and dtype are still passed. That reason is stored
+    for the report. A class skip stays cleared for every method. The
+    reason is copied onto the item first. skipIf and other capability
+    skips are not cleared and do not get a code_skip property.
     """
     rerun_disabled_tests = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
     if not rerun_disabled_tests:
