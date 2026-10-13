@@ -35,11 +35,13 @@ def _quantize_tensor_validate_inputs(
     scaling_algorithm: int,
     swizzle_type: int,
     scaling_type_use_square_block_size: bool,
+    qdata_rounding_mode: int,
+    random_key: torch.Tensor | None,
 ) -> None:
     # Input validation for `F.quantize_tensor`, shared between meta functions
     # and DSL implementations
 
-    from torch.nn.functional import SwizzleType
+    from torch.nn.functional import RoundingMode, SwizzleType
 
     if quant_format == _TensorQuantFormat.MXFP8:
         rows, cols = input.shape
@@ -66,6 +68,29 @@ def _quantize_tensor_validate_inputs(
             torch._check_value(rows % 16 == 0)
         if scaling_type_use_square_block_size:
             torch._check_value(rows % 32 == 0)
+        torch._check_value(
+            qdata_rounding_mode
+            in (RoundingMode.RTNE.value, RoundingMode.STOCHASTIC.value),
+            lambda: "quantize_tensor has an unsupported qdata_rounding_mode",
+        )
+        if qdata_rounding_mode == RoundingMode.RTNE.value:
+            torch._check_value(
+                random_key is None, lambda: "RTNE does not use random_key"
+            )
+        else:
+            torch._check_value(
+                not scaling_type_use_square_block_size,
+                lambda: "quantize_tensor stochastic rounding requires 1x32 scales",
+            )
+            if random_key is not None:
+                torch._check_value(
+                    random_key.dtype == torch.uint64 and random_key.numel() == 2,
+                    lambda: "random_key must be a two-element uint64 tensor",
+                )
+                torch._check_value(
+                    random_key.device == input.device,
+                    lambda: "random_key and input must be on the same device",
+                )
 
     else:
         raise AssertionError(f"Unsupported {quant_format=}")
@@ -79,11 +104,13 @@ def _quantize_tensor_dual_validate_inputs(
     scaling_algorithm: int,
     swizzle_type: int,
     scaling_type_use_square_block_size: bool,
+    qdata_rounding_mode: int,
+    random_key: torch.Tensor | None,
 ) -> None:
     # Input validation for `F.quantize_tensor_dual`, shared between meta functions
     # and DSL implementations
 
-    from torch.nn.functional import SwizzleType
+    from torch.nn.functional import RoundingMode, SwizzleType
 
     if quant_format == _TensorQuantFormat.MXFP8:
         rows, cols = input.shape
@@ -104,5 +131,28 @@ def _quantize_tensor_dual_validate_inputs(
             in (SwizzleType.NO_SWIZZLE.value, SwizzleType.SWIZZLE_32_4_4.value),
             lambda: "unsupported swizzle type",
         )
+        torch._check_value(
+            qdata_rounding_mode
+            in (RoundingMode.RTNE.value, RoundingMode.STOCHASTIC.value),
+            lambda: "quantize_tensor_dual has an unsupported qdata_rounding_mode",
+        )
+        if qdata_rounding_mode == RoundingMode.RTNE.value:
+            torch._check_value(
+                random_key is None, lambda: "RTNE does not use random_key"
+            )
+        else:
+            torch._check_value(
+                not scaling_type_use_square_block_size,
+                lambda: "quantize_tensor_dual stochastic rounding requires 1x32 scales",
+            )
+            if random_key is not None:
+                torch._check_value(
+                    random_key.dtype == torch.uint64 and random_key.numel() == 2,
+                    lambda: "random_key must be a two-element uint64 tensor",
+                )
+                torch._check_value(
+                    random_key.device == input.device,
+                    lambda: "random_key and input must be on the same device",
+                )
     else:
         raise AssertionError(f"Unsupported {quant_format=}")
