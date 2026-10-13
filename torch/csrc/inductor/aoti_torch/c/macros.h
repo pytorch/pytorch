@@ -63,4 +63,9 @@ using AOTITorchError = int32_t;
 } // extern "C"
 #endif
 
+// Optional private-namespace layer for the aoti_torch_* shims (no-op unless
+// -DAOTI_SHIM_SYMBOL_PREFIX is set). Must be included after the typedefs above
+// and before shim.h's declarations so it rewrites both declarations and calls.
+#include <torch/csrc/inductor/aoti_torch/c/shim_symbol_prefix.h>
+
 #endif // AOTI_TORCH_MACRO_H
