@@ -818,7 +818,6 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         self.assertEqual(mp._get_thread_name(), name)
 
 
-@instantiate_parametrized_tests
 @unittest.skipIf(
     TEST_WITH_TSAN,
     "TSAN is not fork-safe since we're forking in a multi-threaded environment",
