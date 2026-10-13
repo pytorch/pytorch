@@ -4077,9 +4077,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.indexing_code.clear()
         self.loads.clear()
         self.compute.clear()
+        # Reduction block constants are already declared at kernel initialization.
         self.body.writeline(f"{tree.prefix}numel = {value}")
-        if self.inside_reduction:
-            self.codegen_reduction_numels(self.body)
         self.outside_loop_vars.add(value)
 
     def need_numel_args(self):

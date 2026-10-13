@@ -16,25 +16,26 @@ class TestDataDependentCodegen(TestCase):
     def test_pointwise_fusion_with_features(self):
         # for b in range(4):
         #     for j in range(offsets[b + 1] - offsets[b]):
-        #         for d in range(8):
-        #             p = offsets[b] + j
-        #             out[p, d] = (values[p, d] + bias[b, d]) * scale[d] + 1
+        #         for d in range(2):
+        #             for e in range(4):
+        #                 p = offsets[b] + j
+        #                 out[p, d, e] = (values[p, d, e] + bias[b, d, e]) * scale[d, e] + 1
         device = torch.device("cuda", 0)
         graph = GraphLowering(torch.fx.symbolic_trace(lambda: 0))
         j_range = ir.DataDependentRange("j")
 
         def output_indexer(index):
-            b, j, d = index
+            b, j, d, e = index
             p = ops.load("offsets", b) + ops.index_expr(j, torch.int64)
-            return p * 8 + ops.index_expr(d, torch.int64)
+            return p * 8 + ops.index_expr(d * 4 + e, torch.int64)
 
         def add_body(index):
-            b, _, d = index
+            b, _, d, e = index
             ops.register_datadep_range(
                 ops.load("offsets", b + 1) - ops.load("offsets", b), j_range
             )
             address = ops.indirect_indexing(output_indexer(index), 48, wrap_neg=False)
-            return ops.load("values", address) + ops.load("bias", b * 8 + d)
+            return ops.load("values", address) + ops.load("bias", b * 8 + d * 4 + e)
 
         with (
             V.set_graph_handler(graph),
@@ -42,9 +43,9 @@ class TestDataDependentCodegen(TestCase):
             config.patch(benchmark_fusion=False),
         ):
             for name, dtype, size in (
-                ("values", torch.float32, [6, 8]),
-                ("bias", torch.float32, [4, 8]),
-                ("scale", torch.float32, [8]),
+                ("values", torch.float32, [6, 2, 4]),
+                ("bias", torch.float32, [4, 2, 4]),
+                ("scale", torch.float32, [2, 4]),
                 ("offsets", torch.int64, [5]),
             ):
                 buffer = ir.InputBuffer(
@@ -58,8 +59,8 @@ class TestDataDependentCodegen(TestCase):
                 device=device,
                 dtype=torch.float32,
                 inner_fn=add_body,
-                ranges=[4, j_range, 8],
-                flat_size=[6, 8],
+                ranges=[4, j_range, 2, 4],
+                flat_size=[6, 2, 4],
                 iteration_numel=48,
                 output_indexer=output_indexer,
             )
@@ -67,7 +68,7 @@ class TestDataDependentCodegen(TestCase):
             added.data.data.decide_layout()
 
             def scale_body(index):
-                b, _, d = index
+                b, _, d, e = index
                 ops.register_datadep_range(
                     ops.load("offsets", b + 1) - ops.load("offsets", b), j_range
                 )
@@ -75,14 +76,15 @@ class TestDataDependentCodegen(TestCase):
                     output_indexer(index), 48, wrap_neg=False
                 )
                 value = ops.load(added.get_name(), address)
-                return value * ops.load("scale", d) + ops.constant(1, torch.float32)
+                scale = ops.load("scale", d * 4 + e)
+                return value * scale + ops.constant(1, torch.float32)
 
             result = ir.Pointwise.create(
                 device=device,
                 dtype=torch.float32,
                 inner_fn=scale_body,
-                ranges=[4, j_range, 8],
-                flat_size=[6, 8],
+                ranges=[4, j_range, 2, 4],
+                flat_size=[6, 2, 4],
                 iteration_numel=48,
                 output_indexer=output_indexer,
             )

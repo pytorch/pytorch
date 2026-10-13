@@ -700,7 +700,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             grid_dim_map = filtered_index_map(
                 grid_dims, active_prefixes - datadep_prefixes
             )
-            breakpoint()
 
         range_trees = []
         for i, prefix in enumerate(active_prefixes):
@@ -3011,7 +3010,6 @@ class SIMDScheduling(BaseScheduling):
                         (numel2, rnumel2, 1),
                     )
                     if not ordinary_fusion:
-                        breakpoint()
                         why("invalid tiling for reduction")
             else:
                 ordinary_fusion = numel1 == numel2
@@ -6014,7 +6012,6 @@ class SIMDScheduling(BaseScheduling):
         """
         if reduction_numel == 1 and numel.has(ir.DataDependentRange):
             node = next(iter(EnableReduction.filter(node_schedule)))
-            breakpoint()
             return cls.create_tiling(node.get_ranges()[0], [reduction_numel]), None
 
         selection = cls.select_tiling_with_memory(

@@ -122,6 +122,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     DataDependentRange,
+    decompose_index,
     developer_warning,
     do_bench_using_profiling,
     dtype_from_size,
@@ -5954,6 +5955,35 @@ class ComputedBuffer(OperationBuffer):
             isinstance(size, DataDependentRange)
             for size in itertools.chain(index_size, reduce_size)
         ):
+            dense_start = len(index_size)
+            for i, size in enumerate(index_size):
+                if isinstance(size, DataDependentRange):
+                    dense_start = i + 1
+
+            if len(index_size) - dense_start > 1:
+                # Combine the dense suffix into one loop coordinate:
+                #
+                #     for b in range(B):
+                #         for j in range(lengths[b]):
+                #             for f in range(D * E):
+                #                 compute(b, j, f // E, f % E)
+                #
+                # [B, J, D, E] becomes [B, J, D * E]. The body still uses
+                # (b, j, d, e), and the buffer keeps its [N, D, E] layout.
+                # Parent and dependent loops stay in their original order.
+                dense_sizes = index_size[dense_start:]
+                index_size = [*index_size[:dense_start], sympy_product(dense_sizes)]
+                args, var_ranges = dependencies.index_vars_no_squeeze(
+                    index_size, reduce_size, prefix="p"
+                )
+                iter_vars, reduce_vars = args
+                indices = [
+                    *iter_vars[:dense_start],
+                    *decompose_index(iter_vars[-1], dense_sizes),
+                ]
+                body = LoopBody(
+                    body, [indices, reduce_vars], var_ranges, iter_vars, reduce_vars
+                )
             return (index_size, reduce_size), body
 
         if recompute_sizes_body_func:

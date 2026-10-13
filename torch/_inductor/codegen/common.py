@@ -2924,9 +2924,6 @@ class CSEProxy(DefaultHandler):
         self.kernel = kernel
         self.parent_handler = parent_handler
 
-    def register_datadep_range(self, value, symbol):
-        cast("TritonKernel", self.kernel).register_datadep_range(value, symbol)
-
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         bounds = self._bound_variable(name, *args, **kwargs)
 
@@ -3133,6 +3130,9 @@ class CSEProxy(DefaultHandler):
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
     ) -> None:
         return self.kernel.check_bounds(expr, size, lower, upper)
+
+    def register_datadep_range(self, value, symbol) -> None:
+        cast("TritonKernel", self.kernel).register_datadep_range(value, symbol)
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         if name in self.kernel.cse.invalidated_stores:
