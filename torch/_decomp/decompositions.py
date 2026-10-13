@@ -241,6 +241,18 @@ def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, 0, grad_output)
 
 
+@register_decomposition(aten.softshrink_backward)
+@out_wrapper("grad_input")
+def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tensor:
+    # Like the ATen kernel, compute in the common dtype and compare against
+    # lambd rounded to it
+    dtype = torch.result_type(grad_output, self)
+    grad_output, self = grad_output.to(dtype), self.to(dtype)
+    if dtype in (torch.bfloat16, torch.float16):
+        lambd = torch.scalar_tensor(lambd, dtype=dtype, device=self.device)  # type: ignore[assignment]
+    return torch.where((self >= -lambd) & (self <= lambd), 0, grad_output)
+
+
 @register_decomposition(aten.leaky_relu_backward)
 @out_wrapper("grad_input")
 @pw_cast_for_opmath

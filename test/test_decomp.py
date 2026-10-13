@@ -428,7 +428,6 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "meshgrid"),
     # Decomposition registered as Autograd
     (None, None, "nn.functional.hardshrink"),
-    (None, None, "nn.functional.softshrink"),
     # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
     (None, None, "diag"),
     # _softmax_backward_data's CPU kernel for bfloat16 always return the grad_input as float32
@@ -525,7 +524,6 @@ core_backward_failures = {
     skip("native_dropout_backward"),  # slow: fails with --timeout=360 secs
     skip("nn.functional.glu"),  # slow: fails with --timeout=360 secs
     xfail("nn.functional.hardshrink"),
-    xfail("nn.functional.softshrink"),
     skip("nn.functional.unfold"),  # slow: fails with --timeout=360 secs
     xfail("norm"),
     xfail("norm", "fro"),
