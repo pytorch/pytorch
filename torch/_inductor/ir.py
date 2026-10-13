@@ -1660,6 +1660,14 @@ class Reduction(Loops):
                 for var in reduction_vars
                 if isinstance(var, Expr) and not isinstance(var, sympy.Number)
             ]
+
+            def read_bytes(name: str) -> int:
+                buf = V.graph.try_get_buffer(name)
+                if buf is None:
+                    return 1
+                numel = V.graph.sizevars.optimization_hint(buf.get_numel(), fallback=1)
+                return max(1, numel * buf.get_dtype().itemsize)
+
             indices = []
             broadcasted_reduction_indices = []
             changed = False
@@ -1673,9 +1681,11 @@ class Reduction(Loops):
                     var in free_symbols for var in reduction_vars
                 )
                 if is_full_size_read:
-                    indices.append(md.index)
+                    indices.append((md.index, read_bytes(md.name)))
                 elif is_broadcasted_reduction_read:
-                    broadcasted_reduction_indices.append(md.index)
+                    broadcasted_reduction_indices.append(
+                        (md.index, read_bytes(md.name))
+                    )
                 if is_full_size_read or is_broadcasted_reduction_read:
                     if md.name in V.graph.name_to_buffer:
                         buf = V.graph.name_to_buffer[md.name]
@@ -1696,9 +1706,11 @@ class Reduction(Loops):
         (_, reduction_vars), ranges1 = dependencies.index_vars_squeeze(
             r.get_size(), r.get_reduction_size()
         )
+        # Weight each read by its buffer size, so a small broadcast input (e.g. a
+        # per-group mask) does not outvote the large tensor being reduced.
         num_outer = 0
         num_inner = 0
-        for i in indices:
+        for i, weight in indices:
             j = V.graph.sizevars.simplify_with_ranges(i, ranges1)
             strides = V.graph.sizevars.stride_hints(
                 j, reduction_vars, list(ranges1.keys())
@@ -1707,9 +1719,9 @@ class Reduction(Loops):
             # This can happen when the reduction ranges contains a 1.
             outer = all(s == 0 or s > 1 for s in strides)
             if outer:
-                num_outer += 1
+                num_outer += weight
             else:
-                num_inner += 1
+                num_inner += weight
         if num_inner > num_outer:
             return ReductionHint.INNER, inner_reduction_splits(
                 reduction_numel_hint, numel_hint
