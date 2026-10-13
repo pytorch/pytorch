@@ -720,6 +720,29 @@ class TestHwClassificationLinter(unittest.TestCase):
                 main()
         self.assertEqual(cm.exception.code, 2)
 
+    # --- allowlist file as an argument
+
+    def test_expand_filenames_allowlist_arg(self) -> None:
+        """Passing the allowlist file re-checks every test file, like no args."""
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "test")) as td:
+            allowlist_path = Path(td) / "allowlist.json"
+            allowlist_path.write_text("[]\n", encoding="utf-8")
+            with mock.patch.object(test_linter, "ALLOWLIST_PATH", allowlist_path):
+                # Other arguments are irrelevant once the allowlist is passed.
+                expanded = test_linter._expand_filenames(
+                    [str(allowlist_path), "test/foo_test.py"]
+                )
+        self.assertEqual(
+            expanded, [str(path) for path in test_linter._discover_files()]
+        )
+
+    def test_expand_filenames_passthrough(self) -> None:
+        """Non-allowlist arguments pass through unchanged and de-duplicated."""
+        self.assertEqual(
+            test_linter._expand_filenames(["test/a_test.py", "test/a_test.py"]),
+            ["test/a_test.py"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

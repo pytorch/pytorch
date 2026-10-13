@@ -9,6 +9,11 @@ A JSON allowlist tracks test files that are not yet migrated to this linter's
 requirements. Files in the allowlist are skipped silently. Files not in the
 allowlist must satisfy the test case requirements defined below.
 
+Passing the allowlist file as an argument re-checks every test file, exactly
+like passing no filenames: a change to the allowlist can change which files are
+skipped, so lintrunner (which only re-runs a linter for files matching its
+include_patterns) triggers the full run by passing the allowlist file.
+
 A file that cannot be parsed is reported as ``[parse_error]``. Such a file is
 never allowlisted, because an allowlist entry would hide the parse failure from
 every later run.
@@ -48,6 +53,9 @@ Usage:
     # Lint the given files (every test file if none are given)
     python tools/linter/adapters/test_linter.py [filenames ...]
 
+    # Re-check every test file; what lintrunner passes when the allowlist changes
+    python tools/linter/adapters/test_linter.py test_linter_allowlist.json
+
     # Regenerate the allowlist from the linter's own results
     python tools/linter/adapters/test_linter.py --regenerate
 """
@@ -56,7 +64,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import concurrent.futures
 import fnmatch
 import json
 import logging
@@ -164,6 +171,25 @@ def _discover_files() -> list[Path]:
             if _is_test_file(str(path)):
                 files.add(path)
     return sorted(files)
+
+
+def _is_allowlist_arg(filename: str) -> bool:
+    """True if *filename* refers to the allowlist file itself."""
+    return Path(filename).resolve() == ALLOWLIST_PATH
+
+
+def _expand_filenames(filenames: list[str]) -> list[str]:
+    """Expand CLI arguments into de-duplicated, ordered lint candidates.
+
+    The allowlist file is accepted as an argument and expands to every test
+    file, exactly like passing no filenames: changing the allowlist can change
+    which files are skipped, so the whole suite is re-checked. lintrunner only
+    re-runs a linter for files matching its include_patterns, so an
+    allowlist-only change would otherwise lint nothing.
+    """
+    if any(_is_allowlist_arg(filename) for filename in filenames):
+        return [str(path) for path in _discover_files()]
+    return list(dict.fromkeys(filenames))
 
 
 def _is_test_class(node: ast.ClassDef) -> bool:
@@ -838,13 +864,6 @@ def regenerate_allowlist() -> None:
     print(f"wrote {len(entries)} entries to {ALLOWLIST_REL_PATH}")
 
 
-def _default_num_workers() -> int | None:
-    max_jobs = os.environ.get("MAX_JOBS")
-    if max_jobs and max_jobs.isdigit() and int(max_jobs) > 0:
-        return int(max_jobs)
-    return os.cpu_count()
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Ensure test classes declare hw_classification.",
@@ -877,21 +896,22 @@ def main() -> None:
         stream=sys.stderr,
     )
 
-    # No filenames means lint every test file this linter applies to.
-    candidates = args.filenames or [str(p) for p in _discover_files()]
+    # No filenames, or the allowlist file, means lint every test file.
+    candidates = (
+        _expand_filenames(args.filenames)
+        if args.filenames
+        else [str(p) for p in _discover_files()]
+    )
     filenames = [x for x in candidates if _is_test_file(x)]
 
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=_default_num_workers(),
-    ) as executor:
-        futures = {executor.submit(check_file, x): x for x in filenames}
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                for lint_message in future.result():
-                    print(json.dumps(lint_message._asdict()), flush=True)
-            except Exception:
-                logging.critical('Failed at "%s".', futures[future])
-                raise
+    for filename in filenames:
+        try:
+            messages = check_file(filename)
+        except Exception:
+            logging.critical('Failed at "%s".', filename)
+            raise
+        for lint_message in messages:
+            print(json.dumps(lint_message._asdict()), flush=True)
 
 
 if __name__ == "__main__":
