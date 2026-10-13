@@ -1321,6 +1321,10 @@ class FxConverter:
             k: self._generate_buffer(v) if isinstance(v, ir.IRNode) else v
             for k, v in kernel.kwargs.items()
         }
+        # Symbolic scalar args, e.g. a SymInt output_size, must be FX nodes.
+        args, kwargs = pytree.tree_map_only(
+            sympy.Expr, self._generate_sym_node, (args, kwargs)
+        )
 
         result_buffer: str | None = None
         if isinstance(kernel, ir.ExternKernelOut):
