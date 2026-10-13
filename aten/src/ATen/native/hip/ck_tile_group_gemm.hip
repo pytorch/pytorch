@@ -56,6 +56,18 @@ namespace at::hip::detail {
 			static constexpr index_t TilePartitionerM01 = 4;
 		};
 
+		// GroupedGemmKernel instantiates a split-K (k_batch > 1) atomic_add epilogue next to the plain store one.
+		// We always run k_batch == 1, so compile the atomic_add path out: 16-bit atomics reject a C vector width of 1.
+		template <typename Epilogue>
+		struct NoSplitKEpilogue : Epilogue {
+			template <typename OutWindow, typename... Args>
+			CK_TILE_DEVICE auto operator()(OutWindow& out_window, Args&&... args) {
+				if constexpr (OutWindow::BottomTensorView::DstInMemOp == ck_tile::memory_operation_enum::set) {
+					return Epilogue::operator()(out_window, std::forward<Args>(args)...);
+				}
+			}
+		};
+
 		template<typename DataType, typename ALayout, typename BLayout, typename Config>
 		struct CkTileGroupGemm {
 			using CLayout = ck_tile::tensor_layout::gemm::RowMajor;
@@ -86,7 +98,7 @@ namespace at::hip::detail {
 
 			using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>;
 
-			using GemmEpilogue = ck_tile::CShuffleEpilogue<ck_tile::CShuffleEpilogueProblem<
+			using GemmEpilogue = NoSplitKEpilogue<ck_tile::CShuffleEpilogue<ck_tile::CShuffleEpilogueProblem<
 				DataType, DataType, ck_tile::tuple<>, AccDataType,
 				DataType, ck_tile::tuple<>, CLayout, PassThrough,
 				TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
@@ -94,7 +106,7 @@ namespace at::hip::detail {
 				Config::M_Warp_Tile, Config::N_Warp_Tile, Config::K_Warp_Tile,
 				PipelineProblem::TransposeC,
 				1 /* kNumWaveGroups */, Config::FixedVectorSizeC, Config::VectorSizeC>
-			>;
+			>>;
 
 			using Kernel = ck_tile::GroupedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 		};
@@ -110,9 +122,11 @@ namespace at::hip::detail {
 		using Cfg16_2D2D_256x256x32 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, false, false, true>;
 
 		// Not from Primus: fallback for everything the configs above reject (K not a multiple of 64,
-		// jagged K or N, column-major A). C is stored 2 elements at a time (the narrowest ck_tile allows
-		// for 16-bit outputs) because in 3D x 2D a group's output columns can start at any even offset.
+		// jagged K, column-major A). C is stored 2 elements at a time, so N must be even.
 		using Cfg16_256x128x64_Pad  = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>;
+		// Jagged (3D x 2D) or odd N: a 2-wide C store at a group's last column would also write the next group's
+		// first column (or the next row's), so store C one element at a time.
+		using Cfg16_256x128x64_PadC1 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 1>;
 
 		using Strides = std::array<int64_t, 3>;
 
@@ -304,6 +318,8 @@ namespace at::hip::detail {
 					run_with_config(Cfg16_256x128x64{});
 				} else if (primus_ok) {
 					run_with_config(Cfg16_256x128x64_PadN{});
+				} else if (N < 0 || N % 2 != 0) {
+					run_with_config(Cfg16_256x128x64_PadC1{});
 				} else {
 					run_with_config(Cfg16_256x128x64_Pad{});
 				}
