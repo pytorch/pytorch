@@ -259,7 +259,8 @@ _COW_TENSOR_UNSUPPORTED = object()
 def _try_is_cow_tensor(value: object) -> bool | object:
     if not isinstance(value, torch.Tensor):
         return _COW_TENSOR_UNSUPPORTED
-    if torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python):
+    is_python = torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python)
+    if is_python or torch._subclasses.fake_tensor.is_fake_tensor(value):
         return _COW_TENSOR_UNSUPPORTED
     return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
 
@@ -1332,6 +1333,40 @@ def check_closure(value: object, metadata: Any) -> bool:
     if type(value) is types.FunctionType and hasattr(value, "__code__"):
         return value.__code__ is metadata
     return id(value) == metadata
+
+
+def _ordered_dict_key_signature(
+    value: collections.OrderedDict[Any, Any],
+) -> list[tuple[type[Any] | None, Any]]:
+    from .variables.constant import ConstantVariable
+    from .variables.dicts import _contains_nan
+
+    # NaN-containing keys and nonliteral keys require identity matching.
+    return [
+        (type(key), key)
+        if ConstantVariable.is_literal(key) and not _contains_nan(key)
+        else (None, id(key))
+        for key in collections.OrderedDict.keys(value)
+    ]
+
+
+def _ordered_dict_keys_match(
+    value: collections.OrderedDict[Any, Any],
+    signature: list[tuple[type[Any] | None, Any]],
+) -> bool:
+    if collections.OrderedDict.__len__(value) != len(signature):
+        return False
+    for key, (key_type, expected) in zip(
+        collections.OrderedDict.keys(value), signature
+    ):
+        if key_type is None:
+            if id(key) != expected:
+                return False
+        elif key is not expected and (
+            type(key) is not key_type or not constants_identical(key, expected)
+        ):
+            return False
+    return True
 
 
 def _constant_subclass_base_value(value: object) -> Any:
@@ -3479,27 +3514,20 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: [
-            id(key) for key in collections.OrderedDict.keys(value)
-        ],
-        eval_fn=lambda value, metadata: [
-            id(key) for key in collections.OrderedDict.keys(value)
-        ]
-        == metadata,
+        get_metadata_fn=lambda guard, value: _ordered_dict_key_signature(value),
+        eval_fn=_ordered_dict_keys_match,
     )
     def ORDERED_DICT_KEYS_MATCH(self, guard: Guard) -> None:
-        key_ids = [
-            self.id_ref(key, guard.name)
-            for key in collections.OrderedDict.keys(self.get(guard))
-        ]
+        value = self.get(guard)
+        key_signature = _ordered_dict_key_signature(value)
+        for key, (key_type, _) in zip(
+            collections.OrderedDict.keys(value), key_signature
+        ):
+            if key_type is None:
+                self.id_ref(key, guard.name)
 
         def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
-            return collections.OrderedDict.__len__(value) == len(key_ids) and all(
-                id(current) == expected
-                for current, expected in zip(
-                    collections.OrderedDict.keys(value), key_ids
-                )
-            )
+            return _ordered_dict_keys_match(value, key_signature)
 
         code = [f"___check_order({self.arg_ref(guard)})"]
         self.add_python_lambda_leaf_guard_to_root(
@@ -6516,6 +6544,20 @@ def make_dupe_guard(
             # However, this should always be a sound guard to add here.
             return functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source)
     return None
+
+
+def install_not_in_instance_dict_guard(source: Source, name: str) -> None:
+    """
+    Guard that `name` stays absent from the instance __dict__ of the object at
+    `source`. Python reads the instance __dict__ before nn.Module.__getattr__
+    (or a user __getattr__), so a value resolved from the registries or through
+    such a hook is only valid while the dict lacks `name`.
+    """
+    install_guard(
+        source.make_guard(
+            functools.partial(GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name)
+        )
+    )
 
 
 def install_guard(*guards: Guard, skip: int = 0) -> None:
