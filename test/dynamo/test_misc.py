@@ -16427,17 +16427,51 @@ fn
 
     @torch.fx.experimental._config.patch(dynamic_storage_offset=True)
     def test_dynamic_storage_offset_no_zero_one_recompile(self):
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt, dynamic=True)
-        def fn(x):
-            return x * 2
-
         buf = torch.randn(64)
-        for offset in (5, 0, 1, 7):
+        # (8, 3): the first offset equals the size 8, which duck sizing would tie.
+        for offsets in ((5, 0, 1, 7), (0, 5, 1, 7), (1, 0, 5), (8, 3)):
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounter()
+
+            @torch.compile(backend=cnt, dynamic=True)
+            def fn(x):
+                return x * 2
+
+            for offset in offsets:
+                x = buf[offset : offset + 8]
+                self.assertEqual(fn(x), x * 2)
+            self.assertEqual(cnt.frame_count, 1, offsets)
+
+    @torch.fx.experimental._config.patch(dynamic_storage_offset=True)
+    def test_dynamic_storage_offset_range(self):
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            StatelessSymbolicContext,
+        )
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        shape_env = ShapeEnv()
+        _, _, offset = shape_env.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(64)[0:8],
+            ConstantSource("x"),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC]
+            ),
+        )
+        self.assertEqual(
+            shape_env.var_to_range[offset.node.expr], ValueRanges(0, int_oo)
+        )
+
+        def fn(x):
+            if x.storage_offset() > 0:
+                return x * 2
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True)
+        buf = torch.randn(64)
+        for offset in (5, 0):
             x = buf[offset : offset + 8]
-            self.assertEqual(fn(x), x * 2)
-        self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(opt_fn(x), fn(x))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_infer_unbacked_size_gt_zero(self):
