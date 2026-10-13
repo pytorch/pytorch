@@ -2978,14 +2978,15 @@ the **full QR decomposition** of a matrix
 
 .. math::
 
-    AP = QR\mathrlap{\qquad Q \in \mathbb{K}^{m \times m}, R \in \mathbb{K}^{m \times n}, P \in \mathbb{N}^{n \times n}}
+    AP = QR\mathrlap{\qquad Q \in \mathbb{K}^{m \times m}, R \in \mathbb{K}^{m \times n}}
 
-where :math:`Q` is orthogonal in the real case and unitary in the complex case,
+where :math:`P` is an :math:`n \times n` permutation matrix,
+:math:`Q` is orthogonal in the real case and unitary in the complex case,
 and :math:`R` is upper triangular with real diagonal (even in the complex case).
 
-The pivot matrix :math:`P` acts as a permutation of the columns of :math:`A`, such that the
-diagonal of :math:`R` is non-increasing. This routine computes a vector-like :math:`P` with dimensions `n`,
-which permutes the of the columns of `A` such that :math:`A[:,P] = QR`.
+The permutation :math:`P` reorders the columns of :math:`A` such that the absolute values of the
+diagonal of :math:`R` are non-increasing. Instead of the permutation matrix, this routine returns
+a vector of `n` column indices `P`, which permutes the columns of `A` such that :math:`A[:,P] = QR`.
 
 When `m > n` (tall matrix), as `R` is upper triangular, its last `m - n` rows are zero.
 In this case, we can drop the last `m - n` columns of `Q` to form the
@@ -2993,7 +2994,7 @@ In this case, we can drop the last `m - n` columns of `Q` to form the
 
 .. math::
 
-    AP = QR\mathrlap{\qquad Q \in \mathbb{K}^{m \times n}, R \in \mathbb{K}^{n \times n}, P \in \mathbb{N}^{n \times n}}
+    AP = QR\mathrlap{\qquad Q \in \mathbb{K}^{m \times n}, R \in \mathbb{K}^{n \times n}}
 
 The reduced QR decomposition agrees with the full QR decomposition when `n >= m` (wide matrix).
 
