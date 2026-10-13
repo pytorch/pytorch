@@ -4945,7 +4945,14 @@ def _same_c_function(left: Any, right: Any) -> bool | None:
         receiver = owner.__new__(owner)
     except TypeError:
         return None
-    return left.__get__(receiver) == right.__get__(receiver)
+    return left.__get__(receiver, owner) == right.__get__(receiver, owner)
+
+
+def _bind_builtin_method(descriptor: Any, obj: Any) -> Any:
+    if isinstance(descriptor, types.ClassMethodDescriptorType):
+        return descriptor.__get__(None, obj)
+    # METH_METHOD descriptors need an explicit owner on Python 3.12.
+    return descriptor.__get__(obj, type(obj))
 
 
 class BoundBuiltinMethodVariable(VariableTracker):
@@ -5080,10 +5087,8 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         obj = self.obj.as_python_constant()
-        if isinstance(self.descriptor, types.ClassMethodDescriptorType):
-            return self.descriptor.__get__(None, obj)
         if hasattr(self.descriptor, "__get__"):
-            return self.descriptor.__get__(obj)  # type: ignore[union-attr]
+            return _bind_builtin_method(self.descriptor, obj)
         return getattr(obj, self.descriptor.__name__)
 
     def call_function(
@@ -5139,14 +5144,12 @@ class BoundBuiltinMethodVariable(VariableTracker):
             # METH_STATIC functions are already bound, e.g. tuple.__new__.
             codegen.append_output(load_descriptor)
             return
-        codegen.extend_output([load_descriptor, *codegen.create_load_attrs("__get__")])
-        if isinstance(descriptor, types.ClassMethodDescriptorType):
-            codegen.append_output(codegen.create_load_const(None))
-            codegen(self.obj)
-            codegen.extend_output(create_call_function(2, True))
-        else:
-            codegen(self.obj)
-            codegen.extend_output(create_call_function(1, True))
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(__name__, "_bind_builtin_method")
+        )
+        codegen.append_output(load_descriptor)
+        codegen(self.obj)
+        codegen.extend_output(create_call_function(2, False))
 
 
 class ClassMethodDescriptorVariable(DescriptorVariable):
