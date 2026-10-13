@@ -186,61 +186,6 @@ class TestPackage(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         PrecompileContext.clear()
 
-    class _tempTensorSamplerForQualName:
-        def __init__(self, val, mask, prob):
-            self.val = val
-            self.mask = mask
-            self.prob = prob
-
-        @classmethod
-        def class_method_that_is_used(cls, x):
-            prob = torch.sigmoid(x)
-            thresh = torch.rand(1, device=x.device)
-            mask = (prob > thresh).to(torch.bool)
-            return cls(x, mask, prob)
-
-        @classmethod
-        def class_method_that_is_not_used(cls, x):
-            prob = torch.sigmoid(x)
-            thresh = torch.rand(1, device=x.device)
-            mask = (prob > thresh).to(torch.bool)
-            return cls(x, mask, prob)
-
-        def instance_method_that_is_used(self, x):
-            return x / 2
-
-    class _tempNetForQualName(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-
-        def instance_method_without_args(self):
-            shape = [1, 2, 3, 4]
-            x = torch.randn(shape)
-            return x
-
-        def instance_method_with_args(self, x):
-            return x + 1
-
-        def forward(self, x):
-            x *= x
-            with torch.device(x.device):
-                y = self.instance_method_without_args()
-            # test classmethod called from class
-            sampler = (
-                TestPackage._tempTensorSamplerForQualName.class_method_that_is_used(x)
-            )
-            x = torch.where(torch.rand_like(x) < sampler.prob, sampler.val, x) + y.sum()
-            # test instance method called from instance
-            x = sampler.instance_method_that_is_used(x)
-            # test classmethod called from instance
-            another_sampler = sampler.class_method_that_is_not_used(x)
-            # test instance method called from instance
-            x = another_sampler.instance_method_that_is_used(x)
-            # test classmethod called from instance
-            x += y.sum()
-            x = self.instance_method_with_args(x)
-            return x
-
     def test_collapse_device_types_prefers_an_accelerator(self):
         # The single string both callers record. Among several accelerators
         # one SystemInfo.check_compatibility checks wins: alphabetical order
@@ -1011,6 +956,85 @@ def add(x, y):
         source = ImportSource("torch")
         reloaded = pickle.loads(pickle.dumps(source))
         self.assertEqual(reloaded, source)
+    class _tempTensorSamplerForQualName:
+        def __init__(self, val, mask, prob):
+            self.val = val
+            self.mask = mask
+            self.prob = prob
+
+        @classmethod
+        def class_method_that_is_used(cls, x):
+            prob = torch.sigmoid(x)
+            thresh = torch.rand(1, device=x.device)
+            mask = (prob > thresh).to(torch.bool)
+            return cls(x, mask, prob)
+
+        @classmethod
+        def class_method_that_is_not_used(cls, x):
+            prob = torch.sigmoid(x)
+            thresh = torch.rand(1, device=x.device)
+            mask = (prob > thresh).to(torch.bool)
+            return cls(x, mask, prob)
+
+        def instance_method_that_is_used(self, x):
+            return x / 2
+
+    class _tempNetForQualName(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+
+        def instance_method_without_args(self):
+            shape = [1, 2, 3, 4]
+            x = torch.randn(shape)
+            return x
+
+        def instance_method_with_args(self, x):
+            return x + 1
+
+        def forward(self, x):
+            x *= x
+            with torch.device(x.device):
+                y = self.instance_method_without_args()
+            # test classmethod called from class
+            sampler = (
+                TestPackage._tempTensorSamplerForQualName.class_method_that_is_used(x)
+            )
+            x = torch.where(torch.rand_like(x) < sampler.prob, sampler.val, x) + y.sum()
+            # test instance method called from instance
+            x = sampler.instance_method_that_is_used(x)
+            # test classmethod called from instance
+            another_sampler = sampler.class_method_that_is_not_used(x)
+            # test instance method called from instance
+            x = another_sampler.instance_method_that_is_used(x)
+            # test classmethod called from instance
+            x += y.sum()
+            x = self.instance_method_with_args(x)
+            return x
+
+    def test_accelerator_set_up_class_failure_releases_patches(self):
+        # setUpClass() patches two configs through an ExitStack, and unittest
+        # does not call tearDownClass() when setUpClass() raises -- so the
+        # except block is the only thing releasing them. Without that release
+        # the patches leak into every later test class in the process, which
+        # shows up as order-dependent failures far from here (exactly what CI
+        # cannot catch). Pin the contract: after a failing setUpClass, both
+        # configs read their unpatched values again.
+        accelerator = _PreInstantiateAccelerator
+        bundled_key = "bundled_autograd_cache"
+        strict_key = "strict_precompile"
+        # The body must be entered (so both patches are actually applied) before
+        # the super() call that fails.
+        with patch(
+            "torch._dynamo.test_case.TestCase.setUpClass",
+            side_effect=RuntimeError("setUpClass failure"),
+        ):
+            self.assertTrue(getattr(functorch_config, bundled_key))
+            self.assertTrue(torch._dynamo.config.strict_precompile)
+            with self.assertRaisesRegex(RuntimeError, "setUpClass failure"):
+                accelerator.setUpClass()
+            self.assertFalse(getattr(functorch_config, bundled_key))
+            self.assertFalse(torch._dynamo.config.strict_precompile)
+
 
 
 class TestPackageAccelerator(torch._inductor.test_case.TestCase):
@@ -1035,7 +1059,6 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             # test class in the process. The ConfigPatch class decorator this
             # replaced closed its patches on failure.
             cls._package_config_stack.close()
-            cls._package_config_stack = None
             raise
 
     @classmethod
@@ -1624,6 +1647,12 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         compiled_fn(x)
 
 
+# Kept under its own name because instantiate_device_type_tests below removes
+# TestPackageAccelerator from this module's globals, and the setUpClass
+# regression test in TestPackage has to call setUpClass on the class itself.
+_PreInstantiateAccelerator = TestPackageAccelerator
+
+
 instantiate_device_type_tests(
     TestPackageAccelerator,
     globals(),
@@ -1634,5 +1663,4 @@ instantiate_device_type_tests(
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
-
     run_tests()
