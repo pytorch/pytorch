@@ -72,6 +72,7 @@ def all_gather_output_fn_with_native_copy(
 
 def reduce_scatter_input_fn_with_native_copy(
     unsharded_grads: list[torch.Tensor],
+    *,
     shard_dims: list[int],
     world_size: int,
 ) -> Callable:
