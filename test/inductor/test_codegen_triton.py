@@ -502,9 +502,7 @@ def helper(x):
         # The compatibility API composes collection and formatting.
         self.assertEqual(
             source,
-            render_user_defined_triton_kernel_transitive_closure(
-                source_modules, decorate_root=True
-            ),
+            render_user_defined_triton_kernel_transitive_closure(source_modules),
         )
 
     @unittest.skipUnless(
@@ -1845,7 +1843,7 @@ def helper(x):
         self.assertNotIn("tt.pointer_range", code_str)
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
-    def test_user_defined_triton_kernel_uses_bare_root_jit_decorator(self):
+    def test_user_defined_triton_kernel_omits_root_jit_decorator(self):
         from torch._inductor.codegen.wrapper import (
             user_defined_triton_kernel_transitive_closure_source_code,
         )
@@ -1865,7 +1863,8 @@ def helper(x):
                 )
             )
         self.assertEqual(bare_source, decorated_source)
-        self.assertIn("@triton.jit\ndef root_decorator_for_codegen", decorated_source)
+        self.assertNotIn("@triton.jit", decorated_source)
+        self.assertIn("def root_decorator_for_codegen", decorated_source)
         self.assertNotIn("noinline=True", decorated_source)
         self.assertNotIn("debug=True", decorated_source)
 
@@ -1966,7 +1965,8 @@ def helper(x):
             # Older Triton KernelParam instances predate this attribute. Remove
             # it only during Inductor codegen so current Triton can capture the HOP.
             alignment_options = [
-                param.do_not_specialize_on_alignment for param in kernel.params
+                getattr(param, "do_not_specialize_on_alignment", False)
+                for param in kernel.params
             ]
             try:
                 for param in kernel.params:

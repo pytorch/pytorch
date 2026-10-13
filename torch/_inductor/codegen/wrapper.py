@@ -877,17 +877,12 @@ def render_user_defined_triton_kernel_transitive_closure(
     source_modules: Sequence[TritonKernelSource],
     *,
     imported_modules: Sequence[str] = (),
-    decorate_root: bool = False,
 ) -> str:
     """Render collected Triton sources and their required global bindings."""
 
     rendered: list[str] = []
-    for index, source_module in enumerate(source_modules):
+    for source_module in source_modules:
         if source_module.module_name not in imported_modules:
-            if index == 0 and decorate_root:
-                # Inductor supplies entry-point specialization and compiler options
-                # directly, so only the bare decorator is used for compilation.
-                rendered.append("@triton.jit\n")
             rendered.append(source_module.source)
         rendered.extend(
             f"{symbol_name} = {source_name}\n"
@@ -904,9 +899,7 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     source_modules = user_defined_triton_kernel_transitive_closure(
         kernel, epilogue_fusion
     )
-    return render_user_defined_triton_kernel_transitive_closure(
-        source_modules, decorate_root=True
-    )
+    return render_user_defined_triton_kernel_transitive_closure(source_modules)
 
 
 def user_defined_triton_kernel_specialization(
@@ -4705,6 +4698,7 @@ class PythonWrapperCodegen(CodeGen):
                 filename=__file__,
                 custom_kernel=True,
             )
+            @triton.jit
             """
         )
         kernel_src = user_defined_triton_kernel_transitive_closure_source_code(
