@@ -700,6 +700,13 @@ class BaseUserFunctionVariable(VariableTracker):
                 result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
             except NotImplementedError:
                 result = False
+            source = self.get_source()
+            if source is not None:
+                install_guard(
+                    source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=name)
+                    )
+                )
         return VariableTracker.build(tx, result)
 
     def closure_vars(
