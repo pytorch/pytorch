@@ -4604,6 +4604,16 @@ class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
         device = torch.device(c10d.distributed_c10d._get_object_coll_device(pg))
         self.assertEqual(pg._get_backend(device).options._timeout, timeout)
 
+    def test_guard_pg_inherits_default_timeout(self):
+        from torch._dynamo.distributed import get_guard_pg
+
+        timeout = datetime.timedelta(seconds=120)
+        self._init_process_group(timeout=timeout)
+
+        pg = get_guard_pg()
+        device = torch.device(c10d.distributed_c10d._get_object_coll_device(pg))
+        self.assertEqual(pg._get_backend(device).options._timeout, timeout)
+
 
 class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
     """Unit tests for Node-typed group_name handling in bucketing.

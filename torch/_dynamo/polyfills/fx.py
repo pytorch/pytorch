@@ -8,12 +8,12 @@ from torch.fx.node import Node
 from ..decorators import substitute_in_graph
 
 
-@substitute_in_graph(_fx_map_arg, can_constant_fold_through=True)
+@substitute_in_graph(_fx_map_arg)
 def map_arg(a: Any, fn: Callable[[Node], Any]) -> Any:
     return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
 
 
-@substitute_in_graph(_fx_map_aggregate, can_constant_fold_through=True)
+@substitute_in_graph(_fx_map_aggregate)
 def map_aggregate(a: Any, fn: Callable[[Any], Any]) -> Any:
     result: Any
     if isinstance(a, tuple):
