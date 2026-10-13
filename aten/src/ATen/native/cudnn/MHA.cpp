@@ -12,8 +12,10 @@
 
 namespace at::native {
 
-// Check the pointer and stride alignment cuDNN requires for varlen tensors.
-bool has_aligned_varlen_layout(const Tensor& tensor) {
+namespace {
+
+// Check the pointer and stride alignment cuDNN requires.
+bool has_aligned_layout(const Tensor& tensor, bool allow_broadcast) {
   constexpr int64_t alignment_bytes = 16;
   if (!tensor.numel()) {
     return true;
@@ -26,11 +28,18 @@ bool has_aligned_varlen_layout(const Tensor& tensor) {
   const int64_t alignment = alignment_bytes / tensor.element_size();
   for (int64_t dim = 0; dim < tensor.dim() - 1; ++dim) {
     if (tensor.size(dim) > 1 &&
-        (tensor.stride(dim) <= 0 || tensor.stride(dim) % alignment != 0)) {
+        ((!allow_broadcast && tensor.stride(dim) <= 0) ||
+         tensor.stride(dim) % alignment != 0)) {
       return false;
     }
   }
   return true;
+}
+
+} // namespace
+
+bool has_aligned_varlen_layout(const Tensor& tensor) {
+  return has_aligned_layout(tensor, /*allow_broadcast=*/false);
 }
 
 } // namespace at::native
@@ -376,6 +385,22 @@ void checkInt32Alignment(const Tensor& tensor, const char* name) {
       " data pointer must be aligned to ",
       kRequiredInt32Alignment,
       " bytes for the selected cuDNN Frontend");
+}
+
+// cuDNN does not see data pointers when checking graph support.
+void checkSDPAAlignment(const Tensor& tensor, const char* name) {
+  TORCH_CHECK(
+      has_aligned_layout(tensor, /*allow_broadcast=*/true),
+      "cuDNN attention requires ",
+      name,
+      " to have 16-byte-aligned storage and strides, with a contiguous last dimension");
+}
+
+void checkSDPABiasAlignment(const std::optional<Tensor>& attn_bias) {
+  TORCH_CHECK(
+      !attn_bias.has_value() ||
+          reinterpret_cast<uintptr_t>(attn_bias->const_data_ptr()) % 16 == 0,
+      "cuDNN attention requires attn_bias data pointer to be aligned to 16 bytes");
 }
 
 // Record an auxiliary tensor layout in the zero-initialized cache key.
@@ -1581,6 +1606,10 @@ void run_cudnn_SDP_fprop(
     return;
   }
   check_cudnn_sdpa_decode(s_q);
+  checkSDPAAlignment(q, "query");
+  checkSDPAAlignment(k, "key");
+  checkSDPAAlignment(v, "value");
+  checkSDPABiasAlignment(attn_bias);
   Tensor seqlen_q, seqlen_kv;
   Tensor rag_off_q, rag_off_k, rag_off_v, rag_off_o, rag_off_lse;
 
@@ -1950,6 +1979,11 @@ void run_cudnn_SDP_bprop(
     return;
   }
   check_cudnn_sdpa_decode(s_q);
+  checkSDPAAlignment(q, "query");
+  checkSDPAAlignment(k, "key");
+  checkSDPAAlignment(v, "value");
+  checkSDPAAlignment(o, "out");
+  checkSDPABiasAlignment(attn_bias);
   Tensor seqlen_q, seqlen_kv;
   Tensor rag_off_q, rag_off_k, rag_off_v, rag_off_o, rag_off_lse;
 
@@ -1984,6 +2018,11 @@ void run_cudnn_SDP_bprop(
     permute_to_matching_layout(o, dO_);
   }
 #endif
+  // Autograd may pass a misaligned grad_output view (e.g. from cat backward).
+  if (!has_aligned_layout(dO_, /*allow_broadcast=*/true)) {
+    dO_ = at::empty_like(o);
+    dO_.copy_(dO);
+  }
   if (use_ragged_in_dense(q, k, v, o, attn_bias.has_value())) {
     seqlen_q = at::full({b, 1, 1, 1}, s_q, q.options().dtype(kInt));
     seqlen_kv = at::full({b, 1, 1, 1}, s_kv, q.options().dtype(kInt));
