@@ -234,7 +234,7 @@ def fold_decoded_uniform_tree(
     for load in cutlass.range_constexpr(nloads):
         r = tidx + Int32(const_expr(load * threads_per_block))
         carry = trait.leaf(
-            _load_reduction_value(trait, mX, obase + Int64(r) * stride, False),
+            trait.acc(mX[obase + Int64(r) * stride]),
             r,
         )
         width = 1
@@ -251,7 +251,7 @@ def fold_decoded_uniform_tree(
         valid = tidx < Int32(remainder)
         safe = r if valid else Int32(0)
         leaf = trait.leaf(
-            _load_reduction_value(trait, mX, obase + Int64(safe) * stride, False),
+            trait.acc(mX[obase + Int64(safe) * stride]),
             safe,
         )
         ident = trait.init()
@@ -713,10 +713,8 @@ class TileReduce:
             or order != "linear"
             or combine
             or npairs_red != 1
-            or wide_gidx
             or wide_red
             or gidx_from != "r"
-            or getattr(trait, "complex_input", False)
             or not hasattr(trait, "combine_equal")
             or general_tree_count < threads_per_block
         ):
