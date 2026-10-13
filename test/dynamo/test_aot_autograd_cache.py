@@ -57,7 +57,10 @@ from torch.compiler._cache import CacheArtifactManager
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -5530,6 +5533,109 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
                 fake_mode=standalone_fake_mode,
             )
             self.assertEqual(captured_key, sc_key)
+
+
+class GuardContextCacheTests(InductorTestCase):
+    @functorch_config.patch(
+        enable_autograd_cache=True, enable_remote_autograd_cache=False
+    )
+    @inductor_config.patch(fx_graph_cache=True, fx_graph_remote_cache=False)
+    @parametrize("training", (False, True))
+    @parametrize("narrow_first", (False, True))
+    def test_issue_194001_incoming_context(self, device, training, narrow_first):
+        def narrow(x):
+            if x.shape[0] < 10:
+                pass
+            return x * 10
+
+        def wide(x):
+            return x * 10
+
+        with fresh_cache():
+            counters.clear()
+            modes = (
+                (narrow, wide, narrow, wide)
+                if narrow_first
+                else (wide, narrow, wide, narrow)
+            )
+            for fn in modes:
+                torch._dynamo.reset()
+                torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
+                compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+                for size in (5, 7) if fn is narrow else (5, 10, 3):
+                    x = torch.randn(size, 10, device=device, requires_grad=training)
+                    if fn is narrow:
+                        torch._dynamo.mark_dynamic(x, 0)
+                    else:
+                        torch._dynamo.mark_dynamic(x, 0, min=3, max=10)
+                    actual = compiled(x)
+                    self.assertEqual(actual, x * 10)
+                    if training:
+                        actual.sum().backward()
+                        self.assertEqual(x.grad, torch.full_like(x, 10))
+            self.assertGreaterEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @functorch_config.patch(
+        enable_autograd_cache=True, enable_remote_autograd_cache=False
+    )
+    @inductor_config.patch(fx_graph_cache=True, fx_graph_remote_cache=False)
+    def test_issue_194001_compatible_hints_hit(self, device):
+        def fn(x):
+            return x.sin()
+
+        with fresh_cache():
+            counters.clear()
+            for size in (5, 7):
+                torch._dynamo.reset()
+                x = torch.randn(size, device=device)
+                torch._dynamo.mark_dynamic(x, 0, min=3, max=10)
+                actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+                self.assertEqual(actual, fn(x))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+
+instantiate_device_type_tests(
+    GuardContextCacheTests, globals(), only_for=("cpu", "cuda")
+)
+
+
+class IncomingGuardContextTests(torch._dynamo.test_case.TestCase):
+    def test_issue_194001_canonical_readonly_context(self):
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.codecache import FxGraphHashDetails
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        def inputs(prefix, unrelated):
+            env = ShapeEnv()
+            if unrelated:
+                env.create_symbol(13, ConstantSource("unrelated"), DimDynamic.DYNAMIC)
+            values = []
+            for index, hint in enumerate((5, 7)):
+                expr = env.create_symbol(
+                    hint, ConstantSource(f"{prefix}{index}"), DimDynamic.DYNAMIC
+                )
+                env._constrain_range(expr, 3, 10)
+                values.append(env.create_symintnode(expr, hint=hint))
+            return env, [values[0], values[1], values[0] + values[1], values[0]]
+
+        first_env, first = inputs("first", False)
+        second_env, second = inputs("second", True)
+        before = (
+            list(first_env.guards),
+            dict(first_env.var_to_range),
+            dict(first_env.replacements),
+        )
+        context = FxGraphHashDetails._incoming_guard_context(first)
+        self.assertEqual(context, FxGraphHashDetails._incoming_guard_context(second))
+        self.assertEqual(
+            before, (first_env.guards, first_env.var_to_range, first_env.replacements)
+        )
+        self.assertNotEqual(
+            context, FxGraphHashDetails._incoming_guard_context(first[:-1] + [first[1]])
+        )
+        second_env._constrain_range(second[0].node.expr, 3, 9)
+        self.assertNotEqual(context, FxGraphHashDetails._incoming_guard_context(second))
 
 
 if __name__ == "__main__":
