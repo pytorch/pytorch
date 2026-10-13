@@ -1,7 +1,7 @@
 """CuTeDSL implementations of the MXFP8 quantization operators."""
 
 import torch
-from torch._quantization_formats import (
+from torch.utils._quantize_tensor_validation import (
     _get_quant_format,
     _quantize_tensor_dual_validate_inputs,
     _quantize_tensor_validate_inputs,
