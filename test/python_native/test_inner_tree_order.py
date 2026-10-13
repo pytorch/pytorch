@@ -345,6 +345,24 @@ class TestInnerTreeOrder(TestCase):
                     got.reshape(-1).view(torch.int32), want.view(torch.int32)
                 )
 
+    def test_indexed_split_cache_distinguishes_partial_dtypes(self):
+        """Compile distinct stage-one launchers when accumulator dtypes differ."""
+        x = (
+            torch.arange(2 * 65538, device="cuda", dtype=torch.float32).reshape(
+                2, 65538
+            )
+            % 17
+        )[:, ::2]
+        key = "inner_tree_test_partial_dtype_cache"
+        for acc, dtype in (
+            (cutlass.Float32, torch.float32),
+            (cutlass.Float64, torch.float64),
+        ):
+            got = kg.reduce_dim(
+                T.SumOps(acc=acc), key, x, [1], dtype, order="inner_tree"
+            )
+            self.assertEqual(got, x.sum(dim=1, dtype=dtype))
+
     def test_multi_field_and_two_output_traits_under_the_order(self):
         # Exercise per-field staging/partials, two outputs from one accumulator, and ragged
         # identity padding. Compare only plumbing with launch order because the DAGs differ.
