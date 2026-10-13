@@ -484,19 +484,19 @@ namespace {
 at::Tensor one_shot_all_reduce_meta(
     const at::Tensor& input,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    std::string reduce_op,
+    std::string /*reduce_op*/,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    std::string group_name) {
+    std::string /*group_name*/) {
   return at::empty_like(input);
 }
 
 at::Tensor one_shot_all_reduce_copy_meta(
-    const at::Tensor& symm_buffer,
+    const at::Tensor& /*symm_buffer*/,
     const at::Tensor& local_input,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    std::string reduce_op,
+    std::string /*reduce_op*/,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    std::string group_name) {
+    std::string /*group_name*/) {
   return at::empty_like(local_input);
 }
 
@@ -558,12 +558,14 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def("nvshmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
   m.def(
       "nvshmem_put_with_signal(Tensor(a) tensor, Tensor(a) sigpad, int signal, int peer) -> ()");
-  m.def("nccl_put(Tensor(a!) tensor, int peer) -> ()");
-  m.def("nccl_get(Tensor(a!) tensor, int peer) -> ()");
+  m.def("nccl_put(Tensor(a!) tensor, int peer, str? group_name=None) -> ()");
+  m.def("nccl_get(Tensor(a!) tensor, int peer, str? group_name=None) -> ()");
   m.def(
       "nccl_get_out(Tensor(a!) dst, __torch__.torch.classes.c10d.SymmetricMemory hdl, int offset, int size, int peer) -> ()");
-  m.def("nccl_wait_for_signal(Tensor sigpad, int signal) -> ()");
-  m.def("nccl_put_with_signal(Tensor(a) tensor, int signal, int peer) -> ()");
+  m.def(
+      "nccl_wait_for_signal(Tensor sigpad, int signal, str? group_name=None) -> ()");
+  m.def(
+      "nccl_put_with_signal(Tensor(a) tensor, int signal, int peer, str? group_name=None) -> ()");
   m.def(
       "nccl_reduce_scatter_offset(Tensor input, Tensor(a!)[] out, str group_name, int dim, int[]? offsets=None, int[]? dst_ranks=None, str red_op='sum') -> ()");
   m.def(
