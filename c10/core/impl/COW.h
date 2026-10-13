@@ -1,7 +1,10 @@
 #pragma once
 
+#include <c10/core/impl/COWDeleter.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
+
+#include <optional>
 
 namespace c10 {
 struct StorageImpl;
@@ -28,5 +31,15 @@ C10_API bool is_cow_data_ptr(const c10::DataPtr& data_ptr);
 
 // MaterializeFn for COW storages. Copies shared data on write.
 C10_API void materialize_cow(StorageImpl* storage);
+
+// Declares that a lazily cloned storage is done with the data it shares, once
+// `event` completes (or already, if nullopt): no work enqueued after this call
+// reads the shared data through this storage. This lets the last reference
+// to stream-ordered data take it without copying, and a storage materialized
+// from it stop keeping it alive. Does nothing for other storages. See
+// "Releasing lazy clones" in README-cow.md.
+C10_API void release_lazy_clone(
+    StorageImpl& storage,
+    std::optional<ReleaseEvent> event);
 
 } // namespace c10::impl::cow

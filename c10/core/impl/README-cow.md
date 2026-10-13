@@ -125,3 +125,31 @@ storage, it also records the stream for the data it was materialized
 from, which uses enqueued before materialization read. (Code which
 records streams with the caching allocator directly, at the time of
 use, records them for the data that use reads.)
+
+### Releasing lazy clones
+Never stealing and keeping the shared data alive is safe but costs a
+copy and memory. `release_lazy_clone()`
+(`torch._C._lazy_clone_release(tensor, event)` in Python) lets a user
+declare that a reference is done with the shared data once an event
+completes: nothing enqueued after the call reads the shared data
+through that storage. (Passing no event means that it is done
+already.) Releasing during CUDA graph capture is not supported.
+
+The context counts every reference ever created, not just the live
+ones, since freed references may also have pending reads, and it keeps
+the release events. When the last remaining reference materializes and
+every other reference ever created has been released, it makes the
+current stream wait for the release events and steals the data.
+Otherwise it copies as before.
+
+The copy made by materialization is a read of the shared data that
+users do not know about, so materialization adds an event of its own
+for it. Releasing a materialized storage drops its reference to the
+data it was materialized from, making it an ordinary storage. Releasing
+a storage which still shares the data keeps it a lazy clone. Reading
+it after releasing it is an error that we do not detect, but writing
+to it is fine, and it then does not keep the shared data alive.
+
+When the shared data is freed instead of stolen, the allocation stream
+first waits for the release events, since the allocator only orders the
+reuse of its memory after that stream.

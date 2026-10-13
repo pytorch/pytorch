@@ -22,6 +22,14 @@ def is_cow(t):
     return torch._C._is_cow_tensor(t)
 
 
+def address(t):
+    # Unlike data_ptr(), this does not materialize.
+    return torch._C._data_address(t)
+
+
+release = torch._C._lazy_clone_release
+
+
 # Lazy clones of CUDA tensors should be safe to use with the synchronization an
 # ordinary clone made on the current stream would need.
 @unittest.skipUnless(TEST_NATIVE_ALLOCATOR, "requires the native CUDA allocator")
@@ -165,6 +173,134 @@ class TestCOWCUDA(TestCase):
         self.assertFalse(is_cow(w))
         self.assertEqual(z, x)
         self.assertEqual(w, x)
+
+    def test_release_allows_steal(self, device):
+        side = torch.cuda.Stream(device=device)
+        x = torch.ones(1 << 20, device=device)
+        ptr = address(x)
+        y = x._lazy_clone()
+        side.wait_stream(torch.cuda.current_stream(device))
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(SLEEP_CYCLES)
+            out = x * 2
+        release(x, side.record_event())
+        del x
+        y.fill_(7)
+        self.assertEqual(address(y), ptr)
+        torch.cuda.current_stream(device).wait_stream(side)
+        self.assertEqual(out, torch.full_like(out, 2))
+        self.assertEqual(y, torch.full_like(y, 7))
+
+    def test_release_materialized(self, device):
+        x = torch.ones(1 << 20, device=device)
+        ptr = address(x)
+        y = x._lazy_clone()
+        x.add_(1)
+        allocated = torch.cuda.memory_allocated(device)
+        release(x)
+        self.assertFalse(is_cow(x))
+        y.add_(1)
+        self.assertEqual(address(y), ptr)
+        self.assertEqual(torch.cuda.memory_allocated(device), allocated)
+        self.assertEqual(x, torch.full_like(x, 2))
+        self.assertEqual(y, torch.full_like(y, 2))
+        z = x._lazy_clone()
+        self.assertTrue(is_cow(z))
+
+    def test_unreleased_reference_prevents_steal(self, device):
+        x = torch.ones(1 << 20, device=device)
+        ptr = address(x)
+        y = x._lazy_clone()
+        z = x._lazy_clone()
+        release(x)
+        del x, y
+        z.add_(1)
+        self.assertNotEqual(address(z), ptr)
+
+    def test_write_after_release(self, device):
+        # Writing to y after releasing it reads the shared data once more,
+        # which must complete before x steals it.
+        side = torch.cuda.Stream(device=device)
+        x = torch.ones(1 << 20, device=device)
+        ptr = address(x)
+        y = x._lazy_clone()
+        release(y)
+        side.wait_stream(torch.cuda.current_stream(device))
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(SLEEP_CYCLES)
+            y.add_(1)
+        self.assertFalse(is_cow(y))
+        x.fill_(5)
+        self.assertEqual(address(x), ptr)
+        torch.cuda.current_stream(device).wait_stream(side)
+        self.assertEqual(x, torch.full_like(x, 5))
+        self.assertEqual(y, torch.full_like(y, 2))
+
+    def test_release_after_materialize(self, device):
+        # The copy materializing x reads the shared data on the stream x is
+        # written on, which releasing x cannot cover, so y's steal must still
+        # wait for it.
+        side = torch.cuda.Stream(device=device)
+        x = torch.ones(1 << 20, device=device)
+        ptr = address(x)
+        y = x._lazy_clone()
+        side.wait_stream(torch.cuda.current_stream(device))
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(SLEEP_CYCLES)
+            x.add_(1)
+        release(x)
+        y.fill_(7)
+        self.assertEqual(address(y), ptr)
+        torch.cuda.current_stream(device).wait_stream(side)
+        self.assertEqual(x, torch.full_like(x, 2))
+        self.assertEqual(y, torch.full_like(y, 7))
+
+    def test_free_after_release(self, device):
+        # When the shared data is freed, its reuse must wait for the release
+        # events.
+        side = torch.cuda.Stream(device=device)
+        x = torch.ones(1 << 20, device=device)
+        y = x._lazy_clone()
+        side.wait_stream(torch.cuda.current_stream(device))
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(SLEEP_CYCLES)
+            out = x * 2
+        release(x, side.record_event())
+        del x, y
+        scratch = torch.empty(1 << 20, device=device)
+        scratch.fill_(99)
+        torch.cuda.current_stream(device).wait_stream(side)
+        self.assertEqual(out, torch.full_like(out, 2))
+
+    def test_release_event_types(self, device):
+        for event in [torch.Event(device=device), torch.cuda.Event()]:
+            x = torch.ones(16, device=device)
+            ptr = address(x)
+            y = x._lazy_clone()
+            event.record()
+            release(x, event)
+            del x, event
+            y.add_(1)
+            self.assertEqual(address(y), ptr)
+
+    def test_release_errors(self, device):
+        x = torch.ones(16, device=device)
+        y = x._lazy_clone()
+        with self.assertRaisesRegex(RuntimeError, "expected a recorded event"):
+            release(x, torch.cuda.Event())
+        with self.assertRaisesRegex(RuntimeError, "expected a torch.Event"):
+            release(x, 1)
+        if TEST_CUDA_GRAPH:
+            g = torch.cuda.CUDAGraph()
+            with self.assertRaisesRegex(RuntimeError, "during CUDA graph capture"):
+                with torch.cuda.graph(g):
+                    release(y)
+        # Releasing other tensors does nothing.
+        release(torch.ones(16, device=device))
+        cpu = torch.ones(16)
+        cpu_clone = cpu._lazy_clone()
+        release(cpu)
+        self.assertTrue(is_cow(cpu_clone))
 
     @unittest.skipUnless(TEST_CUDA_GRAPH, "requires CUDA graphs")
     def test_lazy_clone_during_capture(self, device):

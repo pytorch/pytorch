@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <optional>
+#include <utility>
 
 namespace c10::impl::cow {
 
@@ -162,6 +163,10 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
 
   if (simple) {
     // Case 1) We have a simple data pointer: wrap it.
+    if (storage.extra_meta_) {
+      // The storage may have released an earlier context.
+      storage.extra_meta_->cow_released_ = false;
+    }
     std::unique_ptr<void, DeleterFnPtr> original_ctx =
         storage._mutable_data_ptr_no_checks().move_context();
 
@@ -202,12 +207,6 @@ void materialize_cow(StorageImpl* storage) {
   TORCH_INTERNAL_ASSERT(ctx != nullptr);
 
   if (const auto& stream = ctx->stream()) {
-    // Stream-ordered data may still be read by work that was enqueued through
-    // any reference to it, including references which have since been
-    // freed. So we can neither steal it nor free it yet. Copy it on the
-    // current stream into an allocation on the allocation stream, which the
-    // storage's users synchronize with before freeing it, and keep our
-    // reference to the data until then.
     c10::DeviceGuard device_guard(data_ptr.device());
     const auto* impl = getDeviceGuardImpl(data_ptr.device().type());
     const Stream current = impl->getStream(data_ptr.device());
@@ -216,22 +215,49 @@ void materialize_cow(StorageImpl* storage) {
         "Cannot write to a lazily cloned tensor during CUDA graph capture "
         "when it was cloned outside of the capture. Use clone() instead of "
         "_lazy_clone(), or write to it before capture.");
-    DataPtr copy;
-    {
-      c10::StreamGuard stream_guard(*stream);
-      copy = storage->allocator()->allocate(storage->nbytes());
+    auto& extra_meta = storage->get_extra_meta();
+    // Only cleared once materialization can no longer fail, so that a
+    // storage which is still a lazy clone cannot release twice.
+    const bool released = extra_meta.cow_released_;
+    if (ctx->can_steal(released)) {
+      // Every other reference has been released, so once their events
+      // complete, nothing else reads the data. Steal it below.
+      ctx->wait_for_releases(current);
+      extra_meta.cow_released_ = false;
+    } else {
+      // Stream-ordered data may still be read by work that was enqueued
+      // through any unreleased reference to it, including references which
+      // have since been freed. So we can neither steal it nor free it yet.
+      // Copy it on the current stream into an allocation on the allocation
+      // stream, which the storage's users synchronize with before freeing it,
+      // and keep our reference to the data until then.
+      DataPtr copy;
+      {
+        c10::StreamGuard stream_guard(*stream);
+        copy = storage->allocator()->allocate(storage->nbytes());
+      }
+      if (!same_stream(impl, current, *stream)) {
+        // The allocation is only ready for use on the allocation stream.
+        c10::Event ready(data_ptr.device().type());
+        ready.record(*stream);
+        ready.block(current);
+      }
+      storage->allocator()->copy_data(
+          copy.mutable_get(), data_ptr.get(), storage->nbytes());
+      // The copy is the storage's last read of the data. Users cannot know
+      // to cover it when they release the storage, so a steal or free waits
+      // for it.
+      auto copied = std::make_shared<c10::Event>(data_ptr.device().type());
+      copied->record(current);
+      DataPtr old_data_ptr =
+          storage->set_data_ptr_no_materialize(std::move(copy));
+      extra_meta.cow_released_ = false;
+      ctx->add_release_event(ReleaseEvent{copied->eventId(), copied});
+      if (!released) {
+        extra_meta.cow_materialized_from_ = std::move(old_data_ptr);
+      }
+      return;
     }
-    if (!same_stream(impl, current, *stream)) {
-      // The allocation is only ready for use on the allocation stream.
-      c10::Event ready(data_ptr.device().type());
-      ready.record(*stream);
-      ready.block(current);
-    }
-    storage->allocator()->copy_data(
-        copy.mutable_get(), data_ptr.get(), storage->nbytes());
-    storage->get_extra_meta().cow_materialized_from_ =
-        storage->set_data_ptr_no_materialize(std::move(copy));
-    return;
   }
 
   auto result = ctx->decrement_refcount();
@@ -251,6 +277,8 @@ void materialize_cow(StorageImpl* storage) {
     TORCH_INTERNAL_ASSERT(
         std::holds_alternative<cow::COWDeleterContext::NotLastReference>(
             result));
+    // can_steal() guarantees that stream-ordered data is not shared.
+    TORCH_INTERNAL_ASSERT(!is_stream_ordered(data_ptr));
     // We don't need to consume the result, it's just a shared lock ensuring
     // that the data will remain while we copy it.
     new_data_ptr =
@@ -263,6 +291,41 @@ void materialize_cow(StorageImpl* storage) {
   // The refcount of the context was already decremented above. Release the
   // reference to the context so the refcount doesn't get decremented again
   old_data_ptr.release_context();
+}
+
+void release_lazy_clone(
+    StorageImpl& storage,
+    std::optional<ReleaseEvent> event) {
+  const DataPtr* cow_data_ptr = storage.cow_materialized_from();
+  const bool materialized = cow_data_ptr != nullptr;
+  if (!materialized) {
+    cow_data_ptr = &storage.data_ptr();
+    if (!is_cow_data_ptr(*cow_data_ptr)) {
+      return;
+    }
+  }
+  auto* ctx = cow_data_ptr->cast_context<COWDeleterContext>(cow_deleter);
+  if (!ctx->stream()) {
+    // Only stream-ordered data can have pending reads.
+    return;
+  }
+  const auto* impl = getDeviceGuardImpl(cow_data_ptr->device().type());
+  TORCH_CHECK(
+      !impl->isStreamCapturing(impl->getStream(cow_data_ptr->device())),
+      "Cannot release a lazily cloned tensor during CUDA graph capture");
+  auto& extra_meta = storage.get_extra_meta();
+  if (materialized) {
+    ctx->release(std::move(event));
+    // This may free the data, after the allocation stream waits for the
+    // release events.
+    extra_meta.cow_materialized_from_.clear();
+  } else if (std::exchange(extra_meta.cow_released_, true)) {
+    if (event) {
+      ctx->add_release_event(std::move(*event));
+    }
+  } else {
+    ctx->release(std::move(event));
+  }
 }
 
 } // namespace c10::impl::cow

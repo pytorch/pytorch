@@ -3513,6 +3513,48 @@ Call this whenever a new thread is created in order to propagate values from
       "Checks if a tensor's data pointer is COW");
 
   py_module.def(
+      "_lazy_clone_release",
+      [](const at::Tensor& tensor, py::handle event) {
+        TORCH_CHECK(
+            !tensor.is_fake() &&
+                !tensor.key_set().has(c10::DispatchKey::Python),
+            "_lazy_clone_release is not defined for Python tensor subclasses or FakeTensors");
+        std::optional<c10::impl::cow::ReleaseEvent> release_event;
+        if (!event.is_none()) {
+          TORCH_CHECK(
+              THPEvent_Check(event.ptr()),
+              "_lazy_clone_release expected a torch.Event, but got ",
+              Py_TYPE(event.ptr())->tp_name);
+          // event_id and device are also correct for device-specific events,
+          // like torch.cuda.Event.
+          void* handle = PyLong_AsVoidPtr(event.attr("event_id").ptr());
+          TORCH_CHECK(
+              handle != nullptr,
+              "_lazy_clone_release expected a recorded event");
+          auto device = event.attr("device");
+          TORCH_CHECK(
+              THPDevice_Check(device.ptr()) &&
+                  reinterpret_cast<THPDevice*>(device.ptr())->device.type() ==
+                      tensor.device().type(),
+              "_lazy_clone_release expected an event on ",
+              tensor.device().type(),
+              ", but got one on ",
+              py::str(device).cast<std::string>());
+          Py_INCREF(event.ptr());
+          release_event = c10::impl::cow::ReleaseEvent{
+              handle,
+              std::make_shared<c10::SafePyObject>(
+                  event.ptr(), getPyInterpreter())};
+        }
+        c10::impl::cow::release_lazy_clone(
+            *tensor.storage().unsafeGetStorageImpl(), std::move(release_event));
+      },
+      py::arg("tensor"),
+      py::arg("event") = py::none(),
+      "Declares that a lazy clone is done with the data it shares once event "
+      "completes (or already, if event is None)");
+
+  py_module.def(
       "_get_cudnn_batch_norm_reserve_space_size",
       [](const at::Tensor& input, bool training) {
 #ifdef USE_CUDA
