@@ -11029,6 +11029,70 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertNotIn("L['x'] == 5", message)
         self.assertIn("... and 2 more distinct reason(s) not shown.", message)
 
+    def test_guard_complete_hook_can_reset_hit(self):
+        from torch._C._dynamo.eval_frame import set_guard_complete_hook
+
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        compiled_fn = torch.compile(fn, backend="eager")
+        compiled_fn(x)
+        entry = torch._dynamo.eval_frame._debug_get_cache_entry_list(fn.__code__)[0]
+        expected_annotation = entry.trace_annotation
+        del entry
+        guard_results = []
+
+        def reset_hit(hit):
+            guard_results.append(hit)
+            # Frees the entry, and with it the only reference to its code and
+            # annotation that the cache held.
+            torch._dynamo.reset_code(fn.__code__)
+            gc.collect()
+            [str(i) * 64 for i in range(1000)]
+            return hit
+
+        old_hook = set_guard_complete_hook(reset_hit)
+        try:
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU]
+            ) as prof:
+                self.assertEqual(compiled_fn(x), fn(x))
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(guard_results, [True])
+        self.assertIn(expected_annotation, [e.name for e in prof.events()])
+
+    def test_guard_complete_hook_can_reset_hit_and_force_recompile(self):
+        from torch._C._dynamo.eval_frame import set_guard_complete_hook
+
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        compiled_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        guard_results = []
+
+        def reset_hit_and_force_miss(hit):
+            guard_results.append(hit)
+            torch._dynamo.reset_code(fn.__code__)
+            return False
+
+        old_hook = set_guard_complete_hook(reset_hit_and_force_miss)
+        try:
+            self.assertEqual(compiled_fn(x), fn(x))
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(guard_results, [True])
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(
+            len(torch._dynamo.eval_frame._debug_get_cache_entry_list(fn.__code__)),
+            1,
+        )
+
     def test_compile_past_precompiled_entries_records_why_they_missed(self):
         from torch._C._dynamo.eval_frame import (
             _load_precompile_entry,
