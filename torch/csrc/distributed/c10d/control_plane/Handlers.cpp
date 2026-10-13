@@ -99,16 +99,18 @@ RegisterHandler frDumpFileHandler(
         return;
       }
 
-      // Single-flight guard: a polling health check must not spawn one worker
-      // per request, all writing the same file. The previous future's state is
-      // the signal - once wait_for(0) reports ready the worker has exited, so
-      // reassigning cannot block on a join; otherwise a dump is still running
-      // and we coalesce into it.
+      // Single-flight guard per backend: a polling health check must not spawn
+      // one worker per request, all writing the same file. Different backends
+      // have different recorders and must be allowed to dump concurrently.
+      // The previous future's state is the signal - once wait_for(0) reports
+      // ready the worker has exited, so reassigning cannot block on a join;
+      // otherwise a dump is still running and we coalesce into it.
       static std::mutex dumpFutureMutex;
-      static std::future<void> dumpFuture;
+      static std::unordered_map<std::string, std::future<void>> dumpFutures;
 
       {
         std::lock_guard<std::mutex> lock(dumpFutureMutex);
+        auto& dumpFuture = dumpFutures[backend];
         if (dumpFuture.valid() &&
             dumpFuture.wait_for(std::chrono::seconds(0)) !=
                 std::future_status::ready) {
@@ -192,7 +194,7 @@ RegisterHandler pyspyHandler{
 } // namespace
 
 void registerHandler(const std::string& name, HandlerFunc f) {
-  return getHandlerRegistry().registerHandler(name, std::move(f));
+  getHandlerRegistry().registerHandler(name, std::move(f));
 }
 
 HandlerFunc getHandler(const std::string& name) {
