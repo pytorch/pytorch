@@ -12,34 +12,6 @@ from ... import cutedsl_utils as cu
 from .utils import _device_capability
 
 
-def _validate_rounding(
-    input: torch.Tensor,
-    qdata_rounding_mode: int,
-    random_key: torch.Tensor | None,
-    swizzle_type: int,
-    scaling_type_use_square_block_size: bool,
-) -> bool:
-    from torch.nn.functional import RoundingMode, SwizzleType
-
-    if qdata_rounding_mode == RoundingMode.RTNE.value:
-        if random_key is not None:
-            raise ValueError("RTNE does not use random_key")
-        return False
-    if qdata_rounding_mode != RoundingMode.STOCHASTIC.value:
-        raise ValueError("unsupported qdata_rounding_mode")
-    if (
-        swizzle_type != SwizzleType.SWIZZLE_32_4_4.value
-        or scaling_type_use_square_block_size
-    ):
-        raise ValueError("stochastic rounding requires swizzled 1x32 scales")
-    if random_key is not None:
-        if random_key.dtype != torch.uint64 or random_key.numel() != 2:
-            raise ValueError("random_key must be a two-element uint64 tensor")
-        if random_key.device != input.device:
-            raise ValueError("random_key and input must be on the same device")
-    return True
-
-
 def _quantize_tensor_impl(
     input: torch.Tensor,
     scaling_type: int,
@@ -50,7 +22,7 @@ def _quantize_tensor_impl(
     qdata_rounding_mode: int = 0,
     random_key: torch.Tensor | None = None,
 ) -> list[torch.Tensor]:
-    from torch.nn.functional import SwizzleType
+    from torch.nn.functional import RoundingMode, SwizzleType
 
     if input.dim() != 2:
         raise ValueError("quantize_tensor requires a 2D input")
@@ -66,17 +38,13 @@ def _quantize_tensor_impl(
             scaling_algorithm,
             swizzle_type,
             scaling_type_use_square_block_size,
+            qdata_rounding_mode,
+            random_key,
         )
     else:
         raise AssertionError(f"Unknown {quant_format=}")
 
-    stochastic_rounding = _validate_rounding(
-        input,
-        qdata_rounding_mode,
-        random_key,
-        swizzle_type,
-        scaling_type_use_square_block_size,
-    )
+    stochastic_rounding = qdata_rounding_mode == RoundingMode.STOCHASTIC.value
     is_scale_swizzled = swizzle_type == SwizzleType.SWIZZLE_32_4_4.value
     if input.is_contiguous():
         source, orientation = input, "dim_k"
@@ -113,6 +81,8 @@ def _quantize_tensor_dual_impl(
     qdata_rounding_mode: int = 0,
     random_key: torch.Tensor | None = None,
 ) -> list[torch.Tensor]:
+    from torch.nn.functional import RoundingMode
+
     if input.dim() != 2:
         raise ValueError("quantize_tensor_dual requires a 2D input")
     if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
@@ -127,17 +97,13 @@ def _quantize_tensor_dual_impl(
             scaling_algorithm,
             swizzle_type,
             scaling_type_use_square_block_size,
+            qdata_rounding_mode,
+            random_key,
         )
     else:
         raise AssertionError(f"Unknown {quant_format=}")
 
-    stochastic_rounding = _validate_rounding(
-        input,
-        qdata_rounding_mode,
-        random_key,
-        swizzle_type,
-        scaling_type_use_square_block_size,
-    )
+    stochastic_rounding = qdata_rounding_mode == RoundingMode.STOCHASTIC.value
     if input.device.type != "cuda" or torch.version.hip is not None:
         raise RuntimeError("quantize_tensor_dual requires an NVIDIA CUDA tensor")
     if _device_capability(input.get_device()) < (10, 0):
