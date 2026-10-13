@@ -1,4 +1,5 @@
 import copy
+import dis
 import functools
 import json
 import os
@@ -98,8 +99,11 @@ def _rerun_aware_unittest_skip(reason: Any) -> Any:
     return _stamp
 
 
-_unittest_case.skip = _rerun_aware_unittest_skip
-unittest.skip = _rerun_aware_unittest_skip
+# Dynamo names this function as unittest.case.skip. Swap it only while rerun
+# mode is on, so a normal pytest run still sees the original function.
+if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
+    _unittest_case.skip = _rerun_aware_unittest_skip
+    unittest.skip = _rerun_aware_unittest_skip
 
 
 try:
@@ -440,7 +444,7 @@ def _device_allows_rerun(item: Any, target: Any) -> bool:
 # Kept on the item until the test finishes, then written with record_property.
 _CODE_SKIP_REASON_ATTR = "_pt_code_skip_reason"
 # Class-level unittest.skip is cleared on the first method. Later methods
-# still need the original __unittest_skip_why__.
+# still need the original __unittest_skip_why__, and must stay in the run.
 _SAVED_SKIP_WHY_ATTR = "_pt_saved_skip_why"
 
 
@@ -494,6 +498,82 @@ def _replace_item_obj(item: Any, replacement: Any) -> None:
         item.obj = replacement
 
 
+def _code_raises_skiptest(code: Any) -> bool:
+    # `raise SkipTest(...)` loads the name and then raises. `except SkipTest`
+    # uses CHECK_EXC_MATCH first; that wrapper must stay in place.
+    loaded = False
+    for instr in dis.get_instructions(code):
+        if instr.argval == "SkipTest" and instr.opname.startswith("LOAD"):
+            loaded = True
+            continue
+        if not loaded:
+            continue
+        if instr.opname == "CHECK_EXC_MATCH":
+            loaded = False
+            continue
+        if instr.opname == "RAISE_VARARGS":
+            return True
+    return False
+
+
+def _is_skiptest_wrapper(fn: Any) -> bool:
+    # Device helpers raise SkipTest and often leave __unittest_skip_why__ unset.
+    # The original test body is not a functools wrap, so peeling stops on it.
+    if fn is None:
+        return False
+    if getattr(fn, "__unittest_skip__", False):
+        return True
+    code = getattr(fn, "__code__", None)
+    if code is None or "SkipTest" not in getattr(code, "co_names", ()):
+        return False
+    if getattr(fn, "__wrapped__", None) is None:
+        return False
+    return _code_raises_skiptest(code)
+
+
+def _closure_skip_reason(fn: Any) -> str:
+    code = getattr(fn, "__code__", None)
+    closure = getattr(fn, "__closure__", None)
+    if code is None or not closure:
+        return ""
+    freevars = getattr(code, "co_freevars", ())
+    for name, cell in zip(freevars, closure):
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            continue
+        if name == "reason" and isinstance(contents, str) and contents.strip():
+            return contents.strip()
+        reason = getattr(contents, "reason", None)
+        if isinstance(reason, str) and reason.strip() and hasattr(contents, "dep"):
+            return reason.strip()
+    return ""
+
+
+def _wrapper_skip_reason(fn: Any) -> str:
+    why = _unittest_skip_why(fn)
+    if why:
+        return why
+    return _closure_skip_reason(fn)
+
+
+def _peel_rerun_skip_wrappers(item: Any, fn: Any) -> Any:
+    # instantiate_test wraps the device skip. One peel leaves that skip in
+    # place, so keep going until the wrapper that raises SkipTest is gone.
+    seen: set[int] = set()
+    current = fn
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        wrapped = getattr(current, "__wrapped__", None)
+        if wrapped is None:
+            break
+        if not (_is_skiptest_wrapper(current) or _is_skiptest_wrapper(wrapped)):
+            break
+        _remember_code_skip_reason(item, _wrapper_skip_reason(current))
+        current = wrapped
+    return current
+
+
 def _pytest_skip_reason(markers: list[Any]) -> str:
     parts: list[str] = []
     for marker in markers:
@@ -515,25 +595,28 @@ def _pytest_skip_reason(markers: list[Any]) -> str:
 def _enable_unconditional_unittest_skip(item: Any) -> bool:
     target = _skip_func(getattr(item, "obj", None))
     if _has_rerun_stamp(target) and _device_allows_rerun(item, target):
-        wrapped = getattr(target, "__wrapped__", None)
-        if wrapped is not None:
-            _remember_code_skip_reason(item, _unittest_skip_why(target))
-            _copy_rerun_stamps(target, wrapped)
-            _replace_item_obj(item, wrapped)
-            return True
-        if getattr(target, "__unittest_skip__", False):
-            _remember_code_skip_reason(item, _unittest_skip_why(target))
+        peeled = _peel_rerun_skip_wrappers(item, target)
+        if peeled is not target:
+            _copy_rerun_stamps(target, peeled)
+            _replace_item_obj(item, peeled)
+        elif getattr(target, "__unittest_skip__", False):
+            _remember_code_skip_reason(item, _wrapper_skip_reason(target))
             _clear_unittest_skip(target)
-            return True
+        else:
+            _remember_code_skip_reason(item, _wrapper_skip_reason(target))
+        return True
     cls = getattr(item, "cls", None)
     class_stamped = cls is not None and _has_rerun_stamp(cls)
-    if class_stamped and getattr(cls, "__unittest_skip__", False):
+    if not class_stamped:
+        return False
+    # Clearing __unittest_skip__ on the first method used to return False for
+    # the rest, so pytest dropped them. Every method on the stamped class runs.
+    if getattr(cls, "__unittest_skip__", False):
         _remember_code_skip_reason(item, _unittest_skip_why(cls))
         _clear_unittest_skip(cls)
-        return True
-    if class_stamped:
+    else:
         _remember_code_skip_reason(item, getattr(cls, _SAVED_SKIP_WHY_ATTR, None))
-    return False
+    return True
 
 
 def _enable_unconditional_pytest_skip(item: Any) -> bool:
@@ -582,8 +665,11 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
     and XML outputs with junk. So we want this to run last when collecting tests.
 
     Unconditional unittest.skip, pytest.mark.skip, and known-failure code
-    skips are kept and their skip is cleared so the body runs. The reason
-    is copied onto the item first. skipIf and other capability skips are
+    skips are kept and their skip is cleared so the body runs. Device
+    instantiation wraps the skip again; matching devices peel every
+    SkipTest wrapper so the body runs, and that reason is stored for the
+    report. A class skip stays cleared for every method. The reason is
+    copied onto the item first. skipIf and other capability skips are
     not cleared and do not get a code_skip property.
     """
     rerun_disabled_tests = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"

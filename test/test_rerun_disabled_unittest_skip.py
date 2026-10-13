@@ -223,6 +223,7 @@ class TestRerunDisabledUnittestSkip(TestCase):
         env = os.environ.copy()
         env["TEST_DIR"] = str(test_dir)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env["PYTORCH_TEST_RERUN_DISABLED_TESTS"] = "1"
         proc = subprocess.run(
             [sys.executable, "-c", script],
             cwd=test_dir,
@@ -233,6 +234,161 @@ class TestRerunDisabledUnittestSkip(TestCase):
         output = proc.stdout + proc.stderr
         self.assertEqual(proc.returncode, 0, msg=output)
         self.assertEqual("METHOD_OK" in proc.stdout, True, msg=output)
+
+    def test_unittest_skip_wrapper_follows_rerun_mode(self) -> None:
+        # Dynamo looks up unittest.case.skip by file and function name.
+        # Importing the plugin must not replace that function unless rerun
+        # mode is on. No Dynamo import: the file name is the check.
+        test_dir = Path(__file__).resolve().parent
+        script = textwrap.dedent(
+            """\
+            import os
+            import sys
+            import unittest
+            import unittest.case
+
+            sys.path.insert(0, os.environ["TEST_DIR"])
+            import conftest
+
+            want = os.environ.get("EXPECT_WRAPPER") == "1"
+            case_skip = unittest.case.skip
+            if unittest.skip is not case_skip:
+                raise SystemExit("unittest.skip and unittest.case.skip differ")
+            installed = case_skip is conftest._rerun_aware_unittest_skip
+            original = case_skip is conftest._ORIG_UNITTEST_SKIP
+            if installed != want or original == want:
+                raise SystemExit(
+                    f"want_wrapper={want} installed={installed} original={original}"
+                )
+            if not want:
+                filename = case_skip.__code__.co_filename
+                if os.path.basename(filename) != "case.py" or case_skip.__name__ != "skip":
+                    raise SystemExit(
+                        f"normal run saw {case_skip.__name__} from {filename}"
+                    )
+            print("WRAPPER_OK")
+            """
+        )
+        env_base = os.environ.copy()
+        env_base["TEST_DIR"] = str(test_dir)
+        env_base["PYTHONDONTWRITEBYTECODE"] = "1"
+
+        def run(wrapper_on: bool) -> tuple[int, str]:
+            env = env_base.copy()
+            env.pop("PYTORCH_TEST_RERUN_DISABLED_TESTS", None)
+            env["EXPECT_WRAPPER"] = "1" if wrapper_on else "0"
+            if wrapper_on:
+                env["PYTORCH_TEST_RERUN_DISABLED_TESTS"] = "1"
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=test_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            return proc.returncode, proc.stdout + proc.stderr
+
+        off_code, off_out = run(False)
+        on_code, on_out = run(True)
+        self.assertEqual(off_code, 0, msg=off_out)
+        self.assertEqual("WRAPPER_OK" in off_out, True, msg=off_out)
+        self.assertEqual(on_code, 0, msg=on_out)
+        self.assertEqual("WRAPPER_OK" in on_out, True, msg=on_out)
+
+    def test_class_level_skip_runs_every_method(self) -> None:
+        # Same helper the collection hook calls. A pytest TestCase import
+        # pulls in torch, which this tree may not have built, so run the
+        # class here. Rerun mode must keep and execute every method. Off
+        # mode must leave the class skipped.
+        test_dir = Path(__file__).resolve().parent
+        script = textwrap.dedent(
+            """\
+            import os
+            import sys
+            import unittest
+
+            rerun = os.environ.get("PYTORCH_TEST_RERUN_DISABLED_TESTS") == "1"
+            sys.path.insert(0, os.environ["TEST_DIR"])
+            import conftest
+
+            @unittest.skip("class-level known failure")
+            class TestSkippedClass(unittest.TestCase):
+                def test_first_method(self):
+                    TestSkippedClass.ran.append("first")
+
+                def test_second_method(self):
+                    TestSkippedClass.ran.append("second")
+
+            TestSkippedClass.ran = []
+
+            class Item:
+                def __init__(self, name):
+                    self.cls = TestSkippedClass
+                    self.name = name
+                    self.originalname = name
+                    self.obj = getattr(TestSkippedClass, name)
+
+            enabled = []
+            for name in ("test_first_method", "test_second_method"):
+                item = Item(name)
+                if conftest._enable_unconditional_unittest_skip(item):
+                    enabled.append(name)
+                    reason = getattr(item, conftest._CODE_SKIP_REASON_ATTR, None)
+                    if reason != "class-level known failure":
+                        raise SystemExit(f"{name} reason={reason!r}")
+            if rerun and enabled != ["test_first_method", "test_second_method"]:
+                raise SystemExit(f"dropped methods: {enabled!r}")
+            if not rerun and enabled:
+                raise SystemExit(f"off mode enabled {enabled!r}")
+
+            result = unittest.TestResult()
+            suite = unittest.defaultTestLoader.loadTestsFromTestCase(TestSkippedClass)
+            suite.run(result)
+            if rerun:
+                if TestSkippedClass.ran != ["first", "second"]:
+                    raise SystemExit(f"ran={TestSkippedClass.ran!r}")
+                if result.skipped or result.failures or result.errors:
+                    detail = (
+                        f"skipped={result.skipped!r} "
+                        f"failures={result.failures!r} errors={result.errors!r}"
+                    )
+                    raise SystemExit(detail)
+            else:
+                if TestSkippedClass.ran:
+                    raise SystemExit(f"off mode ran {TestSkippedClass.ran!r}")
+                if len(result.skipped) != 2 or result.failures or result.errors:
+                    detail = (
+                        f"skipped={result.skipped!r} "
+                        f"failures={result.failures!r} errors={result.errors!r}"
+                    )
+                    raise SystemExit(detail)
+            print("CLASS_OK")
+            """
+        )
+
+        def run(rerun: bool) -> tuple[int, str]:
+            env = os.environ.copy()
+            env["TEST_DIR"] = str(test_dir)
+            env["PYTHONDONTWRITEBYTECODE"] = "1"
+            if rerun:
+                env["PYTORCH_TEST_RERUN_DISABLED_TESTS"] = "1"
+            else:
+                env.pop("PYTORCH_TEST_RERUN_DISABLED_TESTS", None)
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=test_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            return proc.returncode, proc.stdout + proc.stderr
+
+        on_code, on_out = run(True)
+        off_code, off_out = run(False)
+        self.assertEqual(on_code, 0, msg=on_out)
+        self.assertEqual("CLASS_OK" in on_out, True, msg=on_out)
+        self.assertEqual(off_code, 0, msg=off_out)
+        self.assertEqual("CLASS_OK" in off_out, True, msg=off_out)
 
 
 if __name__ == "__main__":

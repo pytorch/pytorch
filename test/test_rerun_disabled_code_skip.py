@@ -440,8 +440,10 @@ class TestRerunDisabledCodeSkip(TestCase):
         self.assertEqual("other" in off_marks, True, msg=off_out)
 
     def test_device_instantiation_stamp_runs_only_matching_device(self) -> None:
-        # Pytest collection of a TestCase imports torch. This machine has no
-        # build, so call the same helper the collection hook uses.
+        # instantiate_test adds an outer functools.wraps around the device
+        # skip. Peeling once leaves that skip, so the body never runs.
+        # Pytest collection of a TestCase imports torch. This machine may
+        # have no build, so build that same two-wrapper shape here.
         test_dir = Path(__file__).resolve().parent
         script = textwrap.dedent(
             """\
@@ -461,25 +463,53 @@ class TestRerunDisabledCodeSkip(TestCase):
             spec.loader.exec_module(helper)
 
             ran = []
+            reason = "test doesn't work on MPS backend"
 
             def body(self):
                 ran.append(self.device_type)
 
-            @functools.wraps(body)
-            def wrapper(self):
-                if getattr(self, "device_type", None) == "mps":
-                    raise unittest.SkipTest("test doesn't work on MPS backend")
-                return body(self)
+            class _SkipIf:
+                def __init__(self, dep, reason, device_type):
+                    self.dep = dep
+                    self.reason = reason
+                    self.device_type = device_type
 
-            stamped = helper.stamp_rerun_device_skip(wrapper, "mps")
+                def __call__(self, fn):
+                    @functools.wraps(fn)
+                    def dep_fn(slf, *args, **kwargs):
+                        if (
+                            self.device_type is None
+                            or self.device_type == getattr(slf, "device_type", None)
+                        ):
+                            if self.dep:
+                                raise unittest.SkipTest(self.reason)
+                        return fn(slf, *args, **kwargs)
+
+                    return dep_fn
+
+            skip_fn = helper.stamp_rerun_device_skip(
+                _SkipIf(True, reason, "mps")(body), "mps"
+            )
+
+            def _outer(skip_fn):
+                @functools.wraps(skip_fn)
+                def instantiated_test(self, param_kwargs=None):
+                    return skip_fn(self)
+
+                return instantiated_test
+
+            mps_outer = _outer(skip_fn)
+            cpu_outer = _outer(skip_fn)
+            if mps_outer.__wrapped__ is not skip_fn or skip_fn.__wrapped__ is not body:
+                raise SystemExit("expected instantiate_test's two wrappers")
 
             class OnMPS:
                 device_type = "mps"
-                test_device = stamped
+                test_device = mps_outer
 
             class OnCPU:
                 device_type = "cpu"
-                test_device = stamped
+                test_device = cpu_outer
 
             class Item:
                 def __init__(self, cls):
@@ -491,14 +521,31 @@ class TestRerunDisabledCodeSkip(TestCase):
             mps_item = Item(OnMPS)
             if not conftest._enable_unconditional_unittest_skip(mps_item):
                 raise SystemExit("mps instantiation should run")
+            try:
+                OnMPS.test_device(OnMPS())
+            except unittest.SkipTest as exc:
+                raise SystemExit(f"mps body did not run: {exc}") from exc
+            if ran != ["mps"]:
+                raise SystemExit(f"ran={ran!r}")
+            if OnMPS.test_device is not body:
+                raise SystemExit("matching device did not reach the original body")
+            got_reason = getattr(mps_item, conftest._CODE_SKIP_REASON_ATTR, None)
+            if got_reason != reason:
+                raise SystemExit(f"reason={got_reason!r}")
+
             cpu_item = Item(OnCPU)
             if conftest._enable_unconditional_unittest_skip(cpu_item):
                 raise SystemExit("cpu instantiation must stay skipped")
-            OnMPS.test_device(OnMPS())
-            if ran != ["mps"]:
-                raise SystemExit(f"ran={ran!r}")
-            if OnCPU.test_device is not stamped:
+            if OnCPU.test_device is not cpu_outer:
                 raise SystemExit("cpu method was replaced")
+            try:
+                cpu_outer(OnMPS())
+            except unittest.SkipTest:
+                pass
+            else:
+                raise SystemExit("cpu copy lost the skip wrapper")
+            if ran != ["mps"]:
+                raise SystemExit(f"cpu copy ran the body: {ran!r}")
             print("DEVICE_OK")
             """
         )
