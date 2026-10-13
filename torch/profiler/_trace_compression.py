@@ -5,10 +5,11 @@ from typing import Any, IO
 
 
 def _get_trace_file_opener(
-    path: str, *, gzip_compresslevel: int = 9
+    path: str, *, compresslevel: int | None = None
 ) -> Callable[..., IO[Any]]:
     if path.endswith(".gz"):
-        return partial(gzip.open, compresslevel=gzip_compresslevel)
+        level = 9 if compresslevel is None else compresslevel
+        return partial(gzip.open, compresslevel=level)
     if path.endswith(".zst"):
         try:
             import zstandard  # pyrefly: ignore[missing-import]
@@ -17,5 +18,6 @@ def _get_trace_file_opener(
                 "Zstd trace compression requires zstandard. "
                 "Please install it with `pip install zstandard`."
             ) from exc
-        return partial(zstandard.open, cctx=zstandard.ZstdCompressor(level=1))
+        level = 1 if compresslevel is None else compresslevel
+        return partial(zstandard.open, cctx=zstandard.ZstdCompressor(level=level))
     return open
