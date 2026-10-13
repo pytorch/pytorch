@@ -58,3 +58,7 @@
   - "oncall: distributed"
   then:
   - "ciflow/h100-distributed"
+- any:
+  - "good first issue"
+  then:
+  - "actionable"
