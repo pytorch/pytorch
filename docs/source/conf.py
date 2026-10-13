@@ -1464,10 +1464,8 @@ coverage_ignore_classes = [
     "WorkerSpec",
     # torch.distributed.elastic.events.api
     "Event",
-    "RdzvEvent",
     # torch.distributed.elastic.metrics.api
     "ConsoleMetricHandler",
-    "MetricData",
     "MetricHandler",
     "MetricStream",
     "MetricsConfig",
@@ -1476,8 +1474,6 @@ coverage_ignore_classes = [
     "MultiprocessContext",
     "PContext",
     "RunProcsResult",
-    "SignalException",
-    "Std",
     "SubprocessContext",
     "SubprocessHandler",
     # torch.distributed.elastic.multiprocessing.tail_log

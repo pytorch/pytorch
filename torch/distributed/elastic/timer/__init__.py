@@ -14,20 +14,27 @@ deadline.
 
 Usage::
 
-    import torchelastic.timer as timer
-    import torchelastic.agent.server as agent
+    import torch.multiprocessing as mp
+    import torch.distributed.elastic.timer as timer
+    from torch.distributed.elastic.agent.server import WorkerSpec
+    from torch.distributed.elastic.agent.server.local_elastic_agent import (
+        LocalElasticAgent,
+    )
+    from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs
 
     def main():
         start_method = "spawn"
         message_queue = mp.get_context(start_method).Queue()
-        server = timer.LocalTimerServer(message, max_interval=0.01)
+        server = timer.LocalTimerServer(message_queue, max_interval=0.01)
         server.start() # non-blocking
 
         spec = WorkerSpec(
-                    fn=trainer_func,
+                    entrypoint=trainer_func,
                     args=(message_queue,),
                     ...<OTHER_PARAMS...>)
-        agent = agent.LocalElasticAgent(spec, start_method)
+        agent = LocalElasticAgent(
+            spec, logs_specs=DefaultLogsSpecs(), start_method=start_method
+        )
         agent.run()
 
     def trainer_func(message_queue):

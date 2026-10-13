@@ -13,27 +13,48 @@ shown below.
 ```python
 # my_launcher.py
 
+import uuid
+
+from torch.distributed.elastic.agent.server import WorkerSpec
+from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
+from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs
+from torch.distributed.elastic.rendezvous import RendezvousParameters
+from torch.distributed.elastic.rendezvous.registry import get_rendezvous_handler
+
+
+def trainer(x):
+    return x * 2
+
+
 if __name__ == "__main__":
-    args = parse_args(sys.argv[1:])
-    rdzv_handler = RendezvousHandler(...)
+    rdzv_handler = get_rendezvous_handler(
+        RendezvousParameters(
+            backend="c10d",
+            endpoint="localhost:0",
+            run_id=str(uuid.uuid4()),
+            min_nodes=1,
+            max_nodes=1,
+        )
+    )
     spec = WorkerSpec(
-        local_world_size=args.nproc_per_node,
-        fn=trainer_entrypoint_fn,
-        args=(trainer_entrypoint_fn args.fn_args,...),
+        role="trainer",
+        local_world_size=2,
+        entrypoint=trainer,
+        args=(21,),
         rdzv_handler=rdzv_handler,
-        max_restarts=args.max_restarts,
-        monitor_interval=args.monitor_interval,
+        max_restarts=3,
+        monitor_interval=1,
     )
 
-    agent = LocalElasticAgent(spec, start_method="spawn")
+    agent = LocalElasticAgent(spec, logs_specs=DefaultLogsSpecs(), start_method="spawn")
     try:
         run_result = agent.run()
         if run_result.is_failed():
-            print(f"worker 0 failed with: run_result.failures[0]")
+            print(f"worker 0 failed with: {run_result.failures[0]}")
         else:
-            print(f"worker 0 return value is: run_result.return_values[0]")
-    except Exception ex:
-        # handle exception
+            print(f"worker 0 return value is: {run_result.return_values[0]}")
+    finally:
+        rdzv_handler.shutdown()
 ```
 
 ## Rendezvous Handler
@@ -52,11 +73,28 @@ spec when creating the agent.
 
 ```python
 spec = WorkerSpec(
+    role="trainer",
     rdzv_handler=MyRendezvousHandler(params),
     ...
 )
-elastic_agent = LocalElasticAgent(spec, start_method=start_method)
+elastic_agent = LocalElasticAgent(spec, logs_specs=DefaultLogsSpecs())
 elastic_agent.run(spec.role)
+```
+
+To create it by name with `get_rendezvous_handler`, register a `creator`
+that takes a `RendezvousParameters` and returns the handler with
+`torch.distributed.elastic.rendezvous.rendezvous_handler_registry.register(name, creator)`.
+The handler's `get_backend()` must return `name`.
+
+`torchrun` runs in its own process, so to make the backend available to
+`torchrun --rdzv-backend=<name>`, expose it through the `torchrun.handlers`
+entry-point group of an installed package. The entry point is a zero-argument
+function that returns the `creator`:
+
+```toml
+# pyproject.toml
+[project.entry-points."torchrun.handlers"]
+my_backend = "my_package.rendezvous:get_creator"
 ```
 
 ## Metric Handler
@@ -72,42 +110,52 @@ custom launcher.
 
 import torch.distributed.elastic.metrics as metrics
 
+
 class MyMetricHandler(metrics.MetricHandler):
     def emit(self, metric_data: metrics.MetricData):
-        # push metric_data to your metric sink
+        ...  # push metric_data to your metric sink
+
 
 def main():
-    metrics.configure(MyMetricHandler())
+    metrics.configure(MyMetricHandler(), group="torchelastic")
 
     spec = WorkerSpec(...)
-    agent = LocalElasticAgent(spec)
+    agent = LocalElasticAgent(spec, logs_specs=DefaultLogsSpecs())
     agent.run()
 ```
 
 ## Events Handler
 
-TorchElastic supports events recording (see {ref}`events-api`).
-The events module defines API that allows you to record events and
-implement custom EventHandler. EventHandler is used for publishing events
-produced during torchelastic execution to different sources, e.g. AWS CloudWatch.
-By default it uses `torch.distributed.elastic.events.NullEventHandler` that ignores
-events. To configure custom events handler you need to implement
-`torch.distributed.elastic.events.EventHandler` interface and `configure` it
-in your custom launcher.
+TorchElastic records events (see {ref}`events-api`) through Python `logging`.
+The destination is chosen by name with `torchrun --event-log-handler` or
+`WorkerSpec.event_log_handler`; `null` (default) drops events and `console`
+prints them. Each event is logged as a JSON string to the logger
+`torchelastic-events-<destination>`, so you can forward events elsewhere
+(e.g. AWS CloudWatch) by attaching a `logging.Handler` to that logger in
+your custom launcher. Rendezvous events (`RdzvEvent`) ignore the destination
+and always go to the `torchelastic-events-dynamic_rendezvous` logger. They
+are not recorded at all while the `dynamic_rendezvous` entry in
+`torch.distributed.elastic.events.handlers` is a `logging.NullHandler` (the
+default); attaching a handler to the logger alone is not enough.
 
 ```python
 # my_launcher.py
 
-import torch.distributed.elastic.events as events
+import logging
 
-class MyEventHandler(events.EventHandler):
-    def record(self, event: events.Event):
-        # process event
+from torch.distributed.elastic.events import Event
+
+
+class MyEventHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord):
+        event = Event.deserialize(record.getMessage())
+        ...  # process event
+
 
 def main():
-    events.configure(MyEventHandler())
+    logging.getLogger("torchelastic-events-console").addHandler(MyEventHandler())
 
-    spec = WorkerSpec(...)
-    agent = LocalElasticAgent(spec)
+    spec = WorkerSpec(..., event_log_handler="console")
+    agent = LocalElasticAgent(spec, logs_specs=DefaultLogsSpecs())
     agent.run()
 ```
