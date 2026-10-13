@@ -2225,6 +2225,26 @@ def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
     return GetItemSource(TypeMROSource(klass_source), idx)
 
 
+def guard_mro_absent(
+    tx: "InstructionTranslatorBase",
+    klass: type,
+    klass_source: Source,
+    name: str,
+    stop: int,
+) -> None:
+    """Guard that *name* stays out of the ``__dict__`` of ``klass.__mro__[:stop]``."""
+    for idx in range(stop):
+        absent_key = (id(klass), idx, name)
+        if absent_key in tx.output.guarded_mro_absent_keys:
+            continue
+        tx.output.guarded_mro_absent_keys.add(absent_key)
+        install_guard(
+            TypeDictSource(_mro_entry_source(klass, klass_source, idx)).make_guard(
+                partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
+            )
+        )
+
+
 def mro_attr_source(
     tx: "InstructionTranslatorBase",
     klass: type,
@@ -2247,18 +2267,8 @@ def mro_attr_source(
             continue
 
         # Guard the classes we walked past, so the owner stays the owner if one
-        # of them later gains *name*. Deduplicated by (id(klass), name): the
-        # caller's TYPE_MATCH pins the MRO, so an id always means the same class.
-        for absent_idx in range(idx):
-            absent_key = (id(mro[absent_idx]), name)
-            if absent_key in tx.output.guarded_mro_absent_keys:
-                continue
-            tx.output.guarded_mro_absent_keys.add(absent_key)
-            install_guard(
-                TypeDictSource(
-                    _mro_entry_source(klass, klass_source, absent_idx)
-                ).make_guard(partial(GuardBuilder.DICT_NOT_CONTAINS, key=name))
-            )
+        # of them later gains *name*.
+        guard_mro_absent(tx, klass, klass_source, name, idx)
 
         # Reuse the source when the same owner is reached again for the same
         # name, even from a differently-sourced object, so it does not collect

@@ -126,6 +126,7 @@ from .object_protocol import (
     _resolve_descriptor_get,
     generic_is_true,
     generic_repr,
+    guard_mro_absent,
     is_nb_not_implemented,
     mro_attr_source,
     mro_lookup,
@@ -602,6 +603,38 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
+    def pending_setattr_owner(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        """The class in this class's MRO whose pending setattr of *name* a lookup
+        sees, or None.
+
+        In eager the store would already be in that class's ``__dict__``, so it
+        wins unless a class earlier in the MRO defines *name*. The classes walked
+        past and the owner's place in the MRO are guarded to keep it that way, as
+        ``__bases__`` can be reassigned between calls.
+        """
+        side_effects = tx.output.side_effects
+        for idx, klass in enumerate(self.value.__mro__):
+            if klass is self.value:
+                klass_vt = self
+            elif klass in side_effects:
+                klass_vt = side_effects[klass]
+            else:
+                klass_vt = None
+            if klass_vt is not None and side_effects.has_pending_mutation_of_attr(
+                klass_vt, name
+            ):
+                if self.source is not None:
+                    guard_mro_absent(tx, self.value, self.source, name, idx)
+                    if klass_vt is not self:
+                        mro_entry = GetItemSource(TypeMROSource(self.source), idx)
+                        install_guard(mro_entry.make_guard(GuardBuilder.CLASS_MATCH))
+                return klass_vt
+            if name in klass.__dict__:
+                return None
+        return None
+
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
@@ -640,9 +673,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
             return self.resolve_meta_data_descriptor(tx, name, meta_attr, source)
 
-        # Check for pending mutations from setattr on the class during tracing.
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
-            return tx.output.side_effects.load_attr(self, name)
+        # Check for pending mutations from setattr on the class or a base
+        # during tracing.
+        owner = self.pending_setattr_owner(tx, name)
+        if owner is not None:
+            value = tx.output.side_effects.load_attr(owner, name)
+            # The store sits in owner.__dict__, so a descriptor is bound to this
+            # class, as in step 4 below.
+            if isinstance(
+                value, (variables.StaticMethodVariable, variables.ClassMethodVariable)
+            ):
+                return value.tp_descr_get_impl(tx, self, self)
+            if isinstance(value, UserDefinedVariable) and (
+                mro_lookup(value.python_type(), "__get__") is not NO_SUCH_SUBOBJ
+            ):
+                none = variables.ConstantVariable.create(None)
+                return value.call_method(tx, "__get__", [none, self], {})
+            return value
 
         # Step 3-5: Class MRO lookup.
         cls_attr = self.lookup_cls_mro_attr(name)
@@ -1151,6 +1198,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
+        elif (
+            name == "mro"
+            and len(args) == 0
+            and not kwargs
+            and type(self.value) is type
+            and self.lookup_cls_mro_attr("mro") is NO_SUCH_SUBOBJ
+        ):
+            # type.mro() returns a new list. With metaclass type, CPython
+            # recomputes __mro__ with the same C3 whenever a base changes, so
+            # the two always match. A custom metaclass can leave __mro__ stale.
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L2935-L2945
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L3001-L3014
+            if self.source is not None:
+                # cls.mro is type.mro while no class in the MRO defines mro.
+                guard_mro_absent(
+                    tx, self.value, self.source, "mro", len(self.value.__mro__)
+                )
+            mro_source = self.source and TypeMROSource(self.source)
+            mro = VariableTracker.build(tx, self.value.__mro__, mro_source)
+            items = mro.unpack_var_sequence(tx)
+            return variables.ListVariable(items, mutation_type=ValueMutationNew())
         elif name == "fromkeys" and issubclass(self.value, dict):
             if not issubclass(self.value, collections.OrderedDict):
                 no_keywords(tx, f"{self.value.__name__}.fromkeys", kwargs)
@@ -1935,6 +2003,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if isinstance(new_fn, staticmethod):
             new_fn = new_fn.__func__
         return new_fn is object.__new__
+
+    def _hasattr_check_side_effects(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "ConstantVariable | None":
+        owner = self.pending_setattr_owner(tx, name)
+        if owner is None:
+            return None
+        value = tx.output.side_effects.load_attr(owner, name, deleted_ok=True)
+        return variables.ConstantVariable.create(
+            not isinstance(value, variables.DeletedVariable)
+        )
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str

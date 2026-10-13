@@ -3524,12 +3524,16 @@ class InstructionTranslatorBase(
             if not obj.is_python_constant():
                 raise
             # An eager getattr would run a user-defined __get__ at trace time
-            # and bake its result into the graph.
-            if isinstance(obj, variables.UserDefinedClassVariable) and isinstance(
-                inspect.getattr_static(
-                    type(obj.lookup_cls_mro_attr(attr)), "__get__", None
-                ),
-                types.FunctionType,
+            # and bake its result into the graph, or miss a setattr still
+            # pending in this frame.
+            if isinstance(obj, variables.UserDefinedClassVariable) and (
+                isinstance(
+                    inspect.getattr_static(
+                        type(obj.lookup_cls_mro_attr(attr)), "__get__", None
+                    ),
+                    types.FunctionType,
+                )
+                or obj.pending_setattr_owner(self, attr) is not None
             ):
                 raise
             source = AttrSource(obj.source, attr) if obj.source else None
