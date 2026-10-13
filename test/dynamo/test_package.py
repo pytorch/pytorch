@@ -150,6 +150,23 @@ class _DescriptorCodeOwner:
         return 2
 
 
+def _make_generated_method():
+    def method(self):
+        return 1
+
+    method.__qualname__ = "_GeneratedMethodOwner.method"
+    return method
+
+
+class _GeneratedMethodOwner:
+    method = _make_generated_method()
+
+
+# The method's co_qualname, _make_generated_method.<locals>.method, now names
+# nothing in this module; only its rewritten __qualname__ does.
+del _make_generated_method
+
+
 # A dynamic dim on a module-level tensor is what makes a SHAPE_ENV guard read a
 # global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
 PKG_DYN_ROWS = torch.randn(4, 3)
@@ -258,6 +275,17 @@ print(eval(f"bbmod.{name}.{path}") is code)
             with package.code_context(code):
                 pass
             self.assertIs(_lookup_code(package._codes[code]), code)
+
+    def test_code_source_searches_the_module_when_the_qualname_is_stale(self):
+        # Python >= 3.11 walks co_qualname from the module and used to refuse
+        # the code at the first missing part, while < 3.11 searches the module.
+        code = _GeneratedMethodOwner.method.__code__
+        package = CompilePackage(None)
+        with package.code_context(code):
+            pass
+        entry = package._codes[code]
+        self.assertEqual(entry.function_names, ["_GeneratedMethodOwner.method"])
+        self.assertIs(_lookup_code(entry), code)
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A

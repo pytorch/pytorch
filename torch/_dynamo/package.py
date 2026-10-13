@@ -745,12 +745,20 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
         raise PackageError(f"Cannot find module for code {code}")
 
     toplevel: Any = module
-    if sys.version_info >= (3, 11):
+    search_module_tree = sys.version_info < (3, 11)
+    if not search_module_tree:
         parts = code.co_qualname.split(".")
 
         for part in parts:
             if not hasattr(toplevel, part):
-                _raise_resolution_error(code, toplevel)
+                # co_qualname is fixed at compile time and names where the def
+                # statement ran: a factory deleted afterwards, or one that
+                # exec'd it under a module's filename. The function can still
+                # be reachable from the module under a rewritten __qualname__,
+                # so search the module the way Python < 3.11 always does.
+                toplevel = module
+                search_module_tree = True
+                break
             toplevel = getattr(toplevel, part)
             if (
                 inspect.isfunction(toplevel)
@@ -815,7 +823,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                         toplevel = obj
                         return f".__closure__[{i}].cell_contents{res}"
 
-        if sys.version_info < (3, 11):
+        if search_module_tree:
             if inspect.ismodule(obj):
                 for value in obj.__dict__.values():
                     if not (
