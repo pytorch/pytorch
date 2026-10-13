@@ -10457,6 +10457,45 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             run(arch, idx)
             self.assertEqual(arch.msg, f"max_idx={n - 1}, bad=[-1]")
 
+    def test_equal_sets_render_the_same_guard_text(self):
+        from torch._dynamo.guards import _order_stable_repr
+
+        live, rebuilt = {1, 9}, set()
+        rebuilt.add(9)
+        rebuilt.add(1)
+        self.assertEqual(live, rebuilt)
+        self.assertNotEqual(repr(live), repr(rebuilt))
+        self.assertEqual(_order_stable_repr(live), _order_stable_repr(rebuilt))
+        self.assertEqual(
+            _order_stable_repr(("a", frozenset(rebuilt), [rebuilt])),
+            "('a', frozenset({1, 9}), [{1, 9}])",
+        )
+        for value in (set(), frozenset(), (1,), (), "s", 1.5):
+            self.assertEqual(_order_stable_repr(value), repr(value))
+            self.assertEqual(eval(_order_stable_repr(value)), value)
+
+        def guard_text(s):
+            torch._dynamo.reset()
+            guards = []
+
+            def fn(x, s):
+                if 9 in s:
+                    return x + 1
+                return x - 1
+
+            opt_fn = torch._dynamo.optimize("eager", guard_export_fn=guards.extend)(fn)
+            opt_fn(torch.zeros(1), s)
+            return [
+                code
+                for guard in guards
+                for code in guard.code_list or ()
+                if code.startswith("L['s'] ==")
+            ]
+
+        live_text = guard_text(live)
+        self.assertIn("L['s'] == {1, 9}", live_text)
+        self.assertEqual(live_text, guard_text(rebuilt))
+
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
         # and then rolls back due to control flow.
@@ -10988,6 +11027,21 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
+    def test_cast_result_is_guarded(self):
+        from typing import cast
+
+        class Config:
+            scale = 1
+
+        def fn(x):
+            return x * cast(type, Config).scale
+
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        x = torch.ones(2)
+        self.assertEqual(opt_fn(x), fn(x))
+        Config.scale = 3
+        self.assertEqual(opt_fn(x), x * 3)
+
     def test_cast_no_recompile_after_graph_break(self):
         # In FSDP, cast(nn.Module, self) can be called after a
         # graph break. Without the polyfill + skip_code fix, PEP 523 compiles
@@ -11020,14 +11074,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 1
 
         x = torch.randn(4)
-        fn(a, x)
-        fn(b, x)
-        if torch._dynamo.config.nested_graph_breaks:
-            # NGB inlines get_state() and handles the graph break inline,
-            # producing 2 subgraphs (before/after break) per call.
-            self.assertEqual(cnt.frame_count, 2)
-        else:
-            self.assertEqual(cnt.frame_count, 1)
+        for mod in (a, b, a, b):
+            self.assertEqual(fn(mod, x), x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        if not torch._dynamo.config.nested_graph_breaks:
             # 5 frames: fn (x2), get_state before graph_break (x2),
             # get_state resume after graph_break (x1, no recompile).
             # Without skip_code, typing.cast would add 2 more frames (7 total).
@@ -13632,6 +13682,44 @@ def ___make_guard_fn():
         compiled_out = compiled_fn()
         self.assertEqual(fn_out, compiled_out)
         self.assertFalse(fn_out)
+
+    def test_fn_hasattr_guarded(self):
+        def bar(x):
+            return x
+
+        def fn(x):
+            if hasattr(bar, "flag"):
+                return x + 1
+            return x - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(3)
+        self.assertEqual(opt_fn(x), fn(x))
+        bar.flag = True
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(cnt.frame_count, 2)
+        del bar.flag
+        self.assertEqual(opt_fn(x), x - 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_torch_fn_hasattr_guarded(self):
+        def fn(x):
+            if hasattr(torch.nn.functional.relu, "_test_flag"):
+                return x + 1
+            return x - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(3)
+        self.assertEqual(opt_fn(x), x - 1)
+        torch.nn.functional.relu._test_flag = True
+        try:
+            self.assertEqual(opt_fn(x), x + 1)
+        finally:
+            del torch.nn.functional.relu._test_flag
+        self.assertEqual(opt_fn(x), x - 1)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_constant_hasattr_returns_bool(self):
         """Test that hasattr on constant values properly returns boolean ConstantVariable."""
@@ -16360,6 +16448,20 @@ fn
 
         with self.assertRaisesRegex(RuntimeError, "specialized"):
             fn(x, y)
+
+    @torch.fx.experimental._config.patch(dynamic_storage_offset=True)
+    def test_dynamic_storage_offset_no_zero_one_recompile(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def fn(x):
+            return x * 2
+
+        buf = torch.randn(64)
+        for offset in (5, 0, 1, 7):
+            x = buf[offset : offset + 8]
+            self.assertEqual(fn(x), x * 2)
+        self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_infer_unbacked_size_gt_zero(self):

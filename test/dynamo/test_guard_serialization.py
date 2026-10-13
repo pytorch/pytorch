@@ -1655,6 +1655,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"cell": empty[0]})
         self.assertTrue(_cell_is_empty(load_guards_state(buf.getvalue())["cell"]))
 
+    def test_reduce_dict_keys_type(self):
+        dict_keys = type({}.keys())
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"t": dict_keys})
+        self.assertIs(load_guards_state(buf.getvalue())["t"], dict_keys)
+
     def test_rebuilt_function_keeps_an_empty_closure_cell(self):
         # A by-value rebuild of an fqn-mismatched wrapper carries its cells
         # through FunctionPicklerBase._reduce_cell, so an EMPTY cell has to come
@@ -3267,6 +3273,18 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # for precompile under FSDP+TP.
         self._test_check_fn(ref, loaded, {"w": base}, True)
 
+    def test_dict_keys_type_local(self):
+        def fn(x, t):
+            if t.__name__ == "dict_keys":
+                return x + 1
+            return x - 1
+
+        dict_keys = type({}.keys())
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x, dict_keys)
+        self._test_check_fn(ref, loaded, {"x": x, "t": dict_keys}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "t": type({}.values())}, False)
+
     def test_equals_match(self):
         def fn(x, y):
             # CustomConstantType is registered as a pytree constant so this should
@@ -4196,6 +4214,57 @@ class TestGuardSerialization(TestGuardSerializationBase):
             torch._dynamo.package.load_guards_state(
                 package._codes[foo.__code__].guarded_codes[0].guards_state
             )
+        finally:
+            dist.destroy_process_group()
+            tmpfile.close()
+
+    def test_ddp_module_non_default_process_group(self):
+        import torch.distributed as dist
+
+        if not dist.is_available():
+            self.skipTest("Torch distributed is not available")
+        from torch.nn.parallel import DistributedDataParallel as DDP
+
+        tmpfile = tempfile.NamedTemporaryFile()  # noqa: SIM115
+        dist.init_process_group(
+            backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
+        )
+        try:
+            ddp_model = DDP(
+                GlobalNestedModule(), process_group=dist.new_group(ranks=[0])
+            )
+
+            def foo(ddp, x):
+                return ddp(x)
+
+            unsupported = frozenset(
+                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            )
+            x = torch.randn(10)
+            package = CompilePackage(foo)
+            torch._dynamo.optimize(
+                package=package,
+                guard_filter_fn=lambda gs: [
+                    x.guard_type not in unsupported for x in gs
+                ],
+            )(foo)(ddp_model, x)
+            self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)
+            guards_state = load_guards_state(
+                package._codes[foo.__code__].guarded_codes[0].guards_state
+            )
+            loaded_ddp = guards_state.output_graph.local_scope["ddp"]
+            self.assertIsInstance(loaded_ddp, DDP)
+
+            # The loaded shell has no process group, reducer or logger; it must
+            # still pickle.
+            buf = io.BytesIO()
+            GuardsStatePickler({id(loaded_ddp): loaded_ddp}, {}, {}, {}, buf).dump(
+                loaded_ddp
+            )
+            reloaded_ddp = load_guards_state(buf.getvalue())
+            self.assertIsInstance(reloaded_ddp, DDP)
+            for name in ("process_group", "reducer", "logger", "broadcast_buffers"):
+                self.assertNotIn(name, reloaded_ddp.__dict__)
         finally:
             dist.destroy_process_group()
             tmpfile.close()
