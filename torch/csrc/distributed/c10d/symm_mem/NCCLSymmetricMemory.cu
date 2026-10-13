@@ -203,7 +203,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     // for the data sub-region: only the base pointer (returned by
     // ncclMemAlloc, already granularity-aligned) is registered.
     const size_t aligned_buffer_size = at::round_up(buffer_size_, 16UL);
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && defined(NCCL_WIN_REQUIRED_ALIGNMENT)
     // RCCL advertises 4096-byte window alignment. The tested requirement is a
     // rounded backing allocation; registering an unrounded size also worked.
     // Use one rounded extent for both allocation and registration, while
@@ -755,7 +755,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     const size_t buffer_offset =
         at::round_up(get_signal_pad_size(), signal_pad_alignment);
     const size_t aligned_buffer_size = at::round_up(size, 16UL);
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && defined(NCCL_WIN_REQUIRED_ALIGNMENT)
     // Round the backing allocation to RCCL's advertised 4096-byte window
     // granularity; registration currently uses this same extent.
     const size_t total_size = at::round_up(
