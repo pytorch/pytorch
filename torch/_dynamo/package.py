@@ -1523,7 +1523,10 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
-        from torch._C._dynamo.eval_frame import _load_precompile_entry
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _load_precompile_skip,
+        )
 
         from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
@@ -1604,7 +1607,7 @@ class CompilePackage:
                 if len(entry.guarded_codes) == 0:
                     # Dynamo generates empty graph for trivial functions, should just skip them
                     # in these cases.
-                    torch._dynamo.eval_frame.skip_code(target_code)
+                    _load_precompile_skip(target_code)
 
                 for guarded_code in entry.guarded_codes:
                     with dynamo_timed("precompile_load_guards"):

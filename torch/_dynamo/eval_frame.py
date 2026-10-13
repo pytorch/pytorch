@@ -76,6 +76,7 @@ from torch._dynamo.types import (
     ConvertFrameReturn,
     FrameAction,
     FrameExecStrategy,
+    GuardCollectiveState,
 )
 from torch._export.utils import _compiling_state_context
 from torch._library.opaque_object import is_custom_class
@@ -964,22 +965,28 @@ def _log_traced_frames() -> None:
     log.info(msg)
 
 
-def guard_collectives_hook(guard_eval_result: bool) -> bool:
+def guard_collectives_hook(guard_eval_result: int) -> int:
     import torch.distributed as dist
     from torch._dynamo.utils import dynamo_timed
 
-    # guard_eval_result == True  ==>  cache hit
+    # guard_eval_result is a GuardCollectiveState
     if pg := distributed.get_guard_pg():
         with dynamo_timed(
             "guard_collective", log_pt2_compile_event=False, log_waitcounter=True
         ):
             log.debug("guard_collective %s", guard_eval_result)
             # TODO: a bit awkward to time, this isn't inside of the dynamo compile region
-            all_results = [None] * pg.size()
-            dist.all_gather_object(all_results, guard_eval_result, group=pg)
-            # True = everyone hit, OK to run
-            # False = someone missed, force recompile everywhere
-            res = all(all_results)
+            all_results: list[int | None] = [None] * pg.size()
+            dist.all_gather_object(all_results, int(guard_eval_result), group=pg)
+            # HIT = everyone hit, OK to run
+            # SKIP = everyone skips, run eagerly
+            # MISS = anything else, force recompile everywhere
+            if all(r == GuardCollectiveState.HIT for r in all_results):
+                res = GuardCollectiveState.HIT
+            elif all(r == GuardCollectiveState.SKIP for r in all_results):
+                res = GuardCollectiveState.SKIP
+            else:
+                res = GuardCollectiveState.MISS
             log.debug("guard_collective %s -> %s", guard_eval_result, res)
             return res
     return guard_eval_result

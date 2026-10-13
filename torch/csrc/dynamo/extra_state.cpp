@@ -107,6 +107,7 @@ void set_region_exec_strategy(
     FrameExecStrategy strategy) {
   if (isolate_recompiles_id < 0) {
     extra_state->strategy = strategy;
+    extra_state->precompile_skip = false;
   } else {
     extra_state->region_strategy_map[isolate_recompiles_id] = strategy;
   }
@@ -306,7 +307,7 @@ bool get_frame_exec_strategy(
 }
 
 void set_code_exec_strategy(PyCodeObject* code, FrameExecStrategy strategy) {
-  get_or_init_extra_state(code)->strategy = strategy;
+  set_region_exec_strategy(get_or_init_extra_state(code), -1, strategy);
 }
 
 bool try_lookup_without_guard_eval(
@@ -481,6 +482,11 @@ bool has_relevant_cache_entries(
   return found;
 }
 
+bool is_precompile_skip(PyCodeObject* code) {
+  ExtraState* extra_state = get_extra_state(code);
+  return extra_state != nullptr && extra_state->precompile_skip;
+}
+
 CompileInputs get_compile_inputs(
     PyCodeObject* code,
     int64_t isolate_recompiles_id) {
@@ -635,6 +641,12 @@ void _load_precompile_entry(
   } else {
     extra->precompile_entries.push_back(std::move(entry));
   }
+}
+
+void _load_precompile_skip(const py::handle& code_obj) {
+  ExtraState* extra = get_or_init_extra_state(code_from_handle(code_obj));
+  extra->strategy = FrameExecStrategy{FrameAction::SKIP, FrameAction::DEFAULT};
+  extra->precompile_skip = true;
 }
 
 bool _set_lru_cache(py::object boolean) {
