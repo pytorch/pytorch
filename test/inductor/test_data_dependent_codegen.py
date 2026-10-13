@@ -102,8 +102,8 @@ class TestDataDependentCodegen(TestCase):
 
             self.assertEqual(len(graph.scheduler.nodes), 1)
             self.assertIsInstance(graph.scheduler.nodes[0], FusedSchedulerNode)
-            self.assertIn("'grid_prefixes': ('x', 'z')", wrapper.value)
-            self.assertIn("for yoffset in tl.range(", wrapper.value)
+            self.assertIn("'grid_prefixes': ('y', 'z')", wrapper.value)
+            self.assertIn("for xoffset in tl.range(", wrapper.value)
             self.assertNotIn("tl.load(out_ptr", wrapper.value)
 
     def test_bias_add_then_sum(self):
@@ -288,6 +288,92 @@ class TestDataDependentNestedCodegen(TestCase):
 
 instantiate_device_type_tests(
     TestDataDependentNestedCodegen, globals(), only_for="cuda"
+)
+
+
+class TestDataDependentReductionCodegen(TestCase):
+    @parametrize("width", [32, 8192])
+    def test_sum_d(self, device, width):
+        device = torch.device(device)
+        offsets = torch.tensor([0, 513, 513, 516, 517], device=device)
+        values = torch.arange(517 * width, dtype=torch.float32, device=device)
+        values = values.reshape(517, width) % 7
+        j_range = ir.DataDependentRange("j")
+
+        def reference():
+            off, x = offsets.cpu(), values.cpu()
+            result = torch.empty(517)
+            for b in range(4):
+                for j in range(int(off[b + 1] - off[b])):
+                    p = int(off[b]) + j
+                    result[p] = x[p].sum()
+            return result.to(device)
+
+        def output_indexer(index):
+            b, j = index
+            return ops.load("offsets", b) + ops.index_expr(j, torch.int64)
+
+        def inner_fn(index, reduction_index):
+            b = index[0]
+            (d,) = reduction_index
+            ops.register_datadep_range(
+                ops.load("offsets", b + 1) - ops.load("offsets", b), j_range
+            )
+            address = ops.indirect_indexing(
+                output_indexer(index) * width + ops.index_expr(d, torch.int64),
+                values.numel(),
+                wrap_neg=False,
+            )
+            return ops.load("values", address)
+
+        inputs = {"offsets": offsets, "values": values}
+        graph = GraphLowering(torch.fx.symbolic_trace(lambda: 0))
+        with (
+            V.set_graph_handler(graph),
+            DebugContext(),
+            config.patch(benchmark_fusion=False),
+        ):
+            for name, tensor in inputs.items():
+                buffer = ir.InputBuffer(
+                    name=name,
+                    layout=ir.FixedLayout(device, tensor.dtype, list(tensor.shape)),
+                )
+                graph.graph_inputs[name] = ir.TensorBox.create(buffer)
+                graph.graph_inputs_original[name] = buffer
+                graph.graph_input_names.append(name)
+
+            result = ir.TensorBox.create(
+                ir.Reduction(
+                    device=device,
+                    dtype=values.dtype,
+                    inner_fn=inner_fn,
+                    ranges=[4, j_range],
+                    reduction_ranges=[width],
+                    flat_size=[517],
+                    iteration_numel=values.numel(),
+                    output_indexer=output_indexer,
+                    reduction_type="sum",
+                    src_dtype=values.dtype,
+                    reduction_hint=ir.ReductionHint.DEFAULT,
+                )
+            )
+            result.realize()
+            result.data.data.decide_layout()
+            graph.graph_outputs = [result]
+            wrapper, _ = graph.codegen()
+
+        if width == 32:
+            self.assertIn("@triton_heuristics.persistent_reduction(", wrapper.value)
+        else:
+            self.assertIn("@triton_heuristics.reduction(", wrapper.value)
+        module = PyCodeCache.load(wrapper.value)
+        (actual,) = module.call([inputs[name] for name in graph.graph_input_names])
+        torch.cuda.synchronize()
+        self.assertEqual(actual, reference())
+
+
+instantiate_device_type_tests(
+    TestDataDependentReductionCodegen, globals(), only_for="cuda"
 )
 
 

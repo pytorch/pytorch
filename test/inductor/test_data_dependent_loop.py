@@ -498,7 +498,7 @@ class TestDataDependentIR(TestCase):
             buffer = tensor.data.data
             buffer.decide_layout()
             sizes, body = buffer.simplify_and_reorder()
-            self.assertEqual(sizes, ([4, j_range, prod(feature_shape)], []))
+            self.assertEqual(sizes, ([4, prod(feature_shape), j_range], []))
             evaluator = EagerOps(
                 {
                     "offsets": offsets,
@@ -510,9 +510,9 @@ class TestDataDependentIR(TestCase):
             )
             with V.set_ops_handler(evaluator):
                 for b in range(4):
-                    for j in range(int(lengths[b])):
-                        for feature in range(prod(feature_shape)):
-                            body([b, j, feature])
+                    for feature in range(prod(feature_shape)):
+                        for j in range(int(lengths[b])):
+                            body([b, feature, j])
                 last = [5, *(size - 1 for size in feature_shape)]
                 self.assertEqual(buffer.make_loader()(last).value, output[tuple(last)])
             self.assertEqual(output, reference())

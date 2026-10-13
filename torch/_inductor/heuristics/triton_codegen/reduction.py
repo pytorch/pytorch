@@ -131,6 +131,7 @@ def _adapt_config_for_tiling(
         num_stages=num_stages,
         register_intensive=register_intensive,
         waves_per_eu=waves_per_eu,
+        z=block_sizes.get("z", 1),
         warp_size=warp_size,
     )
 
@@ -466,13 +467,15 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         else:
             configs = []
             tiling_scores = _get_tiling_scores(inductor_meta, size_hints)
-            x_y_scores = {dim: tiling_scores[dim] for dim in ("x", "y")}
+            pointwise_scores = {
+                dim: tiling_scores[dim] for dim in ("x", "y", "z") if dim in size_hints
+            }
             for target_block_size in xblock_vals:
                 if target_block_size * rnumel > MAX_PERSISTENT_BLOCK_NUMEL:
                     continue
 
                 block_sizes = _match_target_block_product(
-                    size_hints, x_y_scores, target_block_size
+                    size_hints, pointwise_scores, target_block_size
                 )
                 configs.append(
                     triton_config_tiled_reduction(
@@ -480,6 +483,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                         block_sizes["x"],
                         block_sizes["y"],
                         rnumel,
+                        z=block_sizes.get("z", 1),
                         warp_size=warp_size,
                     )
                 )

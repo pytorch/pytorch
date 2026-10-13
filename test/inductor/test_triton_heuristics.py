@@ -341,6 +341,30 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(cfg.kwargs["XBLOCK"], 128)
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 512)
 
+    @parametrize("persistent", [False, True])
+    def test_reduction_configs_preserve_z(self, persistent):
+        device = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=132,
+            cc=90,
+            major=9,
+            warp_size=32,
+        )
+        fn = _persistent_reduction_configs if persistent else _reduction_configs
+        configs = fn(
+            size_hints={"z": 4, "y": 8192, "x": 8192, "r0_": 32},
+            inductor_meta={
+                "grid_prefixes": ("z",),
+                "reduction_hint": ReductionHint.DEFAULT,
+                "max_autotune": True,
+            },
+            triton_meta={"device": device},
+        )
+        zblocks = [cfg.kwargs["ZBLOCK"] for cfg in configs]
+        self.assertGreater(max(zblocks), 1)
+        self.assertLessEqual(max(zblocks), 4)
+
     @staticmethod
     def _fake_cuda_device_properties():
         return DeviceProperties(

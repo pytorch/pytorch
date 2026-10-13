@@ -6010,9 +6010,38 @@ class SIMDScheduling(BaseScheduling):
         Returns:
             `(tile1, tile2, reduction_numel)` s.t. `tile1 * tile2 == numel`
         """
-        if reduction_numel == 1 and numel.has(ir.DataDependentRange):
-            node = next(iter(EnableReduction.filter(node_schedule)))
-            return cls.create_tiling(node.get_ranges()[0], [reduction_numel]), None
+        if (numel * reduction_numel).has(ir.DataDependentRange):
+            # Keep each dependent range as its own loop:
+            #
+            #     for b in range(B):
+            #         for j in range(left_lengths[b]):
+            #             for k in range(right_lengths[b]):
+            #                 reduce_over_d(b, j, k)
+            #
+            # A J * K tile would lose the separate bounds. In a fused schedule,
+            # use the reduction node's ranges, including its reduction axes.
+            node = max(
+                EnableReduction.filter(node_schedule), key=lambda n: n.is_reduction()
+            )
+            pointwise_ranges, reduction_ranges = node.get_ranges()
+            tilings = [pointwise_ranges, reduction_ranges or [reduction_numel]]
+            if reduction_numel != 1:
+                # Dense neighbors can still share a reduction tile:
+                # [B, D, J] becomes [B * D, J], while dependent J and K
+                # stay separate in [B, J, K].
+                for i, ranges in enumerate(tilings):
+                    tiling = []
+                    for size in ranges:
+                        if (
+                            not tiling
+                            or isinstance(size, ir.DataDependentRange)
+                            or isinstance(tiling[-1], ir.DataDependentRange)
+                        ):
+                            tiling.append(size)
+                        else:
+                            tiling[-1] *= size
+                    tilings[i] = tiling
+            return cls.create_tiling(*tilings), None
 
         selection = cls.select_tiling_with_memory(
             node_schedule, numel, reduction_numel, coalesce_analysis

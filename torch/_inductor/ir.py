@@ -5964,26 +5964,31 @@ class ComputedBuffer(OperationBuffer):
                 if isinstance(size, DataDependentRange):
                     dense_start = i + 1
 
-            if len(index_size) - dense_start > 1:
-                # Combine the dense suffix into one loop coordinate:
+            if dense_start < len(index_size):
+                # Put the combined dense suffix before the dependent loop:
                 #
                 #     for b in range(B):
-                #         for j in range(lengths[b]):
-                #             for f in range(D * E):
+                #         for f in range(D * E):
+                #             for j in range(lengths[b]):
                 #                 compute(b, j, f // E, f % E)
                 #
-                # [B, J, D, E] becomes [B, J, D * E]. The body still uses
+                # [B, J, D, E] becomes [B, D * E, J]. The body still uses
                 # (b, j, d, e), and the buffer keeps its [N, D, E] layout.
-                # Parent and dependent loops stay in their original order.
+                # Earlier dependent loops keep their original order.
                 dense_sizes = index_size[dense_start:]
-                index_size = [*index_size[:dense_start], sympy_product(dense_sizes)]
+                index_size = [
+                    *index_size[: dense_start - 1],
+                    sympy_product(dense_sizes),
+                    index_size[dense_start - 1],
+                ]
                 args, var_ranges = dependencies.index_vars_no_squeeze(
                     index_size, reduce_size, prefix="p"
                 )
                 iter_vars, reduce_vars = args
                 indices = [
-                    *iter_vars[:dense_start],
-                    *decompose_index(iter_vars[-1], dense_sizes),
+                    *iter_vars[:-2],
+                    iter_vars[-1],
+                    *decompose_index(iter_vars[-2], dense_sizes),
                 ]
                 body = LoopBody(
                     body, [indices, reduce_vars], var_ranges, iter_vars, reduce_vars
