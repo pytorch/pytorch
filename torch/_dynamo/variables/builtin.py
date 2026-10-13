@@ -413,6 +413,14 @@ def populate_builtin_to_tensor_fn_map() -> None:
                     BUILTIN_TO_TENSOR_RFN_MAP[op] = most_recent_func
 
 
+# object's comparison slots.  Their tp_richcompare is identity based on every
+# type, so _call_unbound_method runs object_richcompare for them instead of
+# dispatching the name on the receiver.
+_RICHCOMPARE_OPS = frozenset(
+    {"__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"}
+)
+
+
 class BaseBuiltinVariable(VariableTracker):
     """
     Common base class for all builtin variable trackers (BuiltinVariable,
@@ -608,18 +616,42 @@ class BaseBuiltinVariable(VariableTracker):
                     # the same name never runs in place of the descriptor's
                     # slot: list.append(OverridingAppend(), 3) appends.
                     return obj.call_base_method(tx, name, rest, kwargs)
+                if descriptor.__objclass__ is object and name in _RICHCOMPARE_OPS:
+                    # object's comparison slots are not "the receiver's method
+                    # of this name" on every type: tp_richcompare is identity
+                    # based, so object.__eq__(lst_a, lst_b) is NotImplemented
+                    # rather than list equality.  Run object's slot here instead
+                    # of dispatching the name on the receiver.
+                    from .object_protocol import object_richcompare, vt_identity_compare
+
+                    if name == "__ne__":
+                        # Inverts object's __eq__ result, read here rather than
+                        # through object_richcompare's __ne__ arm, which would
+                        # call the receiver's own __eq__ to get a value.
+                        identity = vt_identity_compare(obj, rest[0])
+                        if identity is None:
+                            return ConstantVariable.create(NotImplemented)
+                        return ConstantVariable.create(
+                            not identity.as_python_constant()
+                        )
+                    return object_richcompare(obj, tx, rest[0], name)
                 # A builtin VT dispatches by name, which is this descriptor's
                 # slot only when the receiver's own type resolves the name back
-                # to the descriptor.  Where another C descriptor shadows it
-                # (OrderedDict.keys) that descriptor's slot is still the right
-                # one, but where a plain attribute shadows it the name belongs
-                # to the receiver's type and running its method here would be
-                # wrong: object.__eq__ is not list/dict/set equality, and
-                # object.__hash__(lst) is the id hash, not list's TypeError.
+                # to the descriptor or to another C slot.  Where a subclass
+                # shadows it with a descriptor of its own (OrderedDict.keys over
+                # dict.keys) that descriptor's slot is still the one to run, and
+                # where it resolves to None (list.__hash__) the receiver's own
+                # dispatch already answers correctly.  Only a plain attribute
+                # shadow declines: its owner, not the descriptor's __objclass__,
+                # is the type whose method eager reaches.
                 shadow = inspect.getattr_static(obj_type, name, None)
-                if shadow is not descriptor and not isinstance(
-                    shadow,
-                    (types.MethodDescriptorType, types.WrapperDescriptorType),
+                if (
+                    shadow is not None
+                    and shadow is not descriptor
+                    and not isinstance(
+                        shadow,
+                        (types.MethodDescriptorType, types.WrapperDescriptorType),
+                    )
                 ):
                     return None
                 return obj.call_method(tx, name, rest, kwargs)
@@ -2089,10 +2121,12 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         # Must precede the protocol handlers below, which dispatch on the
         # receiver and so would run a subclass override where this runs the
-        # type's own slot.  The base class repeats this for the builtin VTs that
-        # do not inherit from this one.  Every type those handlers name defines
-        # the slot, so they only run for a type that lacks it: int.__len__(x)
-        # reaches its handler, list.__len__(x) is dispatched here.
+        # type's own slot.  This dispatch claims the names it can answer, so the
+        # handlers only see what it declines or does not cover: of the names
+        # below, int.__len__(x) reaches its handler because int has no __len__
+        # descriptor to dispatch, while list.__len__(x) is answered here.
+        # BaseBuiltinVariable.call_method runs the same dispatch first, for the
+        # builtin VTs that do not inherit from this class.
         result = self._call_unbound_method(tx, name, args, kwargs)
         if result is not None:
             return result

@@ -5458,27 +5458,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(result, correct)
 
     def test_unbound_container_copy_methods(self):
-        class OverridingList(list):
-            # list.copy runs list's C slot, not this override
-            def copy(self):
-                return "overridden"
-
-        class OverridingDict(dict):
-            def copy(self):
-                return "overridden"
-
-        class OverridingSet(set):
-            def copy(self):
-                return "overridden"
-
         def fn(x):
             lst = list.copy([1, 2, 3])
             dct = dict.copy({1: 2})
             st = set.copy({1, 2})
-            sub = list.copy(OverridingList([1, 2]))
-            dsub = dict.copy(OverridingDict({1: 2}))
-            ssub = set.copy(OverridingSet({1, 2}))
-            return x + len(lst) + len(dct) + len(st) + len(sub) + len(dsub) + len(ssub)
+            return x + len(lst) + len(dct) + len(st)
 
         x = torch.randn(4)
         correct = fn(x)
@@ -5486,7 +5470,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(result, correct)
 
     def test_unbound_descriptor_owner_not_receiver_type(self):
-        # list.append(lst, v) is method_descr_call on list's own C slot, so a
+        # An unbound method descriptor runs the slot of its own __objclass__.
+        # list.append(lst, v) is methoddescr_call on list's C slot, so a
         # subclass overriding append must not see the override run.  The
         # override here raises, which only a dispatch on the receiver reaches.
         class OverridingAppend(list):
@@ -5519,6 +5504,37 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = torch.compile(copied, fullgraph=True, backend="eager")(*copied_args)
         self.assertEqual(result, correct)
 
+    def test_unbound_object_comparison_slots(self):
+        # object's own comparison slots are identity based on every type, so
+        # object.__eq__(a, b) is NotImplemented for a != b rather than the
+        # container's element-wise comparison.  Tensor elements keep the lists
+        # off the constant-fold path, so the dispatch itself is exercised.
+        def fn(x, a, b):
+            return x + float(
+                object.__eq__(a, b) is NotImplemented
+                and object.__ne__(a, b) is not NotImplemented
+                and object.__lt__(a, b) is NotImplemented
+            )
+
+        x = torch.randn(4)
+        t = torch.randn(3)
+        args = (x, [t], [t])
+        correct = fn(*args)
+        self.assertEqual(correct, x + 1)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(*args)
+        self.assertEqual(result, correct)
+
+        # identity still compares equal, and __ne__ inverts it
+        same = (x, [t], None)
+
+        def identical(x, a, _unused):
+            return x + float(object.__eq__(a, a) and not object.__ne__(a, a))
+
+        correct = identical(*same)
+        self.assertEqual(correct, x + 1)
+        result = torch.compile(identical, fullgraph=True, backend="eager")(*same)
+        self.assertEqual(result, correct)
+
     def test_unbound_list_methods(self):
         # list.<method>(lst, ...) is the same call as lst.<method>(...): the
         # whole method table is dispatched on the explicit receiver.
@@ -5536,20 +5552,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(4)
         correct = fn(x)
         result = torch.compile(fn, fullgraph=True, backend="eager")(x)
-        self.assertEqual(result, correct)
-
-        class OverridingList(list):
-            # list.append runs list's C slot, not this override
-            def append(self, value):
-                return "overridden"
-
-        def overridden(x):
-            lst = OverridingList([1, 2])
-            list.append(lst, 3)
-            return x + len(lst)
-
-        correct = overridden(x)
-        result = torch.compile(overridden, fullgraph=True, backend="eager")(x)
         self.assertEqual(result, correct)
 
     def test_unbound_methods_other_builtin_types(self):
