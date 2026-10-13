@@ -484,6 +484,13 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             def __iter__(self):
                 return iter((9,))
 
+        class RawArray(bytearray):
+            def __iter__(self):
+                return iter((9,))
+
+            def __len__(self):
+                return 1
+
         def f(x, value):
             y = x + 1
             dst = bytearray(b"q")
@@ -491,9 +498,10 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             return y, dst
 
         x = torch.ones(1)
-        self.assertEqual(
-            torch.compile(f, backend="eager")(x, Raw(b"ab"))[1], f(x, Raw(b"ab"))[1]
-        )
+        for value in (Raw(b"ab"), RawArray(b"ab")):
+            self.assertEqual(
+                torch.compile(f, backend="eager")(x, value)[1], f(x, value)[1]
+            )
 
     def test_extend_asks_for_a_length_hint_first(self):
         class Items:

@@ -2439,10 +2439,12 @@ class ByteArrayVariable(VariableTracker):
         # traced iterator unconsumed.
         if isinstance(iterable, ConstantVariable):
             values = iterable.as_python_constant()
-        elif issubclass(maybe_get_python_type(iterable), bytes):
+        elif not isinstance(iterable, ByteArrayVariable) and issubclass(
+            maybe_get_python_type(iterable), (bytes, bytearray)
+        ):
             # CPython reads a buffer before it considers __iter__, so a bytes
-            # subclass that overrides __iter__ is still extended from its
-            # buffer. Raw-buffer access is not modeled here: decline.
+            # or bytearray subclass that overrides __iter__ is still extended
+            # from its buffer. Raw-buffer access is not modeled here: decline.
             return None
         elif vt_is_iterable(iterable):
             values = []
