@@ -2333,7 +2333,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         from torch._higher_order_ops import BaseHOP
 
         if isinstance(value, BaseHOP):
-            return BaseHOPVariable(value, source, **kwargs)
+            from .builder import VariableBuilder
+
+            return VariableBuilder.create_internal_base_hop(value, source, **kwargs)
         unimplemented(
             gb_type="unsupported HigherOrderOperator",
             context=str(value),
@@ -5642,10 +5644,12 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         tx, autograd_function_backward_rewritten(self.bwd_fn)
                     )
                 elif isinstance(self.bwd_fn, types.MethodType):
+                    rewritten = autograd_function_backward_rewritten(
+                        self.bwd_fn.__func__
+                    )
+                    fn_vt = SourcelessBuilder.create_internal_user_function(rewritten)
                     bwd_fn = UserMethodVariable(
-                        torch._dynamo.variables.UserFunctionVariable(
-                            autograd_function_backward_rewritten(self.bwd_fn.__func__),
-                        ),
+                        fn_vt,
                         VariableTracker.build(tx, self.bwd_fn.__class__),
                     )
                 else:

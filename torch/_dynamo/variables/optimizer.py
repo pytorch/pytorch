@@ -221,8 +221,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
             orig_vt = param_group_vt.items.get(key)
             if orig_vt is None or isinstance(orig_vt, OptimizerCapturableVariable):
                 continue
-            param_group_vt.items[key] = OptimizerCapturableVariable(
-                value=True, orig_value=orig_vt.as_python_constant()
+            param_group_vt.items[key] = OptimizerCapturableVariable.create(
+                orig_vt.as_python_constant()
             )
 
     def get_python_args(
@@ -448,6 +448,10 @@ class OptimizerCapturableVariable(VariableTracker):
     """
 
     _nonvar_fields = {"orig_value", *VariableTracker._nonvar_fields}
+
+    @classmethod
+    def create(cls, orig_value: bool) -> "OptimizerCapturableVariable":
+        return cls(value=True, orig_value=orig_value)
 
     def __init__(self, value: bool, orig_value: bool, **kwargs: Any) -> None:
         super().__init__(**kwargs)
