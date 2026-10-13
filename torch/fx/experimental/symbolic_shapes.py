@@ -5332,7 +5332,8 @@ class ShapeEnv:
         # specialize all of the inner strides/offset too. We don't have to
         # do this, and arguably we should ALWAYS allow for dynamic offset,
         # this is cheap.
-        # TODO: This should be DYNAMIC, using DUCK for BC
+        # TODO: This should be DYNAMIC by default; DUCK is kept for BC unless
+        # config.dynamic_storage_offset opts in.
         dynamic_offset = (
             DimDynamic.STATIC
             if all(r == DimDynamic.STATIC for r in dynamic_sizes)
@@ -5400,16 +5401,21 @@ class ShapeEnv:
                     source=TensorPropertySource(source, TensorProperty.STRIDE, i),
                 )
             )
+        # A sympy positive=True symbol would fold Eq(s, 0) to False, so the
+        # dynamic offset is an unconstrained symbol with an explicit [0, inf] range.
+        offset_expr = self.create_symbol(
+            ex_storage_offset,
+            TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
+            dynamic_dim=dynamic_offset,
+            constraint_dim=None,
+            symbolic_context=symbolic_context,
+            positive=None if config.dynamic_storage_offset else True,
+            do_not_specialize_zero_one=config.dynamic_storage_offset,
+        )
+        if config.dynamic_storage_offset and isinstance(offset_expr, sympy.Symbol):
+            self._update_var_to_range(offset_expr, ValueRanges(0, int_oo))
         sym_storage_offset = self.create_symintnode(
-            self.create_symbol(
-                ex_storage_offset,
-                TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-                dynamic_dim=dynamic_offset,
-                constraint_dim=None,
-                symbolic_context=symbolic_context,
-                positive=None if config.dynamic_storage_offset else True,
-                do_not_specialize_zero_one=config.dynamic_storage_offset,
-            ),
+            offset_expr,
             hint=ex_storage_offset,
             source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
         )
