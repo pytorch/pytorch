@@ -13,12 +13,15 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SignalPad.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/error.h>
 #include <mutex>
 #include <c10/util/flat_hash_map.h>
@@ -128,31 +131,121 @@ NCCLAllocMap::iterator find_allocation_covering(
 
 } // namespace
 
-// Before NCCL 2.29, we can use device-side APIs to get peer pointers.
-#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-// Fill both peer pointer arrays in a single kernel launch. For each peer,
-// NCCL returns the window base (== signal pad base); the data buffer pointer
-// is derived as `base + buffer_offset`, mirroring the host-side layout.
-static __global__ void build_ptr_dev(
-  ncclWindow_t  handle,
-  size_t  buffer_offset,  // data buffer offset; signal pad occupies [0, buffer_offset)
-  void**  buffers,        // out: peer buffer pointers
-  void**  signal_pads,    // out: peer signal pad pointers
-  int  world_size)
-{
-  int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
-  for (int peer = tid; peer < world_size; peer += stride) {
-      void* buf = ncclGetLsaPointer(handle, 0, peer);
-      signal_pads[peer] = buf;
-      buffers[peer] = buf == nullptr
-          ? nullptr
-          : static_cast<char*>(buf) + buffer_offset;
+// Before NCCL 2.29, only the device-side API returns peer pointers.
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+static __global__ void window_bases_kernel(
+    ncclWindow_t win,
+    void** bases,
+    int world_size) {
+  for (int peer = threadIdx.x; peer < world_size; peer += blockDim.x) {
+    bases[peer] = ncclGetLsaPointer(win, 0, peer);
   }
 }
+#endif
+
+// Each rank's base of `win`, on the host and in `bases_dev`. From NCCL 2.29 a
+// rank outside the LSA domain gets nullptr; before that the lookup is a kernel
+// on `stream`, which returns an address for every rank.
+static std::vector<void*> window_bases(
+    ncclWindow_t win,
+    int world_size,
+    void** bases_dev,
+    [[maybe_unused]] cudaStream_t stream) {
+  std::vector<void*> bases(world_size);
+  const size_t arr_size = sizeof(void*) * world_size;
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+  window_bases_kernel<<<1, std::min(128, world_size), 0, stream>>>(
+      win, bases_dev, world_size);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+  C10_CUDA_CHECK(
+      cudaMemcpy(bases.data(), bases_dev, arr_size, cudaMemcpyDeviceToHost));
+#else
+  for (int i = 0; i < world_size; i++) {
+    C10D_NCCL_CHECK(
+        ncclGetPeerDevicePointer(win, 0, i, &bases[i]),
+        "ncclGetPeerDevicePointer failed");
+  }
+  C10_CUDA_CHECK(
+      cudaMemcpy(bases_dev, bases.data(), arr_size, cudaMemcpyHostToDevice));
+#endif
+  return bases;
+}
+
+// Memory of a group's internal signal pad on one device. Its window stays
+// registered: the pad is dropped only after its group is gone, when the
+// communicator may be too, and destroying the communicator releases its
+// windows.
+struct NCCLSignalPadMemory : public c10::intrusive_ptr_target {
+  explicit NCCLSignalPadMemory(int device_idx) : device_idx(device_idx) {}
+
+  ~NCCLSignalPadMemory() override {
+    if (should_skip_cuda_cleanup(device_idx)) {
+      return;
+    }
+    c10::cuda::CUDAGuard guard(device_idx);
+    if (peers_dev != nullptr) {
+      C10_CUDA_CHECK_WARN(cudaFree(peers_dev));
+    }
+    if (base != nullptr) {
+      ncclResult_t res = ncclMemFree(base);
+      if (res != ncclSuccess) {
+        LOG(WARNING) << "ncclMemFree failed for a signal pad: "
+                     << ncclGetErrorString(res);
+      }
+    }
+  }
+
+  int device_idx;
+  void* base{nullptr};
+  void** peers_dev{nullptr};
+};
+
+// Creates a group's internal signal pad on `device_idx`, a window of its own on
+// the group's communicator `comm`. Collective over the group. Its size is
+// get_signal_pad_size(), which, as for allocations, must be the same on every
+// rank: NCCL accepts windows of different sizes.
+static std::shared_ptr<const SignalPad> create_signal_pad(
+    ncclComm_t comm,
+    int device_idx,
+    int world_size) {
+  const size_t size = get_signal_pad_size();
+  c10::cuda::CUDAGuard guard(device_idx);
+  // Rendezvous may run under graph capture: work on a stream of its own, in
+  // relaxed mode, so that none of it is captured.
+  c10::cuda::CUDAStreamCaptureModeGuard mode(cudaStreamCaptureModeRelaxed);
+  cudaStream_t stream = nullptr;
+  C10_CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+  auto destroy_stream = c10::make_scope_exit(
+      [&] { C10_CUDA_CHECK_WARN(cudaStreamDestroy(stream)); });
+
+  auto mem = c10::make_intrusive<NCCLSignalPadMemory>(device_idx);
+  C10D_NCCL_CHECK(ncclMemAlloc(&mem->base, size), "ncclMemAlloc");
+  C10_CUDA_CHECK(cudaMemsetAsync(mem->base, 0, size, stream));
+  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+  ncclWindow_t win = nullptr;
+  C10D_NCCL_CHECK(
+      ncclCommWindowRegister(comm, mem->base, size, &win, NCCL_WIN_COLL_SYMMETRIC),
+      "ncclCommWindowRegister failed for a signal pad");
+  // Until the pad is built, a failure frees the memory, so its window goes
+  // first (deregistering is local): NCCL would match a later buffer at that
+  // address to it.
+  auto deregister =
+      c10::make_scope_exit([&] { ncclCommWindowDeregister(comm, win); });
+  // Not the caching allocator: under capture it would hand this long-lived
+  // array out of the graph's private pool.
+  C10_CUDA_CHECK(cudaMalloc(
+      reinterpret_cast<void**>(&mem->peers_dev), sizeof(void*) * world_size));
+  auto peers = window_bases(win, world_size, mem->peers_dev, stream);
+  // No multicast: the NCCL barrier has no multimem path. The communicator fixes
+  // each rank's device, so no mapping id either.
+  auto pad = std::make_shared<const SignalPad>(
+      mem, std::move(peers), mem->peers_dev, nullptr, size, 0);
+  deregister.release();
+  return pad;
+}
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-#endif // NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
 
 class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
  public:
@@ -209,63 +302,28 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     // owning backend at comm-init time. The earlier mgr.get_comm() call
     // above relied on that. No re-register here.)
 
-    // Starting from NCCL 2.28, we can get peer pointers.
+    // Starting from NCCL 2.28, we can get peer pointers. A peer's window starts
+    // with its signal pad; its buffer is buffer_offset_ in, as on every rank.
     const size_t arr_size = sizeof(void*) * world_size_;
     buffers_dev_ = reinterpret_cast<void**>(
         c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
     signal_pads_dev_ = reinterpret_cast<void**>(
         c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+    signal_pads_ = window_bases(
+        combined_win_,
+        world_size_,
+        signal_pads_dev_,
+        at::cuda::getCurrentCUDAStream());
     buffers_.resize(world_size_);
-    signal_pads_.resize(world_size_);
-
-#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
-    // Lack of host-side API to get peer pointers, so a kernel writes both
-    // peer arrays at once and copies the results to host.
-    int threads = std::min(128, world_size_);
-    auto stream = at::cuda::getCurrentCUDAStream();
-    build_ptr_dev<<<1, threads, 0, stream>>>(
-        combined_win_, buffer_offset_, buffers_dev_, signal_pads_dev_, world_size_);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+    for (int i = 0; i < world_size_; i++) {
+      buffers_[i] = signal_pads_[i] == nullptr
+          ? nullptr
+          : static_cast<char*>(signal_pads_[i]) + buffer_offset_;
+    }
     C10_CUDA_CHECK(cudaMemcpy(
-      buffers_.data(),  // dst (host)
-      buffers_dev_,  // src (device)
-      arr_size,
-      cudaMemcpyDeviceToHost));
-    C10_CUDA_CHECK(cudaMemcpy(
-      signal_pads_.data(),  // dst (host)
-      signal_pads_dev_,  // src (device)
-      arr_size,
-      cudaMemcpyDeviceToHost));
-#else
-  // Starting from NCCL 2.29, we can use host-side APIs to get peer pointers.
-  // ncclGetPeerDevicePointer returns each peer's window base, which is the
-  // signal pad base (the signal pad is at the front of the window).
-  for (int i = 0; i < world_size_; i++) {
-    // If peer is not accessible within LSA domain, `ncclGetPeerDevicePointer`
-    // returns nullptr.
-    C10D_NCCL_CHECK(
-      ncclGetPeerDevicePointer(combined_win_, 0, i, &signal_pads_[i]),
-      "ncclGetPeerDevicePointer failed");
-  }
-  // Derive each peer's data buffer pointer from its window base; all ranks
-  // share the same buffer_offset_ so we don't need to ask NCCL separately.
-  for (int i = 0; i < world_size_; i++) {
-    buffers_[i] = signal_pads_[i] == nullptr
-        ? nullptr
-        : static_cast<char*>(signal_pads_[i]) + buffer_offset_;
-  }
-  C10_CUDA_CHECK(cudaMemcpy(
-    buffers_dev_,  // dst (device)
-    buffers_.data(),  // src (host)
-    arr_size,
-    cudaMemcpyHostToDevice));
-  C10_CUDA_CHECK(cudaMemcpy(
-      signal_pads_dev_,  // dst (device)
-      signal_pads_.data(),  // src (host)
-      arr_size,
-      cudaMemcpyHostToDevice));
+        buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
   // Starting from NCCL 2.29, we can use `ncclGetLsaMultimemDevicePointer`
   // to get multicast address.
   void* mc_addr = nullptr;
@@ -278,7 +336,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       mc_addr != nullptr) {
     mc_addr_ = mc_addr;
   }
-#endif // NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+#endif // NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   }
 
@@ -326,7 +384,13 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   // Multicast address (data buffer base within the multicast mapping)
   void* mc_addr_{nullptr};
   ncclComm_t comm_{nullptr};
+  // The group's internal signal pad on this device, which PyTorch's own
+  // operations synchronize through. From NCCL 2.29, null when some peer is
+  // outside the LSA domain, which every rank then sees: NCCL's LSA team is the
+  // same on all ranks.
+  std::shared_ptr<const SignalPad> pad_;
   friend class NCCLSymmetricMemory;
+  friend class NCCLSymmetricMemoryAllocator;
 };
 
 NCCLSymmetricMemory::NCCLSymmetricMemory(
@@ -362,6 +426,24 @@ void** NCCLSymmetricMemory::get_signal_pad_ptrs_dev() {
   return pai_->signal_pads_dev_;
 }
 
+const SignalPad& NCCLSymmetricMemory::group_signal_pad() const {
+  TORCH_CHECK(
+      pai_->pad_ != nullptr,
+      "NCCL symmetric memory: barrier() and the symm_mem collectives need "
+      "every rank of group '",
+      pai_->group_name_,
+      "' in the symmetric-memory (LSA/NVLink) domain, and NCCL >= 2.28.");
+  return *pai_->pad_;
+}
+
+void** NCCLSymmetricMemory::get_group_signal_pad_ptrs_dev() {
+  return group_signal_pad().peers_dev();
+}
+
+size_t NCCLSymmetricMemory::get_group_signal_pad_size() {
+  return group_signal_pad().size();
+}
+
 size_t NCCLSymmetricMemory::get_buffer_size() {
   return pai_->buffer_size_;
 }
@@ -379,12 +461,8 @@ void* NCCLSymmetricMemory::get_multicast_ptr() {
 
 void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-  TORCH_CHECK(
-      pai_->signal_pads_dev_ != nullptr,
-      "NCCLSymmetricMemory::barrier requires peer signal pad pointers, which "
-      "are only populated when peers are accessible over the symmetric-memory "
-      "(LSA/NVLink) domain.");
-  check_channel(channel, world_size_, get_signal_pad_size());
+  const SignalPad& pad = group_signal_pad();
+  check_channel(channel, world_size_, pad.size());
   c10::cuda::CUDAGuard device_guard(device_idx_);
   GroupStreamGuard stream_guard(pai_->group_name_);
   barrier_kernel<<<
@@ -392,7 +470,7 @@ void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
       std::max(at::cuda::warp_size(), world_size_),
       0,
       at::cuda::getCurrentCUDAStream()>>>(
-      reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
+      reinterpret_cast<uint32_t**>(pad.peers_dev()),
       channel,
       rank_,
       world_size_,
@@ -650,10 +728,33 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // for different groups (e.g., forward vs backward).
     std::lock_guard<std::mutex> alloc_lock(allocation->mutex);
     auto& peer_alloc_infos = allocation->peer_alloc_infos_;
-    auto& pai = peer_alloc_infos[*group_name];
-    if (!pai) {
-      pai = c10::make_intrusive<NCCLPeerAllocInfo>(allocation, *group_name);
+    auto pai_it = peer_alloc_infos.find(*group_name);
+    if (pai_it == peer_alloc_infos.end()) {
+      auto new_pai =
+          c10::make_intrusive<NCCLPeerAllocInfo>(allocation, *group_name);
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+      // The group's first rendezvous on this device creates its internal pad,
+      // after the buffer's window. Every rank creates it in the same call or
+      // none does: ranks rendezvous a group's buffers in the same order, as the
+      // collective window registration already requires, and see the same LSA
+      // team. If creating it fails on some ranks only, the group's operations
+      // hang, as after a buffer registration that fails on some ranks. A pad
+      // stays on the communicator it was registered on, so the group's
+      // communicator must not change while the group lives.
+      const auto& peers = new_pai->signal_pads_;
+      if (std::find(peers.begin(), peers.end(), nullptr) == peers.end()) {
+        new_pai->pad_ = get_or_create_signal_pad(
+            resolve_process_group(*group_name),
+            static_cast<c10::DeviceIndex>(allocation->device_idx),
+            [&] {
+              return create_signal_pad(
+                  new_pai->comm_, allocation->device_idx, new_pai->world_size_);
+            });
+      }
+#endif
+      pai_it = peer_alloc_infos.emplace(*group_name, std::move(new_pai)).first;
     }
+    auto& pai = pai_it->second;
     // Offset is relative to the data buffer base (past the signal pad).
     size_t offset = reinterpret_cast<uintptr_t>(ptr) -
         reinterpret_cast<uintptr_t>(buffer_ptr_key);
