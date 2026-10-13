@@ -573,11 +573,12 @@ void apply_geqp3(const at::Tensor& input, const at::Tensor& tau, const at::Tenso
 
     using value_t = typename c10::scalar_value_type<scalar_t>::type;
     // rwork is just used for the complex decomposition
-    auto rwork = std::vector<value_t>{};
+    Tensor rwork;
+    value_t* rwork_ptr = nullptr;
     if (input.is_complex()) {
-        rwork.resize(2 * n);
+        rwork = at::empty({2 * n}, input.options().dtype(c10::toRealValueType(input.scalar_type())));
+        rwork_ptr = rwork.mutable_data_ptr<value_t>();
     }
-    auto* const rwork_ptr = rwork.data();
 
     lapackGeqp3<scalar_t, value_t>(m, n, input_data, lda, P_data, tau_data, &wkopt, lwork, rwork_ptr, &info);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
