@@ -350,6 +350,35 @@ __global__ void upsample_bilinear2d_backward_nhwc_out_frame(
   }
 }
 
+// Spatial extents are narrowed to int for the kernels' index math, so an extent
+// above INT_MAX wraps and can produce a negative source index (gh-193689).
+// Check the untruncated sizes. numel is deliberately not checked: it may exceed
+// INT_MAX safely, because these kernels address memory through accessor64 and
+// are launched over height*width rather than over the element count.
+static void check_upsample_2d_extents(
+    int64_t input_height,
+    int64_t input_width,
+    int64_t output_height,
+    int64_t output_width,
+    const char* name) {
+  constexpr int64_t kMax = std::numeric_limits<int>::max();
+  TORCH_CHECK(
+      input_height <= kMax && input_width <= kMax && output_height <= kMax &&
+          output_width <= kMax,
+      name,
+      ": spatial dimensions must each be at most ",
+      kMax,
+      ", but got input (",
+      input_height,
+      ", ",
+      input_width,
+      ") and output (",
+      output_height,
+      ", ",
+      output_width,
+      ")");
+}
+
 static void upsample_bilinear2d_out_cuda_template(
     const Tensor& output,
     const Tensor& input,
@@ -359,6 +388,10 @@ static void upsample_bilinear2d_out_cuda_template(
     std::optional<double> scales_w) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU(__func__, {input_arg, output_arg});
+
+  check_upsample_2d_extents(
+      input.size(2), input.size(3), output_size[0], output_size[1],
+      "upsample_bilinear2d");
 
   int output_height = output_size[0];
   int output_width = output_size[1];
@@ -474,6 +507,10 @@ static void upsample_bilinear2d_backward_out_cuda_template(
 
   int output_height = output_size[0];
   int output_width = output_size[1];
+
+  check_upsample_2d_extents(
+      input_size[2], input_size[3], output_size[0], output_size[1],
+      "upsample_bilinear2d_backward");
 
   int nbatch = input_size[0];
   int channels = input_size[1];
