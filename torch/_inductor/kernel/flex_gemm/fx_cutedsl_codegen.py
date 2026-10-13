@@ -29,7 +29,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR,
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
     FlexGemmLocalReduceGeometry,
-    LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
     LOCAL_REDUCE_FINALIZE_CAPTURE_ERROR,
     LOCAL_REDUCE_FRAGMENT_WIDTH,
@@ -518,17 +517,6 @@ def epimod_reduction_alias_key(reduction: NormalizedReduction) -> tuple[Any, ...
     )
 
 
-def epimod_reduction_spec(
-    node: torch.fx.Node,
-    aliases: tuple[torch.fx.Node, ...],
-    reduction: NormalizedReduction,
-) -> FlexGemmEpiModReductionSpec:
-    """Translate one normalized FX reduction into QuACK semantics."""
-    if reduction.dtype is not None:
-        raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
-    return FlexGemmEpiModReductionSpec(node, aliases, reduction)
-
-
 def epimod_dependency_slice(
     result: torch.fx.Node, boundaries: frozenset[torch.fx.Node]
 ) -> frozenset[torch.fx.Node]:
@@ -576,7 +564,7 @@ def epimod_local_reduce_spec(
         if analysis.local_reduce.matches[reduction_node].geometry != geometry:
             raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
         spec = FlexGemmEpiModLocalReduceSpec(
-            epimod_reduction_spec(
+            FlexGemmEpiModReductionSpec(
                 reduction_node, aliases[reduction_node], reductions[reduction_node]
             )
         )
@@ -601,10 +589,10 @@ def epimod_local_reduce_spec(
                 "feeds the pointwise source of the second"
             )
         spec = FlexGemmEpiModLocalReduceSpec(
-            epimod_reduction_spec(
+            FlexGemmEpiModReductionSpec(
                 outer_node, aliases[outer_node], reductions[outer_node]
             ),
-            epimod_reduction_spec(inner_node, aliases[inner_node], inner),
+            FlexGemmEpiModReductionSpec(inner_node, aliases[inner_node], inner),
         )
     else:
         raise NotImplementedError(
