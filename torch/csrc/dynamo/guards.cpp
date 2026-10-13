@@ -7833,7 +7833,6 @@ PyObject* torch_c_dynamo_guards_init() {
 
   py::class_<LocalState>(py_m, "LocalState")
       .def(py::init<>())
-      .def("apply_for_tensor", &LocalState::apply_for_tensor)
       .def(py::pickle(
           [](const LocalState& state) {
             return py::make_tuple(

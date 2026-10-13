@@ -232,7 +232,6 @@ if TYPE_CHECKING:
     from sympy import Symbol
 
     from torch._C import DispatchKeySet
-    from torch._C._dynamo.guards import LocalState
     from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
     from torch.utils._python_dispatch import TraceableWrapperSubclass
 
@@ -942,26 +941,6 @@ def get_verbose_code_part(code_part: str, guard: Guard | None) -> str:
     return f"{code_part:<60}{extra}"
 
 
-def _order_stable_repr(value: object) -> str:
-    """repr() with set elements sorted.
-
-    Set iteration order depends on hash seed and insertion history, so two
-    equal sets can repr differently, e.g. across processes. Guard text should
-    only depend on the guarded value.
-    """
-    if istype(value, (set, frozenset)):
-        if not value:
-            return repr(value)
-        body = "{" + ", ".join(sorted(_order_stable_repr(v) for v in value)) + "}"
-        return body if istype(value, set) else f"frozenset({body})"
-    if istype(value, tuple):
-        items = [_order_stable_repr(v) for v in value]
-        return "(" + ", ".join(items) + ("," if len(items) == 1 else "") + ")"
-    if istype(value, list):
-        return "[" + ", ".join(_order_stable_repr(v) for v in value) + "]"
-    return repr(value)
-
-
 def get_verbose_code_parts(
     code_parts: str | list[str],
     guard: Guard | None,
@@ -1076,10 +1055,11 @@ def get_tensor_guard_code_part(
     strides: list[int | None],
     pytype: type,
     dispatch_keys: DispatchKeySet,
-    local_state: LocalState,
     device_index_is_current: bool = False,
 ) -> str:
-    dispatch_key = local_state.apply_for_tensor(dispatch_keys)
+    dispatch_key = (
+        dispatch_keys | torch._C._dispatch_tls_local_include_set()
+    ) - torch._C._dispatch_tls_local_exclude_set()
     dtype = value.dtype
     # Render the relaxed form as "current" so diagnostics describe the
     # rank-relative runtime check rather than the compiling rank's device index.
@@ -3089,7 +3069,7 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         # Construct a debug string to put into the c++ equals match guard.
-        code = [f"{ref} == {_order_stable_repr(val)}"]
+        code = [f"{ref} == {val!r}"]
         if istype(val, ok_mutable_types):
             # C++ guards perform a pointer equality check to speedup guards, but the assumption is that the object
             # is immutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
@@ -4032,7 +4012,6 @@ class GuardBuilder(GuardBuilderBase):
                         stride,
                         pytype,
                         dispatch_keys,
-                        self.guard_manager.root.get_local_state(),
                         device_index_is_current,
                     ),
                     guard,
@@ -4922,12 +4901,9 @@ class GuardsStatePickler(FunctionPicklerBase):
 
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it
-            # is often a toplevel module. DDP.__getstate__ is not used since it
-            # rejects any DDP not built on the default process group.
+            # is often a toplevel module.
             if is_ddp:
-                return type(self)._unpickle_ddp_module, (
-                    obj._getstate_without_process_group(),
-                )
+                return type(self)._unpickle_ddp_module, (obj.__getstate__(),)
 
             if type(obj).__qualname__ == type(obj).__name__:
                 return NotImplemented

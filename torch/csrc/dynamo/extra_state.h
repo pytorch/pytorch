@@ -58,8 +58,6 @@ typedef struct VISIBILITY_HIDDEN PrecompileEntry {
   py::object guard_manager;
   py::object code;
   void* root_mgr;
-  // Same clock as CacheEntry::recency.
-  uint64_t recency{0};
 
   PrecompileEntry(py::object gm, py::object c);
 } PrecompileEntry;
