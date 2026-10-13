@@ -246,6 +246,12 @@ bool check_mxfp4_recipe(
   return true;
 }
 
+bool is_valid_cublaslt_input_pair(c10::ScalarType type_a, c10::ScalarType type_b) {
+  return (type_a == ScalarType::Float8_e4m3fn || type_a == ScalarType::Float8_e5m2) &&
+      (type_b == ScalarType::Float8_e4m3fn || type_b == ScalarType::Float8_e5m2) &&
+      (type_a == ScalarType::Float8_e4m3fn || type_b == ScalarType::Float8_e4m3fn);
+}
+
 namespace {
 
 bool is_fp8_or_fp4_type(ScalarType dtype) {
