@@ -286,7 +286,7 @@ class TestC10dTorchCommsBasicCUDA(C10dTorchCommsTestBase):
     def _rank_value(self):
         return self.rank + 1
 
-    def test_new_group_with_pg_options(self, device):
+    def test_new_group_with_pg_options(self):
         ranks = list(range(self.world_size))
         opts = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
         opts.config.cga_cluster_size = 2
@@ -296,7 +296,7 @@ class TestC10dTorchCommsBasicCUDA(C10dTorchCommsTestBase):
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
-    def test_new_group_sequential_pg_options_produce_distinct_groups(self, device):
+    def test_new_group_sequential_pg_options_produce_distinct_groups(self):
         ranks = list(range(self.world_size))
         opts_a = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
         opts_a.config.cga_cluster_size = 2
@@ -470,7 +470,7 @@ class TestC10dTorchCommsInitAutoQualifyCUDA(C10dTorchCommsTestBase):
     def _rank_value(self):
         return self.rank + 1
 
-    def test_new_group_nccl_lazy_builds_per_peer_group(self, device):
+    def test_new_group_nccl_lazy_builds_per_peer_group(self):
         # Passing backend="nccl-lazy" builds a per-peer, lazily-initialized
         # group (a dedicated comm + stream per send/recv peer) usable for P2P.
         # use_local_synchronization makes it members-only. The parent must be
@@ -545,7 +545,7 @@ class TestC10dTorchCommsMixedBackends(C10dTorchCommsTestBase):
     def _rank_value(self):
         return self.rank + 1
 
-    def test_mixed_backend_subgroup(self, device):
+    def test_mixed_backend_subgroup(self):
         subg_ranks = list(range(self.world_size // 2))
         ng = dist.new_group(ranks=subg_ranks)
 
@@ -695,7 +695,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
                 )
         return captured
 
-    def test_new_comm_gets_indexed_device_id(self, device):
+    def test_new_comm_gets_indexed_device_id(self):
         # A subgroup's group-local rank differs from the rank's physical device,
         # so new_comm must receive device_id (WITH index), not a device-type-only
         # device. group_rank (2) deliberately differs from the device index (3).
@@ -707,7 +707,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         )
         self.assertEqual(cap["device"], torch.device("cuda:3"))
 
-    def test_new_comm_device_type_mismatch_not_overridden(self, device):
+    def test_new_comm_device_type_mismatch_not_overridden(self):
         # gloo maps to the cpu device; device_id is a cuda device, so the type
         # guard must leave cpu alone rather than substituting cuda:3.
         cap = self._drive_member(
@@ -718,7 +718,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         )
         self.assertEqual(cap["device"], torch.device("cpu"))
 
-    def test_new_comm_without_device_id_keeps_type_only_device(self, device):
+    def test_new_comm_without_device_id_keeps_type_only_device(self):
         # World-group path: no device_id bound, so the guard must not fire and
         # new_comm gets the device-type-only device from the backend map.
         cap = self._drive_member(
@@ -1075,7 +1075,7 @@ class TestC10dGroupNameHashSalt(TestCase):
     before the membership check, on BOTH the hashed and non-hashed paths.
     """
 
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -1184,9 +1184,6 @@ class _FakeBackendWrapper:
 
 class _FakeOtherBackend:
     """A c10d backend that is not a _BackendWrapper (must be left untouched)."""
-
-
-instantiate_device_type_tests(TestC10dGroupNameHashSalt, globals(), only_for=["cuda"])
 
 
 class TestC10dTorchCommsDestroyDedup(TestCase):
