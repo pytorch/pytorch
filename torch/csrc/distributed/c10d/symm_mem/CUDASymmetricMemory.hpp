@@ -93,6 +93,20 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
       std::string group_name);
 
  private:
+  struct DevicePointerTables {
+    explicit DevicePointerTables(int device_idx) : device_idx(device_idx) {}
+    ~DevicePointerTables();
+
+    DevicePointerTables(const DevicePointerTables&) = delete;
+    DevicePointerTables& operator=(const DevicePointerTables&) = delete;
+    DevicePointerTables(DevicePointerTables&&) = delete;
+    DevicePointerTables& operator=(DevicePointerTables&&) = delete;
+
+    int device_idx;
+    void** buffers{nullptr};
+    void** signal_pads{nullptr};
+  };
+
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs_;
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
@@ -105,8 +119,7 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
   int local_device_idx_;
   int rank_;
   int world_size_;
-  void** buffers_dev_;
-  void** signal_pads_dev_;
+  DevicePointerTables pointer_tables_;
   std::string group_name_;
 
   friend class CUDASymmetricMemory;
