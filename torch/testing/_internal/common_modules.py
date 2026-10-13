@@ -3269,7 +3269,8 @@ def module_error_inputs_torch_nn_Embedding(module_info, device, dtype, requires_
 
 def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requires_grad, training, **kwargs):
     # Currently all samples below are for validating the no-batch-dim support.
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    # Avoid saturated attention probabilities in low-precision layout comparisons.
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=-1, high=1)
     samples = []
     bool_vals = (True, False)
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))

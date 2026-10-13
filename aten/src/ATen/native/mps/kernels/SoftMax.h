@@ -3,6 +3,7 @@
 
 C10_METAL_CONSTEXPR unsigned kSoftmaxThreads = 256;
 C10_METAL_CONSTEXPR unsigned kSoftmaxMaxThreads = 1024;
+C10_METAL_CONSTEXPR unsigned kSoftmaxBackwardRowsPerGrid = 65535;
 
 template <typename index_t = uint64_t>
 struct SoftmaxParams {
