@@ -44,6 +44,7 @@ AllGatherInput.__module__ = "torch.distributed.fsdp.experimental"
 def all_gather_output_fn_with_native_copy(
     all_gather_output: torch.Tensor,
     outputs: list[torch.Tensor],
+    *,
     split_sizes: list[int],
     outer_sizes: list[int],
     world_size: int,
@@ -62,7 +63,11 @@ def all_gather_output_fn_with_native_copy(
         for output, split_size in zip(copy_outputs, split_sizes)
     ):
         _default_all_gather_output_fn(
-            all_gather_output, outputs, split_sizes, outer_sizes, world_size
+            all_gather_output,
+            outputs,
+            split_sizes=split_sizes,
+            outer_sizes=outer_sizes,
+            world_size=world_size,
         )
         return
     torch.ops.fsdp._all_gather_copy_out_(
