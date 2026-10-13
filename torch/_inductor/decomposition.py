@@ -26,6 +26,7 @@ from torch._decomp.decompositions import (
     pw_cast_for_opmath_non_tensor_args,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
+from torch._dispatch.python import no_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._environment import is_fbcode
 from torch._higher_order_ops.out_dtype import out_dtype
@@ -48,6 +49,7 @@ from . import config, inductor_prims
 from .utils import (
     is_bf16x9_matmul,
     is_gpu,
+    is_strict_cuda_triton,
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
 )
@@ -456,8 +458,34 @@ def convolution_backward(
 
 @register_decomposition([aten.round.decimals])
 def round_dec(x: torch.Tensor, decimals: int = 0) -> torch.Tensor:
+    if is_strict_cuda_triton(x.device) and x.dtype in (
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+    ):
+        return NotImplemented
     ten_pow_decimals = 10.0**decimals
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
+
+
+_softshrink_default_decomp = decompositions.pop(aten.softshrink.default)
+
+
+@aten.softshrink.default.py_impl(torch._C.DispatchKey.AutogradCUDA)
+def _softshrink_autograd(x: torch.Tensor, lambd: float = 0.5) -> torch.Tensor:
+    if is_strict_cuda_triton(x.device) and x.dtype == torch.float32:
+        # Keep the native derivative before the Autograd reference decomposes it.
+        with no_python_dispatcher():
+            return aten.softshrink.default(x, lambd)
+    return _softshrink_default_decomp(x, lambd)
+
+
+@register_decomposition(aten.softshrink.default)
+def softshrink(x: torch.Tensor, lambd: float = 0.5) -> torch.Tensor:
+    if is_strict_cuda_triton(x.device) and x.dtype == torch.float32:
+        return NotImplemented
+    return _softshrink_default_decomp(x, lambd)
 
 
 def _preserve_bf16x9_matmul(arg_index, arg_name):
