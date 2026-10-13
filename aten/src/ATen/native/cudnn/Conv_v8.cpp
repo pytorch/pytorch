@@ -24,6 +24,8 @@ C10_DIAGNOSTIC_POP()
 #include <c10/util/env.h>
 
 #include <list>
+#include <mutex>
+#include <string>
 #include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -286,16 +288,14 @@ struct BenchmarkCache {
   std::list<KeyType> engine_cache_order;
   std::unordered_map<
       KeyType,
-      std::pair<
-          cudnn_frontend::ExecutionPlan,
-          typename std::list<KeyType>::iterator>,
+      std::pair<T, typename std::list<KeyType>::iterator>,
       ParamsWrapperHash<KeyType>>
       engine_cache;
 
   // no mutexes here as caches are now thread local for v8, can also return a
   // pointer to the Execution Plan if we know it will not be invalidated by
   // another thread
-  cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
+  T* find(const KeyType& key) {
     const int lru_cache_limit = getLRUCacheLimit();
     if (lru_cache_limit < 0) {
       return nullptr;
@@ -365,6 +365,61 @@ _get_benchmark_cache_fused() {
       CacheKeyFusedWrapper>* benchmark_cache_fused =
       new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>();
   return benchmark_cache_fused;
+}
+
+// cuDNN Execution Plans are not thread safe, so share their JSON instead
+template <typename KeyType>
+struct SerializedPlanCache {
+  // TODO: Use something less heavy duty than a big honking mutex
+  std::mutex mutex;
+  BenchmarkCache<std::string, KeyType> engine_cache;
+
+  bool find(const KeyType& key, std::string* results) {
+    std::lock_guard<std::mutex> guard(mutex);
+    auto search = engine_cache.find(key);
+    if (!search) {
+      return false;
+    }
+    *results = *search;
+    return true;
+  }
+
+  void insert(const KeyType& key, const cudnn_frontend::ExecutionPlan& plan) {
+    if (getLRUCacheLimit() < 0) {
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> guard(mutex);
+      if (engine_cache.find(key)) {
+        return;
+      }
+    }
+    std::string results;
+    try {
+      results = plan.getJsonRepresentation();
+    } catch (cudnn_frontend::cudnnException&) {
+      return;
+    }
+    if (results.empty()) {
+      return;
+    }
+    std::lock_guard<std::mutex> guard(mutex);
+    engine_cache.update(key, results);
+  }
+};
+
+// We also leak the caches to workaround potential teardown race issues.
+SerializedPlanCache<CacheKeyWrapper>* _get_serialized_plan_cache() {
+  static SerializedPlanCache<CacheKeyWrapper>* serialized_plan_cache =
+      new SerializedPlanCache<CacheKeyWrapper>();
+  return serialized_plan_cache;
+}
+
+SerializedPlanCache<CacheKeyFusedWrapper>* _get_serialized_plan_cache_fused() {
+  static SerializedPlanCache<CacheKeyFusedWrapper>*
+      serialized_plan_cache_fused =
+          new SerializedPlanCache<CacheKeyFusedWrapper>();
+  return serialized_plan_cache_fused;
 }
 } // namespace
 
@@ -1012,6 +1067,7 @@ void try_plans(
     try {
       run_conv_plan(handle, x, y, w, plan, operation);
       _get_benchmark_cache()->update(key, plan);
+      _get_serialized_plan_cache()->insert(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -1036,6 +1092,7 @@ void try_plans_fused(
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
       _get_benchmark_cache_fused()->update(key, plan);
+      _get_serialized_plan_cache_fused()->insert(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -1070,6 +1127,7 @@ bool try_configs(
       }
       run_conv_plan(handle, x, y, w, plan, operation);
       _get_benchmark_cache()->update(key, plan);
+      _get_serialized_plan_cache()->insert(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -1104,6 +1162,7 @@ bool try_configs_fused(
       }
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
       _get_benchmark_cache_fused()->update(key, plan);
+      _get_serialized_plan_cache_fused()->insert(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -1149,6 +1208,59 @@ bool try_configs_fused(
       configs.begin(), configs.end(), opgraph_tag, key, handle, x, y, w, z, b);
 }
 
+bool try_serialized_plan(
+    const CacheKeyWrapper& key,
+    const cudnnHandle_t handle,
+    const Tensor& x,
+    const Tensor& y,
+    const Tensor& w,
+    const cudnnBackendDescriptorType_t operation) {
+  std::string serialized_plan;
+  if (!_get_serialized_plan_cache()->find(key, &serialized_plan)) {
+    return false;
+  }
+  try {
+    auto plan =
+        cudnn_frontend::ExecutionPlanBuilder().setHandle(handle).loadFromJson(
+            serialized_plan);
+    run_conv_plan(handle, x, y, w, plan, operation);
+    _get_benchmark_cache()->update(key, plan);
+    return true;
+  } catch (cudnn_frontend::cudnnException&) {
+  } catch (CuDNNError&) {
+  } catch (c10::OutOfMemoryError&) {
+    std::ignore = cudaGetLastError(); // clear CUDA error
+  }
+  return false;
+}
+
+bool try_serialized_plan_fused(
+    const CacheKeyFusedWrapper& key,
+    const cudnnHandle_t handle,
+    const Tensor& x,
+    const Tensor& y,
+    const Tensor& w,
+    const Tensor& z,
+    const Tensor& b) {
+  std::string serialized_plan;
+  if (!_get_serialized_plan_cache_fused()->find(key, &serialized_plan)) {
+    return false;
+  }
+  try {
+    auto plan =
+        cudnn_frontend::ExecutionPlanBuilder().setHandle(handle).loadFromJson(
+            serialized_plan);
+    run_conv_plan_fused(handle, x, y, w, z, b, plan);
+    _get_benchmark_cache_fused()->update(key, plan);
+    return true;
+  } catch (cudnn_frontend::cudnnException&) {
+  } catch (CuDNNError&) {
+  } catch (c10::OutOfMemoryError&) {
+    std::ignore = cudaGetLastError(); // clear CUDA error
+  }
+  return false;
+}
+
 void run_single_conv(
     const cudnnBackendDescriptorType_t operation,
     const Tensor& x,
@@ -1182,6 +1294,8 @@ void run_single_conv(
     } catch (c10::OutOfMemoryError&) {
       std::ignore = cudaGetLastError(); // clear CUDA error
     }
+  } else if (try_serialized_plan(key, handle, x, y, w, operation)) {
+    return;
   }
   if (!benchmark) {
     std::string opgraph_tag; // extra data needed for errata filter
@@ -1337,6 +1451,8 @@ void run_fused_conv(
     } catch (c10::OutOfMemoryError&) {
       std::ignore = cudaGetLastError(); // clear CUDA error
     }
+  } else if (try_serialized_plan_fused(key, handle, x, y, w, z, b)) {
+    return;
   }
   if (!benchmark) {
     std::string opgraph_tag; // extra data needed for errata filter
