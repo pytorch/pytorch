@@ -27,9 +27,9 @@ Three complementary mechanisms are available:
 
 1. **bypass_device_restrictions** — Run tests gated by ``@onlyCUDA`` or other
    ``@onlyOn``-based decorators on your backend.
-2. **op_skips / op_decorators** — Skip or modify operator-level tests generated
-   via ``@ops`` on a per-backend basis.
-3. **skipped_testcases** — Skip entire test classes or individual test methods
+2. **op_overrides** — Skip or modify operator-level tests generated via ``@ops``
+   on a per-backend basis.
+3. **test_exclusions** — Skip entire test classes or individual test methods
    during device-type test instantiation.
 
 These mechanisms are all configured declaratively on your backend's
@@ -58,88 +58,93 @@ With this flag set, tests decorated with ``@onlyCUDA`` or similar decorators
 will run on your backend instead of being skipped. No upstream PyTorch files
 need to be modified.
 
-This flag is defined on ``PrivateUse1TestBase`` and defaults to ``False``,
-preserving existing behavior for all standard device types.
+This flag defaults to ``False`` on ``DeviceTypeTestBase``, preserving existing
+behavior for all standard device types.
 
 .. seealso::
 
    For a working example, see the ``openreg`` test backend in
    ``test/cpp_extensions/open_registration_extension/torch_openreg/tests/``.
 
-Skipping Operator-Level Tests
-------------------------------
+Overriding Operator-Level Tests
+---------------------------------
 
 PyTorch uses ``op_db`` and ``instantiate_device_type_tests`` to dynamically
 generate large numbers of operator test cases via the ``@ops`` decorator. New
 backends may not yet support every operator, or may have different numerical
 precision characteristics.
 
-Two class-level fields on ``DeviceTypeTestBase`` allow you to handle this:
-
-- ``op_skips`` — skip specific operators entirely for your backend.
-- ``op_decorators`` — attach additional decorators (e.g., ``skipIf``,
-  ``toleranceOverride``) to specific operator tests for your backend.
+The ``op_overrides`` class-level field on ``DeviceTypeTestBase`` allows you to
+attach additional decorators (e.g., ``unittest.skip``, ``unittest.expectedFailure``,
+``precisionOverride``) to specific operator tests for your backend:
 
 .. code-block:: python
 
+   import unittest
    from torch.testing._internal.common_device_type import (
        DeviceTypeTestBase,
        DecorateInfo,
-       skipIf,
+       precisionOverride,
    )
 
    class MyAcceleratorTestBase(DeviceTypeTestBase):
        device_type = "mydevice"
 
-       # Skip specific operators your backend does not yet support
-       op_skips = {
-           "torch.ops.aten.svd": "SVD not yet implemented on mydevice",
-           "torch.ops.aten.fft_fft": "FFT not supported on mydevice",
-       }
+       op_overrides = {
+           # Skip an operator entirely
+           "op_skip": [DecorateInfo(unittest.skip("not supported on mydevice"))],
 
-       # Apply additional decorators to specific operator tests
-       op_decorators = {
-           "torch.ops.aten.add": [
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
-                   "TestCommon",
-                   "test_compare_cpu",
-               )
+           # Skip for a specific dtype only
+           "op_skip_f32": [
+               DecorateInfo(unittest.skip("f32 not supported"), dtypes=(torch.float32,))
+           ],
+
+           # Mark as expected failure
+           "op_xfail": [DecorateInfo(unittest.expectedFailure)],
+
+           # Override numerical precision
+           "op_precision": [
+               DecorateInfo(precisionOverride({torch.float32: 1e-2}))
            ],
        }
 
-The keys in both dictionaries are the full operator names (``op.full_name``).
+The keys in ``op_overrides`` are operator names as they appear in ``op_db``.
 PyTorch merges these into the operator's existing decorator list during test
-instantiation via ``DeviceTypeTestBase.update_op_list``.
+instantiation via ``DeviceTypeTestBase._apply_op_overrides``.
 
 Skipping Test Classes and Methods
 -----------------------------------
 
-Beyond operator-level skipping, you may need to skip entire test classes or
+Beyond operator-level overrides, you may need to skip entire test classes or
 individual test methods that are not relevant or not yet supported for your
 backend.
 
-Use the ``skipped_testcases`` field on your test base class:
+Use the ``test_exclusions`` field on your backend's test base class:
 
 .. code-block:: python
 
-   from torch.testing._internal.common_device_type import DeviceTypeTestBase
+   from torch.testing._internal.common_device_type import (
+       DeviceTypeTestBase,
+       instantiate_device_type_tests,
+   )
 
-   class MyAcceleratorTestBase(DeviceTypeTestBase):
-       device_type = "mydevice"
+   # Define exclusions directly on the base class
+   PrivateUse1TestBase.test_exclusions = {
+       # Skip specific methods within a class
+       "TestSkippedSpecificTestCases": ["test_skipped", "test_other"],
 
-       skipped_testcases = {
-           # Skip an entire test class
-           "TestLinearAlgebra": "Linear algebra ops not yet supported",
+       # Skip an entire test class using the wildcard "*"
+       "TestSkippedWholeTestClass": "*",
+   }
 
-           # Skip a specific test method within a class
-           "TestCommon.test_noncontiguous_samples": "Known failure on mydevice",
-       }
+The format is a dictionary where:
 
-The keys follow the format ``"ClassName"`` to skip an entire class, or
-``"ClassName.method_name"`` to skip a specific method. Skipping is applied
-during ``instantiate_device_type_tests`` before tests are collected, so skipped
-tests do not appear as failures in CI.
+- Keys are test class names (as strings).
+- Values are either a list of method names to skip, or ``"*"`` to skip the
+  entire class.
+
+Skipping is applied during ``instantiate_device_type_tests`` before tests are
+collected, so skipped tests do not appear as failures in CI.
 
 Putting It All Together
 ------------------------
@@ -149,10 +154,12 @@ this:
 
 .. code-block:: python
 
+   import unittest
    from torch.testing._internal.common_device_type import (
        DeviceTypeTestBase,
        DecorateInfo,
        instantiate_device_type_tests,
+       precisionOverride,
    )
 
    class MyAcceleratorTestBase(DeviceTypeTestBase):
@@ -161,26 +168,19 @@ this:
        # Allow tests gated by @onlyCUDA to run on this backend
        bypass_device_restrictions = True
 
-       # Skip unsupported operators
-       op_skips = {
-           "torch.ops.aten.svd": "Not yet implemented",
+       # Override specific operator tests
+       op_overrides = {
+           "op_skip": [DecorateInfo(unittest.skip("not yet implemented"))],
+           "op_xfail": [DecorateInfo(unittest.expectedFailure)],
        }
 
-       # Apply precision overrides for specific operators
-       op_decorators = {
-           "torch.ops.aten.add": [
-               DecorateInfo(toleranceOverride(...), "TestCommon", "test_compare_cpu")
-           ],
-       }
-
-       # Skip test classes or methods not applicable to this backend
-       skipped_testcases = {
-           "TestLinearAlgebra": "Not supported",
-           "TestCommon.test_noncontiguous_samples": "Known issue",
-       }
+   # Skip specific test classes or methods for this backend
+   MyAcceleratorTestBase.test_exclusions = {
+       "TestLinearAlgebra": "*",
+       "TestCommon": ["test_noncontiguous_samples"],
+   }
 
    # Instantiate PyTorch's built-in tests for your device
-   from torch.testing._internal.common_methods_invocations import op_db
    from test_ops import TestCommon
 
    instantiate_device_type_tests(TestCommon, globals(), only_for="mydevice")
