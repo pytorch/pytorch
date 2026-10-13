@@ -119,6 +119,7 @@
 # /aten/src/ATen/native/ScaledBlasUtils.cpp
 # /aten/src/ATen/native/ScaledBlasUtils.h
 /test/test_scaled_matmul_cuda.py @drisspg @slayton58
+/test/test_quantize_tensor.py @vkuzo @slayton58
 #
 # [sparse]
 # label: module: sparse
@@ -776,6 +777,7 @@
 # label: module: dsl-native-ops
 /torch/_native/ @slayton58 @drisspg
 /torch/_native/ops/linear_cross_entropy/ @slayton58 @pearu
+/torch/_quantization_formats.py @vkuzo @slayton58
 # label: module: complex
 /torch/_subclasses/complex_tensor/ @hameerabbasi @amjames
 # label: oncall: pt2, module: fakeTensor

@@ -40,6 +40,12 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
+from torch._quantization_formats import (
+    _get_quant_format,
+    _quantize_tensor_dual_validate_inputs,
+    _quantize_tensor_validate_inputs,
+    _TensorQuantFormat,
+)
 from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.fx.experimental import _config as exp_config
 from torch.utils import _pytree as pytree
@@ -7519,6 +7525,162 @@ def meta_scaled_mm(
     return _check_scaled_mm_sizes(
         self, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum
     )
+
+
+def _check_quantize_tensor_rounding(
+    input: torch.Tensor,
+    qdata_rounding_mode: int,
+    random_key: torch.Tensor | None,
+    swizzle_type: int,
+    scaling_type_use_square_block_size: bool,
+    op_name: str,
+) -> None:
+    from torch.nn.functional import RoundingMode, SwizzleType
+
+    torch._check_value(
+        qdata_rounding_mode in (RoundingMode.RTNE.value, RoundingMode.STOCHASTIC.value),
+        lambda: f"{op_name} has an unsupported qdata_rounding_mode",
+    )
+    if qdata_rounding_mode == RoundingMode.RTNE.value:
+        torch._check_value(random_key is None, lambda: "RTNE does not use random_key")
+        return
+    torch._check_value(
+        swizzle_type == SwizzleType.SWIZZLE_32_4_4.value
+        and not scaling_type_use_square_block_size,
+        lambda: f"{op_name} stochastic rounding requires swizzled 1x32 scales",
+    )
+    if random_key is not None:
+        torch._check_value(
+            random_key.dtype == torch.uint64 and random_key.numel() == 2,
+            lambda: "random_key must be a two-element uint64 tensor",
+        )
+        torch._check_value(
+            random_key.device == input.device,
+            lambda: "random_key and input must be on the same device",
+        )
+
+
+@register_meta([aten._quantize_tensor.default])
+def meta_quantize_tensor(
+    input: torch.Tensor,
+    scaling_type: int,
+    qdata_dtype: torch.dtype,
+    scaling_algorithm: int,
+    swizzle_type: int,
+    scaling_type_use_square_block_size: bool = False,
+    qdata_rounding_mode: int = 0,
+    random_key: torch.Tensor | None = None,
+) -> list[torch.Tensor]:
+    from torch.nn.functional import SwizzleType
+
+    if input.device.type not in ("cuda", "meta") or (
+        input.device.type == "cuda" and torch.version.hip is not None
+    ):
+        raise RuntimeError("quantize_tensor requires an NVIDIA CUDA tensor")
+    torch._check_value(
+        input.dtype in (torch.float16, torch.bfloat16, torch.float32),
+        lambda: "quantize_tensor supports only fp16, bf16, and fp32 input",
+    )
+    torch._check_value(input.dim() == 2, lambda: "quantize_tensor requires a 2D input")
+
+    quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
+
+    if quant_format == _TensorQuantFormat.MXFP8:
+        _quantize_tensor_validate_inputs(
+            quant_format,
+            input,
+            scaling_type,
+            qdata_dtype,
+            scaling_algorithm,
+            swizzle_type,
+            scaling_type_use_square_block_size,
+        )
+        _check_quantize_tensor_rounding(
+            input,
+            qdata_rounding_mode,
+            random_key,
+            swizzle_type,
+            scaling_type_use_square_block_size,
+            "quantize_tensor",
+        )
+        rows, cols = input.shape
+        is_scale_swizzled = swizzle_type == SwizzleType.SWIZZLE_32_4_4.value
+
+        scale_shape = (
+            ((rows + 127) // 128, (cols + 127) // 128, 32, 16)
+            if is_scale_swizzled
+            else (rows, cols // 32)
+        )
+        return [
+            torch.empty((rows, cols), device=input.device, dtype=qdata_dtype),
+            torch.empty(scale_shape, device=input.device, dtype=torch.float8_e8m0fnu),
+        ]
+
+    else:
+        raise AssertionError(f"Unknown {quant_format=}")
+
+
+@register_meta([aten._quantize_tensor_dual.default])
+def meta_quantize_tensor_dual(
+    input: torch.Tensor,
+    scaling_type: int,
+    qdata_dtype: torch.dtype,
+    scaling_algorithm: int,
+    swizzle_type: int,
+    scaling_type_use_square_block_size: bool = False,
+    qdata_rounding_mode: int = 0,
+    random_key: torch.Tensor | None = None,
+) -> list[torch.Tensor]:
+    if input.device.type not in ("cuda", "meta") or (
+        input.device.type == "cuda" and torch.version.hip is not None
+    ):
+        raise RuntimeError("quantize_tensor_dual requires an NVIDIA CUDA tensor")
+    torch._check_value(
+        input.dim() == 2, lambda: "quantize_tensor_dual requires a 2D input"
+    )
+    torch._check_value(
+        input.dtype in (torch.float16, torch.bfloat16, torch.float32),
+        lambda: "quantize_tensor_dual supports only fp16, bf16, and fp32 input",
+    )
+
+    quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
+
+    if quant_format == _TensorQuantFormat.MXFP8:
+        _quantize_tensor_dual_validate_inputs(
+            quant_format,
+            input,
+            scaling_type,
+            qdata_dtype,
+            scaling_algorithm,
+            swizzle_type,
+            scaling_type_use_square_block_size,
+        )
+        _check_quantize_tensor_rounding(
+            input,
+            qdata_rounding_mode,
+            random_key,
+            swizzle_type,
+            scaling_type_use_square_block_size,
+            "quantize_tensor_dual",
+        )
+        rows, cols = input.shape
+        return [
+            torch.empty((rows, cols), device=input.device, dtype=qdata_dtype),
+            torch.empty(
+                ((rows + 127) // 128, (cols + 127) // 128, 32, 16),
+                device=input.device,
+                dtype=torch.float8_e8m0fnu,
+            ),
+            torch.empty((cols, rows), device=input.device, dtype=qdata_dtype),
+            torch.empty(
+                ((cols + 127) // 128, (rows + 127) // 128, 32, 16),
+                device=input.device,
+                dtype=torch.float8_e8m0fnu,
+            ),
+        ]
+
+    else:
+        raise AssertionError(f"Unknown {quant_format=}")
 
 
 @register_meta([aten._scaled_mm_v2.default])

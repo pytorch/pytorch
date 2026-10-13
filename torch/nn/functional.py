@@ -1,6 +1,7 @@
 """Functional interface."""
 
 import dataclasses
+import enum
 import importlib
 import math
 import warnings
@@ -36,6 +37,29 @@ from torch.overrides import (
 # Set visibility of the bound enums to this module
 ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
+
+
+class ScalingAlgorithm(enum.IntEnum):
+    r"""Algorithm used to compute and encode block scales for :func:`quantize_tensor`."""
+
+    MXFP_E8M0_RU = 0
+    r"""MXFP E8M0 round-up scaling, described in `Algorithm 1
+    <https://arxiv.org/pdf/2506.08027>`_.
+
+    The block's maximum absolute input value, divided by the largest
+    representable quantized value, is rounded up to E8M0. If any input in the
+    block is ``NaN`` or ``+/-Inf``, the scale is E8M0 ``NaN`` (byte ``0xff``).
+    An all-zero block instead receives the smallest E8M0 scale,
+    :math:`2^{-127}` (byte ``0x00``), because E8M0 has no zero encoding.
+    """
+
+
+class RoundingMode(enum.IntEnum):
+    r"""Rounding mode for quantized data produced by :func:`quantize_tensor`."""
+
+    RTNE = 0
+    STOCHASTIC = 1
+
 
 if TYPE_CHECKING:
     from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
@@ -7265,6 +7289,216 @@ def _enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
     if not isinstance(l, list):
         l = [l]
     return [li.value for li in l]
+
+
+def quantize_tensor(
+    input: Tensor,
+    *,
+    scaling_type: ScalingType,
+    qdata_dtype: torch.dtype,
+    scaling_algorithm: ScalingAlgorithm,
+    swizzle_type: SwizzleType,
+    scaling_type_use_square_block_size: bool = False,
+    qdata_rounding_mode: RoundingMode = RoundingMode.RTNE,
+    random_key: Tensor | None = None,
+) -> tuple[Tensor, Tensor]:
+    r"""quantize_tensor(input, *, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False, qdata_rounding_mode=RoundingMode.RTNE, random_key=None) -> tuple[Tensor, Tensor]
+
+    Quantize a 2D tensor. Returns ``(qdata, scale)`` for use with
+    :func:`scaled_mm`.  Currently supported formats: ``mxfp8``.
+    See the code samples at the bottom of this docblock
+    for how to configure supported formats.
+
+    A contiguous input is quantized along its last dimension (dim-k). Pass a
+    transposed view of a contiguous tensor to quantize along its last dimension
+    using the dim-m kernel.
+
+    Automatic autograd is not supported for this op, users are encouraged to define
+    their own derivative.
+
+    This implementation currently requires an NVIDIA SM100 or newer GPU and the optional
+    ``nvidia-cutlass-dsl`` and ``apache-tvm-ffi`` packages. The hardware support may
+    expand in the future.
+
+    Args:
+        input (Tensor): Contiguous 2D tensor or a transposed view of one, with
+          shape :math:`(M, K)` and dtype ``float16``, ``bfloat16``, or
+          ``float32``. The data pointer must be 16-byte aligned.
+        scaling_type (ScalingType): The size of the local region corresponding to
+          a single inner scale, as well as the layout of the output inner scale.
+          Currently supported values: ``ScalingType.BlockWise1x32``.
+        qdata_dtype (:class:`torch.dtype`): The dtype of the resulting quantized
+          data. Currently supported values: ``torch.float8_e4m3fn``. Special value
+          handling is format dependent. For example, for ``mxfp8`` an input
+          ``NaN`` or ``Inf`` makes every quantized value sharing its scale ``NaN``;
+          all-zero blocks quantize to zero.
+        scaling_algorithm (ScalingAlgorithm): The algorithm to convert from a
+          local region of the ``input`` (with its size specified by ``scaling_type``)
+          to the inner scale and inverse inner scale corresponding to that region.
+          Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
+        swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
+          Currently supported values: ``SwizzleType.NO_SWIZZLE`` and
+          ``SwizzleType.SWIZZLE_32_4_4``. If the input is not contiguous, currently
+          only ``SwizzleType.SWIZZLE_32_4_4`` is supported.
+        scaling_type_use_square_block_size (bool, optional): When ``True``,
+          modify the size of the local region corresponding to a single scale
+          value to be a square (for example, modify ``1x32`` to be ``32x32``).
+          Note that the output scale size is still controlled by ``scaling_type``
+          and ``swizzle_type``. If this flag is ``True``, currently
+          ``SwizzleType.SWIZZLE_32_4_4`` and a contiguous input are required.
+          Default: ``False``.
+        qdata_rounding_mode (RoundingMode, optional): Round qdata to nearest,
+          ties to even (``RTNE``), or use stochastic rounding (``STOCHASTIC``).
+          Default: ``RoundingMode.RTNE``.
+        random_key (Tensor, optional): A two-element ``uint64`` random key on
+          the input device, such as a key from ``torch.func._random.key``.
+          With ``STOCHASTIC``, a key produces reproducible stateless rounding;
+          ``None`` uses the device's default CUDA generator. Default: ``None``.
+
+    Returns:
+        tuple[Tensor, Tensor]: Quantized data in the logical input shape and
+          scales with the dtype and layout honoring the ``scaling_algorithm``,
+          ``scaling_type``, and ``swizzle_type`` settings. For example, for
+          ``mxfp8``, compact dim-k scales have shape ``(rows, cols // 32)``;
+          swizzled scales have shape ``(ceil(rows / 128), ceil(cols / 128), 32, 16)``.
+
+    Examples::
+
+        >>> # xdoctest: +SKIP("requires NVIDIA SM100+ and CuTeDSL")
+        >>> import torch
+        >>> import torch.nn.functional as F
+        >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        >>> mxfp8_kwargs = dict(
+        ...     scaling_type=F.ScalingType.BlockWise1x32,
+        ...     qdata_dtype=torch.float8_e4m3fn,
+        ...     scaling_algorithm=F.ScalingAlgorithm.MXFP_E8M0_RU,
+        ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
+        ... )
+        >>> # mxfp8 dim-k with swizzled scales
+        >>> qdata_k, scale_k = F.quantize_tensor(x, **mxfp8_kwargs)
+        >>> # mxfp8 dim-m: pass a transposed view of the contiguous input
+        >>> qdata_m, scale_m = F.quantize_tensor(x.t(), **mxfp8_kwargs)
+        >>> # mxfp8 dim-k with scales shared over 32x32 blocks
+        >>> qdata_square, scale_square = F.quantize_tensor(
+        ...     x, **mxfp8_kwargs, scaling_type_use_square_block_size=True
+        ... )
+        >>> # mxfp8 dim-k with compact, unswizzled scales
+        >>> plain_kwargs = {**mxfp8_kwargs, "swizzle_type": F.SwizzleType.NO_SWIZZLE}
+        >>> qdata_plain, scale_plain = F.quantize_tensor(x, **plain_kwargs)
+        >>> # stateful stochastic rounding using the default CUDA generator
+        >>> qdata_sr_stateful, scale_sr_stateful = F.quantize_tensor(
+        ...     x, **mxfp8_kwargs, qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+        ... )
+        >>> # stochastic rounding with an explicit Philox key
+        >>> key = torch.func._random.key(42, device=x.device)
+        >>> qdata_sr, scale_sr = F.quantize_tensor(
+        ...     x, **mxfp8_kwargs, qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+        ...     random_key=key,
+        ... )
+    """
+    # TODO(future PR): add torch.export support for the native quantization op.
+    outputs = torch.ops.aten._quantize_tensor.default(
+        input,
+        scaling_type=scaling_type.value,
+        qdata_dtype=qdata_dtype,
+        scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
+        swizzle_type=swizzle_type.value,
+        scaling_type_use_square_block_size=scaling_type_use_square_block_size,
+        qdata_rounding_mode=getattr(qdata_rounding_mode, "value", qdata_rounding_mode),
+        random_key=random_key,
+    )
+    return outputs[0], outputs[1]
+
+
+def quantize_tensor_dual(
+    input: Tensor,
+    *,
+    scaling_type: ScalingType,
+    qdata_dtype: torch.dtype,
+    scaling_algorithm: ScalingAlgorithm,
+    swizzle_type: SwizzleType,
+    scaling_type_use_square_block_size: bool = False,
+    qdata_rounding_mode: RoundingMode = RoundingMode.RTNE,
+    random_key: Tensor | None = None,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    r"""quantize_tensor_dual(input, *, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False, qdata_rounding_mode=RoundingMode.RTNE, random_key=None) -> tuple[Tensor, Tensor, Tensor, Tensor]
+
+    Quantize a contiguous 2D tensor along both dim-k and dim-m dimensions in one
+    pass. See :func:`quantize_tensor` to quantize along one dimension.
+
+    Automatic autograd is not supported for this op, users are encouraged to define
+    their own derivative.
+
+    This implementation currently requires an NVIDIA SM100 or newer GPU and the optional
+    ``nvidia-cutlass-dsl`` and ``apache-tvm-ffi`` packages. The hardware support may
+    expand in the future.
+
+    Args:
+        input (Tensor): Contiguous 2D tensor of shape :math:`(M, K)` with dtype
+          ``float16``, ``bfloat16``, or ``float32``. The data pointer must
+          be 16-byte aligned.
+        scaling_type (ScalingType): The size of the local region corresponding to
+          a single inner scale, as well as the layout of the output inner scale.
+          Currently supported values: ``ScalingType.BlockWise1x32``.
+        qdata_dtype (:class:`torch.dtype`): The dtype of the resulting quantized
+          data. Currently supported values: ``torch.float8_e4m3fn``. Special value
+          handling is format dependent. For example, for ``mxfp8`` an input
+          ``NaN`` or ``Inf`` makes every quantized value sharing its scale ``NaN``;
+          all-zero blocks quantize to zero.
+        scaling_algorithm (ScalingAlgorithm): The algorithm to convert from a
+          local region of the ``input`` (with its size specified by ``scaling_type``)
+          to the inner scale and inverse inner scale corresponding to that region.
+          Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
+        swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
+          Currently supported values: ``SwizzleType.SWIZZLE_32_4_4``.
+        scaling_type_use_square_block_size (bool, optional): When ``True``,
+          modify the size of the local region corresponding to a single scale
+          value to be a square (for example, modify ``1x32`` to be ``32x32``).
+          Note that the output scale size is still controlled by ``scaling_type``
+          and ``swizzle_type``. Note: currently only ``False`` is supported.
+          Default: ``False``.
+        qdata_rounding_mode (RoundingMode, optional): Round qdata to nearest,
+          ties to even (``RTNE``), or use stochastic rounding (``STOCHASTIC``).
+          Default: ``RoundingMode.RTNE``.
+        random_key (Tensor, optional): A two-element ``uint64`` random key on
+          the input device, such as a key from ``torch.func._random.key``.
+          With ``STOCHASTIC``, a key produces reproducible stateless rounding;
+          ``None`` uses the device's default CUDA generator. Default: ``None``.
+
+    Returns:
+        tuple[Tensor, Tensor, Tensor, Tensor]: ``(qdata_k, scale_k, qdata_m, scale_m)``.
+          For example, for input of shape ``(M, K)`` and the
+          ``mxfp8`` format, the quantized tensors have shapes ``(M, K)`` and
+          ``(K, M)``. Their E8M0 scales have shapes
+          ``(ceil(M / 128), ceil(K / 128), 32, 16)`` and
+          ``(ceil(K / 128), ceil(M / 128), 32, 16)``, respectively.
+
+    Examples::
+
+        >>> # xdoctest: +SKIP("requires NVIDIA SM100+ and CuTeDSL")
+        >>> import torch
+        >>> import torch.nn.functional as F
+        >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        >>> mxfp8_kwargs = dict(
+        ...     scaling_type=F.ScalingType.BlockWise1x32,
+        ...     qdata_dtype=torch.float8_e4m3fn,
+        ...     scaling_algorithm=F.ScalingAlgorithm.MXFP_E8M0_RU,
+        ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
+        ... )
+        >>> # mxfp8 dim-km with swizzled scales
+        >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(x, **mxfp8_kwargs)
+    """
+    outputs = torch.ops.aten._quantize_tensor_dual.default(
+        input,
+        scaling_type=scaling_type.value,
+        qdata_dtype=qdata_dtype,
+        scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
+        swizzle_type=swizzle_type.value,
+        scaling_type_use_square_block_size=scaling_type_use_square_block_size,
+        qdata_rounding_mode=getattr(qdata_rounding_mode, "value", qdata_rounding_mode),
+        random_key=random_key,
+    )
+    return outputs[0], outputs[1], outputs[2], outputs[3]
 
 
 def scaled_mm(
