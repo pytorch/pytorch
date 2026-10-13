@@ -4086,10 +4086,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         torch._dynamo.reset()
 
+        # Only the unchanged physical accumulator may ride along as an aux output.
         def auxiliary(a, b):
             def epilogue(acc):
                 lanes = acc.view(m, n, 2)
-                return lanes[..., 0] - lanes[..., 1], acc
+                return lanes[..., 0] - lanes[..., 1], acc + 1
 
             return flex_gemm(
                 torch.mm,
@@ -4098,8 +4099,62 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 kernel_options={"backend": "QUACK"},
             )
 
-        with self.assertRaisesRegex(Exception, "do not yet compose"):
+        with self.assertRaisesRegex(Exception, "compose only"):
             torch.compile(auxiliary, backend="inductor", fullgraph=True)(a, b)
+
+        torch._dynamo.reset()
+
+        # Chunked lanes interleave B, so the physical accumulator is not acc.
+        def chunked_auxiliary(a, b):
+            def epilogue(acc):
+                first, second = acc.chunk(2, dim=-1)
+                return first - second, acc
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        chunked_b = torch.randn(2 * n, k, device="cuda", dtype=torch.float16).t()
+        with self.assertRaisesRegex(Exception, "compose only"):
+            torch.compile(chunked_auxiliary, backend="inductor", fullgraph=True)(
+                a, chunked_b
+            )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_output_contraction_stores_physical_aux(self):
+        # Fused SwiGLU forward that also keeps the pre-activation for backward.
+        m, h, k = 128, 128, 64
+
+        def epilogue_fn(acc):
+            pairs = acc.view(acc.shape[0], h, 2)
+            act = F.silu(pairs[..., 0].float()) * pairs[..., 1].float()
+            return act.to(acc.dtype), acc
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, 2 * h, device="cuda", dtype=torch.bfloat16)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        eager = epilogue_fn(a @ b)
+        reference = epilogue_fn(a.double() @ b.double())
+        for result, low_precision, high_precision in zip(
+            actual, eager, reference, strict=True
+        ):
+            self.assertEqual(result.shape, low_precision.shape)
+            self.assertMatchesLowPrecisionEager(
+                result, low_precision, high_precision, k
+            )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

@@ -262,7 +262,12 @@ class FlexGemmEpilogueAnalysis:
                 raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
             local_reduce.commit_output_guards(outputs)
             return cls(gemm, outputs, local_reduce)
-        if outputs.aux_outputs:
+        if outputs.aux_outputs and (
+            outputs.aux_outputs != (gemm,)
+            or outputs.local_reduce is not None
+            or contraction_plan.transform.group != 2
+            or contraction_plan.transform.chunked
+        ):
             raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
         if (
             contraction_plan.transform.chunked
