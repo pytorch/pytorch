@@ -45,7 +45,6 @@ The final post-grad passes `slice_scatter_chunking_pass` and `reinplace_inplacea
 
 
 ## Altering Aliasing
-For non-mutating graphs (those with no storage-mutating ops, as explained in [Mutations](#mutations)):
 - Passes may change aliasing relationships among intermediate tensors because internal storage identity is not part of the functional operator contract. In particular, functional custom operators cannot rely on whether two intermediate inputs share storage; there is no schema or tag for declaring such a dependency.
 
 - Passes must preserve aliasing relationships that escape through user-visible inputs and outputs. They must neither introduce nor remove user-visible input-output or output-output aliases.
@@ -116,7 +115,8 @@ graph.erase_node(node)
 When searching for nodes with a particular operation and target, use `Graph.find_nodes` instead of scanning `Graph.nodes`. It uses the graph's lookup table and avoids visiting unrelated nodes. By default, `find_nodes` sorts matches into current graph-list order, which is not necessarily topological order. Pass `sort=False` when match order does not matter to avoid that sorting cost.
 
 ## Passes that add dependencies
-Passes that add new dependencies must run after all **mandatory** control-dependency
-passes. A topological order computed before those dependencies are added is not
-valid: adding edges based on it can create a cycle once the mandatory
-dependencies are inserted (e.g. random-op ordering under `fallback_random=True`).
+Some passes add **mandatory** control dependencies. For example, when
+`fallback_random=True`, post-grad chains random ops so they run in eager order.
+Passes that add new dependencies must run after these. A topological order
+computed before the mandatory dependencies exist may not be valid once they are
+added, so edges based on it can create a cycle.
