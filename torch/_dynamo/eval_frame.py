@@ -58,10 +58,12 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     get_eval_frame_isolate_recompiles_id,
+    get_eval_frame_isolate_recompiles_strict,
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
     set_eval_frame_isolate_recompiles_id,
+    set_eval_frame_isolate_recompiles_strict,
     set_fullgraph_compiled_frame_count,
     set_fullgraph_error_on_nested_compile,
     set_guard_complete_hook,
@@ -76,6 +78,7 @@ from torch._dynamo.types import (
     ConvertFrameReturn,
     FrameAction,
     FrameExecStrategy,
+    GuardCollectiveState,
 )
 from torch._export.utils import _compiling_state_context
 from torch._library.opaque_object import is_custom_class
@@ -280,6 +283,93 @@ class _RecompileRefusedError(RuntimeError):
     """Raised by a ``_RefuseRecompileCallback`` instead of compiling."""
 
 
+_PRECOMPILE_REASONS_REPORTED = 5
+
+
+def _failing_guard_parts(
+    guard_manager: Any, f_locals: dict[str, Any], parts: Sequence[Any]
+) -> Sequence[Any]:
+    """
+    Symbolic shape guards are installed as a single lambda guard whose
+    verbose_code_parts is every clause, so a failure reports all of them.
+    Re-evaluate clause by clause, as get_guard_fail_reason_helper does, to
+    name the ones that rejected this call; fall back to all parts.
+    """
+    global_scope = getattr(guard_manager, "global_scope", None)
+    closure_vars = getattr(guard_manager, "closure_vars", None)
+    if global_scope is None or closure_vars is None:
+        return parts
+    scope = {"L": f_locals, "G": global_scope.get("G"), **closure_vars}
+    failed = []
+    for part in parts:
+        try:
+            ok = eval(str(part), dict(global_scope), scope)
+        except Exception:
+            continue
+        if ok is False:
+            failed.append(part)
+        elif isinstance(ok, str):
+            failed.append(ok)
+    return failed or parts
+
+
+def _precompile_rejection(entry: Any, f_locals: dict[str, Any]) -> str:
+    """The guard that rejected this call, for one precompiled entry."""
+    # The report is built because the call already missed; a guard that raises
+    # on re-evaluation must not replace it.
+    try:
+        reason = entry.guard_manager.check_verbose(f_locals)
+    except Exception as e:
+        return f"<guard check raised {type(e).__name__}: {e}>"
+    # A passing check has no failing parts to name: the call raced an install,
+    # or the guard is not deterministic.
+    if getattr(reason, "result", False):
+        return "<matched on re-check>"
+    parts = getattr(reason, "verbose_code_parts", None) or [str(reason)]
+    if len(parts) > 1:
+        parts = _failing_guard_parts(entry.guard_manager, f_locals, parts)
+    return "; ".join(str(p) for p in parts)
+
+
+def _index_ranges(indices: Sequence[int]) -> str:
+    """``[0, 1, 2, 5]`` -> ``"0-2, 5"``."""
+    spans: list[list[int]] = []
+    for i in indices:
+        if spans and i == spans[-1][1] + 1:
+            spans[-1][1] = i
+        else:
+            spans.append([i, i])
+    return ", ".join(str(a) if a == b else f"{a}-{b}" for a, b in spans)
+
+
+def _precompile_no_match_message(
+    entries: Sequence[Any], f_locals: dict[str, Any]
+) -> str:
+    """
+    Why the precompiled entries rejected this call, one line per distinct reason.
+
+    A precompile artifact carries one entry per captured variant, and each
+    entry's guard_manager repr is the whole guard tree, so printing them runs
+    to megabytes for a real model. This names only the failing guard of each
+    entry. Variants of one frame often share their first failing guard, so
+    entries are grouped by reason, and the reasons named are capped.
+    """
+    if not entries:
+        return ""
+    by_reason: dict[str, list[int]] = {}
+    for i, entry in enumerate(entries):
+        by_reason.setdefault(_precompile_rejection(entry, f_locals), []).append(i)
+    lines = [f"Failed on all {len(entries)} precompiled variant(s):"]
+    for reason, indices in list(by_reason.items())[:_PRECOMPILE_REASONS_REPORTED]:
+        lines.append(f"  [{_index_ranges(indices)}] {reason}")
+    if len(by_reason) > _PRECOMPILE_REASONS_REPORTED:
+        lines.append(
+            f"  ... and {len(by_reason) - _PRECOMPILE_REASONS_REPORTED} more "
+            "distinct reason(s) not shown."
+        )
+    return "\n".join(lines)
+
+
 class _FailOnRecompileCallback:
     """Serves cached entries but raises instead of compiling.
 
@@ -298,15 +388,21 @@ class _FailOnRecompileCallback:
     def __call__(
         self, frame: DynamoFrameType, *args: Any, **kwargs: Any
     ) -> ConvertFrameReturn:
-        if trace_rules.check(frame.f_code):
-            return ConvertFrameReturn()
-        if not convert_frame.has_tensor_in_frame(frame):
+        if trace_rules.check(frame.f_code, frame=frame):
             return ConvertFrameReturn()
 
         from torch._C._dynamo.eval_frame import (
             _debug_get_cache_entry_list,
             _debug_get_precompile_entries,
         )
+
+        precompile_entries = _debug_get_precompile_entries(frame.f_code)
+        # A tensor-free frame is not compiled, so missing it is no recompile --
+        # unless a package installed variants for it: a package's tensor-free
+        # graph-break continuation still carries guards (e.g. on a scalar).
+        if not precompile_entries and not convert_frame.has_tensor_in_frame(frame):
+            return ConvertFrameReturn()
+
         from torch._dynamo.guards import get_and_maybe_log_recompilation_reasons
 
         message = (
@@ -330,11 +426,10 @@ class _FailOnRecompileCallback:
                     f"triggered by the following guard failure(s):\n{failures}"
                 )
                 message += f"\n{textwrap.indent(guard_failure_details, '    ')}"
-        precompile_entries = _debug_get_precompile_entries(frame.f_code)
-        if len(precompile_entries) > 0:
-            message += "\nFailed on the following precompiled guards: "
-            for entry in precompile_entries:
-                message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
+        if precompile_entries:
+            message += "\n" + _precompile_no_match_message(
+                precompile_entries, frame.f_locals
+            )
         raise self._error(message)
 
 
@@ -872,28 +967,82 @@ def _log_traced_frames() -> None:
     log.info(msg)
 
 
-def guard_collectives_hook(guard_eval_result: bool) -> bool:
+def guard_collectives_hook(guard_eval_result: int) -> int:
     import torch.distributed as dist
     from torch._dynamo.utils import dynamo_timed
 
-    # guard_eval_result == True  ==>  cache hit
+    # guard_eval_result is a GuardCollectiveState
     if pg := distributed.get_guard_pg():
         with dynamo_timed(
             "guard_collective", log_pt2_compile_event=False, log_waitcounter=True
         ):
             log.debug("guard_collective %s", guard_eval_result)
             # TODO: a bit awkward to time, this isn't inside of the dynamo compile region
-            all_results = [None] * pg.size()
-            dist.all_gather_object(all_results, guard_eval_result, group=pg)
-            # True = everyone hit, OK to run
-            # False = someone missed, force recompile everywhere
-            res = all(all_results)
+            all_results: list[int | None] = [None] * pg.size()
+            dist.all_gather_object(all_results, int(guard_eval_result), group=pg)
+            # HIT = everyone hit, OK to run
+            # SKIP = everyone skips, run eagerly
+            # MISS = anything else, force recompile everywhere
+            if all(r == GuardCollectiveState.HIT for r in all_results):
+                res = GuardCollectiveState.HIT
+            elif all(r == GuardCollectiveState.SKIP for r in all_results):
+                res = GuardCollectiveState.SKIP
+            else:
+                res = GuardCollectiveState.MISS
             log.debug("guard_collective %s -> %s", guard_eval_result, res)
             return res
     return guard_eval_result
 
 
 _not_set = object()
+
+
+def _run_cleanups_lifo(cleanups: list[Callable[[], Any]]) -> None:
+    for i in range(len(cleanups) - 1, -1, -1):
+        try:
+            cleanups[i]()
+        except BaseException:
+            _run_cleanups_lifo(cleanups[:i])
+            raise
+
+
+def _restore_compile_wrapper_state(
+    prior_error_on_nested_compile: bool | None,
+    cleanups: list[Callable[[], Any]],
+    prior_skip_guard_eval_unsafe: bool | None,
+    prior_isolate_recompiles_id: int | None,
+    prior_isolate_recompiles_strict: bool | None,
+    prior_error_on_graph_break: bool | None,
+) -> None:
+    """Undo compile_wrapper's state changes in reverse order of entry. Every
+    restore runs even if an earlier one raises; ``None`` marks state that was
+    never changed."""
+    try:
+        if prior_error_on_graph_break is not None:
+            _set_error_on_graph_break(prior_error_on_graph_break)
+    finally:
+        try:
+            if prior_isolate_recompiles_strict is not None:
+                set_eval_frame_isolate_recompiles_strict(
+                    prior_isolate_recompiles_strict
+                )
+        finally:
+            try:
+                if prior_isolate_recompiles_id is not None:
+                    set_eval_frame_isolate_recompiles_id(prior_isolate_recompiles_id)
+            finally:
+                try:
+                    if prior_skip_guard_eval_unsafe is not None:
+                        set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
+                finally:
+                    try:
+                        if cleanups:
+                            _run_cleanups_lifo(cleanups)
+                    finally:
+                        if prior_error_on_nested_compile is not None:
+                            set_fullgraph_error_on_nested_compile(
+                                prior_error_on_nested_compile
+                            )
 
 
 class _TorchDynamoContext:
@@ -942,6 +1091,9 @@ class _TorchDynamoContext:
         self._isolate_recompiles_id = (
             next(_next_isolate_recompiles_id) if isolate_recompiles else -1
         )
+        # A region that records into a package must not serve a call from the
+        # default region's cache: that entry would be missing from the package.
+        self._isolate_recompiles_strict = isolate_recompiles and package is not None
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -1194,6 +1346,12 @@ class _TorchDynamoContext:
             prior = set_eval_frame(None)
             prior_error_on_nested_compile: bool | None = None
             fullgraph_count_enabled = False
+            cleanups: list[Callable[[], Any]] = []
+            prior_skip_guard_eval_unsafe: bool | None = None
+            prior_isolate_recompiles_id: int | None = None
+            prior_isolate_recompiles_strict: bool | None = None
+            prior_error_on_graph_break: bool | None = None
+            state_restored = False
             # Fake propagation and AOT metadata collection execute user
             # subclass code under active fake/functional modes. Nested compile
             # must run the original function in those regions.  Still honor
@@ -1213,15 +1371,17 @@ class _TorchDynamoContext:
                     finally:
                         _maybe_set_eval_frame(prior)
 
-            if self.fullgraph:
-                prior_error_on_nested_compile = set_fullgraph_error_on_nested_compile(
-                    torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code
-                )
-                if not self.export:
-                    fullgraph_count_enabled = set_fullgraph_compiled_frame_count(0) < 0
-                    if fullgraph_count_enabled:
-                        reset_skip_reasons()
             try:
+                if self.fullgraph:
+                    prior_error_on_nested_compile = set_fullgraph_error_on_nested_compile(
+                        torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code
+                    )
+                    if not self.export:
+                        fullgraph_count_enabled = (
+                            set_fullgraph_compiled_frame_count(0) < 0
+                        )
+                        if fullgraph_count_enabled:
+                            reset_skip_reasons()
                 # We shouldn't compile inside kernel invocation.
                 if tracing_context := torch._guards.TracingContext.try_get():
                     if (
@@ -1259,14 +1419,19 @@ class _TorchDynamoContext:
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
 
-                cleanups = [enter() for enter in self.enter_exit_hooks]
+                for enter in self.enter_exit_hooks:
+                    cleanups.append(enter())
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
                 prior_isolate_recompiles_id = set_eval_frame_isolate_recompiles_id(
                     self._isolate_recompiles_id
                 )
-                prior_error_on_graph_break = None
+                prior_isolate_recompiles_strict = (
+                    set_eval_frame_isolate_recompiles_strict(
+                        self._isolate_recompiles_strict
+                    )
+                )
                 if not self.fullgraph and self.error_on_graph_break is not None:
                     current_error_on_graph_break = _get_error_on_graph_break()
                     if current_error_on_graph_break != self.error_on_graph_break:
@@ -1317,40 +1482,40 @@ class _TorchDynamoContext:
                         # data in the TorchDynamo frames, so we strip them out.
                         raise e.remove_dynamo_frames() from None
                     finally:
-                        # Restore the dynamic layer stack depth if necessary.
-                        set_eval_frame(None)
-                        if fullgraph_count_enabled and call_succeeded:
-                            count = set_fullgraph_compiled_frame_count(-1)
-                            if count == 0 and _stance.stance == "default":
-                                skip_reasons = get_skip_reasons()
-                                msg = "torch.compile with fullgraph=True found no compiled frames."
-                                if skip_reasons:
-                                    reasons_str = "\n".join(
-                                        f"  - {r}" for r in skip_reasons
-                                    )
-                                    msg += f" Skipped frames:\n{reasons_str}"
-                                else:
-                                    msg += (
-                                        " Compilation was not attempted and no cached compiled"
-                                        " code was found."
-                                    )
-                                raise RuntimeError(msg)
-                        if prior_error_on_graph_break is not None:
-                            _set_error_on_graph_break(prior_error_on_graph_break)
-                        if prior_error_on_nested_compile is not None:
-                            set_fullgraph_error_on_nested_compile(
-                                prior_error_on_nested_compile
-                            )
-                        torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
-                            saved_dynamic_layer_stack_depth
-                        )
-
-                        set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
-                        set_eval_frame_isolate_recompiles_id(
-                            prior_isolate_recompiles_id
-                        )
-                        for cleanup in cleanups:
-                            cleanup()
+                        try:
+                            set_eval_frame(None)
+                            if fullgraph_count_enabled and call_succeeded:
+                                count = set_fullgraph_compiled_frame_count(-1)
+                                if count == 0 and _stance.stance == "default":
+                                    skip_reasons = get_skip_reasons()
+                                    msg = "torch.compile with fullgraph=True found no compiled frames."
+                                    if skip_reasons:
+                                        reasons_str = "\n".join(
+                                            f"  - {r}" for r in skip_reasons
+                                        )
+                                        msg += f" Skipped frames:\n{reasons_str}"
+                                    else:
+                                        msg += (
+                                            " Compilation was not attempted and no cached compiled"
+                                            " code was found."
+                                        )
+                                    raise RuntimeError(msg)
+                        finally:
+                            state_restored = True
+                            try:
+                                # Restore the dynamic layer stack depth if necessary.
+                                torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
+                                    saved_dynamic_layer_stack_depth
+                                )
+                            finally:
+                                _restore_compile_wrapper_state(
+                                    prior_error_on_nested_compile,
+                                    cleanups,
+                                    prior_skip_guard_eval_unsafe,
+                                    prior_isolate_recompiles_id,
+                                    prior_isolate_recompiles_strict,
+                                    prior_error_on_graph_break,
+                                )
                 finally:
                     # Restore the local dispatch key set snapshotted above. In an
                     # outer finally so it runs even if the inner finally raised,
@@ -1358,10 +1523,24 @@ class _TorchDynamoContext:
                     torch._C._dynamo_restore_local_dispatch_key_set()
                 return result
             finally:
-                if fullgraph_count_enabled:
-                    set_fullgraph_compiled_frame_count(-1)
-                    dynamo_tls.skip_reasons = None
-                _maybe_set_eval_frame(prior)
+                try:
+                    if not state_restored:
+                        state_restored = True
+                        _restore_compile_wrapper_state(
+                            prior_error_on_nested_compile,
+                            cleanups,
+                            prior_skip_guard_eval_unsafe,
+                            prior_isolate_recompiles_id,
+                            prior_isolate_recompiles_strict,
+                            prior_error_on_graph_break,
+                        )
+                finally:
+                    try:
+                        if fullgraph_count_enabled:
+                            set_fullgraph_compiled_frame_count(-1)
+                            dynamo_tls.skip_reasons = None
+                    finally:
+                        _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
         if self.error_on_graph_break is not None:
