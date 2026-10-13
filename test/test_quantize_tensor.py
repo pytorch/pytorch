@@ -527,7 +527,7 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
             rtne_scales, rtne_qdata = to_mxfp8_reference(
                 input, swizzle_type=swizzle_type
             )
-            self.assertEqual(scales.view(torch.uint8), rtne_scales.view(torch.uint8))
+            self.assertEqual(scales, rtne_scales)
             unswizzled = from_blocked(qdata, scales, 32)
             reconstructed = from_blocked_format(qdata, unswizzled)
             rtne_reconstructed = from_blocked_format(rtne_qdata, unswizzled)
@@ -548,9 +548,7 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
             rtne_scales_k, rtne_qdata_k = to_mxfp8_reference(
                 input, swizzle_type=swizzle_type
             )
-            self.assertEqual(
-                scales_k.view(torch.uint8), rtne_scales_k.view(torch.uint8)
-            )
+            self.assertEqual(scales_k, rtne_scales_k)
             unswizzled_k = from_blocked(qdata_k, scales_k, 32)
             reconstructed_k = from_blocked_format(qdata_k, unswizzled_k)
             rtne_reconstructed_k = from_blocked_format(rtne_qdata_k, unswizzled_k)
@@ -566,9 +564,7 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
             rtne_scales_m, rtne_qdata_m = to_mxfp8_reference(
                 input.t().contiguous(), swizzle_type=swizzle_type
             )
-            self.assertEqual(
-                scales_m.view(torch.uint8), rtne_scales_m.view(torch.uint8)
-            )
+            self.assertEqual(scales_m, rtne_scales_m)
             unswizzled_m = from_blocked(qdata_m, scales_m, 32)
             reconstructed_m = from_blocked_format(qdata_m, unswizzled_m)
             rtne_reconstructed_m = from_blocked_format(rtne_qdata_m, unswizzled_m)
@@ -649,7 +645,7 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
             random_key=key_m,
         )
         for actual, reference in zip(outputs, (*expected_k, *expected_m), strict=True):
-            self.assertEqual(actual.view(torch.uint8), reference.view(torch.uint8))
+            self.assertEqual(actual, reference)
 
     @parametrize("orientation", ("dim_k", "dim_km"))
     @parametrize("num_ops", (1, 2))
@@ -691,18 +687,18 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                     self.assertEqual(generator.get_offset(), offset + 4 * num_ops)
                     outputs = []
                     for op, (scales, qdata) in enumerate(captured):
-                        scale_bytes = scales.view(torch.uint8).clone()
-                        qdata_bytes = qdata.view(torch.uint8).clone()
+                        captured_scales = scales.clone()
+                        captured_qdata = qdata.clone()
                         ref_scales, ref_qdata = expected[replay * num_ops + op]
-                        self.assertEqual(scale_bytes, ref_scales.view(torch.uint8))
-                        self.assertEqual(qdata_bytes, ref_qdata.view(torch.uint8))
+                        self.assertEqual(captured_scales, ref_scales)
+                        self.assertEqual(captured_qdata, ref_qdata)
                         unswizzled = from_blocked(qdata, scales, 32)
                         reconstructed = from_blocked_format(qdata, unswizzled)
                         self.assertGreater(
                             compute_error(input.float(), reconstructed.float()).item(),
                             15.0,
                         )
-                        outputs.append((scale_bytes, qdata_bytes))
+                        outputs.append((captured_scales, captured_qdata))
                     replays.append(outputs)
 
                 for op in range(num_ops):
@@ -741,15 +737,15 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                     outputs = []
                     for op, result in enumerate(captured):
                         scales_k, qdata_k, scales_m, qdata_m = result
-                        scale_bytes_k = scales_k.view(torch.uint8).clone()
-                        qdata_bytes_k = qdata_k.view(torch.uint8).clone()
-                        scale_bytes_m = scales_m.view(torch.uint8).clone()
-                        qdata_bytes_m = qdata_m.view(torch.uint8).clone()
+                        captured_scales_k = scales_k.clone()
+                        captured_qdata_k = qdata_k.clone()
+                        captured_scales_m = scales_m.clone()
+                        captured_qdata_m = qdata_m.clone()
                         ref_sk, ref_qk, ref_sm, ref_qm = expected[replay * num_ops + op]
-                        self.assertEqual(scale_bytes_k, ref_sk.view(torch.uint8))
-                        self.assertEqual(qdata_bytes_k, ref_qk.view(torch.uint8))
-                        self.assertEqual(scale_bytes_m, ref_sm.view(torch.uint8))
-                        self.assertEqual(qdata_bytes_m, ref_qm.view(torch.uint8))
+                        self.assertEqual(captured_scales_k, ref_sk)
+                        self.assertEqual(captured_qdata_k, ref_qk)
+                        self.assertEqual(captured_scales_m, ref_sm)
+                        self.assertEqual(captured_qdata_m, ref_qm)
 
                         unswizzled_k = from_blocked(qdata_k, scales_k, 32)
                         reconstructed_k = from_blocked_format(qdata_k, unswizzled_k)
@@ -760,7 +756,12 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                         sqnr_m = compute_error(source_m, reconstructed_m.float())
                         self.assertGreater(sqnr_m.item(), 15.0)
                         outputs.append(
-                            (scale_bytes_k, qdata_bytes_k, scale_bytes_m, qdata_bytes_m)
+                            (
+                                captured_scales_k,
+                                captured_qdata_k,
+                                captured_scales_m,
+                                captured_qdata_m,
+                            )
                         )
                     replays.append(outputs)
 
@@ -839,16 +840,16 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                 )
 
             for source, scales, qdata, ref_scales, ref_qdata in quantizations:
-                scale_bytes = scales.view(torch.uint8).clone()
-                qdata_bytes = qdata.view(torch.uint8).clone()
-                self.assertEqual(scale_bytes, ref_scales.view(torch.uint8))
-                self.assertEqual(qdata_bytes, ref_qdata.view(torch.uint8))
+                captured_scales = scales.clone()
+                captured_qdata = qdata.clone()
+                self.assertEqual(captured_scales, ref_scales)
+                self.assertEqual(captured_qdata, ref_qdata)
                 unswizzled = from_blocked(qdata, scales, 32)
                 reconstructed = from_blocked_format(qdata, unswizzled)
                 self.assertGreater(
                     compute_error(source.float(), reconstructed.float()).item(), 15.0
                 )
-                pairs.append((scale_bytes, qdata_bytes))
+                pairs.append((captured_scales, captured_qdata))
             replays.append(pairs)
 
         self.assertEqual(replays[0], replays[1])
