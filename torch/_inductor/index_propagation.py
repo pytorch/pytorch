@@ -106,8 +106,11 @@ class SymPyOps:
         value: TypedExpr,
         dtype: torch.dtype,
         src_dtype: torch.dtype | None = None,
-        use_compute_types: bool = False,
+        use_compute_types: bool = True,
     ) -> TypedExpr:
+        if not use_compute_types and dtype in (torch.float16, torch.bfloat16):
+            # Keep explicit rounding instead of folding it into a compute-type expression.
+            return NotImplemented
         return TypedExpr(value.expr, dtype)
 
     @staticmethod

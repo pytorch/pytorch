@@ -921,7 +921,6 @@ class TestVarlenAttention(NNTestCase):
                 scale=scale,
             )
 
-    @skipIfRocm
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -1397,7 +1396,6 @@ class TestVarlenAttention(NNTestCase):
                 SDPBackend.CUDNN_ATTENTION.value,
             )
 
-    @skipIfRocm
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -1485,7 +1483,6 @@ class TestVarlenAttention(NNTestCase):
             varlen_attn(q, k, v, cu_seq_q, cu_seq_k, 1, 64)
         self.assertEqual(cudnn_forward.call_count, 0)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -1567,7 +1564,7 @@ class TestVarlenAttention(NNTestCase):
             if use_cudnn
             else nullcontext()
         )
-        # fa4 and cuDNN are batch invariant by default
+        # cuDNN is batch invariant by default
         with (
             _use_backend(backend),
             _use_cudnn_varlen(use_cudnn, device),
