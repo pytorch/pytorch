@@ -118,3 +118,10 @@ keeps reading the old address of a graph input which later materializes
 after being lazily cloned. Callers must not lazily clone memory that
 graphs use. Freeing shared data whose allocation stream is being
 captured is not supported either.
+
+`record_stream()` on a lazy clone records the stream for the shared
+data, so it is honored when the shared data is freed. On a materialized
+storage, it also records the stream for the data it was materialized
+from, which uses enqueued before materialization read. (Code which
+records streams with the caching allocator directly, at the time of
+use, records them for the data that use reads.)

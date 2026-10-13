@@ -31,7 +31,6 @@ struct C10_API StorageExtraMeta {
 
 namespace impl::cow {
 C10_API void materialize_cow(StorageImpl* storage);
-C10_API intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage);
 } // namespace impl::cow
 
 // A storage represents the underlying backing data buffer for a
@@ -304,6 +303,13 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return &pyobj_slot_;
   }
 
+  // See StorageExtraMeta::cow_materialized_from_.
+  const DataPtr* cow_materialized_from() const {
+    return extra_meta_ && extra_meta_->cow_materialized_from_
+        ? &extra_meta_->cow_materialized_from_
+        : nullptr;
+  }
+
   StorageExtraMeta& get_extra_meta() {
     if (!extra_meta_) {
       extra_meta_ = std::make_unique<StorageExtraMeta>();
@@ -371,8 +377,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
  protected:
   friend void c10::impl::cow::materialize_cow(StorageImpl*);
-  friend intrusive_ptr<StorageImpl> c10::impl::cow::lazy_clone_storage(
-      StorageImpl&);
 
   // Returns the previous data_ptr. Bypasses materialization —
   // only for use by materializer implementations.
