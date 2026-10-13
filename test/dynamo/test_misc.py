@@ -5534,27 +5534,86 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = torch.compile(copied, fullgraph=True, backend="eager")(*copied_args)
         self.assertEqual(result, correct)
 
+    def test_unbound_descriptor_owner_shadowed_by_subclass(self):
+        # A receiver whose type replaces the comparison under the same name gets
+        # its own slot, not the named descriptor's: methoddescr_call would run
+        # dict's slot, so dict.__eq__(od1, od2) is dict equality (True for these
+        # two, whose key sets match) where the == operator on the same receivers
+        # runs OrderedDict's order sensitive compare (False).  The receiver's
+        # slot is the closest the VTs can get, so this documents the divergence
+        # rather than claiming dict's answer.
+        def eq(x, a, b):
+            return x + float(dict.__eq__(a, b))
+
+        def operator_eq(x, a, b):
+            return x + float(a == b)
+
+        x = torch.randn(4)
+        a = collections.OrderedDict([(1, 2), (3, 4)])
+        b = collections.OrderedDict([(3, 4), (1, 2)])
+
+        # eager really does disagree between the slot and the operator here
+        self.assertTrue(dict.__eq__(a, b))
+        self.assertFalse(a == b)
+
+        result = torch.compile(eq, fullgraph=True, backend="eager")(x, a, b)
+        self.assertEqual(result, x)
+        result = torch.compile(operator_eq, fullgraph=True, backend="eager")(x, a, b)
+        self.assertEqual(result, x)
+
+        # inherited descriptors are not shadowed and still dispatch
+        d = collections.OrderedDict([("a", 1), ("b", 2)])
+        d.move_to_end("a")
+
+        def get(x, d):
+            return x + dict.get(d, "a", 0)
+
+        self.assertEqual(dict.get(d, "a", 0), 1)
+        result = torch.compile(get, fullgraph=True, backend="eager")(x, d)
+        self.assertEqual(result, x + 1)
+
+        # a view method reads the same keys either way, so it still dispatches
+        def keys(x, d):
+            return x + float(dict.keys(d) == d.keys())
+
+        self.assertTrue(dict.keys(d) == d.keys())
+        result = torch.compile(keys, fullgraph=True, backend="eager")(x, d)
+        self.assertEqual(result, x + 1)
+
     def test_unbound_object_comparison_slots(self):
         # object's own comparison slots are identity based on every type, so
-        # object.__eq__(a, b) is NotImplemented for a != b rather than the
-        # container's element-wise comparison.  Tensor elements keep the lists
-        # off the constant-fold path, so the dispatch itself is exercised.
+        # object.__eq__(a, b) is NotImplemented for a != b.  Its __ne__ is not
+        # the inverse of that: object_richcompare asks tp_richcompare(self, other,
+        # Py_EQ), which for a dict is dict equality, and inverts the answer.
         def fn(x, a, b):
             return x + float(
                 object.__eq__(a, b) is NotImplemented
-                and object.__ne__(a, b) is not NotImplemented
+                and object.__ne__(a, b) is False
                 and object.__lt__(a, b) is NotImplemented
             )
 
         x = torch.randn(4)
-        t = torch.randn(3)
-        args = (x, [t], [t])
+        args = (x, {1: 2}, {1: 2})
         correct = fn(*args)
         self.assertEqual(correct, x + 1)
         result = torch.compile(fn, fullgraph=True, backend="eager")(*args)
         self.assertEqual(result, correct)
 
-        # identity still compares equal, and __ne__ inverts it
+        # an unhashable receiver is no different: the slot object.__hash__
+        # installs is PyObject_GenericHash wherever it is called from
+        def unhashable(x, a, b):
+            return x + float(object.__eq__(a, b) is NotImplemented)
+
+        t = torch.randn(3)
+        unhashable_args = (x, [t], [t])
+        correct = unhashable(*unhashable_args)
+        self.assertEqual(correct, x + 1)
+        result = torch.compile(unhashable, fullgraph=True, backend="eager")(
+            *unhashable_args
+        )
+        self.assertEqual(result, correct)
+
+        # identity still compares equal, and __ne__ inverts that
         same = (x, [t], None)
 
         def identical(x, a, _unused):
@@ -5564,6 +5623,31 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(correct, x + 1)
         result = torch.compile(identical, fullgraph=True, backend="eager")(*same)
         self.assertEqual(result, correct)
+
+        # the descriptor arity is checked before the receiver is dispatched to
+        def too_few_args(x, a):
+            try:
+                object.__eq__(a)
+            except TypeError:
+                return x + 1
+            return x + 100
+
+        result = torch.compile(too_few_args, fullgraph=True, backend="eager")(x, [t])
+        self.assertEqual(result, x + 1)
+
+    def test_unbound_object_hash_slot(self):
+        # object.__hash__(lst) is an id based hash in eager, not list's
+        # unhashable TypeError: the receiver's own dispatch is not what eager
+        # runs.  The hash value is the receiver's identity, so the only correct
+        # answer is not to trace it.
+        def fn(x, lst):
+            return x + object.__hash__(lst)
+
+        x = torch.randn(4)
+        t = torch.randn(3)
+        self.assertIsInstance(object.__hash__([t]), int)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, fullgraph=True, backend="eager")(x, [t])
 
     def test_unbound_list_methods(self):
         # list.<method>(lst, ...) is the same call as lst.<method>(...): the

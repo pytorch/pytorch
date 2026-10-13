@@ -5870,6 +5870,16 @@
       ]
     }
   ],
+  "GB7199": [
+    {
+      "Gb_type": "object.__hash__ on a builtin receiver",
+      "Context": "object.__hash__({obj})",
+      "Explanation": "object.__hash__ returns an identity based hash, which cannot be computed while tracing.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
   "GB9509": [
     {
       "Gb_type": "torch.switch: improper index",

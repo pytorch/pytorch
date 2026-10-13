@@ -413,9 +413,10 @@ def populate_builtin_to_tensor_fn_map() -> None:
                     BUILTIN_TO_TENSOR_RFN_MAP[op] = most_recent_func
 
 
-# object's comparison slots.  Their tp_richcompare is identity based on every
-# type, so _call_unbound_method runs object_richcompare for them instead of
-# dispatching the name on the receiver.
+# The comparison slots.  object's are identity based on every type, so
+# _call_unbound_method runs object_richcompare for those instead of dispatching
+# the name on the receiver, and for the rest it checks the receiver has not
+# replaced the slot before dispatching to it.
 _RICHCOMPARE_OPS = frozenset(
     {"__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"}
 )
@@ -609,6 +610,13 @@ class BaseBuiltinVariable(VariableTracker):
                         f"'{descriptor.__objclass__.__name__}' objects doesn't "
                         f"apply to a '{obj_type.__name__}' object",
                     )
+                if name in _RICHCOMPARE_OPS and (kwargs or len(rest) != 1):
+                    # descriptor_call checks the arity before it reaches the
+                    # receiver, and the comparison slots take no keywords.  A
+                    # user class inherits that check, so it precedes its
+                    # call_base_method below for the same reason it precedes the
+                    # slot lookup in CPython.
+                    raise_type_error(tx, f"expected 1 argument, got {len(args)}")
                 if isinstance(obj, UserDefinedObjectVariable):
                     # A user class reaches this call through its own dispatch,
                     # and call_base_method starts the slot lookup at the builtin
@@ -622,38 +630,40 @@ class BaseBuiltinVariable(VariableTracker):
                     # based, so object.__eq__(lst_a, lst_b) is NotImplemented
                     # rather than list equality.  Run object's slot here instead
                     # of dispatching the name on the receiver.
-                    from .object_protocol import object_richcompare, vt_identity_compare
+                    from .object_protocol import object_richcompare
 
-                    if name == "__ne__":
-                        # Inverts object's __eq__ result, read here rather than
-                        # through object_richcompare's __ne__ arm, which would
-                        # call the receiver's own __eq__ to get a value.
-                        identity = vt_identity_compare(obj, rest[0])
-                        if identity is None:
-                            return ConstantVariable.create(NotImplemented)
-                        return ConstantVariable.create(
-                            not identity.as_python_constant()
-                        )
                     return object_richcompare(obj, tx, rest[0], name)
-                # A builtin VT dispatches by name, which is this descriptor's
-                # slot only when the receiver's own type resolves the name back
-                # to the descriptor or to another C slot.  Where a subclass
-                # shadows it with a descriptor of its own (OrderedDict.keys over
-                # dict.keys) that descriptor's slot is still the one to run, and
-                # where it resolves to None (list.__hash__) the receiver's own
-                # dispatch already answers correctly.  Only a plain attribute
-                # shadow declines: its owner, not the descriptor's __objclass__,
-                # is the type whose method eager reaches.
-                shadow = inspect.getattr_static(obj_type, name, None)
-                if (
-                    shadow is not None
-                    and shadow is not descriptor
-                    and not isinstance(
-                        shadow,
-                        (types.MethodDescriptorType, types.WrapperDescriptorType),
+                if descriptor.__objclass__ is object and name == "__hash__":
+                    # object.__hash__ is PyObject_GenericHash on every type, so
+                    # it is neither the receiver's tp_hash nor anything the
+                    # receiver's own dispatch can run.  Its value is the
+                    # receiver's identity, which tracing cannot know.
+                    unimplemented(
+                        gb_type="object.__hash__ on a builtin receiver",
+                        context=f"object.__hash__({obj})",
+                        explanation="object.__hash__ returns an identity based "
+                        "hash, which cannot be computed while tracing.",
+                        hints=[*graph_break_hints.DYNAMO_BUG],
                     )
-                ):
+                # A builtin VT dispatches by name, which is this descriptor's
+                # slot only when the receiver's own type still resolves the name
+                # to it.  Where a subclass installs a comparison of its own
+                # (OrderedDict.__eq__ over dict.__eq__) eager runs the
+                # descriptor's slot, and dispatching by name runs the
+                # receiver's, so those go to the receiver's comparison slot
+                # rather than through a call_method that cannot reach one.  The
+                # view methods keep the receiver's dispatch: it serves their
+                # callers (Dynamo's own dict___eq__ reads dict.keys) and differs
+                # only on an ordering those callers do not observe.
+                shadow = inspect.getattr_static(obj_type, name, None)
+                if shadow is None:
                     return None
+                if name in _RICHCOMPARE_OPS and shadow is not descriptor:
+                    # methoddescr_call runs the slot of the type the descriptor
+                    # was read from; the receiver's own slot is the closest the
+                    # VTs can get to it, and the receiver's call_method cannot
+                    # reach a comparison at all.
+                    return obj.realize().tp_richcompare_impl(tx, rest[0], name)
                 return obj.call_method(tx, name, rest, kwargs)
         return None
 
