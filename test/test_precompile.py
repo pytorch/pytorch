@@ -5124,6 +5124,45 @@ class TestPrecompileDynamoCapture(TestCase):
         self.model.load_state_dict(state)
         self._serve_in_fresh_process([((self.x2,), {}, None)], grads)
 
+    def test_a_cold_bundled_autotune_cache_does_not_break_a_training_capture(self):
+        # The bundled autotune remote cache opens one bundle per compile context
+        # and closes it on the first compiled call; the capture lowers the
+        # backward with the forward, before either runs.
+        from torch._inductor.utils import fresh_cache
+
+        single = self.mod.single
+        reference = copy.deepcopy(self.model)
+        expected = single(reference, self.x2)
+        expected.sum().backward()
+        cold = mock.Mock()
+        cold.get.return_value = None
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(bundled_autotune_remote_cache=True),
+            mock.patch(
+                "torch._inductor.runtime.autotune_cache.create_cache",
+                return_value=cold,
+            ),
+        ):
+            with self._capture(single, backend="inductor") as cap:
+                y = cap(self.model, self.x2)
+                y.sum().backward()
+                self.assertTrue(cap.summary().complete)
+            self.assertIs(torch._inductor.config.bundled_autotune_remote_cache, True)
+            with self.assertRaisesRegex(KeyError, "the block's own"):
+                with self._capture(single, backend="inductor") as cap:
+                    raise KeyError("the block's own")
+            self.assertIs(torch._inductor.config.bundled_autotune_remote_cache, True)
+        self.assertEqual(y, expected)
+        for p, ref in zip(self.model.parameters(), reference.parameters()):
+            self.assertEqual(p.grad, ref.grad)
+        self.model.zero_grad()
+        served = load(self.artifact, self.cache)(self.model, self.x2)
+        served.sum().backward()
+        self.assertEqual(served, expected)
+        for p, ref in zip(self.model.parameters(), reference.parameters()):
+            self.assertEqual(p.grad, ref.grad)
+
     def test_save_checkpoints_mid_block(self):
         single = self.mod.single
         writes = mock.patch("torch._precompile._write_artifact", wraps=_write_artifact)
