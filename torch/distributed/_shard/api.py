@@ -53,6 +53,9 @@ def _shard_tensor(
     current_rank = dist.get_rank(pg)
 
     # Validate src_rank and sharding_spec are same across all ranks.
+    # Stays on the pickle default: sharding_spec may be an arbitrary
+    # user-defined ShardingSpec subclass, which cannot be allowlisted for
+    # weights_only deserialization ahead of time.
     gathered_list = [None] * world_size
     dist.all_gather_object(gathered_list, (src_rank, sharding_spec), group=pg)
 
