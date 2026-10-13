@@ -2712,14 +2712,18 @@ class CachingAutotuner(KernelInterface):
             if not callable(runner):
                 return None
             kernel = runner.__self__
-            # compile-on-one-rank kernels keep their loaded handles per device, so
-            # kernel.function is None; the fast launcher binds a single device's
-            # function pointer, so fall back to the per-device static launcher.
-            if getattr(kernel, "device_agnostic", False):
-                return None
             if getattr(kernel, "global_scratch_size", 0):
                 return None
-            cu_function = kernel.function
+            # compile-on-one-rank kernels keep their loaded handles per device, so
+            # kernel.function is None. Bind the current device's handle; the
+            # launcher below only takes the fast path on that device.
+            device = None
+            if getattr(kernel, "device_agnostic", False):
+                device = kernel._current_device()
+                kernel.load_kernel(device)
+                cu_function = kernel.functions.get(device)
+            else:
+                cu_function = kernel.function
             num_warps = kernel.num_warps
             shared = kernel.shared
             arg_tys = kernel.arg_tys
@@ -2771,7 +2775,9 @@ class CachingAutotuner(KernelInterface):
             # dangling, producing a CUDA "misaligned address" error on the next
             # launch. Keep the owner alive for as long as the fast launcher is.
             new_launcher._static_kernel_owner = kernel  # type: ignore[attr-defined]
-            return new_launcher
+            if device is None:
+                return new_launcher
+            return _bind_to_device(new_launcher, launcher, device)
         except (AttributeError, TypeError, KeyError, ValueError):
             # Expected failures - silent fallback is OK.
             # ValueError is raised when nArgs > MAX_ARGS in the C extension.
@@ -5687,3 +5693,33 @@ class RoundRobinComboKernelGrid(ComboKernelGrid):
         if xnumels_x_dim:
             exprs.append(self.ceildiv(self.maximum(xnumels_x_dim), meta.get("XBLOCK")))
         return f"({self.maximum(exprs)}) * {num_kernels}"
+
+
+def _bind_to_device(
+    fast: LauncherType, fallback: LauncherType, device: int
+) -> LauncherType:
+    """Take ``fast`` (bound to one device's function) only on that device.
+
+    A device-agnostic kernel can be launched on several devices in one process,
+    but the fast launcher bakes in one device's function pointer.
+    """
+    def launcher(*args: Any, stream: int) -> Any:
+        if torch._C._cuda_getDevice() == device:
+            return fast(*args, stream=stream)
+        return fallback(*args, stream=stream)
+
+    for attr in (
+        "config",
+        "n_regs",
+        "n_spills",
+        "shared",
+        "cache_hash",
+        "store_cubin",
+        "_is_static",
+        "_expected_positional_count",
+        "_static_kernel_owner",
+    ):
+        val = getattr(fast, attr, None)
+        if val is not None:
+            setattr(launcher, attr, val)
+    return launcher
