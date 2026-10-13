@@ -20,7 +20,7 @@ if not torch.backends.mps.is_available():
         print("MPS not available because the current PyTorch install was not "
               "built with MPS enabled.")
     else:
-        print("MPS not available because the current macOS version is not 14.0+ "
+        print("MPS not available because the current macOS version is not 15.0+ "
               "and/or you do not have an MPS-enabled device on this machine.")
 
 else:
@@ -41,3 +41,23 @@ else:
     # Now every call runs on the GPU
     pred = model(x)
 ```
+
+## Double-precision types
+
+The MPS backend does not support `torch.float64` (`torch.double`) or
+`torch.complex128` (`torch.cdouble`) because Metal Shading Language has no
+`double` type:
+
+```python
+>>> torch.ones(3, dtype=torch.float64, device="mps")
+TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework
+doesn't support float64. Please use float32 instead.
+```
+
+This is a fundamental limitation of Metal Shading Language rather than an
+unimplemented PyTorch operator. Consequently, `PYTORCH_ENABLE_MPS_FALLBACK=1`
+does not apply: tensors with double-precision types cannot be allocated or
+copied to MPS in the first place. `Tensor.to("mps")` on a float64 tensor raises
+for the same reason, rather than downcasting implicitly.
+
+A computation that genuinely requires double precision has to run on the CPU.

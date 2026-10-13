@@ -349,6 +349,19 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return materialize_fn_ != nullptr;
   }
 
+  // Whether data_ptr()/data() (the immutable accessors) would throw. Lets
+  // callers query without a try/catch.
+  bool throw_on_immutable_data_ptr() const {
+    return throw_on_immutable_data_ptr_;
+  }
+
+  // Whether mutable_data_ptr()/mutable_data() would throw specifically because
+  // of the mutable-only check. Does not include the immutable case (query that
+  // separately) nor materializer hooks, which materialize rather than throw.
+  bool throw_on_mutable_data_ptr() const {
+    return throw_on_mutable_data_ptr_;
+  }
+
  protected:
   friend void c10::impl::cow::materialize_cow(StorageImpl*);
 

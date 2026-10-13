@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import torch
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.graph import _parse_stack_trace
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._pytree import tree_map
@@ -98,7 +98,7 @@ def _tensor_debug_string(tensor, attributes, tensor_memo=None) -> str:
         if isinstance(tensor, torch.distributed.tensor.DTensor):
             # omitted device mesh
             return f"dt{id_str}: {tensor_debug_str}| {_stringify_dtensor_spec(tensor._spec)}"
-        elif isinstance(tensor, FakeTensor):
+        elif is_fake_tensor(tensor):
             return f"ft{id_str}: {tensor_debug_str}"
         else:
             return f"t{id_str}: {tensor_debug_str}"

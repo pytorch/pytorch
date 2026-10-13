@@ -22,7 +22,7 @@ BlenderbotForCausalLM,pass_due_to_skip,0
 
 
 
-DebertaV2ForMaskedLM,eager_fail_to_run,0
+DebertaV2ForMaskedLM,pass_due_to_skip,0
 
 
 
@@ -83,6 +83,10 @@ PegasusForCausalLM,pass,0
 
 
 Qwen/Qwen3-0.6B,pass,0
+
+
+
+Qwen/Qwen3.5-0.8B,pass,0
 
 
 

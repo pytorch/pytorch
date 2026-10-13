@@ -5,7 +5,7 @@ import math
 import operator
 import sys
 from collections.abc import Callable
-from typing import Any, TypeAlias, TypeVar
+from typing import Any, cast, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -20,6 +20,7 @@ from torch._decomp import (
 from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
     _index_add,
+    adaptive_max_pool3d as decomp_adaptive_max_pool3d,
     embedding_dense_backward as decomp_embedding_dense_backward,
     pw_cast_for_opmath,
     pw_cast_for_opmath_non_tensor_args,
@@ -32,14 +33,20 @@ from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    make_contiguous_strides_for,
     suggest_memory_format,
     type_to_dtype,
 )
 from torch._refs import native_layer_norm as decomp_native_layer_norm
-from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
+from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
+    statically_known_true,
+    sym_eq,
+)
 
 from . import config, inductor_prims
 from .utils import (
+    is_bf16x9_matmul,
     is_gpu,
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
@@ -62,7 +69,7 @@ inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
         aten.adaptive_max_pool2d,
-        aten.adaptive_max_pool3d,
+        aten.adaptive_max_pool3d.out,
         aten.index_select,
         aten.addmv,
         aten.arange,
@@ -142,6 +149,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten._foreach_addcdiv_,
     aten.lerp,
     aten.lerp_,
+    aten.special_log_ndtr,  # inductor re-registers with copysign wrapper (#187336)
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -154,6 +162,103 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition(aten.adaptive_max_pool3d.default)
+def adaptive_max_pool3d(input, output_size):
+    result = decomp_adaptive_max_pool3d(input, output_size)
+    if result is NotImplemented:
+        return NotImplemented
+    values, indices = result
+    values = inductor_prims.force_stride_order(
+        values, make_contiguous_strides_for(values.shape)
+    )
+    indices = inductor_prims.force_stride_order(
+        indices, make_contiguous_strides_for(indices.shape)
+    )
+    return values, indices
+
+
+@register_decomposition([aten.special_log_ndtr])
+def special_log_ndtr(a: torch.Tensor) -> torch.Tensor:
+    # Inductor's C++ codegen compiles with -fno-signed-zeros, which causes the
+    # compiler to optimize away the -0.0 signbit in log_ndtr results (#187336).
+    # We wrap the base decomposition result with copysign to force the sign bit,
+    # since log_ndtr is always non-positive.
+    M_SQRT1_2 = 0.707106781186547524400844362104849039
+    t = a * M_SQRT1_2
+    res = torch.where(
+        a < 1.0,
+        torch.log(torch.special.erfcx(-t) / 2) - t * t,
+        torch.log1p(-torch.erfc(t) / 2),
+    )
+    return torch.copysign(res, -1.0)
+
+
+if torch.distributed.is_available():
+
+    @register_decomposition([torch.ops._dtensor.shard_dim_alltoall.default])
+    def shard_dim_alltoall_decomp(
+        inp: torch.Tensor,
+        gather_dim: int,
+        shard_dim: int,
+        group_name: str,
+    ) -> torch.Tensor:
+        if not config.decompose_shard_dim_alltoall:
+            return NotImplemented
+        if inp.dtype.is_complex:
+            return NotImplemented
+
+        ndim = inp.dim()
+        gather_dim = gather_dim + ndim if gather_dim < 0 else gather_dim
+        shard_dim = shard_dim + ndim if shard_dim < 0 else shard_dim
+        if not (0 <= gather_dim < ndim and 0 <= shard_dim < ndim):
+            return NotImplemented
+        if gather_dim == shard_dim:
+            return NotImplemented
+
+        try:
+            from torch.distributed.distributed_c10d import (
+                _get_group_size_by_name,
+                GroupName,
+            )
+
+            group_size = _get_group_size_by_name(GroupName(group_name))
+        except (RuntimeError, ValueError):
+            return NotImplemented
+
+        input_shape = list(inp.shape)
+        shard_dim_size = input_shape[shard_dim]
+        # Match eager shard_dim_alltoall semantics. DTensor pads uneven logical
+        # shards before reaching this op, so the local shard dim should split
+        # evenly across the process group here. If the guard fails at runtime,
+        # Dynamo recompiles and may keep the original shard_dim_alltoall fallback.
+        if not guard_or_false(sym_eq(shard_dim_size % group_size, 0)):
+            return NotImplemented
+        local_shard_dim_size = shard_dim_size // group_size
+
+        pre_view_shape = list(input_shape)
+        pre_view_shape[shard_dim] = local_shard_dim_size
+        pre_view_shape.insert(shard_dim, group_size)
+
+        post_view_shape = list(input_shape)
+        post_view_shape[shard_dim] = local_shard_dim_size
+        post_view_shape[gather_dim] = post_view_shape[gather_dim] * group_size
+
+        out = aten.view.default(inp, pre_view_shape)
+        out = aten.movedim.int(out, shard_dim, 0)
+        out = aten.clone.default(out, memory_format=torch.contiguous_format)
+        out = torch.ops._c10d_functional.all_to_all_single.default(
+            out,
+            [1] * group_size,
+            [1] * group_size,
+            group_name,
+        )
+        out = torch.ops._c10d_functional.wait_tensor.default(out)
+        out = aten.movedim.int(out, 0, gather_dim)
+        out = aten.clone.default(out, memory_format=torch.contiguous_format)
+        counters["inductor"]["decompose_shard_dim_alltoall"] += 1
+        return aten.view.default(out, post_view_shape)
 
 
 @register_decomposition([aten.lerp.Scalar])
@@ -275,13 +380,18 @@ def index_add(
     *,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
-    # If we are not in fbcode and dtype is bfloat16
-    # fallback to index_add kernel
-    # see https://github.com/pytorch/pytorch/issues/137425 for details
     if not is_fbcode() and x.dtype == torch.bfloat16:
-        return NotImplemented
-    else:
-        return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
+        # Triton supports BF16 atomic add on ROCm and NVIDIA SM90 and newer.
+        if x.device.type != "cuda" or (
+            torch.version.hip is None
+            and torch.cuda.get_device_capability(x.device) < (9, 0)
+        ):
+            return NotImplemented
+    # The index_put lowering expects tensor indices to have at least one
+    # dimension. Normalizing a scalar index preserves index_add semantics.
+    if index.ndim == 0:
+        index = index.unsqueeze(0)
+    return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
 
 
 # Not really sure how to put this into the main library.  PrimTorch wants
@@ -350,7 +460,24 @@ def round_dec(x: torch.Tensor, decimals: int = 0) -> torch.Tensor:
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
+def _preserve_bf16x9_matmul(arg_index, arg_name):
+    """Keep FP32 CUDA matmuls intact before opmath casts hide their dtype."""
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            mat = args[arg_index] if len(args) > arg_index else kwargs[arg_name]
+            if is_bf16x9_matmul(mat.device.type, mat.dtype):
+                return NotImplemented
+            return fn(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
 @register_decomposition([aten.bmm])
+@_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def bmm(
     self: torch.Tensor,
@@ -384,6 +511,7 @@ def bmm(
 
 
 @register_decomposition([aten.addmm])
+@_preserve_bf16x9_matmul(1, "mat1")
 @pw_cast_for_opmath
 def addmm(
     self: torch.Tensor,
@@ -393,7 +521,27 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    if beta == 0 and mat1.device.type != "cuda":
+        # CPU and MPS eager check that self expands to the output even though
+        # beta == 0 ignores its values, XPU checks a looser broadcast and CUDA
+        # doesn't check. tuned_addmm drops self, so check here.
+        utils.check_same_device(self, mat1, allow_cpu_scalar_tensors=False)
+        self.expand(mat1.shape[0], mat2.shape[1])
+    # The rewrites below compute in the input dtype, so leave aten.addmm.dtype
+    # to the tuned_addmm lowering.
+    if out_dtype is not None:
+        return NotImplemented
+
+    def add_input(out: torch.Tensor) -> torch.Tensor:
+        # Unconditional: `if alpha != 1` would guard on an unbacked alpha.
+        out = alpha * out
+        if beta == 0:
+            return out
+        return out + beta * self.expand(out.shape)
+
     if mat1.device.type not in ["cpu", "mps"]:
+        if beta == 0 and mat1.device.type == "cuda":
+            return NotImplemented
         if (
             statically_known_true(mat1.size(-1) == 1)
             and statically_known_true(mat1.size(0) != 1)
@@ -401,7 +549,7 @@ def addmm(
         ):
             counters["inductor"]["decompose_addmm"] += 1
             out = mat1 * mat2
-            return alpha * out + beta * self
+            return add_input(out)
 
     if self.device.type == "cpu":
         if statically_known_true(mat1.size(0) == 1) and statically_known_true(
@@ -411,7 +559,7 @@ def addmm(
             out = torch.sum(
                 mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
-            return alpha * out + beta * self
+            return add_input(out)
         if (
             statically_known_true(mat1.size(0) == 1)
             and guard_or_false(mat2.size(0) <= 16)
@@ -419,11 +567,12 @@ def addmm(
         ):
             counters["inductor"]["decompose_addmm"] += 1
             out = (mat1.T * mat2).sum(dim=0, keepdim=True)
-            return alpha * out + beta * self
+            return add_input(out)
     return NotImplemented
 
 
 @register_decomposition([aten.mm])
+@_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def mm(
     self: torch.Tensor,
@@ -845,6 +994,31 @@ def randint(
     return aten.randint.low(0, high, size, **kwargs)
 
 
+@register_decomposition(prims.uniform)
+def uniform(
+    shape: list[int | torch.SymInt],
+    *,
+    low: torch.types.Number,
+    high: torch.types.Number,
+    dtype: torch.dtype,
+    device: torch.device,
+    stride: list[int | torch.SymInt],
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    storage_len = utils.compute_required_storage_length(
+        cast(list[int], shape), cast(list[int], stride), 0
+    )
+    sample_shape: list[int | torch.SymInt] = [storage_len]
+    if generator is None:
+        rand_samples = torch.rand(sample_shape, dtype=dtype, device=device)
+    else:
+        rand_samples = torch.rand(
+            sample_shape, generator=generator, dtype=dtype, device=device
+        )
+    res = (high - low) * rand_samples + low
+    return res.as_strided(shape, stride)
+
+
 @register_decomposition(quantized.linear_dynamic_fp16_unpacked_weight.default)
 def linear_dynamic_fp16_unpacked_weight(
     input: torch.Tensor,
@@ -1020,38 +1194,6 @@ def _foreach_lerp_scalarlist(
         aten._foreach_mul.ScalarList(
             aten._foreach_sub.List(end_tensors, start_tensors), scalars
         ),
-    )
-
-
-@aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
-@register_decomposition(aten.miopen_batch_norm)
-def miopen_batch_norm(
-    input: torch.Tensor,
-    weight: torch.Tensor,
-    bias: torch.Tensor | None,
-    running_mean: torch.Tensor | None,
-    running_var: torch.Tensor | None,
-    training: bool,
-    exponential_average_factor: float,
-    epsilon: float,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    a, b, c = aten.native_batch_norm(
-        input,
-        weight,
-        bias,
-        running_mean,
-        running_var,
-        training,
-        exponential_average_factor,
-        epsilon,
-    )
-
-    if training:
-        return (a, b, c)
-    return (
-        a,
-        weight.new_zeros((0,)),
-        weight.new_zeros((0,)),
     )
 
 

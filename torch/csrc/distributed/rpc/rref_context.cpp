@@ -256,7 +256,7 @@ void RRefContext::delAllUsersAndUnforkedOwners(
   // Start sending UserRRef delete messages, after all pendings are confirmed.
   // Note, there should be no new forkings in between, because it's assumed that
   // this utility is called during graceful shutdown, where no new user RPCs can
-  // be initiaited anymore.
+  // be initiated anymore.
   for (const auto& user : tempConfirmedUsers) {
     c10::intrusive_ptr<RRef> rref_ptr = user.second.lock();
     if (!rref_ptr) {
@@ -275,7 +275,7 @@ void RRefContext::delAllUsersAndUnforkedOwners(
     std::vector<RRefId> unforkedOwners;
     for (const auto& it : owners_) {
       auto rrefId = it.first;
-      if (forks_.find(rrefId) == forks_.end()) {
+      if (!forks_.contains(rrefId)) {
         // Successful fork of owner was never processed.
         unforkedOwners.push_back(rrefId);
       }
@@ -747,7 +747,7 @@ void RRefContext::addForkOfOwnerIfNotPresent(
   // the child may have been added by a previous send attempt, and this check
   // (as opposed to an assertion here) ensures that messages that trigger this
   // function are idempotent.
-  if (rrefForks.find(forkId) == rrefForks.end()) {
+  if (!rrefForks.contains(forkId)) {
     rrefForks.insert(forkId);
   } else {
     LOG(INFO) << "Ignoring duplicate request to add Fork of OwnerRRef with "

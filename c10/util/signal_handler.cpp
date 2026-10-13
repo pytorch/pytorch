@@ -6,7 +6,7 @@
 
 // Normal signal handler implementation.
 #include <dirent.h>
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 

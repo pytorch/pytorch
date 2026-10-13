@@ -395,7 +395,7 @@ void all_to_all_vdev(
 
 // Start of `all_to_all_vdev_2d`
 
-// This is an warp-scope, exclusive prefix sum. When called by a block of
+// This is a warp-scope, exclusive prefix sum. When called by a block of
 // threads, each warp will perform an independent prefix sum, concurrently.
 // Returns the sum of all elements in the warp.
 // `NUM_WARPS` is the number of warps participating the concurrent prefix sum.
@@ -887,6 +887,10 @@ void all_to_all_vdev_2d_offset(
       out_splits_offsets_ptr, ne, world_size, major_align_val);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   C10_CUDA_CHECK(hipStreamSynchronize(stream));
+}
+
+void release_nvshmem_team_pool(const std::string& group_name) {
+  TeamManager::release_group_if_initialized(group_name);
 }
 
 } // namespace c10d::nvshmem_extension

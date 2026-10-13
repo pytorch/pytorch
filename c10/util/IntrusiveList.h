@@ -46,7 +46,7 @@ class IntrusiveListHook {
     }
   }
 
-  bool is_linked() const {
+  [[nodiscard]] bool is_linked() const {
     return next_ != this;
   }
 };
@@ -55,17 +55,19 @@ template <typename P, typename T>
 class ListIterator {
   static_assert(std::is_same_v<std::remove_const_t<P>, IntrusiveListHook>);
   static_assert(std::is_base_of_v<IntrusiveListHook, T>);
-  P* ptr_;
+  P* ptr_ = nullptr;
 
   friend class IntrusiveList<T>;
 
  public:
+  using iterator_concept = std::bidirectional_iterator_tag;
   using iterator_category = std::bidirectional_iterator_tag;
   using value_type = std::conditional_t<std::is_const_v<P>, const T, T>;
   using difference_type = std::ptrdiff_t;
   using pointer = value_type*;
   using reference = value_type&;
 
+  ListIterator() = default;
   explicit ListIterator(P* ptr) : ptr_(ptr) {}
   ~ListIterator() = default;
 
@@ -88,16 +90,16 @@ class ListIterator {
   }
 
   template <typename Q>
-  bool operator==(const ListIterator<Q, T>& other) const {
+  [[nodiscard]] bool operator==(const ListIterator<Q, T>& other) const {
     return ptr_ == other.ptr_;
   }
 
   template <typename Q>
-  bool operator!=(const ListIterator<Q, T>& other) const {
+  [[nodiscard]] bool operator!=(const ListIterator<Q, T>& other) const {
     return !(*this == other);
   }
 
-  auto& operator*() const {
+  [[nodiscard]] auto& operator*() const {
     return static_cast<reference>(*ptr_);
   }
 
@@ -107,13 +109,25 @@ class ListIterator {
     return *this;
   }
 
+  ListIterator operator++(int) {
+    auto old = *this;
+    ++*this;
+    return old;
+  }
+
   ListIterator& operator--() {
     TORCH_CHECK(ptr_);
     ptr_ = ptr_->prev_;
     return *this;
   }
 
-  auto* operator->() const {
+  ListIterator operator--(int) {
+    auto old = *this;
+    --*this;
+    return old;
+  }
+
+  [[nodiscard]] auto* operator->() const {
     return static_cast<pointer>(ptr_);
   }
 };
@@ -142,43 +156,43 @@ class IntrusiveList {
   using iterator = ListIterator<IntrusiveListHook, T>;
   using const_iterator = ListIterator<const IntrusiveListHook, T>;
 
-  auto begin() const {
+  [[nodiscard]] auto begin() const {
     return ++const_iterator{&head_};
   }
 
-  auto begin() {
+  [[nodiscard]] auto begin() {
     return ++iterator{&head_};
   }
 
-  auto end() const {
+  [[nodiscard]] auto end() const {
     return const_iterator{&head_};
   }
 
-  auto end() {
+  [[nodiscard]] auto end() {
     return iterator{&head_};
   }
 
-  auto rbegin() const {
+  [[nodiscard]] auto rbegin() const {
     return std::reverse_iterator{end()};
   }
 
-  auto rbegin() {
+  [[nodiscard]] auto rbegin() {
     return std::reverse_iterator{end()};
   }
 
-  auto rend() const {
+  [[nodiscard]] auto rend() const {
     return std::reverse_iterator{begin()};
   }
 
-  auto rend() {
+  [[nodiscard]] auto rend() {
     return std::reverse_iterator{begin()};
   }
 
-  auto iterator_to(const T& n) const {
+  [[nodiscard]] auto iterator_to(const T& n) const {
     return const_iterator{&n};
   }
 
-  auto iterator_to(T& n) {
+  [[nodiscard]] auto iterator_to(T& n) {
     return iterator{&n};
   }
 
@@ -187,7 +201,7 @@ class IntrusiveList {
     return iterator{&n};
   }
 
-  size_t size() const {
+  [[nodiscard]] size_t size() const {
     size_t ret = 0;
     for ([[maybe_unused]] auto& _ : *this) {
       ret++;
@@ -195,7 +209,7 @@ class IntrusiveList {
     return ret;
   }
 
-  bool empty() const {
+  [[nodiscard]] bool empty() const {
     return !head_.is_linked();
   }
 

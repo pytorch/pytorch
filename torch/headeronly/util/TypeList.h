@@ -12,9 +12,6 @@ namespace c10::guts {
 
 template <class... T>
 struct false_t : std::false_type {};
-template <template <class> class... T>
-struct false_higher_t : std::false_type {};
-
 namespace typelist {
 
 /**
@@ -109,82 +106,20 @@ template <class... TypeLists>
 using concat_t = typename concat<TypeLists...>::type;
 
 /**
- * Filters the types in a type list by a type trait.
- * Examples:
- *   typelist<int&, const string&&>  ==  filter_t<std::is_reference,
- * typelist<void, string, int&, bool, const string&&, int>>
- */
-template <template <class> class Condition, class TypeList>
-struct filter final {
-  static_assert(
-      false_t<TypeList>::value,
-      "In typelist::filter<Condition, TypeList>, the TypeList argument must be typelist<...>.");
-};
-template <template <class> class Condition, class Head, class... Tail>
-struct filter<Condition, typelist<Head, Tail...>> final {
-  static_assert(
-      is_type_condition<Condition>::value,
-      "In typelist::filter<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
-  using type = std::conditional_t<
-      Condition<Head>::value,
-      concat_t<
-          typelist<Head>,
-          typename filter<Condition, typelist<Tail...>>::type>,
-      typename filter<Condition, typelist<Tail...>>::type>;
-};
-template <template <class> class Condition>
-struct filter<Condition, typelist<>> final {
-  static_assert(
-      is_type_condition<Condition>::value,
-      "In typelist::filter<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
-  using type = typelist<>;
-};
-template <template <class> class Condition, class TypeList>
-using filter_t = typename filter<Condition, TypeList>::type;
-
-/**
- * Counts how many types in the list fulfill a type trait
- * Examples:
- *   2  ==  count_if<std::is_reference, typelist<void, string, int&, bool, const
- * string&&, int>>
- */
-template <template <class> class Condition, class TypeList>
-struct count_if final {
-  static_assert(
-      is_type_condition<Condition>::value,
-      "In typelist::count_if<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
-  static_assert(
-      is_instantiation_of<typelist, TypeList>::value,
-      "In typelist::count_if<Condition, TypeList>, the TypeList argument must be typelist<...>.");
-  // TODO Direct implementation might be faster
-  static constexpr size_t value = size<filter_t<Condition, TypeList>>::value;
-};
-
-/**
  * Checks if a typelist contains a certain type.
  * Examples:
  *  contains<typelist<int, string>, string> == true_type
  *  contains<typelist<int, string>, double> == false_type
  */
 namespace detail {
-template <class TypeList, class Type, class Enable = void>
-struct contains {};
-template <class Type>
-struct contains<typelist<>, Type, void> : std::false_type {};
-template <class Type, class Head, class... Tail>
-struct contains<
-    typelist<Head, Tail...>,
-    Type,
-    std::enable_if_t<std::is_same_v<Head, Type>>> : std::true_type {};
-template <class Type, class Head, class... Tail>
-struct contains<
-    typelist<Head, Tail...>,
-    Type,
-    std::enable_if_t<!std::is_same_v<Head, Type>>>
-    : contains<typelist<Tail...>, Type> {};
+template <class TypeList, class Type>
+struct contains_impl : std::false_type {};
+template <class Type, class... Types>
+struct contains_impl<typelist<Types...>, Type>
+    : std::bool_constant<(std::is_same_v<Types, Type> || ...)> {};
 } // namespace detail
 template <class TypeList, class Type>
-using contains = typename detail::contains<TypeList, Type>::type;
+using contains = typename detail::contains_impl<TypeList, Type>::type;
 
 /**
  * Returns true iff the type trait is true for all types in the type list
@@ -228,25 +163,6 @@ struct true_for_any_type<Condition, typelist<Types...>> final
       is_type_condition<Condition>::value,
       "In typelist::true_for_any_type<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
 };
-
-/**
- * Maps types of a type list using a type trait
- * Example:
- *  typelist<int&, double&, string&>  ==  map_t<std::add_lvalue_reference_t,
- * typelist<int, double, string>>
- */
-template <template <class> class Mapper, class TypeList>
-struct map final {
-  static_assert(
-      false_t<TypeList>::value,
-      "In typelist::map<Mapper, TypeList>, the TypeList argument must be typelist<...>.");
-};
-template <template <class> class Mapper, class... Types>
-struct map<Mapper, typelist<Types...>> final {
-  using type = typelist<Mapper<Types>...>;
-};
-template <template <class> class Mapper, class TypeList>
-using map_t = typename map<Mapper, TypeList>::type;
 
 /**
  * Returns the first element of a type list.
@@ -322,29 +238,6 @@ template <size_t Index, class TypeList>
 using element_t = typename element<Index, TypeList>::type;
 
 /**
- * Returns the last element of a type list.
- * Example:
- *   int  ==  last_t<typelist<int, string>>
- */
-template <class TypeList>
-struct last final {
-  static_assert(
-      false_t<TypeList>::value,
-      "In typelist::last<T>, the T argument must be typelist<...>.");
-};
-template <class Head, class... Tail>
-struct last<typelist<Head, Tail...>> final {
-  using type = typename last<typelist<Tail...>>::type;
-};
-template <class Head>
-struct last<typelist<Head>> final {
-  using type = Head;
-};
-template <class TypeList>
-using last_t = typename last<TypeList>::type;
-static_assert(std::is_same_v<int, last_t<typelist<double, float, int>>>);
-
-/**
  * Take/drop a number of arguments from a typelist.
  * Example:
  *   typelist<int, string> == take_t<typelist<int, string, bool>, 2>
@@ -411,107 +304,6 @@ struct drop_if_nonempty final {
 template <class TypeList, size_t num>
 using drop_if_nonempty_t = typename drop_if_nonempty<TypeList, num>::type;
 
-/**
- * Reverses a typelist.
- * Example:
- *   typelist<int, string>  == reverse_t<typelist<string, int>>
- */
-template <class TypeList>
-struct reverse final {
-  static_assert(
-      false_t<TypeList>::value,
-      "In typelist::reverse<T>, the T argument must be typelist<...>.");
-};
-template <class Head, class... Tail>
-struct reverse<typelist<Head, Tail...>> final {
-  using type =
-      concat_t<typename reverse<typelist<Tail...>>::type, typelist<Head>>;
-};
-template <>
-struct reverse<typelist<>> final {
-  using type = typelist<>;
-};
-template <class TypeList>
-using reverse_t = typename reverse<TypeList>::type;
-
-/**
- * Find the index of the first type in a typelist fulfilling a type trait
- * condition. Example:
- *
- * 2 == find_if<typelist<char, int, char&, int&>, std::is_reference>::value
- */
-template <class TypeList, template <class> class Condition, class Enable = void>
-struct find_if final {
-  static_assert(
-      false_t<TypeList>::value,
-      "In typelist::find_if<TypeList, Condition>, the TypeList argument must be typelist<...>.");
-};
-template <template <class> class Condition>
-struct find_if<typelist<>, Condition, void> final {
-  static_assert(
-      false_higher_t<Condition>::value,
-      "In typelist::find_if<Type/List, Condition>, didn't find any type fulfilling the Condition.");
-};
-template <class Head, class... Tail, template <class> class Condition>
-struct find_if<
-    typelist<Head, Tail...>,
-    Condition,
-    std::enable_if_t<Condition<Head>::value>>
-    final {
-  static constexpr size_t value = 0;
-};
-template <class Head, class... Tail, template <class> class Condition>
-struct find_if<
-    typelist<Head, Tail...>,
-    Condition,
-    std::enable_if_t<!Condition<Head>::value>>
-    final {
-  static constexpr size_t value =
-      1 + find_if<typelist<Tail...>, Condition>::value;
-};
-
-/**
- * Maps a list of types into a list of values.
- * Examples:
- *   // Example 1
- *   auto sizes =
- *     map_types_to_values<typelist<int64_t, bool, uint32_t>>(
- *       [] (auto t) { return sizeof(decltype(t)::type); }
- *     );
- *   //  sizes  ==  std::tuple<size_t, size_t, size_t>{8, 1, 4}
- *
- *   // Example 2
- *   auto shared_ptrs =
- *     map_types_to_values<typelist<int, double>>(
- *       [] (auto t) { return make_shared<typename decltype(t)::type>(); }
- *     );
- *   // shared_ptrs == std::tuple<shared_ptr<int>, shared_ptr<double>>()
- */
-namespace detail {
-template <class T>
-struct type_ final {
-  using type = T;
-};
-template <class TypeList>
-struct map_types_to_values final {
-  static_assert(
-      false_t<TypeList>::value,
-      "In typelist::map_types_to_values<T>, the T argument must be typelist<...>.");
-};
-template <class... Types>
-struct map_types_to_values<typelist<Types...>> final {
-  template <class Func>
-  static auto call(Func&& func) {
-    return std::tuple{std::forward<Func>(func)(type_<Types>())...};
-  }
-};
-} // namespace detail
-
-template <class TypeList, class Func>
-auto map_types_to_values(Func&& func) {
-  return detail::map_types_to_values<TypeList>::call(std::forward<Func>(func));
-}
-
 } // namespace typelist
 } // namespace c10::guts
 
@@ -524,17 +316,11 @@ namespace typelist {
 using c10::guts::typelist::all;
 using c10::guts::typelist::concat_t;
 using c10::guts::typelist::contains;
-using c10::guts::typelist::count_if;
 using c10::guts::typelist::drop_if_nonempty_t;
 using c10::guts::typelist::drop_t;
-using c10::guts::typelist::filter_t;
-using c10::guts::typelist::find_if;
 using c10::guts::typelist::from_tuple_t;
 using c10::guts::typelist::head_t;
 using c10::guts::typelist::head_with_default_t;
-using c10::guts::typelist::map_t;
-using c10::guts::typelist::map_types_to_values;
-using c10::guts::typelist::reverse_t;
 using c10::guts::typelist::size;
 using c10::guts::typelist::take_t;
 using c10::guts::typelist::to_tuple_t;

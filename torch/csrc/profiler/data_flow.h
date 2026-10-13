@@ -9,7 +9,7 @@
 
 namespace torch::profiler::impl {
 
-// Identity is a complex concept in PyTorch. A Tensor might not have a
+// Identity is a complex concept in PyTorch. A Tensor might not have
 // an associated storage, multiple Tensors might share the same underlying
 // storage, the storage of a Tensor might change over time, etc.
 //

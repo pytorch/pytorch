@@ -30,7 +30,7 @@ class basic_string_view final : public std::basic_string_view<CharT> {
   // `using Base::Base` does not bring Base's copy/move ctors.
   /* implicit */ constexpr basic_string_view(Base sv) noexcept : Base(sv) {}
 
-  constexpr basic_string_view substr(
+  [[nodiscard]] constexpr basic_string_view substr(
       size_type pos = 0,
       size_type count = Base::npos) const {
 #if !defined(__CUDA_ARCH__)
@@ -42,7 +42,7 @@ class basic_string_view final : public std::basic_string_view<CharT> {
 #endif
   }
 
-  constexpr explicit operator std::basic_string<CharT>() const {
+  [[nodiscard]] constexpr explicit operator std::basic_string<CharT>() const {
     return std::basic_string<CharT>(static_cast<const Base&>(*this));
   }
 };
@@ -57,8 +57,16 @@ inline std::basic_ostream<CharT>& operator<<(
 using string_view = std::string_view;
 using c10_string_view = basic_string_view<char>;
 
+struct TransparentStringHash {
+  using is_transparent = void;
+
+  size_t operator()(std::string_view value) const noexcept {
+    return std::hash<std::string_view>{}(value);
+  }
+};
+
 // NOTE: In C++20, this function should be replaced by string_view.starts_with
-constexpr bool starts_with(
+[[nodiscard]] constexpr bool starts_with(
     const std::string_view s,
     const std::string_view prefix) noexcept {
   return (prefix.size() > s.size()) ? false
@@ -66,14 +74,14 @@ constexpr bool starts_with(
 }
 
 // NOTE: In C++20, this function should be replaced by string_view.starts_with
-constexpr bool starts_with(
+[[nodiscard]] constexpr bool starts_with(
     const std::string_view s,
     const char prefix) noexcept {
   return !s.empty() && prefix == s.front();
 }
 
 // NOTE: In C++20, this function should be replaced by string_view.ends_with
-constexpr bool ends_with(
+[[nodiscard]] constexpr bool ends_with(
     const std::string_view s,
     const std::string_view suffix) noexcept {
   return (suffix.size() > s.size())
@@ -82,7 +90,9 @@ constexpr bool ends_with(
 }
 
 // NOTE: In C++20, this function should be replaced by string_view.ends_with
-constexpr bool ends_with(const std::string_view s, const char prefix) noexcept {
+[[nodiscard]] constexpr bool ends_with(
+    const std::string_view s,
+    const char prefix) noexcept {
   return !s.empty() && prefix == s.back();
 }
 

@@ -86,7 +86,7 @@ def get_reversed_fusions() -> list[tuple[NSFusionType, int]]:
             quant_pattern = (quant_pattern[0], quant_pattern[1][0], quant_pattern[1][1])
 
         # Only patterns of multiple ops are fusions, ignore
-        # patterns which contain a single ops (they get matched
+        # patterns which contain a single op (they get matched
         # without caring about fusions).
         if isinstance(quant_pattern, tuple):
             results.append((quant_pattern, default_base_op_idx))  # type: ignore[arg-type]

@@ -45,7 +45,7 @@ class TORCH_API TSComputation : public Computation {
   const std::string to_string() const override {
     std::ostringstream oss;
     oss << *graph_;
-    return oss.str();
+    return std::move(oss).str();
   }
 
   std::shared_ptr<torch::jit::Graph> graph() const {
@@ -79,10 +79,10 @@ class TORCH_API TSLoweringContext : public LoweringContext {
   }
 
   void AddParameter(
-      const torch::lazy::Output& output,
-      size_t index,
-      const Shape& shape,
-      const std::string& name) override {
+      const torch::lazy::Output& /*output*/,
+      size_t /*index*/,
+      const Shape& /*shape*/,
+      const std::string& /*name*/) override {
     TORCH_INTERNAL_ASSERT(false, "not implemented");
   }
 

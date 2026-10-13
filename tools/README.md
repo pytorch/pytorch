@@ -17,11 +17,8 @@ Modern infrastructure:
 
 Build system pieces:
 
-* [setup_helpers](setup_helpers) - Helper code for searching for
-  third-party dependencies on the user system.
-* [build_pytorch_libs.py](build_pytorch_libs.py) - cross-platform script that
-  builds all of the constituent libraries of PyTorch,
-  but not the PyTorch Python extension itself.
+* [setup_helpers](setup_helpers) - Code generation entry points and
+  related helpers invoked from the CMake build.
 * [build_libtorch.py](build_libtorch.py) - Script for building
   libtorch, a standalone C++ library without Python support.  This
   build script is tested in CI.

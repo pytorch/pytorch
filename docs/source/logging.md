@@ -69,6 +69,7 @@ component defaults to `logging.WARN` unless configured.
 * `fake_tensor`: The log level for FakeTensor.
 * `fsdp`: The log level for `FullyShardedDataParallel` components.
 * `inductor`: The log level for the TorchInductor component.
+* `native_dsl`: The log level for the native DSL component.
 * `onnx`: The log level for the ONNX exporter component.
 * `pp`: The log level for distributed pipelining.
 * `torch`: The log level for the top-level `torch` component.
@@ -90,6 +91,8 @@ Internal test-only artifacts are omitted.
   partitioning.
 * `annotation`: Logs detailed steps of creating annotations on graph nodes.
   Off by default.
+* `autotuning_inputs`: Logs per-kernel input tensor shapes/dtypes/strides during
+  autotuning. Off by default.
 * `autotuning`: Logs autotuning choices, such as kernel source, performance,
   and tuning parameters. Off by default.
 * `auto_chunker`: Logs related to the auto chunker. Off by default.

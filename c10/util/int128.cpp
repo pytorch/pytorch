@@ -167,7 +167,7 @@ std::ostream& operator<<(std::ostream& o, const uint128& b) {
     os << std::noshowbase << std::setfill('0') << std::setw(div_base_log);
   }
   os << low.lo_;
-  std::string rep = os.str();
+  std::string rep = std::move(os).str();
 
   // Add the requisite padding.
   std::streamsize width = o.width(0);

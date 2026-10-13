@@ -18,6 +18,21 @@ def remove_cpu(config_list):
     return [config for config in config_list if cpu_config not in config]
 
 
+def remove_rocm_slow_3d_transpose(config_list):
+    # ConvTranspose3d gradient/compile on ROCm (e.g. gfx950) spends ~1-2h per
+    # kernel=5, stride=2 config going through MIOpen generic-solver fallbacks,
+    # pushing the operator_microbenchmark job past its timeout (see
+    # https://github.com/pytorch/pytorch/issues/188557). ROCm reports
+    # device="cuda", so gate on the runtime HIP build rather than the config.
+    if torch.version.hip is None:
+        return config_list
+    return [
+        config
+        for config in config_list
+        if not ({"kernel": 5} in config and {"stride": 2} in config)
+    ]
+
+
 # Configs for conv-1d ops
 conv_1d_configs_short = op_bench.config_list(
     attr_names=["IC", "OC", "kernel", "stride", "N", "L"],

@@ -18,6 +18,7 @@
 #endif
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/Float4_e2m1fn_x2.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
@@ -25,6 +26,7 @@
 #include <c10/util/Float8_e8m0fnu.h>
 #include <c10/util/StringUtil.h>
 #include <fmt/printf.h>
+#include <optional>
 
 namespace at::cuda::tunable {
 
@@ -52,7 +54,10 @@ template <typename T>
 class DefaultGemmAndBiasOp : public Callable<GemmAndBiasParams<T>> {
   public:
     TuningStatus Call(const GemmAndBiasParams<T>* params) override {
-      at::cuda::blas::gemm_and_bias<T>(
+      // gemm_and_bias returns false when cuBLASLt finds no usable algo, and
+      // leaves the output unwritten. Reporting OK would make the caller skip
+      // its unfused retry and consume that buffer.
+      const bool dispatched = at::cuda::blas::gemm_and_bias<T>(
           _transposeBoolFromChar(params->transa),
           _transposeBoolFromChar(params->transb),
           params->m, params->n, params->k,
@@ -62,7 +67,7 @@ class DefaultGemmAndBiasOp : public Callable<GemmAndBiasParams<T>> {
           params->bias,
           params->c, params->ldc,
           params->activation);
-      return OK;
+      return dispatched ? OK : FAIL;
     }
 };
 
@@ -99,12 +104,14 @@ class DefaultScaledGemmOp : public Callable<ScaledGemmParams<T>> {
           params->a_dtype,
           params->a_scale_dtype,
           params->a_scaling_type,
+          params->a_swizzle_type,
           params->b,
           params->b_scale_ptr,
           params->ldb,
           params->b_dtype,
           params->b_scale_dtype,
           params->b_scaling_type,
+          params->b_swizzle_type,
           params->bias_ptr,
           params->bias_dtype,
           params->c,
@@ -112,7 +119,11 @@ class DefaultScaledGemmOp : public Callable<ScaledGemmParams<T>> {
           params->ldc,
           params->c_dtype,
           params->use_fast_accum,
+#ifdef USE_ROCM
           std::nullopt /* alpha */);
+#else
+          params->alpha);
+#endif
       return OK;
     }
 };
@@ -149,11 +160,15 @@ inline const char* TypeName(T v) {
 
 template <>
 inline const char* TypeName(float v) {
-  if (at::globalContext().allowTF32CuBLAS()) {
+  const auto precision = at::globalContext().float32Precision(
+      at::Float32Backend::CUDA, at::Float32Op::MATMUL);
+  if (precision == at::Float32Precision::TF32) {
     return "tf32";
-  } else {
-    return "float";
   }
+  if (at::cuda::blas::useBF16x9()) {
+    return "bfx9";
+  }
+  return "float";
 }
 
 template <>
@@ -169,6 +184,11 @@ inline const char* TypeName(BFloat16 v) {
 template <>
 inline const char* TypeName(Half v) {
   return "Half";
+}
+
+template <>
+inline const char* TypeName(Float4_e2m1fn_x2 v) {
+  return "Float4_e2m1fn_x2";
 }
 
 template <>
@@ -326,7 +346,14 @@ class GemmStridedBatchedTunableOp
 };
 
 template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout>
-class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>> {
+class ScaledGemmTunableOp
+    : public
+#ifdef USE_ROCM
+          TunableOp<ScaledGemmParams<CT>>
+#else
+          CublasltScaledGemmTunableOp<AT, BT, CT, ScaledGemmParams<CT>>
+#endif
+{
  public:
   ScaledGemmTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());

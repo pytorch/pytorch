@@ -173,7 +173,7 @@ void host_softmax(
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
   const scalar_t* input_data_base = input.const_data_ptr<scalar_t>();
-  scalar_t* output_data_base = output.data_ptr<scalar_t>();
+  scalar_t* output_data_base = output.mutable_data_ptr<scalar_t>();
   const bool* mask_data_base = mask;
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, static_cast<int64_t>(1));
   parallel_for(
@@ -260,7 +260,7 @@ void host_softmax_backward(
   }
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
-  scalar_t* gradInput_data_base = gI.data_ptr<scalar_t>();
+  scalar_t* gradInput_data_base = gI.mutable_data_ptr<scalar_t>();
   const scalar_t* output_data_base = output.const_data_ptr<scalar_t>();
   const scalar_t* gradOutput_data_base = grad.const_data_ptr<scalar_t>();
   const bool* mask_data_base = mask;
@@ -409,7 +409,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
 
 Tensor softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
-    if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
+    if ((input_.is_cuda() || input_.is_xpu()) && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
         return at::_softmax(input_, dim_, true);
     } else {
         Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
@@ -425,7 +425,7 @@ Tensor& softmax_out(
     std::optional<ScalarType> dtype,
     Tensor& output_) {
   Tensor output_temp;
-  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half &&
+  if ((input_.is_cuda() || input_.is_xpu()) && input_.scalar_type() == ScalarType::Half &&
       dtype == ScalarType::Float) {
     if (!output_.is_contiguous()) {
       auto options =
@@ -463,7 +463,7 @@ Tensor special_softmax(const Tensor& input_, const int64_t dim_, std::optional<S
 
 Tensor log_softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
-    if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
+    if ((input_.is_cuda() || input_.is_xpu()) && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
         return at::_log_softmax(input_, dim_, true);
     } else {
         Tensor converted = dtype.has_value()? input_.toType(dtype.value()) : input_;
@@ -479,7 +479,7 @@ Tensor& log_softmax_out(
     std::optional<ScalarType> dtype,
     Tensor& output_) {
   Tensor output_temp;
-  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half &&
+  if ((input_.is_cuda() || input_.is_xpu()) && input_.scalar_type() == ScalarType::Half &&
       dtype == ScalarType::Float) {
     if (!output_.is_contiguous()) {
       auto options =

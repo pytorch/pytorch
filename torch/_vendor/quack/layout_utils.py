@@ -38,6 +38,42 @@ def expand(a: cute.Tensor, dim: int, size: Int32 | int) -> cute.Tensor:
 
 
 @cute.jit
+def permute_gated_Cregs_f32(t: cute.Tensor) -> None:
+    """The :func:`permute_gated_Cregs_b16` data movement at fp32 granularity,
+    for gated outputs whose storage dtype is narrower than 16 bits (fp8/fp4
+    quantized postact): each 16-bit half of the b16 version is one fp32
+    register here, so the same quad shuffles + half swaps become selects +
+    shuffles, applied BEFORE the storage-dtype convert (the movement is
+    dtype-independent; the b16 version's prmt recombine cannot address
+    sub-16-bit lanes)."""
+    assert t.element_type.width == 32
+    assert cute.size(t.shape) % 4 == 0, "Tensor size must be a multiple of 4"
+    quad_idx = cute.arch.lane_idx() % 4
+    lane_03 = quad_idx == 0 or quad_idx == 3
+    upper_idx = quad_idx // 2 if quad_idx % 2 == 0 else 3 - quad_idx // 2
+    lower_idx = upper_idx ^ 1
+    width = 4
+    mask = cute.arch.WARP_SIZE - width
+    clamp = cute.arch.WARP_SIZE - 1
+    mask_and_clamp = mask << 8 | clamp
+    for i in cutlass.range(cute.size(t.shape) // 4, unroll_full=True):
+        v0, v1, v2, v3 = t[i * 4 + 0], t[i * 4 + 1], t[i * 4 + 2], t[i * 4 + 3]
+        # upper0/lower0 halves of the b16 version, one f32 each
+        x0 = v0 if lane_03 else v2
+        x1 = v1 if lane_03 else v3
+        y0 = v2 if lane_03 else v0
+        y1 = v3 if lane_03 else v1
+        x0 = cute.arch.shuffle_sync(x0, offset=upper_idx, mask_and_clamp=mask_and_clamp)
+        x1 = cute.arch.shuffle_sync(x1, offset=upper_idx, mask_and_clamp=mask_and_clamp)
+        y0 = cute.arch.shuffle_sync(y0, offset=lower_idx, mask_and_clamp=mask_and_clamp)
+        y1 = cute.arch.shuffle_sync(y1, offset=lower_idx, mask_and_clamp=mask_and_clamp)
+        t[i * 4 + 0] = x0 if lane_03 else y0
+        t[i * 4 + 1] = y0 if lane_03 else x0
+        t[i * 4 + 2] = x1 if lane_03 else y1
+        t[i * 4 + 3] = y1 if lane_03 else x1
+
+
+@cute.jit
 def permute_gated_Cregs_b16(t: cute.Tensor) -> None:
     assert t.element_type.width == 16
     assert cute.size(t.shape) % 4 == 0, "Tensor size must be a multiple of 4 for b16 permutation"
@@ -282,15 +318,8 @@ def mma_partition_C_vec(
 ) -> cute.Tensor:
     assert cute.rank(sVec) == 2
     assert sVec.stride[0] == 1
-    stage = sVec.shape[1]
-    shape = (
-        (sVec.shape[0], expand_shape, stage)
-        if const_expr(is_colvec)
-        else (expand_shape, sVec.shape[0], stage)
-    )
-    stride = (1, 0, sVec.stride[1]) if const_expr(is_colvec) else (0, 1, sVec.stride[1])
-    sVec_mma = cute.make_tensor(sVec.iterator, cute.make_layout(shape, stride=stride))
-    tC_sVec = make_acc_tensor_mn_view(thr_mma.partition_C(sVec_mma))
+    sVec_mma = expand(sVec, 1 if const_expr(is_colvec) else 0, expand_shape)
+    tC_sVec = reshape_acc_to_mn(thr_mma.partition_C(sVec_mma))
     return tC_sVec[None, 0, None] if const_expr(is_colvec) else tC_sVec[0, None, None]
 
 
@@ -299,15 +328,8 @@ def mma_partition_A_vec(
 ) -> cute.Tensor:
     assert cute.rank(sVec) == 2
     assert sVec.stride[0] == 1
-    stage = sVec.shape[1]
-    shape = (
-        (sVec.shape[0], expand_shape, stage)
-        if const_expr(is_colvec)
-        else (expand_shape, sVec.shape[0], stage)
-    )
-    stride = (1, 0, sVec.stride[1]) if const_expr(is_colvec) else (0, 1, sVec.stride[1])
-    sVec_mma = cute.make_tensor(sVec.iterator, cute.make_layout(shape, stride=stride))
-    tC_sVec = make_acc_tensor_mn_view(thr_mma.partition_A(sVec_mma))
+    sVec_mma = expand(sVec, 1 if const_expr(is_colvec) else 0, expand_shape)
+    tC_sVec = reshape_acc_to_mn(thr_mma.partition_A(sVec_mma))
     return tC_sVec[None, 0, None] if const_expr(is_colvec) else tC_sVec[0, None, None]
 
 
@@ -316,14 +338,7 @@ def copy_partition_S_vec(
 ) -> cute.Tensor:
     assert cute.rank(sVec) == 2
     assert sVec.stride[0] == 1
-    stage = sVec.shape[1]
-    shape = (
-        (sVec.shape[0], expand_shape, stage)
-        if const_expr(is_colvec)
-        else (expand_shape, sVec.shape[0], stage)
-    )
-    stride = (1, 0, sVec.stride[1]) if const_expr(is_colvec) else (0, 1, sVec.stride[1])
-    sVec_thr = cute.make_tensor(sVec.iterator, cute.make_layout(shape, stride=stride))
+    sVec_thr = expand(sVec, 1 if const_expr(is_colvec) else 0, expand_shape)
     tC_sVec = reshape_acc_to_mn(thr_copy.partition_S(sVec_thr))
     return tC_sVec[None, 0, None] if const_expr(is_colvec) else tC_sVec[0, None, None]
 
@@ -333,14 +348,7 @@ def copy_partition_D_vec(
 ) -> cute.Tensor:
     assert cute.rank(sVec) == 2
     assert sVec.stride[0] == 1
-    stage = sVec.shape[1]
-    shape = (
-        (sVec.shape[0], expand_shape, stage)
-        if const_expr(is_colvec)
-        else (expand_shape, sVec.shape[0], stage)
-    )
-    stride = (1, 0, sVec.stride[1]) if const_expr(is_colvec) else (0, 1, sVec.stride[1])
-    sVec_thr = cute.make_tensor(sVec.iterator, cute.make_layout(shape, stride=stride))
+    sVec_thr = expand(sVec, 1 if const_expr(is_colvec) else 0, expand_shape)
     tC_sVec = reshape_acc_to_mn(thr_copy.partition_D(sVec_thr))
     return tC_sVec[None, 0, None] if const_expr(is_colvec) else tC_sVec[0, None, None]
 
@@ -367,11 +375,11 @@ def tile_atom_to_shape_SF_strided(
         shape: A/B operand shape. Rank-3 `(m/n, k, l)` or rank-2
             `(total_mn, k)` (varlen_m).
         sf_vec_size: Scale factor vector size (16 or 32).
-        sf_strides: Strides of the scale tensor, which has logical shape
-            `(L, rmn, rk, 512)` (rank 4). Only `sf_strides[0..2]` are used:
-            `sf_strides[1]` as the rmn stride, `sf_strides[2]` as the rk
-            stride, and `sf_strides[0]` as the L stride (only for rank-3
-            `shape`).
+        sf_strides: Strides of the `(L, rmn, rk, 32, 4, 4)` scale tensor.
+            Only `sf_strides[0..2]` are used: `sf_strides[1]` as the rmn
+            stride, `sf_strides[2]` as the rk stride, and `sf_strides[0]` as
+            the L stride (only for rank-3 `shape`); the inner atom layout is
+            hardware-fixed.
     """
     from cutlass.utils.blockscaled_layout import BlockScaledBasicChunk
 

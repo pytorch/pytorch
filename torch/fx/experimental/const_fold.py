@@ -1,4 +1,5 @@
 import re
+import types
 from collections.abc import Callable
 from typing import Any
 
@@ -82,7 +83,10 @@ class FoldedGraphModule(torch.fx.GraphModule):
 
 
 def _inline_module(
-    gm: torch.fx.GraphModule, inline_mod_name: str, run_dce: bool = True
+    gm: torch.fx.GraphModule,
+    inline_mod_name: str,
+    run_dce: bool = True,
+    is_impure_node: Callable[[torch.fx.Node], bool] | None = None,
 ) -> dict[torch.fx.Node, torch.fx.Node]:
     """
     Given `gm` and some graph module which is called with target name `inline_mod_name`,
@@ -166,7 +170,7 @@ def _inline_module(
     # this module is unneeded as it's just inlined back to main graph.
     gm.graph.erase_node(call_mod_node_to_replace)
     if run_dce:
-        gm.graph.eliminate_dead_code()
+        gm.graph.eliminate_dead_code(is_impure_node=is_impure_node)
 
     return replacement_mapping
 
@@ -195,6 +199,7 @@ def split_const_subgraphs(
     module: torch.nn.Module | torch.fx.GraphModule,
     skip_folding_node_fn: Callable[[torch.fx.Node], bool] | None = None,
     device_for_folded_attrs: str = "cpu",
+    is_impure_node: Callable[[torch.fx.Node], bool] | None = None,
 ) -> FoldedGraphModule:
     """
     Looks through `module` for any nodes that have all constant attribute inputs
@@ -202,6 +207,18 @@ def split_const_subgraphs(
     FoldedGraphModule which runs that constant subgraph on the first run to set
     attributes on the module prior to running the non-constant portion of the
     graph.
+
+    `skip_folding_node_fn`, if provided, may be invoked on nodes owned by nested
+    `call_module` subgraphs, not just top-level nodes: a `call_module` node is
+    folded atomically, so it is skipped if any node inside its subgraph is
+    skipped. Predicates must therefore be node-local; one that needs to resolve a
+    node's `target` to a submodule must use `node.graph.owning_module` rather than
+    a captured top-level module.
+
+    `is_impure_node`, if provided, is forwarded to `eliminate_dead_code` so DCE
+    preserves nodes the caller considers impure beyond the default
+    `Node.is_impure()` check (e.g. out-variant ops that write a pre-allocated
+    buffer via an `out=` kwarg not declared mutable in their schema).
     """
 
     import sympy
@@ -231,6 +248,29 @@ def split_const_subgraphs(
                 return _subgraph_has_impure_ops(submodule)
         return False
 
+    def _subgraph_has_skipped_node(
+        module: torch.fx.GraphModule,
+        skip_fn: Callable[[torch.fx.Node], bool],
+    ) -> bool:
+        """
+        Return True if a GraphModule type subgraph contains any node that
+        `skip_fn` says to skip, recursing into nested submodules.
+        """
+        for node in module.graph.nodes:
+            if node.op in {"placeholder", "output"}:
+                continue
+            if skip_fn(node):
+                return True
+            if (
+                node.op == "call_module"
+                # pyrefly: ignore [not-callable]
+                and (submodule := module.get_submodule(node.target))
+                and isinstance(submodule, torch.fx.GraphModule)
+                and _subgraph_has_skipped_node(submodule, skip_fn)
+            ):
+                return True
+        return False
+
     # Build up a list of const_nodes, defined as nodes that are themselves
     # get_attrs, or have all get_attr or other constant node inputs.
     const_nodes: set[torch.fx.Node] = set()
@@ -243,14 +283,37 @@ def split_const_subgraphs(
 
         # If the node itself is constant, or all of its inputs are constant,
         # then tag it as constant.
-        if node.op != "get_attr" and not set(node.all_input_nodes).issubset(
-            const_nodes
-        ):
+        if node.op == "get_attr":
+            # Only fold get_attr nodes that resolve to tensors (parameters,
+            # buffers). Module references and unresolvable paths must be
+            # excluded -- split_module handles get_attr nodes outside the
+            # normal partition callback, so tagging alone is not enough.
+            try:
+                parts = node.target.split(".")
+                obj = mod_traced
+                for part in parts:
+                    obj = getattr(obj, part)
+            except AttributeError:
+                continue
+            if isinstance(obj, (torch.nn.Module, types.ModuleType)):
+                continue
+        elif not set(node.all_input_nodes).issubset(const_nodes):
             continue
 
-        # If provided skip folding function says to skip, then skip.
-        if skip_folding_node_fn and skip_folding_node_fn(node):
-            continue
+        # If provided skip folding function says to skip, then skip. Also skip a
+        # call_module node whose subgraph contains a node that should be skipped,
+        # since a call_module node can only be folded as a whole.
+        if skip_folding_node_fn is not None:
+            if skip_folding_node_fn(node):
+                continue
+            if (
+                node.op == "call_module"
+                # pyrefly: ignore [not-callable]
+                and (target_mod := mod_traced.get_submodule(node.target))
+                and isinstance(target_mod, torch.fx.GraphModule)
+                and _subgraph_has_skipped_node(target_mod, skip_folding_node_fn)
+            ):
+                continue
 
         # Skip folding side-effectful functions
         if node.is_impure():
@@ -394,9 +457,9 @@ def split_const_subgraphs(
     # This is so that the original caller who may have passed in a graph module will
     # get back out a graph module whose graph is traced to the same granularity.
     if hasattr(split, non_const_mod_name):
-        _inline_module(split, non_const_mod_name)
+        _inline_module(split, non_const_mod_name, is_impure_node=is_impure_node)
 
-    split.graph.eliminate_dead_code()
+    split.graph.eliminate_dead_code(is_impure_node=is_impure_node)
 
     return FoldedGraphModule(
         split,

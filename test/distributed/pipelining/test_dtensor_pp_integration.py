@@ -33,7 +33,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    TEST_MULTIACCELERATOR,
 )
 
 
@@ -140,12 +139,16 @@ def _loss_fn(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 def _requires_multi_gpu(func):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 4+ GPUs"
+        torch.accelerator.device_count() < 4,
+        f"{backend} test requires 4+ GPUs",
     )
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
 
+    # Decorators above may rebind wrapper. Stamp the object pytest collects
+    # (item.obj), not the inner function. The skip condition is unchanged.
+    wrapper._min_gpus_required = 4
     return wrapper
 
 
@@ -165,8 +168,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
         return torch.device(device_type, self.rank)
 
     def init_pg(self) -> None:
-        if device_type == "cuda":
-            torch.cuda.set_device(self.device)
+        torch.accelerator.set_device_index(self.device.index)
 
     def _make_mesh(self) -> DeviceMesh:
         return init_device_mesh(device_type, (2, 2), mesh_dim_names=("pp", "tp"))
@@ -417,9 +419,12 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
         stage_module = pp_model.get_submodule(f"layers.{stage_index}")
         for name, param in stage_module.named_parameters():
             param_fqn = f"layers.{stage_index}.{name}"
-            self.assertIsNotNone(param.grad, f"Missing PP grad for {param_fqn}")
             self.assertIsNotNone(
-                ref_grads[param_fqn], f"Missing reference grad for {param_fqn}"
+                param.grad, lambda msg: f"{msg}\nMissing PP grad for {param_fqn}"
+            )
+            self.assertIsNotNone(
+                ref_grads[param_fqn],
+                lambda msg: f"{msg}\nMissing reference grad for {param_fqn}",
             )
             pp_grad = cast(torch.Tensor, param.grad)
             ref_grad = cast(torch.Tensor, ref_grads[param_fqn])

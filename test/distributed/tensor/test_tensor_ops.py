@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-import itertools
 import unittest
 
 import torch
@@ -24,15 +23,14 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
     DTensorConverter,
-    DTensorTestBase,
     LocalDTensorContinuousTestBase,
     LocalDTensorTestBase,
+    NUM_DEVICES,
     op_strategy_context,
     with_comms,
 )
@@ -798,7 +796,6 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             self.assertEqual(output_dt.placements, [Shard(gather_dim)])
             self.assertEqual(output_dt.full_tensor(), global_output)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/175064")
     @serialTest()  # heavy combinatorial _test_op calls, serialize to avoid OOM
     def test_index(self):
         meshes = [
@@ -1484,32 +1481,84 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 
     def test_unbind(self):
         device_mesh = self.build_device_mesh()
-        shard_dims = [0, 1]
-        unbind_dims = [0, 1]
-        local_tensor = torch.randn(4, 8, requires_grad=True)
-        for shard_dim, unbind_dim in itertools.product(shard_dims, unbind_dims):
+        cases = [
+            # (shape, shard_dim, unbind_dim)
+            ((4, 8), 0, 1),
+            ((4, 8), 1, 0),
+            ((4, 3), 1, 0),
+            ((4, 8), 0, 0),
+            ((4, 8), 1, 1),
+            ((4, 8), 0, -1),
+            ((4, 4, 8), 0, 1),
+            ((4, 4, 8), 2, 1),
+            ((4, 4, 8), 1, 1),
+            ((4, 4, 8), 0, -1),
+        ]
+        for shape, shard_dim, unbind_dim in cases:
+            local_tensor = torch.randn(*shape, requires_grad=True)
             dist_tensor = distribute_tensor(
                 local_tensor, device_mesh, (Shard(shard_dim),)
             )
+            norm_dim = unbind_dim if unbind_dim >= 0 else unbind_dim + len(shape)
+            if shard_dim == norm_dim:
+                with CommDebugMode() as comm_mode:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        f"Attempted to unbind along the sharded dimension {norm_dim}. "
+                        "Please redistribute the input explicitly before unbinding.",
+                    ):
+                        dist_tensor.unbind(dim=unbind_dim)
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+                continue
 
-            if shard_dim == unbind_dim:
-                with self.assertRaisesRegex(
-                    RuntimeError, "Sharding propagation failed"
-                ):
-                    dist_tensor.unbind(dim=unbind_dim)
-            else:
+            with CommDebugMode() as comm_mode:
                 unbinded_dist_tensors = dist_tensor.unbind(dim=unbind_dim)
-                new_shard_dim = shard_dim if shard_dim < unbind_dim else shard_dim - 1
-                self.assertTrue(
-                    all(
-                        elem.placements[0].is_shard(dim=new_shard_dim)
-                        for elem in unbinded_dist_tensors
-                    )
+            self.assertEqual(len(unbinded_dist_tensors), shape[norm_dim])
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            new_shard_dim = shard_dim if shard_dim < norm_dim else shard_dim - 1
+            self.assertTrue(
+                all(
+                    elem.placements[0].is_shard(dim=new_shard_dim)
+                    for elem in unbinded_dist_tensors
                 )
-                for x, y in zip(
-                    unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)
-                ):
-                    self.assertEqual(x.full_tensor(), y)
+            )
+            for x, y in zip(unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)):
+                self.assertEqual(x.full_tensor(), y)
+
+        # replicated input stays replicated without communication
+        local_tensor = torch.randn(4, 8)
+        dist_tensor = distribute_tensor(local_tensor, device_mesh, (Replicate(),))
+        with CommDebugMode() as comm_mode:
+            unbinded_dist_tensors = dist_tensor.unbind(dim=0)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        for elem in unbinded_dist_tensors:
+            self.assertEqual(elem.placements, (Replicate(),))
+
+    def test_unbind_on_partial(self):
+        self.run_subtests(
+            {
+                "reduce_op": ["sum", "avg", "min", "max"],
+                "unbind_dim": [0, -1],
+            },
+            self._test_unbind_on_partial,
+        )
+
+    def _test_unbind_on_partial(self, reduce_op: str, unbind_dim: int):
+        self.init_manual_seed_for_rank()
+        mesh = self.build_device_mesh()
+
+        partial_tensor = torch.randn(8, 8, device=self.device_type)
+        partial_dt = DTensor.from_local(
+            local_tensor=partial_tensor,
+            device_mesh=mesh,
+            placements=[Partial(reduce_op=reduce_op)],
+        )
+        with CommDebugMode() as comm_mode:
+            unbinded = torch.unbind(partial_dt, dim=unbind_dim)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        for elem in unbinded:
+            self.assertEqual(elem.placements, (Partial(reduce_op),))
+        self._test_op_on_dtensor(torch.unbind, partial_dt, dim=unbind_dim)
 
     @with_comms
     def test_select_scatter(self):
@@ -1573,7 +1622,7 @@ class DistBucketizeTest(LocalDTensorTestBase):
 
                 self.assertTrue(
                     result.placements[0].is_replicate(),
-                    f"Expected Replicate output but got {result.placements[0]} "
+                    lambda msg: f"{msg}\nExpected Replicate output but got {result.placements[0]} "
                     f"for Partial({reduce_op}) input",
                 )
                 global_input = partial_input.full_tensor()
@@ -1590,7 +1639,7 @@ class DistBucketizeTest(LocalDTensorTestBase):
 
                 self.assertTrue(
                     result.placements[0].is_partial(),
-                    f"Expected Partial output but got {result.placements[0]} "
+                    lambda msg: f"{msg}\nExpected Partial output but got {result.placements[0]} "
                     f"for Partial({reduce_op}) input",
                 )
                 self.assertEqual(
@@ -1657,11 +1706,15 @@ class DistToCopyTest(LocalDTensorTestBase):
                 result = dt.to(target_dtype)
                 p = result.placements[0]
                 if expect_partial:
-                    self.assertTrue(p.is_partial(), f"{reduce_op}→{target_dtype}: {p}")
+                    self.assertTrue(
+                        p.is_partial(),
+                        lambda msg: f"{msg}\n{reduce_op}→{target_dtype}: {p}",
+                    )
                     self.assertEqual(p.reduce_op, reduce_op)
                 else:
                     self.assertTrue(
-                        p.is_replicate(), f"{reduce_op}→{target_dtype}: {p}"
+                        p.is_replicate(),
+                        lambda msg: f"{msg}\n{reduce_op}→{target_dtype}: {p}",
                     )
 
 
@@ -1900,7 +1953,9 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
         self.assertNotEqual(schema1, schema2)
 
 
-class TestNewEmptyStridedUneven(DTensorTestBase):
+class TestNewEmptyStridedUneven(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     @with_comms
     def test_backward_no_allgather(self):
         """Backward on unevenly-sharded DTensor should not allgather (issue #107661)."""
@@ -1997,7 +2052,7 @@ class TestNewEmptyStridedUneven(DTensorTestBase):
         self.assertIsNotNone(model._grad_placement)
         self.assertTrue(
             all(isinstance(p, Partial) for p in model._grad_placement),
-            f"Expected Partial grad placement, got {model._grad_placement}",
+            lambda msg: f"{msg}\nExpected Partial grad placement, got {model._grad_placement}",
         )
 
     @with_comms

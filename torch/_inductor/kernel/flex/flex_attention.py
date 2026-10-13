@@ -13,21 +13,25 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch._logging import warning_once
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.nn.attention.flex_attention import _Backend
-from torch.utils._sympy.functions import FloorDiv, Mod
+from torch.utils._sympy.functions import FloorDiv
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
+from ...runtime.runtime_utils import is_power_of_2
 from ...select_algorithm import (
     autotune_select_algorithm,
     SymbolicGridFn,
     TritonTemplate,
 )
-from ...utils import can_use_tma
+from ...utils import can_use_tma, use_flex_tdm_descriptor
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
     build_subgraph_buffer,
+    can_skip_boundary_checks,
     create_indices_fake,
     create_num_blocks_fake_generator,
     create_placeholder,
@@ -52,10 +56,11 @@ from .flex_flash_attention import (
     is_trivial_mask_graph,
     is_trivial_score_graph,
 )
+from .flex_flydsl_attention import create_flydsl_flex_attention_kernel
 
 
 if TYPE_CHECKING:
-    from ...template_heuristics.triton import FlexBwDConfig, FlexConfig
+    from ...heuristics.template.triton import FlexBwDConfig, FlexConfig
 
 
 log = logging.getLogger(__name__)
@@ -125,19 +130,27 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
     return (cdiv(num_queries, meta["BLOCK_M"]), batch_size, q_heads)
 
 
-def get_float32_precision():
-    if (
-        (
-            torch.backends.cuda.matmul.fp32_precision == "ieee"
-            if torch.backends.cuda.matmul.fp32_precision != "none"
-            else torch.get_float32_matmul_precision() == "highest"
+def set_float32_precision(kernel_options: dict[str, Any], dtype: torch.dtype) -> None:
+    precision = torch.backends.cuda.matmul.fp32_precision
+    if precision == "none":
+        # Unset at every level of the per-backend hierarchy; the legacy
+        # default is "highest". Do not fall back to the legacy getter,
+        # which throws under mixed legacy/new API state.
+        precision = "ieee"
+    if dtype == torch.float32 and precision == "bfx9":
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        warning_once(
+            log,
+            "FP32 FlexAttention does not support bfx9 precision; using IEEE precision instead.",
         )
-        or torch.version.hip
-        or torch.mtia.is_available()
-    ):
-        return "'ieee'"
-    else:
-        return "'tf32'"
+        kernel_options["FLOAT32_PRECISION"] = "'ieee'"
+        return
+    precision = (
+        "ieee"
+        if precision == "ieee" or torch.version.hip or torch.mtia.is_available()
+        else "tf32"
+    )
+    kernel_options.setdefault("FLOAT32_PRECISION", repr(precision))
 
 
 flex_attention_template = TritonTemplate(
@@ -237,6 +250,9 @@ def flex_attention(
     if backend == "FLASH":
         score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
         mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
+    elif backend == "FLYDSL":
+        score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+        mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -271,10 +287,31 @@ def flex_attention(
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
-    kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
+    set_float32_precision(kernel_options, query.get_dtype())
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
+
+    if backend == "FLYDSL":
+        return create_flydsl_flex_attention_kernel(
+            query=query,
+            key=key,
+            value=value,
+            kv_num_blocks=kv_num_blocks,
+            kv_indices=kv_indices,
+            full_kv_num_blocks=full_kv_num_blocks,
+            full_kv_indices=full_kv_indices,
+            subgraph=subgraph,
+            mask_graph=mask_graph,
+            score_mod_other_buffers=score_mod_other_buffers,
+            mask_mod_other_buffers=mask_mod_other_buffers,
+            scale=scale,
+            sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
+            sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
+            subgraph_buffer=subgraph_buffer,
+            mask_graph_buffer=mask_graph_buffer,
+            write_max_scores=kernel_options.get("OUTPUT_MAX", True),
+        )
 
     can_use_decode = _use_flex_decoding(
         query, kv_indices, value, kernel_options, enable_gqa
@@ -367,7 +404,7 @@ def flex_attention(
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
     if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
         raise AssertionError(
-            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+            f"Bq and Bkv must be broadcastable. Got Bq={Bq} and Bkv={Bkv}"
         )
     if not V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_q, 0)):
         raise AssertionError("Query length must be greater than 0")
@@ -376,12 +413,8 @@ def flex_attention(
 
     B = Bq
 
-    seq_q_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_q, 128), 0)
-    )
-    seq_kv_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_kv, 128), 0)
-    )
+    seq_q_divisible = can_skip_boundary_checks(seq_len_q, SPARSE_Q_BLOCK_SIZE)
+    seq_kv_divisible = can_skip_boundary_checks(seq_len_kv, SPARSE_KV_BLOCK_SIZE)
     if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
     else:
@@ -443,9 +476,6 @@ def flex_attention(
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
 
-    # Note, we don't need to pass in the captured buffers explicitly
-    # because they're implicitly added by the score_mod function
-    # We do need to explicitly pass it in for autotuning though.
     original_kernel_options = kernel_options.copy()
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
@@ -470,14 +500,18 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # Intel GPU enables TMA by default
-        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+        # Shrink default tiles to fit smaller pow2 sparse block sizes;
+        # user-pinned tiles and non-pow2 sparse sizes still error out below.
+        block_m, block_n = conf.block_m, conf.block_n
+        if len(configs) == 1 and all(
+            is_power_of_2(s) and s >= 16
+            for s in (SPARSE_Q_BLOCK_SIZE, SPARSE_KV_BLOCK_SIZE)
+        ):
+            block_m = min(block_m, SPARSE_Q_BLOCK_SIZE)
+            block_n = min(block_n, SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("BLOCK_M", block_m)
+        cur_kernel_options.setdefault("BLOCK_N", block_n)
 
-        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
-            cur_kernel_options["USE_TMA"] = False
-
-        cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
-        cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
@@ -498,6 +532,44 @@ def flex_attention(
                     SPARSE_KV_BLOCK_SIZE,
                 )
             continue
+
+        # Descriptor selection runs after the tile rejection above so a config
+        # that is about to be discarded cannot install descriptor range bounds.
+        #
+        # A default of True means "absent": omission keeps automatic selection,
+        # while any explicit falsy value (False, 0, None) forces pointer loads.
+        tdm_requested = bool(cur_kernel_options.get("USE_TMA", True))
+
+        # ROCm reports device type "cuda", so route it exclusively. The generic
+        # probe excludes HIP only in its CUDA arm, so it can read true on a ROCm
+        # host and would then enable descriptors under NVIDIA's rules, skipping
+        # the ROCm floor, the gfx1250 probe and the operand policy.
+        if torch.version.hip is not None and query.get_device().type == "cuda":
+            cur_kernel_options["USE_TMA"] = tdm_requested and use_flex_tdm_descriptor(
+                query,
+                key,
+                value,
+                block_shapes=[
+                    (
+                        cur_kernel_options["BLOCK_M"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["V_HEAD_DIM_ROUNDED"],
+                    ),
+                ],
+            )
+        else:
+            # Intel GPU enables TMA by default
+            cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+
+            if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+                cur_kernel_options["USE_TMA"] = False
 
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
@@ -564,21 +636,6 @@ def flex_attention(
             SPARSE_KV_BLOCK_SIZE,
         )
 
-    inputs_for_autotuning = (
-        [
-            query,
-            key,
-            value,
-            logsumexp,
-            max_scores,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-        ]
-        + list(score_mod_other_buffers)
-        + list(mask_mod_other_buffers)
-    )
     input_gen_fns = {
         5: create_num_blocks_fake_generator(kv_indices),
         6: create_indices_fake,
@@ -589,9 +646,8 @@ def flex_attention(
     out, _ = autotune_select_algorithm(
         "flex_attention",
         choices,
-        # Autotuning materializes benchmark tensors. Scalar shape captures stay
-        # in subgraph_inps below for dependency tracking and codegen.
-        [x for x in inputs_for_autotuning if is_tensor_ir_node(x)],
+        # Use generated inputs because codegen can inline capture producers.
+        list(choices[0].input_nodes) if choices else [],
         layout,
         input_gen_fns=input_gen_fns,
     )
@@ -636,6 +692,54 @@ flex_attention_backward_template = TritonTemplate(
 )
 
 
+def _fuse_nested_index_backward(joint_graph: torch.fx.GraphModule) -> None:
+    r"""Fuse the backward of table[i][j] into one scatter for table[i, j]."""
+    from torch._inductor.pattern_matcher import (
+        CallFunction,
+        KeywordArg,
+        Match,
+        PatternMatcherPass,
+        register_graph_pattern,
+    )
+
+    scatter = torch.ops.flex_lib.zeros_and_scatter.default
+    patterns = PatternMatcherPass(pass_name="flex_attention_index_backward")
+
+    def same_shape(match: Match) -> bool:
+        args = match.kwargs
+        shapes = (args["shape"][len(args["indices"]) :], args["inner_shape"])
+        remaining, inner = torch.fx.map_arg(shapes, lambda n: n.meta["val"])
+        return statically_known_true(sym_eq(remaining, inner))
+
+    @register_graph_pattern(
+        CallFunction(
+            scatter,
+            KeywordArg("shape"),
+            KeywordArg("indices"),
+            CallFunction(
+                scatter,
+                KeywordArg("inner_shape"),
+                KeywordArg("inner_indices"),
+                KeywordArg("value"),
+            ),
+        ),
+        extra_check=same_shape,
+        # pyrefly: ignore [bad-argument-type]
+        pass_dict=patterns,
+    )
+    def fuse(match: Match, shape, indices, inner_shape, inner_indices, value):
+        match.output_node().args = (shape, [*indices, *inner_indices], value)
+        match.erase_nodes()
+
+    # Matching runs backward through the graph; repeat to collapse longer chains.
+    changed = False
+    while patterns.apply(joint_graph):
+        changed = True
+    if changed:
+        joint_graph.graph.lint()
+        joint_graph.recompile()
+
+
 def validate_joint_graph(joint_graph: torch.fx.Graph):
     """We do some pre lowering graph checks in order to raise nicer error messages"""
     for node in joint_graph.nodes:
@@ -655,7 +759,10 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
                         "    bias1 = bias.clone()\n"
                         "    def score_mod(score, b, h, q_idx, kv_idx):\n"
                         "        return score + bias[q_idx] + bias1[kv_idx]\n\n"
-                        "Note that this solution will use additional memory."
+                        "Note that this solution will use additional memory.\n\n"
+                        "For chained indexing with operations in between, such as "
+                        "(table[idx] * 2)[0], apply all indices in one indexing "
+                        "expression instead: table[idx, 0] * 2."
                     )
     return
 
@@ -806,7 +913,7 @@ def flex_attention_backward(*args, **kwargs):
 
     if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
         raise AssertionError(
-            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+            f"Bq and Bkv must be broadcastable. Got Bq={Bq} and Bkv={Bkv}"
         )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
@@ -829,17 +936,13 @@ def flex_attention_backward(*args, **kwargs):
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
-    kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
+    set_float32_precision(kernel_options, query.get_dtype())
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
     kernel_options.setdefault("WRITE_DQ", True)
-    seq_q_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_q, 128), 0)
-    )
-    seq_kv_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_kv, 128), 0)
-    )
+    seq_q_divisible = can_skip_boundary_checks(seq_len_q, SPARSE_Q_BLOCK_SIZE)
+    seq_kv_divisible = can_skip_boundary_checks(seq_len_kv, SPARSE_KV_BLOCK_SIZE)
     if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
     else:
@@ -865,6 +968,7 @@ def flex_attention_backward(*args, **kwargs):
     ]
     # Sometimes we have weird unused nodes here
     joint_graph.graph_module.graph.eliminate_dead_code()
+    _fuse_nested_index_backward(joint_graph.graph_module)
 
     # It is hard to raise nice errors for some joint graphs during subgraph lowering
     # This lets us do some checks before attempting to lower
@@ -903,16 +1007,9 @@ def flex_attention_backward(*args, **kwargs):
         score_mod_other_buffers=score_mod_other_buffers,
     ):
         needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
-
-        # TODO: Implement dLSE support in flash-attention backward by folding
-        # grad_logsumexp into the dPsum preprocess step.
         if grad_logsumexp is not None:
-            raise NotImplementedError(
-                "FLASH backend backward does not support differentiating through "
-                "logsumexp (dLSE). This happens when the loss depends on the LSE "
-                "output of flex_attention. "
-                "Use BACKEND='TRITON' or avoid differentiating through logsumexp."
-            )
+            (grad_logsumexp,) = maybe_realize([grad_logsumexp])
+
         score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
             query,
@@ -921,6 +1018,7 @@ def flex_attention_backward(*args, **kwargs):
             out,
             logsumexp,
             grad_out,
+            grad_logsumexp,
             scale,
             kernel_options,
             SPARSE_Q_BLOCK_SIZE,
@@ -1021,6 +1119,35 @@ def flex_attention_backward(*args, **kwargs):
     invalid_block_options: dict[str, Any] | None = None
 
     original_kernel_options = kernel_options.copy()
+    bwd_input_nodes = [
+        query,
+        key,
+        value,
+        logsumexp,
+        delta,
+        grad_out,
+        grad_query,
+        broadcasted_grad_value,
+        kv_num_blocks,
+        kv_indices,
+        q_num_blocks,
+        q_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        full_q_num_blocks,
+        full_q_indices,
+    ]
+    bwd_subgraphs = [
+        fw_subgraph_buffer,
+        joint_outputs.grad_input,
+        mask_graph_buffer,
+        joint_outputs.captured_grads_compute,
+    ]
+    bwd_mutated_inputs = [
+        grad_query,
+        broadcasted_grad_value,
+        *joint_outputs.mutated_grads,
+    ]
 
     for conf in configs:
         # Performance tuning
@@ -1048,10 +1175,25 @@ def flex_attention_backward(*args, **kwargs):
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
 
-        cur_kernel_options.setdefault("BLOCK_M1", conf.block_m1)
-        cur_kernel_options.setdefault("BLOCK_N1", conf.block_n1)
-        cur_kernel_options.setdefault("BLOCK_M2", conf.block_m2)
-        cur_kernel_options.setdefault("BLOCK_N2", conf.block_n2)
+        # Shrink default tiles to fit smaller pow2 sparse block sizes;
+        # user-pinned tiles and non-pow2 sparse sizes still error out below.
+        block_m1, block_n1 = conf.block_m1, conf.block_n1
+        block_m2, block_n2 = conf.block_m2, conf.block_n2
+        if len(configs) == 1 and all(
+            is_power_of_2(s) and s >= 16
+            for s in (SPARSE_Q_BLOCK_SIZE, SPARSE_KV_BLOCK_SIZE)
+        ):
+            block_m1 = min(block_m1, SPARSE_Q_BLOCK_SIZE)
+            block_n1 = min(block_n1, SPARSE_KV_BLOCK_SIZE)
+            block_m2 = min(block_m2, SPARSE_Q_BLOCK_SIZE)
+            block_n2 = min(block_n2, SPARSE_KV_BLOCK_SIZE)
+            # Kernel static asserts: BLOCK_N1 % BLOCK_M1 == BLOCK_M2 % BLOCK_N2 == 0
+            block_m1 = min(block_m1, block_n1)
+            block_n2 = min(block_n2, block_m2)
+        cur_kernel_options.setdefault("BLOCK_M1", block_m1)
+        cur_kernel_options.setdefault("BLOCK_N1", block_n1)
+        cur_kernel_options.setdefault("BLOCK_M2", block_m2)
+        cur_kernel_options.setdefault("BLOCK_N2", block_n2)
 
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
@@ -1069,6 +1211,9 @@ def flex_attention_backward(*args, **kwargs):
             or cur_kernel_options["SPARSE_Q_BLOCK_SIZE"]
             % cur_kernel_options["BLOCK_M2"]
             != 0
+            # Kernel static asserts; validate here for a friendly error.
+            or cur_kernel_options["BLOCK_N1"] % cur_kernel_options["BLOCK_M1"] != 0
+            or cur_kernel_options["BLOCK_M2"] % cur_kernel_options["BLOCK_N2"] != 0
         ):
             invalid_block_options = cur_kernel_options
             if len(configs) == 1:
@@ -1088,39 +1233,25 @@ def flex_attention_backward(*args, **kwargs):
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
-            input_nodes=[
-                query,
-                key,
-                value,
-                logsumexp,
-                delta,
-                grad_out,
-                grad_query,
-                broadcasted_grad_value,
-                kv_num_blocks,
-                kv_indices,
-                q_num_blocks,
-                q_indices,
-                full_kv_num_blocks,
-                full_kv_indices,
-                full_q_num_blocks,
-                full_q_indices,
-            ],
+            input_nodes=bwd_input_nodes,
             layout=layout_broadcasted_k,  # We use store_output only for grad_key
-            subgraphs=[
-                fw_subgraph_buffer,
-                joint_outputs.grad_input,
-                mask_graph_buffer,
-                joint_outputs.captured_grads_compute,
-            ],
-            mutated_inputs=[
-                grad_query,
-                broadcasted_grad_value,
-                *joint_outputs.mutated_grads,
-            ],
+            subgraphs=bwd_subgraphs,
+            mutated_inputs=bwd_mutated_inputs,
             call_sizes=query.get_size() + key.get_size()[1:3],
             **cur_kernel_options,
         )
+
+    choices = V.choices.append_flex_attention_backward_choices(
+        choices,
+        configs,
+        list(bwd_input_nodes),
+        list(bwd_subgraphs),
+        layout_broadcasted_k,
+        original_kernel_options,
+        SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
+        mutated_inputs=list(bwd_mutated_inputs),
+    )
 
     if not choices and invalid_block_options is not None:
         raise_flex_kernel_options_error(
@@ -1135,24 +1266,7 @@ def flex_attention_backward(*args, **kwargs):
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     inputs_for_autotuning = (
-        [
-            query,
-            key,
-            value,
-            logsumexp,
-            delta,
-            grad_out,
-            grad_query,
-            broadcasted_grad_value,
-            kv_num_blocks,
-            kv_indices,
-            q_num_blocks,
-            q_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-            full_q_num_blocks,
-            full_q_indices,
-        ]
+        bwd_input_nodes
         + list(score_mod_other_buffers)
         + list(mask_mod_other_buffers)
         + joint_outputs.mutated_grads

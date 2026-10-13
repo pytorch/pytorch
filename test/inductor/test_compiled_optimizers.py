@@ -60,6 +60,7 @@ from torch.testing._internal.common_optimizers import (
     optims,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
     skipIfWindows,
@@ -950,6 +951,75 @@ class CompiledOptimizerTests(TestCase):
         self.assertLess(end - start, 90)
 
     @requires_gpu_and_triton
+    @skipIfRocm(msg="ROCm Triton compile time regresses on joined foreach bodies")
+    def test_foreach_shared_body_codegen(self):
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        def fn(xs, ys):
+            return torch._foreach_add(xs, ys)
+
+        for sizes, last_branch in (
+            ((1536, 2048, 2560), "elif pid < num_xblocks_2"),
+            ((1536, 2048, 2304), "elif pid % 3 == 2"),
+        ):
+            with (
+                self.subTest(sizes=sizes),
+                fresh_cache(),
+                config.patch(combo_kernel_allow_mixed_sizes=2),
+            ):
+                xs = [torch.randn(n, device=GPU_TYPE) for n in sizes]
+                ys = [torch.randn_like(x) for x in xs]
+                expected = torch._foreach_add(xs, ys)
+                actual, codes = run_and_get_code(
+                    torch.compile(fn, fullgraph=True), xs, ys
+                )
+
+            self.assertEqual(actual, expected)
+            foreach_codes = [
+                code for code in codes if "@triton_heuristics.foreach" in code
+            ]
+            self.assertEqual(len(foreach_codes), 1)
+            code = foreach_codes[0]
+            self.assertEqual(code.count("tl.load("), 2)
+            self.assertEqual(code.count("tl.store("), 1)
+            self.assertIn("foreach_arg0 = in_ptr0", code)
+            self.assertIn("foreach_arg0 = in_ptr2", code)
+            self.assertGreater(
+                code.rfind("tmp0 = tl.load(foreach_arg0"),
+                code.rfind(last_branch),
+            )
+
+    @requires_gpu_and_triton
+    def test_foreach_optimizer_shared_body_correctness(self):
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        def opt_step(params, grads, momentum):
+            torch._foreach_mul_(momentum, 0.9)
+            torch._foreach_add_(momentum, grads, alpha=0.1)
+            torch._foreach_add_(params, momentum, alpha=-0.01)
+            return params, momentum
+
+        params = [torch.randn(n, device=GPU_TYPE) for n in (1536, 2048, 2560)]
+        grads = [torch.randn_like(p) for p in params]
+        momentum = [torch.zeros_like(p) for p in params]
+        params_ref = [p.clone() for p in params]
+        momentum_ref = [m.clone() for m in momentum]
+
+        with fresh_cache():
+            _, codes = run_and_get_code(
+                torch.compile(opt_step, fullgraph=True), params, grads, momentum
+            )
+        opt_step(params_ref, grads, momentum_ref)
+
+        self.assertEqual(params, params_ref)
+        self.assertEqual(momentum, momentum_ref)
+        foreach_codes = [code for code in codes if "@triton_heuristics.foreach" in code]
+        if torch.version.hip is not None:
+            self.assertFalse(any("foreach_arg0" in code for code in foreach_codes))
+        else:
+            self.assertTrue(any("foreach_arg0" in code for code in foreach_codes))
+
+    @requires_gpu_and_triton
     def test_S429861(self):
         # Just verify we can compile this function without error
         try:
@@ -1007,6 +1077,35 @@ class CompiledOptimizerTests(TestCase):
 
         for param, param_ref in zip(params, params_ref):
             self.assertEqual(param, param_ref)
+
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_capturable_does_not_leak_to_param_groups(self, device):
+        if device == GPU_TYPE and not HAS_GPU:
+            self.skipTest("requires GPU")
+        m = torch.nn.Linear(2, 2, device=device)
+        opt = AdamW(m.parameters(), lr=0.01)
+        original_capturable = opt.param_groups[0]["capturable"]
+        m(torch.randn(2, 2, device=device)).sum().backward()
+
+        # Compile step while state is empty so eager _init_group runs. On GPU
+        # that path temporarily sets capturable=True on the live dict.
+        with torch.set_grad_enabled(False):
+            compile_opt(opt, fullgraph=True)()
+        self.assertEqual(opt.param_groups[0]["capturable"], original_capturable)
+
+        # Accessing param_groups traces OptimizerCapturableVariable. Reconstruct
+        # (state_dict / lr mutation) must emit the original value, not True.
+        def fn():
+            opt.param_groups[0]["lr"] = 5.0
+            sd = deepcopy(opt.state_dict())
+            opt.param_groups[0]["lr"] = 0.01
+            return sd
+
+        sd = torch._dynamo.optimize("eager_noexcept", nopython=False)(fn)()
+        self.assertEqual(
+            sd["param_groups"][0].get("capturable", False), original_capturable
+        )
+        self.assertEqual(opt.param_groups[0]["capturable"], original_capturable)
 
 
 @skipIfRocm(msg="ROCm may have different numerical behavior")
@@ -1205,6 +1304,8 @@ for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
             _make_bitwise_test(optim_cls, kernel_count=kernel_count, **optim_kwargs),
         )
 
+
+instantiate_parametrized_tests(CompiledOptimizerTests)
 
 instantiate_device_type_tests(
     CompiledOptimizerParityTests, globals(), allow_xpu=True, except_for="cpu"

@@ -89,6 +89,7 @@
     :toctree: generated
     :nosignatures:
 
+    FlopCounterMode
     baddbmm_flop
     bmm_flop
     conv_backward_flop
@@ -140,7 +141,6 @@
     preprocessor
     processKernelLaunches
     replace_extern_shared
-    replace_math_functions
     str2bool
 ```
 

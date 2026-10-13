@@ -701,9 +701,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_has_cpp_tests", []() { return true; })
       .def("_has_tensorexpr_cpp_tests", []() { return true; })
 #else
-      .def("_jit_run_cpp_tests", []() { throw std::exception(); })
+      .def(
+          "_jit_run_cpp_tests",
+          []() { TORCH_CHECK(false, "PyTorch was not built with C++ tests"); })
       .def("_jit_has_cpp_tests", []() { return false; })
-      .def("_run_tensorexpr_cpp_tests", []() { throw std::exception(); })
+      .def(
+          "_run_tensorexpr_cpp_tests",
+          []() { TORCH_CHECK(false, "PyTorch was not built with C++ tests"); })
       .def("_has_tensorexpr_cpp_tests", []() { return false; })
 #endif
       .def(
@@ -878,14 +882,16 @@ void initJITBindings(PyObject* module) {
               } else if (pair.first == "DYNAMIC") {
                 vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
               } else {
-                throw py::value_error(
-                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: " +
+                TORCH_CHECK_VALUE(
+                    false,
+                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
                     pair.first);
               }
             }
             auto old_strategy = getFusionStrategy();
-            auto strat =
-                fmap(old_strategy, [](std::pair<FusionBehavior, size_t> behav) {
+            auto strat = fmap(
+                std::move(old_strategy),
+                [](std::pair<FusionBehavior, size_t> behav) {
                   return std::pair<std::string, size_t>(
                       behav.first == FusionBehavior::STATIC ? "STATIC"
                                                             : "DYNAMIC",
@@ -1336,7 +1342,7 @@ void initJITBindings(PyObject* module) {
       .def("__repr__", [](CompleteArgumentSpec& self) {
         std::ostringstream s;
         s << self;
-        return s.str();
+        return std::move(s).str();
       });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
@@ -1548,9 +1554,7 @@ void initJITBindings(PyObject* module) {
     THPObjectPtr getMemview(void* buf, size_t n) const {
       THPObjectPtr memview(PyMemoryView_FromMemory(
           reinterpret_cast<char*>(buf), n, PyBUF_WRITE));
-      if (!memview) {
-        throw python_error();
-      }
+      TORCH_CHECK_PYTHON(memview);
       return memview;
     }
 
@@ -1716,13 +1720,16 @@ void initJITBindings(PyObject* module) {
               return op->schema();
             }
           }
-          throw std::runtime_error("Found no matching schema");
         } catch (const c10::Error& e) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
               : e.what_without_backtrace();
-          throw std::runtime_error(msg);
+          TORCH_CHECK(false, msg);
         }
+        // Outside the try: the handler above exists to flatten c10::Error
+        // subtypes from the lookup, and would otherwise catch this and stamp a
+        // second location onto it.
+        TORCH_CHECK(false, "Found no matching schema");
       });
 
   m.def(
@@ -1762,7 +1769,7 @@ void initJITBindings(PyObject* module) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
               : e.what_without_backtrace();
-          throw std::runtime_error(msg);
+          TORCH_CHECK(false, msg);
         }
       });
 
@@ -1785,7 +1792,8 @@ void initJITBindings(PyObject* module) {
           ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
           const auto overloads = getAllSortedOperatorsFor(symbol);
           auto opWithStack = getOpWithStack(overloads, args, kwargs);
-          std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
+          std::shared_ptr<Operator> overload =
+              std::move(std::get<0>(opWithStack));
           auto result = overload->schema().overload_name();
           if (result.empty()) {
             result = "default";
@@ -1795,7 +1803,7 @@ void initJITBindings(PyObject* module) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
               : e.what_without_backtrace();
-          throw std::runtime_error(msg);
+          TORCH_CHECK(false, msg);
         }
       });
 
@@ -1833,13 +1841,13 @@ void initJITBindings(PyObject* module) {
                     sortedOps, symbol, args, kwargs, false);
               },
               py::name(symbol.toUnqualString()),
-              py::doc(docstring.str().c_str()));
+              py::doc(std::move(docstring).str().c_str()));
           return py::make_tuple(func, overload_names);
         } catch (const c10::Error& e) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
               : e.what_without_backtrace();
-          throw std::runtime_error(msg);
+          TORCH_CHECK(false, msg);
         }
       },
       py::arg("qualified_name"));
@@ -1901,7 +1909,7 @@ void initJITBindings(PyObject* module) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
     if (!type) {
-      throw std::runtime_error(s.str());
+      TORCH_CHECK(false, std::move(s).str());
     }
     return type.value();
   });
@@ -2019,7 +2027,7 @@ void initJITBindings(PyObject* module) {
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
             std::ostringstream out;
             auto result = self.isForwardCompatibleWith(old_schema, out);
-            return std::make_pair(result, out.str());
+            return std::make_pair(result, std::move(out).str());
           })
       .def(
           "__eq__",
@@ -2383,7 +2391,7 @@ void initJITBindings(PyObject* module) {
       auto _stdout = py::module::import("sys").attr("stdout");
       _stdout.attr("write")(str);
     } catch (py::error_already_set& e) {
-      throw std::runtime_error(e.what());
+      TORCH_CHECK(false, e.what());
     }
   });
 

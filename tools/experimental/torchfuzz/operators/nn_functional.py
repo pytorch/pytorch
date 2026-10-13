@@ -720,8 +720,11 @@ class BatchNormOperator(Operator):
 
         target_dtype = str(output_spec.dtype)
         input_name = input_names[0]
-        running_mean_name = input_names[1]
-        running_var_name = input_names[2]
+        # running_mean/running_var must not require grad (batch_norm is not
+        # differentiable w.r.t. them). Args are marked requires_grad by the
+        # template, so detach these two here.
+        running_mean_name = f"{input_names[1]}.detach()"
+        running_var_name = f"{input_names[2]}.detach()"
 
         # Use training=False for deterministic behavior
         if len(input_names) == 3:

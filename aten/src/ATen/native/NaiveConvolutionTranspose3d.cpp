@@ -101,6 +101,12 @@ inline void slow_conv_transpose3d_shape_check(
         " x kernel_height x kernel_width) tensor ",
         "expected for weight, but got: ",
         weight.sizes());
+    TORCH_CHECK(
+        weight.size(2) == kernel_depth && weight.size(3) == kernel_height &&
+            weight.size(4) == kernel_width,
+        "kernel_size (", kernel_depth, ", ", kernel_height, ", ", kernel_width,
+        ") must match weight spatial dimensions (",
+        weight.size(2), ", ", weight.size(3), ", ", weight.size(4), ")");
     if (bias.defined()) {
       check_dim_size(bias, 1, 0, weight.size(1));
     }
@@ -347,7 +353,7 @@ void slow_conv_transpose3d_out_cpu_template(
               dilation_depth,
               dilation_height,
               dilation_width,
-              output_n.data_ptr<scalar_t>());
+              output_n.mutable_data_ptr<scalar_t>());
 
           // Do Bias after:
           // M,N,K are dims of matrix A and B

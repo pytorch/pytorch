@@ -95,6 +95,10 @@ namespace {
     FunctionSchema inferred = inferred_.cloneWithRealTypes();
     std::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
     if (schema_difference.has_value()) {
+      const bool has_unsupported_symint_signature =
+          !kernel.isValidSymUnboxed() &&
+          !findSchemaDifferences(from_def_.cloneWithRealTypes(), inferred)
+               .has_value();
       TORCH_CHECK(false,
         "Inferred operator schema for a C++ kernel function doesn't match the expected function schema.\n"
         "  operator: ", toString(name), "\n",
@@ -102,7 +106,13 @@ namespace {
         "    ", from_def_debug, "\n",
         "  inferred schema: ", toString(inferred), "\n",
         "    ", inferred_debug, "\n",
-        "  reason: ", *schema_difference);
+        "  reason: ", *schema_difference,
+        has_unsupported_symint_signature
+            ? "\n  SymInt parameters must use the supported C++ signatures: "
+              "pass SymInt and std::optional<SymInt> by value, and "
+              "SymIntArrayRef and OptionalSymIntArrayRef directly (not as "
+              "const references)."
+            : "");
     }
   }
 } // anonymous namespace
@@ -585,7 +595,7 @@ std::string OperatorEntry::listAllDispatchKeys() const {
     has_kernels = true;
   }
   str << ']';
-  return str.str();
+  return std::move(str).str();
 }
 
 void OperatorEntry::reportSignatureError(const CppSignature& call_signature, const CppSignatureWithDebug& saved_signature) const {
@@ -669,7 +679,7 @@ std::string OperatorEntry::dumpComputedTable() const {
           << kernel_prov.first.debug << " [" << kernel_prov.second << "]\n";
     }
   }
-  return oss.str();
+  return std::move(oss).str();
 }
 
 void OperatorEntry::setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> callback) {
@@ -715,7 +725,7 @@ std::string OperatorEntry::dumpState() const {
       print_kernel(toString(k), it->second, c10::isAliasDispatchKey(k));
     }
   }
-  return oss.str();
+  return std::move(oss).str();
 }
 
 }

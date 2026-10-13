@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import math
 import operator
@@ -22,11 +21,11 @@ from sympy.utilities.iterables import sift
 
 from torch.torch_version import TorchVersion
 
-from .numbers import int_oo, is_infinite
+from .numbers import int_oo, IntInfinity, is_infinite
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator, Sequence
 
 
 _T = TypeVar("_T", bound=SupportsFloat)
@@ -187,7 +186,7 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
 
 # It would be nice to have assertions on whether or not inputs is_integer
 # However, with bugs like https://github.com/sympy/sympy/issues/26620 sympy
-# sometimes inconsistently reports floats an integers.
+# sometimes inconsistently reports floats as integers.
 #
 # What we can assume from sympy is that if something is an int, it
 # definitely is is_integer, but if it is a float it may or may not
@@ -279,7 +278,7 @@ class FloorDiv(sympy.Function):
         # This only works if floor is an identity, i.e. x / b is an integer.
         if isinstance(divisor, sympy.Integer):
             quotients = 0
-            terms = []
+            terms: list[sympy.Expr] = []
             for term in sympy.Add.make_args(base):
                 quotient = term / divisor
 
@@ -366,24 +365,21 @@ class ModularIndexing(sympy.Function):
         # on wide Add expressions (e.g. in sizevars.simplify).
         if isinstance(base, sympy.Add) and not _is_wide_add(base):
             new_terms: list[sympy.Integer] = []
-            all_positive: bool = True
+            all_nonnegative: bool = True
             for term in base.args:
                 if safe_gcd(term, modulus * divisor) != modulus * divisor:
-                    if (isinstance(term, sympy.Integer) and term < 0) or (
-                        isinstance(term, sympy.Mul)
-                        and isinstance(term.args[0], sympy.Integer)
-                        and term.args[0] < 0
-                    ):
+                    if term.is_nonnegative is not True:
                         # workaround for https://github.com/triton-lang/triton/issues/619,
-                        # if there are negative terms, // produces wrong result
+                        # if terms are not provably nonnegative, // can produce
+                        # the wrong result
                         # TODO if https://github.com/triton-lang/triton/issues/619 is fixed
                         # this optimization would become valid
-                        all_positive = False
+                        all_nonnegative = False
                         break
                     else:
                         new_terms.append(term)
 
-            if len(new_terms) != len(base.args) and all_positive:
+            if len(new_terms) != len(base.args) and all_nonnegative:
                 return ModularIndexing(sum(new_terms), divisor, modulus)
 
         if isinstance(base, FloorDiv):
@@ -486,7 +482,7 @@ class PythonMod(sympy.Function):
     def _eval_is_nonpositive(self) -> bool | None:
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
 
-    def _ccode(self, printer) -> str:
+    def _ccode(self, printer: sympy.printing.codeprinter.CodePrinter) -> str:
         p = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
         q = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
         abs_q = str(q) if self.args[1].is_positive else f"abs({q})"
@@ -502,7 +498,7 @@ class Mod(sympy.Function):
     is_nonnegative = True
 
     @classmethod
-    def eval(cls, p, q):
+    def eval(cls, p: sympy.Expr, q: sympy.Expr) -> sympy.Expr | None:
         # This was adapted from: sympy/core/mod.py
 
         # Triggered by
@@ -561,7 +557,7 @@ class CeilToInt(sympy.Function):
     is_integer = True
 
     @classmethod
-    def eval(cls, number):
+    def eval(cls, number: sympy.Expr) -> sympy.Basic | None:
         # assert number.is_integer is not True, number
         if number in (sympy.oo, int_oo):
             return int_oo
@@ -569,8 +565,9 @@ class CeilToInt(sympy.Function):
             return -int_oo
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
+        return None
 
-    def _ccode(self, printer) -> str:
+    def _ccode(self, printer: sympy.printing.codeprinter.CodePrinter) -> str:
         number = printer._print(self.args[0])
         return f"(int64_t)(ceil({number}))"
 
@@ -579,7 +576,7 @@ class FloorToInt(sympy.Function):
     is_integer = True
 
     @classmethod
-    def eval(cls, number):
+    def eval(cls, number: sympy.Expr) -> sympy.Basic | None:
         if number in (sympy.oo, int_oo):
             return int_oo
         if number in (-sympy.oo, -int_oo):
@@ -588,8 +585,9 @@ class FloorToInt(sympy.Function):
             return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
+        return None
 
-    def _ccode(self, printer) -> str:
+    def _ccode(self, printer: sympy.printing.codeprinter.CodePrinter) -> str:
         number = printer._print(self.args[0])
         return f"(int64_t)(floor({number}))"
 
@@ -601,7 +599,7 @@ class CeilDiv(sympy.Function):
 
     is_integer = True
 
-    def __new__(cls, base, divisor):
+    def __new__(cls, base: sympy.Expr, divisor: sympy.Expr) -> sympy.Basic:
         base = sympy.sympify(base)
         divisor = sympy.sympify(divisor)
         if sympy.gcd(base, divisor) == divisor:
@@ -614,7 +612,7 @@ class LShift(sympy.Function):
     is_integer = True
 
     @classmethod
-    def eval(cls, base, shift):
+    def eval(cls, base: sympy.Expr, shift: sympy.Expr) -> sympy.Basic:
         if shift.is_negative:
             raise ValueError("negative shift count")
         return base * PowByNatural(sympy.Integer(2), shift)
@@ -624,14 +622,14 @@ class RShift(sympy.Function):
     is_integer = True
 
     @classmethod
-    def eval(cls, base, shift):
+    def eval(cls, base: sympy.Expr, shift: sympy.Expr) -> sympy.Basic:
         if shift.is_negative:
             raise ValueError("negative shift count")
         return FloorDiv(base, PowByNatural(sympy.Integer(2), shift))
 
 
 class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
-    def __new__(cls, *original_args, **assumptions):
+    def __new__(cls, *original_args: sympy.Expr, **assumptions: bool) -> sympy.Basic:
         from sympy.core.parameters import global_parameters
 
         evaluate = assumptions.pop("evaluate", global_parameters.evaluate)
@@ -677,7 +675,9 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         return obj
 
     @classmethod
-    def _collapse_known_multiplicative_terms(cls, values):
+    def _collapse_known_multiplicative_terms(
+        cls, values: set[sympy.Expr]
+    ) -> sympy.Expr | None:
         if len(values) != 2:
             return None
 
@@ -709,7 +709,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
 
     @classmethod
     def _satisfy_unique_summations_symbols(
-        cls, args
+        cls, args: "Sequence[sympy.Expr]"
     ) -> set[sympy.core.symbol.Symbol] | None:
         """
         One common case in some models is building expressions of the form
@@ -765,7 +765,9 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
 
     @classmethod
     def _unique_symbols(
-        cls, args, initial_set: set[sympy.core.symbol.Symbol] | None = None
+        cls,
+        args: "Iterable[sympy.Expr]",
+        initial_set: set[sympy.core.symbol.Symbol] | None = None,
     ) -> set[sympy.core.symbol.Symbol] | None:
         """
         Return seen_symbols if all atoms in all args are all unique symbols,
@@ -783,7 +785,9 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         return seen_symbols
 
     @classmethod
-    def _collapse_arguments(cls, args, **assumptions):
+    def _collapse_arguments(
+        cls, args: "Iterable[sympy.Expr]", **assumptions: bool
+    ) -> "Iterable[sympy.Expr]":
         """Remove redundant args.
 
         Examples
@@ -869,7 +873,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
                             args[i] = cls.identity  # type: ignore[attr-defined]
 
         # remove redundant symbolic args
-        def do(ai, a):
+        def do(ai: sympy.Expr, a: sympy.Expr) -> sympy.Expr:
             if not isinstance(ai, (Min, Max)):
                 return ai
             cond = a in ai.args
@@ -889,7 +893,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         # trying to find some optimal subset of args to modify takes
         # too long
 
-        def factor_minmax(args):
+        def factor_minmax(args: list[sympy.Expr]) -> list[sympy.Expr]:
             is_other = lambda arg: isinstance(arg, other)  # noqa: E731
             other_args, remaining_args = sift(args, is_other, binary=True)
             if not other_args:
@@ -919,7 +923,9 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         return args
 
     @classmethod
-    def _new_args_filter(cls, arg_sequence):
+    def _new_args_filter(
+        cls, arg_sequence: "Iterable[sympy.Expr]"
+    ) -> "Iterator[sympy.Expr]":
         """
         Generator filtering args.
 
@@ -946,7 +952,9 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
                 yield arg
 
     @classmethod
-    def _find_localzeros(cls, values, **options):
+    def _find_localzeros(
+        cls, values: "Iterable[sympy.Expr]", **options: bool
+    ) -> set[sympy.Expr]:
         """
         Sequentially allocate values to localzeros.
 
@@ -1071,7 +1079,7 @@ class Min(MinMaxBase, Application):  # type: ignore[misc]
         return fuzzy_or(a.is_negative for a in self.args)
 
 
-def safe_pow(base, exp):
+def safe_pow(base: sympy.Integer, exp: sympy.Integer) -> int | IntInfinity:
     sign = 1
     if base < 0:
         base = -base
@@ -1080,7 +1088,7 @@ def safe_pow(base, exp):
 
 
 # Prevent people from overflowing pow
-def _safe_pow(base, exponent):
+def _safe_pow(base: sympy.Integer, exponent: sympy.Integer) -> int | IntInfinity:
     if exponent < 0:
         raise ValueError("Exponent must be non-negative.")
 
@@ -1112,7 +1120,7 @@ class PowByNatural(sympy.Function):
     precedence: int = 50  # precedence of mul
 
     @classmethod
-    def eval(cls, base, exp):
+    def eval(cls, base: sympy.Expr, exp: sympy.Expr) -> sympy.Basic | None:
         if isinstance(base, sympy.Integer) and isinstance(exp, sympy.Integer):
             r = safe_pow(base, exp)
             if r in (-int_oo, int_oo):
@@ -1129,6 +1137,7 @@ class PowByNatural(sympy.Function):
                 return sympy.zoo  # this is apparently what (-2)**sympy.oo does
         # NB: do NOT translate into sympy.Pow, we will lose knowledge that exp
         # is a natural number if we do
+        return None
 
 
 # base is assumed to be nonnegative, thereby prevent complex numbers from
@@ -1139,7 +1148,7 @@ class FloatPow(sympy.Function):
     precedence: int = 60  # precedence of pow
 
     @classmethod
-    def eval(cls, base, exp):
+    def eval(cls, base: sympy.Expr, exp: sympy.Expr) -> sympy.Basic | None:
         # NB: These test sympy.Number, not sympy.Float, because:
         #   - Sometimes we may have sympy.oo or int_oo, and that's not a Float
         #     (but coerces to math.Inf)
@@ -1148,6 +1157,7 @@ class FloatPow(sympy.Function):
         if isinstance(base, sympy.Number) and isinstance(exp, sympy.Number):
             return sympy.Float(float(base) ** float(exp))
         # NB: do not do any nontrivial reasoning
+        return None
 
 
 # Overloaded to be compatible with regular Python.
@@ -1161,7 +1171,7 @@ class FloatTrueDiv(sympy.Function):
     precedence: int = 35  # lower precedence than add
 
     @classmethod
-    def eval(cls, base, divisor):
+    def eval(cls, base: sympy.Expr, divisor: sympy.Expr) -> sympy.Basic | None:
         # assert base.is_integer is not True, base
         # assert divisor.is_integer is not True, divisor
 
@@ -1170,6 +1180,7 @@ class FloatTrueDiv(sympy.Function):
 
         if isinstance(base, sympy.Number) and isinstance(divisor, sympy.Number):
             return sympy.Float(float(base) / float(divisor))
+        return None
 
 
 # Overloaded to be compatible with regular Python.  We distinguish this from
@@ -1186,7 +1197,7 @@ class IntTrueDiv(sympy.Function):
     precedence: int = 35  # lower precedence than add
 
     @classmethod
-    def eval(cls, base, divisor):
+    def eval(cls, base: sympy.Expr, divisor: sympy.Expr) -> sympy.Basic | None:
         if divisor.is_zero:
             raise ZeroDivisionError("division by zero")
 
@@ -1200,8 +1211,9 @@ class IntTrueDiv(sympy.Function):
             return sympy.Float(float(base) / float(divisor))
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Float(int(base) / int(divisor))
+        return None
 
-    def _ccode(self, printer) -> str:
+    def _ccode(self, printer: sympy.printing.codeprinter.CodePrinter) -> str:
         base = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
         divisor = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
         return f"((int){base}/(int){divisor})"
@@ -1217,7 +1229,7 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
     is_integer = True
 
     @classmethod
-    def eval(cls, *args):
+    def eval(cls, *args: sympy.Expr) -> int | None:
         if len(args) % 2 != 0:
             raise AssertionError(
                 f"expected an even number of arguments, got {len(args)}"
@@ -1278,7 +1290,7 @@ class TruncToFloat(sympy.Function):
     is_real = True
 
     @classmethod
-    def eval(cls, number):
+    def eval(cls, number: sympy.Expr) -> sympy.Basic | None:
         if number in (sympy.oo, -sympy.oo):
             return number
         # assert number.is_integer is not True, number
@@ -1287,22 +1299,32 @@ class TruncToFloat(sympy.Function):
             # math.trunc does, as Python integers are arbitrary precision and
             # so we are guaranteed not to lose precision when we do this
             return sympy.Float(math.trunc(float(number)))
+        return None
 
 
 class TruncToInt(sympy.Function):
     is_integer = True
 
     @classmethod
-    def eval(cls, number):
+    def eval(cls, number: sympy.Expr) -> sympy.Basic | None:
         # assert number.is_integer is not True, number
         if number in (sympy.oo, int_oo):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
+        if number.is_integer is True:
+            return number
+        if isinstance(number, IntTrueDiv):
+            base, divisor = number.args
+            if divisor == 1:
+                return base
+            if divisor == -1:
+                return -base
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.trunc(float(number)))
+        return None
 
-    def _ccode(self, printer) -> str:
+    def _ccode(self, printer: sympy.printing.codeprinter.CodePrinter) -> str:
         number = printer._print(self.args[0])
         return f"(int64_t)(trunc({number}))"
 
@@ -1312,7 +1334,7 @@ class RoundToInt(sympy.Function):
     is_integer = True
 
     @classmethod
-    def eval(cls, number):
+    def eval(cls, number: sympy.Expr) -> sympy.Basic | None:
         # assert number.is_integer is not True, number
 
         if number is sympy.oo:
@@ -1321,6 +1343,7 @@ class RoundToInt(sympy.Function):
             return -int_oo
         if isinstance(number, sympy.Number):
             return sympy.Integer(round(float(number), 0))
+        return None
 
 
 # To get float -> int, Python style round semantics.
@@ -1342,18 +1365,19 @@ class RoundDecimal(sympy.Function):
     is_real = True
 
     @classmethod
-    def eval(cls, number, ndigits):
+    def eval(cls, number: sympy.Expr, ndigits: sympy.Expr) -> sympy.Basic | None:
         # assert number.is_integer is not True, number
 
         if isinstance(number, sympy.Number) and isinstance(ndigits, sympy.Integer):
             return sympy.Float(round(float(number), int(ndigits)))
+        return None
 
 
 class ToFloat(sympy.Function):
     is_real = True
 
     @classmethod
-    def eval(cls, number):
+    def eval(cls, number: sympy.Expr) -> sympy.Basic | None:
         if number in [sympy.oo, -sympy.oo]:
             return number
 
@@ -1363,8 +1387,9 @@ class ToFloat(sympy.Function):
             return sympy.oo
         if number is -int_oo:
             return -sympy.oo
+        return None
 
-    def _ccode(self, printer) -> str:
+    def _ccode(self, printer: sympy.printing.codeprinter.CodePrinter) -> str:
         number = printer._print(self.args[0])
         return f"(double)({number})"
 
@@ -1379,35 +1404,37 @@ class Identity(sympy.Function):
     def __repr__(self) -> str:  # type: ignore[override]
         return f"Identity({self.args[0]})"
 
-    def _sympystr(self, printer) -> str:
+    def _sympystr(self, printer: sympy.printing.StrPrinter) -> str:
         """Controls how sympy's StrPrinter prints this"""
         return f"({printer.doprint(self.args[0])})"
 
-    def _eval_is_real(self):
+    def _eval_is_real(self) -> bool | None:
         return self.args[0].is_real
 
-    def _eval_is_integer(self):
+    def _eval_is_integer(self) -> bool | None:
         return self.args[0].is_integer  # type: ignore[attr-defined]
 
     @property
-    def is_number(self):
+    def is_number(self) -> bool:
         # Treat Identity as numeric only when the argument is comparable.
         # This avoids creating numeric non-comparable Identity(I) terms.
         return bool(self.args[0].is_number and self.args[0].is_comparable)
 
     @property
-    def is_comparable(self):
+    def is_comparable(self) -> bool:
         # Delegate comparability to the wrapped argument.
         return bool(self.args[0].is_comparable)
 
-    def _eval_expand_identity(self, **hints):
+    def _eval_expand_identity(self, **hints: bool) -> sympy.Expr:
         # Removes the identity op.
         return self.args[0]
 
     def __int__(self) -> int:
         return int(self.args[0])
 
-    def _identity_atom_compare(self, other, op):
+    def _identity_atom_compare(
+        self, other: sympy.Expr | int, op: Callable[[sympy.Expr, sympy.Expr], bool]
+    ) -> sympy.logic.boolalg.BooleanAtom | None:
         """
         Fast path for comparing wrapped numeric atomics against other numeric atomics.
         Keep compound expressions on SymPy's default symbolic path.
@@ -1423,19 +1450,19 @@ class Identity(sympy.Function):
             return None
         return sympy.S.true if op(arg, other) else sympy.S.false
 
-    def __ge__(self, other):
+    def __ge__(self, other: sympy.Expr) -> sympy.Basic:
         out = self._identity_atom_compare(other, lambda a, b: a >= b)
         return out if out is not None else super().__ge__(other)
 
-    def __gt__(self, other):
+    def __gt__(self, other: sympy.Expr) -> sympy.Basic:
         out = self._identity_atom_compare(other, lambda a, b: a > b)
         return out if out is not None else super().__gt__(other)
 
-    def __le__(self, other):
+    def __le__(self, other: sympy.Expr) -> sympy.Basic:
         out = self._identity_atom_compare(other, lambda a, b: a <= b)
         return out if out is not None else super().__le__(other)
 
-    def __lt__(self, other):
+    def __lt__(self, other: sympy.Expr) -> sympy.Basic:
         out = self._identity_atom_compare(other, lambda a, b: a < b)
         return out if out is not None else super().__lt__(other)
 
@@ -1443,7 +1470,7 @@ class Identity(sympy.Function):
         return float(self.args[0])
 
 
-def make_opaque_unary_fn(name):
+def make_opaque_unary_fn(name: str) -> type[sympy.Function]:
     class OpaqueUnaryFn(sympy.Function):
         """
         Unlike the builtin sympy functions on real numbers like sympy.sqrt,
@@ -1459,7 +1486,7 @@ def make_opaque_unary_fn(name):
         _torch_unpickler = make_opaque_unary_fn
 
         @classmethod
-        def eval(cls, a):
+        def eval(cls, a: sympy.Expr) -> sympy.Basic | None:
             if isinstance(a, (sympy.Integer, sympy.Float)):
                 # Python converts to float64 before computing, c.f.
                 # >>> math.sin(2**53+1)
@@ -1506,7 +1533,7 @@ OpaqueUnaryFn_asinh = make_opaque_unary_fn("asinh")
 OpaqueUnaryFn_log2 = make_opaque_unary_fn("log2")
 
 
-def make_opaque_bitwise_fn(name, real_op_name):
+def make_opaque_bitwise_fn(name: str, real_op_name: str) -> type[sympy.Function]:
     if name == "bitwise_and":
         prec = PRECEDENCE["BitwiseAnd"]
     elif name == "bitwise_xor":
@@ -1524,7 +1551,7 @@ def make_opaque_bitwise_fn(name, real_op_name):
         )
 
         @classmethod
-        def eval(cls, a, b):
+        def eval(cls, a: sympy.Expr, b: sympy.Expr) -> sympy.Basic | None:
             if a.is_Boolean and b.is_Boolean:
                 return getattr(operator, real_op_name)(a, b)
             if a.is_Boolean:

@@ -363,7 +363,7 @@ class ModelReport:
         dict_a_keys: set = set(info_dict_a.keys())
         dict_b_keys: set = set(info_dict_b.keys())
 
-        # get the insersection keys and check if same value for both dicts
+        # get the intersection keys and check if same value for both dicts
         intersecting_keys: set = dict_a_keys.intersection(dict_b_keys)
 
         for key in intersecting_keys:

@@ -6,7 +6,7 @@ import torch.utils._pytree as pytree
 from torch._inductor.utils import is_symbolic
 from torch.utils._ordered_set import OrderedSet
 
-from . import config, ir
+from . import config as inductor_config, ir
 from .virtualized import V
 
 
@@ -166,11 +166,11 @@ def _should_lower_as_one_shot_all_reduce(
 
     inp_size = inp.get_numel() * inp.get_dtype().itemsize
     return (
-        config._collective.auto_select
+        inductor_config._collective.auto_select
         and is_symm_mem_enabled_for_group(group_name)
         and can_realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM)
         and reduce_op == "sum"
-        and inp_size <= config._collective.one_shot_all_reduce_threshold_bytes
+        and inp_size <= inductor_config._collective.one_shot_all_reduce_threshold_bytes
     )
 
 
@@ -187,6 +187,11 @@ def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
     )
 
 
+def _config_args(config) -> tuple:
+    # Omit config when unset so ordinary collective codegen is unchanged.
+    return () if config is None else (config,)
+
+
 def _create_out_of_place(kernel, inputs, *args) -> ir.IRNode:
     node = ir._CollectiveKernel.create_out_of_place(kernel, inputs, *args)
     if not isinstance(node, ir.IRNode):
@@ -199,7 +204,7 @@ def register_comm_lowerings():
     Register lowerings for the comm subsystem.
     """
     try:
-        torch.ops._c10d_functional.all_reduce
+        _ = torch.ops._c10d_functional.all_reduce
     except AttributeError:
         log.info(
             "Inductor support for distributed collectives depends on building "
@@ -226,13 +231,16 @@ def register_comm_lowerings():
         inp: ir.TensorBox,
         reduce_op: str,
         group_name: "torch.distributed.distributed_c10d.GroupName",
+        config=None,
     ) -> ir.TensorBox:
-        if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
+        if config is None and _should_lower_as_one_shot_all_reduce(
+            inp, reduce_op, group_name
+        ):
             return _one_shot_all_reduce(inp, reduce_op, group_name)
 
         # Lower as c10d.all_reduce_
         inp = clone(inp)
-        if config.reorder_for_compute_comm_overlap:
+        if inductor_config.reorder_for_compute_comm_overlap:
             # The horizontal fusion of this clone often severely delays the
             # scheduling of the all_reduce_ node. Horizontally fusing this
             # clone can almost never out-perform scheduling the all_reduce_
@@ -249,6 +257,7 @@ def register_comm_lowerings():
             inp,  # type: ignore[arg-type]
             reduce_op,
             group_name,  # type: ignore[arg-type]
+            *_config_args(config),
         )
         return inp  # type: ignore[return-value]
 
@@ -257,8 +266,11 @@ def register_comm_lowerings():
         inp: ir.TensorBox,
         reduce_op: str,
         group_name: "torch.distributed.distributed_c10d.GroupName",
+        config=None,
     ) -> ir.TensorBox:
-        if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
+        if config is None and _should_lower_as_one_shot_all_reduce(
+            inp, reduce_op, group_name
+        ):
             ret = copy_(
                 inp,
                 _one_shot_all_reduce(inp, reduce_op, group_name),
@@ -274,41 +286,45 @@ def register_comm_lowerings():
             inp,  # type: ignore[arg-type]
             reduce_op,
             group_name,  # type: ignore[arg-type]
+            *_config_args(config),
         )
         return inp  # type: ignore[return-value]
 
     @register_comm_lowering(c10d.all_reduce_coalesced)
-    def _all_reduce_coalesced(inputs, reduce_op, group_name):
+    def _all_reduce_coalesced(inputs, reduce_op, group_name, config=None):
         inputs = [clone(inp) for inp in inputs]
         ir._CollectiveKernel.create_inplace(
             c10d.all_reduce_coalesced_.default,
             inputs,
             reduce_op,
             group_name,
+            *_config_args(config),
         )
         return inputs
 
     @register_comm_lowering(c10d.all_reduce_coalesced_)
-    def _all_reduce_coalesced_(inputs, reduce_op, group_name):
+    def _all_reduce_coalesced_(inputs, reduce_op, group_name, config=None):
         ir._CollectiveKernel.create_inplace(
             c10d.all_reduce_coalesced_.default,
             inputs,
             reduce_op,
             group_name,
+            *_config_args(config),
         )
         return inputs
 
     @register_comm_lowering(c10d.all_gather_into_tensor)
-    def _all_gather_into_tensor(inp, group_size, group_name):
+    def _all_gather_into_tensor(inp, group_size, group_name, config=None):
         return _create_out_of_place(
             c10d.all_gather_into_tensor.default,
             inp,
             group_size,
             group_name,
+            *_config_args(config),
         )
 
     @register_comm_lowering(c10d.all_gather_into_tensor_coalesced)
-    def _all_gather_into_tensor_coalesced(inputs, group_size, group_name):
+    def _all_gather_into_tensor_coalesced(inputs, group_size, group_name, config=None):
         return pytree.tree_map(
             ir.TensorBox.create,
             ir._CollectiveKernel.create_out_of_place(
@@ -316,28 +332,31 @@ def register_comm_lowerings():
                 inputs,
                 group_size,
                 group_name,
+                *_config_args(config),
             ),
         )
 
     @register_comm_lowering(c10d.all_gather_into_tensor_out)
-    def _all_gather_into_tensor_out(inp, group_size, group_name, *, out):
+    def _all_gather_into_tensor_out(inp, group_size, group_name, config=None, *, out):
         ir._CollectiveKernel.create_inplace(
             c10d.all_gather_into_tensor_out.default,
             inp,
             group_size,
             group_name,
+            *_config_args(config),
             out=out,
         )
         return out
 
     @register_comm_lowering(c10d.reduce_scatter_tensor)
-    def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
+    def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name, config=None):
         return _create_out_of_place(
             c10d.reduce_scatter_tensor.default,
             inp,
             reduce_op,
             group_size,
             group_name,
+            *_config_args(config),
         )
 
     @register_comm_lowering(c10d.reduce_scatter_tensor_out)
@@ -353,7 +372,9 @@ def register_comm_lowerings():
         return out
 
     @register_comm_lowering(c10d.reduce_scatter_tensor_coalesced)
-    def _reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, group_name):
+    def _reduce_scatter_tensor_coalesced(
+        inputs, reduce_op, group_size, group_name, config=None
+    ):
         return pytree.tree_map(
             ir.TensorBox.create,
             ir._CollectiveKernel.create_out_of_place(
@@ -362,17 +383,21 @@ def register_comm_lowerings():
                 reduce_op,
                 group_size,
                 group_name,
+                *_config_args(config),
             ),
         )
 
     @register_comm_lowering(c10d.all_to_all_single)
-    def _all_to_all_single(inp, output_split_sizes, input_split_sizes, group_name):
+    def _all_to_all_single(
+        inp, output_split_sizes, input_split_sizes, group_name, config=None
+    ):
         return _create_out_of_place(
             c10d.all_to_all_single.default,
             inp,
             output_split_sizes,
             input_split_sizes,
             group_name,
+            *_config_args(config),
         )
 
     @register_comm_lowering(c10d.broadcast)
@@ -408,6 +433,11 @@ def register_comm_lowerings():
         ir._WaitKernel.create_wait(c10d.wait_tensor.default, inp)
         return inp
 
+    @register_comm_lowering(c10d.wait_tensors)
+    def _wait_tensors(inputs):
+        ir._WaitKernel.create_wait(c10d.wait_tensors.default, inputs)
+        return inputs
+
     @register_comm_lowering(c10d.isend)  # type: ignore[misc]
     def _isend(inp, dst, tag, group_name):
         inp = ir.ExternKernel.require_contiguous(inp)
@@ -426,13 +456,7 @@ def register_comm_lowerings():
         tensors = [ir.ExternKernel.require_contiguous(t) for t in tensors]
         kernel = c10d.batch_p2p_ops.default
         with V.graph.fake_mode:
-            (
-                example_output,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                unbacked_bindings,
-            ) = ir._CollectiveKernel.process_kernel(
+            result = ir._CollectiveKernel.process_kernel(
                 kernel,
                 op_list,
                 peer_list,
@@ -440,14 +464,18 @@ def register_comm_lowerings():
                 tensors,
                 group_name,
             )
-        if unbacked_bindings:
-            raise AssertionError(f"{kernel} {unbacked_bindings}")
+        example_output = result.example_output
+        tensor_args = result.tensor_args
+        non_tensor_args = result.non_tensor_args
+        unflatten_args = result.unflatten_args
+        if result.unbacked_bindings:
+            raise AssertionError(f"{kernel} {result.unbacked_bindings}")
         for op, tensor_arg in zip(op_list, tensor_args):
             tensor_arg.realize()
             if op == "irecv":
                 V.graph.mark_buffer_mutated(tensor_arg.get_name())
 
-        device = tensor_args[0].get_device()
+        device = tensor_args[0].get_device_or_error()
         packed = ir._CollectiveKernel(
             ir.MultiOutputLayout(device=device),
             kernel,
@@ -485,7 +513,7 @@ def register_symm_mem_lowerings():
         # torch.ops.symm_mem is a lazy namespace that always exists,
         # but the operations may not exist on non-CUDA platforms or
         # when USE_DISTRIBUTED is disabled.
-        symm_mem.one_shot_all_reduce
+        _ = symm_mem.one_shot_all_reduce
     except AttributeError:
         log.info("symm_mem ops not available, skipping symm_mem lowerings")
         return
@@ -550,6 +578,34 @@ def register_symm_mem_lowerings():
                 ir.CommBufferType.SYMM_MEM,
                 group_name,  # type: ignore[arg-type]
             )
+
+    def _create_low_contention_ag_out(
+        kernel: torch._ops.OpOverload,
+        inp: ir.TensorBox,
+        group_name: "torch.distributed.distributed_c10d.GroupName",
+    ) -> ir.TensorBox:
+        from torch.distributed import distributed_c10d as c10d
+
+        inp.realize()
+        group_size = c10d._get_group_size_by_name(group_name)
+        out_size = [inp.get_size()[0] * group_size, *inp.get_size()[1:]]
+        layout = ir.CommBufferLayout(
+            ir.FixedLayout(
+                device=inp.get_device_or_error(),
+                dtype=inp.get_dtype(),
+                size=out_size,
+            ),
+            ir.CommBufferType.SYMM_MEM,
+            group_name,
+        )
+        return ir.TensorBox.create(
+            ir.ExternKernelOut(
+                layout=layout,
+                inputs=[inp],
+                constant_args=(group_name,),
+                op_overload=kernel,
+            )
+        )
 
     @register_lowering(symm_mem.one_shot_all_reduce)
     def _symm_mem_one_shot_all_reduce(
@@ -885,6 +941,42 @@ def register_symm_mem_lowerings():
             symm_mem._low_contention_all_gather.default,
             inp,
             group_name,
+        )
+
+    @register_lowering(symm_mem._low_contention_all_gather_ce_multicast)
+    def _symm_mem_low_contention_all_gather_ce_multicast(
+        inp: ir.TensorBox,
+        group_name: "torch.distributed.distributed_c10d.GroupName",
+    ):
+        return _create_low_contention_ag_out(
+            symm_mem._low_contention_all_gather_ce_multicast_out.default,
+            inp,
+            group_name,
+        )
+
+    @register_lowering(symm_mem._low_contention_all_gather_ce_multicast_out)
+    def _symm_mem_low_contention_all_gather_ce_multicast_out(
+        inp: ir.TensorBox,
+        group_name: "torch.distributed.distributed_c10d.GroupName",
+        out: ir.TensorBox,
+    ):
+        inp.realize()
+        if can_realize_as_comm_buffer(out, ir.CommBufferType.SYMM_MEM):
+            realize_as_comm_buffer(out, ir.CommBufferType.SYMM_MEM, group_name)
+        else:
+            raise RuntimeError(
+                "_low_contention_all_gather_ce_multicast_out requires an "
+                "Inductor-owned output buffer that can be realized as symmetric "
+                "memory; this indicates an invalid lowering."
+            )
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem._low_contention_all_gather_ce_multicast_out.default,
+                inp,
+                group_name,
+                out,
+            ),
         )
 
     @register_lowering(symm_mem._low_contention_reduce_scatter)

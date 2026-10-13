@@ -12,10 +12,12 @@ from torch._inductor.fx_passes.bucketing import (
     BucketMode,
     has_mergeable_all_gather_convert_dtype,
     is_all_gather_into_tensor as is_all_gather,
+    is_all_reduce_tensor,
     is_fsdp_all_gather,
     is_fsdp_reduce_scatter,
     is_reduce_scatter_tensor as is_reduce_scatter,
     merge_all_gather_bucket,
+    merge_all_reduce_bucket,
     merge_reduce_scatter_bucket,
 )
 from torch._inductor.fx_passes.overlap_preserving_bucketer import (
@@ -33,12 +35,90 @@ from .graph_view import get_subgraph_by_path, GraphView, make_graph_view
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 import logging
 
 
 logger = logging.getLogger(__name__)
+
+
+class _BucketPlanReachability:
+    """Track full-graph reachability between collective starts and waits.
+
+    Planned bucket merges are replayed lazily so later plans observe the
+    dependencies they introduce without rescanning the FX graph.
+    """
+
+    def __init__(
+        self,
+        graph_nodes: list[fx.Node],
+        endpoints: list[fx.Node],
+    ) -> None:
+        self.endpoint_to_idx = {node: i for i, node in enumerate(endpoints)}
+        self.endpoint_ancestors = [0] * len(endpoints)
+
+        # Project the full FX graph onto collective starts and waits in one pass.
+        node_to_idx = {node: i for i, node in enumerate(graph_nodes)}
+        # Record which endpoints can reach a given node idx.
+        reachable_endpoints = [0] * len(graph_nodes)
+        for node_idx, node in enumerate(graph_nodes):
+            ancestors = 0
+            # All reachable endpoints to a node input transitively apply to this node.
+            for input_node in node.all_input_nodes:
+                ancestors |= reachable_endpoints[node_to_idx[input_node]]
+            endpoint_idx = self.endpoint_to_idx.get(node)
+            if endpoint_idx is not None:
+                self.endpoint_ancestors[endpoint_idx] = ancestors
+                ancestors |= 1 << endpoint_idx
+            reachable_endpoints[node_idx] = ancestors
+
+        self.merges: list[tuple[int, int]] = []
+        self.applied_merges = [0] * len(endpoints)
+
+    def ancestor_bits(self, node_idx: int) -> int:
+        """Apply planned merges lazily and return this endpoint's ancestors.
+
+        ``applied_merges[node_idx]`` is a cursor into ``merges``. For each
+        unseen merge, this endpoint inherits the merged starts' predecessors if
+        it is one of those starts or already descends from one. Processing the
+        events in order also propagates dependencies introduced by earlier
+        merges through later ones. The updated bitset and cursor are cached, so
+        the same endpoint never processes a merge twice.
+        """
+        ancestors = self.endpoint_ancestors[node_idx]
+        node_bit = 1 << node_idx
+        for member_bits, predecessor_bits in self.merges[
+            self.applied_merges[node_idx] :
+        ]:
+            if (ancestors | node_bit) & member_bits:
+                ancestors |= predecessor_bits
+        self.endpoint_ancestors[node_idx] = ancestors
+        self.applied_merges[node_idx] = len(self.merges)
+        return ancestors
+
+    def merge_starts(self, nodes: list[fx.Node]) -> None:
+        """Model replacing independent collective starts with one fused start.
+
+        Contracting an antichain adds every predecessor of any member as a
+        predecessor of every successor of any member. Updating the projected
+        transitive closure this way exactly captures the new reachability among
+        collectives that have not yet been planned.
+        """
+        if len(nodes) <= 1:
+            return
+
+        indices = [self.endpoint_to_idx[node] for node in nodes]
+        member_bits = sum(1 << idx for idx in indices)
+        member_ancestors = [self.ancestor_bits(idx) for idx in indices]
+        for idx, ancestors in zip(indices, member_ancestors):
+            if ancestors & (member_bits ^ (1 << idx)):
+                raise AssertionError("cannot merge dependent collective starts")
+
+        predecessor_bits = member_bits
+        for ancestors in member_ancestors:
+            predecessor_bits |= ancestors
+        self.merges.append((member_bits, predecessor_bits))
 
 
 def _collect_nodes_must_be_after(node: fx.Node) -> list[fx.Node]:
@@ -58,14 +138,20 @@ def _collect_nodes_must_be_after(node: fx.Node) -> list[fx.Node]:
 
 
 def _collect_nodes_must_be_before(
-    node: fx.Node, node_positions: dict[fx.Node, int]
+    node: fx.Node,
+    node_positions: dict[fx.Node, int],
+    earliest_position: int,
 ) -> list[fx.Node]:
-    """BFS backward collecting node and its non-placeholder dependencies, topo-sorted."""
+    """Collect non-placeholder dependencies at or after ``earliest_position``."""
     visited: OrderedSet[fx.Node] = OrderedSet()
     queue = [node]
     while queue:
         cur = queue.pop()
-        if cur in visited or cur.op == "placeholder":
+        if (
+            cur in visited
+            or cur.op == "placeholder"
+            or node_positions[cur] < earliest_position
+        ):
             continue
         visited.add(cur)
         queue.extend(cur.all_input_nodes)
@@ -102,50 +188,49 @@ def _reduce_scatter_bucket_trace_inputs(coll_node: fx.Node) -> list[fx.Node]:
     return _bucket_trace_inputs(coll_node, coll_node.args[0], group_name_arg=3)
 
 
+def _all_reduce_bucket_trace_inputs(coll_node: fx.Node) -> list[fx.Node]:
+    # all_reduce(tensor, reduce_op, group_name): tensor at 0, group_name at 2.
+    return _bucket_trace_inputs(coll_node, coll_node.args[0], group_name_arg=2)
+
+
+def _do_stable_topological_sort_if_needed(
+    graph: fx.Graph, changed_nodes: Iterable[fx.Node]
+) -> None:
+    """Restore stable topological order if a changed node crosses an edge.
+
+    Callers must include every node moved relative to its neighbors and every
+    endpoint rewired to a node at an independently chosen position. Any newly
+    backward edge is then incident to ``changed_nodes``.
+    """
+    node_positions = {n: i for i, n in enumerate(graph.nodes)}
+    for node in changed_nodes:
+        if node not in node_positions:
+            continue
+        node_pos = node_positions[node]
+        has_late_input = any(
+            inp in node_positions and node_positions[inp] > node_pos
+            for inp in node.all_input_nodes
+        )
+        has_early_user = any(
+            user in node_positions and node_positions[user] < node_pos
+            for user in node.users
+        )
+        if has_late_input or has_early_user:
+            from torch._dynamo.graph_deduplication import _stable_topological_sort
+
+            _stable_topological_sort(graph, {})
+            return
+
+
 def _move_wait_users_after_latest_inputs(
     graph: fx.Graph,
     replacements: dict[fx.Node, fx.Node],
     replaced_users: dict[fx.Node, list[fx.Node]],
 ) -> None:
-    node_positions = {n: i for i, n in enumerate(graph.nodes)}
-    initial_users: OrderedSet[fx.Node] = OrderedSet()
-    for old_out, new_out in replacements.items():
-        if new_out not in node_positions:
-            continue
-        for user in replaced_users.get(old_out, []):
-            if (
-                user in node_positions
-                and user.op != "output"
-                and node_positions[user] < node_positions[new_out]
-            ):
-                initial_users.add(user)
-
-    pending = sorted(initial_users, key=lambda n: node_positions[n])
-    queued = OrderedSet(pending)
-    while pending:
-        node = pending.pop(0)
-        queued.discard(node)
-
-        node_positions = {n: i for i, n in enumerate(graph.nodes)}
-        if node not in node_positions:
-            continue
-
-        input_nodes = [inp for inp in node.all_input_nodes if inp in node_positions]
-        if not input_nodes:
-            continue
-
-        latest_input = max(input_nodes, key=lambda n: node_positions[n])
-        if node_positions[node] >= node_positions[latest_input]:
-            continue
-
-        # Replacing old waits can leave existing consumers before the new bucket
-        # outputs. Pull each affected consumer after its latest input.
-        latest_input.append(node)
-        node_positions = {n: i for i, n in enumerate(graph.nodes)}
-        for user in node.users:
-            if user in node_positions and user.op != "output" and user not in queued:
-                queued.add(user)
-                pending.append(user)
+    changed_nodes: OrderedSet[fx.Node] = OrderedSet(replacements.values())
+    for old_out in replacements:
+        changed_nodes.update(replaced_users.get(old_out, ()))
+    _do_stable_topological_sort_if_needed(graph, changed_nodes)
 
 
 def _move_overlap_nodes(
@@ -158,11 +243,14 @@ def _move_overlap_nodes(
 
     rs_defer: dict[fx.Node, list[fx.Node]] = defaultdict(list)
     ag_prefetch: dict[fx.Node, list[fx.Node]] = defaultdict(list)
+    moved_nodes: OrderedSet[fx.Node] = OrderedSet()
 
     for target, sources in overlap_deps.items():
         for source in sources:
             source_type = bucketed_node_types.get(source, "")
-            if source_type.startswith("bucketed_reduce_scatter"):
+            if source_type.startswith(
+                ("bucketed_reduce_scatter", "bucketed_all_reduce")
+            ):
                 rs_defer[target].append(source)
             elif source_type.startswith("bucketed_all_gather"):
                 ag_prefetch[target].append(source)
@@ -173,6 +261,7 @@ def _move_overlap_nodes(
         latest_rs_start = max(rs_starts, key=lambda n: node_positions[n])
         node_insert_after = latest_rs_start
         for node in _collect_nodes_must_be_after(rs_wait):
+            moved_nodes.add(node)
             node_insert_after.append(node)
             node_insert_after = node
 
@@ -185,15 +274,24 @@ def _move_overlap_nodes(
         for ag_start in sorted_starts:
             if node_positions[ag_start] < ag_wait_pos:
                 continue
-            for node in _collect_nodes_must_be_before(ag_start, node_positions):
+            # Dependencies already before the wait are early enough and should
+            # stay in place rather than moving past their existing users.
+            for node in _collect_nodes_must_be_before(
+                ag_start, node_positions, ag_wait_pos
+            ):
+                moved_nodes.add(node)
                 ag_wait.prepend(node)
+
+    # Moving only the closed part of a chain can leave a boundary edge pointing
+    # backward. Repair once after all requested overlap moves have been applied.
+    _do_stable_topological_sort_if_needed(graph, moved_nodes)
 
 
 class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
-    """
-    Buckets collective operations based on user specifications.
-    The actual bucket happens in bucket_collectives, where all-gathers/reduce-scatters in
-        `nodes` will be buckted one single all-gather/reduce-scatter.
+    """Bucket selected all-gathers, reduce-scatters, and all-reduces.
+
+    ``manual_bucket_collectives`` performs the bucketing, with caller-provided
+    nodes defining the candidate boundary for each manual scope.
     """
 
     def __init__(
@@ -206,8 +304,26 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         # Maps bucketed nodes to their type string, scoped to this bucketer
         # instance so metadata doesn't leak across separate invocations.
         self.bucketed_node_types: dict[fx.Node, str] = {}
+        graph_nodes = sorted(self.node_idx, key=lambda node: self.node_idx[node])
+        # Collective endpoints are their asynchronous starts and completion waits.
+        endpoints = sorted(
+            OrderedSet(
+                endpoint
+                for collective, info in self.collective_info.items()
+                for endpoint in (collective, info.wait_node)
+            ),
+            key=lambda node: self.node_idx[node],
+        )
+        self._bucket_plan_reachability = _BucketPlanReachability(graph_nodes, endpoints)
 
-    def _bucket_group(self, coll_nodes: list[fx.Node]) -> None:
+    def _bucket_group(
+        self, coll_nodes: list[fx.Node]
+    ) -> tuple[dict[fx.Node, fx.Node], dict[fx.Node, list[fx.Node]]]:
+        """Bucket one group and return metadata for deferred wait-user repair.
+
+        The graph may not be topologically ordered until the caller repairs the
+        accumulated replacements.
+        """
         if len(coll_nodes) <= 0:
             raise AssertionError("bucketed coll_nodes should have nonzero node")
 
@@ -226,9 +342,13 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
             bucket_trace_inputs = _reduce_scatter_bucket_trace_inputs
             merge_bucket = merge_reduce_scatter_bucket
             node_type = "bucketed_reduce_scatter"
+        elif is_all_reduce_tensor(first):
+            bucket_trace_inputs = _all_reduce_bucket_trace_inputs
+            merge_bucket = merge_all_reduce_bucket
+            node_type = "bucketed_all_reduce"
         else:
             raise ValueError(
-                "bucket non all_gather/reduce_scatter node is not supported"
+                "bucket non all_gather/reduce_scatter/all_reduce node is not supported"
             )
 
         # coll_nodes order is used for tensor packing and may differ from
@@ -252,7 +372,6 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
             insert_before=next_node,
             mode=self.bucket_mode,
         )
-        _move_wait_users_after_latest_inputs(self.graph, replacements, replaced_users)
 
         logger.debug(f"bucketing nodes: {coll_nodes} into {new_nodes}")  # noqa: G004
 
@@ -282,27 +401,123 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
             elif n is new_start:
                 self.bucketed_node_types[n] = node_type
 
-    def manual_bucket_collectives(self, nodes: list[fx.Node]) -> None:
+        return replacements, replaced_users
+
+    def _split_independent_collectives(
+        self, coll_nodes: OrderedSet[fx.Node], scope_nodes: list[fx.Node]
+    ) -> list[list[fx.Node]]:
+        """Partition same-key collectives so no bucket contains a collective that
+        depends on another member's result.
+
+        Bucketing fuses collectives into one op: inputs are concatenated before
+        the fused collective and outputs split after. If collective B's input
+        depends on collective A's output (A's wait), fusing A and B makes the
+        merged collective's input depend on its own output -- a graph cycle that
+        later fails region topological sort. This arises e.g. in loss-parallel
+        cross-entropy, which emits a sumexp and a result sum-all_reduce on the
+        same (group, reduce_op, dtype) key where result depends on sumexp.
+
+        Each collective is placed in the bucket equal to the longest chain of
+        same-key collectives ending at it (its Mirsky level). Collectives at the
+        same level are mutually independent, so grouping by level gives the
+        minimum number of dependency-free buckets.
+
+        ``scope_nodes`` preserves the method's override contract. The base
+        implementation intentionally uses the full-graph reachability index,
+        including paths that leave and later re-enter that scope.
         """
-        Bucket all all-gather/reduce-scatter nodes from nodes into one all-gather/reduce-scatter.
-        """
-        # Filter out valid collectives
+        candidates = list(coll_nodes)
+        reachability = self._bucket_plan_reachability
+
+        successors: dict[fx.Node, list[fx.Node]] = defaultdict(list)
+        indegree = dict.fromkeys(candidates, 0)
+        wait_idx_to_start = {
+            reachability.endpoint_to_idx[self.collective_info[node].wait_node]: node
+            for node in candidates
+        }
+        candidate_wait_bits = sum(1 << idx for idx in wait_idx_to_start)
+        for descendant in candidates:
+            descendant_idx = reachability.endpoint_to_idx[descendant]
+            ancestor_bits = (
+                reachability.ancestor_bits(descendant_idx) & candidate_wait_bits
+            )
+            while ancestor_bits:
+                ancestor_bit = ancestor_bits & -ancestor_bits
+                ancestor_idx = ancestor_bit.bit_length() - 1
+                ancestor = wait_idx_to_start[ancestor_idx]
+                successors[ancestor].append(descendant)
+                indegree[descendant] += 1
+                ancestor_bits ^= ancestor_bit
+
+        level = dict.fromkeys(candidates, 1)
+        ready = [
+            (self.node_idx[node], node) for node in candidates if not indegree[node]
+        ]
+        heapq.heapify(ready)
+        visited = 0
+        while ready:
+            _, node = heapq.heappop(ready)
+            visited += 1
+            for user in successors[node]:
+                level[user] = max(level[user], level[node] + 1)
+                indegree[user] -= 1
+                if indegree[user] == 0:
+                    heapq.heappush(ready, (self.node_idx[user], user))
+
+        if visited != len(candidates):
+            raise AssertionError("collective dependency graph must be acyclic")
+
+        buckets: dict[int, list[fx.Node]] = defaultdict(list)
+        for candidate in candidates:
+            buckets[level[candidate]].append(candidate)
+        return [buckets[lvl] for lvl in sorted(buckets)]
+
+    def _group_collectives(self, nodes: list[fx.Node]) -> list[OrderedSet[fx.Node]]:
         collectives = [n for n in nodes if n in self.collective_info]
-        if collectives == []:
-            return
         grouped_collectives: dict[object, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for node in collectives:
             if not (
                 is_fsdp_all_gather(node, self.node_ancestors)
                 or is_fsdp_reduce_scatter(node)
+                or is_all_reduce_tensor(node)
             ):
                 continue
             key = get_full_bucket_key(node, "custom_ops")
             if key is not None:
                 grouped_collectives[key].add(node)
+        return list(grouped_collectives.values())
 
-        for key, nodes in grouped_collectives.items():  # type: ignore[arg-type]
-            self._bucket_group(list(nodes))
+    def _apply_manual_bucket_plan(self, sub_buckets: list[list[fx.Node]]) -> None:
+        """Apply one scope's precomputed buckets and repair graph order once."""
+
+        replacements: dict[fx.Node, fx.Node] = {}
+        replaced_users: dict[fx.Node, list[fx.Node]] = {}
+        for sub_bucket in sub_buckets:
+            group_replacements, group_replaced_users = self._bucket_group(sub_bucket)
+            replacements.update(group_replacements)
+            replaced_users.update(group_replaced_users)
+
+        # Repair after all groups so the full-graph sort runs at most once.
+        if replacements:
+            _move_wait_users_after_latest_inputs(
+                self.graph, replacements, replaced_users
+            )
+
+    def manual_bucket_collectives(self, nodes: list[fx.Node]) -> None:
+        """Bucket compatible collectives selected from ``nodes``."""
+        reachability = self._bucket_plan_reachability
+
+        # Plan every group in this scope before mutating the FX graph. Planned
+        # buckets are recorded in the persistent reachability tracker, so this
+        # call also observes dependencies introduced by earlier scope rewrites.
+        sub_buckets: list[list[fx.Node]] = []
+        for group in self._group_collectives(nodes):
+            independent_buckets = self._split_independent_collectives(group, nodes)
+            sub_buckets.extend(independent_buckets)
+            for bucket in independent_buckets:
+                reachability.merge_starts(bucket)
+
+        self._apply_manual_bucket_plan(sub_buckets)
 
 
 class ManualOverlapScheduler(OverlapScheduler):
@@ -435,13 +650,17 @@ class ManualOverlapScheduler(OverlapScheduler):
             if node in self.scheduled:
                 continue
 
-            if node_type == "bucketed_reduce_scatter":
-                # Collect reduce scatter start nodes (pre_bucket_rs and rs)
+            if node_type in ("bucketed_reduce_scatter", "bucketed_all_reduce"):
+                # Collect grad-reduction start nodes (pre_bucket_rs and rs, or
+                # the HSDP/DDP replicate all_reduce).
                 current_rs_start_nodes.append(node)
 
-            elif node_type == "bucketed_reduce_scatter_wait":
-                # When we see a wait node from a new RS, flush delayed waits
-                # with dependencies on previously collected RS start nodes
+            elif node_type in (
+                "bucketed_reduce_scatter_wait",
+                "bucketed_all_reduce_wait",
+            ):
+                # When we see a wait node from a new RS/AR, flush delayed waits
+                # with dependencies on previously collected start nodes
                 if current_rs_start_nodes:
                     for delayed in delayed_rs_wait_nodes:
                         for rs_start in current_rs_start_nodes:
@@ -491,7 +710,7 @@ class ManualOverlapScheduler(OverlapScheduler):
     def _manual_bucket_collectives(self) -> None:
         """Bucket nodes in each module_bucket from module_bucket_plans."""
         self._obtain_nodes_in_subgraph()
-        for i, nodes in enumerate(self.nodes_in_subgraph):
+        for nodes in self.nodes_in_subgraph:
             self.bucketer.manual_bucket_collectives(nodes=nodes)
 
         self.graph.lint()

@@ -196,7 +196,7 @@ std::string repro_from_args(const ConvolutionParams& params) {
   ss << "out.backward(torch.randn_like(out))\n";
   ss << "torch.cuda.synchronize()\n\n";
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 // ---------------------------------------------------------------------
