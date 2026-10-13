@@ -1207,6 +1207,28 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         torch.cuda.synchronize()
         dist.destroy_process_group()
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("blocking", [0, 1])
+    def test_backend_split_with_lazy_parent(self, blocking: int):
+        # The parent has no communicator yet, so the member creates the child
+        # via a fresh init and non-members have no nocolor split to join.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        pg = self._create_process_group_nccl(store, self.opts())
+        backend = pg._get_backend(device)
+        opts = self.opts()
+        opts.config.blocking = blocking
+        child = backend.split(c10d.distributed_c10d._get_default_store(), [0], opts)
+        self.assertEqual(backend._is_initialized(), False)
+        if self.rank == 0:
+            tensor = torch.ones(1, device=device)
+            child.allreduce([tensor]).wait()
+            self.assertEqual(tensor, torch.ones_like(tensor))
+        else:
+            self.assertIsNone(child)
+        dist.destroy_process_group()
+
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_group(self):

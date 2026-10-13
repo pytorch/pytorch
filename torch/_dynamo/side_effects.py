@@ -1849,8 +1849,13 @@ def _codegen_ordered_dict_mutation(ctx: SideEffectReplayContext) -> None:
             original_value = var.original_items.get(key_vt)
             if not var.is_new_item(original_value, value):
                 continue
+            key_vt = key_vt.unwrap()
             # Update lookups preserve existing key objects without positional sources.
-            if original_value is not None and key_vt.is_python_constant():
+            # Use an exact type check to avoid realizing lazy nonliteral keys.
+            if (
+                original_value is not None
+                and type(key_vt) is variables.ConstantVariable
+            ):
                 key_value = key_vt.as_python_constant()
                 if variables.ConstantVariable.is_literal(
                     key_value
