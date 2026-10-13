@@ -525,10 +525,13 @@ runtime_estimations_mms_benchmark: bool = False
 
 # unit: GB/s, uni-directional P2P bandwidth per card (NVLink).
 # None = auto-detect from GPU generation; set to override.
+# Not auto-detected on RDNA GPUs, so the analytical collective estimate and
+# FSDP bucket sizing only use a model there when this is set.
 intra_node_bw: int | None = None
 
 # unit: GB/s, uni-directional P2P bandwidth per node (IB/RoCE).
 # None = auto-detect from GPU generation; set to override.
+# Not auto-detected on RDNA GPUs, so multi-node estimates there require this.
 inter_node_bw: int | None = None
 
 # unit: GB/s, uni-directional CPU<>GPU bandwidth

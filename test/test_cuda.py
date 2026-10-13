@@ -43,6 +43,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     BF16X9_API_SUPPORTED,
     blas_library_context,
+    CUDA_DEVICE_IS_INTEGRATED,
     has_device_side_assert,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     PLATFORM_SUPPORTS_WORKQUEUE_CONFIG,
@@ -55,6 +56,7 @@ from torch.testing._internal.common_cuda import (
     tf32_off,
     tf32_on,
     tf32_on_and_off,
+    with_limited_cuda_memory_on_integrated_device,
     xfailCUDAIfSM89OrLaterOnWindows,
 )
 from torch.testing._internal.common_device_type import (
@@ -277,7 +279,11 @@ class TestAmdSmiImport(TestCase):
                 loader_dir = os.path.join(tmpdir, "loader")
                 os.mkdir(loader_dir)
                 os.symlink(library_source, os.path.join(loader_dir, "libamd_smi.so"))
-                env_updates["LD_LIBRARY_PATH"] = loader_dir
+                env_updates["LD_LIBRARY_PATH"] = os.pathsep.join(
+                    path
+                    for path in (loader_dir, os.environ.get("LD_LIBRARY_PATH"))
+                    if path
+                )
                 env_updates["ROCM_HOME"] = ""
                 env_updates["ROCM_PATH"] = ""
             if provide_sdk_library:
@@ -824,6 +830,8 @@ print(t.is_pinned())
     @unittest.skipIf(
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
+    @serialTest()
+    @with_limited_cuda_memory_on_integrated_device(128)
     def test_out_of_memory(self):
         tensor = torch.zeros(1024, device="cuda")
 
@@ -856,9 +864,12 @@ print(t.is_pinned())
     # raise an OOM RuntimeError, so the assertRaisesRegex below fails.
     @skipIfRocmArch(MI350_ARCH)
     @serialTest()
+    @with_limited_cuda_memory_on_integrated_device(128)
     def test_out_of_memory_retry(self):
         torch.cuda.empty_cache()
         available_memory = torch.cuda.mem_get_info(0)[0]
+        if CUDA_DEVICE_IS_INTEGRATED:
+            available_memory = min(available_memory, 128 * 1024**2)
         oom_regex = (
             "would exceed allowed memory"
             if TEST_CUDAMALLOCASYNC
@@ -942,16 +953,28 @@ print("RECOVERED")
             tensor = torch.zeros(1024, device="cuda")
             torch.cuda.empty_cache()
             total_memory = torch.cuda.get_device_properties(0).total_memory
-            torch.cuda.set_per_process_memory_fraction(0.5, 0)
+            fraction = 0.5
+            if CUDA_DEVICE_IS_INTEGRATED:
+                fraction = 128 * 1024**2 / total_memory
+            torch.cuda.set_per_process_memory_fraction(fraction, 0)
 
-            # test 0.499 allocation is ok.
-            application = int(total_memory * 0.499) - torch.cuda.max_memory_reserved()
+            # Test that an allocation just below the limit is allowed.
+            if CUDA_DEVICE_IS_INTEGRATED:
+                application = (
+                    int(total_memory * fraction)
+                    - torch.cuda.max_memory_reserved()
+                    - 4 * 1024**2
+                )
+            else:
+                application = (
+                    int(total_memory * 0.499) - torch.cuda.max_memory_reserved()
+                )
             tmp_tensor = torch.empty(application, dtype=torch.int8, device="cuda")
             del tmp_tensor
             torch.cuda.empty_cache()
 
-            application = int(total_memory * 0.5)
-            # it will get OOM when try to allocate more than half memory.
+            application = int(total_memory * fraction)
+            # It will OOM when trying to allocate the full limit.
             oom_regex = (
                 "would exceed allowed memory"
                 if TEST_CUDAMALLOCASYNC
@@ -2418,6 +2441,8 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
         self.assertNotEqual(t.data_ptr(), ptr, msg="allocation reused too soon")
         self.assertEqual(list(gpu_tensor), [1])
 
+    @serialTest()
+    @with_limited_cuda_memory_on_integrated_device(512)
     def test_caching_allocator_record_stream_oom(self):
         """allocations delayed by a record_stream call should still be freed on
         an out-of-memory in cuda_malloc_retry. see issue #19219"""
@@ -2586,6 +2611,10 @@ except RuntimeError as e:
 
     @unittest.skipIf(
         not TEST_CUDAMALLOCASYNC, "requires the cudaMallocAsync allocator backend"
+    )
+    @unittest.skipIf(
+        CUDA_DEVICE_IS_INTEGRATED,
+        "requires a real device-memory OOM, which can exhaust host memory",
     )
     @serialTest()
     def test_cudamallocasync_trim_on_oom_retry(self):
@@ -4603,6 +4632,8 @@ exit(2)
     @unittest.skipIf(
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
+    @serialTest()
+    @with_limited_cuda_memory_on_integrated_device(128)
     def test_graph_capture_oom(self):
         oom_regex = (
             "would exceed allowed memory" if TEST_CUDAMALLOCASYNC else "out of memory"
@@ -8022,6 +8053,9 @@ class TestCudaAllocator(TestCase):
                 return torch.empty(311, 411, pin_memory=True)
 
             x = host_alloc()
+            nbytes = x.untyped_storage().nbytes()
+            block_size = 1 << (nbytes - 1).bit_length()
+            addr = x.untyped_storage().data_ptr()
 
             ss = torch.cuda.memory._snapshot()
 
@@ -8033,6 +8067,9 @@ class TestCudaAllocator(TestCase):
                 b = seg["blocks"][0]
                 if b["state"] == "active_allocated":
                     self.assertTrue("test_cuda" in b["frames"][0]["filename"])
+                    self.assertEqual(b["size"], block_size)
+                    self.assertEqual(b["requested_size"], nbytes)
+                    self.assertEqual(seg["requested_size"], nbytes)
                     found_it = True
             self.assertTrue(found_it)
 
@@ -8040,22 +8077,33 @@ class TestCudaAllocator(TestCase):
             text = json.dumps(ss)
             self.assertIn("host_alloc", text)
 
-            # Verify trace actions: segment_alloc then alloc
-            actions = [te["action"] for te in ss["host_traces"]]
-            self.assertIn("segment_alloc", actions)
-            self.assertIn("alloc", actions)
-
-            # Free and verify free traces
+            # A smaller request in the same power-of-two bucket reuses the cached block
             del x
-            ss = torch.cuda.memory._snapshot()
-            actions = [te["action"] for te in ss["host_traces"]]
-            self.assertIn("free_requested", actions)
-            self.assertIn("free_completed", actions)
-
-            # Empty cache and verify segment_free is the last action
+            y = torch.empty(300, 411, pin_memory=True)
+            self.assertEqual(y.untyped_storage().data_ptr(), addr)
+            reused_nbytes = y.untyped_storage().nbytes()
+            del y
             torch._C._host_emptyCache()
+
+            # Segment events carry the rounded block size; alloc and free events
+            # carry the requested size.
             ss = torch.cuda.memory._snapshot()
-            self.assertEqual(ss["host_traces"][-1]["action"], "segment_free")
+            trace = [
+                (te["action"], te["size"])
+                for te in ss["host_traces"]
+                if te["addr"] == addr
+            ]
+            expected = [
+                ("segment_alloc", block_size),
+                ("alloc", nbytes),
+                ("free_requested", nbytes),
+                ("free_completed", nbytes),
+                ("alloc", reused_nbytes),
+                ("free_requested", reused_nbytes),
+                ("free_completed", reused_nbytes),
+                ("segment_free", block_size),
+            ]
+            self.assertEqual(trace, expected)
 
         finally:
             torch.cuda.memory._record_memory_history(None)
@@ -8538,6 +8586,8 @@ print(value, end="")
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
     @parametrize("max_split_size_mb_setting", [False, True])
+    @serialTest()
+    @with_limited_cuda_memory_on_integrated_device(128)
     def test_raises_oom(self, max_split_size_mb_setting):
         if max_split_size_mb_setting:
             # CudaCachingAllocator does early return when searching available blocks
@@ -8608,6 +8658,8 @@ print(value, end="")
     @unittest.skipIf(
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
+    @serialTest()
+    @with_limited_cuda_memory_on_integrated_device(128)
     def test_notifies_oom(self):
         x = False
 
@@ -11934,6 +11986,7 @@ print(json.dumps([
         return original_ptr, new_ptr
 
     @serialTest()
+    @with_limited_cuda_memory_on_integrated_device(128)
     def test_mempool_oom_recovery_releases_cached_blocks(self):
         """Test that the allocator can release default-pool cached blocks to
         satisfy a new allocation when a user mempool is active.
@@ -11947,6 +12000,7 @@ print(json.dumps([
 
         MB = 1024 * 1024
         device = torch.device("cuda:0")
+        limited_memory = 128 * MB
 
         def align_down_2mb(n):
             return n & ~(2 * MB - 1)
@@ -11960,16 +12014,20 @@ print(json.dumps([
         ]:
             with self.subTest(label=label):
                 torch.cuda.empty_cache()
-                free_before = torch.cuda.mem_get_info(device)[0]
+                available_memory = (
+                    limited_memory
+                    if CUDA_DEVICE_IS_INTEGRATED
+                    else torch.cuda.mem_get_info(device)[0]
+                )
 
-                fill_size = align_down_2mb(free_before // 2)
+                fill_size = align_down_2mb(available_memory // 2)
                 if fill_size < 64 * MB:
                     self.skipTest("Not enough GPU memory for this test")
 
                 filler = torch.empty(fill_size, dtype=torch.uint8, device=device)
                 del filler
 
-                alloc_size = align_down_2mb(free_before - free_before // 8)
+                alloc_size = align_down_2mb(available_memory - available_memory // 8)
                 oom = False
                 try:
                     with make_ctx():
@@ -12146,6 +12204,42 @@ print(json.dumps([
         torch.manual_seed(42)
         a_reg = torch.randn(128, 128, device="cuda")
         self.assertEqual(a_uvm, a_reg)
+
+    @requires_cuda_python_bindings
+    def test_use_uvm_oom_uses_caching_allocator_recovery(self):
+        from cuda.bindings import runtime
+
+        oom = (runtime.cudaError_t.cudaErrorMemoryAllocation, 0)
+        with patch.object(runtime, "cudaMallocManaged", return_value=oom):
+            with torch.cuda._use_uvm():
+                with self.assertRaises(torch.OutOfMemoryError):
+                    torch.empty(1, dtype=torch.uint8, device="cuda")
+
+    @requires_cuda_python_bindings
+    def test_use_uvm_advice_error_frees_allocation(self):
+        from cuda.bindings import runtime
+
+        success = runtime.cudaError_t.cudaSuccess
+        ptr = 0x1234
+        with (
+            patch.object(runtime, "cudaMallocManaged", return_value=(success, ptr)),
+            patch.object(runtime, "cudaDeviceGetAttribute", return_value=(success, 1)),
+            patch.object(
+                runtime,
+                "cudaMemAdvise",
+                return_value=(runtime.cudaError_t.cudaErrorInvalidValue,),
+            ),
+            patch.object(runtime, "cudaFree", return_value=(success,)) as cuda_free,
+        ):
+            with torch.cuda._use_uvm():
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"cudaMemAdvise\(SetPreferredLocation\).*"
+                    r"(cudaErrorInvalidValue|invalid argument)",
+                ):
+                    torch.empty(1, dtype=torch.uint8, device="cuda")
+
+        cuda_free.assert_called_once_with(ptr)
 
     @requires_cuda_python_bindings
     def test_use_uvm_backward(self):

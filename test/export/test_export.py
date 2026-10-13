@@ -5673,7 +5673,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             )
         except torch._dynamo.exc.UserError as exc:
             expected_error_msg = (
-                "Specializations unexpectedly required \(dy\)!(.*\n)*.*"
+                "Specializations unexpectedly required \\(dy\\)!(.*\n)*.*"
                 ".*solving the guards generated for dy - 6.*resulted in a specialized value of 6(.*\n)*.*"
                 "Suggested fixes(.*\n)*.*"
                 ".*dy = 12(.*\n)*.*"
@@ -6052,7 +6052,7 @@ def forward(self, x):
             )
         except torch._dynamo.exc.UserError as exc:
             expected_error_msg = (
-                "Constraints violated \(dimz\)!(.*\n)*.*"
+                "Constraints violated \\(dimz\\)!(.*\n)*.*"
                 "The values of dimz.*must always be related to the values of _dimz - 2.*by.*(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
                 "dimz = _dimz"
@@ -8992,10 +8992,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (
                 "Constraints violated.*!(.*\n)*.*"
                 "Suggested fixes(.*\n)*.*"
-                "_dx = Dim\(\\'_dx\\', max=12\)(.*\n)*.*"
-                "dx = 3\*_dx - 1(.*\n)*.*"
-                "dy = 3\*_dx(.*\n)*.*"
-                "dz = 3\*_dx \+ 2"
+                "_dx = Dim\\('_dx', max=12\\)(.*\n)*.*"
+                "dx = 3\\*_dx - 1(.*\n)*.*"
+                "dy = 3\\*_dx(.*\n)*.*"
+                "dz = 3\\*_dx \\+ 2"
             ),
         ):
             export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
@@ -19358,7 +19358,7 @@ def forward(self, x):
             self.assertWarnsRegex(
                 UserWarning,
                 "While exporting, we found certain side effects happened in the model.forward. "
-                "Here are the list of potential sources you can double check: \[\"L\['jt'\]\"\]",
+                "Here are the list of potential sources you can double check: \\[\"L\\['jt'\\]\"\\]",
             ),
             torch._export.config.patch(use_new_tracer_experimental=False),
         ):
