@@ -65,6 +65,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfWindows,
     skipIfXpu,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -1157,7 +1158,20 @@ class CompiledOptimizerBitwiseTests(TestCase):
                 ]
                 expected = fn(start, end)
                 actual = torch.compile(fn)(start, end)
-                self.assertEqual(actual, expected, atol=0, rtol=0)
+
+                # Default: require bitwise-identical compiled vs eager results.
+                atol = rtol = 0
+                if TEST_WITH_ROCM and dtypes == (torch.float16, torch.float16):
+                    # On ROCm the fp16 lerp result for this element is an exact
+                    # fp16 tie. Eager rounds twice (fp32 FMA, then convert to
+                    # fp16), while the AMDGPU backend fuses the compiled kernel's
+                    # fma(...).to(float16) into a single v_fma_mixlo_f16 that
+                    # rounds once to the correctly-rounded neighbor. That leaves a
+                    # 1-ulp difference, so allow
+                    # 1 fp16 ulp here instead of requiring bitwise equality.
+                    atol = 2**-13
+                    rtol = 1e-3
+                self.assertEqual(actual, expected, atol=atol, rtol=rtol)
 
     @staticmethod
     def _test_optimizer_bitwise(
