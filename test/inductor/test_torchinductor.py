@@ -22952,6 +22952,118 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        def test_cross_entropy_backward_has_no_class_reduction(self):
+            # nll_loss_backward's one-hot gradient is summed over the classes by
+            # log_softmax_backward; that sum must fold to the selected term.
+            def fn(x, labels, weight):
+                loss = torch.nn.functional.cross_entropy(
+                    x.float(), labels, weight=weight, ignore_index=-100
+                )
+                return torch.autograd.grad(loss, x)[0]
+
+            x = torch.randn(64, 1000, device=GPU_TYPE, requires_grad=True)
+            labels = torch.randint(0, 1000, (64,), device=GPU_TYPE)
+            labels[::5] = -100
+            for weight in (None, torch.rand(1000, device=GPU_TYPE)):
+                torch._dynamo.reset()
+                result, code = run_and_get_code(torch.compile(fn), x, labels, weight)
+                self.assertEqual(result, fn(x, labels, weight))
+                (backward,) = [c for c in code if "log_softmax_backward" in c]
+                self.assertNotIn("triton_red_", backward)
+                self.assertNotIn("triton_per_", backward)
+
+        def test_row_broadcast_pointwise_uses_2d_tiling(self):
+            # Per-row operands of a pointwise kernel over long rows should be
+            # loaded once per block row ([rows, cols] tiling) rather than
+            # gathered per element from a flattened index.
+            def fn(x, label, col):
+                return torch.where(col == label, x, 0)
+
+            x = torch.randn(64, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+            label = torch.randint(0, 4096, (64, 1), device=GPU_TYPE)
+            col = torch.arange(4096, device=GPU_TYPE)
+            result, code = run_and_get_code(torch.compile(fn), x, label, col)
+            self.assertEqual(result, fn(x, label, col))
+            self.assertIn("ynumel", " ".join(code))
+
+        def test_small_broadcast_read_does_not_split_inner_reduction(self):
+            # The per-group mask is a broadcast (outer-strided) read, but it is
+            # much smaller than the contiguous rows being reduced, so this must
+            # stay an unsplit inner reduction (one kernel).
+            def fn(x, mask):
+                masked = x.view(4096, 8, 32).masked_fill(
+                    mask.unsqueeze(-1), float("-inf")
+                )
+                return masked.flatten(1).amax(-1)
+
+            x = torch.randn(4096, 256, device=GPU_TYPE)
+            mask = torch.rand(4096, 8, device=GPU_TYPE) < 0.5
+            result, code = run_and_get_code(torch.compile(fn), x, mask)
+            self.assertEqual(result, fn(x, mask))
+            self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+
+        def test_topk_small_k(self):
+            def reference(x, k, dim):
+                # Stable descending order; NaN ranks highest and -0 == +0.
+                key = torch.where(x.isnan(), float("inf"), x.float())
+                key = torch.where(key == 0, 0.0, key)
+                order = torch.sort(key, dim=dim, descending=True, stable=True).indices
+                nan_first = torch.gather(x.isnan().to(torch.int8), dim, order)
+                order = torch.gather(
+                    order,
+                    dim,
+                    torch.sort(
+                        nan_first, dim=dim, descending=True, stable=True
+                    ).indices,
+                )
+                indices = order.narrow(dim, 0, k)
+                return torch.gather(x, dim, indices), indices
+
+            specials = torch.tensor(
+                [float("inf"), -float("inf"), float("nan"), 0.0, -0.0, 1.0, 1.0],
+                device=GPU_TYPE,
+            )
+            for shape, k, dim, dtype, special in [
+                ((256, 8, 32), 2, -1, torch.float32, False),
+                ((256, 256), 8, -1, torch.bfloat16, False),
+                ((64, 16), 16, -1, torch.float32, False),
+                ((16, 128, 3), 3, 1, torch.float32, False),
+                ((512, 64), 8, -1, torch.float32, True),
+                ((512, 64), 8, -1, torch.bfloat16, True),
+            ]:
+                x = torch.randn(shape, device=GPU_TYPE)
+                if special:
+                    pick = specials[
+                        torch.randint(0, len(specials), shape, device=GPU_TYPE)
+                    ]
+                    x = torch.where(torch.rand(shape, device=GPU_TYPE) < 0.5, pick, x)
+                x = x.to(dtype)
+                torch._dynamo.reset()
+                (values, indices), code = run_and_get_code(
+                    torch.compile(lambda t: torch.topk(t, k, dim=dim)), x
+                )
+                self.assertNotIn("aten.topk.default(", " ".join(code))
+                ref_values, ref_indices = reference(x, k, dim)
+                self.assertEqual(indices, ref_indices)
+                self.assertTrue(
+                    torch.equal(
+                        values.view(
+                            torch.int16 if dtype == torch.bfloat16 else torch.int32
+                        ),
+                        ref_values.view(
+                            torch.int16 if dtype == torch.bfloat16 else torch.int32
+                        ),
+                    )
+                )
+
+            # Ties between -0 and +0 go to the lowest index, keeping the sign.
+            x = torch.zeros(64, 32, device=GPU_TYPE)
+            x = torch.where(torch.rand(64, 32, device=GPU_TYPE) < 0.5, -x, x)
+            x[:, 20:] = -1.0
+            values, indices = torch.compile(lambda t: torch.topk(t, 4, dim=-1))(x)
+            self.assertEqual(indices, torch.arange(4, device=GPU_TYPE).expand(64, 4))
+            self.assertEqual(torch.signbit(values), torch.signbit(x[:, :4]))
+
         @config.patch({"triton.decompose_sort_ops": True})
         def test_topk_decompose_sort_ops(self):
             def fn(a):

@@ -164,6 +164,61 @@ def register_decomposition(
     return decomp.register_decomposition(ops, decompositions)
 
 
+@register_decomposition(aten.topk.default)
+def topk_small_k(self, k, dim=-1, largest=True, sorted=True):
+    """
+    Small-k topk as k rounds of max-and-remove over the reduced dim, which
+    Inductor fuses into a single persistent reduction instead of falling back
+    to ATen's radix-select/sort kernels.
+
+    Each element gets a unique int64 key: an order-preserving encoding of its
+    value in the high 32 bits and its reversed index in the low 32 bits. The
+    max key is the largest value, with ties going to the lowest index, and a
+    selected key is replaced by INT64_MIN, below every real key, so it is never
+    picked again (even when the row holds -inf). As in ATen, NaN ranks above
+    all numbers, and -0 and +0 compare equal. Results come out in descending
+    order, so the decomposition also serves sorted=True.
+    """
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    if (
+        config.triton.decompose_sort_ops
+        or self.device.type != "cuda"
+        or self.dtype not in (torch.float16, torch.bfloat16, torch.float32)
+        or not largest
+        or self.dim() == 0
+    ):
+        return NotImplemented
+    dim = utils.canonicalize_dim(self.dim(), dim)
+    n = self.shape[dim]
+    if not (
+        statically_known_true(k >= 1)
+        and statically_known_true(k <= 16)
+        and statically_known_true(k <= n)
+        and statically_known_true(n <= 1024)
+    ):
+        return NotImplemented
+
+    x = self.float()
+    # Canonicalize NaN to rank highest and -0 to +0 before taking bits.
+    x = torch.where(torch.isnan(x), float("nan"), torch.where(x == 0, 0.0, x))
+    bits = x.view(torch.int32).to(torch.int64)
+    ordered = torch.where(bits < 0, bits ^ 0x7FFFFFFF, bits)
+    index_shape = [1] * self.dim()
+    index_shape[dim] = n
+    index = torch.arange(n, device=self.device).view(index_shape)
+    key = ordered * (1 << 32) + (n - 1 - index)
+
+    values, indices = [], []
+    for _ in range(k):
+        max_key = key.amax(dim, keepdim=True)
+        selected = (n - 1) - (max_key & 0xFFFFFFFF)
+        indices.append(selected)
+        values.append(torch.gather(self, dim, selected))
+        key = torch.where(key == max_key, torch.iinfo(torch.int64).min, key)
+    return torch.cat(values, dim), torch.cat(indices, dim)
+
+
 @register_decomposition(aten.adaptive_max_pool3d.default)
 def adaptive_max_pool3d(input, output_size):
     result = decomp_adaptive_max_pool3d(input, output_size)

@@ -517,23 +517,34 @@ def _nll_loss_backward(
     if self.dim() == 1 and target.dim() > 0:
         target = target[0]
 
-    target = target.unsqueeze(channel_dim)
-    safe_target = torch.where(target != ignore_index, target, 0)
-    grad_input = torch.zeros_like(self)
-    grad_input = torch.scatter(grad_input, channel_dim, safe_target, -1.0)
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
 
-    if grad_input.dim() > grad_output.dim() > 0:
+    # grad_input is -grad_output at the target class and zero elsewhere. Build
+    # it as a pointwise one-hot select rather than a scatter into zeros, so
+    # every other class is exactly zero. Targets outside [0, num_classes),
+    # including ignore_index, become -1 and match no class, which lets the
+    # class compare run in int32 when the classes fit.
+    num_classes = self.shape[channel_dim]
+    target = target.unsqueeze(channel_dim)
+    in_range = (target != ignore_index) & (target >= 0) & (target < num_classes)
+
+    if self.dim() > grad_output.dim() > 0:
         grad_output = grad_output.unsqueeze(channel_dim)
 
     if weight is not None:
-        new_shape = [1 for _ in range(self.dim())]
-        new_shape[channel_dim] = weight.shape[0]
-        weight = weight.reshape(new_shape)
-        grad_output = grad_output * weight
+        grad_output = grad_output * weight[torch.where(in_range, target, 0)]
 
-    grad_output = torch.where(target != ignore_index, grad_output, 0)
-
-    return grad_input * grad_output
+    index_dtype = (
+        torch.int32
+        if statically_known_true(num_classes <= torch.iinfo(torch.int32).max)
+        else torch.int64
+    )
+    target = torch.where(in_range, target, -1).to(index_dtype)
+    classes_shape = [1] * self.dim()
+    classes_shape[channel_dim] = num_classes
+    classes = torch.arange(num_classes, dtype=index_dtype, device=self.device)
+    one_hot = target == classes.view(classes_shape)
+    return torch.where(one_hot, -grad_output, 0)
 
 
 @register_decomposition(aten.glu_backward)

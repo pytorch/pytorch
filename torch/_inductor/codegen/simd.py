@@ -5856,6 +5856,28 @@ class SIMDScheduling(BaseScheduling):
                     )
                 )
 
+        # Without tiling, a read broadcast along the innermost dim (e.g. per-row
+        # statistics) is a per-element gather addressed via `index // inner`;
+        # [outer, inner] tiling loads it once per block row. The coalescing score
+        # does not capture this, so prefer that split over no tiling when the
+        # innermost dim is long.
+        row_split = None
+        iter_vars = list(all_iter_vars)
+        if (
+            reduction_numel == 1
+            and len(iter_vars) >= 2
+            and get_hint(ranges[iter_vars[-1]]) >= 1024
+            and any(
+                iter_vars[-1] not in index.free_symbols
+                and any(v in index.free_symbols for v in iter_vars)
+                for index in coalesce_analysis.norm_read_writes.reads
+            )
+        ):
+            row_split = (
+                process_node_vars(tuple(iter_vars[-2:]), is_pointwise=True),
+                process_node_vars(is_pointwise=False),
+            )
+
         tilings: list[tuple[CandidateTiling, immutable_dict[str, sympy.Expr], int]] = []
         for pw, red in score_split:
             candidate = CandidateTiling(
@@ -5927,6 +5949,18 @@ class SIMDScheduling(BaseScheduling):
                         torch._inductor.config.triton.max_tiles,
                     )
                     continue
+
+                if cand.tiling == default_tiling and row_split is not None:
+                    pw, red = row_split
+                    row_tiling = cls.create_tiling(pw.splits, red.splits)
+                    if cls.tiling_is_compatible(
+                        node_schedule, pointwise_numel, reduction_numel, row_tiling
+                    ):
+                        return make_selection(
+                            row_tiling,
+                            cls.create_tiling(pw.split_scores, red.split_scores),
+                            pw.coalesced_memory + red.coalesced_memory,
+                        )
 
                 return make_selection(cand.tiling, tiling_score, coalesced_memory)
 
