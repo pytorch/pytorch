@@ -4060,7 +4060,9 @@ kernel void svd_jacobi(
   for (uint32_t i = simd_lane; i < m * n * sizeof(T) / 4; i += kSimd) {
     amax = max(amax, fabs(reinterpret_cast<device const float*>(A_b)[i]));
   }
-  const int scale_exp = clamp(ilogb(c10::metal::simd_max(amax)), -126, 126);
+  // 2^+/-kMaxScaleExp are both normal fp32 (Metal flushes subnormals).
+  constexpr int kMaxScaleExp = 1 - FLT_MIN_EXP;
+  const int scale_exp = clamp(ilogb(c10::metal::simd_max(amax)), -kMaxScaleExp, kMaxScaleExp);
 
   // Stage A column-major so each lane's row access is contiguous.
   for (uint32_t idx = tid; idx < m * n; idx += group_size) {
