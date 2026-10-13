@@ -59,6 +59,14 @@ ExtraState* get_or_init_extra_state(PyCodeObject* code) {
   return extra_state;
 }
 
+// Isolated regions fall back to the default bucket (-1), so they reuse
+// compilations from non-isolated torch.compile() calls (BC friendly). A strict
+// region, one that records into a package, does not: the package would not
+// contain an entry it reused, and could not serve that call once loaded.
+bool searches_default_bucket(int64_t isolate_recompiles_id) {
+  return isolate_recompiles_id >= 0 && !get_current_isolate_recompiles_strict();
+}
+
 // The region's own bucket, then the default bucket, matching lookup order.
 template <typename Fn>
 void for_each_bucket(
@@ -66,7 +74,7 @@ void for_each_bucket(
     int64_t isolate_recompiles_id,
     Fn&& fn) {
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
-  int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
+  int num_ids = searches_default_bucket(isolate_recompiles_id) ? 2 : 1;
   for (int i = 0; i < num_ids; i++) {
     auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
     if (it != extra_state->cache_entry_map.end()) {
@@ -340,7 +348,7 @@ bool try_lookup_without_guard_eval(
   }
 
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
-  int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
+  int num_ids = searches_default_bucket(isolate_recompiles_id) ? 2 : 1;
   std::list<CacheEntry>* found_list = nullptr;
   CacheEntry* found = nullptr;
 
@@ -435,10 +443,9 @@ void lookup(
     ++index;
   }
 
-  // Isolated compiles then fall back to the default bucket (-1). This lets
-  // them reuse compilations from non-isolated torch.compile() calls (BC
-  // friendly). New entries are still written to the isolated bucket.
-  if (isolate_recompiles_id >= 0) {
+  // Then the default bucket (see searches_default_bucket). New entries are
+  // still written to the isolated bucket.
+  if (searches_default_bucket(isolate_recompiles_id)) {
     auto it = extra_state->cache_entry_map.find(-1);
     if (it != extra_state->cache_entry_map.end()) {
       CacheEntry* found = lookup_in_list(
