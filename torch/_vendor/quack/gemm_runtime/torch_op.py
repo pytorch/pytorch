@@ -40,7 +40,7 @@ import torch
 
 from torch._vendor.quack.blockscaled.operand import BlockScaledFormat
 from torch._vendor.quack.gemm_config import GemmConfig, blockscaled_default_config, cta_tile_shape_m
-from torch._vendor.quack.gemm_runtime.autotune import _select_mod_config, mod_selection_args
+from torch._vendor.quack.gemm_runtime.autotune import _legal_mod_configs, mod_selection_args
 from torch._vendor.quack.gemm_runtime.identity import (
     TORCH_OP_EPI_MODS as _EPI_REGISTRY,
     TORCH_OP_TRANSFORM_MODS as _TA_REGISTRY,
@@ -112,7 +112,6 @@ def _gemm_epi(digest: str, ins: list[torch.Tensor], outs: list[torch.Tensor], me
         named.get("C"),
         out=out,
         store_d=m["store_d"],
-        config_constraints=m.get("config_constraints", ()),
         config=cfg,
         tuned=m["tuned"],
         cu_seqlens_m=named.get("cu_seqlens_m"),
@@ -171,14 +170,13 @@ def _sink_config_from_meta(mod, named, outputs, meta, transform_a):
         )
     else:
         preferred_config = mod._default_config(A, B, transform_a)
-    return _select_mod_config(
+    return _legal_mod_configs(
         mod,
         A.device,
-        meta.get("config_constraints", ()),
         selection_args,
         preferred_config=preferred_config,
         transform_a=transform_a,
-    )
+    )[0]
 
 
 def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
@@ -245,7 +243,6 @@ def compile_call(
     out,
     out_dtype,
     store_d,
-    config_constraints,
     config,
     tuned,
     cu_seqlens_m,
@@ -273,7 +270,6 @@ def compile_call(
     ``ins`` under ``ta__<name>`` and the op body hands them back to
     ``__call__`` as ``transform_operands`` (the bundle is rebuilt there from
     the config the op resolves — same deterministic path as this trace)."""
-    constraints = tuple(config_constraints)
     cfg: Optional[GemmConfig] = config
     caller_owned = bool(out) or any(operands.get(name) is not None for name in mod.sinks)
     sink_names = tuple(name for name in mod.sinks if operands.get(name) is None)
@@ -323,7 +319,6 @@ def compile_call(
             sink_names=sink_names,
             store_d=bool(store_d),
             tuned=bool(tuned),
-            config_constraints=constraints,
             config=None if cfg is None else cfg.__dict__,
             rounding_mode=int(rounding_mode),
             bs_format_a=bs_format_a,

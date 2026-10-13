@@ -27,6 +27,7 @@ from torch._logging import LazyString, trace_structured
 
 if TYPE_CHECKING:
     from torch._inductor import ir
+    from torch._inductor.heuristics.template.flex_gemm import QuackConfigKey
     from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         FlexGemmEpilogueAnalysis,
     )
@@ -337,19 +338,22 @@ def format_flex_gemm_lowering_plan(
     return "\n".join(lines)
 
 
-def format_flex_gemm_selection(choice: "ir.ChoiceCaller | None", *, tuned: bool) -> str:
-    """Render the search summary and selected FlexGEMM template."""
+def format_flex_gemm_config_candidates(
+    configs: "Sequence[QuackConfigKey]", *, tuned: bool
+) -> str:
+    """Render the QuACK configs Inductor will benchmark or pin."""
     lines = [
-        "search:",
-        f"  mode: {'autotuned' if tuned else 'fixed'}",
-        "  native config selection: QuACK-owned",
-        "",
-        "selected:",
+        f"mode: {'autotune' if tuned else 'default'}",
+        f"candidates: {len(configs)}",
     ]
-    if choice is None:
-        lines.append("  deferred to a multi-template buffer")
-    else:
-        lines.append(f"  template: {choice.name}")
+    for config in configs:
+        fields = dict(config)
+        lines.append(
+            "  tile=({tile_m}, {tile_n}) cluster=({cluster_m}, {cluster_n}) "
+            "swap_ab={swap_ab} dynamic_persistent={is_dynamic_persistent}".format(
+                **fields
+            )
+        )
     lines.extend(
         (
             "",

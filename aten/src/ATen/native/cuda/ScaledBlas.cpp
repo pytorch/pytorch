@@ -294,7 +294,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
 }
 
 bool
-_tunable_scaled_gemm_rocm(
+_tunable_scaled_gemm(
           cublasCommonArgs& args,
           const Tensor& mat1, const Tensor& mat2,
           const Tensor& scale_a, const Tensor& scale_b,
@@ -302,9 +302,11 @@ _tunable_scaled_gemm_rocm(
           const std::optional<Tensor>& bias,
           const bool use_fast_accum,
           const at::ScalarType out_dtype,
-          Tensor& out) {
-#ifdef USE_ROCM
+          Tensor& out,
+          const std::optional<Tensor>& alpha) {
   bool dispatched = false;
+#ifdef USE_ROCM
+  (void)alpha;
 #define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
       if (mat1.scalar_type() == ScalarType::Float8_e4m3fnuz) {        \
         if (mat2.scalar_type() == ScalarType::Float8_e4m3fnuz) {      \
@@ -362,6 +364,24 @@ _tunable_scaled_gemm_rocm(
           dispatched = scaledgemm(&params) == at::cuda::tunable::OK;                              \
         }                                                             \
       }
+#else
+      // CUDA cuBLASLt dispatches on runtime dtypes in ScaledGemmParams, whose
+      // signature also keys the tuning cache by dtype. AT/BT are placeholders.
+#define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                         \
+      static at::cuda::tunable::ScaledGemmTunableOp<                 \
+          at::Float8_e4m3fn, at::Float8_e4m3fn, scalar_t,            \
+          BLASOP_A, BLASOP_B> scaledgemm{};                          \
+      dispatched = scaledgemm(&params) == at::cuda::tunable::OK;
+#endif
+#ifdef USE_ROCM
+#define TUNABLE_SCALED_GEMM_TYPES \
+  kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_FLOATING_TYPES)
+#define TUNABLE_SET_ALPHA(params, alpha_val)
+#else
+#define TUNABLE_SCALED_GEMM_TYPES \
+  kHalf, kBFloat16, kFloat, AT_EXPAND(AT_FLOAT8_TYPES)
+#define TUNABLE_SET_ALPHA(params, alpha_val) (params).alpha = (alpha_val)
+#endif
   AT_DISPATCH_V2(out_dtype, "_tunable_scaled_gemm", AT_WRAP([&] {
     bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
     bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
@@ -389,7 +409,6 @@ _tunable_scaled_gemm_rocm(
     params.k = args.k;
     params.a = args.mata->data_ptr();
     params.a_scale_ptr = args.scale_mata_ptr;
-    params.a_scale_dtype = args.scale_mata_dtype.value();
     params.lda = args.lda;
     params.a_dtype = args.mata->scalar_type();
     params.a_scale_dtype = args.scale_mata_dtype.value();
@@ -397,7 +416,6 @@ _tunable_scaled_gemm_rocm(
     params.a_swizzle_type = args.swizzle_mata_type;
     params.b = args.matb->data_ptr();
     params.b_scale_ptr = args.scale_matb_ptr;
-    params.b_scale_dtype = args.scale_matb_dtype.value();
     params.ldb = args.ldb;
     params.b_dtype = args.matb->scalar_type();
     params.b_scale_dtype = args.scale_matb_dtype.value();
@@ -410,6 +428,7 @@ _tunable_scaled_gemm_rocm(
     params.ldc = args.result_ld;
     params.c_dtype = out_dtype;
     params.use_fast_accum = use_fast_accum;
+    TUNABLE_SET_ALPHA(params, alpha);
     // `dispatched` stays false if the selected kernel reports a non-OK status,
     // or if no branch of TUNABLE_DISPATCH matches this dtype pair; either way
     // the caller re-dispatches at::cuda::blas::scaled_gemm.
@@ -429,12 +448,11 @@ _tunable_scaled_gemm_rocm(
       TORCH_CHECK(false, "unreachable");
     }
   }),
-  kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_FLOATING_TYPES));
+  TUNABLE_SCALED_GEMM_TYPES);
+#undef TUNABLE_SET_ALPHA
+#undef TUNABLE_SCALED_GEMM_TYPES
 #undef TUNABLE_DISPATCH
   return dispatched;
-#else
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_gemm_rocm only callable on ROCM devices");
-#endif
 }
 
 struct ScaledGemmEpilogue {
@@ -467,9 +485,21 @@ _scaled_gemm(
       swizzle_choice_a,
       swizzle_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
-  // H100 only supports row-major x column-major, but all permutaitons are supported on Blackwells
-  if (scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/false)) {
-    TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
+#ifdef USE_ROCM
+  // hipBLASLt only has solutions for every layout permutation with tensorwise scaling;
+  // row-wise and block-wise bind their scale vectors to the operand orientation and are
+  // TN-only on all gfx archs. scaled_mm_arch_allowed() ignores sm90_only/sm100_only on
+  // ROCm, so it cannot express this.
+  const bool tn_only = scaling_choice_a != ScalingType::TensorWise ||
+      scaling_choice_b != ScalingType::TensorWise;
+  [[maybe_unused]] constexpr auto tn_only_msg = "Only multiplication of row-major and column-major matrices is supported by hipBLASLt for non-tensorwise scaling";
+#else
+  // H100 only supports row-major x column-major, but all permutations are supported on Blackwells
+  const bool tn_only = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/false);
+  [[maybe_unused]] constexpr auto tn_only_msg = "Only multiplication of row-major and column-major matrices is supported by cuBLASLt";
+#endif
+  if (tn_only) {
+    TORCH_CHECK(args.transa == 't' && args.transb == 'n', tn_only_msg);
   }
   std::optional<Tensor> effective_accumulator = epilogue.accumulator;
   // Some cuBLASLt algorithms skip the D write for distinct C/D when M=1.
@@ -483,21 +513,20 @@ _scaled_gemm(
           (effective_accumulator->stride(0) == args.result_ld &&
            effective_accumulator->scalar_type() == out_dtype_),
       "scaled_addmm: input and output must have the same dtype and leading dimension");
-// ROCM enables the TunableOp path only
-// but can fallback to at::cuda::blas::scaled_gemm
-#ifdef USE_ROCM
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  bool tunable_op_enabled = tuning_ctx->IsTunableOpEnabled();
-#else
-  bool tunable_op_enabled = false;
-#endif
+  // TunableOp's ScaledGemmParams cannot represent the addmm accumulator/alpha/beta
+  // yet, so bypass it for epilogues (ROCm blocks the accumulator upstream, CUDA-only).
+  const bool tunable_supports_epilogue = !effective_accumulator &&
+      epilogue.alpha == 1.0f && epilogue.beta == 0.0f;
+  bool tunable_op_enabled =
+      tuning_ctx->IsTunableOpEnabled() && tunable_supports_epilogue;
   if (tunable_op_enabled) {
-      // Only available on ROCM. Returns false when the tunable dispatch did
+      // Returns false when the tunable dispatch did
       // not run the GEMM -- the selected kernel reported a non-OK status, or
       // no TUNABLE_DISPATCH branch matched this dtype pair. Both cases fall
       // through to the non-tunable scaled_gemm below. Matches the addmm
       // fallback in launchGemmAndBiasCublasLt.
-      if (_tunable_scaled_gemm_rocm(
+      if (_tunable_scaled_gemm(
               args,
               mat1, mat2,
               scale_a, scale_b,
@@ -505,7 +534,8 @@ _scaled_gemm(
               bias,
               use_fast_accum,
               out_dtype_,
-              out)) {
+              out,
+              device_alpha)) {
         return out;
       }
   }
@@ -578,7 +608,8 @@ _scaled_rowwise_rowwise(
 // Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, scale_result is not applied.
 // Known limitations:
-//  - Only works if mat1 is row-major and mat2 is column-major
+//  - Only row-major mat1 x column-major mat2 is supported on CUDA SM90, and on ROCm for
+//    every scaling recipe other than tensorwise
 //  - Only works if matrices sizes are divisible by 32
 //  - If 1-dimensional tensors are used then scale_a should be size = mat1.size(0)
 //    and scale_b should have size = to mat2.size(1)
@@ -1192,7 +1223,7 @@ _scaled_mxfp8_mxfp8(
 #ifdef USE_ROCM
   check_mx_swizzle(mat_a, swizzle_a, swizzle_b);
   int64_t scale_a_elems, scale_b_elems;
-  const char* scale_layout;
+  [[maybe_unused]] const char* scale_layout;
   if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
     scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), mat_a.size(1));
     scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), mat_b.size(0));
@@ -1205,7 +1236,7 @@ _scaled_mxfp8_mxfp8(
 #else
   auto scale_a_elems = round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_a.size(1), 32), 4);
   auto scale_b_elems = round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_b.size(0), 32), 4);
-  const char* scale_layout = "SWIZZLE_32_4_4";
+  [[maybe_unused]] const char* scale_layout = "SWIZZLE_32_4_4";
 #endif
   TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
          "For Blockwise scaling with ", scale_layout, " scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
@@ -1282,7 +1313,7 @@ _scaled_mxfp4_mxfp4(
   // AMD
   check_mx_swizzle(mat_a, swizzle_a, swizzle_b);
   int64_t scale_a_elems, scale_b_elems;
-  const char* scale_layout;
+  [[maybe_unused]] const char* scale_layout;
   if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
     scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), K_multiplier * mat_a.size(1));
     scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), K_multiplier * mat_b.size(0));
@@ -1296,7 +1327,7 @@ _scaled_mxfp4_mxfp4(
   // NVIDIA
   auto scale_a_elems = round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(K_multiplier * mat_a.size(1), 32), 4);
   auto scale_b_elems = round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(K_multiplier * mat_b.size(0), 32), 4);
-  const char* scale_layout = "SWIZZLE_32_4_4";
+  [[maybe_unused]] const char* scale_layout = "SWIZZLE_32_4_4";
 #endif
   TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
          "For Blockwise scaling with ", scale_layout, " scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
