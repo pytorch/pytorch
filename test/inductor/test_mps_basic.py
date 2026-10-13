@@ -12,18 +12,12 @@ import torch
 from torch._inductor import config as inductor_config
 from torch._inductor.codegen.mps import MetalKernel
 from torch.testing import FileCheck, make_tensor
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import all_mps_types_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    MACOS_VERSION,
     parametrize,
 )
 
-
-MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble] + (
-    [torch.bfloat16] if MACOS_VERSION < 14.0 else []
-)
-MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
 
 importlib.import_module("filelock")
 
@@ -48,7 +42,7 @@ class MPSBasicTests(TestCase):
     common = check_model_gpu
     device = "mps"
 
-    @parametrize("dtype", MPS_DTYPES)
+    @parametrize("dtype", all_mps_types_and(torch.bool, torch.complex64))
     def test_add(self, dtype):
         self.common(
             lambda a, b: a + b,
@@ -61,6 +55,13 @@ class MPSBasicTests(TestCase):
 
     def test_log(self):
         self.common(lambda x: x.log(), (torch.rand(1024),))
+
+    def test_prims_nextafter(self):
+        x = torch.tensor([0.0, 1.0], device=self.device)
+        y = torch.tensor([1.0, 2.0], device=self.device)
+        expected = torch.ops.prims.nextafter.default(x, y)
+        actual = torch.compile(torch.ops.prims.nextafter.default, fullgraph=True)(x, y)
+        self.assertEqual(actual, expected)
 
     def test_acos(self):
         self.common(lambda x: x.acos(), (torch.rand(1024),))
@@ -126,7 +127,7 @@ class MPSBasicTests(TestCase):
 
         self.common(foo, (torch.rand(1024),))
 
-    @parametrize("dtype", MPS_DTYPES)
+    @parametrize("dtype", all_mps_types_and(torch.bool, torch.complex64))
     def test_cast(self, dtype):
         self.common(lambda a: a.to(dtype), (torch.rand(1024),))
 
@@ -232,6 +233,13 @@ class MPSBasicTests(TestCase):
                 b,
             ),
         )
+
+    def test_argmax_bf16(self):
+        def fn(x):
+            return x.argmax(-1)
+
+        x = torch.randn(1, 65536, dtype=torch.bfloat16)
+        self.common(fn, (x,), check_lowp=False)
 
     @parametrize("shape", [(4, 5000), (3, 1023), (7, 1025), (5, 32), (1, 30000)])
     def test_welford_reduction_dynamic_shape(self, shape):

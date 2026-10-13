@@ -61,7 +61,6 @@ ops_dde_xfail = {
     xfail("grid_sampler_2d"),
     xfail("hash_tensor"),
     xfail("histogram"),
-    xfail("histogramdd"),
     xfail("hsplit"),
     xfail("index_fill"),
     xfail("inner"),
