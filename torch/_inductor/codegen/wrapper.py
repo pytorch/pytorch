@@ -1238,6 +1238,8 @@ class KernelDefinitionLine(WrapperLine):
     metadata: str | None = None
     gpu: bool = True
     cpp_definition: str | None = None
+    standalone: bool = False
+    autotune_body: str | None = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._define_kernel_helper(
@@ -1246,6 +1248,8 @@ class KernelDefinitionLine(WrapperLine):
             metadata=self.metadata,
             gpu=self.gpu,
             cpp_definition=self.cpp_definition,
+            standalone=self.standalone,
+            autotune_body=self.autotune_body,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -4038,6 +4042,8 @@ class PythonWrapperCodegen(CodeGen):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         self.writeline(
             KernelDefinitionLine(
@@ -4047,18 +4053,27 @@ class PythonWrapperCodegen(CodeGen):
                 metadata=metadata,
                 gpu=gpu,
                 cpp_definition=cpp_definition,
+                standalone=standalone,
+                autotune_body=autotune_body,
             )
         )
 
     @staticmethod
     def _format_kernel_definition(
-        kernel_name: str, kernel_body: str, metadata: str | None = None
+        kernel_name: str,
+        kernel_body: str,
+        metadata: str | None = None,
+        standalone: bool = False,
     ):
         if config.triton.autotune_at_compile_time and metadata:
             # Generating autotune block
             # Need to replace C++ comment starter with Python comment starter
             metadata = re.sub(r"^// ", "# ", metadata, flags=re.MULTILINE)
         metadata_comment = f"{metadata}\n" if metadata else ""
+        # A standalone body already binds kernel_name itself (it is a decorated def, not
+        # an expression), so assigning it would be a syntax error rather than a rebind.
+        if standalone:
+            return f"\n\n{metadata_comment}{kernel_body}"
         body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
         return body
 
@@ -4069,10 +4084,18 @@ class PythonWrapperCodegen(CodeGen):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         if config.triton.autotune_at_compile_time and gpu:
+            # The autotune block is exec'd rather than emitted, so it wants whichever
+            # form runs there, not the one meant to be read: a standalone kernel carries
+            # filename=__file__, which is undefined in that exec.
             body = self._format_kernel_definition(
-                kernel_name, kernel_body, metadata=metadata
+                kernel_name,
+                autotune_body if autotune_body is not None else kernel_body,
+                metadata=metadata,
+                standalone=standalone and autotune_body is None,
             )
             self.kernel_autotune_defs.splice(body)
             if V.graph.cpp_wrapper:
@@ -4080,9 +4103,72 @@ class PythonWrapperCodegen(CodeGen):
                 return
 
         body = self._format_kernel_definition(
-            kernel_name, kernel_body, metadata=metadata
+            kernel_name, kernel_body, metadata=metadata, standalone=standalone
         )
         self.header.splice(body)
+
+    def emit_triton_kernel_definition(
+        self,
+        kernel_name: str,
+        subs_name: str,
+        src_code: str,
+        device_type: str,
+        metadata: str | None = None,
+    ) -> None:
+        """Bind ``kernel_name`` to a launchable Triton kernel at module scope.
+
+        The default form hands the kernel to AsyncCompile as a source string, which is
+        what lets compilation fan out to the worker pool. When
+        ``defines_triton_kernels_as_code()`` the kernel is defined as code instead.
+        """
+        if not self.defines_triton_kernels_as_code():
+            self.define_kernel(
+                kernel_name,
+                self.async_compile_triton_body(subs_name, src_code, device_type),
+                metadata,
+            )
+            return
+        # src_code is already a complete module: the triton imports, the
+        # @triton_heuristics.* decorator that builds the CachingAutotuner, and the
+        # @triton.jit def. Spliced at module level it binds kernel_name to the same
+        # object async_compile.triton would have returned, so the launch site
+        # (KERNEL.run(...)) is unchanged.
+        # Kernels define module-level @triton.jit helpers under names that are only
+        # unique per kernel (scan combine_fns, flex attention's forward_inner, ...), so
+        # two kernels can define the same name with different bodies; in one shared
+        # namespace the later def would win for both. Make them kernel-unique.
+        helpers = re.findall(r"^def (\w+)\(", src_code, re.MULTILINE)
+        for helper in OrderedSet(helpers) - OrderedSet([kernel_name, subs_name]):
+            src_code = re.sub(rf"\b{helper}\b", f"{helper}_{kernel_name}", src_code)
+        self.define_kernel(
+            kernel_name,
+            src_code,
+            metadata,
+            standalone=True,
+            # The compile-time autotune block execs its kernels instead of emitting
+            # them, and a module-level kernel there has no __file__ to name itself by,
+            # so that block keeps the AsyncCompile form. It runs at compile time only
+            # and is not carried in the emitted module.
+            autotune_body=(
+                self.async_compile_triton_body(subs_name, src_code, device_type)
+                if config.triton.autotune_at_compile_time
+                else None
+            ),
+        )
+
+    def defines_triton_kernels_as_code(self) -> bool:
+        # Off until module-level kernels compile as fast as string ones; tests patch it.
+        return False
+
+    @staticmethod
+    def async_compile_triton_body(
+        subs_name: str, src_code: str, device_type: str
+    ) -> str:
+        compile_wrapper = IndentedBuffer()
+        compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
+        compile_wrapper.splice(src_code, strip=True)
+        compile_wrapper.writeline(f"''', device_str='{device_type}')")
+        return compile_wrapper.getvalue()
 
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
         self.subgraph_definitions.splice(subgraph_code.value)

@@ -121,6 +121,13 @@ def _contains_nan(value: Any) -> bool:
     return type(value) in (float, complex) and value != value
 
 
+def _guard_nan_key(key: VariableTracker) -> None:
+    # CONSTANT_MATCH accepts distinct NaNs, but dictionary lookups depend
+    # on their identity, including NaNs nested inside tuple keys.
+    if key.source and _contains_nan(_get_literal_key(key)):
+        install_guard(key.make_guard(GuardBuilder.ID_MATCH))
+
+
 # Mirror PyDict_{Check,CheckExact} in Include/cpython/dictobject.h.
 def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
     return issubclass(obj.python_type(), dict)
@@ -600,10 +607,7 @@ class ConstDictVariable(VariableTracker):
         *,
         container_name: str | None = None,
     ) -> HashableTracker:
-        # CONSTANT_MATCH accepts distinct NaNs, but dictionary lookups depend
-        # on their identity, including NaNs nested inside tuple keys.
-        if key.source and _contains_nan(_get_literal_key(key)):
-            install_guard(key.make_guard(GuardBuilder.ID_MATCH))
+        _guard_nan_key(key)
         try:
             return HashableTracker(key)
         except ObservedTypeError:
@@ -719,6 +723,8 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker:
         self.install_dict_keys_match_guard()
         if isinstance(self, OrderedDictVariable) and self.source:
+            # Copies can expose hook IDs too; the hook-dict exemption is unsafe here.
+            tx.output.guard_on_key_order.add(self.source)
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
         return self._new_dict(self.items.copy())
 
@@ -756,12 +762,15 @@ class ConstDictVariable(VariableTracker):
                 raise_observed_exception(KeyError, tx, args=[args[0]])
             return args[1]
         # OrderedDict.pop uses PyObject_Hash, including for an empty mapping.
-        key = (
-            HashableTracker(args[0])
-            if isinstance(self, OrderedDictVariable)
-            else self._lookup_key(tx, args[0])
-        )
-        value = self.items.pop(key, None)
+        if isinstance(self, OrderedDictVariable):
+            _guard_nan_key(args[0])
+            key = HashableTracker(args[0])
+        else:
+            key = self._lookup_key(tx, args[0])
+        # A __dict__ deletion marker is already absent; do not record another
+        # attribute mutation (which may be forbidden inside a HOP).
+        is_proxy = isinstance(self.items, SideEffectsProxyDict)
+        value = self.items.get(key) if is_proxy else self.items.pop(key, None)
         if value is None or type(value) is variables.DeletedVariable:
             # missing item, return the default value. Install no DICT_CONTAINS guard.
             self.install_dict_contains_guard(tx, key, key_present=False)
@@ -772,6 +781,8 @@ class ConstDictVariable(VariableTracker):
         self.should_reconstruct_all = True
         self.has_deleted_keys = True
         tx.output.side_effects.mutation(self)
+        if is_proxy:
+            del self.items[key]
         return value
 
     def dict_popitem(
@@ -953,6 +964,8 @@ class ConstDictVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
         self.install_dict_keys_match_guard()
+        if self.source:
+            tx.output.guard_on_key_order.add(self.source)
         return [x.vt for x in self.items]
 
     def nb_or_impl(
@@ -1145,13 +1158,14 @@ class OrderedDictVariable(ConstDictVariable):
             or not isinstance(other, OrderedDictVariable)
         ):
             return result
-        if result.as_python_constant() == (op == "__ne__"):
-            return result
-        # CPython's odict_richcompare checks key order only after dict equality.
-        # Distinct hook dictionaries also need guards: their IDs affect equality.
+        # Distinct hook dictionaries need key guards even when dict equality
+        # fails: replacing their IDs can make them equal on the next call.
         for mapping in (self, other):
             if mapping.source:
                 install_guard(mapping.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
+        if result.as_python_constant() == (op == "__ne__"):
+            return result
+        # CPython's odict_richcompare checks key order only after dict equality.
         # These iterators advance after comparison, detecting mutations even on
         # the last pair or when comparison returns false, as `_odict_keys_equal` does.
         mutation_checks = tuple(
@@ -1184,6 +1198,7 @@ class OrderedDictVariable(ConstDictVariable):
     ) -> VariableTracker:
         self.install_dict_keys_match_guard()
         # The endpoint identity shortcut also depends on the input's key order.
+        # Hook IDs cannot be exempted: a changed ID can turn a no-op into KeyError.
         if self.source:
             tx.output.guard_on_key_order.add(self.source)
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
@@ -1195,6 +1210,7 @@ class OrderedDictVariable(ConstDictVariable):
         )
         last = specialize_symnode(generic_is_true(tx, last_arg)).as_python_constant()
 
+        _guard_nan_key(args[0])
         endpoint = next(reversed(self.items) if last else iter(self.items))
         same_key = vt_identity_compare(args[0], endpoint.vt)
         if same_key is not None and same_key.as_python_constant():
