@@ -1000,8 +1000,10 @@ objects such as `AllreduceOptions`:
 
 **Work.** Collectives return a `Work`, except `monitored_barrier`;
 `recv_anysource` and `end_coalescing` may return `None`. Subclass
-`dist._Work` and override `wait(timeout)`, `get_future()` and `is_completed()`,
-as with `MyWork` above. Other `Work` methods can't be overridden from Python.
+`dist._Work` and override `wait(timeout)` and `get_future()`, as with `MyWork`
+above. `is_completed()`, `synchronize()`, `source_rank()` (used by
+`recv(src=None)`), `result()` and `block_current_stream()` can also be
+overridden. Other `Work` methods can't be overridden from Python.
 
 **Capabilities.** Features are opted into with read-only properties, for
 example `supports_splitting`, `supports_coalescing` and `supports_shrinking`,

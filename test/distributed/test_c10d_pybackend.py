@@ -434,17 +434,40 @@ class TestPyBackend(TestCase):
 
         self.assertGreater(backend.wait_count, 0)
 
-    def test_work_is_completed_override(self) -> None:
-        class CompletedWork(RecordingWork):
+    def test_work_overrides(self) -> None:
+        calls = []
+
+        class OverrideWork(RecordingWork):
             def is_completed(self):
                 return True
 
+            def synchronize(self):
+                calls.append("synchronize")
+
+            def source_rank(self):
+                return 3
+
+            def result(self):
+                return [torch.ones(1)]
+
+            def block_current_stream(self):
+                calls.append("block_current_stream")
+
         backend = RecordingBackend(0, 1)
         group = create_process_group(backend)
-        self.assertFalse(group.allreduce([torch.zeros(2)]).is_completed())
+        work = group.allreduce([torch.zeros(2)])
+        self.assertFalse(work.is_completed())
+        with self.assertRaisesRegex(RuntimeError, "may only be called"):
+            work._source_rank()
 
-        backend._new_work = lambda result=None: CompletedWork(result, backend)
-        self.assertTrue(group.allreduce([torch.zeros(2)]).is_completed())
+        backend._new_work = lambda result=None: OverrideWork(result, backend)
+        work = group.recv_anysource([torch.zeros(2)], 0)
+        self.assertTrue(work.is_completed())
+        self.assertEqual(work._source_rank(), 3)
+        self.assertEqual(work.result(), [torch.ones(1)])
+        work.synchronize()
+        work.block_current_stream()
+        self.assertEqual(calls, ["synchronize", "block_current_stream"])
 
     def test_collective_returns_none(self) -> None:
         backend = RecordingBackend(0, 1)
