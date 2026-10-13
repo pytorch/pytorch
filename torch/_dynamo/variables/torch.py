@@ -654,6 +654,12 @@ class BaseTorchVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
         result = hasattr(self.value, name)
+        if self.source is not None:
+            install_guard(
+                self.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
+            )
         return VariableTracker.build(tx, result)
 
     def can_constant_fold_through(self) -> bool:

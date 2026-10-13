@@ -5336,6 +5336,8 @@ class ShapeEnv:
         dynamic_offset = (
             DimDynamic.STATIC
             if all(r == DimDynamic.STATIC for r in dynamic_sizes)
+            else DimDynamic.DYNAMIC
+            if config.dynamic_storage_offset
             else DimDynamic.DUCK
         )
         are_sizes_static = all(r == DimDynamic.STATIC for r in dynamic_sizes)
@@ -5405,6 +5407,8 @@ class ShapeEnv:
                 dynamic_dim=dynamic_offset,
                 constraint_dim=None,
                 symbolic_context=symbolic_context,
+                positive=None if config.dynamic_storage_offset else True,
+                do_not_specialize_zero_one=config.dynamic_storage_offset,
             ),
             hint=ex_storage_offset,
             source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),

@@ -70,6 +70,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    CallFunctionNoArgsSource,
     CellContentsSource,
     ClosureSource,
     ConstantSource,
@@ -700,6 +701,13 @@ class BaseUserFunctionVariable(VariableTracker):
                 result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
             except NotImplementedError:
                 result = False
+            source = self.get_source()
+            if source is not None:
+                install_guard(
+                    source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=name)
+                    )
+                )
         return VariableTracker.build(tx, result)
 
     def closure_vars(
@@ -3782,6 +3790,15 @@ class PolyfilledFunctionVariable(VariableTracker):
         ):
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            if self.source is not None and self.fn in (
+                sys.getrecursionlimit,
+                getattr(sys, "get_int_max_str_digits", None),
+            ):
+                install_guard(
+                    CallFunctionNoArgsSource(self.source).make_guard(
+                        GuardBuilder.EQUALS_MATCH
+                    )
+                )
             try:
                 # use the original function which is faster than the polyfill
                 result = self.fn(*const_args, **const_kwargs)
