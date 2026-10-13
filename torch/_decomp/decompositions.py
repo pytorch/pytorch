@@ -3536,6 +3536,12 @@ def _index_copy(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
+    torch._check(
+        index.dtype == torch.int64,
+        lambda: (
+            f"index_copy_(): Expected a long tensor for index, but got {index.dtype}"
+        ),
+    )
     num_indices = index.numel()
     if tensor.ndim == 0:
         torch._check(
