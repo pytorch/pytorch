@@ -1285,34 +1285,107 @@ void copysign_kernel(TensorIteratorBase& iter) {
       });
 }
 
+// x * log(y) is already NaN for a NaN y, so the zero blend must not override
+// that; y == y is a cheaper NaN test here than negating isnan().
+template <typename scalar_t>
+inline Vectorized<scalar_t> mul_log_vec(
+    const Vectorized<scalar_t>& x,
+    const Vectorized<scalar_t>& y,
+    const Vectorized<scalar_t>& log_y) {
+  const Vectorized<scalar_t> zero(0);
+  return Vectorized<scalar_t>::blendv(x * log_y, zero, (x == zero) & (y == y));
+}
+
 void xlogy_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16, kHalf, iter.common_dtype(), "xlogy_cpu", [&]() {
-        cpu_kernel(iter, [](scalar_t x, scalar_t y) -> scalar_t {
-          if (at::_isnan(y)) {
-            return NAN;
-          }
-          if (x == 0) {
-            return 0;
-          }
-          return x * std::log(y);
-        });
-      });
+  const auto dtype = iter.common_dtype();
+  if (at::isReducedFloatingType(dtype)) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "xlogy_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [](scalar_t x, scalar_t y) -> scalar_t {
+            float y0 = float(y);
+            if (at::_isnan(y0)) {
+              return NAN;
+            }
+            float x0 = float(x);
+            if (x0 == 0) {
+              return 0;
+            }
+            return x0 * std::log(y0);
+          },
+          [](Vectorized<scalar_t> x, Vectorized<scalar_t> y) {
+            // Unpack once so the whole body runs in float, avoiding per-op round-trips.
+            auto [x0, x1] = convert_to_float<scalar_t>(x);
+            auto [y0, y1] = convert_to_float<scalar_t>(y);
+            return convert_from_float<scalar_t>(
+                mul_log_vec(x0, y0, y0.log()),
+                mul_log_vec(x1, y1, y1.log()));
+          });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(dtype, "xlogy_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [](scalar_t x, scalar_t y) -> scalar_t {
+            if (at::_isnan(y)) {
+              return NAN;
+            }
+            if (x == 0) {
+              return 0;
+            }
+            return x * std::log(y);
+          },
+          [](Vectorized<scalar_t> x, Vectorized<scalar_t> y) {
+            return mul_log_vec(x, y, y.log());
+          });
+    });
+  }
 }
 
 void xlog1py_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16, kHalf, iter.common_dtype(), "xlog1py_cpu", [&]() {
-        cpu_kernel(iter, [](scalar_t x, scalar_t y) -> scalar_t {
-          if (at::_isnan(y)) {
-            return NAN;
-          }
-          if (x == 0) {
-            return 0;
-          }
-          return x * std::log1p(y);
-        });
-      });
+  const auto dtype = iter.common_dtype();
+  if (at::isReducedFloatingType(dtype)) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "xlog1py_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [](scalar_t x, scalar_t y) -> scalar_t {
+            float y0 = float(y);
+            if (at::_isnan(y0)) {
+              return NAN;
+            }
+            float x0 = float(x);
+            if (x0 == 0) {
+              return 0;
+            }
+            return x0 * std::log1p(y0);
+          },
+          [](Vectorized<scalar_t> x, Vectorized<scalar_t> y) {
+            // Unpack once so the whole body runs in float, avoiding per-op round-trips.
+            auto [x0, x1] = convert_to_float<scalar_t>(x);
+            auto [y0, y1] = convert_to_float<scalar_t>(y);
+            return convert_from_float<scalar_t>(
+                mul_log_vec(x0, y0, y0.log1p()),
+                mul_log_vec(x1, y1, y1.log1p()));
+          });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(dtype, "xlog1py_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [](scalar_t x, scalar_t y) -> scalar_t {
+            if (at::_isnan(y)) {
+              return NAN;
+            }
+            if (x == 0) {
+              return 0;
+            }
+            return x * std::log1p(y);
+          },
+          [](Vectorized<scalar_t> x, Vectorized<scalar_t> y) {
+            return mul_log_vec(x, y, y.log1p());
+          });
+    });
+  }
 }
 
 void zeta_kernel(TensorIteratorBase& iter) {
