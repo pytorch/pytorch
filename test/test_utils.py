@@ -764,6 +764,37 @@ class TestHipify(TestCase):
             )
             self.assertTrue(result[key].hipified_path.endswith(".hip"))
 
+    def test_hipify_keeps_std_math_functions(self):
+        # hipify used to rewrite std::exp( and friends to the global namespace, a
+        # workaround for the hcc compiler. hip-clang resolves std:: math in device
+        # code, and the rewrite also hit host code and string literals.
+        from torch.utils.hipify import hipify_python
+
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = os.path.realpath(tmp)
+            source_name = "kernel.cu"
+            with open(os.path.join(build_dir, source_name), "w") as f:
+                f.write(
+                    "#include <cuda_runtime.h>\n"
+                    "__global__ void k(float* x) { x[0] = std::exp(x[0]) + std::pow(x[1], 2); }\n"
+                    "void launch() { cudaDeviceSynchronize(); }\n"
+                )
+
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                includes=[os.path.join(build_dir, "*")],
+                extra_files=[source_name],
+                hipify_extra_files_only=True,
+                is_pytorch_extension=True,
+            )
+
+            key = os.path.abspath(os.path.join(build_dir, source_name))
+            with open(result[key].hipified_path) as f:
+                hipified = f.read()
+            self.assertIn("std::exp(x[0]) + std::pow(x[1], 2)", hipified)
+            self.assertIn("hipDeviceSynchronize", hipified)
+
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
