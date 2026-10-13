@@ -543,7 +543,7 @@ class FSDPParamGroup:
                         if all_gather_input.dtype == torch.uint8:
                             tensor = tensor.view(torch.uint8)
                         if tensor.numel() != all_gather_input.numel():
-                            tensor = tensor.narrow(0, 0, all_gather_input.numel())
+                            tensor = tensor[: all_gather_input.numel()]
                         tensor.copy_(all_gather_input)
 
         else:

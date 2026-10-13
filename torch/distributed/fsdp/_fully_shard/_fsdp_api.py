@@ -270,20 +270,21 @@ class AllGatherInput:
 
     The number of inputs, and the element count and dtype of each
     ``AllGatherInput``, must stay fixed across calls so FSDP can reuse outputs.
-    Plain tensors may also become uint8 byte views of their outputs or, for shard
-    dim 0, shrink, which leaves stale data after the gathered prefix of their
-    output. Every rank must return the same shapes and dtypes, which FSDP cannot
-    check locally: a mismatch hangs or corrupts the collective. Extensions own any
-    padding, since the sharded tensor that ``fsdp_pre_all_gather`` is called on is
-    unpadded on ranks with a smaller shard, so plain tensors of unevenly sharded
-    parameters need the padded sharded size.
+    Plain tensors may also become uint8 byte views of their outputs, which are
+    passed in the outputs' dtype, or, for shard dim 0, shrink, which leaves stale
+    data after the gathered prefix of their output. Every rank must return the
+    same shapes and dtypes, which FSDP cannot check locally: a mismatch hangs or
+    corrupts the collective. Extensions own any padding, since the sharded tensor
+    that ``fsdp_pre_all_gather`` is called on is unpadded on ranks with a smaller
+    shard. When ``fsdp_pre_all_gather`` takes ``outer_size``, FSDP requires every
+    plain tensor of an unevenly sharded parameter to have the padded sharded
+    size, so return payloads such as scales as records.
 
     Attributes:
         tensor (Tensor): Local payload, which FSDP flattens with ``view(-1)``.
             Scalars count as shape ``(1,)``.
         dim (int): Dimension to concatenate along; may be negative.
-            (Default: ``0``)
     """
 
     tensor: torch.Tensor
-    dim: int = field(default=0, kw_only=True)
+    dim: int = field(kw_only=True)
