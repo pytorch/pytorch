@@ -1668,6 +1668,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # Reuse _setup_shrink_test for complete setup (device, environment, and process group)
         device, pg = self._setup_shrink_test("backend_properties")
+        dist.set_timeout(timedelta(seconds=123))
 
         # Follow _perform_shrink_test pattern from here
         log_test_info(self.rank, f"{test_name} (world_size={self.world_size})")
@@ -1721,6 +1722,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             original_timeout,
             new_timeout,
             lambda msg: f"{msg}\n{test_name}: timeout not preserved",
+        )
+        self.assertEqual(
+            c10d.distributed_c10d._get_process_group_timeout(shrunk_pg),
+            timedelta(seconds=123),
         )
 
         log_test_info(
