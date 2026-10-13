@@ -16361,6 +16361,20 @@ fn
         with self.assertRaisesRegex(RuntimeError, "specialized"):
             fn(x, y)
 
+    @torch.fx.experimental._config.patch(dynamic_storage_offset=True)
+    def test_dynamic_storage_offset_no_zero_one_recompile(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def fn(x):
+            return x * 2
+
+        buf = torch.randn(64)
+        for offset in (5, 0, 1, 7):
+            x = buf[offset : offset + 8]
+            self.assertEqual(fn(x), x * 2)
+        self.assertEqual(cnt.frame_count, 1)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_infer_unbacked_size_gt_zero(self):
         # This code, in fact, does NOT work in eager
