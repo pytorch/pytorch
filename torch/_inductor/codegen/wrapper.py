@@ -607,7 +607,6 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
-@functools.cache
 def _triton_jit_decorator_for_helper(symbol) -> str:
     # Triton helper calls only consume noinline from the callee; launch and
     # specialization options belong to the root kernel compiled by Inductor.

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import atexit
 import functools
 import json
@@ -576,12 +577,24 @@ class AsyncCompile:
                 else:
                     size_hints_str = str(None)
 
-                # Generated modules may contain JIT helpers before the function
-                # being compiled, so anchor the lookup hash to its definition.
-                kernel_start = source_code.find(f"def {kernel_name}(")
-                triton_src = (
-                    source_code[kernel_start:] if kernel_start >= 0 else source_code
+                # Match the worker-side JITFunction source without decorators or
+                # other helpers in the generated module.
+                kernel_node = next(
+                    (
+                        node
+                        for node in ast.parse(source_code).body
+                        if isinstance(node, ast.FunctionDef)
+                        and node.name == kernel_name
+                    ),
+                    None,
                 )
+                if kernel_node is None:
+                    triton_src = source_code
+                else:
+                    source_lines = source_code.splitlines(keepends=True)
+                    triton_src = "".join(
+                        source_lines[kernel_node.lineno - 1 : kernel_node.end_lineno]
+                    )
                 from torch._inductor.runtime.triton_heuristics import (
                     generate_lookup_hash_from_source_code,
                 )

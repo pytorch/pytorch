@@ -437,7 +437,11 @@ def triton_user_kernel_helper(value):
     return value + 1
 
 @triton.jit(noinline=True, do_not_specialize=('in_ptr0',))
-{triton_src}"""
+{triton_src}
+@triton.jit(debug=True)
+def triton_user_kernel_post_helper(value):
+    return value + 2
+"""
         fn_hash = generate_lookup_hash_from_source_code(str({"x": 32}), triton_src)
         lookup_config = {"XBLOCK": 32, "num_warps": 4, "num_stages": 1}
         process_pool = Mock()
@@ -445,7 +449,7 @@ def triton_user_kernel_helper(value):
         with (
             config.patch(autotune_lookup_table={fn_hash: lookup_config}),
             patch.object(AsyncCompile, "use_process_pool", return_value=True),
-            patch.object(AsyncCompile, "process_pool", return_value=process_pool),
+            patch.object(AsyncCompile, "get_worker_pool", return_value=process_pool),
             patch(
                 "torch._inductor.async_compile.CompiledTritonKernels.get",
                 return_value=None,
