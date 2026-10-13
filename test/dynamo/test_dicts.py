@@ -137,7 +137,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(compiled(x, mapping, key), fn(x, mapping, key))
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
-    @parametrize("operation", ["contains", "get"])
+    @parametrize("operation", ["contains", "get", "pop"])
     @parametrize(
         "make_key",
         [
@@ -152,7 +152,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         def fn(x, mapping, key):
             if operation == "contains":
                 return x + (key in mapping)
-            return x + mapping.get(key, 0)
+            return x + getattr(mapping, operation)(key, 0)
 
         absent, present = make_key(), make_key()
         mapping = mapping_type()
@@ -160,7 +160,30 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros(1)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         for key in (absent, present, absent):
-            self.assertEqual(compiled(x, mapping, key), fn(x, mapping, key))
+            self.assertEqual(
+                compiled(x, mapping.copy(), key), fn(x, mapping.copy(), key)
+            )
+
+    def test_dunder_dict_pop_deleted_key_in_hop(self):
+        class Obj:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        def fn(x, obj):
+            del obj.a
+
+            def body(x):
+                return x + obj.__dict__.pop("a", 2)
+
+            return torch.cond(x.sum() > 0, body, body, (x,))
+
+        x = torch.ones(2)
+        obj = Obj()
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), x + 2
+        )
+        self.assertNotIn("a", obj.__dict__)
 
     @parametrize("present", [False, True])
     def test_ordered_dict_subclass_setdefault_dispatch(self, present):
