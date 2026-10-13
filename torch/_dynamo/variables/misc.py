@@ -322,9 +322,9 @@ class SuperVariable(VariableTracker):
                     raise AssertionError(
                         "source must not be None for user-defined class"
                     )
-                user_cls_source = AttrSource(source, "__self__")
-                user_cls_vt = VariableTracker.build(
-                    tx, user_cls, source=user_cls_source, realize=True
+                user_cls_source = source.member
+                user_cls_vt = variables.UserDefinedClassVariable(
+                    user_cls, source=user_cls_source
                 )
             return user_cls_vt.call_method(tx, "__new__", args, kwargs)
         elif isinstance(inner_fn, staticmethod) and isinstance(

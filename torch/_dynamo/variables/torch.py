@@ -112,7 +112,7 @@ from .functions import (
     UserFunctionVariable,
 )
 from .lists import ListVariable, SizeVariable, TupleVariable
-from .object_protocol import pynumber_index, vt_is_iterable
+from .object_protocol import mro_lookup, pynumber_index, vt_is_iterable
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -3862,7 +3862,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                                 "Ensure you do not modify input tensor in place.",
                             ],
                         )
-            return self.call_tensor_method(tx, list(args), kwargs)
+            # call_tensor_method records `x.<name>(...)`, which resolves on
+            # type(x) when the graph runs. If a tensor subclass overrides the
+            # method, fall through so the graph calls the descriptor itself.
+            self_type = args[0].python_type() if args and args[0].is_tensor() else None
+            if (
+                self_type is None
+                or self_type is torch.Tensor
+                or mro_lookup(self_type, name) is mro_lookup(torch.Tensor, name)
+            ):
+                return self.call_tensor_method(tx, list(args), kwargs)
 
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
