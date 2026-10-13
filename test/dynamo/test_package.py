@@ -1208,12 +1208,6 @@ def entry(x):
         self.assertIs(inspect.getmodule(first.helper.__code__), second)
 
         package = self._round_trip_under_fail_on_recompile(first.entry, torch.randn(4))
-        print(
-            [
-                (e.python_module, e.function_names, e.code_source, len(e.guarded_codes))
-                for e in package.cache_entry().codes
-            ]
-        )
         modules = {entry.python_module for entry in package.cache_entry().codes}
         self.assertEqual(modules, {first.__name__})
 
