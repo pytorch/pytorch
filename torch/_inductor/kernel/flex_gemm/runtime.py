@@ -306,7 +306,7 @@ def flex_gemm_epimod(
         sinks[INDEXED_OUTPUT_STORE_ARG_NAME] = ExactColVecSelect(
             INDEXED_OUTPUT_STORE_ARG_NAME,
             idx_op=index_op,
-            output_dtype=cute_dsl_utils.torch2cute_dtype_map[out_dtype],
+            output_dtype=out_dtype,
         )
         extra_ops = (index_op,)
     prepass = None
