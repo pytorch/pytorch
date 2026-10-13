@@ -78,7 +78,7 @@ class CuptiActivityApi {
 
   static void forceLoadCupti();
 
-  // CUPTI configuraiton that needs to be set before CUDA context creation
+  // CUPTI configuration that needs to be set before CUDA context creation
   static void preConfigureCUPTI();
 
  private:

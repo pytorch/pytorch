@@ -2536,6 +2536,13 @@ class TritonHOPifier:
             config_kwarg_names = set().union(
                 *(set(config.kwargs) for config in variable.kernel.configs)
             )
+            # Eager Triton launches with config.all_kwargs(), which includes a
+            # set maxnreg, so a launch kwarg maxnreg is a duplicate there too.
+            if any(
+                getattr(config, "maxnreg", None) is not None
+                for config in variable.kernel.configs
+            ):
+                config_kwarg_names.add("maxnreg")
             config_conflicts = sorted(set(launch_kwargs) & config_kwarg_names)
             if config_conflicts:
                 self.raise_unsupported(

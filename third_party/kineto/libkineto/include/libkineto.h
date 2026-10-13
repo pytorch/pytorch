@@ -124,7 +124,7 @@ class LibkinetoApi {
     resetTLS();
   }
 
-  // Provides access to profier configuration manaegement
+  // Provides access to profiler configuration management
   ConfigLoader& configLoader() {
     return configLoader_;
   }

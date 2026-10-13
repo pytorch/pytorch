@@ -164,8 +164,8 @@ struct RecordFunctionFast {
 
 PyObject* RecordFunctionFast_new(
     PyTypeObject* subtype,
-    PyObject* args,
-    PyObject* kwargs) {
+    PyObject* /*args*/,
+    PyObject* /*kwargs*/) {
   RecordFunctionFast* self = (RecordFunctionFast*)subtype->tp_alloc(subtype, 0);
   if (self != nullptr) {
     self->name = nullptr;
@@ -232,7 +232,9 @@ void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
   Py_TYPE(self)->tp_free(self);
 }
 
-PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
+PyObject* RecordFunctionFast_enter(
+    PyObject* selfGeneric,
+    PyObject* /*unused*/) {
   HANDLE_TH_ERRORS
   if (torch::profiler::impl::ProfilerStateBase::getGlobal() != nullptr ||
       torch::profiler::impl::ProfilerStateBase::getTLS() != nullptr) {
@@ -327,7 +329,7 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* RecordFunctionFast_exit(PyObject* selfGeneric, PyObject* unused) {
+PyObject* RecordFunctionFast_exit(PyObject* selfGeneric, PyObject* /*unused*/) {
   HANDLE_TH_ERRORS
   if (torch::profiler::impl::ProfilerStateBase::getGlobal() != nullptr ||
       torch::profiler::impl::ProfilerStateBase::getTLS() != nullptr) {

@@ -191,7 +191,7 @@ inline constexpr MetadataField<uint64_t> kKernelId{"kernel_id"};
 inline constexpr MetadataField<double> kMemoryBandwidthGbps{
     "memory bandwidth (GB/s)"};
 inline constexpr MetadataField<uint64_t> kMemoryOperationId{
-    "memory opration id"};
+    "memory opration id"}; // codespell:ignore
 inline constexpr MetadataField<uint64_t> kNumberWaitEvents{
     "Number_wait_events"};
 inline constexpr MetadataField<uint64_t> kOverheadCost{"overhead cost"};

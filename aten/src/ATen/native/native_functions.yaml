@@ -5970,8 +5970,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, XPU: prod
-    MPS: prod_mps
+    CPU, CUDA, MPS, XPU: prod
   autogen: prod.out
   tags: [core, reduction]
 
@@ -5985,8 +5984,7 @@
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, XPU: prod_out
-    MPS: prod_out_mps
+    CPU, CUDA, MPS, XPU: prod_out
   tags: reduction
 
 - func: t(Tensor(a) self) -> Tensor(a)

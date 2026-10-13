@@ -267,16 +267,6 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       set(OpenMP_libomp_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libomp location for OpenMP")
     endif()
 
-    if ((NOT OpenMP_libomp_LIBRARY) AND MSVC AND CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
-      # On MSVC ARM64, OpenMP is provided by vcomp, which is a part of the Visual Studio installation.
-      find_library(OpenMP_libomp_LIBRARY
-      NAMES vcomp
-      HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
-      DOC "vcomp location for OpenMP on MSVC ARM64"
-      )
-      mark_as_advanced(OpenMP_libomp_LIBRARY)
-    endif()
-
     # Check if we are using  OpenBLAS which is linked against libgomp
     # we may end up with  multiple omp runtimes linked
     # against libtorch_cpu.so
@@ -307,7 +297,14 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       unset(_omp_clang_lib)
     endif()
 
-    if (NOT OpenMP_libomp_LIBRARY)
+    # cl.exe links the OpenMP runtime matching its -openmp flag by itself (vcomp
+    # for -openmp[:experimental]), so on MSVC this search must not add one. It
+    # would find the libomp.lib shipped with Visual Studio, and with two runtimes
+    # in one process omp_get_thread_num() returns 0 on every vcomp worker, so
+    # at::parallel_for runs the whole range on each thread (#193784). The compiler
+    # id is checked rather than MSVC because clang-cl sets MSVC too but emits
+    # __kmpc_* calls and does need libomp.
+    if ((NOT OpenMP_libomp_LIBRARY) AND (NOT CMAKE_${LANG}_COMPILER_ID STREQUAL "MSVC"))
       find_library(OpenMP_libomp_LIBRARY
         NAMES omp gomp iomp5
         HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
@@ -316,8 +313,9 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       mark_as_advanced(OpenMP_libomp_LIBRARY)
     endif()
 
-    # Use OpenMP_PREFIX if defined
-    if (NOT OpenMP_libomp_LIBRARY AND NOT "${OpenMP_PREFIX}" STREQUAL "")
+    # Use OpenMP_PREFIX if defined. Skipped on MSVC for the same reason as above:
+    # setting a prefix must not bring libomp in next to vcomp.
+    if ((NOT OpenMP_libomp_LIBRARY) AND (NOT "${OpenMP_PREFIX}" STREQUAL "") AND (NOT CMAKE_${LANG}_COMPILER_ID STREQUAL "MSVC"))
       find_library(OpenMP_libomp_LIBRARY
         NAMES omp gomp iomp5
         HINTS "${OpenMP_PREFIX}/lib"

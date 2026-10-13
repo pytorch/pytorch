@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -30,6 +31,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <c10/core/GeneratorImpl.h>
 #include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime.h>
 #include <nccl.h>
@@ -240,7 +242,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 #endif
   }
   bool supportsSplitting() const override {
-    return true;
+    // A lazy_init communicator is created by every member on the first
+    // operation, so ranks agree once it has started.
+    return !options_c10d_->lazy_init ||
+        init_state_ != InitializationState::UNINITIALIZED;
   }
   bool isInitialized() override;
   bool supportsShrinking() const override {
@@ -295,12 +300,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::unordered_map<std::string, uint64_t> getMemoryStats() override;
 
   // Fault tolerance / reconfigure API (see Backend.hpp). The handle encodes
-  // "nccl2:<rank>:<uuid>:<store host:port>"; reconfigure() tears down the
-  // current communicator generation (if any) and bootstraps a fresh ncclComm
-  // over the surviving/new members. Implemented in
+  // "nccl2:<rank>:<uuid>:<instance id>:<store host:port>"; reconfigure() tears
+  // down the current communicator generation (if any) and bootstraps a fresh
+  // ncclComm over the surviving/new members. Implemented in
   // ReconfigureNCCL.cpp.
   bool supportsReconfigure() const override {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0) && !defined(USE_ROCM)
+#ifdef NCCL_HAS_COMM_REVOKE
     return true;
 #else
     return false;
@@ -514,49 +519,59 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const std::vector<BatchSendRecv::P2POp>& ops,
       bool async_op,
       std::chrono::milliseconds timeout);
+  MaterializedCollectiveConfig materializeConfig(
+      const OptionalCollectiveConfig& config);
   c10::intrusive_ptr<WorkNCCL> broadcastImpl(
       at::Tensor& tensor,
       int root,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> all_reduce(
       at::Tensor& tensor,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> reduceImpl(
       const at::Tensor& tensor,
       int root,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> all_gather(
       const std::vector<at::Tensor>& tensor_list,
       const at::Tensor& tensor,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> allGatherSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> reduce_scatter(
       at::Tensor& output,
       const std::vector<at::Tensor>& input_list,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> reduceScatterSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> allToAllSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> all_to_all_v_single(
       at::Tensor& output,
       const at::Tensor& input,
@@ -583,7 +598,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const at::Tensor& input_tensor,
       int root,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      bool contiguous_output = false,
+      const MaterializedCollectiveConfig& config = {});
 
   // Resolve a c10d per-op timeout (kUnsetTimeout -> communicator default).
   std::chrono::milliseconds operationTimeout(
@@ -595,9 +612,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       ncclComm_t comm,
       const at::Tensor& tensor);
   void timeoutWatchdog() noexcept;
-  void checkInitialized() const;
+  // Creates a lazy_init communicator and checks that it is ready.
+  void checkInitialized();
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
+  void drainRetiredGraphWork();
   std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
   applyEphemeralTimeout(std::chrono::milliseconds timeout);
   void releaseEphemeralTimeout(std::chrono::milliseconds timeout);
@@ -676,6 +695,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // -1 until the first reconfigure(). Baked into the reconfigure handle so
   // peers can detect membership of the same generation.
   int64_t reconfigure_uuid_{-1};
+  // Keeps handles unique when rank and uuid collide, e.g. a fresh process and
+  // a rank that lost its communicator both advertising uuid -1.
+  const uint64_t reconfigure_instance_id_{
+      c10::detail::getNonDeterministicRandom()};
 
   // Registration handle for a caching-allocator segment (and its symmetric
   // window, once ensureSegmentWindow upgraded it). Sorted by base address so
@@ -722,10 +745,16 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::optional<BatchSendRecv> coalescing_batch_;
   c10::intrusive_ptr<WorkNCCL> coalesced_work_;
 
+  // Configs issued between startTimeEstimate() and endTimeEstimate().
+  bool time_estimate_active_ = false;
+  std::vector<std::shared_ptr<const void>> time_estimate_configs_;
+
   std::unordered_map<
       unsigned long long,
       std::vector<std::shared_ptr<WorkNCCL::State>>>
       graph_capture_work_refs_;
+  std::list<std::vector<std::shared_ptr<WorkNCCL::State>>>
+      retired_graph_work_refs_;
   std::mutex graph_capture_work_mutex_;
 
   struct GraphCleanupData {

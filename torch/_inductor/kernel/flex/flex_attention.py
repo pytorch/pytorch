@@ -14,6 +14,7 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 from torch._logging import warning_once
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv
 
@@ -55,6 +56,7 @@ from .flex_flash_attention import (
     is_trivial_mask_graph,
     is_trivial_score_graph,
 )
+from .flex_flydsl_attention import create_flydsl_flex_attention_kernel
 
 
 if TYPE_CHECKING:
@@ -248,6 +250,9 @@ def flex_attention(
     if backend == "FLASH":
         score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
         mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
+    elif backend == "FLYDSL":
+        score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+        mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -286,6 +291,27 @@ def flex_attention(
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
+
+    if backend == "FLYDSL":
+        return create_flydsl_flex_attention_kernel(
+            query=query,
+            key=key,
+            value=value,
+            kv_num_blocks=kv_num_blocks,
+            kv_indices=kv_indices,
+            full_kv_num_blocks=full_kv_num_blocks,
+            full_kv_indices=full_kv_indices,
+            subgraph=subgraph,
+            mask_graph=mask_graph,
+            score_mod_other_buffers=score_mod_other_buffers,
+            mask_mod_other_buffers=mask_mod_other_buffers,
+            scale=scale,
+            sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
+            sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
+            subgraph_buffer=subgraph_buffer,
+            mask_graph_buffer=mask_graph_buffer,
+            write_max_scores=kernel_options.get("OUTPUT_MAX", True),
+        )
 
     can_use_decode = _use_flex_decoding(
         query, kv_indices, value, kernel_options, enable_gqa
@@ -666,6 +692,54 @@ flex_attention_backward_template = TritonTemplate(
 )
 
 
+def _fuse_nested_index_backward(joint_graph: torch.fx.GraphModule) -> None:
+    r"""Fuse the backward of table[i][j] into one scatter for table[i, j]."""
+    from torch._inductor.pattern_matcher import (
+        CallFunction,
+        KeywordArg,
+        Match,
+        PatternMatcherPass,
+        register_graph_pattern,
+    )
+
+    scatter = torch.ops.flex_lib.zeros_and_scatter.default
+    patterns = PatternMatcherPass(pass_name="flex_attention_index_backward")
+
+    def same_shape(match: Match) -> bool:
+        args = match.kwargs
+        shapes = (args["shape"][len(args["indices"]) :], args["inner_shape"])
+        remaining, inner = torch.fx.map_arg(shapes, lambda n: n.meta["val"])
+        return statically_known_true(sym_eq(remaining, inner))
+
+    @register_graph_pattern(
+        CallFunction(
+            scatter,
+            KeywordArg("shape"),
+            KeywordArg("indices"),
+            CallFunction(
+                scatter,
+                KeywordArg("inner_shape"),
+                KeywordArg("inner_indices"),
+                KeywordArg("value"),
+            ),
+        ),
+        extra_check=same_shape,
+        # pyrefly: ignore [bad-argument-type]
+        pass_dict=patterns,
+    )
+    def fuse(match: Match, shape, indices, inner_shape, inner_indices, value):
+        match.output_node().args = (shape, [*indices, *inner_indices], value)
+        match.erase_nodes()
+
+    # Matching runs backward through the graph; repeat to collapse longer chains.
+    changed = False
+    while patterns.apply(joint_graph):
+        changed = True
+    if changed:
+        joint_graph.graph.lint()
+        joint_graph.recompile()
+
+
 def validate_joint_graph(joint_graph: torch.fx.Graph):
     """We do some pre lowering graph checks in order to raise nicer error messages"""
     for node in joint_graph.nodes:
@@ -685,7 +759,10 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
                         "    bias1 = bias.clone()\n"
                         "    def score_mod(score, b, h, q_idx, kv_idx):\n"
                         "        return score + bias[q_idx] + bias1[kv_idx]\n\n"
-                        "Note that this solution will use additional memory."
+                        "Note that this solution will use additional memory.\n\n"
+                        "For chained indexing with operations in between, such as "
+                        "(table[idx] * 2)[0], apply all indices in one indexing "
+                        "expression instead: table[idx, 0] * 2."
                     )
     return
 
@@ -891,6 +968,7 @@ def flex_attention_backward(*args, **kwargs):
     ]
     # Sometimes we have weird unused nodes here
     joint_graph.graph_module.graph.eliminate_dead_code()
+    _fuse_nested_index_backward(joint_graph.graph_module)
 
     # It is hard to raise nice errors for some joint graphs during subgraph lowering
     # This lets us do some checks before attempting to lower

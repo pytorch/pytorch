@@ -197,6 +197,8 @@ def grouped_reduce_supports_config(config, axis: int, group: int) -> bool:
         if axis == 0 or getattr(config, "device_capacity", None) != 10:
             return False
         axis = 1 - axis
+    if axis == 1 and config.device_capacity == 12:
+        return False
     tile = config.tile_m if axis == 0 else config.tile_n
     if config.tile_m < 128 or config.tile_n % GROUPED_FRAGMENT_WIDTH or tile % group:
         return False
@@ -621,6 +623,8 @@ class GroupedReduceBase(EpiOp):
 
     def config_support_error(self, configs) -> str:
         """Describe an unsupported group or caller-owned output layout."""
+        if self.axis == 1 and all(config.device_capacity == 12 for config in configs):
+            return "grouped N reduce is not supported on SM120"
         if (
             self.output_layout is not None
             and self.output_layout.supports_config_fn is not None

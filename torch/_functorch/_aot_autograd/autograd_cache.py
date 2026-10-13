@@ -248,13 +248,19 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_sum",
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
-        # An autocast context manager *inside* a compiled region is traced into
-        # these calls. What they do is fully determined by their arguments
-        # (device type, dtype, enabled, cache_enabled), which are constants in
-        # the graph and therefore part of the cache key, so a graph compiled
-        # under one autocast setting can never be reused for another.
+        # Autocast/inference_mode regions inside a compiled function trace these
+        # _enter_*/_exit_* nodes into the graph. Their args are hashed into the
+        # cache key; autocast's dtype=None resolves to the ambient autocast
+        # dtype, which _record_runtime_state also keys on. See #191106.
         "torch.amp.autocast_mode._enter_autocast",
         "torch.amp.autocast_mode._exit_autocast",
+        "torch.autograd.grad_mode._enter_inference_mode",
+        "torch.autograd.grad_mode._exit_inference_mode",
+        # torch.tensor(data) with a data-dependent scalar in `data` traces a raw
+        # torch._refs.tensor node instead of decomposing. Its behavior is fully
+        # determined by its args (the data list), which are in the graph and
+        # hashed into the cache key. See #191106.
+        "torch._refs.tensor",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -623,13 +629,18 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
     def _record_runtime_state(self, gm: torch.fx.GraphModule) -> None:
         self.grad_enabled = torch.is_grad_enabled()
-        # Include per-device autocast dtype in cache key to avoid reusing
+        # Include per-device autocast state in cache key to avoid reusing
         # a graph compiled for one autocast dtype (e.g. bfloat16) when
-        # running under a different autocast dtype (e.g. float16).
-        self.autocast_state: dict[str, torch.dtype] = {}
-        for device_type in torch._C._autocast_supported_devices():
-            if torch.is_autocast_enabled(device_type):
-                self.autocast_state[device_type] = torch.get_autocast_dtype(device_type)
+        # running under a different autocast dtype (e.g. float16). The dtype
+        # is recorded even when autocast is disabled because an in-graph
+        # torch.autocast(device) with no dtype picks up the ambient one.
+        self.autocast_state: dict[str, tuple[bool, torch.dtype]] = {
+            device_type: (
+                torch.is_autocast_enabled(device_type),
+                torch.get_autocast_dtype(device_type),
+            )
+            for device_type in torch._C._autocast_supported_devices()
+        }
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
         if has_triton_package():

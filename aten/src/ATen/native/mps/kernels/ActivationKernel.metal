@@ -436,7 +436,7 @@ REGISTER_BINARY_OP(glu, bfloat, bfloat);
 template <typename T>
 kernel void glu_dense(
     device T* out [[buffer(0)]],
-    constant T* input [[buffer(1)]],
+    device const T* input [[buffer(1)]],
     constant long& inner_half [[buffer(2)]],
     uint2 tpig [[thread_position_in_grid]]) {
   const long L = inner_half;
@@ -449,7 +449,7 @@ kernel void glu_dense(
 #define REGISTER_GLU_DENSE_OP(DTYPE)                                        \
   template [[host_name("glu_dense_" #DTYPE)]] kernel void glu_dense<DTYPE>( \
       device DTYPE * out [[buffer(0)]],                                     \
-      constant DTYPE * input [[buffer(1)]],                                 \
+      device const DTYPE* input [[buffer(1)]],                              \
       constant long& inner_half [[buffer(2)]],                              \
       uint2 tpig [[thread_position_in_grid]])
 
@@ -480,8 +480,8 @@ struct glu_backward_functor {
 template <typename T>
 kernel void glu_backward(
     device void* grad_input [[buffer(0)]],
-    constant void* input [[buffer(1)]],
-    constant void* grad_output [[buffer(2)]],
+    device const char* input [[buffer(1)]],
+    device const char* grad_output [[buffer(2)]],
     constant long* sizes [[buffer(3)]],
     constant long* grad_input_strides [[buffer(4)]],
     constant long* input_strides [[buffer(5)]],
@@ -508,8 +508,8 @@ kernel void glu_backward(
   template [[host_name("glu_backward_" #DTYPE)]] kernel void \
   glu_backward<DTYPE>(                                       \
       device void* grad_input [[buffer(0)]],                 \
-      constant void* input [[buffer(1)]],                    \
-      constant void* grad_output [[buffer(2)]],              \
+      device const char* input [[buffer(1)]],                \
+      device const char* grad_output [[buffer(2)]],          \
       constant long* sizes [[buffer(3)]],                    \
       constant long* grad_input_strides [[buffer(4)]],       \
       constant long* input_strides [[buffer(5)]],            \
@@ -529,8 +529,8 @@ REGISTER_GLU_BACKWARD_OP(bfloat);
 template <typename T>
 kernel void glu_backward_dense(
     device T* grad_input [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant T* grad_output [[buffer(2)]],
+    device const T* input [[buffer(1)]],
+    device const T* grad_output [[buffer(2)]],
     constant long& inner_half [[buffer(3)]],
     uint2 tpig [[thread_position_in_grid]]) {
   const long L = inner_half;
@@ -546,8 +546,8 @@ kernel void glu_backward_dense(
   template [[host_name("glu_backward_dense_" #DTYPE)]] kernel void \
   glu_backward_dense<DTYPE>(                                       \
       device DTYPE * grad_input [[buffer(0)]],                     \
-      constant DTYPE * input [[buffer(1)]],                        \
-      constant DTYPE * grad_output [[buffer(2)]],                  \
+      device const DTYPE* input [[buffer(1)]],                     \
+      device const DTYPE* grad_output [[buffer(2)]],               \
       constant long& inner_half [[buffer(3)]],                     \
       uint2 tpig [[thread_position_in_grid]])
 

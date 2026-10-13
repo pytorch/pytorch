@@ -1111,7 +1111,6 @@ print(torch.xpu.is_initialized())
 
     @unittest.skipIf(not HAS_PYZES, "requires pyzes")
     @unittest.skipIf(not Xe2_Or_Later, "not available")
-    @unittest.skip("See https://github.com/intel/torch-xpu-ops/issues/5015")
     @serialTest()
     def test_mem_get_info_with_pyzes(self):
         torch.xpu.synchronize()
@@ -1852,6 +1851,22 @@ if __name__ == "__main__":
         # After exiting context, should be back on default stream
         restored_handle = module.get_xpu_work_stream(tensor, api_capsule)
         self.assertEqual(default_handle, restored_handle)
+
+    @parametrize("copy", [None, True, False])
+    def test_dlpack_conversion_with_device(self, copy):
+        if self.expandable_segments:
+            self.skipTest("Skipping DLPack test for expandable segments allocator.")
+        x = make_tensor((5,), dtype=torch.float32, device="xpu")
+
+        # Same-device exercises maybeCopyTensor's dlDeviceToTorchDevice path which requires
+        # the data pointer for XPU.
+        z = torch.from_dlpack(x, device=x.device, copy=copy)
+        self.assertEqual(z, x)
+        self.assertEqual(z.device, x.device)
+        if copy:
+            self.assertNotEqual(z.data_ptr(), x.data_ptr())
+        else:
+            self.assertEqual(z.data_ptr(), x.data_ptr())
 
     def test_storage_pin_memory(self):
         t = torch.empty(10, pin_memory=True)

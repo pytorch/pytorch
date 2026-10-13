@@ -10,6 +10,7 @@ from torch.utils._ordered_set import OrderedSet
 from ..utils import get_max_numwarps
 from .hints import (
     InductorMeta,
+    is_valid_mix_order_reduction_config,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
     TRITON_MAX_BLOCK,
@@ -127,6 +128,7 @@ class CoordescTuner:
             # does not have the R0_BLOCK field to guarantee that.
             "R0_BLOCK",
             "R1_BLOCK",
+            "R2_BLOCK",
             # the following 3 are for mm
             "BLOCK_M",
             "BLOCK_N",
@@ -264,11 +266,13 @@ class CoordescTuner:
 
     def is_valid_config(self, config) -> bool:
         if self.is_mix_order_reduction:
-            # Mix order reduction has an extra constraint that
-            # we should not tune XBLOCK beyond RSPLIT_SIZE
-            xblock = config.kwargs["XBLOCK"]
             split_size = config.kwargs["RSPLIT_SIZE"]
-            return xblock <= split_size
+            rnumel_hint = (
+                self.size_hints.get("r0_") if self.size_hints is not None else None
+            )
+            return is_valid_mix_order_reduction_config(
+                config.kwargs, split_size, rnumel_hint, self.inductor_meta
+            )
         if self.is_native_matmul:
             r0_block = None
             if "R0_BLOCK" not in config.kwargs:

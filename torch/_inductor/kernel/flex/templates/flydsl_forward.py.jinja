@@ -1,0 +1,201 @@
+import os
+import threading
+
+import torch
+
+from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+    build_flex_attn_fwd_module,
+)
+from torch._inductor.runtime.flydsl_cache import (
+    configure_flydsl_cache_dir,
+    run_cached_flydsl,
+    temporary_env,
+)
+
+
+{{gen_defines()}}
+
+
+_launcher = None
+_launcher_lock = threading.Lock()
+
+
+def _get_launcher():
+    global _launcher
+    launcher = _launcher
+    if launcher is None:
+        with _launcher_lock:
+            launcher = _launcher
+            if launcher is None:
+                launcher = build_flex_attn_fwd_module(
+                    batch_size=BATCH_SIZE,
+                    num_q_heads=NUM_Q_HEADS,
+                    num_kv_heads=NUM_KV_HEADS,
+                    seq_q=SEQ_Q,
+                    seq_kv=SEQ_KV,
+                    qk_head_dim=QK_HEAD_DIM,
+                    v_head_dim=V_HEAD_DIM,
+                    block_mask_batch=BLOCK_MASK_BATCH,
+                    block_mask_heads=BLOCK_MASK_HEADS,
+                    num_q_blocks=NUM_Q_BLOCKS,
+                    max_partial_blocks=MAX_PARTIAL_BLOCKS,
+                    max_full_blocks=MAX_FULL_BLOCKS,
+                    sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
+                    sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
+                    mask_program=MASK_PROGRAM,
+                    mask_program_output=MASK_PROGRAM_OUTPUT,
+                    mask_buffer_shapes=MASK_BUFFER_SHAPES,
+                    mask_buffer_strides=MASK_BUFFER_STRIDES,
+                    q_stride=Q_STRIDE,
+                    k_stride=K_STRIDE,
+                    v_stride=V_STRIDE,
+                    o_stride=O_STRIDE,
+                    scale=float(SM_SCALE),
+                    output_stats_in_log2=True,
+                    write_max_scores=WRITE_MAX_SCORES,
+                )
+                _launcher = launcher
+    return launcher
+
+
+def _run_flydsl_forward(
+    query,
+    key,
+    value,
+    logsumexp,
+    max_scores,
+    kv_num_blocks,
+    kv_indices,
+    full_kv_num_blocks,
+    full_kv_indices,
+{% for index in range(MASK_BUFFER_COUNT) %}
+    mask_buffer_{{index}},
+{% endfor %}
+    output,
+    stream,
+):
+    configure_flydsl_cache_dir()
+    dispatch_args = (
+        query,
+        key,
+        value,
+        logsumexp,
+        max_scores,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+{% for index in range(MASK_BUFFER_COUNT) %}
+        mask_buffer_{{index}},
+{% endfor %}
+        output,
+        stream,
+    )
+    launcher = _get_launcher()
+    compile_args = tuple(
+        flyc.from_torch_tensor(tensor) for tensor in dispatch_args[:-1]
+    ) + (stream,)
+    flydsl_compile_only = os.environ.get("FLYDSL_COMPILE_ONLY") == "1"
+    compile_only = os.environ.get("COMPILE_ONLY", "").lower() in (
+        "1", "true", "yes", "on"
+    )
+    if compile_only != flydsl_compile_only:
+        raise RuntimeError(
+            "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
+            "by the FlyDSL precompile path"
+        )
+    if flydsl_compile_only:
+        flyc.compile(launcher, *compile_args)
+    else:
+        run_cached_flydsl(
+            launcher,
+            *compile_args,
+            constexpr_param=compile_args[0],
+            compiler=flyc.compile,
+            dispatch_args=dispatch_args,
+        )
+    return output
+
+
+{% set kernel_args = [
+    "query", "key", "value", "logsumexp", "max_scores",
+    "kv_num_blocks", "kv_indices", "full_kv_num_blocks", "full_kv_indices",
+] %}
+{% for index in range(MASK_BUFFER_COUNT) %}
+{% set _ = kernel_args.append("mask_buffer_" ~ index) %}
+{% endfor %}
+{{def_kernel(*kernel_args)}}
+    output = {{get_output()}}
+    return _run_flydsl_forward(
+        query,
+        key,
+        value,
+        logsumexp,
+        max_scores,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+{% for index in range(MASK_BUFFER_COUNT) %}
+        mask_buffer_{{index}},
+{% endfor %}
+        output,
+        stream,
+    )
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    flydsl_gpu_arch=None,
+):
+    """Warm FlyDSL's disk cache using metadata-only fake tensors."""
+
+    def _fake_proxy(name):
+        return torch.empty_strided(
+            tuple(precompile_shapes[name]),
+            tuple(precompile_strides[name]),
+            dtype=getattr(torch, precompile_dtypes[name]),
+            device="cpu",
+        )
+
+    env_updates = {"COMPILE_ONLY": "1", "FLYDSL_COMPILE_ONLY": "1"}
+    if flydsl_gpu_arch is not None:
+        env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
+
+    with temporary_env(env_updates):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            query = _fake_proxy("query")
+            key = _fake_proxy("key")
+            value = _fake_proxy("value")
+            logsumexp = _fake_proxy("logsumexp")
+            max_scores = _fake_proxy("max_scores")
+            kv_num_blocks = _fake_proxy("kv_num_blocks")
+            kv_indices = _fake_proxy("kv_indices")
+            full_kv_num_blocks = _fake_proxy("full_kv_num_blocks")
+            full_kv_indices = _fake_proxy("full_kv_indices")
+{% for index in range(MASK_BUFFER_COUNT) %}
+            mask_buffer_{{index}} = _fake_proxy("mask_buffer_{{index}}")
+{% endfor %}
+            output = _fake_proxy("output")
+            {{kernel_name}}_main(
+                query,
+                key,
+                value,
+                logsumexp,
+                max_scores,
+                kv_num_blocks,
+                kv_indices,
+                full_kv_num_blocks,
+                full_kv_indices,
+{% for index in range(MASK_BUFFER_COUNT) %}
+                mask_buffer_{{index}},
+{% endfor %}
+                output,
+                stream=0,
+            )

@@ -37,7 +37,7 @@ using std::string;
 
 namespace KINETO_NAMESPACE {
 
-// TODO: Move config elsehwere. Sync with @sraikund16 on details.
+// TODO: Move config elsewhere. Sync with @sraikund16 on details.
 ConfigDerivedState::ConfigDerivedState(const Config& config) {
   profileActivityTypes_ = config.selectedActivityTypes();
   profileStartTime_ = config.requestTimestamp();

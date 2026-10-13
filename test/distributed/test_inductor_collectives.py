@@ -4645,7 +4645,7 @@ class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
             args=(input_node, 2, pg_node),
         )
         ag_node.meta["val"] = torch.empty(8, dtype=torch.float32)
-        self.assertEqual(_ag_group_key(ag_node), ("pg0", torch.float32))
+        self.assertEqual(_ag_group_key(ag_node), ("pg0", torch.float32, None))
 
     def test_rs_group_key_with_node_group_name(self):
         from torch._inductor.fx_passes.bucketing import _rs_group_key
@@ -4656,7 +4656,7 @@ class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
             args=(input_node, "sum", 2, pg_node),
         )
         rs_node.meta["val"] = torch.empty(2, dtype=torch.float32)
-        self.assertEqual(_rs_group_key(rs_node), ("pg0", "sum", torch.float32))
+        self.assertEqual(_rs_group_key(rs_node), ("pg0", "sum", torch.float32, None))
 
     def test_ar_group_key_with_node_group_name(self):
         from torch._inductor.fx_passes.bucketing import _ar_group_key
@@ -4667,7 +4667,7 @@ class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
             args=(input_node, "sum", pg_node),
         )
         ar_node.meta["val"] = torch.empty(4, dtype=torch.float32)
-        self.assertEqual(_ar_group_key(ar_node), ("pg0", "sum", torch.float32))
+        self.assertEqual(_ar_group_key(ar_node), ("pg0", "sum", torch.float32, None))
 
 
 def _build_graph_with_duplicate_rs(

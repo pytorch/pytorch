@@ -27,6 +27,7 @@ from torch._C._profiler import (
 from torch._environment import is_fbcode
 from torch._utils_internal import profiler_allow_cudagraph_cupti_lazy_reinit_cuda12
 from torch.autograd import kineto_available, ProfilerActivity
+from torch.monitor import _WaitCounter
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
 
@@ -1325,23 +1326,19 @@ class profile(_KinetoProfile):
             (ProfilerAction.RECORD, ProfilerAction.RECORD): [],
             (ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE): [],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.NONE): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
             ],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.WARMUP): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
                 self.prepare_trace,
             ],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
                 self.prepare_trace,
                 self.start_trace,
             ],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD_AND_SAVE): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
                 self.prepare_trace,
                 self.start_trace,
             ],
@@ -1359,12 +1356,10 @@ class profile(_KinetoProfile):
             # completed.
             (ProfilerAction.WARMUP, ProfilerAction.DEVICE_STOPPED): [
                 self.start_trace,
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
             ],
             (ProfilerAction.RECORD, ProfilerAction.DEVICE_STOPPED): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
             ],
             (ProfilerAction.DEVICE_STOPPED, ProfilerAction.DEVICE_STOPPED): [],
             (ProfilerAction.DEVICE_STOPPED, ProfilerAction.WARMUP): [
@@ -1396,10 +1391,9 @@ class profile(_KinetoProfile):
             ],
             # used for exit action
             (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
-            (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
+            (ProfilerAction.RECORD, None): [self._finalize_trace],
             (ProfilerAction.RECORD_AND_SAVE, None): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
             ],
             (ProfilerAction.DEVICE_STOPPED, None): [],
         }
@@ -1543,6 +1537,11 @@ class profile(_KinetoProfile):
         if self.profiler is None:
             return None
         return self.profiler.trace_id
+
+    def _finalize_trace(self) -> None:
+        with _WaitCounter("pytorch.wait_counter.profiler.trace_finalization").guard():
+            self.stop_trace()
+            self._trace_ready()
 
     def _trace_ready(self) -> None:
         if self.on_trace_ready:

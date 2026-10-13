@@ -1372,17 +1372,26 @@ def wrap(fn_or_name: str | Callable[..., Any]) -> str | Callable[..., Any]:
         fn_name = fn_or_name
 
     currentframe = inspect.currentframe()
-    if currentframe is None:
-        raise AssertionError("inspect.currentframe() returned None")
-    f = currentframe.f_back
-    if f is None:
-        raise AssertionError("currentframe.f_back is None")
-    if f.f_code.co_name != "<module>":
-        raise NotImplementedError("wrap must be called at the top level of a module")
+    f = None
+    try:
+        if currentframe is None:
+            raise AssertionError("inspect.currentframe() returned None")
+        f = currentframe.f_back
+        if f is None:
+            raise AssertionError("currentframe.f_back is None")
+        if f.f_code.co_name != "<module>":
+            raise NotImplementedError(
+                "wrap must be called at the top level of a module"
+            )
 
-    # consider implementing Callable version of this via _autowrap_function_ids / _autowrap_search
-    # semantics would be slightly different, but would add support `from x import wrapped_function`
-    _wrapped_fns_to_patch[(id(f.f_globals), fn_name)] = f.f_globals
+        # consider implementing Callable version of this via _autowrap_function_ids / _autowrap_search
+        # semantics would be slightly different, but would add support `from x import wrapped_function`
+        _wrapped_fns_to_patch[(id(f.f_globals), fn_name)] = f.f_globals
+    finally:
+        # Holding our own frame in a local makes a reference cycle that keeps the
+        # entire calling stack (and its tensors) alive until the next gc. That stack
+        # is deep when the module is first imported lazily from inside a running op.
+        del currentframe, f
     return fn_or_name
 
 

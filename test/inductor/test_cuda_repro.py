@@ -42,11 +42,9 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     instantiate_parametrized_tests,
     IS_FBCODE,
-    MI350_ARCH,
     parametrize,
     skipIfCachingAllocatorDisabled,
     skipIfRocm,
-    skipIfRocmArch,
     skipIfXpu,
     subtest,
     TEST_CUDA,
@@ -130,6 +128,63 @@ class CudaReproTests(TestCase):
         expected = fn(a, b)
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
+
+    @parametrize("self_dtype", [torch.float32, torch.bfloat16])
+    @parametrize("inp_shape", [(64, 32), (32,)])
+    @parametrize("beta", [0.0, 1.0, 2.0])
+    @parametrize("cpp_wrapper", [False, True])
+    def test_addmm_out_dtype_compile(self, self_dtype, inp_shape, beta, cpp_wrapper):
+        inp = torch.randn(inp_shape, device=device_type, dtype=self_dtype)
+        if beta == 0:
+            # beta == 0 ignores inp, NaN included.
+            inp.view(-1)[0] = float("nan")
+        a = torch.randn(64, 16, device=device_type, dtype=torch.bfloat16)
+        b = torch.randn(16, 32, device=device_type, dtype=torch.bfloat16)
+
+        def fn(inp, x, y):
+            return torch.addmm(inp, x, y, out_dtype=torch.float32, beta=beta, alpha=0.5)
+
+        expected = fn(inp, a, b)
+        with config.patch(cpp_wrapper=cpp_wrapper):
+            result, (code, *_) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), inp, a, b
+            )
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result, expected)
+        if not cpp_wrapper:
+            FileCheck().check("extern_kernels.addmm_dtype").run(code)
+
+    @parametrize("self_dtype", [torch.float32, torch.bfloat16])
+    @parametrize("coordinate_descent_tuning", [False, True])
+    def test_addmm_out_dtype_k1_compile(self, self_dtype, coordinate_descent_tuning):
+        # The Inductor addmm decomposition rewrites K == 1 as a pointwise
+        # multiply in the promoted input dtype, so it must skip out_dtype.
+        inp = torch.randn(64, 32, device=device_type, dtype=self_dtype)
+        a = torch.randn(64, 1, device=device_type, dtype=torch.bfloat16)
+        b = torch.randn(1, 32, device=device_type, dtype=torch.bfloat16)
+
+        def fn(inp, x, y):
+            return torch.addmm(inp, x, y, out_dtype=torch.float32)
+
+        expected = fn(inp, a, b)
+        with config.patch(coordinate_descent_tuning=coordinate_descent_tuning):
+            result = torch.compile(fn, backend="inductor", fullgraph=True)(inp, a, b)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result, expected)
+
+    def test_addmm_out_dtype_inplace_compile(self):
+        acc = torch.randn(64, 32, device=device_type, dtype=torch.float32)
+        a = torch.randn(64, 16, device=device_type, dtype=torch.bfloat16)
+        b = torch.randn(16, 32, device=device_type, dtype=torch.bfloat16)
+
+        def fn(acc, x, y):
+            torch.addmm(acc, x, y, out_dtype=torch.float32, out=acc)
+            return acc
+
+        expected = fn(acc.clone(), a, b)
+        compiled_acc = acc.clone()
+        torch.compile(fn, backend="inductor", fullgraph=True)(compiled_acc, a, b)
+        self.assertEqual(compiled_acc, expected)
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_frexp_non_finite(self):
@@ -489,12 +544,7 @@ class CudaReproTests(TestCase):
         # dont check rng state
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
-    # Fails on ROCm MI350
-    # Mismatched elements: 23 / 33062912 (0.0%)
-    # Greatest absolute difference: 0.07861328125 at index (14, 13, 1008, 36) (up to 1e-05 allowed)
-    # Greatest relative difference: 2.90625 at index (14, 13, 1008, 36) (up to 0.016 allowed)
     @skipIfXpu(msg="RuntimeError, not target, torch-xpu-ops: 2697")
-    @skipIfRocmArch(MI350_ARCH)
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -3020,10 +3070,8 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         )
         self.assertEqual(foo(x0), result)
 
-    @skipCUDAIf(
-        not SM90OrLater and not TEST_WITH_ROCM,
-        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
-    )
+    @skipCUDAIf(not SM90OrLater, "requires NVIDIA SM90+ bfloat16 atomic add support")
+    @skipIfRocm(msg="ROCm falls back for bfloat16 atomic add")
     @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
     def test_index_add_bfloat16_dim0(self):
         def f(x, y):
@@ -3077,10 +3125,8 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             out = f(x, y)
             self.assertEqual(torch.compile(f)(x, y), out)
 
-    @skipCUDAIf(
-        not SM90OrLater and not TEST_WITH_ROCM,
-        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
-    )
+    @skipCUDAIf(not SM90OrLater, "requires NVIDIA SM90+ bfloat16 atomic add support")
+    @skipIfRocm(msg="ROCm falls back for bfloat16 atomic add")
     @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
     def test_index_add_bfloat16_direct(self):
         def f(x, idx, src):
@@ -3102,10 +3148,8 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         ).run(code)
         self.assertEqual(out, compiled_out)
 
-    @skipCUDAIf(
-        not SM90OrLater and not TEST_WITH_ROCM,
-        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
-    )
+    @skipCUDAIf(not SM90OrLater, "requires NVIDIA SM90+ bfloat16 atomic add support")
+    @skipIfRocm(msg="ROCm falls back for bfloat16 atomic add")
     @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
     def test_index_add_bfloat16_scalar_index(self):
         def f(x, idx, src):

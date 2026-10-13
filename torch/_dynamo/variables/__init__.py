@@ -69,6 +69,14 @@ from .dicts import (
     OrderedDictVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable
+from .exception import (
+    AttributeErrorVariable,
+    ExceptionVariable,
+    FrameSummaryVariable,
+    NameErrorVariable,
+    StopIterationVariable,
+    TracebackVariable,
+)
 from .functions import (
     BaseUserFunctionVariable,
     BoundBuiltinMethodVariable,
@@ -140,27 +148,22 @@ from .lists import (
 )
 from .memory import CUDAMemPoolContextVariable, CUDAMemPoolVariable
 from .misc import (
-    AttributeErrorVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     CallMethodVariable,
     CellVariable,
     ContextVarVariable,
     DeletedVariable,
-    ExceptionVariable,
     GetAttrVariable,
     LambdaVariable,
-    NameErrorVariable,
     NewGlobalVariable,
     NumpyVariable,
     ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
-    StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
-    TracebackVariable,
     TypingVariable,
     UnknownVariable,
     WeakRefVariable,
@@ -208,12 +211,15 @@ from .user_defined import (
     StructSequenceVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
+    UserDefinedDefaultDictVariable,
     UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedExceptionObjectVariable,
+    UserDefinedFrozensetVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedOrderedDictVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
     UserDefinedVariable,

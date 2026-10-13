@@ -13,7 +13,8 @@ C10_EXPORT at::Tensor& all_reduce_(
 C10_EXPORT at::Tensor& all_reduce_(
     at::Tensor& input,
     c10::intrusive_ptr<ReduceOp> reduce_op,
-    c10::intrusive_ptr<ProcessGroup> group);
+    c10::intrusive_ptr<ProcessGroup> group,
+    const OptionalCollectiveConfig& config = std::nullopt);
 
 C10_EXPORT at::Tensor all_reduce(
     const at::Tensor& input,
@@ -23,13 +24,15 @@ C10_EXPORT at::Tensor all_reduce(
 C10_EXPORT at::Tensor all_reduce(
     const at::Tensor& input,
     c10::intrusive_ptr<ReduceOp> reduce_op,
-    c10::intrusive_ptr<ProcessGroup> group);
+    c10::intrusive_ptr<ProcessGroup> group,
+    const OptionalCollectiveConfig& config = std::nullopt);
 
 C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced_(
     std::vector<at::Tensor> inputs,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     c10::intrusive_ptr<ReduceOp> reduce_op,
-    c10::intrusive_ptr<ProcessGroup> group);
+    c10::intrusive_ptr<ProcessGroup> group,
+    const OptionalCollectiveConfig& config = std::nullopt);
 
 C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced_(
     std::vector<at::Tensor> inputs,
@@ -41,7 +44,8 @@ C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced_(
 C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced(
     std::vector<at::Tensor> inputs,
     c10::intrusive_ptr<ReduceOp> reduce_op,
-    c10::intrusive_ptr<ProcessGroup> group);
+    c10::intrusive_ptr<ProcessGroup> group,
+    const OptionalCollectiveConfig& config = std::nullopt);
 
 C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced(
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
@@ -58,7 +62,8 @@ C10_EXPORT std::vector<at::Tensor> all_gather_into_tensor_coalesced(
 C10_EXPORT std::vector<at::Tensor> all_gather_into_tensor_coalesced(
     std::vector<at::Tensor> inputs,
     int64_t group_size,
-    c10::intrusive_ptr<ProcessGroup> group);
+    c10::intrusive_ptr<ProcessGroup> group,
+    const OptionalCollectiveConfig& config = std::nullopt);
 
 C10_EXPORT at::Tensor all_gather_into_tensor(
     const at::Tensor& input,
@@ -68,7 +73,8 @@ C10_EXPORT at::Tensor all_gather_into_tensor(
 C10_EXPORT at::Tensor all_gather_into_tensor(
     const at::Tensor& input,
     int64_t group_size,
-    c10::intrusive_ptr<ProcessGroup> group);
+    c10::intrusive_ptr<ProcessGroup> group,
+    const OptionalCollectiveConfig& config = std::nullopt);
 
 C10_EXPORT at::Tensor& all_gather_into_tensor_out(
     at::Tensor& input,
@@ -80,14 +86,16 @@ C10_EXPORT at::Tensor& all_gather_into_tensor_out(
     at::Tensor& input,
     int64_t group_size,
     c10::intrusive_ptr<ProcessGroup> group,
-    at::Tensor& output);
+    at::Tensor& output,
+    const OptionalCollectiveConfig& config = std::nullopt);
 
 C10_EXPORT std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor> inputs,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string reduce_op,
     int64_t group_size,
-    c10::intrusive_ptr<ProcessGroup> group);
+    c10::intrusive_ptr<ProcessGroup> group,
+    const OptionalCollectiveConfig& config = std::nullopt);
 
 C10_EXPORT std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor> inputs,
@@ -101,7 +109,8 @@ C10_EXPORT at::Tensor reduce_scatter_tensor(
     const at::Tensor& input,
     std::string reduce_op,
     int64_t group_size,
-    c10::intrusive_ptr<ProcessGroup> group);
+    c10::intrusive_ptr<ProcessGroup> group,
+    const OptionalCollectiveConfig& config = std::nullopt);
 
 C10_EXPORT at::Tensor reduce_scatter_tensor(
     const at::Tensor& input,
@@ -134,7 +143,8 @@ C10_EXPORT at::Tensor all_to_all_single(
     const at::Tensor& input,
     at::SymIntArrayRef output_split_sizes,
     at::SymIntArrayRef input_split_sizes,
-    c10::intrusive_ptr<ProcessGroup> group);
+    const c10::intrusive_ptr<ProcessGroup>& group,
+    const OptionalCollectiveConfig& config = std::nullopt);
 
 C10_EXPORT at::Tensor& broadcast_(
     at::Tensor& input,
