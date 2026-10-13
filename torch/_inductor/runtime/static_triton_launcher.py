@@ -1,4 +1,5 @@
 import functools
+import inspect
 import os
 from functools import cached_property
 from typing import Any
@@ -12,13 +13,22 @@ from .triton_helpers import get_constexprs
 @functools.lru_cache(None)
 def _tma_arg_helpers():
     """Cached (make_arg, TensorDescriptor) for host-side TMA arg expansion.
-    make_arg(arg, metadata) -> [CUtensorMap, *shape, *strides]; the nvidia
-    backend's make_tensordesc_arg ignores its third arg, so we pass None."""
+    make_arg(arg, metadata) -> [CUtensorMap, *shape, *strides]."""
     from triton.backends.nvidia.driver import make_tensordesc_arg
     from triton.tools.tensor_descriptor import TensorDescriptor
 
-    def make_arg(arg, metadata):
-        return make_tensordesc_arg(arg, metadata, None)
+    # triton 3.5.0 and earlier take (arg, metadata); 3.8.0 added a third
+    # argument the nvidia backend ignores. Resolve the arity once, not per
+    # launch.
+    if len(inspect.signature(make_tensordesc_arg).parameters) >= 3:
+
+        def make_arg(arg, metadata):
+            return make_tensordesc_arg(arg, metadata, None)
+
+    else:
+
+        def make_arg(arg, metadata):
+            return make_tensordesc_arg(arg, metadata)
 
     return make_arg, TensorDescriptor
 
@@ -180,9 +190,10 @@ class StaticallyLaunchedTritonKernel:
         # function is bound to a single device, so when device_agnostic is set we keep
         # them per device and resolve the current device at launch time. The cubin
         # (device-agnostic) is retained so it can be loaded onto additional devices.
-        # These per-device dicts assume one thread per device for a given launcher (the
-        # single-process multi-device path is sequential in practice); concurrent
-        # first-launch on two new devices would need external locking.
+        # CooR's intended model uses one current device per rank/process, which
+        # make_launcher loads eagerly. These dicts also support sequential reuse across
+        # devices, but lazy initialization for a previously unseen device is not
+        # thread-safe; callers must serialize its first use.
         self.device_agnostic: bool = False
         self.functions: dict[int, int] = {}
         self.modules: dict[int, int] = {}
@@ -582,14 +593,68 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         self.modules = {}
 
 
+_STATIC_LAUNCHER_REGISTRY: dict[str, type[StaticallyLaunchedTritonKernel]] = {}
+
+
+def register_statically_launched_kernel(
+    device_type: str,
+    kernel_cls: type[StaticallyLaunchedTritonKernel],
+    *,
+    override: bool = False,
+) -> None:
+    """Register a device-type specific static Triton kernel launcher.
+
+    Backends (e.g. privateuse1 devices such as NPU) that implement a
+    StaticallyLaunchedTritonKernel subclass can register it here instead of
+    patching this dispatch.
+
+    Args:
+        device_type: torch.device.type string (e.g. "cuda", "hip", "xpu").
+        kernel_cls: a StaticallyLaunchedTritonKernel subclass that can launch
+            kernels compiled for device_type.
+        override: allow overriding an existing registration.
+    """
+    if not isinstance(device_type, str) or not device_type:
+        raise ValueError(
+            "device_type must be a non-empty string matching torch.device.type"
+        )
+    # Guard against non-class inputs before issubclass (its native TypeError
+    # message "must be a class" doesn't say whether the value is a valid class).
+    if not isinstance(kernel_cls, type) or not issubclass(
+        kernel_cls, StaticallyLaunchedTritonKernel
+    ):
+        raise TypeError(
+            "kernel_cls must be a StaticallyLaunchedTritonKernel subclass, "
+            "got " + str(kernel_cls)
+        )
+    if not override and device_type in _STATIC_LAUNCHER_REGISTRY:
+        raise ValueError(
+            "Static launcher for device_type '" + device_type + "' already registered"
+        )
+    _STATIC_LAUNCHER_REGISTRY[device_type] = kernel_cls
+
+
+# Register the built-in static launchers explicitly, mirroring the
+# register_benchmarker pattern in benchmarking.py.
+register_statically_launched_kernel("cuda", StaticallyLaunchedCudaKernel)
+register_statically_launched_kernel("hip", StaticallyLaunchedCudaKernel)
+register_statically_launched_kernel("xpu", StaticallyLaunchedXpuKernel)
+
+
 def statically_launched_kernel_by_device(
     kernel: CompiledKernel, device_type: str = "cuda"
 ) -> StaticallyLaunchedTritonKernel:
-    if device_type in ("cuda", "hip"):
-        return StaticallyLaunchedCudaKernel(kernel)
-    elif device_type == "xpu":
-        return StaticallyLaunchedXpuKernel(kernel)
-    else:
+    kernel_cls = _STATIC_LAUNCHER_REGISTRY.get(device_type)
+    if kernel_cls is None:
+        supported = ", ".join(sorted(_STATIC_LAUNCHER_REGISTRY))
         raise NotImplementedError(
-            f"Device type {device_type} is not supported for static launcher"
+            "Device type " + device_type + " is not registered for static launcher. "
+            "Registered device types: " + supported + ". Backends can register one via "
+            "register_statically_launched_kernel()."
         )
+    return kernel_cls(kernel)
+
+
+def is_registered_static_launch_device(device_type: str) -> bool:
+    """Return whether a static Triton kernel launcher is registered for device_type."""
+    return device_type in _STATIC_LAUNCHER_REGISTRY

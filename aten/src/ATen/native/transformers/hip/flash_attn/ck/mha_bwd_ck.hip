@@ -372,7 +372,11 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(out.stride(-1) == 1, "out tensor must have contiguous last dimension");
-    TORCH_CHECK(dout.stride(-1) == 1, "dout tensor must have contiguous last dimension");
+    // A 0-element grad has no meaningful last-dim stride, and an empty batch reaches here
+    // with one: `out.sum().backward()` expands a scalar, giving stride 0. CUDA accepts it
+    // because its early return sits above this check (flash_api.cpp mha_bwd).
+    TORCH_CHECK(dout.numel() == 0 || dout.stride(-1) == 1,
+                "dout tensor must have contiguous last dimension");
 
     TORCH_CHECK((bias_requires_grad && grad_bias.has_value()) || (!bias_requires_grad),
             "If bias_requires_grad is set, grad_bias must have a value");

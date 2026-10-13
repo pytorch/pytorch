@@ -359,6 +359,15 @@ class saved_tensors_hooks:
         To avoid reference cycle, the return value of ``pack_hook`` cannot hold a
         reference to the input tensor. For example, use `lambda x: x.detach()`
         instead of `lambda x: x` as the pack hook.
+
+    .. note ::
+        The order in which ``unpack_hook`` calls are made during the backward
+        pass is not specified. It follows the autograd engine's execution
+        order, which is not, in general, the reverse of the order in which
+        ``pack_hook`` was called during the forward pass, and it can differ
+        between graphs, workloads, and releases. Hooks that reconstruct
+        tensors from shared state must therefore not rely on being invoked in
+        reverse packing order.
     """
 
     def __init__(
@@ -565,11 +574,17 @@ class node_creation_hook:
 def region_activation_memory_budget(
     budget: float,
 ) -> contextlib.AbstractContextManager[None]:
-    r"""Context-manager that sets the activation memory budget for the region of
-    a compiled forward traced under it.
+    r"""Set the activation memory budget for the region of a compiled forward
+    traced under this context manager.
 
     .. warning::
         This is a prototype feature and is subject to change.
+
+        Using this API with regions that remain as opaque higher-order operators,
+        such as ``torch.compiler.nested_compile_region``, is not recommended. An
+        opaque higher-order operator and its enclosing graph may be partitioned
+        independently, which can cause unexpected interactions such as duplicated
+        recomputation. This behavior is subject to change.
 
     Under :func:`torch.compile`, the min-cut partitioner chooses which
     activations to save versus recompute in the backward pass to stay under a
@@ -584,12 +599,15 @@ def region_activation_memory_budget(
 
     .. note::
         Today the partitioner only supports a single budget per compiled graph,
-        so the annotation must cover every forward op in the graph (a partial
-        annotation is rejected rather than silently applied graph-wide), and all
-        annotated nodes must agree on the budget. To use different budgets for
-        different parts of a model, separate them with a graph break (e.g.
-        ``torch._dynamo.graph_break()``) so each part becomes its own graph. The
-        context remains active across graph breaks within the region.
+        so all budget contexts within a graph must agree. By default, the context
+        must cover every forward operation in that graph. Set
+        ``torch._functorch.config.activation_memory_budget_require_full_coverage``
+        to ``False`` while compiling to permit unannotated operations; the budget
+        then applies to the whole graph containing the context. To use different
+        budgets for different parts of a model, separate them with a graph break
+        (e.g. ``torch._dynamo.graph_break()``). The context remains active across
+        graph breaks, but a graph with no annotated operations uses the global
+        ``torch._functorch.config.activation_memory_budget``.
 
     This only has an effect under :func:`torch.compile`; using it outside of a
     compiled region raises a ``RuntimeError``.

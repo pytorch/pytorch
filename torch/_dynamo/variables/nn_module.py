@@ -44,7 +44,12 @@ from ..exc import (
     UnspecializeRestartAnalysis,
     Unsupported,
 )
-from ..guards import GuardBuilder, install_guard, make_dupe_guard
+from ..guards import (
+    GuardBuilder,
+    install_guard,
+    install_not_in_instance_dict_guard,
+    make_dupe_guard,
+)
 from ..mutation_guard import GenerationTracker
 from ..source import (
     AttrSource,
@@ -404,7 +409,17 @@ class NNModuleVariable(VariableTracker):
             )
             try:
                 return variables.UserMethodVariable(
-                    getattribute_fn,
+                    # Keep this off VariableTracker.build. The builder installs
+                    # a guard on the accessor eagerly, which made the module's
+                    # guard manager tag-unsafe
+                    # (test/dynamo/test_guard_manager.py,
+                    # test_nn_module_tag_overridden_getattr_safe).
+                    # Constructing directly records the source and leaves the
+                    # guard to whoever consumes it.
+                    variables.UserFunctionVariable(
+                        getattribute_fn,
+                        source=new_source and AttrSource(new_source, "__func__"),
+                    ),
                     self,
                     source=new_source,
                 ).call_function(tx, [variables.ConstantVariable.create(name)], {})
@@ -446,11 +461,17 @@ class NNModuleVariable(VariableTracker):
                 ],
             )
 
-        options = {"source": AttrSource(obj_source, "__getattr__")}
+        source = AttrSource(obj_source, "__getattr__")
 
-        return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
-            tx, [VariableTracker.build(tx, name)], {}
-        )
+        return variables.UserMethodVariable(
+            # See the note in _custom_getattr_fallback above: off the builder
+            # so the accessor guard is not installed eagerly.
+            variables.UserFunctionVariable(
+                getattr_fn, source=AttrSource(source, "__func__")
+            ),
+            self,
+            source=source,
+        ).call_function(tx, [VariableTracker.build(tx, name)], {})
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -503,6 +524,9 @@ class NNModuleVariable(VariableTracker):
                     base=base, tx=tx, name=name, obj_source=self.source
                 )
                 if result is not None:
+                    # __getattr__ only runs after the normal lookup misses, so a
+                    # later instance dict write would shadow what it returned.
+                    install_not_in_instance_dict_guard(self.source, name)
                     return result
                 # if we can't find a __getattr__, we can't parse this, raise attribute error
                 raise_observed_exception(
@@ -510,6 +534,10 @@ class NNModuleVariable(VariableTracker):
                     tx,
                     args=[f"'{type(base).__name__}' object has no attribute '{name}'"],
                 )
+
+        if object_member and name not in base_dict:
+            # A registered entry is only visible while the instance dict lacks it.
+            install_not_in_instance_dict_guard(self.source, name)
 
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
@@ -539,17 +567,33 @@ class NNModuleVariable(VariableTracker):
                 ).call_function(tx, [(self)], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
-                    subobj.__func__,
+                    variables.UserFunctionVariable(
+                        subobj.__func__,
+                        source=source and AttrSource(source, "__func__"),
+                    ),
                     variables.UserDefinedObjectVariable(type(base)),
                     source=source,
                 )
             elif istype(subobj, staticmethod):
                 return variables.UserFunctionVariable(
-                    subobj.__get__(base),
-                    source=source,
+                    subobj.__get__(base), source=source
                 )
             elif istype(subobj, types.FunctionType):
-                return variables.UserMethodVariable(subobj, self, source=source)
+                if inspect.getattr_static(subobj, "_torchdynamo_inline", False):
+                    func_source = source and AttrSource(source, "__func__")
+                    fn_vt = variables.WrapperUserFunctionVariable(
+                        subobj, "_torchdynamo_inline", source=func_source
+                    )
+                    return variables.WrapperUserMethodVariable(
+                        fn_vt, self, source=source
+                    )
+                return variables.UserMethodVariable(
+                    variables.UserFunctionVariable(
+                        subobj, source=source and AttrSource(source, "__func__")
+                    ),
+                    self,
+                    source=source,
+                )
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
                 return VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
@@ -1522,8 +1566,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self, tx: "InstructionTranslatorBase", field: str, name_vt: VariableTracker
     ) -> VariableTracker | None:
         dict_vt = self.tp_getattro_impl(tx, field)
-        if isinstance(dict_vt, variables.UserDefinedDictVariable):
-            dict_vt = dict_vt._base_vt
         if isinstance(dict_vt, variables.ConstDictVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None

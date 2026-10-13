@@ -3,7 +3,7 @@
 import sys
 import threading
 import weakref
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial, reduce
 
 import torch
@@ -15,12 +15,18 @@ from torch._C._distributed_c10d import (
     AllToAllOptions,
     BarrierOptions,
     BroadcastOptions,
+    FlightRecorderHook,
     ReduceOp,
     ReduceScatterOptions,
     ScatterOptions,
     Store,
 )
-from torch.distributed.distributed_c10d import _CollOp, _store_based_barrier, P2POp
+from torch.distributed.distributed_c10d import (
+    _CollOp,
+    _store_based_barrier,
+    _World,
+    P2POp,
+)
 from torch.futures import Future
 from torch.utils import _pytree as pytree
 
@@ -619,18 +625,31 @@ dist.Backend.register_backend(
 )
 
 
+# Mirrors the per-world state _World owns. Every field here needs a matching
+# property on ThreadLocalWorld below; distributed_c10d reaches for them by name
+# and does not care which world is installed. Fields default-construct so that
+# adding one cannot silently shift the others.
 @dataclass
 class WorldData:
-    default_pg: dist.ProcessGroup
-    pg_map: dict[dist.ProcessGroup, tuple[str, Store | None]]
-    pg_names: dict[dist.ProcessGroup, str]
-    pg_group_ranks: dict[dist.ProcessGroup, dict[int, int]]
-    pg_backend_config: dict[dist.ProcessGroup, str]
-    group_count: int
-    tags_to_pg: dict[str, list[dist.ProcessGroup]]
-    pg_to_tag: dict[dist.ProcessGroup, str]
-    pg_coalesce_state: dict[dist.ProcessGroup, list[_CollOp | P2POp]]
-    comms: list
+    default_pg: dist.ProcessGroup | None = None
+    pg_map: dict[dist.ProcessGroup, tuple[str, Store | None]] = field(
+        default_factory=dict
+    )
+    pg_names: dict[dist.ProcessGroup, str] = field(default_factory=dict)
+    pg_group_ranks: dict[dist.ProcessGroup, dict[int, int]] = field(
+        default_factory=dict
+    )
+    pg_backend_config: dict[dist.ProcessGroup, str] = field(default_factory=dict)
+    group_count: int = 0
+    tags_to_pg: dict[str, list[dist.ProcessGroup]] = field(default_factory=dict)
+    pg_to_tag: dict[dist.ProcessGroup, str] = field(default_factory=dict)
+    pg_coalesce_state: dict[dist.ProcessGroup, list[_CollOp | P2POp]] = field(
+        default_factory=dict
+    )
+    pg_flight_recorder_hooks: dict[dist.ProcessGroup, FlightRecorderHook] = field(
+        default_factory=dict
+    )
+    comms: list = field(default_factory=list)
 
 
 class ThreadLocalWorld:
@@ -638,9 +657,7 @@ class ThreadLocalWorld:
 
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = WorldData(
-                None, {}, {}, {}, {}, 0, {}, {}, {}, []
-            )
+            ThreadLocalWorld._world.world = WorldData()
         return ThreadLocalWorld._world.world
 
     @property
@@ -688,8 +705,16 @@ class ThreadLocalWorld:
         return self._get_world().pg_coalesce_state
 
     @property
+    def pg_flight_recorder_hooks(self) -> dict[dist.ProcessGroup, FlightRecorderHook]:
+        return self._get_world().pg_flight_recorder_hooks
+
+    @property
     def comms(self):
         return self._get_world().comms
+
+    # Derived entirely from the state mirrored above, so reuse _World's
+    # property object rather than duplicating its body.
+    pg_config_info = _World.pg_config_info
 
 
 _old_pg_world = None
