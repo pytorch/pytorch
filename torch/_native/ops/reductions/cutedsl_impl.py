@@ -10,8 +10,7 @@ dimension. Unsupported geometry, dtype conversion, and integer or complex inputs
 fall through to ATen.
 
 Accepted calls canonicalize to ``(M, N)``. The ordered adapter uses the shared
-fixed-DAG kernel for nonzero input row strides and unit-stride outputs, and the
-legacy CuTeDSL reference for other accepted layouts.
+fixed-DAG kernel with dynamic input and output row strides.
 """
 
 from __future__ import annotations

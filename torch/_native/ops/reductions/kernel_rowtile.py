@@ -383,8 +383,9 @@ def _launch_itree(
     dsts: Sequence[torch.dtype] = (),
     align: int = 0,
     compact: bool = True,
+    strided_outs: Sequence[bool] = (),
 ) -> None:
-    """Launch one stage, keying the input layout and baked alignment."""
+    """Launch one stage, keying descriptor layouts and baked alignment."""
     op = tile.TileReduce(
         trait,
         dt,
@@ -417,7 +418,15 @@ def _launch_itree(
         )
 
     # Destination types are baked, so include them to prevent a wrong cached plan.
-    key = (tag, trait_key, dt, tuple(dsts), align, compact) + op.cache_sig
+    key = (
+        tag,
+        trait_key,
+        dt,
+        tuple(dsts),
+        align,
+        compact,
+        tuple(strided_outs),
+    ) + op.cache_sig
     build = lambda: _compile(op, *_args(fakes))  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_args(operands))
 
@@ -431,7 +440,7 @@ def _run_itree(
     nouts: int = 1,
     out: Sequence[torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    """Launch each stage; split buffers are per field and supplied outputs are 1-D unit-stride."""
+    """Launch each stage; split buffers are per field."""
     M, N = x.shape
 
     def results():
@@ -460,17 +469,25 @@ def _run_itree(
             (cute.sym_int64(divisibility=align // itemsize), 1),
             assumed_align=align,
         )
-    fake_1d = lambda t: _L.fake_compact(  # noqa: E731
-        torch2cute[t.dtype], (_L.sym(),)
-    )
+
+    def fake_1d(t, strided=False):
+        dt = torch2cute[t.dtype]
+        if strided:
+            return cute.runtime.make_fake_tensor(dt, (_L.sym(),), (cute.sym_int64(),))
+        return _L.fake_compact(dt, (_L.sym(),))
+
     if itree.shape != "split":
         outs = results()
+        strided_outs = tuple(o.stride(0) != 1 for o in outs)
         _launch_itree(
             trait,
             trait_key,
             itree,
             dt,
-            ([fake_in], [fake_1d(o) for o in outs]),
+            (
+                [fake_in],
+                [fake_1d(o, strided) for o, strided in zip(outs, strided_outs)],
+            ),
             ([_L.read_only(x)], list(outs)),
             N,
             "rowitree",
@@ -478,6 +495,7 @@ def _run_itree(
             tuple(o.dtype for o in outs),
             align,
             compact,
+            strided_outs,
         )
         return tuple(outs)
     # Split writes one field-typed partial per (row, batch), then folds them linearly.
@@ -501,18 +519,23 @@ def _run_itree(
         compact,
     )
     outs = results()
+    strided_outs = tuple(o.stride(0) != 1 for o in outs)
     _launch_itree(
         trait,
         trait_key,
         itree_combine_plan(itree),
         dt,
-        ([fake_1d(p) for p in parts], [fake_1d(o) for o in outs]),
+        (
+            [fake_1d(p) for p in parts],
+            [fake_1d(o, strided) for o, strided in zip(outs, strided_outs)],
+        ),
         ([_L.read_only(p) for p in parts], list(outs)),
         N,
         "rowitree2",
         nouts,
         tuple(o.dtype for o in outs),
         align,
+        strided_outs=strided_outs,
     )
     return tuple(outs)
 
