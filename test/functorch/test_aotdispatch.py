@@ -12704,6 +12704,88 @@ Expected a .* tangent but got a plain Tensor.""",
 
         FileCheck().check(expected_msg).run("\n".join(captured.output))
 
+    def _saved_tensors_hooks_gm_ctx(self):
+        return torch.autograd.graph.saved_tensors_hooks(
+            *saved_tensors_hooks_to_gm(
+                lambda x: x * 2, lambda x: x / 2, "pack_hash", "unpack_hash"
+            )
+        )
+
+    def test_saved_tensors_hooks_no_recompile_inference(self):
+        # An optimizer-style step records no autograd graph, so saved tensors
+        # hooks cannot affect it and entering a hooks context must not
+        # recompile it.
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        cnt = CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=cnt)
+        @torch.no_grad()
+        def step(p, g):
+            p.add_(g * 0.1)
+            return p
+
+        p = torch.nn.Parameter(torch.randn(8))
+        g = torch.randn(8)
+        p_ref = p.detach().clone()
+        step(p, g)
+        with self._saved_tensors_hooks_gm_ctx():
+            step(p, g)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(p, p_ref + g * 0.1 + g * 0.1, atol=0, rtol=0)
+
+    def _test_saved_tensors_hooks_recompile_cpu(self, fn, inp_fn, expected_frames):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        compiled_fn = torch.compile(fn, backend=cnt)
+        for ctx in (nullcontext, self._saved_tensors_hooks_gm_ctx):
+            with ctx():
+                inps = inp_fn()
+                ref_inps = [
+                    x.detach().clone().requires_grad_(x.requires_grad) for x in inps
+                ]
+                compiled_fn(*inps).sum().backward()
+                fn(*ref_inps).sum().backward()
+            for x, ref_x in zip(inps, ref_inps):
+                self.assertEqual(x.grad, ref_x.grad, atol=0, rtol=0)
+        self.assertEqual(cnt.frame_count, expected_frames)
+
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="all")
+    def test_saved_tensors_hooks_recompile_training_cpu(self):
+        def fn(x):
+            return x.sin()
+
+        self._test_saved_tensors_hooks_recompile_cpu(
+            fn, lambda: [torch.randn(4, requires_grad=True)], expected_frames=2
+        )
+
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="all")
+    def test_saved_tensors_hooks_recompile_enable_grad_in_no_grad(self):
+        @torch.no_grad()
+        def fn(x):
+            with torch.enable_grad():
+                return x.sin()
+
+        self._test_saved_tensors_hooks_recompile_cpu(
+            fn, lambda: [torch.randn(4, requires_grad=True)], expected_frames=2
+        )
+
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="all")
+    def test_saved_tensors_hooks_recompile_graph_break(self):
+        # Only the resumed frame records autograd, so only it recompiles.
+        def fn(p, x):
+            with torch.no_grad():
+                p.mul_(0.5)
+            torch._dynamo.graph_break()
+            return (x * p).sin()
+
+        self._test_saved_tensors_hooks_recompile_cpu(
+            fn,
+            lambda: [torch.randn(4, requires_grad=True), torch.randn(4)],
+            expected_frames=3,
+        )
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
