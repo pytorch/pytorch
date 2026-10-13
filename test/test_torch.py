@@ -3278,6 +3278,22 @@ class TestTorchDeviceType(TestCase):
             dst.conj().copy_(src._neg_view())
             self.assertEqual(dst, src.neg().conj_physical(), exact_dtype=False)
 
+    # Exercises the multi-threaded CPU path for dense 2D transpose copies: odd
+    # extents leave partial blocks, and the skinny shapes have a single row or
+    # column of blocks.
+    @onlyCPU
+    @dtypes(torch.uint8, torch.bool, torch.bfloat16, torch.float32, torch.float64, torch.complex64)
+    def test_copy_transpose_parallel(self, device, dtype):
+        num_threads = torch.get_num_threads()
+        try:
+            torch.set_num_threads(4)
+            for h, w in ((1000, 1003), (61, 5000), (5000, 61), (120, 121)):
+                src = make_tensor((h, w), dtype=dtype, device=device)
+                out = src.t().contiguous()
+                self.assertEqual(out, src.t(), atol=0, rtol=0)
+        finally:
+            torch.set_num_threads(num_threads)
+
     # FIXME: move to data movement test suite
     @onlyNativeDeviceTypes
     @dtypes(torch.int64, torch.float32, torch.complex64)
