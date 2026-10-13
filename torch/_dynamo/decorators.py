@@ -1013,10 +1013,8 @@ def substitute_in_graph(
             guards = self.install_guards(guard_type)
             if guards is None:
                 raise AssertionError("install_guards returned None")
-            return PolyfilledFunctionVariable(
-                value,
-                source=self.source,
-                **guards,
+            return VariableBuilder.create_internal_polyfilled_function(
+                value, source=self.source, **guards
             )
 
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn

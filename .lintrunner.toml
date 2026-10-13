@@ -1986,6 +1986,20 @@ command = [
 ]
 
 [[linter]]
+code = "RAW_VT_CONSTRUCTION"
+include_patterns = [
+  "torch/**/*.py",
+  "tools/linter/adapters/raw_vt_construction_linter.py",
+  "tools/test/test_raw_vt_construction_linter.py",
+]
+exclude_patterns = ["torch/_dynamo/variables/builder.py"]
+command = [
+  "python3",
+  "tools/linter/adapters/raw_vt_construction_linter.py",
+  "@{{PATHSFILE}}",
+]
+
+[[linter]]
 code = 'STABLE_SHIM_VERSION'
 include_patterns = [
     'torch/csrc/stable/c/shim.h',

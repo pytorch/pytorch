@@ -338,6 +338,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     _reenter_after_graph_break = False
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def create(
         tx: "InstructionTranslatorBase",
         stream_to_enter: "StreamVariable",
