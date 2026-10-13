@@ -141,12 +141,27 @@ class TestQuantileScalarShape(TestCase):
             out = np.empty(())
             assert_equal(func(x, q, out=out), 5.5)
             assert_equal(out, 5.5)
-            out = np.empty(1)  # NumPy broadcasts the 0-D result into out
-            assert_equal(func(x, q, out=out), [5.5])
-            assert_equal(out, [5.5])
+            # NumPy broadcasts a scalar result into out
+            for shape in [(1,), (1, 1), (3,)]:
+                out = np.empty(shape)
+                func(x, q, out=out)
+                assert_equal(out, np.full(shape, 5.5))
             out = np.empty((1, 4))
             func(x, q, axis=0, keepdims=True, out=out)
             assert_equal(out, [[4.0, 5.0, 6.0, 7.0]])
+            with assert_raises(ValueError):
+                func(x, q, axis=0, out=np.empty(3))
+
+    def test_median_out(self):
+        x = np.arange(12, dtype="float64").reshape(3, 4)
+        out = np.empty(())
+        assert_equal(np.median(x, out=out), 5.5)
+        assert_equal(out, 5.5)
+        # Unlike quantile/percentile, NumPy's median requires an exactly shaped out
+        with assert_raises(ValueError):
+            np.median(x, out=np.empty(1))
+        with assert_raises(ValueError):
+            np.median(x, axis=0, out=np.empty(3))
 
 
 class TestMean(TestCase):

@@ -439,12 +439,7 @@ def quantile(
 
     q = _util.cast_if_needed(q, a.dtype)
 
-    result = torch.quantile(a, q, axis, interpolation=method)
-
-    # NumPy assigns into `out` with broadcasting, e.g. a 0-D result into shape (1,)
-    if out is not None and not keepdims and result.shape != out.shape:
-        result = torch.broadcast_to(result, out.shape)
-    return result
+    return torch.quantile(a, q, axis, interpolation=method)
 
 
 def percentile(
@@ -467,7 +462,6 @@ def percentile(
         a,
         qq,
         axis=axis,
-        out=out,
         overwrite_input=overwrite_input,
         method=method,
         keepdims=keepdims,
