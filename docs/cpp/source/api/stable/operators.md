@@ -177,3 +177,6 @@ auto tensor = torch::stable::empty(
 
 ```{doxygenfunction} torch::stable::sort(const torch::stable::Tensor &self, std::optional<bool> stable, int64_t dim, bool descending)
 ```
+
+```{doxygenfunction} torch::stable::masked_select
+```
