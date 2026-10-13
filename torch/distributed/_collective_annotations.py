@@ -7,8 +7,7 @@ per-collective pre/post hooks instead.
 """
 
 from collections.abc import Callable
-from contextlib import AbstractContextManager
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 
 from torch._C._distributed_c10d import PreHookArgs, ProcessGroup
 from torch.distributed.distributed_c10d import (
@@ -18,6 +17,10 @@ from torch.distributed.distributed_c10d import (
     get_backend,
     get_process_group_ranks,
 )
+
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 
 
 # record_param_comms field name -> value, e.g. "Collective name" -> "allreduce".
