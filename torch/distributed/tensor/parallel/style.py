@@ -32,8 +32,9 @@ class ParallelStyle(ABC):
     """
     The parallel style contract defines how the module or submodule should be parallelized.
 
-    It only defines the ``apply`` method for ``parallelize_module`` to use, this allows maximum
-    flexibility for different kind of style implementations.
+    Each subclass defines how ``parallelize_module`` parallelizes a module on a
+    :class:`~torch.distributed.device_mesh.DeviceMesh`, which allows maximum
+    flexibility for different kinds of style implementations.
     """
 
     src_data_rank: int | None = 0

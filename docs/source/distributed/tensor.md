@@ -316,7 +316,7 @@ DTensor:
 
 ```
 tensor = torch.arange(10)
-tensor = DTensor.from_local(tensor, placements=(Replicate(),))
+tensor = DTensor.from_local(tensor, dtensor.device_mesh, placements=(Replicate(),))
 return tensor + dtensor
 ```
 
@@ -325,8 +325,14 @@ Semantically this means that your Tensor data is split between the shards
 and that operations act on the "full stacked data".
 
 ```
-tensor = torch.full([], RANK)
-tensor = DTensor.from_local(tensor, placements=(Shard(0),))
+tensor = torch.arange(10).chunk(WORLD_SIZE)[RANK]
+tensor = DTensor.from_local(
+    tensor,
+    dtensor.device_mesh,
+    placements=(Shard(0),),
+    shape=dtensor.shape,
+    stride=dtensor.stride(),
+)
 return tensor + dtensor
 ```
 
