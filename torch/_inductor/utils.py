@@ -4824,6 +4824,9 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
 
+    if config.avoid_32bit_indexing_guards:
+        return False
+
     # AOTI doesn't guard on < 2**32, so checking hints isn't a viable option,
     # in case the hinted value is < 2**32, but the allowed range is larger.
     # However, to prevent possible perf regressions on pre-existing AOTI models
