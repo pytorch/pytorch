@@ -8,6 +8,12 @@
 #include <c10/util/irange.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/imag.h>
+#endif
+
 #include <thrust/swap.h>
 #include <cooperative_groups.h>
 
@@ -1445,7 +1451,7 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
   // go before any GEMM: one non-finite there would turn the real part into NaN via
   // beta * C = (1 + 0i) * C, as 0 * inf is NaN.
   if (hermitian && LD.is_complex()) {
-    LD.diagonal(0, -2, -1).imag().zero_();
+    at::imag(LD.diagonal(0, -2, -1)).zero_();
   }
   if (n == 1) {
     // The only pivot is the lone entry, and it is singular iff it is zero.

@@ -471,7 +471,9 @@ State at the end of the GB200 session:
 - **Committed:** `0bbcef0`. The full suite passes on it on GB200 (10928 tests, 52 min).
 - **Committed later:** `5a3dd9c` (the `n == 1` fix, `test_n1`,
   `test_nonfinite_imag_diagonal_is_ignored`) and `f0e4a2b` (these TODOs).
-- **Uncommitted:** zeroing `Im(diag)` at entry for every n (10.1.3).
+- **Uncommitted:** `at::imag` instead of `.imag()` (10.1.2) and its include.
+- `unittest -k` with a `*` matches the full test id, so a pattern needs a leading
+  `*`: `-k "*test_n1_*cuda*"`. Several `-k` flags are OR-ed.
 
 ### 10.1 Bugs, in order
 
@@ -499,12 +501,13 @@ State at the end of the GB200 session:
      `huge_scale`/`tiny_scale` (1e±30, 1e±15) are far inside the safe range,
      which is why nothing caught this.
    - Remember to refresh the standalone copy of the kernel.
-2. **`n == 1` ignored the Hermitian imaginary part. Fixed in `5a3dd9c`, then
-   folded into 10.1.3. After a rebuild, run `-k test_n1_`.**
+2. **`n == 1` ignored the Hermitian imaginary part. Fixed (folded into 10.1.3)
+   and verified.** Note: `5a3dd9c` alone does not compile; it calls `LD.imag()`,
+   and `imag` is a free function only in ATen (`at::imag`).
    - For `[[1j]]` CUDA returned `LD = 1j, info = 0`; CPU LAPACK and MAGMA return
      `LD = 0, info = 1`.
-   - The fix zeroes `LD.ima3. **A non-finite `Im(diag)` poisoned the real part. Confirmed; fix in the
-   working tree, needs a rebuild.**
+   - The fix zeroes `LD.ima3. **A non-finite `Im(diag)` poisoned the real part. Fixed and verified (all 96
+   CUDA instances of the two tests below pass).**
    - LAPACK ignores the imaginary part of a Hermitian diagonal. The kernel used to
      drop it only when the column became current (`update_rowcol`).
    - Before that, the trailing GEMM computes `beta·C = (1+0i)·C`, and `0·inf = NaN`
@@ -514,11 +517,11 @@ State at the end of the GB200 session:
      The damage starts exactly at the first panel end (column 32 for complex128,
      26 for complex64), with hundreds of non-finite real entries in `LD` and
      different pivots. Without a GEMM (n=2, complex128 n=33) nothing is wrong.
-   - Fix: `LD.diagonal(0, -2, -1).imag().zero_()` for complex Hermitian input at
+   - Fix: `at::imag(LD.diagonal(0, -2, -1)).zero_()` for complex Hermitian input at
      the top of `ldl_factor_blas3_kernel`, before the `n == 1` shortcut, which is
      back to `pivots.fill_(1)` + `info`.
    - After the rebuild, run
-     `python test_ldl_custom.py -k "test_nonfinite_imag_diagonal*cuda*" -k "test_n1_*cuda*"`.
+     `python test_ldl_custom.py -k "*test_nonfinite_imag_diagonal*cuda*" -k "*test_n1_*cuda*"`.
      The CPU instances take ~35 min (ATLAS) and already passed.
    - The realification inside the kernel (`update_rowcol`) stays: the GEMM
      updates themselves leave rounding-level imaginary parts on the diagonal.
