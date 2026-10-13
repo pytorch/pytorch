@@ -1578,6 +1578,34 @@ class TestInductorDynamic(DynamicShapesTestCase):
             actual = compiled_f(x)
             self.assertEqual(actual, expected)
 
+    @parametrize("cpp_wrapper", (False, True))
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_fill_respects_dtype(self, device, cpp_wrapper):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=torch.bool, device=device).sum()
+
+        x = torch.tensor(3, device=device)
+        with torch._inductor.config.patch(cpp_wrapper=cpp_wrapper):
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+    @parametrize("cpp_wrapper", (False, True))
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_fill_overflow(self, device, cpp_wrapper):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=torch.int8, device=device)
+
+        with torch._inductor.config.patch(cpp_wrapper=cpp_wrapper):
+            compiled_f = torch.compile(f, fullgraph=True)
+            valid = torch.tensor(127, device=device)
+            self.assertEqual(compiled_f(valid), f(valid))
+
+            invalid = torch.tensor(300, device=device)
+            overflow_error = r"without overflow|u\d+ <= 127"
+            with self.assertRaisesRegex(RuntimeError, overflow_error):
+                f(invalid)
+            with self.assertRaisesRegex(RuntimeError, overflow_error):
+                compiled_f(invalid)
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 
