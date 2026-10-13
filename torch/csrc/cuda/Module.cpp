@@ -1713,6 +1713,22 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       });
 
   m.def(
+      "_host_beginAllocateCurrentThreadToPool",
+      [](at::cuda::MempoolId_t mempool_id) {
+        at::getHostAllocator(at::kCUDA)->begin_allocate_current_thread_to_pool(
+            mempool_id);
+      },
+      py::call_guard<py::gil_scoped_release>());
+
+  m.def(
+      "_host_endAllocateCurrentThreadToPool",
+      [](at::cuda::MempoolId_t mempool_id) {
+        at::getHostAllocator(at::kCUDA)->end_allocate_current_thread_to_pool(
+            mempool_id);
+      },
+      py::call_guard<py::gil_scoped_release>());
+
+  m.def(
       "_cuda_checkPoolLiveAllocations",
       [](c10::DeviceIndex device,
          at::cuda::MempoolId_t mempool_id,

@@ -43,4 +43,25 @@ struct TORCH_CUDA_CPP_API MemPool {
   c10::DeviceIndex device_;
 };
 
+// HostMemPool is a pool of pinned host memory in the CUDA host caching
+// allocator. A thread routes its pinned allocations to the pool with
+// at::HostAllocator::begin_allocate_current_thread_to_pool. Once the pool is
+// destroyed and no thread is routed to it, its cached memory is freed, unless
+// a graph capture is underway; what remains is freed by a later host
+// empty_cache().
+struct TORCH_CUDA_CPP_API HostMemPool {
+  HostMemPool();
+  HostMemPool(const HostMemPool&) = delete;
+  HostMemPool(HostMemPool&&) = delete;
+  HostMemPool& operator=(const HostMemPool&) = delete;
+  HostMemPool& operator=(HostMemPool&&) = delete;
+  ~HostMemPool();
+
+  MempoolId_t id() const;
+  int use_count() const;
+
+ private:
+  MempoolId_t id_;
+};
+
 } // namespace at::cuda

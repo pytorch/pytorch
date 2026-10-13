@@ -1005,6 +1005,99 @@ with torch.cuda.use_mem_pool(pool):
 ```
 
 
+(cuda-pinned-host-memory-pools)=
+## Pinned host memory pools
+
+{class}`torch.cuda.HostMemPool` is a pool of pinned host memory in the CUDA host caching
+allocator. Inside {class}`torch.cuda.use_host_mem_pool`, the current thread's pinned
+allocations, such as `torch.empty(n, pin_memory=True)`, `tensor.pin_memory()` and the outputs
+of `tensor.to("cpu", non_blocking=True)`, come from the pool:
+
+```python
+pool = torch.cuda.HostMemPool()
+with torch.cuda.use_host_mem_pool(pool):
+    buf = torch.empty(1024, pin_memory=True)  # allocated from pool
+```
+
+What a pool guarantees is cache isolation: a block freed by any thread returns to the pool it
+came from, and is handed out again only to threads inside that pool.
+
+Routing follows the thread:
+
+* Only the thread that entered the context routes to the pool; threads it starts do not.
+* Several threads can be inside one pool at the same time, and contexts nest: the innermost
+  one wins. Unlike `use_mem_pool`, entering a pool that is already in use is allowed.
+* Contexts must be exited in reverse order, on the thread that entered them; anything else
+  raises an error and changes nothing. When a thread exits inside a context, its routes are
+  ended.
+* During CUDA graph capture, allocations on the capturing stream go to the graph's pool, even
+  when the context is entered inside the capture, while allocations on other streams still go
+  to the HostMemPool. A graph never holds on to a HostMemPool, and a HostMemPool cannot be used
+  as the `pool` of a graph.
+* Use contexts from synchronous code, on threads you control. A context that stays open across
+  an `await` or a generator's `yield` also routes whatever runs on the thread in between. The
+  pin-memory thread of {class}`torch.utils.data.DataLoader` is not covered yet.
+* Pools are local to the process. Using them across `fork` is not supported.
+
+{meth}`torch.cuda.HostMemPool.use_count` is 1 for the pool object plus 1 for each open
+`use_host_mem_pool` context, on any thread.
+
+Creating a pool allocates nothing. While the pool is alive, emptying the host cache, which
+{class}`torch.cuda.graph` does on entry, leaves its cache alone. Deleting the pool frees its
+cached blocks at once, or when the last thread inside it exits the context, with the GIL
+released, since `cudaFreeHost` waits for the work already issued on the current device. Blocks
+that tensors or pending copies still use, and the whole cache if a CUDA graph capture is
+underway (where `cudaFreeHost` would invalidate the capture), are freed by a later
+{func}`torch.accelerator.empty_host_cache`. As with `empty_host_cache`, a capture that another
+thread begins while the pool is being freed is not waited for, so avoid deleting pools while
+other threads may start a capture.
+
+### One pool per NUMA node
+
+`cudaHostAlloc` places and pins all pages of a new block on the NUMA node of the calling
+thread, or on the node its memory policy names, and pinned pages never move. A thread inside a
+pool allocates the pool's new blocks itself. So to keep the buffers of each node on that node,
+create one pool per node and enter `pools[k]` only from threads bound to node `k`:
+
+```python
+import os
+import threading
+
+import torch
+
+# cpus_of_node[k]: the CPUs of NUMA node k, e.g. from
+# /sys/devices/system/node/node{k}/cpulist
+pools = [torch.cuda.HostMemPool() for _ in cpus_of_node]
+
+def loader(node):
+    os.sched_setaffinity(0, cpus_of_node[node])  # before entering the pool
+    with torch.cuda.use_host_mem_pool(pools[node]):
+        ...  # pinned buffers for the GPUs attached to this node
+
+threads = [threading.Thread(target=loader, args=(k,)) for k in range(len(pools))]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+```
+
+The allocator knows nothing about NUMA, so placement depends on the setup:
+
+* Bind the thread, or set its memory policy, before it enters the pool. A block allocated by an
+  unbound thread stays in the pool on whatever node it landed. With CPU affinity alone, the
+  kernel can fall back to another node when the local one is full; `MPOL_BIND` does not.
+* `pinned_use_cuda_host_register` with `pinned_num_register_threads` greater than 1 touches
+  the pages from a shared thread pool, which then decides where they go.
+* Blocks of a HostMemPool never come from the `pinned_reserve_segment_size_mb` segment, which
+  the first allocating thread placed for the whole process.
+* Pinned allocations during graph capture go to the graph's pool and are placed like
+  default-pool allocations (by the capturing thread, or from the reserve segment), not by any
+  HostMemPool.
+
+Stream-ordered host memory pools (`cudaMemPoolCreate` with `cudaMemLocationTypeHostNuma`,
+CUDA 12.8+) could back a HostMemPool with explicit placement in the future, and this API may
+move to {mod}`torch.accelerator`.
+
 (cuda-memory-python-allocators)=
 ## Python-defined CUDA allocators
 
