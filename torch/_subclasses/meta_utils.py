@@ -345,10 +345,14 @@ class MetaTensorDescriber:
                 # the tensor must be built standalone from its own storage.
                 # Only meaningful for plain dense tensors: a nested tensor
                 # repacks values/offsets, so a genuine NT view need not share
-                # its base's storage.
+                # its base's storage. Sparse layouts throw on untyped_storage()
+                # (values() of a sparse tensor reports the sparse parent as
+                # _base), so the alias test only runs on strided pairs.
                 if (
                     not is_nested
                     and not base.is_nested
+                    and t.layout == torch.strided
+                    and base.layout == torch.strided
                     and base.untyped_storage()._cdata != t.untyped_storage()._cdata
                 ):
                     is_view = False
