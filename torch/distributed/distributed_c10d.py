@@ -8307,11 +8307,12 @@ def _register_pg_in_world(
     store: Store,
     group_name: GroupName,
     backend_config: str,
-    timeout: timedelta,
     rank_mapping: dict[int, int] | None = None,
     pg_tag: str | None = None,
     user_tag: str | None = None,
     add_to_default_tag: bool = False,
+    *,
+    timeout: timedelta | None = None,
 ) -> None:
     """
     Update all global state dictionaries for a process group.
@@ -8325,7 +8326,6 @@ def _register_pg_in_world(
         store (Store): Store instance for pg_map.
         group_name (str): Group name for pg_names and registration.
         backend_config (str): Backend configuration string.
-        timeout (timedelta): Timeout the process group was created with.
         rank_mapping (Dict[int, int], optional): Global rank to group rank mapping.
             If None, skips updating pg_group_ranks.
         pg_tag (str, optional): Process group tag. If None, defaults to f"ptd:{group_name}".
@@ -8334,12 +8334,16 @@ def _register_pg_in_world(
         add_to_default_tag (bool): When True and user_tag is None, also appends
             pg to the default "" tag in addition to pg_tag. Ignored when
             user_tag is set (the "" tag is always appended in that case).
+        timeout (timedelta, optional): Timeout the process group was created with.
+            If None, records ``_get_default_timeout(backend_name)``.
     """
     # Update main process group mappings
     _world.pg_map[pg] = (backend_name, store)
     _world.pg_names[pg] = group_name
     _world.pg_backend_config[pg] = backend_config
-    _world.pg_timeouts[pg] = timeout
+    _world.pg_timeouts[pg] = (
+        timeout if timeout is not None else _get_default_timeout(backend_name)
+    )
 
     # Register the process group name
     _register_process_group(group_name, pg)
