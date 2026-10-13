@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 
+#include <ATen/ops/scalar_tensor.h>
 #include <c10/util/Exception.h>
 #include <c10/util/FileSystem.h>
 #include <torch/csrc/inductor/aoti_torch/generated_enum_converters.h>
@@ -68,6 +69,23 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       break;
     }
     case c10::TypeKind::TensorType: {
+      // FX graphs allow a python scalar to bind to a Tensor-typed parameter.
+      // Materialize it the same way the direct C-shim call path does
+      // (aoti_torch_scalar_to_tensor_*): a 0-d CPU tensor of the canonical
+      // dtype for the scalar type.
+      if (serialized_arg_type == "as_int") {
+        stack.at(index) = at::scalar_tensor(
+            serialized_arg_val.get<int64_t>(), c10::ScalarType::Long);
+        break;
+      } else if (serialized_arg_type == "as_float") {
+        stack.at(index) = at::scalar_tensor(
+            serialized_arg_val.get<double>(), c10::ScalarType::Double);
+        break;
+      } else if (serialized_arg_type == "as_bool") {
+        stack.at(index) = at::scalar_tensor(
+            serialized_arg_val.get<bool>(), c10::ScalarType::Bool);
+        break;
+      }
       TORCH_CHECK(
           serialized_arg_type == "as_tensor",
           "Expected extern kernel ",
