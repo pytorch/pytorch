@@ -236,7 +236,8 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
 * If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
 
 * When installing with `python -m pip install -e . -v --no-build-isolation` (in contrast to `python -m pip install . -v --no-build-isolation`) Python runtime will use
-  the current local source-tree when importing `torch` package. (This is done by installing an import hook in the `site-packages` folder that redirects `torch`'s Python modules to the source tree; compiled output is not redirected.)
+  the current local source-tree when importing `torch` package. (This is done by installing an import hook in the `site-packages` folder that redirects `torch`'s Python modules to the source tree; the compiled output is installed into `build/install/<wheel tag>/` in the checkout and loaded from there.)
+  The install tree is keyed by wheel tag only. If you point `SKBUILD_BUILD_DIR` at a second build tree (another CUDA toolkit, a Debug build), also set `SKBUILD_EDITABLE_REBUILD_DIR` to a directory under it, otherwise both editable installs share `build/install/<wheel tag>/` and the last one installed wins.
   This way you do not need to repeatedly install after modifying Python files (`.py`).
   However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
