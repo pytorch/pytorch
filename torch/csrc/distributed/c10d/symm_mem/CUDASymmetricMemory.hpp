@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
@@ -103,8 +104,8 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
     DevicePointerTables& operator=(DevicePointerTables&&) = delete;
 
     int device_idx;
-    void** buffers{nullptr};
-    void** signal_pads{nullptr};
+    c10::DataPtr buffers;
+    c10::DataPtr signal_pads;
   };
 
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs_;
