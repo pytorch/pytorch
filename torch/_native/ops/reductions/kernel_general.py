@@ -444,6 +444,7 @@ def _try_indexed_itree(
         )
         for f in range(trait.nfields)
     ]
+    part_dtypes = tuple(p.dtype for p in parts)
     s1 = ReduceBlock(
         trait,
         count=count,
@@ -456,7 +457,7 @@ def _try_indexed_itree(
         order="inner_tree",
         itree=plan,
     )
-    key1 = ("genitree1", trait_key, x.dtype) + s1.cache_sig
+    key1 = ("genitree1", trait_key, x.dtype, part_dtypes) + s1.cache_sig
     _launch(s1, key1, [_flat(x)], parts)
 
     outs = [torch.empty(num_o, device=x.device, dtype=d) for d in out_dtypes]
@@ -472,7 +473,6 @@ def _try_indexed_itree(
         order="inner_tree",
         itree=combine,
     )
-    part_dtypes = tuple(p.dtype for p in parts)
     key2 = (
         "genitree2",
         trait_key,
