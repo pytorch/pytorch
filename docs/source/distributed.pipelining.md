@@ -124,6 +124,34 @@ schedule.step(
 )
 ```
 
+If your loss takes extra arguments, pass the ones shared by every microbatch in
+`loss_kwargs`, and the ones that differ per microbatch, such as per-token
+weights, in `loss_kwarg_mbs`, one dict per microbatch. Like the other pre-split
+inputs, `loss_kwarg_mbs` goes with `target_mbs`. Microbatch `i` computes
+`loss_fn(output, target_mbs[i], **loss_kwargs, **loss_kwarg_mbs[i])`, so a key
+must not appear in both:
+
+```python
+def loss_fn(output, target, *, num_tokens, token_weights):
+    per_token_loss = torch.nn.functional.cross_entropy(
+        output.transpose(1, 2), target, reduction="none"
+    )
+    return (per_token_loss * token_weights).sum() / num_tokens
+
+schedule = ScheduleGPipe(stage, n_microbatches, loss_fn=loss_fn)
+schedule.step(
+    arg_mbs=arg_mbs,
+    target_mbs=target_mbs,
+    loss_kwargs={"num_tokens": num_tokens},  # same for every microbatch
+    loss_kwarg_mbs=[{"token_weights": w0}, {"token_weights": w1}],
+    losses=losses,
+)
+```
+
+While inferring stage metadata (on the first step by default), the schedule
+also calls `loss_fn` once with microbatch 0's inputs, so `loss_fn` must not
+accumulate into objects passed through `loss_kwarg_mbs`.
+
 Note that the above code needs to be launched for each worker, thus we use a
 launcher service to launch multiple processes:
 
