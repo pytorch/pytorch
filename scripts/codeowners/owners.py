@@ -57,7 +57,7 @@ TEST_GLOBS = [
 
 def header_owners(path: Path) -> set[str]:
     owners_prefix = "# Owner(s): "
-    with path.open() as source:
+    with path.open(encoding="utf-8") as source:
         for line in source:
             if line.startswith(owners_prefix):
                 labels = json.loads(line.removeprefix(owners_prefix))
