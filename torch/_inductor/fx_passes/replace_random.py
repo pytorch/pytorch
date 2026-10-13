@@ -87,21 +87,23 @@ def fuse_offset_creation_pass(graph: torch.fx.Graph) -> int:
     device_offsets = collections.defaultdict(list)
     for node in graph.nodes:
         if CallFunctionVarArgs(inductor_prims.rand_eager_offset).match(node):
-            device_offsets[node.args[1]].append(node)
+            device_offsets[_device_key(node.args[1])].append(node)
 
     if not device_offsets:
         return 0
 
-    for device, offsets in device_offsets.items():
+    for offsets in device_offsets.values():
+        device = offsets[0].args[1]
         with graph.inserting_before(offsets[0]):
             offs = [n.args[0] for n in offsets]
             combined = graph.call_function(
                 inductor_prims.rand_eager_offsets, (offs, device)
             )
             combined.meta.update(offsets[0].meta)
+            val_device = _concrete_device(device)
             with V.fake_mode:
                 combined.meta["val"] = torch.empty(
-                    [len(offsets), 2], device=device, dtype=torch.int64
+                    [len(offsets), 2], device=val_device, dtype=torch.int64
                 )
                 combined.meta["tensor_meta"] = _extract_tensor_metadata(
                     combined.meta["val"]
@@ -136,19 +138,17 @@ def fuse_seed_creation_pass(graph: torch.fx.Graph):
     device_seeds = collections.defaultdict(list)
     for node in graph.nodes:
         if CallFunctionVarArgs(inductor_prims.seed).match(node):
-            device_seeds[node.args[0]].append(node)
+            device_seeds[_device_key(node.args[0])].append(node)
 
     if not device_seeds:
         return 0
 
-    for device, seeds in device_seeds.items():
+    for seeds in device_seeds.values():
+        device = seeds[0].args[0]
         with graph.inserting_before(seeds[0]):
             combined = graph.call_function(inductor_prims.seeds, (len(seeds), device))
             combined.meta.update(seeds[0].meta)
             with V.fake_mode:
-                # The graph argument above may be a coor current_device() node, which
-                # is what keeps the fused seed rank-agnostic. Only this meta value
-                # needs a real torch.device.
                 combined.meta["val"] = torch.empty(
                     [len(seeds)], device=_concrete_device(device), dtype=torch.int64
                 )
@@ -172,35 +172,40 @@ def default_kwargs(device):
     return {}
 
 
-def _concrete_device(device):
-    """A real torch.device for a device operand that may still be a CooR node."""
-    if isinstance(device, torch.fx.Node):
-        if device.target is torch.ops.coor.current_device.default:
-            from torch.fx.experimental.proxy_tensor import _coor_current_device
-
-            return _coor_current_device()
+def _is_coor_device(device) -> bool:
+    if not isinstance(device, torch.fx.Node):
+        return False
+    if device.target is not torch.ops.coor.current_device.default:
         raise AssertionError(
             f"replace_random: device operand is an unexpected graph node: {device}"
         )
+    return True
+
+
+def _device_key(device):
+    # compile-on-one-rank: each replacement is traced separately and brings its own
+    # current_device() node, but they all denote the same device.
+    return torch.ops.coor.current_device.default if _is_coor_device(device) else device
+
+
+def _concrete_device(device):
+    """A real torch.device for a device operand that may still be a CooR node.
+
+    compile-on-one-rank: these passes run on the joint graph, where a factory op's
+    device operand is still a coor current_device() node -- respecialize_current_device_nodes
+    does not concretise those until post_grad. Resolve it the way that pass does. Nothing
+    is pinned by doing so: the replacement is traced with compile-on-one-rank live, which
+    turns the device back into a current_device() node.
+    """
+    if _is_coor_device(device):
+        from torch.fx.experimental.proxy_tensor import _coor_current_device
+
+        return _coor_current_device()
     return device
 
 
 def get_device(device):
-    if isinstance(device, torch.fx.Node):
-        # compile-on-one-rank: this pass runs on the joint graph, where a factory op's
-        # device operand is still a coor current_device() node rather than a
-        # torch.device -- respecialize_current_device_nodes does not concretise those
-        # until post_grad. Resolve it the way that pass does, from the op's runtime
-        # value rather than the consumer's meta. Nothing is pinned by doing so: the
-        # replacement is re-traced through make_fx, which re-applies the substitution,
-        # and respecialize would concretise it a few passes later regardless.
-        if device.target is torch.ops.coor.current_device.default:
-            from torch.fx.experimental.proxy_tensor import _coor_current_device
-
-            return _coor_current_device()
-        raise AssertionError(
-            f"replace_random: device operand is an unexpected graph node: {device}"
-        )
+    device = _concrete_device(device)
     if device is not None:
         return device
     return torch.empty([]).device  # default device
