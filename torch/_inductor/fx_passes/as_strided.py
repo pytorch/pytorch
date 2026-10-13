@@ -1,7 +1,9 @@
 import torch
 from torch.fx import GraphModule, Node
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 
+from ..compiler_bisector import CompilerBisector
 from ..fx_utils import get_node_storage
 
 
@@ -9,15 +11,24 @@ aten = torch.ops.aten
 
 
 def canonicalize_as_strided(
-    gm: GraphModule, *, storage_bases: OrderedSet[Node] | None = None
+    gm: GraphModule,
+    *,
+    storage_bases: OrderedSet[Node] | None = None,
+    is_subgraph: bool = False,
 ) -> int:
-    """Redirect as_strided/copy through same-dtype aliases and collect supported bases."""
+    """Redirect as_strided/copy to supported fresh allocations at storage offset zero."""
+    from ..lowering import user_lowerings
+
+    if is_subgraph or CompilerBisector.bisection_enabled:
+        return 0
     changed = 0
     for node in list(gm.graph.nodes):
         if node.op != "call_function" or node.target not in (
             aten.as_strided.default,
             aten.as_strided_copy.default,
         ):
+            continue
+        if node.target in user_lowerings:
             continue
         args = dict(zip(("self", "size", "stride", "storage_offset"), node.args))
         args.update(node.kwargs)
@@ -27,6 +38,9 @@ def canonicalize_as_strided(
         base = source
         supported = True
         while True:
+            if base.target in user_lowerings:
+                supported = False
+                break
             value = base.meta.get("val")
             if not isinstance(value, torch.Tensor) or value.is_conj() or value.is_neg():
                 supported = False
@@ -58,6 +72,18 @@ def canonicalize_as_strided(
                 break
             base = parent
         if not supported:
+            continue
+        # Do not treat mutations or unresolved aliases as fresh storage bases.
+        value = base.meta["val"]
+        if (
+            base.op != "call_function"
+            or not isinstance(base.target, torch._ops.OpOverload)
+            or base.target._schema.is_mutable
+            or any(ret.alias_info is not None for ret in base.target._schema.returns)
+            or not isinstance(value.storage_offset(), int)
+            or value.storage_offset() != 0
+            or free_unbacked_symbols(value.stride())
+        ):
             continue
         if storage_bases is not None:
             storage_bases.add(base)

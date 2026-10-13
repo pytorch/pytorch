@@ -1,11 +1,14 @@
 # Owner(s): ["module: inductor"]
 import re
 import unittest
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import torch
 from torch._inductor import config
+from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.fx_passes.as_strided import canonicalize_as_strided
+from torch._inductor.lowering import lowerings, user_lowerings
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -171,11 +174,11 @@ class TestAsStrided(TestCase):
         src = torch.full_like(x, 20.0)
         gm = make_fx(fn, tracing_mode="fake")(x, src)
         expected = gm(x, src)
-        self.assertEqual(canonicalize_as_strided(gm), 1)
-        node = gm.graph.find_nodes(op="call_function", target=aten.as_strided.default)[
-            0
-        ]
-        self.assertEqual(node.args[0].target, aten.copy_.default)
+        code = gm.code
+        bases = OrderedSet()
+        self.assertEqual(canonicalize_as_strided(gm, storage_bases=bases), 0)
+        self.assertEqual(gm.code, code)
+        self.assertFalse(bases)
         self.assertEqual(gm(x, src), expected)
 
     @parametrize("input_base", [False, True])
@@ -191,7 +194,7 @@ class TestAsStrided(TestCase):
         gm = make_fx(fn, tracing_mode="fake")(x, src)
         expected_input = x.clone()
         expected = gm(expected_input, src)
-        self.assertEqual(canonicalize_as_strided(gm), 1)
+        self.assertEqual(canonicalize_as_strided(gm), 0 if input_base else 1)
         actual_input = x.clone()
         self.assertEqual(gm(actual_input, src), expected)
         self.assertEqual(actual_input, expected_input)
@@ -237,6 +240,13 @@ class TestAsStrided(TestCase):
             return base, torch.as_strided_copy(view, (1,), (1,), offset)
 
         x = torch.arange(13, device=device, dtype=torch.float32)[5:].reshape(2, 2, 2)
+        if input_base:
+            # Input storage is outside the rewrite's supported allocation scope.
+            with self.assertRaisesRegex(
+                torch._inductor.exc.InductorError, "unrealized as_strided"
+            ):
+                torch.compile(fn, fullgraph=True)(x)
+            return
         actual = torch.compile(fn, fullgraph=True)(x)
         self.assertEqual(actual, fn(x))
         self.assertFalse(torch._C._is_alias_of(actual[0], actual[1]))
@@ -293,6 +303,126 @@ class TestAsStrided(TestCase):
                 )
                 x = x[input_offset:].reshape(rows, 4)
                 self.assertEqual(compiled(x), fn(x))
+
+    @parametrize("copy", [False, True])
+    @parametrize("computed_base", [False, True])
+    def test_compile_lite_symbolic_offset(self, device, copy, computed_base):
+        op = torch.as_strided_copy if copy else torch.as_strided
+
+        def fn(x):
+            base = x + 1 if computed_base else x
+            return op(base[x.shape[0] // 2 :], (2,), (1,)) + 1
+
+        x = torch.arange(10, dtype=torch.float32, device=device)
+        gm = make_fx(fn, tracing_mode="symbolic")(x)
+        self.assertEqual(canonicalize_as_strided(gm), int(computed_base))
+        compiled = torch.compile(fn, fullgraph=True, dynamic=True, mode="lite")
+        for size in (10, 12):
+            with self.subTest(size=size):
+                x = torch.arange(size, dtype=torch.float32, device=device)
+                self.assertEqual(compiled(x), fn(x))
+
+    @parametrize(
+        "scope",
+        [
+            "input",
+            "constant",
+            "subgraph",
+            "user_lowering",
+            "bisector",
+        ],
+    )
+    def test_unsupported_scope(self, device, scope):
+        x = torch.arange(8, dtype=torch.float32, device=device)
+        constant = x + 2
+
+        def fn(x):
+            base = x if scope == "input" else constant if scope == "constant" else x + 1
+            return base[1:].as_strided((2,), (1,)) + 2
+
+        gm = make_fx(fn, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
+        code = gm.code
+        bases = OrderedSet()
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch.object(CompilerBisector, "bisection_enabled", scope == "bisector")
+            )
+            if scope == "user_lowering":
+                stack.enter_context(
+                    patch.dict(user_lowerings, {aten.add.Tensor: lambda x, y: None})
+                )
+            self.assertEqual(
+                canonicalize_as_strided(
+                    gm, storage_bases=bases, is_subgraph=scope == "subgraph"
+                ),
+                0,
+            )
+        self.assertEqual(gm.code, code)
+        self.assertFalse(bases)
+        self.assertEqual(gm(x), fn(x))
+
+    def test_unrelated_user_lowering(self, device):
+        def fn(x):
+            base = x + 1
+            return base[1:].as_strided((2,), (1,)), x.sin()
+
+        x = torch.arange(8, dtype=torch.float32, device=device)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        with patch.dict(user_lowerings, {aten.sin.default: lambda x: None}):
+            self.assertEqual(canonicalize_as_strided(gm), 1)
+
+        node = gm.graph.find_nodes(op="call_function", target=aten.as_strided.default)[
+            0
+        ]
+        self.assertEqual(node.args[0].target, aten.add.Tensor)
+        self.assertEqual(gm(x), fn(x))
+
+    @onlyCPU
+    def test_compile_user_lowering_nonzero_offset(self, device):
+        def custom_add(x, y):
+            result = lowerings[aten.add.Tensor](x, y)
+            doubled = lowerings[aten.cat.default]([result, result], 0)
+            return lowerings[aten.slice.Tensor](
+                doubled, 0, result.get_size()[0], None, 1
+            )
+
+        def fn(x):
+            base = x + 1
+            return base[1:].as_strided((3,), (1,))
+
+        x = torch.arange(12, dtype=torch.float32, device=device).reshape(3, 4)
+        with (
+            patch.dict(user_lowerings, {aten.add.Tensor: custom_add}),
+            config.patch(force_disable_caches=True),
+        ):
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
+    @onlyCPU
+    @parametrize("position", ["base", "view", "target"])
+    def test_compile_marked_fallback_chain(self, device, position):
+        target = {
+            "base": aten.add.Tensor,
+            "view": aten.slice.Tensor,
+            "target": aten.as_strided.default,
+        }[position]
+
+        def fn(x):
+            base = x + 1
+            return base[1:].as_strided((3,), (1,))
+
+        def mark_fallback(graph):
+            for node in graph.nodes:
+                if node.target is target:
+                    node.meta["should_fallback"] = True
+
+        x = torch.arange(12, dtype=torch.float32, device=device).reshape(3, 4)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        mark_fallback(gm.graph)
+        self.assertEqual(canonicalize_as_strided(gm), 1)
+        with config.patch(
+            post_grad_custom_post_pass=mark_fallback, force_disable_caches=True
+        ):
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_compile_unbacked_offsets(self, device):
@@ -423,9 +553,26 @@ class TestAsStrided(TestCase):
                 x = base[offset:]
                 self.assertEqual(compiled(x), fn(x))
 
+    @onlyCPU
+    def test_compile_complex_fallback_base(self, device):
+        def fn(x):
+            base = x + 1
+            return base[1:].as_strided((3,), (1,))
+
+        x = torch.arange(12, dtype=torch.float32, device=device).reshape(3, 4)
+        x = x.to(torch.complex64)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        self.assertEqual(canonicalize_as_strided(gm), 1)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
     @parametrize("copy", [False, True])
-    @parametrize("offset", [None, 0, 12])
-    def test_compile_frozen_view_offset(self, device, copy, offset):
+    @parametrize(
+        "storage_size,base_offset,offset",
+        [(64, 10, None), (64, 10, 0), (64, 10, 12)],
+    )
+    def test_compile_frozen_view_offset(
+        self, device, copy, storage_size, base_offset, offset
+    ):
         op = torch.as_strided_copy if copy else torch.as_strided
 
         class Model(torch.nn.Module):
@@ -436,16 +583,57 @@ class TestAsStrided(TestCase):
             def forward(self, x):
                 # Keep the view chain from being constant-folded during freezing.
                 view = self.b[x.shape[0] :]
-                return op(view, (3,), (1,), offset) + x[:3]
+                return op(view, (2,), (1,), offset) + x[:2]
 
-        buffer = torch.arange(64, dtype=torch.float32, device=device)[10:]
+        buffer = torch.arange(storage_size, dtype=torch.float32, device=device)[
+            base_offset:
+        ]
         model = Model(buffer).eval()
         with torch.no_grad(), config.patch(freezing=True):
             compiled = torch.compile(model, fullgraph=True, dynamic=True)
-            for size in (6, 8):
+            for size in (3, 4):
                 with self.subTest(size=size):
                     x = torch.ones(size, device=device)
                     self.assertEqual(compiled(x), model(x))
+
+    def test_compile_frozen_inline_constant_bounds(self, device):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "b", torch.arange(10, dtype=torch.float32, device=device)[2:]
+                )
+
+            def forward(self, x):
+                return self.b[x.shape[0] :].as_strided((2,), (1,), 5) + x[:2]
+
+        model = Model().eval()
+        x = torch.ones(3, device=device)
+        with torch.no_grad(), config.patch(freezing=True):
+            with self.assertRaisesRegex(
+                torch._inductor.exc.InductorError, "requires .* elements"
+            ):
+                torch.compile(model, fullgraph=True, dynamic=True)(x)
+
+    @parametrize("copy", [False, True])
+    @parametrize("iterations", [1, 2])
+    @parametrize("mode", ["default", "lite"])
+    def test_compile_while_loop_view_offset(self, device, copy, iterations, mode):
+        op = torch.as_strided_copy if copy else torch.as_strided
+
+        def fn(y):
+            def cond(i, x):
+                return i < iterations
+
+            def body(i, x):
+                view = op(x[2:], (1,), (1,))
+                return i + 1, x + view
+
+            i = torch.zeros((), dtype=torch.int64, device=y.device)
+            return torch.while_loop(cond, body, (i, y[1:]))[1]
+
+        y = torch.arange(8, dtype=torch.float32, device=device)
+        self.assertEqual(torch.compile(fn, fullgraph=True, mode=mode)(y), fn(y))
 
     @parametrize("dtypes", [(torch.int32, torch.int16), (torch.int16, torch.int32)])
     @parametrize("default_offset", [False, True])
@@ -479,11 +667,11 @@ class TestAsStrided(TestCase):
 
     @onlyCPU
     @parametrize("strict", [False, True])
-    @parametrize(
-        "return_view",
-        [False, subtest(True, decorators=[unittest.expectedFailure])],
-    )
+    @parametrize("return_view", [False, True])
     def test_compile_shared_mkldnn_view(self, device, strict, return_view):
+        self._check_shared_mkldnn_view(device, strict, return_view)
+
+    def _check_shared_mkldnn_view(self, device, strict, return_view):
         if not torch.backends.mkldnn.is_available():
             self.skipTest("MKLDNN is required")
 
@@ -512,12 +700,24 @@ class TestAsStrided(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(actual[-1].stride(), expected[-1].stride())
         self.assertTrue(torch._C._is_alias_of(actual[0], actual[-1]))
-        if return_view:
-            # https://github.com/pytorch/pytorch/pull/197712#issuecomment-6074453380
-            self.assertEqual(
-                (actual[1].stride(), torch._C._is_alias_of(actual[0], actual[1])),
-                (expected[1].stride(), True),
-            )
+        return expected, actual
+
+    @onlyCPU
+    @parametrize(
+        "strict",
+        [
+            subtest(False, decorators=[unittest.expectedFailure]),
+            subtest(True, decorators=[unittest.expectedFailure]),
+        ],
+    )
+    def test_compile_shared_mkldnn_returned_view_alias(self, device, strict):
+        expected, actual = self._check_shared_mkldnn_view(device, strict, True)
+        # MKLDNN can copy the sibling view during layout selection, changing its
+        # stride and breaking its alias to base. This also happens on main.
+        self.assertEqual(
+            (actual[1].stride(), torch._C._is_alias_of(actual[0], actual[1])),
+            (expected[1].stride(), True),
+        )
 
     @onlyCPU
     @parametrize("as_strided_source", ["none", "unrelated", "base", "view"])

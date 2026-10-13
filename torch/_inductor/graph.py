@@ -428,7 +428,11 @@ class GraphLowering(torch.fx.Interpreter):
 
         # Interpreter caches last uses, so finish changing edges before initialization.
         self.as_strided_storage_bases: OrderedSet[torch.fx.Node] = OrderedSet()
-        canonicalize_as_strided(gm, storage_bases=self.as_strided_storage_bases)
+        canonicalize_as_strided(
+            gm,
+            storage_bases=self.as_strided_storage_bases,
+            is_subgraph=isinstance(self, SubgraphLowering),
+        )
         super().__init__(gm)
         self.get_decomp_fn = get_decomp_fn
         self.example_inputs = example_inputs
@@ -2169,9 +2173,18 @@ class GraphLowering(torch.fx.Interpreter):
             if preserve_storage_layout and isinstance(result, TensorBox):
                 # Fix the base before another view or consumer freezes its layout.
                 result.realize()
-                result = ir.ExternKernel.require_exact_strides(
-                    result, convert_shape_to_inductor(n.meta["val"].stride())
-                )
+                strides = convert_shape_to_inductor(n.meta["val"].stride())
+                result = ir.ExternKernel.require_exact_strides(result, strides)
+                _, layout = ir.as_storage_and_layout(result)
+                if not self.sizevars.statically_known_equals(
+                    layout.offset, 0
+                ) or not self.sizevars.statically_known_list_equals(
+                    layout.stride, strides
+                ):
+                    raise AssertionError(
+                        f"Expected a fresh as_strided base with offset zero and strides {strides}, "
+                        f"got layout {layout}"
+                    )
             elif n.meta.get("inductor_realize_to_strides", False) and isinstance(
                 result, TensorBox
             ):
