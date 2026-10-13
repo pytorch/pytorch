@@ -1374,9 +1374,10 @@ def _is_arange_in_dim(node, dim, ndim, length):
 
 
 def _one_hot_sum_selector(match):
-    """Returns (selector, length) if the match sums, over ``dim`` of size
-    ``length``, ``where(selector == arange(length), val, 0)`` with selector and
-    val broadcast along ``dim``; otherwise None."""
+    """Returns (selector, classes) if the match sums, over ``dim``,
+    ``where(selector == classes, val, 0)`` where classes is arange along
+    ``dim``, selector has the full rank and selector and val are broadcast
+    along ``dim``; otherwise None."""
     dims = match.kwargs["dim"]
     one_hot = match.output_node().args[0]
     one_hot_val = one_hot.meta.get("val")
@@ -1405,8 +1406,12 @@ def _one_hot_sum_selector(match):
         (match.kwargs["lhs"], match.kwargs["rhs"]),
         (match.kwargs["rhs"], match.kwargs["lhs"]),
     ):
-        if is_broadcast(selector) and _is_arange_in_dim(classes, dim, ndim, length):
-            return selector, length
+        if (
+            is_broadcast(selector)
+            and selector.meta["val"].dim() == ndim
+            and _is_arange_in_dim(classes, dim, ndim, length)
+        ):
+            return selector, classes
     return None
 
 
@@ -1437,16 +1442,23 @@ def one_hot_sum(match: Match, *, lhs, rhs, val, background, dim, keepdim):
     This arises in the cross-entropy backward, where log_softmax_backward sums
     the one-hot gradient from nll_loss_backward over the class dim.
     """
-    selector, length = _one_hot_sum_selector(match)
-    out_val = match.output_node().meta["val"]
-    reduced_dim = dim[0] % (out_val.dim() + (0 if keepdim else 1))
+    selector, classes = _one_hot_sum_selector(match)
+    one_hot = match.output_node().args[0]
+    if not isinstance(one_hot, torch.fx.Node):
+        raise AssertionError(f"expected an fx.Node, got {type(one_hot)}")
+    one_hot_val = one_hot.meta["val"]
+    ndim = one_hot_val.dim()
+    reduced_dim = dim[0] % ndim
+    dtype = one_hot_val.dtype
 
-    def repl(selector, val):
+    # Sizes are read from the inputs inside repl so that they stay symbolic
+    # under dynamic shapes. With a full-rank selector, the result already has
+    # the reduced (keepdim) shape: classes is 1 outside the reduced dim.
+    def repl(selector, val, classes):
+        length = classes.shape[reduced_dim - ndim]
         selected = (selector >= 0) & (selector < length) & (val != 0)
-        out = torch.where(selected, val, 0).to(out_val.dtype)
-        if not keepdim:
-            out = out.squeeze(reduced_dim)
-        return out.expand(out_val.shape)
+        out = torch.where(selected, val, 0).to(dtype)
+        return out if keepdim else out.squeeze(reduced_dim)
 
     # pyrefly: ignore [bad-argument-type]
-    match.replace_by_example(repl, [selector, val])
+    match.replace_by_example(repl, [selector, val, classes])
