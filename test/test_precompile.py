@@ -4776,6 +4776,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
     @skipIfCrossRef
     @parametrize("backend", ["inductor", "eager"])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_a_frame_the_entry_cannot_reach_is_served_installed(self, backend):
         # The graph break inside breaking_helper compiles it as a frame of its
         # own, entered by an ordinary call rather than by a continuation name.
@@ -4797,6 +4798,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self._serve_in_fresh_process(calls, mode="installed")
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_leaves_the_global_stance_alone(self):
         # Another thread's torch.compile reads the process-global stance, so a
         # served call must refuse recompiles without setting it.
@@ -4807,6 +4809,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("served ['default']", stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_under_a_process_wide_stance(self):
         # Captured on x2 only; x3 is uncovered. A served call adds 1.
         fn = self.mod.tags_compiled
@@ -4859,6 +4862,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("stances ok", out.stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_refuses_to_load_with_dynamo_disabled(self):
         fn = self.mod.calls_breaking_helper
         with self._capture(fn, backend="eager") as cap:
@@ -4881,6 +4885,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("refused", out.stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_refuses_to_load_with_compiled_autograd(self):
         fn = self.mod.calls_breaking_helper
         with self._capture(fn, backend="eager") as cap:
@@ -4901,6 +4906,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("refused", out.stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_refuses_changed_source_at_load(self):
         fn = self.mod.calls_breaking_helper
         with self._capture(fn, backend="eager") as cap:
@@ -4928,6 +4934,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("refused", out.stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_passes_the_models_own_errors_through(self):
         # Only Dynamo's fail_on_recompile refusal becomes a PrecompileError; a
         # RuntimeError the served model raises on a covered call is its own.
