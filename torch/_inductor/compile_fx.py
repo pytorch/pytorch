@@ -132,7 +132,7 @@ from .fx_passes.post_grad import (
 )
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .ir import get_device_type, IRNode
+from .ir import get_device_type, IRNode, is_triton
 from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
@@ -472,7 +472,7 @@ def _step_logger() -> Callable[..., None]:
 
 @functools.cache
 def _warn_tf32_disabled() -> None:
-    if torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0):
+    if torch.cuda.is_available() and torch.cuda.is_tf32_supported():
         perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
@@ -1768,6 +1768,9 @@ class _InProcessFxCompile(FxCompile):
                 const_graph = None
                 const_wrapper_code = None
                 const_kernel_code = None
+                # Shared so the const graph's proxy-executor calls get indices
+                # distinct from the main graph's in the one serialized list.
+                extern_kernel_nodes: list[ExternKernelNode] = []
 
                 if aot_mode and config.aot_inductor.use_runtime_constant_folding:
                     # torchbind objects have name that starts with _torchbind_obj
@@ -1798,7 +1801,7 @@ class _InProcessFxCompile(FxCompile):
                     )
                     with (
                         V.set_graph_handler(const_graph),
-                        V.set_extern_kernel_nodes([]),
+                        V.set_extern_kernel_nodes(extern_kernel_nodes),
                     ):
                         if not cpp_wrapper:
                             raise AssertionError("AOT mode only supports C++ wrapper")
@@ -1839,7 +1842,7 @@ class _InProcessFxCompile(FxCompile):
                 graph.freeze_runtime_asserts()
                 with (
                     V.set_graph_handler(graph),
-                    V.set_extern_kernel_nodes([]),
+                    V.set_extern_kernel_nodes(extern_kernel_nodes),
                     distributed_autotune.graph_context(),
                 ):
                     graph.run(*example_inputs)
@@ -3177,10 +3180,9 @@ def compile_fx(
         compile_region_name=compile_region_name,
     )
 
-    # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
+    # Wake up the AsyncCompile subproc pool as early as possible (if the graph uses Triton).
     if any(
-        isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
-        for e in example_inputs_
+        isinstance(e, torch.Tensor) and is_triton(e.device) for e in example_inputs_
     ):
         torch._inductor.async_compile.AsyncCompile.wakeup()
 
@@ -3193,15 +3195,8 @@ def compile_fx(
             # wrapper_fxir.py); neither is rank-portable, so refuse rather than silently
             # emit a non-portable artifact.
             #
-            # NB cudagraphs is deliberately NOT refused here. Its device dependence
-            # (CompiledFxGraph.device_idxs, which cudagraph_post_compile passes to
-            # cudagraphify as device_index) lives in the wrapper-level artifact, and that
-            # artifact is not shared across ranks today: the FX graph cache key embeds the
-            # device, so each rank builds its own. Only the kernel/cubin layer is shared,
-            # and that is what the device-agnostic launcher handles. Whoever makes the FX
-            # graph cache key device-agnostic must revisit device_idxs (and re-check that
-            # graph-partition functions still define _coor_device_idx in their own scope)
-            # before cudagraphs can ride on a shared artifact.
+            # cudagraphs is not refused: CompiledFxGraph.device_index() resolves its
+            # device at load time, so the shared artifact carries no rank's index.
             raise RuntimeError(
                 "compile-on-one-rank (device-as-parameter) is not supported with "
                 "cpp_wrapper/AOTInductor or fx_wrapper: the device guard bakes the "
