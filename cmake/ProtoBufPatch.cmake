@@ -86,7 +86,12 @@ if(NOT SYSTEM_PROTOBUF)
     string(REGEX REPLACE "([a-zA-Z_]+)\\([a-zA-Z_]+&& from\\) noexcept" "  \\1::\\1(\\1&& from) noexcept" content_cc "${content_cc}")
     set(content_cc "${content_cc_origin}\nnamespace ${NAMESPACES} {\n#if LANG_CXX11\n${content_cc}\n#endif\n}")
 
-    string(REGEX REPLACE "([a-zA-Z_]+)\\([a-zA-Z_]+&& from\\) noexcept([^}]*)}" "\\1(\\1&& from) noexcept;" content "${content}")
+    string(
+      REGEX REPLACE
+      "(inline )?([a-zA-Z_]+)\\([a-zA-Z_]+&& from\\) noexcept([^}]*)}"
+      "\\2(\\2&& from) noexcept;"
+      content
+      "${content}")
 
     file(WRITE ${SOURCE_FILENAME} "${content_cc}")
   endif()

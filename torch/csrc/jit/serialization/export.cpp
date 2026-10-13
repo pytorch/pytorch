@@ -19,10 +19,10 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/onnx/back_compat.h>
 #include <torch/csrc/onnx/onnx.h>
+#include <torch/csrc/onnx/onnx_pb.h>
 #include <torch/version.h>
 
 #include <onnx/checker.h>
-#include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
 #include <onnx/shape_inference/implementation.h>
 

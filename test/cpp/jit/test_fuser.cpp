@@ -36,8 +36,6 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
-#include <onnx/onnx_pb.h>
-
 #include <c10/util/Exception.h>
 
 #include <algorithm>

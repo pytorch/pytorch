@@ -62,7 +62,7 @@
 #include <torch/jit.h>
 #include <torch/script.h>
 
-#include <onnx/onnx_pb.h>
+#include <torch/csrc/onnx/onnx_pb.h>
 
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
