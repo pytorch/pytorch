@@ -1469,7 +1469,10 @@ class TritonOverrides(OpOverrides):
                 return f"tl.full({shape}, 0x80000000, tl.uint32).to({triton_type}, bitcast=True)"
             elif triton_type == "tl.float64":
                 return f"tl.full({shape}, 0x8000000000000000, tl.uint64).to({triton_type}, bitcast=True)"
-            elif triton_type in ("tl.float16", "tl.bfloat16"):
+            elif (
+                triton_type in ("tl.float16", "tl.bfloat16")
+                and TritonOverrides._strict_cuda_pointwise()
+            ):
                 return f"tl.full({shape}, 0x8000, tl.uint16).to({triton_type}, bitcast=True)"
 
         # NOTE: We use tl.full here to get the expected type.
