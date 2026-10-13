@@ -232,6 +232,7 @@ if TYPE_CHECKING:
     from sympy import Symbol
 
     from torch._C import DispatchKeySet
+    from torch._C._dynamo.guards import LocalState
     from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
     from torch.utils._python_dispatch import TraceableWrapperSubclass
 
@@ -1075,11 +1076,10 @@ def get_tensor_guard_code_part(
     strides: list[int | None],
     pytype: type,
     dispatch_keys: DispatchKeySet,
+    local_state: LocalState,
     device_index_is_current: bool = False,
 ) -> str:
-    dispatch_key = (
-        dispatch_keys | torch._C._dispatch_tls_local_include_set()
-    ) - torch._C._dispatch_tls_local_exclude_set()
+    dispatch_key = local_state.apply_for_tensor(dispatch_keys)
     dtype = value.dtype
     # Render the relaxed form as "current" so diagnostics describe the
     # rank-relative runtime check rather than the compiling rank's device index.
@@ -4032,6 +4032,7 @@ class GuardBuilder(GuardBuilderBase):
                         stride,
                         pytype,
                         dispatch_keys,
+                        self.guard_manager.root.get_local_state(),
                         device_index_is_current,
                     ),
                     guard,

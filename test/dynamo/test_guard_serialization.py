@@ -2948,6 +2948,28 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
 
+    def test_tensor_match_code_renders_saved_dispatch_state(self):
+        # The loaded TENSOR_MATCH checks dispatch keys against the saved TLS
+        # state, so its code must render that state rather than the loader's.
+        from torch._dynamo.package import load_guard_manager, load_guards_state
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        ref, _ = self._test_serialization("TENSOR_MATCH", f, torch.ones(2))
+        state = load_guards_state(self._cached_guards_state)
+        with torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
+        ):
+            loaded = load_guard_manager(state, self._cached_f_code, f.__globals__)
+
+        def tensor_match(gm):
+            return [part for part in gm.code_parts if "check_tensor(" in part]
+
+        self.assertIn("AutogradCPU", tensor_match(ref)[0])
+        self.assertEqual(tensor_match(loaded), tensor_match(ref))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(2)}, True)
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @torch.compiler.config.patch(compile_on_one_rank=True)
     def test_tensor_match_current_device(self):
