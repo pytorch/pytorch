@@ -15,7 +15,6 @@ import functools
 import json
 import logging
 import threading
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
@@ -396,14 +395,8 @@ class CuspyObserver:
         if not self.available or cuspy is None:
             return
         ext_id = cuspy.push_external_correlation_id()
+        # None when Cuspy is not started, in which case the matching pop no-ops too.
         if ext_id is None:
-            # Cuspy is not started; the matching pop no-ops too. A profiler problem
-            # must not fail the collective, so skip its annotation.
-            warnings.warn(
-                "Cuspy could not push an external correlation id; collective kernels "
-                "will not carry collective metadata",
-                stacklevel=2,
-            )
             return
         torch._C._profiler._cuspy.metadata_put_external(json.dumps(metadata), ext_id)
 

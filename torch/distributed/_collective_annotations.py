@@ -84,14 +84,11 @@ def _collective_metadata(info: _GroupInfo, args: PreHookArgs) -> CollectiveMetad
             metadata[key] = info.ranks[args.root]
     else:
         metadata["Rank"] = info.rank
-        try:
-            # The hook fires before the backend bumps its counter.
-            metadata["Seq"] = (
-                info.group._get_sequence_number_for_group()  # pyrefly: ignore[missing-attribute]
-                + 1
-            )
-        except RuntimeError:
-            pass
+        # The hook fires before the backend bumps its counter.
+        metadata["Seq"] = (
+            info.group._get_sequence_number_for_group()  # pyrefly: ignore[missing-attribute]
+            + 1
+        )
     return metadata
 
 
@@ -102,14 +99,9 @@ def _runs_cuda_on_nccl(group: ProcessGroup) -> bool:
     return device_backends.get("cuda") == Backend.NCCL
 
 
-# Registered handles, kept alive until removed so a live handle's id() is never
-# reused as another registration's hook id.
-_active_handles: dict[int, "CollectiveAnnotationHandle"] = {}
-
-
 class CollectiveAnnotationHandle:
     """Hooks set by :func:`register_collective_annotation_hooks`; :meth:`remove`
-    unregisters them."""
+    unregisters them. Keep the handle until then: its id() is the hook id."""
 
     def __init__(self, groups: list[ProcessGroup]) -> None:
         self._groups = groups
@@ -120,7 +112,6 @@ class CollectiveAnnotationHandle:
             group.unregister_pre_hook(id(self))
             group.unregister_post_hook(id(self))
         self._groups = []
-        _active_handles.pop(id(self), None)
 
 
 def register_collective_annotation_hooks(
@@ -153,7 +144,6 @@ def register_collective_annotation_hooks(
             if _include_non_nccl or _runs_cuda_on_nccl(group)
         ]
     )
-    _active_handles[id(handle)] = handle
     for group in handle._groups:
         info = _GroupInfo(group)
 

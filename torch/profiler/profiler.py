@@ -153,19 +153,12 @@ class CuspyConfig(_ProfilerExtensionConfig):
             dependency edges.
         enable_event_node_ids (bool, optional): Associate CUDA events with CUDA
             graph event-record nodes.
-        annotate_collectives (bool, optional): Tag the kernels of c10d
-            collectives with ``record_param_comms``-style fields. Coalesced and
-            batched p2p collectives are not tagged. Pass ``False`` when a
-            wrapper already annotates them, e.g. with
-            ``add_collective_metadata``: both write the same per-collective
-            fields, so one overwrites the other.
     """
 
     enable_cuda_sync_events: bool = False
     enable_environment_counters: bool = False
     enable_graph_dependencies: bool = False
     enable_event_node_ids: bool = False
-    annotate_collectives: bool = True
 
     def _to_config_entries(self) -> dict[str, str]:
         return {}
@@ -591,11 +584,7 @@ class _KinetoProfile:
             self._cuspy_profiler_observer.open_window()
             # Not at prepare_trace: warmup collectives would pay for annotations
             # the window drops.
-            if (
-                self._cuspy_config is not None
-                and self._cuspy_config.annotate_collectives
-                and torch.distributed.is_available()
-            ):
+            if torch.distributed.is_available():
                 from torch.distributed._collective_annotations import (
                     register_collective_annotation_hooks,
                 )
