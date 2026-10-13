@@ -2,7 +2,7 @@
 These are the invariants and idioms that Inductor (GPU) post-grad FX passes may assume. They are not general FX graph invariants and may not hold for other backends.
 
 ## Fake Tensor metadata on node
-Each FX node has metadata on it, and in particular, stores a faketensor representing the metadata of that node `node.meta['val']`. This FakeTensor records the node's shape, stride, and storage (which determines aliasing). However, various passes may change the faketensor values, and so we need to maintain consistency.
+Each FX node has metadata on it, and in particular, stores a faketensor representing the metadata of that node `node.meta['val']`. This FakeTensor records the node's shape, stride, and storage (which determines aliasing). However, various passes may change the faketensor values, and so consistency must be maintained.
 
 Passes may assume that FakeTensor metadata is consistent when they begin. If a pass changes node inputs or outputs in a way that makes downstream metadata stale, it must update the affected metadata itself or run `FakeTensorUpdater` from `_inductor/fx_utils.py` before returning.
 
@@ -15,29 +15,34 @@ dim = get_arg_value(split_node, 2, "dim")
 
 
 ## Mutations
-The invariant we have about mutation is: after AOTDispatch tracing, joint-graph and post-grad graphs contain no mutation except
+After AOTDispatch tracing, joint-graph and post-grad graphs contain no mutation except:
 
-- a `copy_` epilogue at the end of the graph that writes back mutated inputs (see below), and
-- rare storage-mutating ops: `aten.set_.source_Tensor` and `aten.shallow_copy_data_.default`. Passes that do not support these may conservatively exit early if either appears in the graph:
+- a `copy_` epilogue at the end of the graph that writes back mutated inputs, and
+- rare storage-mutating ops: `aten.set_.source_Tensor` and `aten.shallow_copy_data_.default`.
 
-  ```python
-  storage_mutation_ops = (aten.set_.source_Tensor, aten.shallow_copy_data_.default)
-  if any(graph.find_nodes(op="call_function", target=op, sort=False) for op in storage_mutation_ops):
-      return
-  ```
+Passes can assume the graph is otherwise functional.
 
-Passes do not need to account for any other mutation. The final post-grad pass `reinplace_inplaceable_ops` reintroduces mutation just before lowering.
+Passes do not have to support the storage-mutating ops; because they are rare, it is usually fine to exit early if either appears:
 
-When the user program mutates a graph input, functionalization traces the mutation as functional ops and AOTDispatch appends a `copy_` epilogue at the end of the graph that writes the final value back into the input (`input.copy_(new_value)`). We can assume the rest of the graph is functional, but this epilogue still constrains passes. For example, we may have a graph like
+```python
+storage_mutation_ops = (aten.set_.source_Tensor, aten.shallow_copy_data_.default)
+if any(graph.find_nodes(op="call_function", target=op, sort=False) for op in storage_mutation_ops):
+    return
+```
+
+The `copy_` epilogue exists because functionalization traces input mutations as functional ops, then writes the final value back with `input.copy_(new_value)`. It still constrains passes. In
+
 ```python
 def f(x: Tensor):
     y = x.clone()
     x.copy_(y)
     return y
 ```
-In this case, we are not allowed to eliminate `x.clone()`. This is prevented by
-the same rule as in [Altering Aliasing](#altering-aliasing): our passes must
-neither introduce nor remove aliasing between user-visible inputs and outputs.
+
+a pass must not eliminate `x.clone()`, by the same rule as in [Altering Aliasing](#altering-aliasing): passes must neither introduce nor remove aliasing between user-visible inputs and outputs.
+
+The final post-grad passes `slice_scatter_chunking_pass` and `reinplace_inplaceable_ops` reintroduce mutation just before lowering.
+
 
 ## Altering Aliasing
 For non-mutating graphs (those with no storage-mutating ops, as explained in [Mutations](#mutations)):
@@ -107,14 +112,11 @@ if node.users or node.is_impure():
 graph.erase_node(node)
 ```
 
-## Graph outputs
-Post-grad graph outputs are either a single FX node or a flat list or tuple of FX nodes.
-
 ## Finding nodes
 When searching for nodes with a particular operation and target, use `Graph.find_nodes` instead of scanning `Graph.nodes`. It uses the graph's lookup table and avoids visiting unrelated nodes. By default, `find_nodes` sorts matches into current graph-list order, which is not necessarily topological order. Pass `sort=False` when match order does not matter to avoid that sorting cost.
 
 ## Passes that add dependencies
-Passes that add new dependencies must run after all mandatory control-dependency
+Passes that add new dependencies must run after all **mandatory** control-dependency
 passes. A topological order computed before those dependencies are added is not
 valid: adding edges based on it can create a cycle once the mandatory
 dependencies are inserted (e.g. random-op ordering under `fallback_random=True`).
