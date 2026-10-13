@@ -4188,6 +4188,9 @@ class ShapeEnv:
         self.log = log
         self.log.info("create_env")
         self.frozen = False
+        self.var_to_range_at_freeze: (
+            dict[sympy.Symbol, ValueRanges[sympy.Expr]] | None
+        ) = None
         self._error_on_new_guards = False
         self.runtime_asserts_frozen = False
         self.dim_constraints: DimConstraints | None = None
@@ -4716,6 +4719,10 @@ class ShapeEnv:
         A frozen ShapeEnv will ignore any further guards generated on it and
         only emit a warning which may lead to accuracy problems.
         """
+        if self.var_to_range_at_freeze is None:
+            # Later backward compilation can refine ranges without updating the
+            # guards that were already emitted for the forward dispatch.
+            self.var_to_range_at_freeze = self.var_to_range.copy()
         self.frozen = True
 
     @record_shapeenv_event()
