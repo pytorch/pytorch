@@ -1080,7 +1080,7 @@ is returned. If :math:`n < 6` or :math:`|\text{input}| > 1` the recursion:
 is evaluated. Otherwise, the explicit trigonometric formula:
 
 .. math::
-    T_{n}(\text{input}) = \text{cos}(n \times \text{arccos}(x))
+    T_{n}(\text{input}) = \text{cos}(n \times \text{arccos}(\text{input}))
 
 is evaluated.
 
@@ -1170,11 +1170,11 @@ hermite_polynomial_h(input, n, *, out=None) -> Tensor
 
 Physicist's Hermite polynomial :math:`H_{n}(\text{input})`.
 
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`2 \times \text{input}`
 is returned. Otherwise, the recursion:
 
 .. math::
-    H_{n + 1}(\text{input}) = 2 \times \text{input} \times H_{n}(\text{input}) - H_{n - 1}(\text{input})
+    H_{n + 1}(\text{input}) = 2 \times \text{input} \times H_{n}(\text{input}) - 2n \times H_{n - 1}(\text{input})
 
 is evaluated.
 
@@ -1200,7 +1200,7 @@ If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
 is returned. Otherwise, the recursion:
 
 .. math::
-    He_{n + 1}(\text{input}) = 2 \times \text{input} \times He_{n}(\text{input}) - He_{n - 1}(\text{input})
+    He_{n + 1}(\text{input}) = \text{input} \times He_{n}(\text{input}) - n \times He_{n - 1}(\text{input})
 
 is evaluated.
 
@@ -1222,11 +1222,11 @@ laguerre_polynomial_l(input, n, *, out=None) -> Tensor
 
 Laguerre polynomial :math:`L_{n}(\text{input})`.
 
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`1 - \text{input}`
 is returned. Otherwise, the recursion:
 
 .. math::
-    L_{n + 1}(\text{input}) = 2 \times \text{input} \times L_{n}(\text{input}) - L_{n - 1}(\text{input})
+    L_{n + 1}(\text{input}) = \frac{(2n + 1 - \text{input}) \times L_{n}(\text{input}) - n \times L_{n - 1}(\text{input})}{n + 1}
 
 is evaluated.
 
@@ -1252,7 +1252,7 @@ If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
 is returned. Otherwise, the recursion:
 
 .. math::
-    P_{n + 1}(\text{input}) = 2 \times \text{input} \times P_{n}(\text{input}) - P_{n - 1}(\text{input})
+    P_{n + 1}(\text{input}) = \frac{(2n + 1) \times \text{input} \times P_{n}(\text{input}) - n \times P_{n - 1}(\text{input})}{n + 1}
 
 is evaluated.
 
