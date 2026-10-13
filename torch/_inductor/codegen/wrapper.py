@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import ast
 import collections
 import contextlib
 import dataclasses
@@ -15,7 +14,6 @@ import re
 import secrets
 import sys
 import tempfile
-import textwrap
 from collections.abc import Callable, Iterator
 from enum import Enum
 from itertools import chain, count
@@ -609,81 +607,12 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
-def _is_triton_jit_decorator(
-    decorator: ast.expr,
-    global_symbols: dict[str, Any],
-    triton_jit: Any,
-) -> bool:
-    if isinstance(decorator, ast.Call):
-        decorator = decorator.func
-    if isinstance(decorator, ast.Name):
-        return global_symbols.get(decorator.id) is triton_jit
-    if isinstance(decorator, ast.Attribute):
-        base = decorator.value
-        return (
-            decorator.attr == "jit"
-            and isinstance(base, ast.Name)
-            and getattr(global_symbols.get(base.id), "jit", None) is triton_jit
-        )
-    # Nested attribute paths cannot be resolved from function globals, so their
-    # options are not preserved by the bare @triton.jit fallback.
-    return False
-
-
-def _check_triton_jit_decorator_literals(
-    decorator: ast.Call,
-    symbol: Any,
-) -> None:
-    nonliteral_options = []
-    for index, arg in enumerate(decorator.args):
-        try:
-            ast.literal_eval(arg)
-        except (TypeError, ValueError):
-            nonliteral_options.append(f"positional option {index}")
-    for keyword in decorator.keywords:
-        if keyword.arg is None:
-            nonliteral_options.append("**options")
-            continue
-        try:
-            ast.literal_eval(keyword.value)
-        except (TypeError, ValueError):
-            nonliteral_options.append(f"{keyword.arg}=")
-    if nonliteral_options:
-        # Dropping these options would silently change kernel semantics,
-        # including when this source is collected for a cache key.
-        options = ", ".join(nonliteral_options)
-        raise RuntimeError(
-            f"{getattr(symbol, '__name__', symbol)}: @triton.jit decorator options "
-            "must be Python literals for Inductor codegen; "
-            f"non-literal options are not supported: {options}"
-        )
-
-
 @functools.cache
-def _triton_jit_decorator_from_source(symbol) -> str:
-    raw_src = getattr(symbol, "raw_src", None)
-    if raw_src:
-        # Triton .src strips decorators; raw_src preserves them in current Triton.
-        # Joining handles both string raw_src and list-of-lines raw_src variants.
-        try:
-            import triton
-
-            src = textwrap.dedent("".join(raw_src))
-            fn_def = ast.parse(src).body[0]
-            if isinstance(fn_def, ast.FunctionDef):
-                global_symbols = getattr(getattr(symbol, "fn", None), "__globals__", {})
-                for decorator in fn_def.decorator_list:
-                    if _is_triton_jit_decorator(decorator, global_symbols, triton.jit):
-                        if isinstance(decorator, ast.Call):
-                            _check_triton_jit_decorator_literals(decorator, symbol)
-                            decorator_src = ast.get_source_segment(src, decorator)
-                            func_src = ast.get_source_segment(src, decorator.func)
-                            if decorator_src and func_src:
-                                return f"@triton.jit{decorator_src[len(func_src) :]}"
-                        return "@triton.jit"
-        except (ImportError, IndexError, SyntaxError, TypeError, ValueError):
-            pass
-    return "@triton.jit"
+def _triton_jit_decorator_for_helper(symbol) -> str:
+    # Triton helper calls only consume noinline from the callee; launch and
+    # specialization options belong to the root kernel compiled by Inductor.
+    noinline = getattr(symbol, "noinline", False)
+    return "@triton.jit(noinline=True)" if noinline else "@triton.jit"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -779,7 +708,7 @@ def user_defined_triton_kernel_transitive_closure(
                 if isinstance(symbol, JITFunction):
                     source = IndentedBuffer()
                     source.newline()
-                    source.splice(_triton_jit_decorator_from_source(symbol), strip=True)
+                    source.splice(_triton_jit_decorator_for_helper(symbol), strip=True)
                     source.splice(symbol.src, strip=True)
                     add_source_module(symbol, source, symbol_name)
                     symbols_included.add(symbol_name)
@@ -917,7 +846,11 @@ def user_defined_triton_kernel_specialization(
         for p in kernel.params
         if getattr(p, "do_not_specialize_on_alignment", False)
     )
-    return do_not_specialize, do_not_specialize_on_alignment
+    # do_not_specialize disables both value and alignment specialization.
+    alignment_exclusions = tuple(
+        OrderedSet(do_not_specialize + do_not_specialize_on_alignment)
+    )
+    return do_not_specialize, alignment_exclusions
 
 
 def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
@@ -4454,7 +4387,7 @@ class PythonWrapperCodegen(CodeGen):
         constexprs = [p.num for p in kernel.params if p.is_constexpr]
         # Root decorator text is omitted from generated source, but the original
         # JITFunction parameters still carry Triton's specialization controls.
-        do_not_specialize, do_not_specialize_on_alignment = (
+        do_not_specialize, alignment_exclusions = (
             user_defined_triton_kernel_specialization(kernel)
         )
         for idx, key in enumerate(arg_names):
@@ -4544,7 +4477,7 @@ class PythonWrapperCodegen(CodeGen):
                     signature,
                     indices=arg_indices,
                     pointer_range_override=(),
-                    divisible_by_16_exclusions=do_not_specialize_on_alignment,
+                    divisible_by_16_exclusions=alignment_exclusions,
                     equal_to_1_exclusions=do_not_specialize,
                 )
             ],

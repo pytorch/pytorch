@@ -7,7 +7,7 @@ import unittest
 from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import sympy
 
@@ -97,13 +97,13 @@ if has_triton_package():
         tl.store(out + offsets, values + 1, mask=mask)
 
     @triton.jit(
-        do_not_specialize=["one"],
+        do_not_specialize=["specialization_value"],
         do_not_specialize_on_alignment=["multiple_of_16"],
     )
     def root_specialization_for_codegen(
         x,
         out,
-        one,
+        specialization_value,
         multiple_of_16,
         n_elements,
         BLOCK_SIZE: tl.constexpr,
@@ -111,9 +111,15 @@ if has_triton_package():
         offsets = tl.arange(0, BLOCK_SIZE)
         mask = offsets < n_elements
         values = tl.load(x + offsets, mask=mask)
-        tl.store(out + offsets, values + one + multiple_of_16, mask=mask)
+        tl.store(
+            out + offsets,
+            values + specialization_value + multiple_of_16,
+            mask=mask,
+        )
 
-    @triton_jit(noinline=True, debug=True)
+    NOINLINE_FOR_CODEGEN = True
+
+    @triton_jit(noinline=NOINLINE_FOR_CODEGEN, debug=True)
     def aliased_jit_helper_for_codegen(x):
         return x + 1
 
@@ -1880,7 +1886,7 @@ def helper(x):
             root_specialization_for_codegen[(1,)](
                 x,
                 out,
-                1,
+                16,
                 16,
                 x.numel(),
                 BLOCK_SIZE=128,
@@ -1892,14 +1898,16 @@ def helper(x):
         with patch.object(wrapper, "config_of", wraps=wrapper.config_of) as config_of:
             result, _ = run_and_get_code(torch.compile(fn), x)
 
-        self.assertEqual(result, x + 17)
+        self.assertEqual(result, x + 32)
         user_config_call = next(
             call
             for call in config_of.call_args_list
             if call.kwargs.get("pointer_range_override") == ()
         )
         self.assertEqual(user_config_call.kwargs["equal_to_1_exclusions"], (2,))
-        self.assertEqual(user_config_call.kwargs["divisible_by_16_exclusions"], (3,))
+        self.assertEqual(
+            user_config_call.kwargs["divisible_by_16_exclusions"], (2, 3)
+        )
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_user_defined_triton_cache_keys_include_root_specialization(self):
@@ -1929,7 +1937,9 @@ def helper(x):
         gm = torch.fx.GraphModule({}, graph)
 
         fx_details = FxGraphHashDetails(gm, [], {}, [])
-        self.assertEqual(fx_details.user_defined_triton_source[0][1:3], ((2,), (3,)))
+        self.assertEqual(
+            fx_details.user_defined_triton_source[0][1:3], ((2,), (2, 3))
+        )
 
         aot_details = object.__new__(AOTAutogradCacheDetails)
         with patch.object(
@@ -1938,7 +1948,7 @@ def helper(x):
             return_value=[root_specialization_for_codegen],
         ):
             aot_sources = aot_details.get_triton_source_codes_from_gm(gm)
-        self.assertEqual(aot_sources[0][1:], ((2,), (3,)))
+        self.assertEqual(aot_sources[0][1:], ((2,), (2, 3)))
 
     @unittest.skipUnless(
         HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
@@ -1991,7 +2001,7 @@ def helper(x):
         HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
         "requires CPU or GPU Triton",
     )
-    def test_user_defined_triton_kernel_preserves_jit_decorator(self):
+    def test_user_defined_triton_kernel_preserves_helper_noinline(self):
         from torch._inductor.codegen.wrapper import (
             user_defined_triton_kernel_transitive_closure_source_code,
         )
@@ -2003,8 +2013,8 @@ def helper(x):
         helper_idx = source.index("def noinline_helper_for_codegen")
         self.assertLess(decorator_idx, helper_idx)
         self.assertIn("noinline=True", source)
-        self.assertIn("debug=True", source)
-        self.assertIn('do_not_specialize=["x"]', source)
+        self.assertNotIn("debug=True", source)
+        self.assertNotIn("do_not_specialize", source)
 
         def fn(x):
             out = torch.empty_like(x)
@@ -2018,7 +2028,7 @@ def helper(x):
         self.assertEqual(result, x + 1)
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
-    def test_user_defined_triton_kernel_preserves_aliased_jit_decorator(self):
+    def test_user_defined_triton_kernel_preserves_aliased_helper_noinline(self):
         from torch._inductor.codegen.wrapper import (
             user_defined_triton_kernel_transitive_closure_source_code,
         )
@@ -2036,64 +2046,33 @@ def helper(x):
             helper_idx = source.index(helper_def)
             self.assertLess(decorator_idx, helper_idx)
             self.assertIn("noinline=True", source)
-            self.assertIn("debug=True", source)
-
-    def test_user_defined_triton_kernel_jit_decorator_parse_failure_falls_back(self):
-        from torch._inductor.codegen.wrapper import _triton_jit_decorator_from_source
-
-        for raw_src in (None, "", "@triton.jit(\n", ["@triton.jit(\n"]):
-            self.assertEqual(
-                _triton_jit_decorator_from_source(Mock(raw_src=raw_src)),
-                "@triton.jit",
-            )
+            self.assertNotIn("debug=True", source)
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_user_defined_triton_kernel_jit_decorator_is_memoized(self):
-        from torch._inductor.codegen.wrapper import _triton_jit_decorator_from_source
+        from torch._inductor.codegen.wrapper import _triton_jit_decorator_for_helper
 
-        _triton_jit_decorator_from_source.cache_clear()
-        self.addCleanup(_triton_jit_decorator_from_source.cache_clear)
-        with patch(
-            "torch._inductor.codegen.wrapper.ast.parse", wraps=ast.parse
-        ) as parse:
-            first = _triton_jit_decorator_from_source(noinline_helper_for_codegen)
-            first_call_count = parse.call_count
-            second = _triton_jit_decorator_from_source(noinline_helper_for_codegen)
+        _triton_jit_decorator_for_helper.cache_clear()
+        self.addCleanup(_triton_jit_decorator_for_helper.cache_clear)
+        first = _triton_jit_decorator_for_helper(noinline_helper_for_codegen)
+        second = _triton_jit_decorator_for_helper(noinline_helper_for_codegen)
 
         self.assertEqual(first, second)
-        self.assertGreater(first_call_count, 0)
-        self.assertEqual(parse.call_count, first_call_count)
+        self.assertEqual(_triton_jit_decorator_for_helper.cache_info().hits, 1)
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
-    def test_user_defined_triton_kernel_rejects_global_jit_decorator_option(self):
+    def test_user_defined_triton_kernel_ignores_root_only_helper_option(self):
         from torch._inductor.codegen.wrapper import (
             user_defined_triton_kernel_transitive_closure_source_code,
         )
 
-        msg = (
-            "global_option_jit_helper_for_codegen: @triton.jit decorator options "
-            "must be Python literals for Inductor codegen; non-literal options "
-            "are not supported: repr="
+        source = user_defined_triton_kernel_transitive_closure_source_code(
+            root_for_global_option_jit_helper
         )
-        with self.assertRaisesRegex(RuntimeError, msg):
-            user_defined_triton_kernel_transitive_closure_source_code(
-                root_for_global_option_jit_helper
-            )
-
-    @unittest.skipUnless(has_triton_package(), "requires Triton")
-    def test_user_defined_triton_kernel_literal_eval_type_error(self):
-        from torch._inductor.codegen.wrapper import _triton_jit_decorator_from_source
-
-        msg = "non-literal options are not supported: noinline="
-        _triton_jit_decorator_from_source.cache_clear()
-        with (
-            patch(
-                "torch._inductor.codegen.wrapper.ast.literal_eval",
-                side_effect=TypeError,
-            ),
-            self.assertRaisesRegex(RuntimeError, msg),
-        ):
-            _triton_jit_decorator_from_source(noinline_helper_for_codegen)
+        self.assertIn(
+            "@triton.jit\ndef global_option_jit_helper_for_codegen", source
+        )
+        self.assertNotIn("repr=", source)
 
     @unittest.skipUnless(
         HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
