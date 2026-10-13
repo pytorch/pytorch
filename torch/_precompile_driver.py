@@ -738,9 +738,7 @@ def _build_installed_forward():
     callback is a _RefuseRecompileCallback bound at load, which
     _callback_from_stance keeps even under stances that would compile, so, as
     for a standalone artifact, a call no captured variant covers raises instead
-    of compiling. load(allow_serve_time_compiles=True) presets
-    _ALLOW_SERVE_TIME_COMPILES in this module's globals to keep the ordinary
-    compiling callback instead.
+    of compiling.
     """
     import base64
     import importlib
@@ -811,11 +809,7 @@ def _build_installed_forward():
                 f"would still serve any call the installed entries miss: load this "
                 f"artifact in a fresh process."
             )
-        allow_compiles = globals().get("_ALLOW_SERVE_TIME_COMPILES", False)
-        # A serve-time compile is not part of the artifact: record it nowhere.
-        context = torch._dynamo.optimize(
-            BACKEND, package=None if allow_compiles else package
-        )
+        context = torch._dynamo.optimize(BACKEND, package=package)
         if not isinstance(context, OptimizeContext):
             raise _PrecompileError(
                 "precompile: an installed artifact serves through Dynamo, which is "
@@ -825,8 +819,7 @@ def _build_installed_forward():
         # The refusal is this callable's own callback, not the process-global
         # stance, so other threads' compiles are unaffected. It must be bound
         # before context(fn), which captures the callback when it wraps.
-        if not allow_compiles:
-            context.callback = _RefuseRecompileCallback(context.callback)
+        context.callback = _RefuseRecompileCallback(context.callback)
         compiled = context(fn)
         package.install(package_state["backends"])
     except _PrecompileError:
