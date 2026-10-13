@@ -51,6 +51,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
 
@@ -4276,7 +4277,7 @@ partial_fn = functools.partial(fn, scale=2)
     def test_filter(self):
         def fn(inputs):
             out = inputs[0]
-            for inp in filter(lambda x: (x.requires_grad), inputs):
+            for inp in filter(lambda x: x.requires_grad, inputs):
                 out = out * inp
             return out
 
@@ -7324,7 +7325,9 @@ class FunctionAcceleratorTests(torch._dynamo.test_case.TestCase):
                 return x + prop.multi_processor_count
             return x + prop.max_threads_per_multi_processor
 
-        torch._dynamo.testing.standard_test(self, fn=fn, nargs=1, expected_frame_count=1)
+        torch._dynamo.testing.standard_test(
+            self, fn=fn, nargs=1, expected_frame_count=1
+        )
 
     @onlyAccelerator
     def test_cuda_manual_seed(self, device):
@@ -7377,7 +7380,9 @@ class FunctionTensorTypeAcceleratorTests(torch._dynamo.test_case.TestCase):
         return fn(self)
 
 
-instantiate_device_type_tests(FunctionTensorTypeAcceleratorTests, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    FunctionTensorTypeAcceleratorTests, globals(), allow_xpu=True
+)
 
 
 class FunctionTritonAcceleratorTests(torch._dynamo.test_case.TestCase):
