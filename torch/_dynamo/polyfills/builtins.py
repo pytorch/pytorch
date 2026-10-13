@@ -176,6 +176,6 @@ def callable_iterator(fn, sentinel, /):
     return _CallableIterator(fn, sentinel)
 
 
-@substitute_in_graph(typing.cast, can_constant_fold_through=True)
+@substitute_in_graph(typing.cast)
 def cast(typ: type, val: _T) -> _T:  # type: ignore[type-var]
     return val
