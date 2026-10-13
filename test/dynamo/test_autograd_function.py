@@ -397,6 +397,70 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             ):
                 opt_fn(x)
 
+    def test_apply_override_not_routed_to_autograd_function(self):
+        class Function(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x + 1
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def replacement(cls, x):
+            return x + 10
+
+        Function.apply = classmethod(replacement)
+        target = Function.apply
+
+        def fn(target, x):
+            return target(x)
+
+        x = torch.randn(2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(target, x), x + 10
+        )
+
+    def test_bound_builtin_apply_stored_alias_guarded(self):
+        class Function(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x + 1
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        class Holder:
+            pass
+
+        holder = Holder()
+        holder.target = Function.apply
+
+        def fn(x):
+            return holder.target(x)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), x + 1)
+
+        replacement = Function.__subclasshook__
+        self.assertIs(replacement.__self__, Function)
+        holder.target = replacement
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.RecompileError, "holder.*target"
+            ):
+                opt_fn(x)
+
     def test_apply_uses_setup_context_identity(self):
         class EqualToEverything:
             def __eq__(self, other):
