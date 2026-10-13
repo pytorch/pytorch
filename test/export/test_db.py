@@ -12,7 +12,6 @@ from torch._export.db.examples import (
 )
 from torch.export import export
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -24,8 +23,6 @@ from torch.testing._internal.common_utils import (
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class ExampleTests(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     # TODO Maybe we should make this tests actually show up in a file?
     @parametrize(
         "name,case",
