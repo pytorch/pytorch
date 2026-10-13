@@ -54,6 +54,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
     failed = []
     improved = []
     eager_nondeterministic_models = get_eager_nondeterministic_models(expected_filename)
+    infrastructure_failures = {"timeout", "worker_fail"}
 
     if "rocm" in expected_filename:
         flaky_models.update(
@@ -86,15 +87,25 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             }
         )
 
-    for model in actual_csv["name"]:
-        accuracy = get_field(actual_csv, model, "accuracy")
+    key_columns = ["name"]
+    for column in ("dev", "tag"):
+        if column in actual_csv:
+            key_columns.append(column)
+    actual_csv = actual_csv.drop_duplicates(key_columns, keep="last")
+
+    for _, row in actual_csv.iterrows():
+        model = row["name"]
+        accuracy = row.get("accuracy")
         expected_accuracy = get_field(expected_csv, model, "accuracy")
 
-        if accuracy is None:
+        if accuracy is None or pd.isna(accuracy):
             status = "MISSING_ACCURACY:"
             failed.append(model)
         elif expected_accuracy is None:
             status = "MISSING_EXPECTED:"
+            failed.append(model)
+        elif accuracy in infrastructure_failures:
+            status = "FAIL:"
             failed.append(model)
         elif accuracy == expected_accuracy:
             status = "PASS" if expected_accuracy == "pass" else "XFAIL"
