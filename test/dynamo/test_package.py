@@ -1011,34 +1011,45 @@ def add(x, y):
             x = self.instance_method_with_args(x)
             return x
 
-    def test_accelerator_set_up_class_failure_releases_patches(self):
+
+class TestPackageAccelerator(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_set_up_class_failure_releases_patches(self):
         # setUpClass() patches two configs through an ExitStack, and unittest
         # does not call tearDownClass() when setUpClass() raises -- so the
         # except block is the only thing releasing them. Without that release
         # the patches leak into every later test class in the process, which
         # shows up as order-dependent failures far from here (exactly what CI
-        # cannot catch). Pin the contract: after a failing setUpClass, both
-        # configs read their unpatched values again.
+        # cannot catch).
+        #
+        # This lives in the accelerator class because it is the class that owns
+        # the ExitStack, and because this class carries no config-patch class
+        # decorator: TestPackage is decorated with both patches, which would
+        # keep the values True and hide a leak from an assertion.
         accelerator = _PreInstantiateAccelerator
         bundled_key = "bundled_autograd_cache"
-        strict_key = "strict_precompile"
-        # The body must be entered (so both patches are actually applied) before
-        # the super() call that fails.
+        baseline = (
+            getattr(functorch_config, bundled_key),
+            torch._dynamo.config.strict_precompile,
+        )
         with patch(
             "torch._dynamo.test_case.TestCase.setUpClass",
             side_effect=RuntimeError("setUpClass failure"),
         ):
-            self.assertTrue(getattr(functorch_config, bundled_key))
-            self.assertTrue(torch._dynamo.config.strict_precompile)
             with self.assertRaisesRegex(RuntimeError, "setUpClass failure"):
                 accelerator.setUpClass()
-            self.assertFalse(getattr(functorch_config, bundled_key))
-            self.assertFalse(torch._dynamo.config.strict_precompile)
-
-
-
-class TestPackageAccelerator(torch._inductor.test_case.TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+        # The failing setUpClass applied both patches to its body and the except
+        # block released them again, so both configs are back to what they were
+        # before it ran. Without that release the values stay patched here --
+        # and leak into every later test class in the process.
+        self.assertEqual(
+            (
+                getattr(functorch_config, bundled_key),
+                torch._dynamo.config.strict_precompile,
+            ),
+            baseline,
+        )
 
     _package_config_stack = None
 
