@@ -20,7 +20,6 @@ import torch.nn.functional as F
 from torch._higher_order_ops import flex_gemm
 from torch._higher_order_ops.flex_gemm import (
     _SUPPORTED_FLEX_GEMM_OP_NAMES,
-    flex_gemm_hop,
     nvfp4_pack,
     to_blocked,
 )
@@ -512,7 +511,13 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         self.assertEqual(flex_gemm_default_config(legal, varlen=True), varlen_default)
         self.assertEqual(
             flex_gemm_search_space(legal, varlen=True),
-            (varlen_default, key(256, 256, 2, 2, False), key(128, 128, 2, 1, False)),
+            (
+                varlen_default,
+                key(256, 256, 2, 2, False),
+                key(128, 128, 2, 1, False),
+                quack_default,
+                key(128, 256, 2, 1, True),
+            ),
         )
         with inductor_config.patch(max_autotune_gemm_search_space="EXHAUSTIVE"):
             self.assertEqual(flex_gemm_search_space(legal, varlen=True), legal)
@@ -520,11 +525,11 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 flex_gemm_default_config(legal, varlen=True), varlen_default
             )
         # Legal sets without a ranked varlen config keep QuACK's default first.
-        unranked = (quack_default, key(128, 32, 1, 1, True))
-        self.assertEqual(flex_gemm_default_config(unranked, varlen=True), quack_default)
+        unranked = (key(256, 192, 2, 1, True), key(128, 32, 1, 1, True))
+        self.assertEqual(flex_gemm_default_config(unranked, varlen=True), unranked[0])
         self.assertEqual(flex_gemm_search_space(unranked, varlen=True), unranked)
         # Grouped-main stores only accept cluster_n == 1 configs (tile_m 128 needs
-        # cluster_m 1); the varlen table ranks two of them after the others.
+        # cluster_m 1); the varlen table ranks three of them after the others.
         output_contraction_legal = (
             quack_default,
             key(128, 128, 1, 1, False),
@@ -537,7 +542,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
         self.assertEqual(
             flex_gemm_search_space(output_contraction_legal, varlen=True),
-            (key(128, 128, 1, 1, True), key(256, 128, 2, 1, True)),
+            (key(128, 128, 1, 1, True), key(256, 128, 2, 1, True), quack_default),
         )
 
     @parametrize(
@@ -1887,12 +1892,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         torch.testing.assert_close(actual, F.grouped_mm(x, w_t, offs=offs).relu())
 
-    def test_grouped_mm_compiled_carries_offs_as_tensor_operand(self):
-        graphs = []
+    @parametrize("varlen_k", (False, True))
+    def test_grouped_mm_compiled_reads_offs_at_runtime(self, varlen_k):
+        from torch._dynamo.testing import CompileCounterWithBackend
 
-        def record_backend(gm, example_inputs):
-            graphs.append(gm)
-            return gm.forward
+        counter = CompileCounterWithBackend("eager")
 
         def fn(x, w_t, offs):
             return flex_gemm(
@@ -1903,20 +1907,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             )
 
         x, w_t, offs = self.makeGroupedMm()
-        actual = torch.compile(fn, backend=record_backend, fullgraph=True)(x, w_t, offs)
-
-        torch.testing.assert_close(actual, F.grouped_mm(x, w_t, offs=offs).relu())
-        (graph,) = graphs
-        (hop_node,) = graph.graph.find_nodes(op="call_function", target=flex_gemm_hop)
-        self.assertIs(hop_node.args[0], torch.ops.aten._grouped_mm.default)
-        self.assertEqual(len(hop_node.args[2]), 3)
-        self.assertTrue(all(isinstance(arg, torch.fx.Node) for arg in hop_node.args[2]))
-        self.assertEqual(hop_node.args[3], {})
-        body = getattr(graph, hop_node.args[1].target)
-        (gemm_node,) = body.graph.find_nodes(
-            op="call_function", target=torch.ops.aten._grouped_mm.default
-        )
-        self.assertEqual(len(gemm_node.args), 3)
+        if varlen_k:
+            x, w_t = x.mT, x
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for seqlens in ((24, 0, 40), (16, 24, 24)):
+            offs.copy_(torch.tensor(seqlens).cumsum(0))
+            expected = F.grouped_mm(x, w_t, offs=offs).relu()
+            self.assertEqual(compiled(x, w_t, offs), expected)
+        self.assertEqual(counter.frame_count, 1)
 
     def test_grouped_mm_rejects_unsupported_forms(self):
         x, w_t, offs = self.makeGroupedMm()
@@ -1944,11 +1942,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 "3-D A",
             ),
             (
-                "2d_b",
+                "1d_b",
                 F.grouped_mm,
-                (x.transpose(0, 1), x),
+                (x, x[0]),
                 {"offs": offs},
-                "weight-gradient",
+                "2-D A",
             ),
             # TODO: Support scaled grouped GEMMs through FlexGEMM.
             (
@@ -1969,6 +1967,32 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             flex_gemm(
                 torch.ops.aten._grouped_mm.default, (x, w_t, offs), lambda acc: acc
             )
+
+    def test_grouped_mm_varlen_k_quack_contract(self):
+        x, _, offs = self.makeGroupedMm()
+        a, b = x.mT, x
+        graph = torch.fx.Graph()
+        args = tuple(graph.placeholder(name) for name in ("a", "b", "offs"))
+        gemm = graph.call_function(torch.ops.aten._grouped_mm.default, args)
+        cases = (
+            ("valid", a, b, offs, None),
+            ("a_layout", a.contiguous(), b, offs, "varlen-K requires m-major"),
+            ("b_layout", a, b.mT.contiguous().mT, offs, "varlen-K requires m-major"),
+            ("unequal_totals", a, b[:-1], offs, "equal reduction extents"),
+            ("mixed_dtype", a, b.half(), offs, "supports only bf16/fp16"),
+            ("fp32", a.float(), b.float(), offs, "supports only bf16/fp16"),
+        )
+        for name, mat_a, mat_b, offsets, error in cases:
+            with self.subTest(name=name):
+                for node, value in zip(args, (mat_a, mat_b, offsets)):
+                    node.meta["val"] = value
+                if error is None:
+                    self.assertEqual(
+                        lowering.quack_grouped_mm_contract(gemm), (args, "k")
+                    )
+                else:
+                    with self.assertRaisesRegex(NotImplementedError, error):
+                        lowering.quack_grouped_mm_contract(gemm)
 
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_grouped_mm_quack_pinned_config_rejects_varlen_gaps(self):
@@ -8931,6 +8955,234 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
 
 
 instantiate_device_type_tests(TestFlexGemmGroupedMmDevice, globals(), only_for="cuda")
+
+
+@skipIfNoCuteDSL
+@unittest.skipIf(not SM100OrLater, "SM100+ required")
+class TestFlexGemmGroupedWgradDevice(FlexGemmTestCase):
+    def assertGroupedWgradMatches(self, actual, a, b, offs, epilogue_fn):
+        self.assertEqual(actual.shape, (offs.numel(), a.shape[0], b.shape[1]))
+        self.assertEqual(actual.dtype, a.dtype)
+        self.assertTrue(actual.isfinite().all())
+        eager_out = epilogue_fn(F.grouped_mm(a, b, offs=offs))
+        for group, (start, end) in enumerate(itertools.pairwise([0, *offs.tolist()])):
+            with self.subTest(group=group, start=start, end=end):
+                expected = epilogue_fn(a[:, start:end].double() @ b[start:end].double())
+                eager, result = eager_out[group], actual[group]
+                if start == end:
+                    self.assertEqual(result, expected.to(result.dtype), atol=0, rtol=0)
+                    continue
+                self.assertMatchesLowPrecisionEager(
+                    result, eager, expected, end - start
+                )
+                # Also bound the worst element so a bad expert/tile cannot hide in a mean.
+                rounding_eps = (
+                    math.sqrt(end - start) * torch.finfo(torch.float32).eps
+                    + torch.finfo(result.dtype).eps
+                )
+                self.assertLessEqual(
+                    (result.double() - expected).abs().max().item(),
+                    (eager.double() - expected).abs().max().item()
+                    + rounding_eps * expected.abs().max().item(),
+                )
+
+    @parametrize(
+        "case",
+        (
+            ("bf16_identity", torch.bfloat16, False, False),
+            ("fp16_identity_tuned", torch.float16, True, False),
+            ("bf16_scalar_tuned", torch.bfloat16, True, True),
+            ("fp16_scalar", torch.float16, False, True),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_grouped_mm_varlen_k_matches_reference(self, device, case):
+        _, dtype, tuned, scalar_epilogue = case
+        m, n, total_k = 64, 96, 1088
+        lengths = (0, 37, 0, 1000, 5, 0)
+        padding = 8 if scalar_epilogue else 0
+        x = self.makeTensor(total_k, m + padding, device=device, dtype=dtype)
+        dy = self.makeTensor(total_k, n + padding, device=device, dtype=dtype)
+        x[sum(lengths) :] = dy[sum(lengths) :] = float("nan")
+        if padding:
+            x[:, m:] = dy[:, n:] = float("nan")
+        a, b = x[:, :m].mT, dy[:, :n]
+        offs = torch.tensor(lengths, device=device).cumsum(0).to(torch.int32)
+
+        def epilogue_fn(acc):
+            return acc * 0.5 + 0.125 if scalar_epilogue else acc
+
+        def fn(a, b, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (a, b),
+                epilogue_fn,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK", "tuned": tuned},
+            )
+
+        prefixes = []
+        make_prefix = lowering.flex_gemm_cu_seqlens_benchmark_input
+
+        def record_prefix(*args, **kwargs):
+            prefix = make_prefix(*args, **kwargs)
+            prefixes.append(prefix)
+            return prefix
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        with (
+            self.limitEpiModAutotune(),
+            inductor_config.patch(autotune_in_subproc=False, force_disable_caches=True),
+            mock.patch.object(
+                lowering, "flex_gemm_cu_seqlens_benchmark_input", record_prefix
+            ),
+        ):
+            actual, (code,) = run_and_get_code(compiled, a, b, offs)
+
+        self.assertFlexGemmGeneratedCode(code, "cu_seqlens_k=")
+        self.assertNotIn("extern_kernels._grouped_mm(", code)
+        if tuned:
+            self.assertTrue(prefixes)
+            prefix = prefixes[0].cpu()
+            self.assertEqual(prefix.dtype, torch.int32)
+            self.assertEqual(prefix.shape, (len(lengths) + 1,))
+            self.assertEqual(prefix[0], 0)
+            self.assertEqual(prefix[-1], total_k)
+            self.assertTrue((prefix.diff() >= 0).all())
+        self.assertGroupedWgradMatches(actual, a, b, offs, epilogue_fn)
+        # Reuse both compiled code and the offsets allocation, including all-empty experts.
+        for changed_lengths in ((5, 0, 37, 0, 1000, 0), (0,) * len(lengths)):
+            with self.subTest(lengths=changed_lengths):
+                offs.copy_(torch.tensor(changed_lengths, device=device).cumsum(0))
+                self.assertGroupedWgradMatches(
+                    compiled(a, b, offs), a, b, offs, epilogue_fn
+                )
+
+    def test_grouped_mm_varlen_k_constrains_produced_operand_layouts(self, device):
+        # x.mT * 0.5 has m-major FX metadata, but Inductor would realize the
+        # pointwise result contiguous (K-major) unless lowering fixes the layout.
+        x = self.makeTensor(128, 64, device=device)
+        b = self.makeTensor(128, 96, device=device)
+        offs = torch.tensor([37, 128], device=device, dtype=torch.int32)
+
+        def fn(x, b, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x.mT * 0.5, b * 2),
+                lambda acc: acc,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, b, offs)
+        self.assertGroupedWgradMatches(actual, x.mT * 0.5, b * 2, offs, lambda acc: acc)
+
+    def test_grouped_mm_varlen_k_dynamic_and_cuda_graph(self, device):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        scale = torch.tensor(0.5, device=device)
+
+        def fn(a, b, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (a, b),
+                lambda acc: (acc, acc * scale),
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        for lengths in ((37, 0, 75), (0, 41, 104)):
+            total_k = sum(lengths)
+            a = self.makeTensor(total_k, 64, device=device).mT
+            b = self.makeTensor(total_k, 96, device=device)
+            offs = torch.tensor(lengths, device=device).cumsum(0).to(torch.int32)
+            actual, aux = compiled(a, b, offs)
+            self.assertGroupedWgradMatches(actual, a, b, offs, lambda x: x)
+            self.assertGroupedWgradMatches(aux, a, b, offs, lambda x: x * scale)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            actual, aux = compiled(a, b, offs)
+        offs.copy_(torch.tensor([41, 80, 145], device=device, dtype=torch.int32))
+        scale.fill_(0.75)
+        graph.replay()
+        self.assertGroupedWgradMatches(actual, a, b, offs, lambda x: x)
+        self.assertGroupedWgradMatches(aux, a, b, offs, lambda x: x * scale)
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("scalar_epilogue", (False, True))
+    def test_grouped_mm_varlen_k_output_alignment(self, device, scalar_epilogue):
+        x = self.makeTensor(64, 72, device=device)
+        dy = self.makeTensor(64, 104, device=device)
+        x[:, 65:] = dy[:, 97:] = float("nan")
+        a, b = x[:, :65].mT, dy[:, :97]
+        offs = torch.tensor([17, 64], device=device, dtype=torch.int32)
+
+        def epilogue_fn(acc):
+            return acc * 0.5 + 0.125 if scalar_epilogue else acc
+
+        def fn(a, b, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (a, b),
+                epilogue_fn,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, fullgraph=True)
+        if scalar_epilogue:
+            with self.assertRaisesRegex(
+                InductorError, "16-byte aligned output strides"
+            ):
+                compiled(a, b, offs)
+        else:
+            self.assertGroupedWgradMatches(
+                compiled(a, b, offs), a, b, offs, epilogue_fn
+            )
+
+    @parametrize("total_k,experts", ((0, 2), (16, 0)))
+    def test_grouped_mm_varlen_k_empty(self, device, total_k, experts):
+        a = self.makeTensor(total_k, 64, device=device).mT
+        b = self.makeTensor(total_k, 96, device=device)
+        offs = torch.zeros(experts, device=device, dtype=torch.int32)
+
+        def fn(a, b, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (a, b),
+                lambda acc: acc * 0.5 + 0.125,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        result = torch.compile(fn, fullgraph=True)(a, b, offs)
+        self.assertEqual(
+            result, torch.full((experts, 64, 96), 0.125, device=device, dtype=a.dtype)
+        )
+
+    def test_grouped_mm_varlen_k_rejects_swap_ab(self, device):
+        a = self.makeTensor(128, 64, device=device).mT
+        b = self.makeTensor(128, 96, device=device)
+        offs = torch.tensor([37, 128], device=device, dtype=torch.int32)
+
+        def fn(a, b, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (a, b),
+                lambda acc: acc,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK", "config": {"swap_ab": True}},
+            )
+
+        with self.assertRaisesRegex(InductorError, "no supported GemmConfig matches"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b, offs)
+
+
+instantiate_device_type_tests(
+    TestFlexGemmGroupedWgradDevice, globals(), only_for="cuda"
+)
 
 
 @skipIfNoCuteDSL
