@@ -13791,14 +13791,14 @@ class TestCudaDeviceParametrized(TestCase):
             self.assertEqual(out, out_control, atol=0, rtol=0)
             hidden = hidden if kind == "LSTM" else (hidden,)
             hidden_control = hidden_control if kind == "LSTM" else (hidden_control,)
-            for actual, expected in zip(hidden, hidden_control):
+            for actual, expected in zip(hidden, hidden_control, strict=True):
                 self.assertEqual(actual.dtype, torch.bfloat16)
                 self.assertEqual(actual, expected, atol=0, rtol=0)
             out.float().sum().backward()
             out_control.float().sum().backward()
         tensors = [x, *states, *rnn.parameters()]
         tensors_control = [x_ref, *states_ref, *control.parameters()]
-        for actual, expected in zip(tensors, tensors_control):
+        for actual, expected in zip(tensors, tensors_control, strict=True):
             self.assertIsNotNone(actual.grad)
             self.assertIsNotNone(expected.grad)
             grad = expected.grad.to(actual.dtype)
