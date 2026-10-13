@@ -1591,6 +1591,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
     ) -> list[FlexBwDConfig]:
+        """Return flex attention backward configs for the current CUDA device."""
         capability = torch.cuda.get_device_capability()
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
         if config.max_autotune:
