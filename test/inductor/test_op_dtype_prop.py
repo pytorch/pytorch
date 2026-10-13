@@ -132,6 +132,50 @@ class TestCase(InductorTestCase):
 
     @requires_gpu()
     @parametrize("input_shape", [(32, 32), (32, 128), (256, 32)])
+    @parametrize("scan_func", [torch.cumsum, torch.cumprod])
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+    @config.patch("triton.use_block_ptr", True)
+    def test_low_precision_scan(self, input_shape, scan_func, input_dtype):
+        """A scan accumulates across its axis, so it widens like a reduction.
+
+        The counterpart of `test_low_precision_reduction`: with
+        `codegen_upcast_to_fp32` off, the combine must still run in fp32 or
+        every partial result rounds at the input width.
+        """
+
+        @torch.compile
+        def func(a, b, c, d):
+            return scan_func(a * b * c * d, -1)
+
+        inps = (torch.rand(input_shape, device=GPU_TYPE, dtype=input_dtype),) * 4
+        with config.patch("triton.codegen_upcast_to_fp32", False):
+            func_opt = torch._dynamo.optimize("inductor")(func)
+            code = run_and_get_triton_code(func_opt, *inps)
+            self.assertTrue(".to(tl.float32)" in code)
+            self.assertEqual(func(*inps), func_opt(*inps))
+
+    @requires_gpu()
+    @parametrize("fp8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    @config.patch("triton.use_block_ptr", True)
+    def test_fp8_scan_upcasts_regardless_of_config(self, fp8_dtype):
+        """fp8 scans widen even with `codegen_upcast_to_fp32` left enabled.
+
+        `upcast_compute_type` only covers fp16/bf16, so fp8 reaches the
+        combine at its input width unless the scan widens it explicitly, the
+        way `reduction` already does.
+        """
+
+        @torch.compile
+        def func(a):
+            return torch.cumsum(a.to(torch.float32).to(fp8_dtype), -1)
+
+        inp = torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float32)
+        func_opt = torch._dynamo.optimize("inductor")(func)
+        code = run_and_get_triton_code(func_opt, inp)
+        self.assertTrue(".to(tl.float32)" in code)
+
+    @requires_gpu()
+    @parametrize("input_shape", [(32, 32), (32, 128), (256, 32)])
     @parametrize(
         "reduction_func",
         [
@@ -156,6 +200,69 @@ class TestCase(InductorTestCase):
             code = run_and_get_triton_code(func_opt, *inps)
             self.assertTrue(".to(tl.float32)" in code)
             self.assertEqual(func(*inps), func_opt(*inps))
+
+    @requires_gpu()
+    @parametrize("upcast_to_fp32", [False, True])
+    @parametrize("persistent", [False, True])
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+    def test_low_precision_reduction_result_reuse(
+        self, input_dtype, persistent, upcast_to_fp32
+    ):
+        # The amax result feeds ops in the same kernel, so its tracked dtype
+        # must match the dtype emitted after the post-reduction cast.
+        def func(a, b):
+            x = a * b
+            peak = x.amax(dim=1, keepdim=True).abs()
+            return (x - peak).sum(dim=1)
+
+        rnumel = 512 if persistent else 4096
+        a = torch.rand((32, rnumel), device=GPU_TYPE, dtype=input_dtype)
+        b = torch.rand((32, rnumel), device=GPU_TYPE, dtype=input_dtype)
+        with config.patch(
+            {
+                "split_reductions": False,
+                "test_configs.runtime_triton_dtype_assert": True,
+                "triton.codegen_upcast_to_fp32": upcast_to_fp32,
+                "triton.persistent_reductions": persistent,
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(func, fullgraph=True), a, b)
+
+        self.assertEqual(func(a, b), actual)
+        source = "\n".join(code)
+        self.assertEqual("for r0_offset in" in source, not persistent)
+
+    @requires_gpu()
+    @parametrize("persistent", [False, True])
+    @parametrize("reduction_name", ["min", "max", "argmin", "argmax"])
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16, torch.int32])
+    def test_min_max_arg_reduction_dtypes(
+        self, reduction_name, input_dtype, persistent
+    ):
+        def func(a, b):
+            value = a / b if input_dtype.is_floating_point else a + b
+            return getattr(torch, reduction_name)(value, dim=1)
+
+        rnumel = 512 if persistent else 4096
+        a = torch.zeros((4, rnumel), device=GPU_TYPE, dtype=input_dtype)
+        a[:, -2] = -10
+        a[:, -1] = 10
+        b = torch.ones_like(a)
+        with config.patch(
+            {
+                "test_configs.runtime_triton_dtype_assert": True,
+                "triton.persistent_reductions": persistent,
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(func, fullgraph=True), a, b)
+
+        self.assertEqual(func(a, b), actual)
+        source = "\n".join(code)
+        if reduction_name.startswith("arg"):
+            # Index results keep their index dtype; no post-reduction cast.
+            self.assertNotRegex(source, r"(\w+) = \1\.to\(tl\.int\d+\)")
+        if not input_dtype.is_floating_point:
+            self.assertNotIn(".to(tl.float32)", source)
 
     def test_op_dtype_support(self):
         """
@@ -191,7 +298,6 @@ class TestCase(InductorTestCase):
             "exp2",
             "abs",
             "hypot",
-            "nextafter",
         ]:
             # These ops do not support float16 and bfloat16.
             supported_dtypes = OpDtypeSupport.supported_dtypes[op_name]

@@ -17,9 +17,52 @@ kernel void nllnd_loss_backward(
     constant NLLLossBackwardParams<>& params [[buffer(5)]],
     device ErrorMessages* error_buf [[buffer(6)]],
     uint thread_index [[thread_position_in_grid]]) {
+  const long index =
+      static_cast<long>(thread_index) + params.forward.tid_offset;
+  const long target_index = target[index];
+  if (target_index == params.forward.ignore_index) {
+    return;
+  }
+  if (target_index < 0 || target_index >= params.forward.n_classes) {
+    TORCH_REPORT_ERROR(
+        error_buf, "Target ", target_index, " is out of bounds.");
+    return;
+  }
+
+  T grad = -grad_output[params.is_reduction ? 0 : index];
+  if (params.is_mean) {
+    const T total = total_weight[0];
+    if (total == T(0)) {
+      return;
+    }
+    grad = static_cast<T>(grad / total);
+  }
+  if (params.forward.has_weight) {
+    grad = static_cast<T>(grad * weight[target_index]);
+  }
+
+  const long batch = index / params.forward.map_size;
+  const long spatial = index % params.forward.map_size;
+  const long output_index = batch * params.forward.batch_stride +
+      target_index * params.forward.class_stride + spatial;
+  grad_input[output_index] = grad;
+}
+
+template <typename T>
+kernel void nllnd_loss_forward(
+    constant T* input [[buffer(0)]],
+    constant long* target [[buffer(1)]],
+    constant T* weight [[buffer(2)]],
+    device T* output [[buffer(3)]],
+    device T* sample_weights [[buffer(4)]],
+    constant NLLLossForwardParams<>& params [[buffer(5)]],
+    device ErrorMessages* error_buf [[buffer(6)]],
+    uint thread_index [[thread_position_in_grid]]) {
   const long index = static_cast<long>(thread_index) + params.tid_offset;
-  const long target_index = target[params.target_offset + index];
+  const long target_index = target[index];
   if (target_index == params.ignore_index) {
+    output[index] = T(0);
+    sample_weights[index] = T(0);
     return;
   }
   if (target_index < 0 || target_index >= params.n_classes) {
@@ -28,25 +71,13 @@ kernel void nllnd_loss_backward(
     return;
   }
 
-  const long grad_output_index =
-      params.grad_output_offset + (params.is_reduction ? 0 : index);
-  T grad = -grad_output[grad_output_index];
-  if (params.is_mean) {
-    const T total = total_weight[params.total_weight_offset];
-    if (total == T(0)) {
-      return;
-    }
-    grad = static_cast<T>(grad / total);
-  }
-  if (params.has_weight) {
-    grad = static_cast<T>(grad * weight[params.weight_offset + target_index]);
-  }
-
   const long batch = index / params.map_size;
   const long spatial = index % params.map_size;
-  const long output_index = batch * params.batch_stride +
+  const long input_index = batch * params.batch_stride +
       target_index * params.class_stride + spatial;
-  grad_input[params.grad_input_offset + output_index] = grad;
+  const T w = params.has_weight ? weight[target_index] : T(1);
+  output[index] = -input[input_index] * w;
+  sample_weights[index] = w;
 }
 
 // Augmented target lookup: l'[idx] is BLANK for even idx, l[idx/2] for odd.
@@ -455,3 +486,19 @@ INSTANTIATE_CTC_LOSS_TARGET_TYPES(half);
 INSTANTIATE_NLLND_LOSS_BACKWARD(float);
 INSTANTIATE_NLLND_LOSS_BACKWARD(bfloat);
 INSTANTIATE_NLLND_LOSS_BACKWARD(half);
+
+#define INSTANTIATE_NLLND_LOSS_FORWARD(T)                      \
+  template [[host_name("nllnd_loss_forward_" #T)]] kernel void \
+  nllnd_loss_forward<T>(                                       \
+      constant T*,                                             \
+      constant long*,                                          \
+      constant T*,                                             \
+      device T*,                                               \
+      device T*,                                               \
+      constant NLLLossForwardParams<>&,                        \
+      device ErrorMessages*,                                   \
+      uint);
+
+INSTANTIATE_NLLND_LOSS_FORWARD(float);
+INSTANTIATE_NLLND_LOSS_FORWARD(bfloat);
+INSTANTIATE_NLLND_LOSS_FORWARD(half);
