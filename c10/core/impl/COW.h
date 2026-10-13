@@ -32,4 +32,9 @@ C10_API void materialize_cow(StorageImpl* storage);
 // An eager COW snapshot must be resolved before its address enters a capture.
 C10_API void check_cow_read(const StorageImpl* storage);
 
+// Record completion of all current and retired CUDA COW uses of this storage
+// on the current stream. Callers must join all such uses before this boundary.
+// Retired references are released; later access invalidates current completion.
+C10_API void record_done(StorageImpl& storage);
+
 } // namespace c10::impl::cow

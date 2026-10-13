@@ -27,12 +27,12 @@ struct C10_API StorageExtraMeta {
   // Pointer extraction may materialize without ordering previous readers.
   // Keep their CUDA backing allocations until the logical storage is released.
   std::vector<DataPtr> cow_retired_data;
-  uint64_t cow_capture_id = 0;
 };
 
 namespace impl::cow {
 C10_API void materialize_cow(StorageImpl* storage);
 C10_API void check_cow_read(const StorageImpl* storage);
+C10_API void record_done(StorageImpl& storage);
 C10_API intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage);
 } // namespace impl::cow
 
@@ -384,6 +384,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
  protected:
   friend void c10::impl::cow::materialize_cow(StorageImpl*);
   friend void c10::impl::cow::check_cow_read(const StorageImpl*);
+  friend void c10::impl::cow::record_done(StorageImpl&);
   friend intrusive_ptr<StorageImpl> c10::impl::cow::lazy_clone_storage(
       StorageImpl&);
 
