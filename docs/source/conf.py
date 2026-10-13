@@ -53,6 +53,9 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from redirects import redirects  # noqa: F401
 
 
+redirect_html_template_file = "_templates/redirect.html"
+
+
 # -- General configuration ------------------------------------------------
 
 # Add any Sphinx extension module names here, as strings. They can be
