@@ -116,6 +116,13 @@ def _contains_nan(value: Any) -> bool:
     return type(value) in (float, complex) and value != value
 
 
+def _guard_nan_key(key: VariableTracker) -> None:
+    # CONSTANT_MATCH accepts distinct NaNs, but dictionary lookups depend
+    # on their identity, including NaNs nested inside tuple keys.
+    if key.source and _contains_nan(_get_literal_key(key)):
+        install_guard(key.make_guard(GuardBuilder.ID_MATCH))
+
+
 # Mirror PyDict_{Check,CheckExact} in Include/cpython/dictobject.h.
 def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
     return issubclass(obj.python_type(), dict)
@@ -536,10 +543,7 @@ class ConstDictVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         key: VariableTracker,
     ) -> HashableTracker:
-        # CONSTANT_MATCH accepts distinct NaNs, but dictionary lookups depend
-        # on their identity, including NaNs nested inside tuple keys.
-        if key.source and _contains_nan(_get_literal_key(key)):
-            install_guard(key.make_guard(GuardBuilder.ID_MATCH))
+        _guard_nan_key(key)
         try:
             return HashableTracker(key)
         except ObservedTypeError:
@@ -685,12 +689,15 @@ class ConstDictVariable(VariableTracker):
                 raise_observed_exception(KeyError, tx, args=[args[0]])
             return args[1]
         # OrderedDict.pop uses PyObject_Hash, including for an empty mapping.
-        key = (
-            HashableTracker(args[0])
-            if isinstance(self, OrderedDictVariable)
-            else self._lookup_key(tx, args[0])
-        )
-        value = self.items.pop(key, None)
+        if isinstance(self, OrderedDictVariable):
+            _guard_nan_key(args[0])
+            key = HashableTracker(args[0])
+        else:
+            key = self._lookup_key(tx, args[0])
+        # A __dict__ deletion marker is already absent; do not record another
+        # attribute mutation (which may be forbidden inside a HOP).
+        is_proxy = isinstance(self.items, SideEffectsProxyDict)
+        value = self.items.get(key) if is_proxy else self.items.pop(key, None)
         if value is None or type(value) is variables.DeletedVariable:
             # missing item, return the default value. Install no DICT_CONTAINS guard.
             self.install_dict_contains_guard(tx, key, key_present=False)
@@ -700,6 +707,8 @@ class ConstDictVariable(VariableTracker):
             return args[1]
         self.should_reconstruct_all = True
         tx.output.side_effects.mutation(self)
+        if is_proxy:
+            del self.items[key]
         return value
 
     def dict_popitem(
