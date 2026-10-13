@@ -27,6 +27,7 @@ from torch._dynamo.utils import dict_items
 from torch._dynamo.variables import (
     ConstDictVariable,
     OrderedDictVariable,
+    UserDefinedClassVariable,
     VariableTracker,
 )
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
@@ -172,7 +173,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(compiled(x, mapping, key), fn(x, mapping, key))
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
-    @parametrize("operation", ["contains", "get"])
+    @parametrize("operation", ["contains", "get", "pop"])
     @parametrize(
         "make_key",
         [
@@ -187,7 +188,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         def fn(x, mapping, key):
             if operation == "contains":
                 return x + (key in mapping)
-            return x + mapping.get(key, 0)
+            return x + getattr(mapping, operation)(key, 0)
 
         absent, present = make_key(), make_key()
         mapping = mapping_type()
@@ -195,7 +196,52 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros(1)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         for key in (absent, present, absent):
-            self.assertEqual(compiled(x, mapping, key), fn(x, mapping, key))
+            self.assertEqual(
+                compiled(x, mapping.copy(), key), fn(x, mapping.copy(), key)
+            )
+
+    def test_dunder_dict_pop_deleted_key_in_hop(self):
+        class Obj:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        def fn(x, obj):
+            del obj.a
+
+            def body(x):
+                return x + obj.__dict__.pop("a", 2)
+
+            return torch.cond(x.sum() > 0, body, body, (x,))
+
+        x = torch.ones(2)
+        obj = Obj()
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), x + 2
+        )
+        self.assertNotIn("a", obj.__dict__)
+
+    @parametrize("method", ["keys", "values", "items", "update"])
+    def test_ordered_dict_unbound_method_missing_receiver(self, method):
+        def fn(x):
+            try:
+                getattr(OrderedDict, method)()
+            except TypeError:
+                return x + 1
+            return x
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+        # Descriptors validate receivers too; exercise the class dispatcher directly.
+        with patch(
+            "torch._dynamo.variables.user_defined.raise_type_error",
+            side_effect=TypeError,
+        ) as raise_error:
+            with self.assertRaises(TypeError):
+                UserDefinedClassVariable(OrderedDict).call_method(None, method, [], {})
+        raise_error.assert_called_once_with(
+            None, f"unbound method OrderedDict.{method}() needs an argument"
+        )
 
     @parametrize("present", [False, True])
     def test_ordered_dict_subclass_setdefault_dispatch(self, present):
@@ -689,7 +735,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(counter.frame_count, 1)
 
     @parametrize("operation", [operator.eq, operator.ne])
-    def test_hook_dict_comparison_guards_keys(self, operation):
+    @parametrize("initially_equal", [False, True])
+    def test_hook_dict_comparison_guards_keys(self, operation, initially_equal):
         def hook(module, args, output):
             return output
 
@@ -699,17 +746,43 @@ class DictTests(torch._dynamo.test_case.TestCase):
         left = torch.nn.Linear(2, 2)
         left.register_forward_hook(hook)
         right = torch.nn.Linear(2, 2)
-        right._forward_hooks = left._forward_hooks.copy()
+        if initially_equal:
+            right._forward_hooks = left._forward_hooks.copy()
+        else:
+            right.register_forward_hook(hook)
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(2)
         self.assertEqual(compiled(x, left, right), fn(x, left, right))
         self.assertEqual(counter.frame_count, 1)
 
-        right._forward_hooks.clear()
-        right.register_forward_hook(hook)
+        if initially_equal:
+            right._forward_hooks.clear()
+            right.register_forward_hook(hook)
+        else:
+            right._forward_hooks = left._forward_hooks.copy()
         self.assertEqual(compiled(x, left, right), fn(x, left, right))
         self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("operation", [operator.eq, operator.ne])
+    @parametrize("key_type", [str, int])
+    def test_ordered_dict_comparison_literal_keys_no_recompile(
+        self, operation, key_type
+    ):
+        def fn(x, left, right):
+            return x + operation(left, right)
+
+        def keys():
+            return [key_type(str(i).encode().decode()) for i in (12345, 67890)]
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(3):
+            left = OrderedDict.fromkeys(keys(), 1)
+            right = OrderedDict.fromkeys(keys(), 1)
+            self.assertEqual(compiled(x, left, right), fn(x, left, right))
+        self.assertEqual(counter.frame_count, 1)
 
     @parametrize("name", ["__eq__", "__ne__"])
     def test_dict_comparison_unsupported_storage(self, name):
@@ -2607,6 +2680,63 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(["b", "c", "a"], list(opt_fn(x).keys()))
         self.assertEqual(fn(x), opt_fn(x))
+
+    @parametrize("nested", [False, True])
+    @parametrize("last", [False, True])
+    def test_move_to_end_nan_endpoint_guard(self, nested, last):
+        key = (float("nan"),) if nested else float("nan")
+
+        def fn(x, mapping):
+            try:
+                mapping.move_to_end(key, last=last)
+            except KeyError:
+                return x + 2
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        for stored in (key, (float("nan"),) if nested else float("nan")):
+            mapping = OrderedDict([(stored, 1)])
+            self.assertEqual(compiled(x, mapping), fn(x, mapping.copy()))
+
+    @parametrize("operation", ["unpack", "copy"])
+    def test_ordered_dict_key_identity_guard(self, operation):
+        def fn(x, mapping):
+            if operation == "unpack":
+                key, other = mapping
+            else:
+                key = next(iter(mapping.copy()))
+            return x + 1, id(key)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            mapping = OrderedDict.fromkeys([b"layer.0.weight".decode(), "other"], 1)
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+
+    @parametrize("operation", ["copy", "move_to_end"])
+    def test_hook_dict_copy_and_move_to_end_guard_keys(self, operation):
+        def hook(module, args, output):
+            return output + 1
+
+        first = torch.nn.Identity()
+        key = first.register_forward_hook(hook).id
+
+        def fn(x, module):
+            if operation == "copy":
+                return x + 1, module._forward_hooks.copy()
+            try:
+                module._forward_hooks.move_to_end(key, last=False)
+            except KeyError:
+                return x + 2
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        second = torch.nn.Identity()
+        second.register_forward_hook(hook)
+        for module in (first, second):
+            self.assertEqual(compiled(x, module), fn(x, module))
 
     @parametrize("last", [False, True])
     @parametrize("first_mutates", [False, True])

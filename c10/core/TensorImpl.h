@@ -235,9 +235,20 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
+  // Owns a Python weakref to this mode's Python wrapper (CppFakeTensorMode),
+  // not the wrapper itself. See
+  // Note [C++ FakeTensorMode Python wrapper lifetime] in
+  // torch/csrc/FakeTensorMode.cpp.
+  std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
 
   // when false, disallow a fake tensor from having a 'meta' device
   bool allow_meta_ = true;
+
+  // When true, real tensor inputs to an op are converted to fakes instead of
+  // raising. A non-None fake_tensor_tls.allow_non_fake_inputs_override, a
+  // thread-local override used by dynamo's nonstrict_trace, takes precedence,
+  // so read this through PyInterpreterVTable::allow_non_fake_inputs().
+  bool allow_non_fake_inputs_ = false;
 
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
