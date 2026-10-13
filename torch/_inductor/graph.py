@@ -493,8 +493,8 @@ class GraphLowering(torch.fx.Interpreter):
         # Populated during run_node for every FX node that has nn_module_stack.
         self.fx_fqn_map: dict[str, str] = {}
         # FQN strings claimed by ExternKernelSchedulerNodes (e.g. convolution).
-        # Populated during codegen so Pass 2 of get_fused_kernel_module_fqn
-        # skips ops already annotated by their own extern kernel wrapper.
+        # get_fused_kernel_module_fqn keeps these out of a fused Triton kernel's
+        # label, unless the kernel computes nothing else.
         self.fx_extern_fqns: OrderedSet[str] = OrderedSet()
         # Set per-kernel during SIMD codegen so the wrapper can bake the FQN.
         self._current_kernel_module_fqn: str | None = None

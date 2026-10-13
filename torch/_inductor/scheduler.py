@@ -3809,7 +3809,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
 
         Separated from codegen() so the Scheduler can pre-populate
         fx_extern_fqns before any Triton kernel codegen runs, making
-        get_fused_kernel_module_fqn's pass-2 filter order-independent.
+        get_fused_kernel_module_fqn's extern filter order-independent.
         """
         if not isinstance(self.node, ir.ExternKernel):
             raise AssertionError("expected self.node to be an ir.ExternKernel")
@@ -12679,12 +12679,10 @@ class Scheduler:
                     V.graph.wrapper_code.mark_multistream_alignment(multi)
 
         # Pre-populate fx_extern_fqns for all extern kernels before any Triton
-        # kernel is codegen'd.  get_fused_kernel_module_fqn's pass-2 filter
-        # reads this set to exclude extern-kernel FQNs from Triton annotations;
-        # if an extern kernel is codegen'd after a Triton kernel that shares the
-        # same block, the filter is incomplete and returns None, leaving the
-        # Triton kernel unannotated.  Walking all nodes up front makes the
-        # filter order-independent.
+        # kernel is codegen'd.  get_fused_kernel_module_fqn reads this set to
+        # keep extern-kernel FQNs out of fused Triton labels; if an extern
+        # kernel were codegen'd after a Triton kernel in the same block, the
+        # set would be incomplete and the label would depend on codegen order.
         if (
             config.triton.cudagraph_kernel_annotations
             and not V.graph.cpp_wrapper
