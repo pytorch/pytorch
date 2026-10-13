@@ -4821,6 +4821,78 @@ class TestPrecompileDynamoCapture(TestCase):
         )
 
     @skipIfCrossRef
+    def test_installed_artifact_dispatches_overlapping_variants_like_torch_compile(
+        self,
+    ):
+        # The second shape makes automatic dynamic compile a variant of
+        # breaking_helper that also admits the first. torch.compile then serves
+        # both shapes from that newest variant, and so must the installed
+        # artifact.
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        fn = self.mod.calls_breaking_helper
+        # y is the model's output, so the guards require grad.
+        only_dynamic = {"y": torch.randn(7, 4, requires_grad=True)}
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+            cap(self.model, self.x3)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="eager")
+        compiled(self.model, self.x2)
+        compiled(self.model, self.x3)
+        jit_entries = _debug_get_cache_entry_list(self.mod.breaking_helper)
+        self.assertEqual(len(jit_entries), 2)
+        self.assertTrue(jit_entries[0].guard_manager.check(only_dynamic))
+        torch._dynamo.reset()
+
+        script = (
+            "import sys, torch\n"
+            "from torch._C._dynamo.eval_frame import _debug_get_precompile_entries\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "mod = __import__(sys.argv[4])\n"
+            "f = torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "assert f.installed\n"
+            "f(mod.Model(), torch.randn(2, 4))\n"
+            "entries = _debug_get_precompile_entries(mod.breaking_helper.__code__)\n"
+            "assert len(entries) == 2, entries\n"
+            "only_dynamic = {'y': torch.randn(7, 4, requires_grad=True)}\n"
+            "print('dynamic first', entries[0].guard_manager.check(only_dynamic))\n"
+        )
+        argv = [self.dir, self.artifact, self.cache, self.module_name]
+        cmd = [sys.executable, "-c", script, *argv]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("dynamic first True", out.stdout)
+
+    def test_standalone_artifact_dispatches_overlapping_variants_like_torch_compile(
+        self,
+    ):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        single = self.mod.single
+        with self._capture(single, backend="eager") as cap:
+            cap(self.model, self.x2)
+            cap(self.model, self.x3)
+        loaded = load(self.artifact, self.cache)
+        self.assertFalse(loaded.installed)
+        admitted = []
+        real_check = GuardManagerWrapper.check
+
+        def recording_check(manager, f_locals):
+            ok = real_check(manager, f_locals)
+            if ok:
+                admitted.append(manager)
+            return ok
+
+        with mock.patch.object(GuardManagerWrapper, "check", recording_check):
+            loaded(self.model, self.x2)
+            served_first_shape = admitted[-1]
+            loaded(self.model, torch.randn(7, 4))
+            dynamic_variant = admitted[-1]
+        self.assertIs(served_first_shape, dynamic_variant)
+
+    @skipIfCrossRef
     @parametrize("backend", ["inductor", "eager"])
     def test_a_frame_the_entry_cannot_reach_is_served_installed(self, backend):
         # The graph break inside breaking_helper compiles it as a frame of its

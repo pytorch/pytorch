@@ -10862,16 +10862,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         args = (torch.randn(3, 2),)
 
         compiled_fn = torch.compile(fn, backend="eager")
-        _load_precompile_entry(
-            fn.__code__,
-            torch._dynamo.guards.GuardManagerWrapper(guard_manager_bool),
-            injected_bool.__code__,
-        )
-
+        # Like cache entries, the most recently loaded entry is checked first,
+        # so bool (which also passes the int guard) is loaded after int.
         _load_precompile_entry(
             fn.__code__,
             torch._dynamo.guards.GuardManagerWrapper(guard_manager_int),
             injected_int.__code__,
+        )
+
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager_bool),
+            injected_bool.__code__,
         )
 
         _load_precompile_entry(

@@ -618,6 +618,10 @@ def _build_multigraph_forward():
             manager = load_guard_manager(guards_state, target, scope)
             body = SerializedCode.to_code_object(guarded["dynamo_code"])
             variants.append((manager, body))
+        # Dynamo's cache serves the newest compile first and moves a hit to the
+        # front, so a call that two variants both admit gets the variant
+        # torch.compile would serve. Mirror both.
+        variants.reverse()
 
         # Calls are bound to f_locals the way Python binds them (keyword-only,
         # *args and **kwargs included); the transformed bytecode keeps the
@@ -644,8 +648,10 @@ def _build_multigraph_forward():
             # A tag-safe root's fast path (GuardManager::check_nopybind) can
             # refuse without running its tree and disarms itself; check twice.
             for _ in range(2):
-                for manager, variant in bound:
+                for i, (manager, variant) in enumerate(bound):
                     if manager.check(f_locals):
+                        if i:
+                            bound.insert(0, bound.pop(i))
                         return variant(*args, **kwargs)
             raise _PrecompileError(
                 f"precompile: no captured variant of {target.co_name!r} matches this "
