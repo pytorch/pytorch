@@ -7,11 +7,22 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <shared_mutex>
 #include <variant>
+#include <vector>
 
 namespace c10::impl::cow {
+
+// An event recorded after a reference to stream-ordered copy-on-write data is
+// done with it. See "Releasing lazy clones" in README-cow.md.
+struct C10_API ReleaseEvent {
+  // A backend event handle, as used by DeviceGuardImplInterface::block().
+  void* event;
+  // Keeps `event` alive.
+  std::shared_ptr<void> owner;
+};
 
 // A COWDeleterContext object is used as the `ctx` argument for DataPtr
 // to implement a Copy-on-write (COW) DataPtr.
@@ -36,6 +47,21 @@ class C10_API COWDeleterContext {
 
   // Increments the current refcount.
   void increment_refcount();
+
+  // Counts one of the references to stream-ordered data as released: it is
+  // done with the data once `event` completes (or already, if nullopt).
+  void release(std::optional<ReleaseEvent> event);
+
+  // Adds an event to wait for to a reference which was already released.
+  void add_release_event(ReleaseEvent event);
+
+  // Whether the only remaining reference may take the stream-ordered data
+  // after waiting for the release events: every other reference ever created
+  // has been released. `released` is whether the remaining one was.
+  bool can_steal(bool released);
+
+  // Makes `stream` wait for the release events, which are then dropped.
+  void wait_for_releases(const Stream& stream);
 
   // See README.md in this directory to understand the locking
   // strategy.
@@ -65,6 +91,12 @@ class C10_API COWDeleterContext {
   std::unique_ptr<void, DeleterFnPtr> data_;
   std::atomic<std::int64_t> refcount_ = 1;
   const std::optional<Stream> stream_;
+
+  // The number of references ever created, and how many were released.
+  std::atomic<std::int64_t> references_ = 1;
+  std::mutex release_mutex_;
+  std::int64_t releases_ = 0;
+  std::vector<ReleaseEvent> release_events_;
 };
 
 // `cow_deleter` is used as the `ctx_deleter` for DataPtr to implement a COW

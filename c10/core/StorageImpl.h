@@ -27,10 +27,14 @@ struct C10_API StorageExtraMeta {
   // Work enqueued before materialization may still read it, so it is kept
   // until the storage is freed. See README-cow.md.
   DataPtr cow_materialized_from_;
+  // Whether this storage, a copy-on-write reference to stream-ordered data,
+  // has been released with cow::release_lazy_clone().
+  bool cow_released_ = false;
 };
 
 namespace impl::cow {
 C10_API void materialize_cow(StorageImpl* storage);
+C10_API intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage);
 } // namespace impl::cow
 
 // A storage represents the underlying backing data buffer for a
@@ -377,6 +381,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
  protected:
   friend void c10::impl::cow::materialize_cow(StorageImpl*);
+  friend intrusive_ptr<StorageImpl> c10::impl::cow::lazy_clone_storage(
+      StorageImpl&);
 
   // Returns the previous data_ptr. Bypasses materialization —
   // only for use by materializer implementations.
