@@ -4,6 +4,7 @@ import sys
 import threading
 import weakref
 from dataclasses import dataclass, field
+from datetime import timedelta
 from functools import partial, reduce
 
 import torch
@@ -640,6 +641,7 @@ class WorldData:
         default_factory=dict
     )
     pg_backend_config: dict[dist.ProcessGroup, str] = field(default_factory=dict)
+    pg_timeouts: dict[dist.ProcessGroup, timedelta] = field(default_factory=dict)
     group_count: int = 0
     tags_to_pg: dict[str, list[dist.ProcessGroup]] = field(default_factory=dict)
     pg_to_tag: dict[dist.ProcessGroup, str] = field(default_factory=dict)
@@ -683,6 +685,10 @@ class ThreadLocalWorld:
     @property
     def pg_backend_config(self):
         return self._get_world().pg_backend_config
+
+    @property
+    def pg_timeouts(self):
+        return self._get_world().pg_timeouts
 
     @property
     def group_count(self) -> int:

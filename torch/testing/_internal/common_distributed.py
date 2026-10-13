@@ -139,6 +139,7 @@ def setup_torchcomms_pg(
         store=file_store,
         group_name=group_name,
         backend_config=backend,
+        timeout=c10d._get_default_timeout(backend),
         rank_mapping={r: r for r in range(world_size)},
     )
 
