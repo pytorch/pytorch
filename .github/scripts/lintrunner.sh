@@ -4,6 +4,11 @@ set -ex
 CACHE_DIRECTORY="/tmp/.lintbin"
 CLANG_LINTERS="CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT"
 PYREFLY_LINTERS="PYREFLY"
+# Findings from these linters are reported but do not affect the job status.
+# They are excluded from the main blocking run and executed separately in the
+# advisory pass below.
+ADVISORY_LINTERS="TEST_LINTER"
+ADVISORY_LINT_JSON="lint_test_linter.json"
 
 case "${LINTER_GROUP:-}" in
     clang)
@@ -13,7 +18,7 @@ case "${LINTER_GROUP:-}" in
         ADDITIONAL_LINTRUNNER_ARGS="--take ${PYREFLY_LINTERS} --all-files"
         ;;
     other)
-        ADDITIONAL_LINTRUNNER_ARGS="--skip ${CLANG_LINTERS},${PYREFLY_LINTERS} ${CHANGED_FILES}"
+        ADDITIONAL_LINTRUNNER_ARGS="--skip ${CLANG_LINTERS},${PYREFLY_LINTERS},${ADVISORY_LINTERS} ${CHANGED_FILES}"
         ;;
     "")
         ;;
@@ -49,6 +54,15 @@ if ! spin lint -- --force-color --tee-json=lint.json ${ADDITIONAL_LINTRUNNER_ARG
     echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions. To apply suggested patches automatically, use the -a flag. Before pushing another commit,\e[0m"
     echo -e "\e[1m\e[36mplease verify locally and ensure everything passes.\e[0m"
     RC=1
+fi
+
+# Advisory pass: run advisory linters separately so their findings are
+# reported (in the log and ${ADVISORY_LINT_JSON}) without affecting the job
+# status. `spin lint` exits non-zero when findings are present, so ignore its
+# exit code here.
+if [[ "${LINTER_GROUP:-}" == "other" ]]; then
+    echo "Running advisory linters: ${ADVISORY_LINTERS} (findings do not fail this job)"
+    spin lint -- --force-color --take "${ADVISORY_LINTERS}" --tee-json="${ADVISORY_LINT_JSON}" ${CHANGED_FILES} || true
 fi
 
 # Unstage temporally added pyi files

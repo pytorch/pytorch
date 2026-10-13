@@ -113,10 +113,7 @@ class HardwareClassification(Enum):
 
 # Lint message types
 class LintSeverity(str, Enum):
-    ERROR = "error"
-    WARNING = "warning"
     ADVICE = "advice"
-    DISABLED = "disabled"
 
 
 class LintMessage(NamedTuple):
@@ -131,11 +128,11 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
-error_msg = partial(
+lint_msg = partial(
     LintMessage,
     char=None,
     code=LINTER_CODE,
-    severity=LintSeverity.ERROR,
+    severity=LintSeverity.ADVICE,
     original=None,
     replacement=None,
 )
@@ -472,7 +469,7 @@ class Rule:
 
     Each rule is a class declaring its id, a summary of what it checks and why
     it is needed, and a ``check`` classmethod implementing the rule. The check
-    builds its own messages with ``error_msg``; check signatures are
+    builds its own messages with ``lint_msg``; check signatures are
     rule-specific.
     """
 
@@ -555,7 +552,7 @@ class HwClassificationRule(Rule):
         classification = _get_hw_classification(node)
         if classification is None:
             return None, [
-                error_msg(
+                lint_msg(
                     name=cls.tag(),
                     path=filename,
                     line=node.lineno,
@@ -599,7 +596,7 @@ class InstantiationRule(Rule):
                 f"must not be used with {INSTANTIATE_FN_NAME}."
             )
         return [
-            error_msg(
+            lint_msg(
                 name=cls.tag(),
                 path=ctx.filename,
                 line=ctx.class_node.lineno,
@@ -633,7 +630,7 @@ class DeviceParamRule(Rule):
                 continue
             action = "must accept" if required else "must not accept"
             messages.append(
-                error_msg(
+                lint_msg(
                     name=cls.tag(),
                     path=ctx.filename,
                     line=stmt.lineno,
@@ -673,7 +670,7 @@ class AcceleratorApiRule(Rule):
                 if check is None:
                     continue
                 messages.append(
-                    error_msg(
+                    lint_msg(
                         name=cls.tag(),
                         path=ctx.filename,
                         line=node.lineno,
@@ -733,7 +730,7 @@ class DecoratorRule(Rule):
                 name = get_decorator_name(dec)
                 if name in forbidden:
                     messages.append(
-                        error_msg(
+                        lint_msg(
                             name=cls.tag(),
                             path=ctx.filename,
                             line=stmt.lineno,
@@ -764,7 +761,7 @@ class OnlyForRule(Rule):
         if ctx.instantiation is None or not ctx.instantiation.has_only_for:
             return []
         return [
-            error_msg(
+            lint_msg(
                 name=cls.tag(),
                 path=ctx.filename,
                 line=ctx.instantiation.call.lineno,
@@ -789,7 +786,7 @@ def check_file(filename: str) -> list[LintMessage]:
         tree = ast.parse(source, filename=filename)
     except SyntaxError as e:
         return [
-            error_msg(
+            lint_msg(
                 name=PARSE_ERROR_NAME,
                 path=filename,
                 line=e.lineno,

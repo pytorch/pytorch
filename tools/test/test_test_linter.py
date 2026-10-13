@@ -14,8 +14,8 @@ from unittest import mock
 from tools.linter.adapters import test_linter
 from tools.linter.adapters.test_linter import (
     check_file,
-    error_msg,
     HardwareClassification,
+    lint_msg,
     LintMessage,
     LintSeverity,
     main,
@@ -48,7 +48,7 @@ class TestHwClassificationLinter(unittest.TestCase):
         msgs = self._run("this is not valid python @@@")
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0].name, test_linter.PARSE_ERROR_NAME)
-        self.assertEqual(msgs[0].severity, LintSeverity.ERROR)
+        self.assertEqual(msgs[0].severity, LintSeverity.ADVICE)
         self.assertEqual(msgs[0].line, 1)
         self.assertEqual(
             msgs[0].description, "Failed to parse the file: invalid syntax"
@@ -58,10 +58,10 @@ class TestHwClassificationLinter(unittest.TestCase):
         with self.assertRaises(OSError):
             check_file(str(REPO_ROOT / "test" / "test_does_not_exist.py"))
 
-    def test_error_msg_defaults(self) -> None:
-        """Pin error_msg defaults so tests don't silently inherit a wrong severity/code."""
-        msg = error_msg(name="[test]", path="some.py", line=None, description="boom")
-        self.assertEqual(msg.severity, LintSeverity.ERROR)
+    def test_lint_msg_defaults(self) -> None:
+        """Pin lint_msg defaults so tests don't silently inherit a wrong severity/code."""
+        msg = lint_msg(name="[test]", path="some.py", line=None, description="boom")
+        self.assertEqual(msg.severity, LintSeverity.ADVICE)
         self.assertEqual(msg.code, "TEST_LINTER")
 
     # --- allowlist ---
@@ -163,7 +163,7 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(len(msgs), 1, src)
             self.assertEqual(
                 msgs[0],
-                error_msg(
+                lint_msg(
                     name="[hw_classification]",
                     path=msgs[0].path,
                     line=line,
@@ -185,7 +185,7 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            error_msg(
+            lint_msg(
                 name="[hw_classification]",
                 path=msgs[0].path,
                 line=2,
@@ -222,7 +222,7 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            error_msg(
+            lint_msg(
                 name="[device_param]",
                 path=msgs[0].path,
                 line=5,
@@ -267,7 +267,7 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(len(msgs), 1, f"failed with {param}")
             self.assertEqual(
                 msgs[0],
-                error_msg(
+                lint_msg(
                     name="[device_param]",
                     path=msgs[0].path,
                     line=4,
@@ -292,7 +292,7 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            error_msg(
+            lint_msg(
                 name="[instantiation]",
                 path=msgs[0].path,
                 line=3,
@@ -323,7 +323,7 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(len(msgs), 1, f"failed for {check}")
             self.assertEqual(
                 msgs[0],
-                error_msg(
+                lint_msg(
                     name="[accelerator_api]",
                     path=msgs[0].path,
                     line=5,
@@ -351,7 +351,7 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            error_msg(
+            lint_msg(
                 name="[accelerator_api]",
                 path=msgs[0].path,
                 line=5,
@@ -378,7 +378,7 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            error_msg(
+            lint_msg(
                 name="[accelerator_api]",
                 path=msgs[0].path,
                 line=3,
@@ -430,7 +430,7 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            error_msg(
+            lint_msg(
                 name="[device_param]",
                 path=msgs[0].path,
                 line=5,
@@ -453,7 +453,7 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            error_msg(
+            lint_msg(
                 name="[instantiation]",
                 path=msgs[0].path,
                 line=2,
@@ -489,7 +489,7 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(len(msgs), 1, f"failed for {bad_dec}")
             self.assertEqual(
                 msgs[0],
-                error_msg(
+                lint_msg(
                     name="[decorator]",
                     path=msgs[0].path,
                     line=6,
@@ -520,7 +520,7 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(len(msgs), 1, f"failed for {dec_name}")
             self.assertEqual(
                 msgs[0],
-                error_msg(
+                lint_msg(
                     name="[decorator]",
                     path=msgs[0].path,
                     line=6,
@@ -559,7 +559,7 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            error_msg(
+            lint_msg(
                 name="[only_for]",
                 path=msgs[0].path,
                 line=6,
