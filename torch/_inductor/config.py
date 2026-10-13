@@ -1880,7 +1880,11 @@ assume_32bit_indexing: bool = False
 # range. A later input past the bound fails that guard and recompiles a 64-bit variant,
 # so a graph can end up with two variants split on a threshold no example has to
 # cross. With avoid_32bit_indexing_guards, an unprovable size gets 64-bit indexing and
-# no guard: one variant that serves every size, at the cost of 64-bit index math.
+# no guard in kernel index/size-argument selection (expr_fits_within_32bit). Every
+# kernel whose sizes cannot be proven to fit then pays for 64-bit index math, which
+# can be measurable in memory-bound pointwise kernels. Template eligibility checks
+# (e.g. the TMA descriptor bounds for mm and grouped mm) still guard on the hint.
+# assume_32bit_indexing takes precedence when both are set.
 avoid_32bit_indexing_guards: bool = False
 
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
