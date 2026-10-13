@@ -15,19 +15,20 @@ dim = get_arg_value(split_node, 2, "dim")
 
 
 ## Mutations
-The invariant about mutation we have is:
+The invariant we have about mutation is: after AOTDispatch tracing, joint-graph and post-grad graphs contain no mutation except
 
-After AOTDispatch tracing, joint-graph and post-grad graphs contain no mutation except a `copy_` epilogue at the end of the graph and rare storage-mutating ops (`aten.set_.source_Tensor` and `aten.shallow_copy_data_.default`). The final post-grad pass `reinplace_inplaceable_ops` reintroduces mutation just before lowering.
+- a `copy_` epilogue at the end of the graph that writes back mutated inputs (see below), and
+- rare storage-mutating ops: `aten.set_.source_Tensor` and `aten.shallow_copy_data_.default`. Passes that do not support these may conservatively exit early if either appears in the graph:
 
-Passes operating on the joint_graph and post_grad graph do not need to account for other mutations. Passes that do not support these rare storage-mutating ops may conservatively exit early if any exists in the graph:
+  ```python
+  storage_mutation_ops = (aten.set_.source_Tensor, aten.shallow_copy_data_.default)
+  if any(graph.find_nodes(op="call_function", target=op, sort=False) for op in storage_mutation_ops):
+      return
+  ```
 
-```python
-storage_mutation_ops = (aten.set_.source_Tensor, aten.shallow_copy_data_.default)
-if any(graph.find_nodes(op="call_function", target=op, sort=False) for op in storage_mutation_ops):
-    return
-```
+Passes do not need to account for any other mutation. The final post-grad pass `reinplace_inplaceable_ops` reintroduces mutation just before lowering.
 
-When the user program mutates a graph input, functionalization traces the mutation as functional ops and AOTDispatch appends a `copy_` epilogue at the end of the graph that writes the final value back into the input (`input.copy_(new_value)`). This epilogue still constrains passes. For example, we may have a graph like
+When the user program mutates a graph input, functionalization traces the mutation as functional ops and AOTDispatch appends a `copy_` epilogue at the end of the graph that writes the final value back into the input (`input.copy_(new_value)`). We can assume the rest of the graph is functional, but this epilogue still constrains passes. For example, we may have a graph like
 ```python
 def f(x: Tensor):
     y = x.clone()
