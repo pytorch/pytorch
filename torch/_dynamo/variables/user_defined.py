@@ -62,7 +62,7 @@ from ..exc import (
     unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
-from ..guards import GuardBuilder, install_guard
+from ..guards import GuardBuilder, install_guard, install_not_in_instance_dict_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
@@ -1176,6 +1176,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             "items",
             "update",
         ):
+            if not args:
+                raise_type_error(
+                    tx, f"unbound method OrderedDict.{name}() needs an argument"
+                )
             obj = args[0].realize()
             if not pyodict_check(obj):
                 raise_type_error(
@@ -3233,12 +3237,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     if method.__objclass__ is collections.OrderedDict
                     else ConstDictVariable
                 )
-                return cast(
-                    VariableTracker,
-                    owner.tp_methods[method.__name__](
-                        self, tx, method.__name__, args, kwargs
-                    ),
+                result = owner.tp_methods[method.__name__](
+                    self, tx, method.__name__, args, kwargs
                 )
+                if result is not None:
+                    return result
 
             overloaded = (
                 self._base_methods is not None and method not in self._base_methods
@@ -3893,6 +3896,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # Step 6: __getattr__ fallback.
         result = self.call_getattr_fallback(tx, name)
         if result is not None:
+            if (
+                self.source
+                and isinstance(self, variables.UnspecializedNNModuleVariable)
+                and hasattr(self.value, "__dict__")
+                and name not in self.value.__dict__
+            ):
+                # A pending deletion in the traced code can reach here with the
+                # name still in the live dict; guarding absence then would fail
+                # on the frame it was created.
+                install_not_in_instance_dict_guard(self.source, name)
             return result
 
         # Step 7: AttributeError.
