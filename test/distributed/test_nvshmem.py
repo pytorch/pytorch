@@ -128,6 +128,68 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         torch.ops.symm_mem.nvshmem_broadcast(tensor, src_rank, group_name)
         self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
 
+    def test_mempool_broadcast_recycled(self) -> None:
+        """
+        Regression for the nvshmem_broadcast barrier fix (rocSHMEM): the op now
+        issues rocshmem_barrier_on_stream before rocshmem_broadcastmem_on_stream.
+        Unlike NVSHMEM, rocSHMEM's broadcast does not implicitly make all PEs'
+        symmetric buffers consistent first, so a broadcast over a freshly
+        (re)allocated -- especially a *recycled* -- MemPool symmetric buffer can
+        land no data on non-root PEs without that barrier.
+
+        This broadcasts over a mempool buffer, frees it, allocates again to
+        recycle the same symmetric address, then broadcasts distinct data from
+        root and asserts every non-root rank receives the root's data. Without
+        the barrier fix the second broadcast races the recycled allocation and
+        non-root ranks keep their stale/zero contents.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+        src_rank = 0
+
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+        recycle_ptrs: list[int] = []
+
+        def _broadcast_round(fill_value: int) -> None:
+            # root fills distinct data; non-root start from a sentinel that must
+            # be overwritten by the broadcast.
+            with torch.cuda.use_mem_pool(mempool):
+                if self.rank == src_rank:
+                    tensor = torch.full(
+                        (numel,), fill_value, dtype=dtype, device=self.device
+                    )
+                else:
+                    tensor = torch.full((numel,), -1, dtype=dtype, device=self.device)
+            symm_mem.rendezvous(tensor, group=group_name)
+            torch.ops.symm_mem.nvshmem_broadcast(tensor, src_rank, group_name)
+            self.assertEqual(
+                tensor,
+                torch.full((numel,), fill_value, dtype=dtype, device=self.device),
+            )
+            # Record the symmetric address, then drop the only reference so the
+            # mempool can recycle it for the next round.
+            recycle_ptrs.append(tensor.data_ptr())
+            del tensor
+
+        # First broadcast over a fresh mempool buffer.
+        _broadcast_round(7)
+        # Second broadcast over a reused/recycled mempool buffer with distinct
+        # data; this is the case the barrier fix guards.
+        _broadcast_round(9)
+        # The recycle scenario is only covered if the second allocation reused the
+        # first's symmetric address; otherwise this is two fresh broadcasts and the
+        # barrier-fix regression is not exercised.
+        if recycle_ptrs[0] != recycle_ptrs[1]:
+            self.skipTest(
+                f"mempool did not recycle the symmetric address "
+                f"({recycle_ptrs[0]:#x} != {recycle_ptrs[1]:#x}); "
+                "recycle path not exercised"
+            )
+
     def test_mempool_tensor_w_collective(self) -> None:
         """
         Test the effectiveness of MemPool on tensor factory ops.
@@ -695,6 +757,249 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         torch.testing.assert_close(out[:out_numel], expected)
 
     @skip_if_lt_x_gpu(2)
+    def test_all_to_all_vdev_force_host(self) -> None:
+        # Exercise the inter-node host-barrier fallback's LOGIC intra-node via the
+        # test-only TORCH_SYMMMEM_A2AV_HOST override (production dispatch picks the
+        # path by direct-access reachability). This covers the host path's metadata
+        # exchange, offsets, and push; the barrier-completion behaviour that only
+        # matters on a real non-IPC transport still needs multi-node hardware.
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        k = 10
+        inp_splits = torch.randint(k, (self.world_size,), device=self.device)
+        inp_numel = inp_splits.sum().item()
+        out_splits = torch.zeros_like(inp_splits)
+        dist.all_to_all_single(out_splits, inp_splits)
+        out_numel = out_splits.sum().item()
+
+        max_inp_numel = k * self.world_size
+        max_out_numel = max_inp_numel * self.world_size
+
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).copy_(
+            torch.randn(max_inp_numel, dtype=dtype, device=self.device)
+        )
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
+        in_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        out_splits_offsets = symm_mem.empty(
+            (2, self.world_size), dtype=torch.int64, device=self.device
+        )
+        in_splits.copy_(inp_splits)
+        dist.barrier()
+
+        prev = os.environ.get("TORCH_SYMMMEM_A2AV_HOST")
+        os.environ["TORCH_SYMMMEM_A2AV_HOST"] = "1"
+        try:
+            torch.ops.symm_mem.all_to_all_vdev(
+                inp, out, in_splits, out_splits_offsets, group_name
+            )
+        finally:
+            if prev is None:
+                os.environ.pop("TORCH_SYMMMEM_A2AV_HOST", None)
+            else:
+                os.environ["TORCH_SYMMMEM_A2AV_HOST"] = prev
+
+        torch.testing.assert_close(out_splits_offsets[0], out_splits)
+        out_offsets = torch.cumsum(out_splits, dim=0)
+        self.assertEqual(out_splits_offsets[1][0], 0)
+        torch.testing.assert_close(out_splits_offsets[1][1:], out_offsets[:-1])
+
+        expected = torch.empty(out_numel, dtype=dtype, device=self.device)
+        dist.all_to_all_single(
+            expected, inp[:inp_numel], out_splits.tolist(), inp_splits.tolist()
+        )
+        torch.testing.assert_close(out[:out_numel], expected)
+        dist.barrier()
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all_vdev_small_signal_pad(self) -> None:
+        # The op reserves an int64 signaling region in the out_splits_offsets
+        # handle's signal pad, past the CAS channels; if the pad is too small it must
+        # raise rather than silently overrun it. The default pad (9216 B) is far
+        # larger than the op needs, so shrink it below the op's requirement (but
+        # above the rendezvous barrier's) to exercise the guard.
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        k = 10
+        max_inp_numel = k * self.world_size
+        max_out_numel = max_inp_numel * self.world_size
+
+        original_pad = symm_mem.get_signal_pad_size()
+        # The op's signaling region needs symm_max_nblocks(32)*world_size*4 CAS bytes
+        # + (4*world_size+1)*8 int64 bytes = 160*world_size + 8. 256 B is below that
+        # for any world_size >= 2 (so the guard fires) yet leaves room for the
+        # rendezvous barrier's channel 0. Assert it so the test fails loudly rather
+        # than going vacuous if those sizes ever change.
+        tiny_pad = 256
+        self.assertLess(
+            tiny_pad,
+            160 * self.world_size + 8,
+            "signal pad must be below the op's signaling need to exercise the guard",
+        )
+        symm_mem.set_signal_pad_size(tiny_pad)
+        try:
+            inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).fill_(
+                0
+            )
+            out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(
+                -1
+            )
+            in_splits = symm_mem.empty(
+                self.world_size, dtype=torch.int64, device=self.device
+            ).fill_(0)
+            out_splits_offsets = symm_mem.empty(
+                (2, self.world_size), dtype=torch.int64, device=self.device
+            )
+            for t in (inp, out, in_splits, out_splits_offsets):
+                symm_mem.rendezvous(t, group=group_name)
+            dist.barrier()
+            with self.assertRaisesRegex(
+                RuntimeError, "signal pad too small for all_to_all_vdev"
+            ):
+                torch.ops.symm_mem.all_to_all_vdev(
+                    inp, out, in_splits, out_splits_offsets, group_name
+                )
+            dist.barrier()
+        finally:
+            symm_mem.set_signal_pad_size(original_pad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all_vdev_invalid_args(self) -> None:
+        # Negative test for the host-side input-validation TORCH_CHECKs in
+        # all_to_all_vdev. These fire before any kernel is launched, so the test
+        # is fast and does not need a device-side sync. Symmetric tensors are
+        # allocated exactly as in test_all_to_all_vdev; only the one argument
+        # under test is malformed per case.
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        k = 10
+        max_inp_numel = k * self.world_size
+        max_out_numel = max_inp_numel * self.world_size
+
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).fill_(0)
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
+        in_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        ).fill_(0)
+        out_splits_offsets = symm_mem.empty(
+            (2, self.world_size), dtype=torch.int64, device=self.device
+        )
+        for t in (inp, out, in_splits, out_splits_offsets):
+            symm_mem.rendezvous(t, group=group_name)
+        dist.barrier()
+
+        # (a) out_splits_offsets of the wrong shape: must be [2, world_size].
+        bad_oso_1d = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        bad_oso_3rows = symm_mem.empty(
+            (3, self.world_size), dtype=torch.int64, device=self.device
+        )
+        for bad_oso in (bad_oso_1d, bad_oso_3rows):
+            symm_mem.rendezvous(bad_oso, group=group_name)
+            with self.assertRaisesRegex(
+                RuntimeError, r"out_splits_offsets must have shape \[2, world_size\]"
+            ):
+                torch.ops.symm_mem.all_to_all_vdev(
+                    inp, out, in_splits, bad_oso, group_name
+                )
+
+        # (b) int32 splits instead of int64.
+        in_splits_i32 = symm_mem.empty(
+            self.world_size, dtype=torch.int32, device=self.device
+        ).fill_(0)
+        symm_mem.rendezvous(in_splits_i32, group=group_name)
+        with self.assertRaisesRegex(
+            RuntimeError, "in_splits and out_splits_offsets must be int64"
+        ):
+            torch.ops.symm_mem.all_to_all_vdev(
+                inp, out, in_splits_i32, out_splits_offsets, group_name
+            )
+        oso_i32 = symm_mem.empty(
+            (2, self.world_size), dtype=torch.int32, device=self.device
+        )
+        symm_mem.rendezvous(oso_i32, group=group_name)
+        with self.assertRaisesRegex(
+            RuntimeError, "in_splits and out_splits_offsets must be int64"
+        ):
+            torch.ops.symm_mem.all_to_all_vdev(inp, out, in_splits, oso_i32, group_name)
+
+        # (c) non-contiguous input (a strided view of a symmetric buffer).
+        inp_wide = symm_mem.empty(
+            2 * max_inp_numel, dtype=dtype, device=self.device
+        ).fill_(0)
+        symm_mem.rendezvous(inp_wide, group=group_name)
+        noncontig_inp = inp_wide[::2]
+        self.assertFalse(noncontig_inp.is_contiguous())
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input, out, in_splits and out_splits_offsets must be contiguous",
+        ):
+            torch.ops.symm_mem.all_to_all_vdev(
+                noncontig_inp, out, in_splits, out_splits_offsets, group_name
+            )
+
+        # (d) in_splits with the wrong number of elements (!= world_size).
+        in_splits_bad = symm_mem.empty(
+            self.world_size + 1, dtype=torch.int64, device=self.device
+        ).fill_(0)
+        symm_mem.rendezvous(in_splits_bad, group=group_name)
+        with self.assertRaisesRegex(RuntimeError, "in_splits must have world_size"):
+            torch.ops.symm_mem.all_to_all_vdev(
+                inp, out, in_splits_bad, out_splits_offsets, group_name
+            )
+
+        # (e) input/out dtype mismatch.
+        out_i64 = symm_mem.empty(
+            max_out_numel, dtype=torch.int64, device=self.device
+        ).fill_(-1)
+        symm_mem.rendezvous(out_i64, group=group_name)
+        with self.assertRaisesRegex(
+            RuntimeError, "input and out must have the same dtype"
+        ):
+            torch.ops.symm_mem.all_to_all_vdev(
+                inp, out_i64, in_splits, out_splits_offsets, group_name
+            )
+
+        # (f) a 0-dimensional input (dim() < 1). A reshaped view of a size-1
+        # symmetric buffer shares its handle, so the op's rendezvous resolves it and
+        # the dim check fires.
+        scalar = symm_mem.empty(1, dtype=dtype, device=self.device).fill_(0)
+        symm_mem.rendezvous(scalar, group=group_name)
+        scalar_0d = scalar.reshape(())
+        with self.assertRaisesRegex(
+            RuntimeError, "input and out must have at least 1 dimension"
+        ):
+            torch.ops.symm_mem.all_to_all_vdev(
+                scalar_0d, out, in_splits, out_splits_offsets, group_name
+            )
+
+        # (g) input/out with mismatched dim-0 stride (different inner shape), both
+        # contiguous and same dtype -- exercises the stride half of the dtype/stride
+        # check that case (e) does not reach.
+        inp_wide = symm_mem.empty(
+            self.world_size, 8, dtype=dtype, device=self.device
+        ).fill_(0)
+        out_narrow = symm_mem.empty(
+            self.world_size, 4, dtype=dtype, device=self.device
+        ).fill_(-1)
+        for t in (inp_wide, out_narrow):
+            symm_mem.rendezvous(t, group=group_name)
+        with self.assertRaisesRegex(RuntimeError, "same stride at dim 0"):
+            torch.ops.symm_mem.all_to_all_vdev(
+                inp_wide, out_narrow, in_splits, out_splits_offsets, group_name
+            )
+
+        dist.barrier()
+
+    @skip_if_lt_x_gpu(2)
     def test_all_to_all_vdev_repeat(self) -> None:
         # Stress the op's device-side completion barrier: reuse the SAME symmetric
         # buffers across many calls with different splits, running them back-to-back
@@ -759,6 +1064,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
 
         for got, (_, _, _, expected) in zip(captured, plans):
             torch.testing.assert_close(got, expected)
+        dist.barrier()  # realign ranks before the reused worker's next test
 
     @skip_if_lt_x_gpu(2)
     @skip_but_pass_in_sandcastle_if(
@@ -865,21 +1171,41 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         #
         # get_a2a_nblocks derives the block count from the input buffer size
         # (16B/thread * THREADS_PER_BLOCK * 8 = 64KiB per block, rounded up to a
-        # multiple of world_size); sizing the per-rank input so its byte count is
-        # in (world*64KiB, 2*world*64KiB] yields exactly 2 blocks per peer for any
-        # world_size, without relying on the (process-cached) TORCH_SYMMMEM_NBLOCKS
-        # override. nsend*D = 32767*3 = 98301 bytes/peer is odd, so it is not a
-        # multiple of 2 and the buggy version drops its tail byte.
+        # multiple of world_size) and then CAPS it: 64 blocks intra-node, 16
+        # inter-node. all_to_all_vdev itself requires an intra-node direct-access
+        # group, so the cap here is 64. Sizing the per-rank input so its byte
+        # count is in (world*64KiB, 2*world*64KiB] yields exactly 2 blocks per
+        # peer -- but only while 2*world_size stays under the cap. For
+        # world_size > 32 the 64-block cap collapses this to 1 block/peer and the
+        # multi-block remainder path is never exercised (a vacuous pass), so skip
+        # those. This also avoids relying on the (process-cached)
+        # TORCH_SYMMMEM_NBLOCKS override. nsend*D = 32767*3 = 98301 bytes/peer is
+        # odd, so it is not a multiple of 2 and the buggy version drops its tail
+        # byte.
         self._init_device()
         if os.environ.get("TORCH_SYMMMEM_NBLOCKS"):
             # Needs get_a2a_nblocks to derive 2 blocks/peer from the input size;
             # the override forces a fixed count and makes the remainder path a
             # vacuous pass.
             self.skipTest("TORCH_SYMMMEM_NBLOCKS override bypasses the remainder path")
+        if self.world_size > 32:
+            # 2 * world_size exceeds the intra-node 64-block cap, so blocks/peer
+            # drops below 2 and the remainder path under test is never reached.
+            self.skipTest(
+                "world_size > 32: block cap collapses blocks/peer below 2, "
+                "remainder path not exercised"
+            )
         group_name = dist.group.WORLD.group_name
         dtype = torch.int8
         D = 3
         nsend = 32767
+        # Guard against the test silently going vacuous: the per-peer byte count
+        # must exceed one block (64 KiB) so get_a2a_nblocks yields >= 2 blocks/peer.
+        self.assertGreater(
+            nsend * D,
+            64 * 1024,
+            "per-peer bytes must exceed one 64 KiB block to force >=2 blocks/peer",
+        )
 
         max_inp_numel = nsend * self.world_size
         max_out_numel = nsend * self.world_size  # uniform splits: recv nsend/peer
