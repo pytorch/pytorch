@@ -15,6 +15,7 @@ from . import (
     bytecode_debugger,
     config,
     convert_frame,
+    decorators,
     eval_frame,
     functional_export,
     resume_execution,
@@ -216,6 +217,9 @@ def reset_code_caches() -> None:
             if code:
                 reset_code(code)
         code_context.clear()
+        # The shared non-recursive disable wrapper is skipped at import; restore
+        # that if it was enrolled above (e.g. as a package's top-level code).
+        eval_frame.skip_code(decorators._nonrecursive_disable_wrapper_code)
 
 
 def get_recursion_limit() -> int:
