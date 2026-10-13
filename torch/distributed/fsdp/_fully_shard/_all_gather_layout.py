@@ -68,7 +68,7 @@ def _default_all_gather_output_fn(
             reassembled.append((copy_output, output, outer_size))
         split_output = copy_output.view(torch.uint8) if byte_views else copy_output
         if split_output.numel() != world_size * split_size:  # a smaller payload
-            split_output = split_output.narrow(0, 0, world_size * split_size)
+            split_output = split_output[: world_size * split_size]
         split_outputs.append(split_output.view(world_size, split_size))
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs

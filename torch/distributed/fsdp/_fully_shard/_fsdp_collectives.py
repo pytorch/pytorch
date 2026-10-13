@@ -612,6 +612,7 @@ def foreach_all_gather_copy_out(
 # world_size) signature fail.
 def _default_reduce_scatter_input_fn(
     unsharded_grads: list[torch.Tensor],
+    *,
     shard_dims: list[int],
     world_size: int,
 ) -> Callable:

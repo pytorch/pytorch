@@ -1008,12 +1008,13 @@ class FSDPParam:
         name = self._param_fqn or self._module_info.param_name
         if self.is_dtensor:
             raise NotImplementedError(
-                "Resharding to smaller mesh is not supported for DTensor parameters yet"
+                f"Resharding {name} to smaller mesh is not supported for DTensor "
+                "parameters yet"
             )
-        if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
+        if (num_outputs := len(self.all_gather_outputs)) > 1:
             raise NotImplementedError(
                 f"Resharding {name} to smaller mesh is not supported for all-gather "
-                "extensions yet"
+                f"extensions with {num_outputs} inputs yet"
             )
         if self.post_forward_mesh_info is None:
             raise AssertionError("Expected post_forward_mesh_info to not be None")
@@ -1034,6 +1035,10 @@ class FSDPParam:
             )
 
     def to_sharded_post_forward(self) -> None:
+        if self.is_dtensor:
+            raise NotImplementedError(
+                "Resharding to smaller mesh is not supported for DTensor parameters yet"
+            )
         self._assert_in_states(ShardedState.UNSHARDED)
         if self.post_forward_mesh_info is None:
             raise AssertionError("Expected post_forward_mesh_info to not be None")
@@ -1199,7 +1204,11 @@ class FSDPParam:
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
-                raise NotImplementedError
+                name = self._param_fqn or self._module_info.param_name
+                raise NotImplementedError(
+                    f"All-gathering the post-forward shard of {name} is not "
+                    "supported for all-gather extensions yet"
+                )
             all_gather_input = _to_dtype_if_needed(
                 cast(torch.Tensor, self._sharded_post_forward_param_data),
                 self.param_dtype,
@@ -1555,11 +1564,11 @@ def _get_all_gather_output_layouts(
         output = all_gather_outputs[i] if all_gather_outputs else None
         if is_record:
             ndim = max(len(size), 1)
-            try:
-                dim = operator.index(inp.dim)
-            except TypeError:
-                dim = None
-            if dim is None or not -ndim <= dim < ndim:
+            dim = inp.dim
+            # Tensor dims would sync on every lookup of the cached layouts
+            if not isinstance(dim, torch.Tensor) and hasattr(dim, "__index__"):
+                dim = operator.index(dim)
+            if not isinstance(dim, int) or not -ndim <= dim < ndim:
                 raise ValueError(
                     f"AllGatherInput {i} of {param_name} has dim {inp.dim!r}, which "
                     f"is invalid for size {tuple(size)}"

@@ -264,14 +264,19 @@ class AllGatherInput:
     ``fsdp_post_all_gather``. For example, over a shard mesh of size ``N``,
     ``(2, F, D)`` with ``dim=1`` gathers to ``(2, N * F, D)``. Plain tensor
     inputs are instead read as rows of the padded sharded parameter, concatenated
-    along its shard dim, and passed viewed as ``(-1, *tensor.shape[1:])``.
+    along its shard dim, and passed viewed as ``(-1, *tensor.shape[1:])``. For a
+    nonzero shard dim, they need the padded sharded element count or its dims
+    before that dim.
 
     The number of inputs, and the element count and dtype of each
     ``AllGatherInput``, must stay fixed across calls so FSDP can reuse outputs.
-    Every rank must return the same shapes and dtypes, which FSDP cannot check
-    locally: a mismatch hangs or corrupts the collective. Extensions own any
+    Plain tensors may also become uint8 byte views of their outputs or, for shard
+    dim 0, shrink, which leaves stale data after the gathered prefix of their
+    output. Every rank must return the same shapes and dtypes, which FSDP cannot
+    check locally: a mismatch hangs or corrupts the collective. Extensions own any
     padding, since the sharded tensor that ``fsdp_pre_all_gather`` is called on is
-    unpadded on ranks with a smaller shard.
+    unpadded on ranks with a smaller shard, so plain tensors of unevenly sharded
+    parameters need the padded sharded size.
 
     Attributes:
         tensor (Tensor): Local payload, which FSDP flattens with ``view(-1)``.
