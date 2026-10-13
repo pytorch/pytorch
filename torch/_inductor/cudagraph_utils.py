@@ -34,6 +34,8 @@ static_inputs_log = torch._logging.getArtifactLogger(
 OutputType = list[int | torch.Tensor | None]
 ModelType = Callable[[list[InputType]], OutputType]
 
+_CUDAGRAPH_SUPPORTED_DEVICE_TYPES = frozenset(OrderedSet(["cuda"]))
+
 
 def cudagraph_trees_generation_cloning() -> Literal["user_visible"] | None:
     mode = config.triton.cudagraph_trees_generation_cloning
@@ -189,6 +191,8 @@ class WrappedFunction:
     constants: tuple[torch.Tensor, ...]
     placeholders: Sequence[PlaceholderInfo]
     mutated_input_idxs: Sequence[int]
+    cudagraph_managed_input_rerecord_limit: int
+    cudagraph_managed_input_rerecord_action: Literal["copy", "skip"]
     kernel_free_cudagraph: bool = False
     user_visible_output_idxs: frozenset[int] = dataclasses.field(
         default_factory=frozenset
@@ -374,12 +378,13 @@ def is_graph_capture_runtime_ready(device_types: AbstractSet[str]) -> bool:
 def _graph_capture_compatible_device_type(device_type: str) -> bool:
     """Whether a single-device FX graph may pass the cudagraph device gate.
 
-    CUDA always passes here. Out-of-tree backends share the PrivateUse1 slot:
-    only after rename (name differs from the default ``privateuseone``) and
-    with a registered ``DeviceInterface``. This gate does not perform capture;
-    backends still supply their own graph runtime (e.g. NPUGraph via OOT).
+    Devices listed in ``_CUDAGRAPH_SUPPORTED_DEVICE_TYPES`` always pass.
+    Out-of-tree backends share the PrivateUse1 slot: only after rename
+    (name differs from the default ``privateuseone``) and with a registered
+    ``DeviceInterface``. This gate does not perform capture; backends still
+    supply their own graph runtime (e.g. NPUGraph via OOT).
     """
-    if device_type == "cuda":
+    if device_type in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES:
         return True
     privateuse1_name = torch._C._get_privateuse1_backend_name()
     if privateuse1_name == "privateuseone":

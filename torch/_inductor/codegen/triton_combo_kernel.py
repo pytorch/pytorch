@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     import triton
 
 from .. import config, metrics
-from ..runtime.hints import DeviceProperties, TritonMeta
+from ..runtime.hints import TritonMeta
 from ..runtime.runtime_utils import next_power_of_2
 from ..runtime.triton_heuristics import (
     RoundRobinComboKernelGrid,
@@ -61,6 +61,7 @@ from .triton_utils import (
     equal_1_arg_indices,
     is_unaligned_buffer,
     signature_to_meta,
+    triton_meta_device_props,
 )
 
 
@@ -379,7 +380,7 @@ class ComboKernel(Kernel):
             if ndim < 2:
                 raise AssertionError(f"Combokernel not support tile {tiled_groups}")
 
-            # Skip 2d reductions (r0_,r1_) and 3D pointwise (x,y,z) from combo
+            # Skip multi-axis reductions and 3D pointwise kernels from combo.
             keys = tiled_groups.keys()
             if ("r0_" in keys and "r1_" in keys) or "z" in keys:
                 all_partitions.append([node_info])
@@ -918,7 +919,7 @@ class ComboKernel(Kernel):
                 "signature": signature_to_meta(
                     signature, size_dtype=size_dtype, argdefs=argdefs
                 ),
-                "device": DeviceProperties.create(
+                "device": triton_meta_device_props(
                     V.graph.get_current_device_or_throw()
                 ),
                 "constants": {},

@@ -14,7 +14,7 @@ from torch._inductor.remote_cache import (
     RemoteCacheBackend,
     RemoteCachePassthroughSerde,
 )
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 from torch.testing._internal.logging_utils import log_settings
 
 
@@ -51,6 +51,8 @@ class FakeCache(RemoteCache):
 
 
 class TestRemoteCache(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_normal_logging(
         self,
     ) -> None:

@@ -59,15 +59,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "cpu-s390x"
-            docker_image: "manylinuxs390x-builder"
-            docker_image_tag_prefix: "cpu-s390x"
-            build_name: "manywheel-py3_10-cpu-s390x"
-            timeout_minutes: 420
-            pytorch_extra_install_requirements: ""
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -143,14 +134,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "cpu-s390x"
-            docker_image: "manylinuxs390x-builder"
-            docker_image_tag_prefix: "cpu-s390x"
-            build_name: "manywheel-py3_10-cpu-s390x"
-            runs_on: "linux.s390x"
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -222,13 +205,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "cpu-s390x"
-            docker_image: "manylinuxs390x-builder"
-            docker_image_tag_prefix: "cpu-s390x"
-            build_name: "manywheel-py3_10-cpu-s390x"
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
