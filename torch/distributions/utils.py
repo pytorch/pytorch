@@ -83,8 +83,8 @@ def _sum_rightmost(value: Tensor, dim: int) -> Tensor:
     """
     if dim == 0:
         return value
-    required_shape = value.shape[:-dim] + (-1,)
-    return value.reshape(required_shape).sum(-1)
+    dims = tuple(range(max(0, value.dim() - dim), value.dim()))
+    return value.sum(dim=dims)
 
 
 def logits_to_probs(logits: Tensor, is_binary: bool = False) -> Tensor:

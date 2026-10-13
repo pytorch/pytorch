@@ -4295,6 +4295,26 @@ class TestDistributions(DistributionsTestCase):
                     except NotImplementedError:
                         pass
 
+    def test_independent_empty_batch(self):
+        base = Normal(torch.zeros(0, 3), torch.ones(0, 3))
+        dist = Independent(base, 1)
+        x = torch.zeros(0, 3)
+
+        log_prob = dist.log_prob(x)
+        entropy = dist.entropy()
+
+        self.assertEqual(log_prob.shape, torch.Size([0]))
+        self.assertEqual(entropy.shape, torch.Size([0]))
+        self.assertEqual(log_prob, torch.empty(0))
+        self.assertEqual(entropy, torch.empty(0))
+
+        # Multi-dimensional empty batch with reinterpreted_batch_ndims = 2
+        base_multi = Normal(torch.zeros(2, 0, 4), torch.ones(2, 0, 4))
+        dist_multi = Independent(base_multi, 2)
+        x_multi = torch.zeros(2, 0, 4)
+        self.assertEqual(dist_multi.log_prob(x_multi).shape, torch.Size([2]))
+        self.assertEqual(dist_multi.entropy().shape, torch.Size([2]))
+
     @expectedFailureMPS
     def test_independent_expand(self):
         for Dist, params in _get_examples():
