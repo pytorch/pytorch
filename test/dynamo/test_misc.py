@@ -10457,6 +10457,45 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             run(arch, idx)
             self.assertEqual(arch.msg, f"max_idx={n - 1}, bad=[-1]")
 
+    def test_equal_sets_render_the_same_guard_text(self):
+        from torch._dynamo.guards import _order_stable_repr
+
+        live, rebuilt = {1, 9}, set()
+        rebuilt.add(9)
+        rebuilt.add(1)
+        self.assertEqual(live, rebuilt)
+        self.assertNotEqual(repr(live), repr(rebuilt))
+        self.assertEqual(_order_stable_repr(live), _order_stable_repr(rebuilt))
+        self.assertEqual(
+            _order_stable_repr(("a", frozenset(rebuilt), [rebuilt])),
+            "('a', frozenset({1, 9}), [{1, 9}])",
+        )
+        for value in (set(), frozenset(), (1,), (), "s", 1.5):
+            self.assertEqual(_order_stable_repr(value), repr(value))
+            self.assertEqual(eval(_order_stable_repr(value)), value)
+
+        def guard_text(s):
+            torch._dynamo.reset()
+            guards = []
+
+            def fn(x, s):
+                if 9 in s:
+                    return x + 1
+                return x - 1
+
+            opt_fn = torch._dynamo.optimize("eager", guard_export_fn=guards.extend)(fn)
+            opt_fn(torch.zeros(1), s)
+            return [
+                code
+                for guard in guards
+                for code in guard.code_list or ()
+                if code.startswith("L['s'] ==")
+            ]
+
+        live_text = guard_text(live)
+        self.assertIn("L['s'] == {1, 9}", live_text)
+        self.assertEqual(live_text, guard_text(rebuilt))
+
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
         # and then rolls back due to control flow.
