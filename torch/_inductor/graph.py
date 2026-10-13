@@ -1844,8 +1844,46 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
     def finalize(self) -> None:
+        selected = self._constrained_buffers_with_selected_template_users()
         for buf in self.buffers:
-            buf.decide_layout()
+            # Freeze to the layout Triton templates were rendered against, see
+            # TritonTemplateKernel.get_stride_and_maybe_freeze_layout, but only if
+            # some consumer actually uses a template. Otherwise forcing the
+            # template's layout only adds copies.
+            name = buf.get_name()
+            if name in selected and isinstance(buf.layout, ir.FlexibleLayout):
+                buf.freeze_layout_with_exact_strides(
+                    self.buffer_layout_constraints[name].stride
+                )
+            else:
+                buf.decide_layout()
+
+    def _constrained_buffers_with_selected_template_users(self) -> OrderedSet[str]:
+        """
+        Names of layout-constrained buffers consumed by a selected Triton template:
+        a TritonTemplateBuffer, or a MultiTemplateBuffer whose best unfused choice
+        is a template. If a MultiTemplateBuffer that prefers an extern kernel picks
+        a template anyway (e.g. through epilogue fusion), the scheduler's layout
+        conflict check falls back to the extern choice.
+        """
+        constraints = self.buffer_layout_constraints
+        selected: OrderedSet[str] = OrderedSet()
+        if not constraints:
+            return selected
+        for buf in self.buffers:
+            if not isinstance(buf, ir.TritonTemplateBuffer):
+                continue
+            names = OrderedSet(
+                name for inp in buf.inputs if (name := inp.get_name()) in constraints
+            )
+            if not names or names <= selected:
+                continue
+            if isinstance(buf, ir.MultiTemplateBuffer):
+                choice, _ = buf.get_min_choice()
+                if not isinstance(choice, ir.TritonTemplateCallerBase):
+                    continue
+            selected |= names
+        return selected
 
     @contextmanager
     def set_current_node(self, node: torch.fx.Node):  # type: ignore[no-untyped-def]
