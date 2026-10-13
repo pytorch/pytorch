@@ -11114,6 +11114,79 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             logs.output,
         )
 
+    def test_precompile_entry_runs_guard_complete_hook(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+            set_guard_complete_hook,
+        )
+
+        def fn(x):
+            return x + 1
+
+        def injected(x):
+            return x + 42
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(),
+            injected.__code__,
+        )
+        guard_results = []
+
+        def record(hit):
+            guard_results.append(hit)
+            return hit
+
+        old_hook = set_guard_complete_hook(record)
+        try:
+            self.assertEqual(compiled_fn(x), injected(x))
+            self.assertEqual(guard_results, [True])
+            self.assertEqual(cnt.frame_count, 0)
+        finally:
+            set_guard_complete_hook(old_hook)
+            _reset_precompile_entries(fn.__code__)
+
+    def test_guard_complete_hook_miss_bypasses_precompile_entry(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+            set_guard_complete_hook,
+        )
+
+        def fn(x):
+            return x + 1
+
+        def injected(x):
+            return x + 42
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(),
+            injected.__code__,
+        )
+        guard_results = []
+
+        # What the guard collective returns when another rank missed.
+        def peer_missed(hit):
+            guard_results.append(hit)
+            return False
+
+        old_hook = set_guard_complete_hook(peer_missed)
+        try:
+            self.assertEqual(compiled_fn(x), fn(x))
+            self.assertEqual(guard_results, [True])
+            self.assertEqual(cnt.frame_count, 1)
+        finally:
+            set_guard_complete_hook(old_hook)
+            _reset_precompile_entries(fn.__code__)
+
     def test_guard_complete_hook_can_reset_hit(self):
         from torch._C._dynamo.eval_frame import set_guard_complete_hook
 
