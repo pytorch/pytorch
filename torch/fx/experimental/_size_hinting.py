@@ -13,6 +13,7 @@ concrete integer hints. Two strategies are provided:
 from __future__ import annotations
 
 import logging
+import math
 import sys
 from functools import lru_cache
 from typing import Any, TYPE_CHECKING
@@ -32,6 +33,9 @@ SYMPY_FACTOR_MAX_FREE_SYMBOLS = 50
 # Maximum product of expression free symbols and non-symbol replacement count
 # before optimization_hint skips expensive SymPy subs() canonicalization.
 SYMPY_SUBS_MAX_SYMBOL_REPLACEMENT_PRODUCT = 1024
+
+# Maximum passes over the multi-symbol linear asserts when repairing unbacked hints.
+CONSISTENT_HINTS_MAX_ITERS = 100
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -405,6 +409,264 @@ def _hint_bounds_from_runtime_asserts(
     return lower, upper
 
 
+def _symbol_hint_bounds(
+    shape_env: ShapeEnv, s: sympy.Symbol
+) -> tuple[int | None, int | None]:
+    lower: int | None = None
+    upper: int | None = None
+    vr = shape_env.var_to_range.get(s, None)
+    if vr is not None:
+        if isinstance(vr.lower, (int, sympy.Integer)):
+            lower = int(vr.lower)
+        if isinstance(vr.upper, (int, sympy.Integer)):
+            upper = int(vr.upper)
+    ra_lower, ra_upper = _hint_bounds_from_runtime_asserts(shape_env, s)
+    if ra_lower is not None:
+        lower = ra_lower if lower is None else max(lower, ra_lower)
+    if ra_upper is not None:
+        upper = ra_upper if upper is None else min(upper, ra_upper)
+    return lower, upper
+
+
+def _clamp_fallback(fallback: int, lower: int | None, upper: int | None) -> int:
+    if lower is not None:
+        fallback = max(fallback, lower)
+    if upper is not None:
+        fallback = min(fallback, upper)
+    return fallback
+
+
+def _multi_symbol_linear_constraints(
+    shape_env: ShapeEnv,
+) -> list[tuple[dict[sympy.Symbol, int], int]]:
+    """Runtime asserts of the form ``sum(c_i * u_i) + k <= 0`` over two or more
+    unbacked symbols, after backed symbols and equalities are substituted.
+    Single-symbol bounds are already handled by ``_symbol_hint_bounds``.
+    """
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    constraints: list[tuple[dict[sympy.Symbol, int], int]] = []
+    seen: set[sympy.Basic] = set()
+    for asserts in shape_env.deferred_runtime_asserts.values():
+        for ra in asserts:
+            ax = ra.expr
+            if ax in seen:
+                continue
+            seen.add(ax)
+            if isinstance(ax, sympy.LessThan):
+                g, strict = ax.lhs - ax.rhs, False
+            elif isinstance(ax, sympy.StrictLessThan):
+                g, strict = ax.lhs - ax.rhs, True
+            elif isinstance(ax, sympy.GreaterThan):
+                g, strict = ax.rhs - ax.lhs, False
+            elif isinstance(ax, sympy.StrictGreaterThan):
+                g, strict = ax.rhs - ax.lhs, True
+            else:
+                continue
+            try:
+                g = g.xreplace(shape_env.replacements)
+                g = sympy.expand(_sub_unbacked_exprs(shape_env, g))
+                syms = list(g.free_symbols)
+                if len(syms) < 2 or len(free_unbacked_symbols(g)) != len(syms):
+                    continue
+                coeffs = {s: g.coeff(s, 1) for s in syms}
+                k = g.subs(dict.fromkeys(syms, 0))
+                if sympy.expand(g - sum(c * s for s, c in coeffs.items()) - k) != 0:
+                    continue
+                if not k.is_Integer or not all(c.is_Integer for c in coeffs.values()):
+                    continue
+            except Exception:
+                continue
+            int_coeffs = {s: int(c) for s, c in coeffs.items() if c != 0}
+            if len(int_coeffs) < 2:
+                continue
+            # Integers: g < 0  <=>  g + 1 <= 0.
+            constraints.append((int_coeffs, int(k) + (1 if strict else 0)))
+    return constraints
+
+
+def _divisibility_constraints(
+    shape_env: ShapeEnv,
+) -> dict[sympy.Symbol, tuple[int, int]]:
+    """``Eq(Mod(u, m), r)`` runtime asserts on a single unbacked symbol, as
+    ``u -> (m, r)``. Several zero-residue moduli on one symbol combine via lcm;
+    other conflicting forms keep the first one seen.
+    """
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+    from torch.utils._sympy.functions import Mod, PythonMod
+
+    mod_types = (sympy.Mod, Mod, PythonMod)
+    mods: dict[sympy.Symbol, tuple[int, int]] = {}
+    for asserts in shape_env.deferred_runtime_asserts.values():
+        for ra in asserts:
+            ax = ra.expr
+            if not isinstance(ax, sympy.Equality):
+                continue
+            lhs, rhs = ax.lhs, ax.rhs
+            if isinstance(rhs, mod_types):
+                lhs, rhs = rhs, lhs
+            if not (isinstance(lhs, mod_types) and rhs.is_Integer):
+                continue
+            base, m = lhs.args
+            if not (
+                isinstance(base, sympy.Symbol)
+                and m.is_Integer
+                and int(m) > 1
+                and free_unbacked_symbols(base)
+            ):
+                continue
+            m, r = int(m), int(rhs) % int(m)
+            prev = mods.get(base)
+            if prev is None:
+                mods[base] = (m, r)
+            elif prev[1] == 0 and r == 0:
+                mods[base] = (prev[0] * m // math.gcd(prev[0], m), 0)
+    return mods
+
+
+def _round_up(v: int, mod: tuple[int, int] | None) -> int:
+    if mod is None:
+        return v
+    m, r = mod
+    return v + (r - v) % m
+
+
+def _round_down(v: int, mod: tuple[int, int] | None) -> int:
+    if mod is None:
+        return v
+    m, r = mod
+    return v - (v - r) % m
+
+
+def _repair_hints(
+    constraints: list[tuple[dict[sympy.Symbol, int], int]],
+    assignment: dict[sympy.Symbol, int],
+    bounds: dict[sympy.Symbol, tuple[int | None, int | None]],
+    mods: dict[sympy.Symbol, tuple[int, int]],
+) -> tuple[dict[sympy.Symbol, int], bool]:
+    """Greedily adjust ``assignment`` until every constraint holds.
+
+    For a violated ``sum(c_i * u_i) + k <= 0`` we first raise symbols with a
+    negative coefficient (e.g. a backing-storage size) within their upper
+    bound, then lower symbols with a positive coefficient (e.g. view size and
+    offset) evenly within their lower bound. Every move lands on a value that
+    keeps the symbol's ``Mod`` residue from ``mods``. Returns the assignment
+    with the fewest violations seen and whether it satisfies every constraint.
+    """
+
+    def excess(coeffs: dict[sympy.Symbol, int], k: int) -> int:
+        return sum(c * x[s] for s, c in coeffs.items()) + k
+
+    def num_violations() -> int:
+        return sum(1 for coeffs, k in constraints if excess(coeffs, k) > 0)
+
+    def lowest(s: sympy.Symbol) -> int | None:
+        lower = bounds[s][0]
+        return None if lower is None else _round_up(lower, mods.get(s))
+
+    x = dict(assignment)
+    best, best_violations = dict(x), num_violations()
+    for _ in range(CONSISTENT_HINTS_MAX_ITERS):
+        if best_violations == 0:
+            break
+        for coeffs, k in constraints:
+            e = excess(coeffs, k)
+            if e <= 0:
+                continue
+            for s, c in coeffs.items():
+                if c >= 0:
+                    continue
+                mod = mods.get(s)
+                target = _round_up(x[s] - (e // c), mod)
+                upper = bounds[s][1]
+                if upper is not None and target > upper:
+                    target = _round_down(upper, mod)
+                if target > x[s]:
+                    e -= (target - x[s]) * -c
+                    x[s] = target
+                if e <= 0:
+                    break
+            lowerable = [s for s, c in coeffs.items() if c > 0]
+            while e > 0 and lowerable:
+                share = -(-e // len(lowerable))
+                still_lowerable = []
+                for s in lowerable:
+                    c = coeffs[s]
+                    mod = mods.get(s)
+                    target = _round_down(x[s] - -(-share // c), mod)
+                    floor = lowest(s)
+                    if floor is not None and target < floor:
+                        target = floor
+                    if target < x[s]:
+                        e -= (x[s] - target) * c
+                        x[s] = target
+                        if floor is None or target > floor:
+                            still_lowerable.append(s)
+                    if e <= 0:
+                        break
+                lowerable = still_lowerable
+        violations = num_violations()
+        if violations < best_violations:
+            best, best_violations = dict(x), violations
+        else:
+            # No progress this pass; further passes repeat the same moves.
+            break
+    return best, best_violations == 0
+
+
+def _get_consistent_unbacked_hints(
+    shape_env: ShapeEnv, fallback: int
+) -> tuple[dict[sympy.Symbol, int], bool]:
+    """One hint per unbacked symbol, chosen jointly so that multi-symbol linear
+    runtime asserts (e.g. ``u_offset + u_size <= u_storage``) hold. Hinting each
+    symbol independently can violate them, which produces example tensors
+    whose views do not fit their backing storage.
+
+    Returns the assignment and whether every collected assert is satisfied.
+    Symbols not mentioned by such asserts are omitted.
+    """
+    key = (fallback, shape_env._version_counter, len(shape_env.var_to_hint_override))
+    cached = shape_env._consistent_unbacked_hints
+    if cached is not None and cached[0] == key:
+        return cached[1], cached[2]
+
+    constraints = _multi_symbol_linear_constraints(shape_env)
+    mods = _divisibility_constraints(shape_env)
+    assignment: dict[sympy.Symbol, int] = {}
+    bounds: dict[sympy.Symbol, tuple[int | None, int | None]] = {}
+    symbols = [s for coeffs, _ in constraints for s in coeffs] + list(mods)
+    for s in symbols:
+        if s in bounds:
+            continue
+        bounds[s] = lower, upper = _symbol_hint_bounds(shape_env, s)
+        v = _round_down(_clamp_fallback(fallback, lower, upper), mods.get(s))
+        if lower is not None and v < lower:
+            v = _round_up(lower, mods.get(s))
+        assignment[s] = v
+
+    consistent = True
+    if constraints:
+        assignment, consistent = _repair_hints(constraints, assignment, bounds, mods)
+        if not consistent:
+            log.debug(
+                "Could not find unbacked hints satisfying all linear asserts: %s",
+                assignment,
+            )
+
+    shape_env._consistent_unbacked_hints = (key, assignment, consistent)
+    return assignment, consistent
+
+
+def unbacked_hints_consistent(shape_env: ShapeEnv, fallback: int | None = None) -> bool:
+    """Whether optimization hints for unbacked symbols satisfy every
+    multi-symbol linear runtime assert."""
+    if fallback is None:
+        from torch._inductor.config import unbacked_symint_fallback
+
+        fallback = unbacked_symint_fallback
+    return _get_consistent_unbacked_hints(shape_env, fallback)[1]
+
+
 def _optimization_hint_base(
     shape_env: ShapeEnv,
     expr: sympy.Expr | int,
@@ -511,26 +773,12 @@ def _optimization_hint_base(
     # size expression like s44 - u0 can hint negative and overflow downstream
     # allocations (autotuning example tensors, buffer sizing).
     size_dict = {}
+    joint_hints, _ = _get_consistent_unbacked_hints(shape_env, fallback)
     for s in free_symbols:
-        lower: int | None = None
-        upper: int | None = None
-        vr = shape_env.var_to_range.get(s, None)
-        if vr is not None:
-            if isinstance(vr.lower, (int, sympy.Integer)):
-                lower = int(vr.lower)
-            if isinstance(vr.upper, (int, sympy.Integer)):
-                upper = int(vr.upper)
-        ra_lower, ra_upper = _hint_bounds_from_runtime_asserts(shape_env, s)
-        if ra_lower is not None:
-            lower = ra_lower if lower is None else max(lower, ra_lower)
-        if ra_upper is not None:
-            upper = ra_upper if upper is None else min(upper, ra_upper)
-        sym_fallback = fallback
-        if lower is not None:
-            sym_fallback = max(sym_fallback, lower)
-        if upper is not None:
-            sym_fallback = min(sym_fallback, upper)
-        size_dict[s] = sym_fallback
+        if s in joint_hints:
+            size_dict[s] = joint_hints[s]
+            continue
+        size_dict[s] = _clamp_fallback(fallback, *_symbol_hint_bounds(shape_env, s))
 
     try:
         final_result = _sympy_subs(expr, size_dict)

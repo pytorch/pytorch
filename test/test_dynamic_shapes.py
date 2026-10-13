@@ -6014,6 +6014,74 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         self.assertRaises(GuardOnDataDependentSymNode, lambda: func(torch.tensor([33])))
 
+    def _unbacked_view_of_storage(self, storage_upper=None, offset_mod=None, size_mod=None):
+        shape_env = ShapeEnv()
+        storage, offset, size = (shape_env.create_unbacked_symint() for _ in range(3))
+        for s in (storage, offset, size):
+            torch._check(s >= 0)
+        if storage_upper is not None:
+            torch._check(storage <= storage_upper)
+        if offset_mod is not None:
+            torch._check(offset % offset_mod == 0)
+        if size_mod is not None:
+            torch._check(size % size_mod == 0)
+        torch._check(offset + size <= storage)
+        hints = tuple(
+            shape_env.optimization_hint(s.node.expr) for s in (storage, offset, size)
+        )
+        return shape_env, (storage, offset, size), hints
+
+    def test_optimization_hint_relational_assert_unbounded(self):
+        # Hinting each symbol to the fallback independently gives 8192 for
+        # all three, which violates offset + size <= storage.
+        _, _, (storage, offset, size) = self._unbacked_view_of_storage()
+        self.assertEqual((storage, offset, size), (16384, 8192, 8192))
+
+    def test_optimization_hint_relational_assert_bounded(self):
+        _, _, (storage, offset, size) = self._unbacked_view_of_storage(
+            storage_upper=64
+        )
+        self.assertEqual((storage, offset, size), (64, 32, 32))
+
+    def test_optimization_hint_relational_assert_divisibility(self):
+        for storage_upper, offset_mod, size_mod in [
+            (100, None, 8),
+            (99, 2, 2),
+            (10, None, 16),
+        ]:
+            with self.subTest(
+                storage_upper=storage_upper, offset_mod=offset_mod, size_mod=size_mod
+            ):
+                _, _, (storage, offset, size) = self._unbacked_view_of_storage(
+                    storage_upper, offset_mod, size_mod
+                )
+                self.assertLessEqual(offset + size, storage)
+                self.assertLessEqual(storage, storage_upper)
+                if offset_mod is not None:
+                    self.assertEqual(offset % offset_mod, 0)
+                if size_mod is not None:
+                    self.assertEqual(size % size_mod, 0)
+
+    def test_optimization_hint_derived_expr_consistent(self):
+        shape_env, (storage, offset, size), hints = self._unbacked_view_of_storage()
+        self.assertEqual(
+            shape_env.optimization_hint((offset + size).node.expr),
+            hints[1] + hints[2],
+        )
+        self.assertEqual(
+            shape_env.optimization_hint((storage - offset - size).node.expr),
+            hints[0] - hints[1] - hints[2],
+        )
+
+    def test_optimization_hint_relational_assert_cache_invalidation(self):
+        shape_env = ShapeEnv()
+        storage, offset, size = (shape_env.create_unbacked_symint() for _ in range(3))
+        for s in (storage, offset, size):
+            torch._check(s >= 0)
+        self.assertEqual(shape_env.optimization_hint(storage.node.expr), 8192)
+        torch._check(offset + size <= storage)
+        self.assertEqual(shape_env.optimization_hint(storage.node.expr), 16384)
+
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_shape_id_unifies_unbacked_symbols(self):
         """

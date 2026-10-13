@@ -4292,6 +4292,10 @@ class ShapeEnv:
         # optimization_hint canonicalization of unbacked expressions.
         self._equality_graph: dict[sympy.Expr, OrderedSet[sympy.Expr]] | None = None
         self._unbacked_replacements: dict[sympy.Expr, sympy.Expr] | None = None
+        # Used by _get_consistent_unbacked_hints: (cache key, assignment, consistent).
+        self._consistent_unbacked_hints: (
+            tuple[tuple[int, int, int], dict[sympy.Symbol, int], bool] | None
+        ) = None
 
         self.trace_asserts = trace_asserts
 
@@ -4451,6 +4455,7 @@ class ShapeEnv:
             # Cached state for optimization_hint unbacked canonicalization
             "_equality_graph",
             "_unbacked_replacements",
+            "_consistent_unbacked_hints",
             # Foreign ShapeEnv transfer cache; replay reconstructs equivalent
             # transferred symbols through recorded registration events.
             "foreign_unbacked_symbol_cache",
