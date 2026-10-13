@@ -64,8 +64,6 @@ class TestExtendedCUDAIsAvail(TestCase):
     def test_cuda_is_available(self, avoid_init, nvml_avail):
         if IS_JETSON and nvml_avail and avoid_init == "1":
             self.skipTest("Not working for Jetson")
-        if torch.version.hip is not None and nvml_avail and avoid_init == "1":
-            self.skipTest("Skipped on ROCm")
         patch_env = {"PYTORCH_NVML_BASED_CUDA_CHECK": avoid_init} if avoid_init else {}
         with patch.dict(os.environ, **patch_env):
             if nvml_avail:
@@ -129,6 +127,10 @@ class TestVisibleDeviceParses(TestCase):
             "GPU-e56257c4-947f-6a5b-7ec9-0f45567ccf4e",
             "GPU-1c20e77d-1c1a-d9ed-fe37-18b8466a78ad",
         ]
+        # amdsmi asic serials have no NVML "GPU-" prefix. Candidates below stay
+        # GPU-prefixed; the matcher strips that prefix on ROCm.
+        if torch.version.hip is not None:
+            uuids = [uuid.removeprefix("GPU-") for uuid in uuids]
         self.assertEqual(_transform_uuid_to_ordinals(["GPU-9e8d35e3"], uuids), [1])
         self.assertEqual(
             _transform_uuid_to_ordinals(["GPU-e4", "GPU-9e8d35e3"], uuids), [2, 1]
