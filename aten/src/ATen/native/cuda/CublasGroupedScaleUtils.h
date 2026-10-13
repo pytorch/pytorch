@@ -10,7 +10,6 @@ namespace at::native {
 enum class CublasGroupedScaleLayout : uint8_t {
   Scalar,
   PerBatchScalar,
-  Vec16UE4M3,
   Vec128F32,
   Block128x128F32,
 };
@@ -41,9 +40,6 @@ C10_HOST_DEVICE inline int64_t cublas_grouped_scale_size_bytes(
       return 0;
     case CublasGroupedScaleLayout::PerBatchScalar:
       return sizeof(float);
-    case CublasGroupedScaleLayout::Vec16UE4M3:
-      return at::round_up(outer, int64_t{128}) *
-          at::round_up(at::ceil_div(inner, int64_t{16}), int64_t{4});
     case CublasGroupedScaleLayout::Vec128F32:
       return outer * at::ceil_div(inner, int64_t{128}) * sizeof(float);
     case CublasGroupedScaleLayout::Block128x128F32:
