@@ -21,7 +21,7 @@ from .bytecode_transformation import (
     create_instruction,
     create_swap,
     Instruction,
-    unique_id,
+    unique_id_unbound_in,
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
@@ -533,7 +533,8 @@ def _build_comprehension_fn(
     )
 
     lineno = tx.lineno if tx.lineno is not None else tx.f_code.co_firstlineno
-    fn_name = unique_id(f"__comprehension_{tx.f_code.co_name}_at_{lineno}")
+    fn_prefix = f"__comprehension_{tx.f_code.co_name}_at_{lineno}"
+    fn_name = unique_id_unbound_in(fn_prefix, tx.output.global_scope)
 
     comprehension_body_vars = (
         analysis.iterator_vars

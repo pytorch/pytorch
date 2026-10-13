@@ -25,7 +25,7 @@ from torch.distributed._tools.fake_collectives import (
     non_functional_collectives,
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -35,24 +35,32 @@ c10d = torch.ops.c10d
 _c10d_functional = torch.ops._c10d_functional
 _c10d_functional_autograd = torch.ops._c10d_functional_autograd
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
 
 class TestFakeCollectives(TestCase):
     def _setup_distributed(self):
         world_size = 4
         store = FakeStore()
         dist.init_process_group("fake", rank=0, world_size=world_size, store=store)
-        torch.cuda.set_device(torch.cuda.current_device())
+        torch.accelerator.set_device_index(torch.accelerator.current_device_index())
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
     def test_collectives(self):
         try:
             self._setup_distributed()
             with FakeTensorMode(), CollectiveTest(test=self):
-                test_tensor_list = [torch.randn(100, device="cuda") for _ in range(4)]
-                test_tensor_list_2 = [torch.randn(400, device="cuda") for _ in range(4)]
-                test_tensor = torch.randn(100, device="cuda")
+                test_tensor_list = [
+                    torch.randn(100, device=device_type) for _ in range(4)
+                ]
+                test_tensor_list_2 = [
+                    torch.randn(400, device=device_type) for _ in range(4)
+                ]
+                test_tensor = torch.randn(100, device=device_type)
                 # Used as gather output or scatter input
-                test_tensor2 = torch.randn(400, device="cuda")
+                test_tensor2 = torch.randn(400, device=device_type)
 
                 # Testing non-functional collective operations
                 dist.broadcast(test_tensor, src=0)
