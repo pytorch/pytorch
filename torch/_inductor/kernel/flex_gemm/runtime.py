@@ -43,6 +43,13 @@ def _quack_cache_dir(_inductor_cache_dir_env: str | None) -> str:
     return os.path.join(cache_dir(), "quack")
 
 
+@functools.cache
+def _quack_gemm_config(config: QuackConfigKey) -> Any:
+    from torch._vendor.quack.gemm_config import GemmConfig
+
+    return GemmConfig(**dict(config))
+
+
 def flex_gemm_problem(
     device: torch.device,
     m: int,
@@ -381,8 +388,6 @@ def gemm_epilogue(
     row/col vectors are always passed rank-1; QuACK shares a row across groups
     and offsets a ``[total_m]`` column per group.
     """
-    from torch._vendor.quack.gemm_config import GemmConfig
-
     if blockscaled_format is not None:
         if SFA is None or SFB is None:
             raise RuntimeError("FlexGEMM block-scaled GEMMs require SFA and SFB")
@@ -473,10 +478,11 @@ def gemm_epilogue(
     concat_layout = (
         None if output_contraction is None else output_contraction.concat_layout
     )
-    quack_config = GemmConfig(**dict(config))
+    # Generated wrappers pass the current stream; switching streams costs ~20us.
     stream_context = (
         torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
         if stream is not None
+        and stream != torch._C._cuda_getCurrentRawStream(a.device.index)
         else contextlib.nullcontext()
     )
     with cache_dir_override(inductor_quack_cache_dir()), stream_context:
@@ -494,7 +500,7 @@ def gemm_epilogue(
             out=output_buffers,
             out_dtype=out.dtype,
             store_d=output_contraction is None,
-            config=quack_config,
+            config=_quack_gemm_config(config),
             tuned=False,
             concat_layout=concat_layout,
             cu_seqlens_m=cu_seqlens_m,
