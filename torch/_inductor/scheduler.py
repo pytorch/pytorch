@@ -11031,7 +11031,7 @@ class Scheduler:
             if not (
                 isinstance(producer, SchedulerNode)
                 and isinstance(producer.node, ComputedBuffer)
-                and producer.node.data.output_indexer is not None
+                and producer.node.data.datadep_output_indexer is not None
                 and write in producer.read_writes.writes
                 and any(
                     isinstance(size, ir.DataDependentRange)
@@ -11048,7 +11048,7 @@ class Scheduler:
                     == tuple(consumer._body.var_ranges.values())
                 ):
                     continue
-                # The data-dependent output_indexer maps valid logical
+                # The datadep_output_indexer maps valid logical
                 # coordinates to unique output locations by contract.
                 # Compare the sliced address graphs, not body-local tmp numbers.
                 write_graph = producer._body.get_indirect_index_graph(write.index)

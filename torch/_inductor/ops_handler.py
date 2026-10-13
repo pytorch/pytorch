@@ -243,9 +243,9 @@ class OpsHandler(Generic[T]):
         """
         raise NotImplementedError
 
-    def register_datadep_range(self, value: T, symbol: sympy.Symbol) -> sympy.Expr:
+    def register_datadep_range(self, value: T, symbol: sympy.Symbol) -> None:
         """Associate a loop-range token with a scalar computed by inner_fn."""
-        return symbol
+        raise NotImplementedError
 
     def load(self, name: str, index: sympy.Expr) -> T:
         """
@@ -1075,7 +1075,9 @@ class KernelFormatterHandler(DefaultHandler):
         return self.parent_handler.indirect_indexing(*args, **kwargs)
 
     def register_datadep_range(self, value, symbol):
-        self._output.writeline(f"ops.register_datadep_range({value}, {sympy_str(symbol)})")
+        self._output.writeline(
+            f"ops.register_datadep_range({value}, {sympy_str(symbol)})"
+        )
         return self.parent_handler.register_datadep_range(value, symbol)
 
     def _write(self, line):

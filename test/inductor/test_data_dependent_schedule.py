@@ -26,14 +26,16 @@ class TestDataDependentSchedule(TestCase):
         graph = GraphLowering(torch.fx.symbolic_trace(lambda: 0))
         j_range = ir.DataDependentRange("j")
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j = index
             return ops.load("offsets", b) + ops.index_expr(j, torch.int64)
 
         def add_body(index):
             b, _ = index
             ops.register_datadep_range(ops.load("lengths", b), j_range)
-            address = ops.indirect_indexing(output_indexer(index), 6, wrap_neg=False)
+            address = ops.indirect_indexing(
+                datadep_output_indexer(index), 6, wrap_neg=False
+            )
             return ops.load("values", address) + ops.load("bias", b)
 
         with (
@@ -60,8 +62,8 @@ class TestDataDependentSchedule(TestCase):
                 dtype=torch.float32,
                 inner_fn=add_body,
                 ranges=[4, j_range],
-                flat_size=[6],
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[6],
+                datadep_output_indexer=datadep_output_indexer,
             )
             added.realize()
             added.data.data.decide_layout()
@@ -83,7 +85,8 @@ class TestDataDependentSchedule(TestCase):
                     inner_fn=sum_body,
                     ranges=[4],
                     reduction_ranges=[j_range],
-                    iteration_numel=6,
+                    datadep_output_flat_size=[4],
+                    datadep_iteration_numel=6,
                     reduction_type="sum",
                     src_dtype=torch.float32,
                     reduction_hint=ir.ReductionHint.DEFAULT,
@@ -144,7 +147,8 @@ class TestDataDependentSchedule(TestCase):
                         inner_fn=sum_body,
                         ranges=[4],
                         reduction_ranges=[j_range],
-                        iteration_numel=6,
+                        datadep_output_flat_size=[4],
+                        datadep_iteration_numel=6,
                         reduction_type="sum",
                         src_dtype=torch.float32,
                         reduction_hint=ir.ReductionHint.DEFAULT,

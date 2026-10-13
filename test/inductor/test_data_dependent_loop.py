@@ -74,7 +74,7 @@ class TestDataDependentIR(TestCase):
                     result[int(offsets[b]) + j] = b + j
             return result
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j = index
             return ops.load("offsets", b) + ops.index_expr(j, torch.int64)
 
@@ -89,8 +89,8 @@ class TestDataDependentIR(TestCase):
                 dtype=output.dtype,
                 inner_fn=inner_fn,
                 ranges=[4, j_range],
-                flat_size=[6],
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[6],
+                datadep_output_indexer=datadep_output_indexer,
             )
             tensor.realize()
             buffer = tensor.data.data
@@ -112,7 +112,7 @@ class TestDataDependentIR(TestCase):
             ops.register_datadep_range(ops.load("lengths", index[0]), j_range)
             return ops.load("values", index[0])
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j = index
             return ops.load("offsets", b) + ops.index_expr(j, torch.int64)
 
@@ -122,8 +122,8 @@ class TestDataDependentIR(TestCase):
                 dtype=torch.float32,
                 inner_fn=inner_fn,
                 ranges=[4, j_range],
-                flat_size=[6],
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[6],
+                datadep_output_indexer=datadep_output_indexer,
             )
             tensor.realize()
             buffer = tensor.data.data
@@ -152,7 +152,7 @@ class TestDataDependentIR(TestCase):
                     result[int(offsets[b]) + k] = 10 * b + k
             return result
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, _, k = index
             return ops.load("offsets", b) + ops.index_expr(k, torch.int64)
 
@@ -167,8 +167,8 @@ class TestDataDependentIR(TestCase):
                 dtype=output.dtype,
                 inner_fn=inner_fn,
                 ranges=sizes,
-                flat_size=[5],
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[5],
+                datadep_output_indexer=datadep_output_indexer,
             )
             tensor.realize()
             buffer = tensor.data.data
@@ -206,8 +206,8 @@ class TestDataDependentIR(TestCase):
                 dtype=torch.int64,
                 inner_fn=inner_fn,
                 ranges=[3, j_range],
-                flat_size=[6],
-                output_indexer=lambda index: 2 * index[0] + index[1],
+                datadep_output_flat_size=[6],
+                datadep_output_indexer=lambda index: 2 * index[0] + index[1],
             )
             tensor.realize()
             buffer = tensor.data.data
@@ -227,7 +227,7 @@ class TestDataDependentIR(TestCase):
             ops.register_datadep_range(ops.load("lengths", index[0]), j_range)
             return ops.index_expr(index[0] + index[1], torch.int64)
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j = index
             return ops.load("offsets", b) + ops.index_expr(j, torch.int64)
 
@@ -237,8 +237,8 @@ class TestDataDependentIR(TestCase):
                 dtype=torch.int64,
                 inner_fn=inner_fn,
                 ranges=ranges,
-                flat_size=[6],
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[6],
+                datadep_output_indexer=datadep_output_indexer,
             )
             tensor.realize()
             buffer = tensor.data.data
@@ -266,14 +266,14 @@ class TestDataDependentIR(TestCase):
                     result[address] = values[address] + bias[b]
             return result
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j = index
             return ops.load("offsets", b) + ops.index_expr(j, torch.int64)
 
         def inner_fn(index):
             ops.register_datadep_range(ops.load("lengths", index[0]), j_range)
             address = ops.indirect_indexing(
-                output_indexer(index), values.numel(), wrap_neg=False
+                datadep_output_indexer(index), values.numel(), wrap_neg=False
             )
             return ops.load("values", address) + ops.load("bias", index[0])
 
@@ -283,8 +283,8 @@ class TestDataDependentIR(TestCase):
                 dtype=values.dtype,
                 inner_fn=inner_fn,
                 ranges=[4, j_range],
-                flat_size=[values.numel()],
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[values.numel()],
+                datadep_output_indexer=datadep_output_indexer,
             )
             lazy.realize()
             buffer = lazy.data.data
@@ -323,7 +323,7 @@ class TestDataDependentIR(TestCase):
                     result[destination] = values[source]
             return result
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j = index
             return ops.load("destination_offsets", b) + ops.index_expr(j, torch.int64)
 
@@ -344,8 +344,8 @@ class TestDataDependentIR(TestCase):
                 dtype=values.dtype,
                 inner_fn=inner_fn,
                 ranges=[3, j_range],
-                flat_size=[output.numel()],
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[output.numel()],
+                datadep_output_indexer=datadep_output_indexer,
             )
             lazy.realize()
             buffer = lazy.data.data
@@ -386,7 +386,7 @@ class TestDataDependentIR(TestCase):
                         result[address] = values[address] + bias[b]
             return result
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j, k = index
             parent = ops.load("offsets", b) + ops.index_expr(j, torch.int64)
             parent = ops.indirect_indexing(
@@ -403,7 +403,7 @@ class TestDataDependentIR(TestCase):
             )
             ops.register_datadep_range(ops.load("depth_lengths", parent), k_range)
             address = ops.indirect_indexing(
-                output_indexer(index), values.numel(), wrap_neg=False
+                datadep_output_indexer(index), values.numel(), wrap_neg=False
             )
             return ops.load("values", address) + ops.load("bias", b)
 
@@ -413,8 +413,8 @@ class TestDataDependentIR(TestCase):
                 dtype=values.dtype,
                 inner_fn=inner_fn,
                 ranges=[3, j_range, k_range],
-                flat_size=[values.numel()],
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[values.numel()],
+                datadep_output_indexer=datadep_output_indexer,
             )
             lazy.realize()
             buffer = lazy.data.data
@@ -468,7 +468,7 @@ class TestDataDependentIR(TestCase):
                         )
             return result
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j, *feature = index
             address = (
                 ops.load("offsets", b) + ops.index_expr(j, torch.int64)
@@ -480,7 +480,7 @@ class TestDataDependentIR(TestCase):
         def inner_fn(index):
             ops.register_datadep_range(ops.load("lengths", index[0]), j_range)
             address = ops.indirect_indexing(
-                output_indexer(index), values.numel(), wrap_neg=False
+                datadep_output_indexer(index), values.numel(), wrap_neg=False
             )
             return ops.load("values", address) + ops.load("bias", index[0])
 
@@ -490,9 +490,9 @@ class TestDataDependentIR(TestCase):
                 dtype=values.dtype,
                 inner_fn=inner_fn,
                 ranges=[4, j_range, *feature_shape],
-                flat_size=list(values.shape),
-                iteration_numel=values.numel(),
-                output_indexer=output_indexer,
+                datadep_output_flat_size=list(values.shape),
+                datadep_iteration_numel=values.numel(),
+                datadep_output_indexer=datadep_output_indexer,
             )
             tensor.realize()
             buffer = tensor.data.data
@@ -517,6 +517,7 @@ class TestDataDependentIR(TestCase):
                 self.assertEqual(buffer.make_loader()(last).value, output[tuple(last)])
             self.assertEqual(output, reference())
             self.assertEqual(buffer.get_size(), list(values.shape))
+            self.assertEqual(buffer.get_size(), buffer.data.datadep_output_flat_size)
             self.assertEqual(buffer.get_stride(), list(strides))
             self.assertEqual(
                 body.indirect_var_ranges[body.indirect_vars[-1]], values.numel()
@@ -555,16 +556,18 @@ class TestDataDependentIR(TestCase):
                 inner_fn=inner_fn,
                 ranges=[4, 2, 3],
                 reduction_ranges=[j_range],
+                datadep_output_flat_size=list(output.shape),
                 reduction_type="sum",
-                iteration_numel=values.numel(),
+                datadep_iteration_numel=values.numel(),
                 src_dtype=values.dtype,
                 reduction_hint=ir.ReductionHint.DEFAULT,
             )
-            buffer = ir.ComputedBuffer(
-                name="out",
-                layout=ir.FixedLayout(torch.device(device), values.dtype, [4, 2, 3]),
-                data=reduction,
-            )
+            tensor = ir.TensorBox.create(reduction)
+            tensor.realize()
+            buffer = tensor.data.data
+            buffer.decide_layout()
+            self.assertEqual(buffer.get_size(), [4, 2, 3])
+            self.assertEqual(buffer.get_size(), reduction.datadep_output_flat_size)
             _, body, _ = buffer.get_default_sizes_body()
             evaluator = EagerOps(
                 {
@@ -618,6 +621,8 @@ class TestDataDependentIR(TestCase):
                 inner_fn=inner_fn,
                 ranges=[4],
                 reduction_ranges=[j_range],
+                datadep_output_flat_size=[4],
+                datadep_iteration_numel=values.numel(),
                 reduction_type="sum",
                 src_dtype=values.dtype,
                 reduction_hint=ir.ReductionHint.DEFAULT,

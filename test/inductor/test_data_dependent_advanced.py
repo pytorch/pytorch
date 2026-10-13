@@ -37,7 +37,7 @@ class TestDataDependentAdvanced(TestCase):
                         )
             return output
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, i, j = index
             width = ops.load("right_offsets", b + 1) - ops.load("right_offsets", b)
             return (
@@ -95,9 +95,9 @@ class TestDataDependentAdvanced(TestCase):
                 dtype=left.dtype,
                 inner_fn=inner_fn,
                 ranges=[4, i_range, j_range],
-                flat_size=[packed_size],
-                iteration_numel=packed_size,
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[packed_size],
+                datadep_iteration_numel=packed_size,
+                datadep_output_indexer=datadep_output_indexer,
             )
             result.realize()
             result.data.data.decide_layout()
@@ -136,7 +136,7 @@ class TestDataDependentAdvanced(TestCase):
                             ]
             return output
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j, d = index
             return (
                 ops.load("output_offsets", b) + ops.index_expr(j, torch.int64)
@@ -206,9 +206,9 @@ class TestDataDependentAdvanced(TestCase):
                 dtype=left.dtype,
                 inner_fn=inner_fn,
                 ranges=[4, j_range, 3],
-                flat_size=[packed_size, 3],
-                iteration_numel=packed_size * 3,
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[packed_size, 3],
+                datadep_iteration_numel=packed_size * 3,
+                datadep_output_indexer=datadep_output_indexer,
             )
             result.realize()
             result.data.data.decide_layout()
@@ -239,7 +239,7 @@ class TestDataDependentAdvanced(TestCase):
                         output[int(output_offsets[b]) + j, d] = values[source, d]
             return output
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j, d = index
             return (
                 ops.load("output_offsets", b) + ops.index_expr(j, torch.int64)
@@ -285,15 +285,116 @@ class TestDataDependentAdvanced(TestCase):
                 dtype=values.dtype,
                 inner_fn=inner_fn,
                 ranges=[4, j_range, 3],
-                flat_size=[packed_size, 3],
-                iteration_numel=packed_size * 3,
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[packed_size, 3],
+                datadep_iteration_numel=packed_size * 3,
+                datadep_output_indexer=datadep_output_indexer,
             )
             result.realize()
             result.data.data.decide_layout()
             graph.graph_outputs = [result]
             wrapper, _ = graph.codegen()
 
+        module = PyCodeCache.load(wrapper.value)
+        (actual,) = module.call([inputs[name] for name in graph.graph_input_names])
+        torch.cuda.synchronize()
+        self.assertEqual(actual, reference())
+
+    @parametrize("d", [32, 8192])
+    def test_split_then_sum_d(self, device, d):
+        # Slice J independently for each batch, then reduce the dense D axis:
+        #
+        #     for b in range(B):
+        #         for j in range(lengths[b]):
+        #             source = offsets[b] + starts[b] + j
+        #             output[output_offsets[b] + j] = values[source, :].sum()
+        device = torch.device(device)
+        offsets = torch.tensor([0, 4, 4, 7, 12], device=device)
+        starts = torch.tensor([1, 0, 2, 1], device=device)
+        lengths = torch.tensor([2, 0, 1, 3], device=device)
+        output_offsets = torch.cat([lengths.new_zeros(1), lengths.cumsum(0)])
+        values = torch.arange(12 * d, dtype=torch.float32, device=device)
+        values = values.reshape(12, d) % 7
+        packed_size = int(output_offsets[-1])
+        j_range = ir.DataDependentRange("j")
+
+        def reference():
+            off, start, length = offsets.cpu(), starts.cpu(), lengths.cpu()
+            out_off, x = output_offsets.cpu(), values.cpu()
+            output = torch.empty(packed_size)
+            for b in range(4):
+                for j in range(int(length[b])):
+                    source = int(off[b]) + int(start[b]) + j
+                    output[int(out_off[b]) + j] = x[source].sum()
+            return output.to(device)
+
+        def datadep_output_indexer(index):
+            b, j = index
+            return ops.load("output_offsets", b) + ops.index_expr(j, torch.int64)
+
+        def inner_fn(index, reduction_index):
+            b, j = index
+            (r,) = reduction_index
+            ops.register_datadep_range(ops.load("lengths", b), j_range)
+            source = (
+                ops.load("offsets", b)
+                + ops.load("starts", b)
+                + ops.index_expr(j, torch.int64)
+            )
+            address = ops.indirect_indexing(
+                source * d + ops.index_expr(r, torch.int64),
+                values.numel(),
+                wrap_neg=False,
+            )
+            return ops.load("values", address)
+
+        inputs = {
+            "offsets": offsets,
+            "starts": starts,
+            "lengths": lengths,
+            "output_offsets": output_offsets,
+            "values": values,
+        }
+        graph = GraphLowering(torch.fx.symbolic_trace(lambda: 0))
+        with (
+            V.set_graph_handler(graph),
+            DebugContext(),
+            config.patch(benchmark_fusion=False),
+        ):
+            for name, tensor in inputs.items():
+                buffer = ir.InputBuffer(
+                    name=name,
+                    layout=ir.FixedLayout(device, tensor.dtype, list(tensor.shape)),
+                )
+                graph.graph_inputs[name] = ir.TensorBox.create(buffer)
+                graph.graph_inputs_original[name] = buffer
+                graph.graph_input_names.append(name)
+
+            result = ir.TensorBox.create(
+                ir.Reduction(
+                    device=device,
+                    dtype=values.dtype,
+                    inner_fn=inner_fn,
+                    ranges=[4, j_range],
+                    reduction_ranges=[d],
+                    datadep_output_flat_size=[packed_size],
+                    datadep_iteration_numel=packed_size * d,
+                    datadep_output_indexer=datadep_output_indexer,
+                    reduction_type="sum",
+                    src_dtype=values.dtype,
+                    reduction_hint=ir.ReductionHint.DEFAULT,
+                )
+            )
+            result.realize()
+            result.data.data.decide_layout()
+            graph.graph_outputs = [result]
+            wrapper, _ = graph.codegen()
+            self.assertEqual(len(graph.scheduler.nodes), 1)
+            self.assertEqual(wrapper.value.count("async_compile.triton("), 1)
+
+        if d == 32:
+            self.assertIn("@triton_heuristics.persistent_reduction(", wrapper.value)
+        else:
+            self.assertIn("@triton_heuristics.reduction(", wrapper.value)
         module = PyCodeCache.load(wrapper.value)
         (actual,) = module.call([inputs[name] for name in graph.graph_input_names])
         torch.cuda.synchronize()
@@ -318,7 +419,7 @@ class TestDataDependentAdvanced(TestCase):
                 output[start:end] = (a[start:end, :, None] * w[b][None, :, :]).sum(1)
             return output.to(device)
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j, k = index
             return (
                 ops.load("offsets", b) + ops.index_expr(j, torch.int64)
@@ -361,9 +462,9 @@ class TestDataDependentAdvanced(TestCase):
                     inner_fn=inner_fn,
                     ranges=[4, j_range, 16],
                     reduction_ranges=[d],
-                    flat_size=[6, 16],
-                    iteration_numel=6 * 16 * d,
-                    output_indexer=output_indexer,
+                    datadep_output_flat_size=[6, 16],
+                    datadep_iteration_numel=6 * 16 * d,
+                    datadep_output_indexer=datadep_output_indexer,
                     reduction_type="sum",
                     src_dtype=torch.float32,
                     reduction_hint=ir.ReductionHint.DEFAULT,
@@ -442,8 +543,8 @@ class TestDataDependentAdvanced(TestCase):
                     inner_fn=inner_fn,
                     ranges=[batches, d, k],
                     reduction_ranges=[j_range],
-                    flat_size=[batches, d, k],
-                    iteration_numel=n * d * k,
+                    datadep_output_flat_size=[batches, d, k],
+                    datadep_iteration_numel=n * d * k,
                     reduction_type="sum",
                     src_dtype=torch.float32,
                     reduction_hint=ir.ReductionHint.DEFAULT,
@@ -497,7 +598,7 @@ class TestDataDependentAdvanced(TestCase):
                 output[c0:c1] = (a[a0:a1, None, :] * w[None, b0:b1, :]).sum(2).flatten()
             return output.to(device)
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j, k = index
             width = ops.load("right_offsets", b + 1) - ops.load("right_offsets", b)
             return (
@@ -556,9 +657,9 @@ class TestDataDependentAdvanced(TestCase):
                     inner_fn=inner_fn,
                     ranges=[batches, j_range, k_range],
                     reduction_ranges=[d],
-                    flat_size=[packed_size],
-                    iteration_numel=packed_size * d,
-                    output_indexer=output_indexer,
+                    datadep_output_flat_size=[packed_size],
+                    datadep_iteration_numel=packed_size * d,
+                    datadep_output_indexer=datadep_output_indexer,
                     reduction_type="sum",
                     src_dtype=torch.float32,
                     reduction_hint=ir.ReductionHint.DEFAULT,

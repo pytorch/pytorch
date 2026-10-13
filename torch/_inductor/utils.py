@@ -125,7 +125,10 @@ class DataDependentRange(sympy.Dummy):
 
     def __new__(cls, name, dummy_index=None, **assumptions):
         return super().__new__(
-            cls, name, dummy_index, **{**assumptions, "integer": True, "nonnegative": True}
+            cls,
+            name,
+            dummy_index,
+            **{**assumptions, "integer": True, "nonnegative": True},
         )
 
 
@@ -5072,7 +5075,7 @@ class ScopedDict(MutableMapping[KeyType, ValType]):
         raise NotImplementedError
 
 
-@dataclass_transform(frozen_default=True)
+@dataclass_transform(frozen_default=True, kw_only_default=True)
 def ir_dataclass(cls: type[Any] | None = None, /, *, frozen: bool = True) -> Any:
     def wrap(cls: _T) -> _T:
         return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]

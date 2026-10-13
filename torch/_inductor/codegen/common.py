@@ -73,7 +73,6 @@ if TYPE_CHECKING:
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
     from ..shape_propagation import BlockShapeType
-    from .triton import TritonKernel
     from .wrapper import PythonWrapperCodegen
 
     _T = TypeVar("_T")
@@ -1283,6 +1282,11 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     ) -> None:
         raise NotImplementedError(
             f"{type(self).__name__}: check_bounds should be handled by CSEProxy"
+        )
+
+    def register_datadep_range(self, value: OpVarT, symbol: sympy.Symbol) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: register_datadep_range should be handled by CSEProxy"
         )
 
     def load(self, name: str, index: sympy.Expr) -> OpVarT:
@@ -2503,6 +2507,11 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         raise NotImplementedError
 
+    def register_datadep_range(self, value: CSEVariable, symbol: sympy.Symbol) -> None:
+        raise NotImplementedError(
+            "Data-dependent loops are only implemented for Triton"
+        )
+
     def indirect_load(self, name: str, index: sympy.Expr) -> CSEVariable:
         """A load that depends on an index we have read"""
         prior = self.loads
@@ -3132,7 +3141,7 @@ class CSEProxy(DefaultHandler):
         return self.kernel.check_bounds(expr, size, lower, upper)
 
     def register_datadep_range(self, value, symbol) -> None:
-        cast("TritonKernel", self.kernel).register_datadep_range(value, symbol)
+        self.kernel.register_datadep_range(value, symbol)
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         if name in self.kernel.cse.invalidated_stores:

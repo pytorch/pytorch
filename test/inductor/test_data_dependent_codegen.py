@@ -31,7 +31,7 @@ class TestDataDependentCodegen(TestCase):
         graph = GraphLowering(torch.fx.symbolic_trace(lambda: 0))
         j_range = ir.DataDependentRange("j")
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j, d, e = index
             p = ops.load("offsets", b) + ops.index_expr(j, torch.int64)
             return p * 8 + ops.index_expr(d * 4 + e, torch.int64)
@@ -41,7 +41,9 @@ class TestDataDependentCodegen(TestCase):
             ops.register_datadep_range(
                 ops.load("offsets", b + 1) - ops.load("offsets", b), j_range
             )
-            address = ops.indirect_indexing(output_indexer(index), 48, wrap_neg=False)
+            address = ops.indirect_indexing(
+                datadep_output_indexer(index), 48, wrap_neg=False
+            )
             return ops.load("values", address) + ops.load("bias", b * 8 + d * 4 + e)
 
         with (
@@ -67,9 +69,9 @@ class TestDataDependentCodegen(TestCase):
                 dtype=torch.float32,
                 inner_fn=add_body,
                 ranges=[4, j_range, 2, 4],
-                flat_size=[6, 2, 4],
-                iteration_numel=48,
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[6, 2, 4],
+                datadep_iteration_numel=48,
+                datadep_output_indexer=datadep_output_indexer,
             )
             added.realize()
             added.data.data.decide_layout()
@@ -80,7 +82,7 @@ class TestDataDependentCodegen(TestCase):
                     ops.load("offsets", b + 1) - ops.load("offsets", b), j_range
                 )
                 address = ops.indirect_indexing(
-                    output_indexer(index), 48, wrap_neg=False
+                    datadep_output_indexer(index), 48, wrap_neg=False
                 )
                 value = ops.load(added.get_name(), address)
                 scale = ops.load("scale", d * 4 + e)
@@ -91,9 +93,9 @@ class TestDataDependentCodegen(TestCase):
                 dtype=torch.float32,
                 inner_fn=scale_body,
                 ranges=[4, j_range, 2, 4],
-                flat_size=[6, 2, 4],
-                iteration_numel=48,
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[6, 2, 4],
+                datadep_iteration_numel=48,
+                datadep_output_indexer=datadep_output_indexer,
             )
             result.realize()
             result.data.data.decide_layout()
@@ -115,7 +117,7 @@ class TestDataDependentCodegen(TestCase):
         graph = GraphLowering(torch.fx.symbolic_trace(lambda: 0))
         j_range = ir.DataDependentRange("j")
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j = index
             return ops.load("offsets", b) + ops.index_expr(j, torch.int64)
 
@@ -124,7 +126,9 @@ class TestDataDependentCodegen(TestCase):
             ops.register_datadep_range(
                 ops.load("offsets", b + 1) - ops.load("offsets", b), j_range
             )
-            address = ops.indirect_indexing(output_indexer(index), 6, wrap_neg=False)
+            address = ops.indirect_indexing(
+                datadep_output_indexer(index), 6, wrap_neg=False
+            )
             return ops.load("values", address) + ops.load("bias", b)
 
         with (
@@ -149,8 +153,8 @@ class TestDataDependentCodegen(TestCase):
                 dtype=torch.float32,
                 inner_fn=add_body,
                 ranges=[4, j_range],
-                flat_size=[6],
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[6],
+                datadep_output_indexer=datadep_output_indexer,
             )
             added.realize()
             added.data.data.decide_layout()
@@ -162,7 +166,7 @@ class TestDataDependentCodegen(TestCase):
                     ops.load("offsets", b + 1) - ops.load("offsets", b), j_range
                 )
                 address = ops.indirect_indexing(
-                    output_indexer([b, rindex[0]]), 6, wrap_neg=False
+                    datadep_output_indexer([b, rindex[0]]), 6, wrap_neg=False
                 )
                 return added_loader([address])
 
@@ -173,7 +177,8 @@ class TestDataDependentCodegen(TestCase):
                     inner_fn=sum_body,
                     ranges=[4],
                     reduction_ranges=[j_range],
-                    iteration_numel=6,
+                    datadep_output_flat_size=[4],
+                    datadep_iteration_numel=6,
                     reduction_type="sum",
                     src_dtype=torch.float32,
                     reduction_hint=ir.ReductionHint.DEFAULT,
@@ -223,7 +228,7 @@ class TestDataDependentNestedCodegen(TestCase):
                         result[address] = values[address] + bias[b]
             return result
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j, k = index
             parent = ops.load("offsets", b) + ops.index_expr(j, torch.int64)
             parent = ops.indirect_indexing(
@@ -240,7 +245,7 @@ class TestDataDependentNestedCodegen(TestCase):
             )
             ops.register_datadep_range(ops.load("depth_lengths", parent), k_range)
             address = ops.indirect_indexing(
-                output_indexer(index), values.numel(), wrap_neg=False
+                datadep_output_indexer(index), values.numel(), wrap_neg=False
             )
             return ops.load("values", address) + ops.load("bias", b)
 
@@ -272,8 +277,8 @@ class TestDataDependentNestedCodegen(TestCase):
                 dtype=values.dtype,
                 inner_fn=inner_fn,
                 ranges=[3, j_range, k_range],
-                flat_size=[values.numel()],
-                output_indexer=output_indexer,
+                datadep_output_flat_size=[values.numel()],
+                datadep_output_indexer=datadep_output_indexer,
             )
             result.realize()
             result.data.data.decide_layout()
@@ -309,7 +314,7 @@ class TestDataDependentReductionCodegen(TestCase):
                     result[p] = x[p].sum()
             return result.to(device)
 
-        def output_indexer(index):
+        def datadep_output_indexer(index):
             b, j = index
             return ops.load("offsets", b) + ops.index_expr(j, torch.int64)
 
@@ -320,7 +325,7 @@ class TestDataDependentReductionCodegen(TestCase):
                 ops.load("offsets", b + 1) - ops.load("offsets", b), j_range
             )
             address = ops.indirect_indexing(
-                output_indexer(index) * width + ops.index_expr(d, torch.int64),
+                datadep_output_indexer(index) * width + ops.index_expr(d, torch.int64),
                 values.numel(),
                 wrap_neg=False,
             )
@@ -349,16 +354,19 @@ class TestDataDependentReductionCodegen(TestCase):
                     inner_fn=inner_fn,
                     ranges=[4, j_range],
                     reduction_ranges=[width],
-                    flat_size=[517],
-                    iteration_numel=values.numel(),
-                    output_indexer=output_indexer,
+                    datadep_output_flat_size=[517],
+                    datadep_iteration_numel=values.numel(),
+                    datadep_output_indexer=datadep_output_indexer,
                     reduction_type="sum",
                     src_dtype=values.dtype,
                     reduction_hint=ir.ReductionHint.DEFAULT,
                 )
             )
             result.realize()
-            result.data.data.decide_layout()
+            buffer = result.data.data
+            buffer.decide_layout()
+            self.assertEqual(buffer.get_size(), [517])
+            self.assertEqual(buffer.get_size(), buffer.data.datadep_output_flat_size)
             graph.graph_outputs = [result]
             wrapper, _ = graph.codegen()
 

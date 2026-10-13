@@ -1096,14 +1096,18 @@ class Loops(IRNode):
     dtype: torch.dtype
     inner_fn: Callable[..., Any]
     ranges: Sequence[_IntLike]
-    # Physical output shape, e.g. [N, D, E] for loops [B, J(b), D, E].
-    # N counts packed (b, j) pairs; the layout is an ordinary dense tensor.
-    flat_size: Sequence[_IntLike] | None = None
-    output_indexer: Callable[[Sequence[Expr]], Any] | None = None
+    # Physical output shape used by ComputedBuffer.layout.size.
+    # For input [B, J(b), D], where NNZ = sum_b lengths[b]:
+    #
+    #     pointwise: [NNZ, D]
+    #     sum_J:     [B, D]
+    #     sum_D:     [NNZ]
+    datadep_output_flat_size: Sequence[_IntLike] | None = None
+    # Map the remaining logical output coordinates to a flat storage address.
+    datadep_output_indexer: Callable[[Sequence[Expr]], Any] | None = None
     # Total valid body evaluations, including reduction coordinates.
-    # For both pointwise [B, J(b), D] and sum_J producing [B, D],
-    # this is N * D, where N = sum_b lengths[b]. It is not B * J(b).
-    iteration_numel: _IntLike | None = None
+    # All three cases above evaluate the body NNZ * D times.
+    datadep_iteration_numel: _IntLike | None = None
 
     @cache_on_self_and_args("Loops")
     def get_free_symbol_uses(
@@ -1112,8 +1116,8 @@ class Loops(IRNode):
         return OrderedSet().union(
             *(get_free_symbols(e, unbacked_only) for e in self.ranges),
             self.inner_fn_free_symbols(unbacked_only),
-            get_free_symbols(self.iteration_numel, unbacked_only)
-            if self.iteration_numel is not None
+            get_free_symbols(self.datadep_iteration_numel, unbacked_only)
+            if self.datadep_iteration_numel is not None
             else (),
         )
 
@@ -1231,17 +1235,22 @@ class Loops(IRNode):
                     self.make_loader(),
                     self.get_size(),
                 ).reads
-            if self.flat_size is not None and self.output_indexer is not None:
-                reads |= extract_read_writes(self.output_indexer, self.get_size()).reads
+            if (
+                self.datadep_output_flat_size is not None
+                and self.datadep_output_indexer is not None
+            ):
+                reads |= extract_read_writes(
+                    self.datadep_output_indexer, self.get_size()
+                ).reads
             return reads
 
     def get_read_names(self) -> OrderedSet[str]:
-        if self.flat_size is not None:
+        if self.datadep_output_flat_size is not None:
             return OrderedSet(dep.name for dep in self.get_reads())
         return OrderedSet(self.inner_fn_opcount().read_buffers)
 
     def num_reads(self) -> int:
-        if self.flat_size is not None:
+        if self.datadep_output_flat_size is not None:
             return len(self.get_read_names())
         return len(self.inner_fn_opcount().read_buffers)
 
@@ -1295,12 +1304,12 @@ class Pointwise(Loops):
         vars: Sequence[Expr],
     ) -> None:
         loader = self.make_loader()
-        if self.output_indexer is None:
+        if self.datadep_output_indexer is None:
             return ops.store(output_name or "unnamed", indexer(vars), loader(vars))
         value = loader(vars)
-        addr = self.output_indexer(vars)
+        addr = self.datadep_output_indexer(vars)
         if isinstance(addr, OpsValue):
-            sizes = cast(Sequence[_IntLike], self.flat_size)
+            sizes = cast(Sequence[_IntLike], self.datadep_output_flat_size)
             addr = ops.indirect_indexing(addr, sympy_product(sizes), wrap_neg=False)
         return ops.store(output_name or "unnamed", addr, value)
 
@@ -1313,9 +1322,9 @@ class Pointwise(Loops):
             dtype=self.dtype,
             inner_fn=loader,
             ranges=self.ranges,
-            flat_size=self.flat_size,
-            output_indexer=self.output_indexer,
-            iteration_numel=self.iteration_numel,
+            datadep_output_flat_size=self.datadep_output_flat_size,
+            datadep_output_indexer=self.datadep_output_indexer,
+            datadep_iteration_numel=self.datadep_iteration_numel,
         )
 
 
@@ -1500,9 +1509,9 @@ class Reduction(Loops):
             self.reduction_type,
             self.inner_fn(vars, reduction_vars),
         )
-        addr = (self.output_indexer or indexer)(vars)
+        addr = (self.datadep_output_indexer or indexer)(vars)
         if isinstance(addr, OpsValue):
-            sizes = cast(Sequence[_IntLike], self.flat_size)
+            sizes = cast(Sequence[_IntLike], self.datadep_output_flat_size)
             addr = ops.indirect_indexing(addr, sympy_product(sizes), wrap_neg=False)
         ops.store_reduction(output_name or "unnamed", addr, value)
 
@@ -1530,9 +1539,9 @@ class Reduction(Loops):
             dtype=self.dtype,
             inner_fn=loader,
             ranges=self.ranges,
-            flat_size=self.flat_size,
-            output_indexer=self.output_indexer,
-            iteration_numel=self.iteration_numel,
+            datadep_output_flat_size=self.datadep_output_flat_size,
+            datadep_output_indexer=self.datadep_output_indexer,
+            datadep_iteration_numel=self.datadep_iteration_numel,
             reduction_ranges=self.reduction_ranges,
             reduction_type=self.reduction_type,
             src_dtype=self.src_dtype,
@@ -5814,7 +5823,7 @@ class ComputedBuffer(OperationBuffer):
             and self.name not in V.graph.mutated_buffers
             and self.num_reads() == 0
             and not self._force_realize
-            and self.data.flat_size is None
+            and self.data.datadep_output_flat_size is None
         ):
             # inline this op rather than generating ops.load()
             return self.data.make_loader()
@@ -5875,7 +5884,10 @@ class ComputedBuffer(OperationBuffer):
         return None
 
     def decide_layout(self) -> None:
-        if self.data.flat_size is not None:
+        if (
+            isinstance(self.data, Loops)
+            and self.data.datadep_output_flat_size is not None
+        ):
             self.freeze_layout()
         if isinstance(self.layout, FlexibleLayout):
             order = self.get_fill_order()
@@ -11256,8 +11268,8 @@ class StorageBox(MutableBox):
                 dtype=self.data.get_dtype(),
                 size=(
                     self.data.get_size()
-                    if self.data.flat_size is None
-                    else self.data.flat_size
+                    if self.data.datadep_output_flat_size is None
+                    else self.data.datadep_output_flat_size
                 ),
                 is_pinned=False,
             ),
