@@ -312,7 +312,7 @@ variants. NCCL picks one per call from message size, so the same
 bandwidth-optimized one for large ones.
 
 Symmetric kernels are driven through the *standard* collective API —
-`dist.all_reduce`, `dist.all_gather_into_tensor`, `dist.reduce_scatter_tensor` —
+`dist.all_reduce`, `dist.all_gather_single`, `dist.reduce_scatter_single` —
 with no change at the call site. What matters is that the buffers were
 registered with NCCL as symmetric windows. There are two ways to arrange that.
 
@@ -515,7 +515,7 @@ work.wait()
 
 - NCCL version 2.28 or later
 - GPUs must have peer-to-peer (P2P) access enabled
-- Tensors must be allocated using {func}`torch.distributed._symmetric_memory` and rendezvoused
+- Tensors must be allocated using {func}`torch.distributed._symmetric_memory.empty` and rendezvoused
 - The NCCL process group must be configured with `NCCL_CTA_POLICY_ZERO` or the
 environment variable `NCCL_CTA_POLICY` be set to 2
 - As of NCCL 2.28, CE collectives cannot run with the default stream, so you
@@ -667,6 +667,10 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 
 ```{eval-rst}
 .. autofunction:: reduce_scatter_offset
+```
+
+```{eval-rst}
+.. autofunction:: all_to_all_nd
 ```
 
 ```{eval-rst}
