@@ -73,16 +73,8 @@ def copy_runtime_dependencies(
     if not libgomp_path.exists():
         sys.exit(f"libgomp not found at {libgomp_path}")
 
-    # Bundle libgomp and rewrite NEEDED entries to point at our copy
+    # Bundle libgomp.
     shutil.copy(libgomp_path, torch_lib / "libgomp.so.1")
-    for sofile in torch_dir.glob("*.so*"):
-        if sofile.is_file():
-            patchelf(
-                "--replace-needed",
-                "libgomp.so.1",
-                "libgomp.so.1",
-                str(sofile),
-            )
 
     # Bundle aarch64 BLAS/LAPACK/ACL dependencies (no-op on x86)
     for dep in arch_extra_deps(arch, use_cuda):
