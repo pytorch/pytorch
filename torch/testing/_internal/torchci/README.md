@@ -39,8 +39,8 @@ open-ended string-to-string maps.
 | `cpu_architecture` | string | Normalized machine architecture |
 | `cpu_capability` | string | `torch.backends.cpu.get_cpu_capability()` lower-cased (`default`, `avx2`, `avx512`, `sve256`, ...), with `ATEN_CPU_CAPABILITY` applied; `amx` for `avx512` on CPUs with AMX tiles |
 | `python_version` | string | Python major.minor, with `t` for free-threaded builds |
-| `cc_compiler` | string | `gcc`, `clang`, `msvc`, or `""` |
-| `cc_compiler_version` | string | Compiler major version |
+| `cc_compiler` | string | `gcc`, `clang`, `msvc`, or `""`, from `torch.__config__._cxx_compiler()`; `""` with a torch that predates it |
+| `cc_compiler_version` | string | Compiler version as `torch.__config__._cxx_compiler()` gives it (`11.4`, `21.1.0`, or MSVC's `_MSC_FULL_VER`, `194134120`) |
 | `accelerator` | string | `cpu`, `cuda`, `rocm`, `xpu`, or `mps` |
 | `accelerator_version` | string | `torch.version.cuda`, `torch.version.rocm` (the ROCm release, not HIP), or `torch.version.xpu` (the SYCL compiler, `20250101`); `""` for CPU and MPS |
 | `device_count` | int | Visible devices of `accelerator`, honoring `CUDA_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES`; `0` for CPU |
@@ -53,7 +53,7 @@ unset. An unset flag that is on by default or implication is `"1"`.
 
 The report `properties` writer emits these keys when their values are nonempty:
 `torch_version`, `os_release`, `device_memory_mib`, `driver_version`,
-`host_memory_mib`, `build_environment`, `test_config`, and `runner_name`.
+`host_memory_mib`, `build_environment`, and `runner_name`.
 `host_memory_mib` is the cgroup v2 memory limit when one is set, otherwise
 physical RAM; it is omitted where neither is available.
 
@@ -90,11 +90,32 @@ change bumps the minor version (`"0.1"` to `"0.2"`); additive changes keep it.
 
 ## Enablement
 
-`test/run_test.py` and tests using `common_utils.run_tests` write reports only
-when given `--save-torchci-reports DIR`. A test file's reports are
+`test/run_test.py` and tests using `common_utils.run_tests` write reports when
+given `--save-torchci-reports DIR`. A test file's reports are
 `<DIR>/<file>-<report_uuid>.report.jsonl`, with path separators in `<file>`
 replaced by dots (`distributed.test_c10d_nccl`). A relative `DIR` is relative to
 the cwd.
+
+In CI, `run_test.py` defaults to `test/torchci-reports`, which is uploaded as
+described below, in the jobs `_torchci_reports_default` selects: for now, the
+trunk and pull workflows' jobs. `run_tests` has no default, so a test file run
+some other way writes no report.
+
+## Upload
+
+At job end, `.github/actions/upload-test-artifacts` uploads each report as its own
+object:
+
+```
+s3://gha-artifacts/torchci-reports/<org>/<repo>/<run id>/<job id>/<file>-<report_uuid>.report.jsonl
+```
+
+The job id is `job.check_run_id`, which equals the job's id. When S3 is skipped
+(ROCm) or the junit upload fails, the action uploads the GitHub artifact
+`torchci-reports-runattempt<N>-<job id>.zip` instead, and
+`tools/stats/upload_artifacts.py` uploads each report in it to the same key. A row in
+the tests tables has its report's `github_workflow_job_id` and `report_uuid`: list
+its job's folder and take the name that ends with the uuid.
 
 ## Local check
 
