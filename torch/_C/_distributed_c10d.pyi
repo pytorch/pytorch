@@ -170,12 +170,14 @@ class BroadcastOptions:
     rootTensor: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class AllreduceOptions:
     reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
     sparseIndices: Tensor | None
+    config: object | None
 
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
@@ -185,15 +187,18 @@ class ReduceOptions:
     rootTensor: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class AllgatherOptions:
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class GatherOptions:
     rootRank: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class ScatterOptions:
     rootRank: int
@@ -204,6 +209,7 @@ class ReduceScatterOptions:
     reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class BarrierOptions:
     device_ids: list[int]
@@ -214,6 +220,7 @@ class BarrierOptions:
 class AllToAllOptions:
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class ReconfigureOptions:
     uuid: int
