@@ -228,7 +228,7 @@ TORCH_META_FUNC(_scaled_addmm)(
 // here; recipe-independent input validation runs here too (in eager, before
 // TORCH_IMPL_FUNC, and during `torch.compile` tracing). Per-recipe scale-shape
 // checks, the device-capability gate, and kernel dispatch live in the CUDA
-// TORCH_IMPL_FUNC. Output is bf16 only.
+// TORCH_IMPL_FUNC. Output may be bf16, fp16, or fp32, subject to backend support.
 //
 // `self`/`mat2` may be 2D or 3D; `offs` carries group boundaries when either
 // operand is 2D. The output size/stride mirror `create_grouped_gemm_output_tensor`.
@@ -618,9 +618,11 @@ TORCH_IMPL_FUNC(_scaled_mm_cpu_v2_out)(
       mat_a.scalar_type(),
       scale_recipe_a_enum,
       scale_a_ref,
+      swizzle_a_enum,
       mat_b.scalar_type(),
       scale_recipe_b_enum,
-      scale_b_ref);
+      scale_b_ref,
+      swizzle_b_enum);
 
   if (gemm_impl == ScaledGemmImplementation::NONE) {
     const std::optional<at::Tensor> scale_a_opt = scale_a.empty() ? std::optional<at::Tensor>{std::nullopt} : std::optional<at::Tensor>{scale_a[0]};

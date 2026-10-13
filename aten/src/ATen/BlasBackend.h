@@ -34,8 +34,8 @@ enum class ScalingType : std::uint8_t {
   TensorWise, // fp32 scales
   RowWise, // fp32 scales
   BlockWise1x16, // fp8_e4m3fn scales
-  BlockWise1x32, // fp8_e8m0fnu or packed int32 UE8M0 scales
-  BlockWise1x128, // fp32 or packed int32 UE8M0 scales
+  BlockWise1x32, // fp8_e8m0fnu scales
+  BlockWise1x128, // fp32 or fp8_e8m0fnu scales
   BlockWise128x128, // fp32 scales
 };
 
@@ -45,6 +45,7 @@ enum class SwizzleType : std::uint8_t {
   NO_SWIZZLE = 0,
   SWIZZLE_32_4_4 = 1, // cuBLAS 128x4-tiled block scales
   SWIZZLE_32_8 = 2, // hipBLASLt BLK32_UE8M0_32_8
+  SWIZZLE_MNxK4 = 3, // cuBLAS MN-major scales with four values packed along K
 };
 
 } // namespace blas
