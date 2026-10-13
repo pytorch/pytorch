@@ -59,7 +59,7 @@ class XPUGraph(_XPUGraph):
             ``capture_end`` and the underlying modifiable command graph will be
             destroyed. Note that the executable command graph will not be
             instantiated at the end of ``capture_end`` in this
-            case. Instead, it will be instantiated via an explicit called
+            case. Instead, it will be instantiated via an explicit call
             to ``instantiate`` or automatically on the first call to
             ``replay`` if ``instantiate`` was not already called. Calling
             ``instantiate`` manually before ``replay`` is recommended to
@@ -295,7 +295,7 @@ def make_graphed_callables(
         The automatic mixed precision is supported in :func:`~torch.xpu.make_graphed_callables` only with disabled
         caching. The context manager `torch.amp.autocast()` must have `cache_enabled=False`.
     """
-    if torch.is_autocast_enabled() and torch.is_autocast_cache_enabled():
+    if torch.is_autocast_enabled("xpu") and torch.is_autocast_cache_enabled():
         raise RuntimeError(
             "make_graphed_callables does not support the autocast caching. Please set `cache_enabled=False`."
         )

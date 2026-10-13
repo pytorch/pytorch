@@ -123,6 +123,7 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "print",
     "inductor_compiled_code",  # Tested separately in test_inductor_wrap_inductor_compile_regions
     "invoke_leaf_function",  # Needs torch.compile, tested separately in test_leaf_function*
+    "control_deps",  # Inductor-internal ordering HOP
 ]
 
 torch.library.define(

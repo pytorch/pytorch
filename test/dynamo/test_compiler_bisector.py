@@ -12,8 +12,10 @@ from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._triton import has_triton
 
 
 aten = torch.ops.aten
@@ -259,24 +261,6 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "inductor_emulate_precision_casts")
 
-    def test_bad_lowering(self):
-        def test_fn():
-            torch._dynamo.reset()
-            with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
-
-                def my_func(x):
-                    return ((x * -1) - 0.01).relu()
-
-                inp = torch.rand([100], device=GPU_TYPE)
-
-                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))  # noqa: UNSPECIFIED_BACKEND
-
-        out = CompilerBisector.do_bisect(test_fn)
-        self.assertEqual(out.backend, "inductor")
-        self.assertEqual(out.subsystem, "lowerings")
-        self.assertEqual(out.bisect_number, 2)
-        self.assertTrue("relu" in out.debug_info)
-
     def test_eager_backend(self):
         # should indicate problem with first backend
         def test_fn():
@@ -339,6 +323,7 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "pre_grad_graph")
         self.assertEqual(out.bisect_number, 1)
 
+    # XPU doesn't support cudagrah
     @requires_cuda
     def test_cudagraph_bisect_max(self):
         """Test that cudagraph bisector can limit number of cudagraphed graphs."""
@@ -379,7 +364,12 @@ class TestCompilerBisector(TestCase):
                 CompilerBisector.bisection_enabled = False
                 get_env_val.cache_clear()
 
-    def test_bisect_run_debuginfo(self):
+
+class TestCompilerBisectorDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not has_triton(), "requires Triton")
+    def test_bisect_run_debuginfo(self, device):
         import os
         import subprocess
         from pathlib import Path
@@ -390,7 +380,11 @@ class TestCompilerBisector(TestCase):
         )
         # Minimize test runtime by searching only the subsystem that's broken.
         with patch.dict(
-            os.environ, {"TORCH_BISECT_BACKEND": "aot_eager_decomp_partition"}
+            os.environ,
+            {
+                "TORCH_BISECT_BACKEND": "aot_eager_decomp_partition",
+                "TORCH_BISECT_TEST_DEVICE": device,
+            },
         ):
             output = subprocess.run(
                 [
@@ -410,6 +404,30 @@ class TestCompilerBisector(TestCase):
             "Debug info: <OpOverload(op='aten.exponential', overload='default')>"
         )
         self.assertIn(expected_result, output.stdout)
+
+    @unittest.skipIf(not has_triton(), "requires Triton")
+    def test_bad_lowering(self, device):
+        def test_fn():
+            torch._dynamo.reset()
+            with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
+
+                def my_func(x):
+                    return ((x * -1) - 0.01).relu()
+
+                inp = torch.rand([100], device=device)
+
+                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))  # noqa: UNSPECIFIED_BACKEND
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "lowerings")
+        self.assertEqual(out.bisect_number, 2)
+        self.assertTrue("relu" in out.debug_info)
+
+
+instantiate_device_type_tests(
+    TestCompilerBisectorDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":

@@ -250,8 +250,8 @@ def TensorMeta(
             raise AssertionError(
                 f"tensorlike must be torch.Tensor, got {type(tensorlike)}"
             )  # mypy
-        inferred_shape = tuple(tensorlike.shape)
-        inferred_strides = tuple(tensorlike.stride())
+        inferred_shape = tensorlike.shape
+        inferred_strides = tensorlike.stride()
         inferred_dtype = tensorlike.dtype
         inferred_device = tensorlike.device
     else:
@@ -1275,6 +1275,8 @@ as_strided = _make_prim(
     return_type=RETURN_TYPE.VIEW,
     doc=_as_strided_doc,
 )
+prim.impl("as_strided", torch.library.fallthrough_kernel, "Conjugate")
+prim.impl("as_strided", torch.library.fallthrough_kernel, "Negative")
 
 
 def _broadcast_in_dim_meta(

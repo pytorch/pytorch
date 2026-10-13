@@ -222,6 +222,21 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         # If we reach this point, the barrier succeeded without deadlock
         self.assertTrue(True)
 
+    def test_monitored_barrier(self):
+        # monitored_barrier is gloo-only; the default PG is gloo only on the
+        # cpu variant (nccl on cuda/xpu), so run there. This drives the full
+        # dist.monitored_barrier dispatch onto BackendWrapper::monitoredBarrier
+        # (the torchcomms reimplementation of ProcessGroupGloo::monitoredBarrier).
+        if self.device_type != "cpu":
+            return
+        self.assertEqual(dist.get_backend(self.pg), dist.Backend.GLOO)
+        # All ranks check in -> the health-checking barrier returns cleanly.
+        dist.monitored_barrier(
+            group=self.pg,
+            timeout=datetime.timedelta(seconds=30),
+            wait_all_ranks=True,
+        )
+
     def test_new_group_delegates_to_split_group(self):
         # Under torchcomms, `new_group` routes through `split_group`. The
         # resulting subgroup must contain the requested ranks and be usable
@@ -357,10 +372,204 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
         self.assertIsNotNone(default_pg.bound_device_id)
         self.assertEqual(default_pg.bound_device_id.type, "cuda")
 
+    def test_monitored_barrier_on_multi_backend_group(self):
+        # A device-bound world reports a multi-backend string from get_backend
+        # (e.g. "cpu:gloo,cuda:nccl"), which is NOT equal to Backend.GLOO. The
+        # relaxed monitored_barrier guard must still accept it under torchcomms
+        # (because it has a CPU-capable backend) and dispatch to the gloo CPU
+        # backend's BackendWrapper::monitoredBarrier, rather than rejecting it
+        # for not being a plain gloo group.
+        backend = dist.get_backend(self.pg)
+        self.assertNotEqual(backend, dist.Backend.GLOO)
+        self.assertIn("gloo", str(backend))
+        # All ranks check in -> the barrier returns cleanly. Reaching past this
+        # call proves the guard accepted the group and the barrier ran.
+        dist.monitored_barrier(
+            group=self.pg,
+            timeout=datetime.timedelta(seconds=30),
+            wait_all_ranks=True,
+        )
+
+    def test_new_group_nccl_lazy_builds_per_peer_group(self):
+        # Passing backend="nccl-lazy" builds a per-peer, lazily-initialized
+        # group (a dedicated comm + stream per send/recv peer) usable for P2P.
+        # use_local_synchronization makes it members-only. The parent must be
+        # device-bound (it is, in this class).
+        ranks = list(range(self.world_size))
+        g = dist.new_group(
+            ranks=ranks, backend="nccl-lazy", use_local_synchronization=True
+        )
+        self.assertEqual(dist.get_process_group_ranks(g), ranks)
+        # P2P round-trip over the lazy group: 0 -> 1 -> ... -> 0
+        dev = torch.device(f"cuda:{self.rank}")
+        send_to = (self.rank + 1) % self.world_size
+        recv_from = (self.rank - 1) % self.world_size
+        if self.rank % 2 == 0:
+            dist.send(
+                torch.full((4,), float(self.rank), device=dev), dst=send_to, group=g
+            )
+            r = torch.empty(4, device=dev)
+            dist.recv(r, src=recv_from, group=g)
+        else:
+            r = torch.empty(4, device=dev)
+            dist.recv(r, src=recv_from, group=g)
+            dist.send(
+                torch.full((4,), float(self.rank), device=dev), dst=send_to, group=g
+            )
+        self.assertEqual(r[0].item(), float(recv_from))
+
+    def test_non_torchcomms_backend_falls_through_to_c10d(self):
+        # Under torchcomms, a backend TorchComms does not own (registered the way
+        # mooncake registers a custom c10d backend) must route through the normal
+        # ProcessGroup path, not new_comm. Use a gloo-backed stand-in.
+        def _creator(store, grank, gsize, timeout):
+            return dist.ProcessGroupGloo(store, grank, gsize, timeout)
+
+        name = "tc_gate_stub"
+        if name not in dist.Backend.backend_list:
+            dist.Backend.register_backend(name, _creator, devices=["cpu", "cuda"])
+
+        ranks = list(range(self.world_size))
+        g = dist.new_group(ranks=ranks, backend=name)
+        be = g._get_backend(torch.device("cpu"))
+        # The c10d creator ran (real ProcessGroupGloo), not a TorchComms wrapper.
+        self.assertNotIn("BackendWrapper", type(be).__name__)
+        t = torch.tensor([self._rank_value], dtype=torch.float32)
+        dist.all_reduce(t, group=g)
+        self.assertEqual(t.item(), sum(range(1, self.world_size + 1)))
+
 
 instantiate_device_type_tests(
     TestC10dTorchCommsInitAutoQualify, globals(), only_for=["cuda"]
 )
+
+
+@unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+class TestC10dTorchCommsMixedBackends(C10dTorchCommsTestBase):
+    """Verify subgroup creation from a mixed-backend parent under torchcomms.
+
+    The parent PG mixes ``cuda:nccl`` with ``cpu:fake``. Under torchcomms,
+    ``new_group`` builds each subgroup directly via ``new_comm`` (a members-only
+    store rendezvous), so a non-splittable device backend in the parent (here
+    ``cpu:fake``) is no obstacle: members construct the subgroup and non-members
+    return ``NON_GROUP_MEMBER`` without any parent split.
+    """
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        torch.distributed.config.use_torchcomms = True
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        os.environ["RANK"] = str(rank)
+        os.environ["WORLD_SIZE"] = str(world_size)
+        os.environ["TORCHCOMM_STORE_PATH"] = rdvz_file
+        os.environ["LOCAL_RANK"] = str(rank)
+
+        store = dist.FileStore(rdvz_file, world_size)
+        device_id = torch.device(f"cuda:{rank}")
+        torch.cuda.set_device(rank)
+
+        dist.init_process_group(
+            backend="cuda:nccl,cpu:fake",
+            world_size=world_size,
+            rank=rank,
+            store=store,
+            device_id=device_id,
+        )
+        cls.pg = dist.distributed_c10d._get_default_group()
+        torch.set_default_device(device_id)
+
+    @property
+    def _rank_value(self):
+        return self.rank + 1
+
+    def test_mixed_backend_subgroup(self):
+        subg_ranks = list(range(self.world_size // 2))
+        ng = dist.new_group(ranks=subg_ranks)
+
+        if self.rank in subg_ranks:
+            self.assertEqual(dist.get_process_group_ranks(ng), subg_ranks)
+            tensor = torch.tensor([self._rank_value], dtype=torch.float32)
+            dist.all_reduce(tensor, group=ng)
+            self.assertEqual(tensor.item(), sum(r + 1 for r in subg_ranks))
+        else:
+            self.assertIs(ng, dist.GroupMember.NON_GROUP_MEMBER)
+
+
+instantiate_device_type_tests(
+    TestC10dTorchCommsMixedBackends, globals(), only_for=["cuda"]
+)
+
+
+class TestTorchCommsHandlesBackend(TestCase):
+    """Unit-test the pure routing logic of ``_torchcomms_handles_backend``.
+
+    This decides whether a backend is one TorchComms can construct (so it goes
+    through ``new_comm`` / ``split_group``) versus a custom c10d plugin such as
+    ``mooncake`` that must fall through to the normal ProcessGroup path. The
+    function depends only on ``_TORCHCOMM_AVAILABLE`` and the two
+    ``is_backend_*`` callables, all of which we patch -- so these tests run even
+    when torchcomms is not installed.
+    """
+
+    def _patch(self, available=True, built=(), registered=()):
+        built, registered = set(built), set(registered)
+        return mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=available,
+            _torchcomms_is_backend_built=lambda name: name in built,
+            _torchcomms_is_backend_registered=lambda name: name in registered,
+            create=True,
+        )
+
+    def test_unavailable_returns_false(self):
+        with self._patch(available=False, built=["nccl"]):
+            self.assertFalse(c10d._torchcomms_handles_backend("nccl"))
+            self.assertFalse(c10d._torchcomms_handles_backend(None))
+
+    def test_none_backend_inherits_parent(self):
+        with self._patch(built=[]):
+            self.assertTrue(c10d._torchcomms_handles_backend(None))
+
+    def test_builtin_backend(self):
+        with self._patch(built=["nccl"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("nccl"))
+
+    def test_registered_backend(self):
+        with self._patch(registered=["myadapter"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("myadapter"))
+
+    def test_custom_backend_falls_through(self):
+        with self._patch(built=["nccl"]):
+            self.assertFalse(c10d._torchcomms_handles_backend("mooncake"))
+            self.assertFalse(c10d._torchcomms_handles_backend("ucc"))
+
+    def test_case_insensitive(self):
+        with self._patch(built=["nccl"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("NCCL"))
+
+    def test_nccl_lazy_is_own_backend(self):
+        # nccl-lazy is a distinct built torchcomms backend, not aliased to nccl:
+        # it is handled iff nccl-lazy itself is built/registered.
+        with self._patch(built=["nccl-lazy"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("nccl-lazy"))
+        with self._patch(built=["nccl"]):
+            self.assertFalse(c10d._torchcomms_handles_backend("nccl-lazy"))
+        with self._patch(built=[]):
+            self.assertFalse(c10d._torchcomms_handles_backend("nccl-lazy"))
+
+    def test_qualified_all_handled(self):
+        with self._patch(built=["gloo", "nccl"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("cpu:gloo,cuda:nccl"))
+
+    def test_qualified_one_unhandled_falls_through(self):
+        with self._patch(built=["gloo"]):
+            self.assertFalse(c10d._torchcomms_handles_backend("cpu:gloo,cuda:mooncake"))
+
+    def test_empty_parts_are_skipped(self):
+        with self._patch(built=["nccl"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("nccl,"))
+            self.assertTrue(c10d._torchcomms_handles_backend(" nccl , "))
 
 
 class TestC10dTorchCommsNewGroupHelper(TestCase):
@@ -396,6 +605,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
 
         with mock.patch.multiple(
             c10d,
+            _TORCHCOMM_AVAILABLE=True,
             _use_torchcomms_enabled=lambda: True,
             _torchcomms_handles_backend=lambda b: True,
             new_comm=fake_new_comm,
@@ -490,7 +700,13 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
                 else:
                     os.environ[k] = v
 
-    def _drive_non_member(self, *, torchcomms_enabled):
+    def _drive_non_member(
+        self,
+        *,
+        torchcomms_enabled,
+        parent_backend="cuda:nccl",
+        requested_backend="cuda:nccl",
+    ):
         """Drive the non-member early-return path of a subgroup.
 
         The default group is faked as initialized and device-bound with this
@@ -498,21 +714,29 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         takes the ``NON_GROUP_MEMBER`` branch. Returns (result, split_source_mock).
         """
         split_src = mock.MagicMock()
+        split_src.supports_splitting = True
         default = mock.MagicMock()
         default.rank.return_value = 0
         default.bound_device_id = torch.device("cuda:0")
-        with mock.patch.multiple(
-            c10d,
-            _use_torchcomms_enabled=lambda: torchcomms_enabled,
-            is_initialized=lambda: True,
-            _get_default_group=lambda: default,
-            _get_split_source=lambda pg: split_src,
+        default._get_backend.return_value = split_src
+        with (
+            mock.patch.dict(
+                c10d._world.pg_map,
+                {default: (parent_backend, dist.HashStore())},
+                clear=True,
+            ),
+            mock.patch.multiple(
+                c10d,
+                _use_torchcomms_enabled=lambda: torchcomms_enabled,
+                is_initialized=lambda: True,
+                _get_default_group=lambda: default,
+            ),
         ):
             res = c10d._new_process_group_helper(
                 group_size=2,
                 group_rank=0,
                 global_ranks_in_group=[1, 2],  # rank 0 is NOT a member
-                backend="nccl",
+                backend=requested_backend,
                 store=dist.HashStore(),
                 group_name=c10d.GroupName(self.id()),
                 timeout=self.TIMEOUT,
@@ -530,6 +754,233 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         res, split_src = self._drive_non_member(torchcomms_enabled=False)
         self.assertEqual(res, (dist.GroupMember.NON_GROUP_MEMBER, None))
         split_src.perform_nocolor_split.assert_called_once_with(torch.device("cuda:0"))
+
+    def test_non_member_does_not_construct_backend_config(self):
+        with mock.patch.object(c10d, "BackendConfig") as backend_config:
+            res, split_src = self._drive_non_member(torchcomms_enabled=False)
+
+        self.assertEqual(res, (dist.GroupMember.NON_GROUP_MEMBER, None))
+        split_src.perform_nocolor_split.assert_called_once_with(torch.device("cuda:0"))
+        backend_config.assert_not_called()
+
+    def test_non_member_skips_parent_split_for_different_backend(self):
+        res, split_src = self._drive_non_member(
+            torchcomms_enabled=False,
+            parent_backend="cuda:nccl",
+            requested_backend="cuda:mccl",
+        )
+        self.assertEqual(res, (dist.GroupMember.NON_GROUP_MEMBER, None))
+        split_src.perform_nocolor_split.assert_not_called()
+
+    def test_missing_parent_world_state_skips_split(self):
+        parent = mock.MagicMock()
+        parent.bound_device_id = torch.device("cuda:0")
+        split_src = mock.MagicMock()
+        split_src.supports_splitting = True
+        parent._get_backend.return_value = split_src
+
+        with mock.patch.dict(c10d._world.pg_map, {}, clear=True):
+            result = c10d._get_split_source(parent, "cuda:nccl")
+
+        self.assertIsNone(result)
+
+    def test_missing_device_mappings_skip_split(self):
+        parent = mock.MagicMock()
+        parent.bound_device_id = torch.device("cuda:0")
+        split_src = mock.MagicMock()
+        split_src.supports_splitting = True
+        parent._get_backend.return_value = split_src
+
+        with mock.patch.dict(
+            c10d._world.pg_map,
+            {parent: ("cpu:gloo", dist.HashStore())},
+            clear=True,
+        ):
+            result = c10d._get_split_source(parent, "xpu:xccl")
+
+        self.assertIsNone(result)
+
+    def test_malformed_backend_mapping_skips_split(self):
+        parent = mock.MagicMock()
+        parent.bound_device_id = torch.device("cuda:0")
+        split_src = mock.MagicMock()
+        split_src.supports_splitting = True
+        parent._get_backend.return_value = split_src
+
+        with mock.patch.dict(
+            c10d._world.pg_map,
+            {parent: ("cuda:nccl", dist.HashStore())},
+            clear=True,
+        ):
+            result = c10d._get_split_source(parent, "cuda:nccl:extra")
+
+        self.assertIsNone(result)
+
+
+class TestC10dTorchCommsDynamicCreation(TestCase):
+    TIMEOUT = datetime.timedelta(seconds=30)
+
+    def _capture_new_comm_options(self, *, enable_reconfigure, timeout=TIMEOUT):
+        captured = {}
+
+        def fake_new_comm(
+            backend_str,
+            device,
+            name=None,
+            store=None,
+            hints=None,
+            **kwargs,
+        ):
+            captured.update(kwargs)
+            raise RuntimeError("stop-after-new_comm")
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _use_torchcomms_enabled=lambda: True,
+            _torchcomms_handles_backend=lambda b: True,
+            new_comm=fake_new_comm,
+            _BackendWrapper=mock.sentinel.backend_wrapper,
+            _TorchCommsFlightRecorderHook=mock.sentinel.flight_recorder_hook,
+            create=True,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "stop-after-new_comm"):
+                c10d._new_process_group_helper(
+                    group_size=4,
+                    group_rank=1,
+                    global_ranks_in_group=[],
+                    backend="nccl",
+                    store=dist.HashStore(),
+                    group_name=c10d.GroupName(self.id()),
+                    timeout=timeout,
+                    device_id=torch.device("cuda:1"),
+                    enable_reconfigure=enable_reconfigure,
+                )
+        return captured
+
+    def test_new_comm_options_are_dynamic_only(self):
+        dynamic = self._capture_new_comm_options(
+            enable_reconfigure=True,
+            timeout=self.TIMEOUT,
+        )
+        self.assertEqual(
+            dynamic,
+            {"timeout": self.TIMEOUT, "enable_reconfigure": True},
+        )
+
+        static = self._capture_new_comm_options(enable_reconfigure=False)
+        self.assertEqual(static, {})
+
+    def test_backend_wrapper_and_options_match_creation_mode(self):
+        for enable_reconfigure, timeout, expected_options in (
+            (False, self.TIMEOUT, {}),
+            (
+                True,
+                self.TIMEOUT,
+                {"timeout": self.TIMEOUT, "enable_reconfigure": True},
+            ),
+            (True, None, {"enable_reconfigure": True}),
+        ):
+            with self.subTest(enable_reconfigure=enable_reconfigure, timeout=timeout):
+                new_comm = mock.Mock(return_value=mock.sentinel.comm)
+                backend_wrapper_instance = mock.Mock()
+                backend_wrapper = mock.Mock(return_value=backend_wrapper_instance)
+                recorder = mock.MagicMock()
+                previous_count = len(c10d._world.comms)
+                try:
+                    with mock.patch.multiple(
+                        c10d,
+                        _TORCHCOMM_AVAILABLE=True,
+                        new_comm=new_comm,
+                        _BackendWrapper=backend_wrapper,
+                        _TorchCommsFlightRecorderHook=mock.Mock(return_value=recorder),
+                        create=True,
+                    ):
+                        result = c10d._create_torchcomms_backend(
+                            "mccl",
+                            "cuda",
+                            group_rank=2,
+                            group_size=4,
+                            group_name=c10d.GroupName(self.id()),
+                            store=dist.HashStore(),
+                            device_id=torch.device("cuda:1"),
+                            backend_options=None,
+                            timeout=timeout,
+                            enable_reconfigure=enable_reconfigure,
+                        )
+                finally:
+                    del c10d._world.comms[previous_count:]
+
+                self.assertIs(result, backend_wrapper_instance)
+                backend_wrapper.assert_called_once_with(mock.sentinel.comm)
+                recorder.register_with_comm.assert_called_once_with(mock.sentinel.comm)
+                new_comm.assert_called_once()
+                actual_options = {
+                    key: value
+                    for key, value in new_comm.call_args.kwargs.items()
+                    if key in {"timeout", "enable_reconfigure"}
+                }
+                self.assertEqual(actual_options, expected_options)
+                backend_wrapper_instance.set_timeout.assert_not_called()
+
+    def test_backend_wrapper_failure_does_not_register_or_publish_comm(self):
+        previous_count = len(c10d._world.comms)
+        recorder = mock.Mock()
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            new_comm=mock.Mock(return_value=mock.sentinel.comm),
+            _BackendWrapper=mock.Mock(side_effect=RuntimeError("wrapper failed")),
+            _TorchCommsFlightRecorderHook=mock.Mock(return_value=recorder),
+            create=True,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "wrapper failed"):
+                c10d._create_torchcomms_backend(
+                    "mccl",
+                    "cuda",
+                    group_rank=2,
+                    group_size=4,
+                    group_name=c10d.GroupName(self.id()),
+                    store=dist.HashStore(),
+                    device_id=torch.device("cuda:1"),
+                    backend_options=None,
+                    timeout=self.TIMEOUT,
+                    enable_reconfigure=True,
+                )
+
+        self.assertEqual(len(c10d._world.comms), previous_count)
+        recorder.register_with_comm.assert_not_called()
+
+    def test_recorder_failure_does_not_publish_comm(self):
+        previous_count = len(c10d._world.comms)
+        recorder = mock.Mock()
+        recorder.register_with_comm.side_effect = RuntimeError("recorder failed")
+        backend_wrapper = mock.Mock()
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            new_comm=mock.Mock(return_value=mock.sentinel.comm),
+            _BackendWrapper=backend_wrapper,
+            _TorchCommsFlightRecorderHook=mock.Mock(return_value=recorder),
+            create=True,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "recorder failed"):
+                c10d._create_torchcomms_backend(
+                    "mccl",
+                    "cuda",
+                    group_rank=2,
+                    group_size=4,
+                    group_name=c10d.GroupName(self.id()),
+                    store=dist.HashStore(),
+                    device_id=torch.device("cuda:1"),
+                    backend_options=None,
+                    timeout=self.TIMEOUT,
+                    enable_reconfigure=True,
+                )
+
+        self.assertEqual(len(c10d._world.comms), previous_count)
+        backend_wrapper.assert_called_once_with(mock.sentinel.comm)
+        backend_wrapper.return_value.set_timeout.assert_not_called()
 
 
 class TestC10dGroupNameHashSalt(TestCase):
@@ -673,6 +1124,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         "pg_group_ranks",
         "pg_backend_config",
         "pg_to_tag",
+        "tags_to_pg",
         "pg_coalesce_state",
         "comms",
     )
@@ -682,6 +1134,8 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         self._saved_world = {
             attr: getattr(c10d._world, attr).copy() for attr in self._WORLD_ATTRS
         }
+        self._saved_default_pg = c10d._world.default_pg
+        self._saved_group_count = c10d._world.group_count
 
     def tearDown(self):
         for attr, value in self._saved_world.items():
@@ -691,26 +1145,28 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
                 container.update(value)
             else:
                 container.extend(value)
+        c10d._world.default_pg = self._saved_default_pg
+        c10d._world.group_count = self._saved_group_count
         super().tearDown()
 
-    def _drive_destroy(self, device_backends):
-        """Register a fake subgroup PG and run ``destroy_process_group`` on it.
-
-        ``device_backends`` maps device type -> backend object; the PG reports
-        those device types and returns the matching backend from
-        ``_get_backend``. Returns the PG mock so callers can assert on teardown.
-        """
+    def _register_pg(self, device_backends, *, name=None):
+        """Register a fake PG whose backends are keyed by device type."""
         pg = mock.MagicMock()
         pg._device_types = list(device_backends)
         pg._get_backend.side_effect = lambda dev: device_backends[dev]
-        name = c10d.GroupName(self.id())
-        pg.group_name = name
+        group_name = c10d.GroupName(self.id() if name is None else name)
+        pg.group_name = group_name
 
         c10d._world.pg_map[pg] = (None, None)
-        c10d._world.pg_names[pg] = name
+        c10d._world.pg_names[pg] = group_name
         c10d._world.pg_group_ranks[pg] = {}
         c10d._world.pg_backend_config[pg] = ""
         c10d._world.pg_to_tag[pg] = None
+        return pg
+
+    def _drive_destroy(self, device_backends):
+        """Register a fake subgroup PG and run ``destroy_process_group`` on it."""
+        pg = self._register_pg(device_backends)
 
         with mock.patch.multiple(
             c10d,
@@ -757,6 +1213,39 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
             {"cuda": _FakeBackendWrapper(comm), "cpu": _FakeOtherBackend()}
         )
         self.assertEqual(comm.finalize_calls, 1)
+
+    def test_destroy_subgroup_keeps_other_live_comms_tracked(self):
+        world_pg = self._register_pg({}, name="world_pg")
+        comm_a, comm_b = _FakeComm(), _FakeComm()
+        subgroup_a = self._register_pg(
+            {"cuda": _FakeBackendWrapper(comm_a)}, name="subgroup_a"
+        )
+        subgroup_b = self._register_pg(
+            {"cuda": _FakeBackendWrapper(comm_b)}, name="subgroup_b"
+        )
+        c10d._world.default_pg = world_pg
+        c10d._world.comms.extend([comm_a, comm_b])
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _unregister_process_group=lambda group_name: None,
+            _unregister_all_process_groups=lambda: None,
+            _update_default_pg=lambda pg: setattr(c10d._world, "default_pg", pg),
+            create=True,
+        ):
+            c10d.destroy_process_group(subgroup_a)
+            self.assertEqual(comm_a.finalize_calls, 1)
+            self.assertEqual(comm_b.finalize_calls, 0)
+            self.assertNotIn(subgroup_a, c10d._world.pg_map)
+            self.assertIn(subgroup_b, c10d._world.pg_map)
+            self.assertEqual(c10d._world.comms, [comm_b])
+
+            c10d.destroy_process_group()
+            self.assertEqual(comm_a.finalize_calls, 1)
+            self.assertEqual(comm_b.finalize_calls, 1)
+            self.assertEqual(c10d._world.comms, [])
 
 
 class TestC10dTorchCommsBackendConfig(TestCase):

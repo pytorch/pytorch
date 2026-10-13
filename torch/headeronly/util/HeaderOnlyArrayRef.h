@@ -9,6 +9,7 @@
 #include <functional>
 #include <initializer_list>
 #include <iterator>
+#include <ostream>
 #include <type_traits>
 #include <vector>
 
@@ -54,17 +55,14 @@ class HeaderOnlyArrayRef {
 
   /// Construct a HeaderOnlyArrayRef from a single element.
   // TODO Make this explicit
-  constexpr HeaderOnlyArrayRef(const T& OneElt C10_LIFETIMEBOUND)
-      : Data(&OneElt), Length(1) {}
+  constexpr HeaderOnlyArrayRef(const T& OneElt) : Data(&OneElt), Length(1) {}
 
   /// Construct a HeaderOnlyArrayRef from a pointer and length.
-  constexpr HeaderOnlyArrayRef(const T* data C10_LIFETIMEBOUND, size_t length)
+  constexpr HeaderOnlyArrayRef(const T* data, size_t length)
       : Data(data), Length(length) {}
 
   /// Construct a HeaderOnlyArrayRef from a range.
-  constexpr HeaderOnlyArrayRef(
-      const T* begin C10_LIFETIMEBOUND,
-      const T* end C10_LIFETIMEBOUND)
+  constexpr HeaderOnlyArrayRef(const T* begin, const T* end)
       : Data(begin), Length(end - begin) {}
 
   template <
@@ -73,8 +71,7 @@ class HeaderOnlyArrayRef {
       // NOLINTNEXTLINE(modernize-use-constraints)
       typename = std::enable_if_t<
           (std::is_same_v<U, T*> || std::is_same_v<U, T const*>)>>
-  /* implicit */ HeaderOnlyArrayRef(
-      const Container& container C10_LIFETIMEBOUND)
+  /* implicit */ HeaderOnlyArrayRef(const Container& container)
       : Data(container.data()), Length(container.size()) {}
 
   /// Construct a HeaderOnlyArrayRef from a std::vector.
@@ -82,8 +79,7 @@ class HeaderOnlyArrayRef {
   // std::vector<bool>, because ArrayRef can't work on a std::vector<bool>
   // bitfield.
   template <typename A>
-  /* implicit */ HeaderOnlyArrayRef(
-      const std::vector<T, A>& Vec C10_LIFETIMEBOUND)
+  /* implicit */ HeaderOnlyArrayRef(const std::vector<T, A>& Vec)
       : Data(Vec.data()), Length(Vec.size()) {
     static_assert(
         !std::is_same_v<T, bool>,
@@ -92,20 +88,18 @@ class HeaderOnlyArrayRef {
 
   /// Construct a HeaderOnlyArrayRef from a std::array
   template <size_t N>
-  /* implicit */ constexpr HeaderOnlyArrayRef(
-      const std::array<T, N>& Arr C10_LIFETIMEBOUND)
+  /* implicit */ constexpr HeaderOnlyArrayRef(const std::array<T, N>& Arr)
       : Data(Arr.data()), Length(N) {}
 
   /// Construct a HeaderOnlyArrayRef from a C array.
   template <size_t N>
-  /* implicit */ constexpr HeaderOnlyArrayRef(
-      // NOLINTNEXTLINE(*c-arrays*)
-      const T (&Arr C10_LIFETIMEBOUND)[N])
+  // NOLINTNEXTLINE(*c-arrays*)
+  /* implicit */ constexpr HeaderOnlyArrayRef(const T (&Arr)[N])
       : Data(Arr), Length(N) {}
 
   /// Construct a HeaderOnlyArrayRef from a std::initializer_list.
   /* implicit */ constexpr HeaderOnlyArrayRef(
-      const std::initializer_list<T>& Vec C10_LIFETIMEBOUND)
+      const std::initializer_list<T>& Vec)
       : Data(
             std::begin(Vec) == std::end(Vec) ? static_cast<T*>(nullptr)
                                              : std::begin(Vec)),
@@ -265,14 +259,28 @@ class HeaderOnlyArrayRef {
     return !a1.equals(a2);
   }
   /// @}
+  /// @name Stream operator
+  /// @{
+  friend std::ostream& operator<<(std::ostream& out, HeaderOnlyArrayRef list) {
+    int i = 0;
+    out << '[';
+    for (const auto& e : list) {
+      if (i++ > 0)
+        out << ", ";
+      out << e;
+    }
+    out << ']';
+    return out;
+  }
+  /// @}
 };
 
 } // namespace c10
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::HeaderOnlyArrayRef;
 using IntHeaderOnlyArrayRef = HeaderOnlyArrayRef<int64_t>;
-} // namespace torch::headeronly
+HIDDEN_NAMESPACE_END(torch, headeronly)
 
 #if __cplusplus >= 202002L
 #include <ranges>

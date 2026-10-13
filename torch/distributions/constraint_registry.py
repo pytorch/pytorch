@@ -45,7 +45,7 @@ invariant.::
     coordinate-wise operation appropriate for algorithms like SVI. In
     contrast, ``biject_to(constraints.simplex)`` returns a
     :class:`~torch.distributions.transforms.StickBreakingTransform` that
-    bijects its input down to a one-fewer-dimensional space; this a more
+    bijects its input down to a one-fewer-dimensional space; this is a more
     expensive less numerically stable transform but is needed for algorithms
     like HMC.
 

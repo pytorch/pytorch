@@ -15,7 +15,11 @@ from torch.nativert.backends._lower_utils import (
     lower_exported_program,
     package_nativert_with_aoti_delegate,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipGPUIf,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
@@ -217,7 +221,7 @@ def make_dynamic_cls(cls, strict=False):
     test_class.__module__ = __name__
 
 
-def _nativert_aoti_basic_module():
+def _single_output_model(device):
     class M(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -227,11 +231,11 @@ def _nativert_aoti_basic_module():
         def forward(self, x):
             return self.relu(self.linear(x))
 
-    return M()
+    return M().to(device), (torch.randn(4, 4, device=device),)
 
 
-def _nativert_aoti_multi_output_module():
-    class MMultiOutput(torch.nn.Module):
+def _multi_output_model(device):
+    class M(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
             self.linear = torch.nn.Linear(4, 4)
@@ -240,10 +244,10 @@ def _nativert_aoti_multi_output_module():
         def forward(self, x):
             return (self.relu(self.linear(x)), x)
 
-    return MMultiOutput()
+    return M().to(device), (torch.randn(4, 4, device=device),)
 
 
-def _nativert_aoti_pytree_module():
+def _pytree_model(device):
     class M(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -257,41 +261,35 @@ def _nativert_aoti_pytree_module():
             y3 = self.linear2(x3)
             return (y1, (y2, y3))
 
-    return M()
-
-
-NATIVERT_AOTI_CASES = ("basic", "multi_output", "pytree")
-
-
-def _nativert_aoti_case(device, case):
-    if case == "basic":
-        return _nativert_aoti_basic_module().to(device), (
+    return M().to(device), (
+        (
             torch.randn(4, 4, device=device),
-        )
-    if case == "multi_output":
-        return (
-            _nativert_aoti_multi_output_module().to(device),
-            (torch.randn(4, 4, device=device),),
-        )
-    if case == "pytree":
-        return (
-            _nativert_aoti_pytree_module().to(device),
-            (
-                (
-                    torch.randn(4, 4, device=device),
-                    (
-                        torch.randn(4, 4, device=device),
-                        torch.randn(4, 4, device=device),
-                    ),
-                ),
-            ),
-        )
-    raise AssertionError(f"unknown aoti case: {case}")
+            (torch.randn(4, 4, device=device), torch.randn(4, 4, device=device)),
+        ),
+    )
 
 
-class _NativeRTAOTI:
-    def _test_aoti(self, device, case):
-        m, sample_inputs = _nativert_aoti_case(device, case)
+@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+@unittest.skipIf(not is_fbcode(), "FBcode only for now")
+class TestNativeRTDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # nativert's placement layer accepts only CPU/CUDA/meta/MTIA
+    # (torch/nativert/executor/PlacementUtils.cpp), and registers an AOTI runner
+    # for CPU and CUDA only.
+    @skipXPUIf(
+        True,
+        "nativert has no XPU support: https://github.com/intel/torch-xpu-ops/issues/5364",
+    )
+    @skipGPUIf(not HAS_TRITON, "AOTI on an accelerator requires triton")
+    @parametrize(
+        "make_model",
+        [_single_output_model, _multi_output_model, _pytree_model],
+        name_fn=lambda fn: fn.__name__.lstrip("_"),
+    )
+    def test_aoti(self, device, make_model):
+        m, sample_inputs = make_model(device)
         MODEL_NAME = "model"
         BACKEND_ID = "aoti"
 
@@ -377,37 +375,6 @@ class _NativeRTAOTI:
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 @unittest.skipIf(not is_fbcode(), "FBcode only for now")
-class TestNativeRT(_NativeRTAOTI, TestCase):
-    hw_classification = HardwareClassification.CPU
-
-    def test_aoti_basic(self):
-        self._test_aoti("cpu", "basic")
-
-    def test_aoti_multi_output(self):
-        self._test_aoti("cpu", "multi_output")
-
-    def test_aoti_pytree(self):
-        self._test_aoti("cpu", "pytree")
-
-
-@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
-@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
-@unittest.skipIf(not is_fbcode(), "FBcode only for now")
-@unittest.skipUnless(HAS_TRITON, "requires triton")
-class TestNativeRTAccelerator(_NativeRTAOTI, TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @parametrize("case", NATIVERT_AOTI_CASES)
-    def test_aoti(self, device, case):
-        self._test_aoti(device, case)
-
-
-instantiate_device_type_tests(TestNativeRTAccelerator, globals(), except_for="cpu")
-
-
-@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
-@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
-@unittest.skipIf(not is_fbcode(), "FBcode only for now")
 class TestSelectScalarOverload(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -444,6 +411,11 @@ if is_fbcode():
         make_dynamic_cls(test, strict=True)
         make_dynamic_cls(test, strict=False)
     del test
+
+
+# Default bases also instantiate privateuse1. allow_xpu keeps the XPU class
+# from #196970; skipXPUIf still skips it until nativert has an XPU runner.
+instantiate_device_type_tests(TestNativeRTDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":

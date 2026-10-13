@@ -22,6 +22,23 @@ def my_has_storage(t) -> bool:
     return torch.ops.libtorch_agn_2_14.my_has_storage.default(t)
 
 
+def my_mps_scale_negate_clamp(t, scale, negate, low, high) -> torch.Tensor:
+    """Stable ``torch_mps_set_arg_bytes`` (2.14+, MPS only)."""
+    return torch.ops.libtorch_agn_2_14.my_mps_scale_negate_clamp.default(
+        t, scale, negate, low, high
+    )
+
+
+def my_mps_set_arg_bytes_raw(t, size, null_ptr) -> torch.Tensor:
+    return torch.ops.libtorch_agn_2_14.my_mps_set_arg_bytes_raw.default(
+        t, size, null_ptr
+    )
+
+
+def my_mps_set_arg_bytes_lifetime(t) -> torch.Tensor:
+    return torch.ops.libtorch_agn_2_14.my_mps_set_arg_bytes_lifetime.default(t)
+
+
 def __getattr__(name):
     """Proxy for inherited ops from previous versions."""
     if name.startswith("_"):
