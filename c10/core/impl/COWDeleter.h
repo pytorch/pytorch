@@ -1,11 +1,13 @@
 #pragma once
 
+#include <c10/core/Stream.h>
 #include <c10/macros/Export.h>
 #include <c10/util/UniqueVoidPtr.h>
 
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <variant>
 
@@ -21,7 +23,16 @@ class C10_API COWDeleterContext {
   // Note that the deleter will only be called in our destructor if
   // the last reference to this goes away without getting
   // materialized.
-  explicit COWDeleterContext(std::unique_ptr<void, DeleterFnPtr> data);
+  //
+  // `stream` is the allocation stream of stream-ordered (e.g. CUDA) data, on
+  // which all references to it are created. See README-cow.md.
+  explicit COWDeleterContext(
+      std::unique_ptr<void, DeleterFnPtr> data,
+      std::optional<Stream> stream = std::nullopt);
+
+  const std::optional<Stream>& stream() const {
+    return stream_;
+  }
 
   // Increments the current refcount.
   void increment_refcount();
@@ -53,6 +64,7 @@ class C10_API COWDeleterContext {
   std::shared_mutex mutex_;
   std::unique_ptr<void, DeleterFnPtr> data_;
   std::atomic<std::int64_t> refcount_ = 1;
+  const std::optional<Stream> stream_;
 };
 
 // `cow_deleter` is used as the `ctx_deleter` for DataPtr to implement a COW

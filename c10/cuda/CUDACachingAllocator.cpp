@@ -5808,8 +5808,24 @@ class NativeCachingAllocator : public CUDAAllocator {
     return "native";
   }
   void copy_data(void* dest, const void* src, std::size_t count) const final {
-    C10_CUDA_CHECK(
-        cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
+    C10_CUDA_CHECK(cudaMemcpyAsync(
+        dest,
+        src,
+        count,
+        cudaMemcpyDeviceToDevice,
+        cuda::getCurrentCUDAStream()));
+  }
+
+  std::optional<AllocationStreamInfo> allocation_stream_info(
+      const void* ptr) const override {
+    Block* block =
+        const_cast<NativeCachingAllocator*>(this)->get_allocated_block(ptr);
+    if (!block) {
+      return std::nullopt;
+    }
+    return AllocationStreamInfo{
+        cuda::getStreamFromExternal(block->stream, block->device),
+        block->pool->owner_PrivatePool != nullptr};
   }
 };
 
