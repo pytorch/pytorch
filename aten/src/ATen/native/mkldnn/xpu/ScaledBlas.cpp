@@ -1247,9 +1247,11 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
       mat_a.scalar_type(),
       scale_recipe_a_enum,
       scale_a_ref,
+      swizzle_a_enum,
       mat_b.scalar_type(),
       scale_recipe_b_enum,
-      scale_b_ref);
+      scale_b_ref,
+      swizzle_b_enum);
   TORCH_CHECK_VALUE(
       gemm_impl != ScaledGemmImplementation::NONE,
       "Invalid scaling configuration.\n"
