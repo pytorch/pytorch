@@ -94,6 +94,7 @@ from ..utils import (
     no_positional,
     product,
     proxy_args_kwargs,
+    specialize_symnode,
     unpack_iterable,
     unwrap_if_wrapper,
 )
@@ -802,18 +803,52 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 raise AssertionError(
                     f"torch.fx.traceback.annotate expects no kwargs, got {len(kwargs)}"
                 )
-            return FxTracebackAnnotateVariable(
-                args[0].as_python_constant(), source=self.source
-            )
+
+            def annotation_constant(value: VariableTracker) -> Any:
+                value = value.realize()
+                if isinstance(value, variables.SymNodeVariable):
+                    if value.python_type() is not float:
+                        unimplemented(
+                            gb_type="dynamic value in torch.fx.traceback.annotate",
+                            context=str(value),
+                            explanation="Annotation values are stored as constants in the graph. "
+                            "Dynamic floats are specialized, but other dynamic values are not, "
+                            "since specializing them (e.g. a tensor size) can cause a recompile "
+                            "for every distinct value.",
+                            hints=[
+                                "Compute the annotation value from configuration rather than from tensors or sizes.",
+                            ],
+                        )
+                    # e.g. per-layer float settings sharing one forward
+                    value = specialize_symnode(value)
+                return value.as_python_constant()
+
+            annotation = args[0].realize()
+            if isinstance(annotation, variables.UserDefinedDictVariable):
+                unimplemented(
+                    gb_type="dict subclass in torch.fx.traceback.annotate",
+                    context=str(annotation),
+                    explanation="Dynamo reads annotation entries directly, which would bypass "
+                    "overridden mapping methods (e.g. __getitem__) on a dict subclass.",
+                    hints=[
+                        "Pass a plain dict to torch.fx.traceback.annotate.",
+                    ],
+                )
+            if isinstance(annotation, variables.ConstDictVariable):
+                annotation_dict = {
+                    k.vt.as_python_constant(): annotation_constant(v)
+                    for k, v in annotation.items.items()
+                }
+            else:
+                annotation_dict = annotation.as_python_constant()
+            return FxTracebackAnnotateVariable(annotation_dict)
         elif self.value in (
             torch.fx.traceback._dynamo_annotate,
             torch.fx.traceback._dynamo_annotate.__wrapped__,  # type: ignore[attr-defined]
         ):
             if len(args) != 1 or kwargs:
                 raise AssertionError("_dynamo_annotate expects one positional argument")
-            return FxTracebackAnnotateVariable(
-                dict(args[0].as_python_constant()), source=self.source
-            )
+            return FxTracebackAnnotateVariable(dict(args[0].as_python_constant()))
         elif self.value in (
             torch.fx.traceback._dynamo_region_activation_memory_budget,
             torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
@@ -829,8 +864,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     f"expected a float budget, got {type(budget).__name__}"
                 )
             return FxTracebackAnnotateVariable(
-                {torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget},
-                source=self.source,
+                {torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget}
             )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
