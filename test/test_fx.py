@@ -4284,6 +4284,16 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
 
         self.checkGraphModule(M(), (torch.rand(2, 3), A()), kwargs=None)
 
+    def test_annotations_with_resolvable_forward_references(self):
+        class M(torch.nn.Module):
+            def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+                return x + 1
+
+        graph_module = symbolic_trace(M())
+        scripted = torch.jit.script(graph_module)
+        x = torch.rand(2, 3)
+        self.assertEqual(graph_module(x), scripted(x))
+
     def test_annotations_with_non_torch_reference_and_no_internal_forward_references(
         self,
     ):

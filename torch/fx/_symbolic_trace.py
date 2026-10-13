@@ -89,6 +89,13 @@ def is_fx_symbolic_tracing() -> bool:
     return _get_is_fx_tracing() and not torch.compiler.is_compiling()
 
 
+def _get_annotations(fn: Callable[..., Any]) -> dict[str, Any]:
+    try:
+        return inspect.get_annotations(fn, eval_str=True)
+    except NameError:
+        return inspect.get_annotations(fn)
+
+
 @compatibility(is_backward_compatible=True)
 class ProxyableClassMeta(type):
     """
@@ -717,6 +724,7 @@ class Tracer(TracerBase):
             args.append(self.root)
 
         sig = inspect.signature(fn_for_analysis)
+        annotations = _get_annotations(fn_for_analysis)
 
         # This covers the very specific case where we are passing in flat
         # concrete_args as a tuple, but our traced fn takes (*args, **kwargs).
@@ -753,7 +761,7 @@ class Tracer(TracerBase):
             concrete_args = dict(zip(arg_names, concrete_args))
 
         def proxy_placeholder(name: str) -> Any:
-            return self._proxy_placeholder(name, concrete_args, sig, fn_for_analysis)
+            return self._proxy_placeholder(name, concrete_args, sig, annotations)
 
         args.extend(proxy_placeholder(names) for names in arg_names)
 
@@ -936,7 +944,7 @@ class Tracer(TracerBase):
                     _autowrap_check(
                         patcher, module.__dict__, self._autowrap_function_ids
                     )
-                ann = inspect.get_annotations(inspect.unwrap(fn))
+                ann = _get_annotations(inspect.unwrap(fn))
                 self.create_node(
                     "output",
                     "output",
@@ -979,7 +987,7 @@ class Tracer(TracerBase):
         name: str,
         concrete_args: dict[str, Any] | None,
         sig: inspect.Signature,
-        fn_for_analysis: Callable[..., Any],
+        annotations: dict[str, Any],
     ) -> Any:
         if concrete_args is not None and name in concrete_args:
             cnt = 0
@@ -1044,7 +1052,7 @@ class Tracer(TracerBase):
             name,
             default,
             {},
-            type_expr=fn_for_analysis.__annotations__.get(name, None),
+            type_expr=annotations.get(name, None),
         )
 
 
