@@ -4232,7 +4232,7 @@ kernel void svd_jacobi(
     if (simd_lane == 0) {
       S[batch_idx * n + j] = sigma;
     }
-    float inv = sigma > eps ? (1 / sigma) : 0.0f;
+    float inv = sigma > 0.0f ? (1 / sigma) : 0.0f;
     threadgroup T* colsrc = Atg + src * m;
     if (!params.transposed) {
       for (uint32_t i = simd_lane; i < m; i += kSimd) {

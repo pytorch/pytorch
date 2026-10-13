@@ -789,6 +789,11 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': False})
 
 
+def sample_inputs_pow(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
+    if dtype.is_complex and not requires_grad:
+        yield SampleInput(torch.zeros(2, device=device, dtype=dtype), torch.tensor([1j, 2], device=device, dtype=dtype))
+
 def sample_inputs_nextafter(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
 
@@ -3117,6 +3122,12 @@ def error_inputs_logcumsumexp(op_info, device, **kwargs):
         yield ErrorInput(SampleInput(src, args=(dim,)),
                          error_type=IndexError,
                          error_regex='Dimension out of range')
+
+    # logcumsumexp is only implemented for floating point and complex dtypes
+    for shape in [(5, 2), (), (0, 2)]:
+        yield ErrorInput(SampleInput(torch.zeros(shape, device=device, dtype=torch.int64), args=(0,)),
+                         error_type=NotImplementedError,
+                         error_regex='input dtype should be either floating point or complex')
 
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
@@ -18226,6 +18237,7 @@ op_db: list[OpInfo] = [
                     dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
                     dtypesIfMPS=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
                     ref=np.power,
+                    sample_inputs_func=sample_inputs_pow,
                     # Due to AVX2 currently not being fully supported for Float16, log_vml_cpu can't be enabled
                     # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
                     # unsupported on CPU.
