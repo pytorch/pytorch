@@ -2365,6 +2365,24 @@ def _aot_stage2b_fw_compile(
     )
 
 
+def _resolve_neg_example_inputs(
+    fw_metadata: ViewAndMutationMeta, example_inputs: list[Any]
+) -> list[Any]:
+    # The runtime wrapper hands the compiled graph resolved copies of inputs
+    # carrying the lazy negative bit, so compile against resolved examples too.
+    # See Note [Resolving lazy negative inputs at the backend boundary]
+    if not any(info.is_neg for info in fw_metadata.input_info):
+        return example_inputs
+    return [
+        t.resolve_neg()
+        if isinstance(t, torch.Tensor)
+        and not is_traceable_wrapper_subclass(t)
+        and t.is_neg()
+        else t
+        for t in example_inputs
+    ]
+
+
 def _aot_stage2b_bw_compile(
     bw_module: torch.fx.GraphModule,
     maybe_subclass_meta: SubclassMeta | None,
@@ -2451,6 +2469,9 @@ def _aot_stage2b_bw_compile(
                     ph_size = ph_arg.size()
 
                     placeholder_list[i] = ph_arg.as_strided(ph_size, inductor_stride)
+            placeholder_list = _resolve_neg_example_inputs(
+                fw_metadata, placeholder_list
+            )
             compiled_bw_func = None
             if (
                 num_symints_saved_for_bw > 0
@@ -2897,7 +2918,9 @@ def _aot_stage2b_compile_forward_or_inference(
 
         with TracingContext.report_output_strides() as fwd_output_strides:
             # pyrefly: ignore[not-callable]
-            compiled_fw_func = compiler(fw_module, adjusted_flat_args)
+            compiled_fw_func = compiler(
+                fw_module, _resolve_neg_example_inputs(fw_metadata, adjusted_flat_args)
+            )
 
         # Make boxed if needed
         if not getattr(compiled_fw_func, "_boxed_call", False):

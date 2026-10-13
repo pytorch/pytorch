@@ -289,6 +289,9 @@ def run_functionalized_fw_and_collect_metadata(
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
                     keep_input_mutations=keep_input_mutations,
+                    is_neg=isinstance(arg, Tensor)
+                    and not is_traceable_wrapper_subclass(arg)
+                    and arg.is_neg(),
                 )
             )
 
