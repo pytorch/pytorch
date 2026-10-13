@@ -434,6 +434,18 @@ class TestPyBackend(TestCase):
 
         self.assertGreater(backend.wait_count, 0)
 
+    def test_work_is_completed_override(self) -> None:
+        class CompletedWork(RecordingWork):
+            def is_completed(self):
+                return True
+
+        backend = RecordingBackend(0, 1)
+        group = create_process_group(backend)
+        self.assertFalse(group.allreduce([torch.zeros(2)]).is_completed())
+
+        backend._new_work = lambda result=None: CompletedWork(result, backend)
+        self.assertTrue(group.allreduce([torch.zeros(2)]).is_completed())
+
     def test_collective_returns_none(self) -> None:
         backend = RecordingBackend(0, 1)
         backend.allreduce = lambda tensors, opts: [t.add_(2) for t in tensors] and None
