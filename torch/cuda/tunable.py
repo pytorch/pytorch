@@ -447,7 +447,11 @@ def set_rotating_buffer_size(buffer_size: int) -> None:
 
 
 def get_rotating_buffer_size() -> int:
-    r"""Get the rotating buffer size in kilobytes."""
+    r"""Get the rotating buffer size in bytes.
+
+    A negative value passed to :func:`set_rotating_buffer_size` resolves to the
+    L2 cache size, which is what this returns in that case.
+    """
     return torch._C._cuda_tunableop_get_rotating_buffer_size()  # type: ignore[attr-defined]
 
 
