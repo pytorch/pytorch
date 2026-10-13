@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
       wr<<<1, 64>>>(buf, (unsigned)i, wx);
     } else {
       for (auto& p : page) p = (unsigned)i;
-      CK(hipMemcpy(buf, page.data(), 4096, hipMemCpyHostToDevice));
+      CK(hipMemcpy(buf, page.data(), 4096, hipMemcpyHostToDevice));
     }
     rd<<<B, 64>>>(buf, out);
     CK(hipMemcpy(h.data(), out, 2 * B * 4, hipMemcpyDeviceToHost));
