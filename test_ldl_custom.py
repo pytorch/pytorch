@@ -90,15 +90,19 @@ def _factor_panels(A, nb, panels, cooperative, nblocks, nthreads, hermitian):
 
 
 # The threshold LAPACK's own test drivers use for its scaled residuals. Those run at
-# small n: the residual of Bunch-Kaufman on the hardest of these inputs grows like
-# 0.5 * sqrt(n) (rounding errors accumulate as a random walk), on CPU LAPACK and CUDA
-# alike -- 22 at n=2049, 32 at 4100, 42 at 8193, 98 at 40000 -- so past n ~ 3500 the
-# bound follows it, with some headroom.
+# small n; past n ~ 2000 the residual of any backward-stable solver on these inputs
+# exceeds it, and how fast it grows with n depends on the machine: on GB200/aarch64
+# it is about 2x what it was on H100/x86, on CPU LAPACK, cuSOLVER LU and the custom
+# kernel alike. So large n is bounded relative to an LU solve of the same system,
+# against which the custom kernel and CPU LAPACK's LDL measured at most 1.2x, and
+# 1.3x on integer_valued, where Bunch-Kaufman is simply less accurate than LU.
 LAPACK_RESID_THRESH = 30.0
+REF_RESID_FACTOR = 1.5
 
 
-def _resid_threshold(n):
-    return max(LAPACK_RESID_THRESH, 0.7 * n ** 0.5)
+def _resid_threshold(A, B):
+    ref = _lapack_residual(A, torch.linalg.solve(A, B), B)
+    return max(LAPACK_RESID_THRESH, REF_RESID_FACTOR * ref)
 
 
 def _lapack_residual(A, X, B):
@@ -113,11 +117,26 @@ def _lapack_residual(A, X, B):
 
 def _residual_after_solve(A, LD, piv, hermitian=True, nrhs=3):
     """Solves on CPU (complex+Hermitian is not supported on CUDA) with the
-    factorization of A, returning the LAPACK residual."""
-    A = symmetrize(A.cpu(), hermitian)
+    factorization of A, returning the LAPACK residual and its bound. The reference
+    solve for the bound runs on A's device: LU on CPU is slow at large n."""
+    A = symmetrize(A, hermitian)
     B = make_tensor((*A.shape[:-1], nrhs), dtype=A.dtype, device="cpu")
     X = torch.linalg.ldl_solve(LD.cpu(), piv.cpu(), B, hermitian=hermitian)
-    return _lapack_residual(A, X, B)
+    return _lapack_residual(A.cpu(), X, B), _resid_threshold(A, B.to(A.device))
+
+
+# Sizes for test_huge's blocks_per_sm: ~47-50 GiB per copy of the matrix, so that 3.2
+# copies fit on a 184 GiB GB200. Cooperative blocks in the first panel: ceil(n / 256)
+# = 450, 313, 313, 219, against caps of 760, 760, 608, 456 there.
+_HUGE_N = {torch.float32: 115000, torch.float64: 80000, torch.complex64: 80000, torch.complex128: 56000}
+
+
+def _huge_n(dtype, regime):
+    return 46341 if regime == "int32_offsets" else _HUGE_N[dtype]
+
+
+def _huge_bytes(dtype, regime, copies):
+    return int(copies * _huge_n(dtype, regime) ** 2 * dtype.itemsize)
 
 
 def _equal_with_nonfinite(a, b):
@@ -470,8 +489,8 @@ class TestLDLCustomKernel(TestCase):
         # LAPACK's scaled solve residual. The per-dtype defaults of assertEqual are far too
         # tight here: they reject valid float32 results from n=33 up, on CPU as
         # readily as on CUDA.
-        resid = _residual_after_solve(A, LD, pivots, hermitian, nrhs)
-        self.assertLess(resid, _resid_threshold(n))
+        resid, thresh = _residual_after_solve(A, LD, pivots, hermitian, nrhs)
+        self.assertLess(resid, thresh)
 
     # ------------------------------------------------------------------ sweeps
 
@@ -548,6 +567,33 @@ class TestLDLCustomKernel(TestCase):
         torch.manual_seed(n)
         self._check(indefinite(n, (), dtype, device), hermitian=True)
 
+    # Two regimes the sizes above never reach, both needing ~3 copies of the matrix
+    # on the device (the input, LD, and the temporary in ldl_factor_blas3_kernel):
+    #  - int32_offsets: n^2 > 2^31, so the offsets of the last columns overflow int32.
+    #  - blocks_per_sm: grids of 1.4 to 3 cooperative blocks per SM on GB200 (152 SMs),
+    #    so the grid-wide argmax and sync run with blocks sharing SMs. n = 40000
+    #    above is ~1 block per SM there.
+    # zero_diagonal forces a 2x2 pivot with an interchange at every step, from anywhere
+    # in the column, i.e. from any block of the grid.
+    @onlyCUDA
+    @largeTensorTest(lambda self, device, dtype, regime: _huge_bytes(dtype, regime, 3.2))
+    @largeTensorTest(lambda self, device, dtype, regime: _huge_bytes(dtype, regime, 3), device="cpu")
+    @parametrize("regime", ["int32_offsets", "blocks_per_sm"])
+    @dtypes(*floating_and_complex_types())
+    def test_huge(self, device, dtype, regime):
+        n = _huge_n(dtype, regime)
+        torch.manual_seed(n)
+        A = zero_diagonal(n, (), dtype, device)
+        A_cpu = A.cpu()
+        LD, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertEqual(info.item(), 0)
+        # Off the device before the reference solve, which needs two more copies.
+        LD, piv = LD.cpu(), piv.cpu()
+        B = make_tensor((n, 3), dtype=dtype, device="cpu")
+        resid = _lapack_residual(A_cpu, torch.linalg.ldl_solve(LD, piv, B, hermitian=True), B)
+        del LD, A_cpu
+        self.assertLess(resid, _resid_threshold(A, B.to(device)))
+
     @onlyCUDA
     def test_standalone_kernel_matches_original(self, device):
         """ldl_panel_standalone.cu holds a copy of the panel kernel, so guard it
@@ -612,7 +658,7 @@ class TestLDLCustomKernel(TestCase):
             LD, ipiv, info = _factor_panels(A, nb, None, cooperative, nblocks, nthreads, True)
             self.assertEqual(info.item(), 0)
             torch.manual_seed(0)
-            self.assertLess(_residual_after_solve(A, LD, ipiv), _resid_threshold(n))
+            self.assertLess(*_residual_after_solve(A, LD, ipiv))
 
     @onlyCUDA
     @parametrize("n", [300, 4100])
@@ -1198,7 +1244,7 @@ class TestLDLCustomKernel(TestCase):
         B = make_tensor((n, 3), dtype=dtype, device=device)
         LD, piv, _ = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
         X = torch.linalg.ldl_solve(LD, piv, B, hermitian=hermitian)
-        self.assertLess(_lapack_residual(A, X, B), _resid_threshold(n))
+        self.assertLess(_lapack_residual(A, X, B), _resid_threshold(A, B))
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_unsupported_dtype(self, device, dtype):
@@ -1211,14 +1257,13 @@ class TestLDLCustomKernel(TestCase):
     @parametrize("n", [33, 127, 513, 1025, 2049])
     @dtypes(*floating_and_complex_types())
     def test_lapack_residual(self, device, dtype, n, structure):
-        """The scaled residual stays under LAPACK's own test threshold (see
-        _resid_threshold). Measured on these inputs it is 0.1 to 22 for CUDA and CPU
-        LAPACK alike, so a loss of a few digits would show."""
+        """The scaled residual stays under LAPACK's own test threshold, or close to
+        that of an LU solve where both exceed it (see _resid_threshold), so a loss of
+        a few digits would show."""
         torch.manual_seed(n)
         A = STRUCTURES[structure](n, (), dtype, device)
         torch.manual_seed(0)
-        resid = _residual_after_solve(A, *torch.linalg.ldl_factor_ex(A, hermitian=True)[:2])
-        self.assertLess(resid, _resid_threshold(n))
+        self.assertLess(*_residual_after_solve(A, *torch.linalg.ldl_factor_ex(A, hermitian=True)[:2]))
 
     @parametrize("n", [2, 5, 33, 34, 65, 150, 2049, 4100])
     @dtypes(*floating_and_complex_types())

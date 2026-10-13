@@ -1418,10 +1418,6 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
 
 // Factors a single matrix: the panel kernels run on a 1x1x1 grid.
 static void ldl_factor_blas3_single(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool hermitian) {
-  // LD is lower triangular.
-  // We materialize the upper triangular part for GEMM-friendly residual updates,
-  // and that also spares us from swaps that restore the initial triangular structure.
-  LD.add_(hermitian ? LD.tril(-1).mH() : LD.tril(-1).mT());
   int n = cuda_int_cast(LD.size(-1), "LD.size(-1)");
   int lda = std::max(cuda_int_cast(LD.stride(-1), "LD.stride(-1)"), std::max(1, n));
   info.zero_();
@@ -1450,6 +1446,21 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
     pivots.fill_(1);
     info.copy_(LD.eq(0).squeeze(-1).squeeze(-1));
     return;
+  }
+
+  // LD is lower triangular.
+  // We materialize the upper triangular part for GEMM-friendly residual updates,
+  // and that also spares us from swaps that restore the initial triangular structure.
+  // NOTE: the tril copy is crucial because x.add_(x.mT()) raises: it is a partial
+  // self-overlap. The conjugate is applied in place on that copy, as a lazy conj view
+  // (mH(), or conj() before tril) gets resolved into a second n x n temporary.
+  // Scoped, so that the copy is freed before the factorization.
+  {
+    auto L21 = LD.tril(-1);
+    if (hermitian) {
+      L21.conj_physical_();
+    }
+    LD.add_(L21.mT());
   }
 
   const auto batch_size = batchCount(LD);

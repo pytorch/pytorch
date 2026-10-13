@@ -71,6 +71,9 @@ Note `CLAUDE.md` says to build only via `pip install -e . -v --no-build-isolatio
   `CMAKE_CUDA_ARCHITECTURES=75`, which is a **red herring**;
   `torch.cuda.get_arch_list()` returns `['sm_90']`, which is the real answer.
 - `compute-sanitizer` is at `/usr/local/cuda/bin/`.
+- Later also run on 4x GB200 (sm_100, aarch64 Grace, CUDA 13.4). pytest is not
+  installed in the `kernel` env there; use `python test_ldl_custom.py [-k ...]`.
+  The full suite takes ~42 minutes there (vs ~7 on the H100 box).
 
 ---
 
@@ -144,6 +147,22 @@ grid and a single `dLD` pointer, so batching is a host loop. It used to live in
 `view`, not `reshape`: `reshape` would silently copy on an awkward layout and the
 in-place result would be discarded; `view` throws instead.
 
+**Mirroring the lower triangle (memory).** The upper triangle of `LD` is filled
+once for the whole batch in `ldl_factor_blas3_kernel`, before the per-matrix
+loop. That is one launch instead of B, but the temporary now spans the whole batch.
+Peak device memory of `ldl_factor_ex` is the input plus 2 copies (`LD` and one
+temporary) for every dtype. Three traps on the way there:
+- `LD.add_(LD.mT())` raises for real dtypes. TensorIterator's
+  `assert_no_partial_overlap` rejects a self-aliasing transposed input, hence
+  the `tril(-1)` copy.
+- `LD.add_(LD.tril(-1).mH())` costs a second temporary for complex, because `add_`
+  resolves the lazy conj view into a fresh copy. `conj()` before `tril` is no
+  better: `tril` resolves the conj input into a copy first. The fix is
+  `conj_physical_()` in place on the `tril` copy. Before the fix, complex128 at
+  n=56000 ran out of memory on a 184 GiB GB200.
+- The `tril` copy is scoped in a block. As a named local it stayed alive through
+  the whole factorization and stacked with cuBLAS's 32 MiB GEMM workspace.
+
 **`n = 0` and `n = 1`** are shortcuts in the same function: empty input returns;
 `n == 1` sets pivots to 1 and `info = (LD == 0)`. (`n = 1` used to return
 uninitialized pivots.)
@@ -209,11 +228,17 @@ dispatch policy before landing (undecided).
 pre-existing gap in the error mapping, unrelated to this kernel. Worth reporting
 upstream separately. Not pinned by a test (it is a bug, not a contract).
 
-**Not testable on this machine:** the cooperative cap and the
+**Not testable on either machine:** the cooperative cap and the
 `cudaErrorCooperativeLaunchTooLarge` fallback in the real library (see section
-4; the standalone harness tests the kernel on small grids instead), and GB200
-(sm_100), whose panel widths differ (`ldl::panel_width`). The harness covers the
-widths themselves (section 7) but not the hardware.
+4; the standalone harness tests the kernel on small grids instead).
+- On GB200 the cap is 760 blocks for float32/float64 (48 registers, 5 blocks/SM,
+  152 SMs), 608 for complex64 (64 regs) and 456 for complex128 (76 regs). It binds
+  past n = 194,560 / 155,648 / 116,736, where one copy of the matrix is already
+  151-303 GB.
+- The fallback could be forced with a green context with few SMs
+  (`torch.cuda.green_contexts`). That needs `cuda.bindings`, which is not installed
+  in the `kernel` env. GB200 itself (sm_100, its panel widths) is now covered by the
+  full suite.
 
 **Resolved since the first notes:** `n = 1`; batching location; the "accuracy gap
 vs CPU grows with n" (the first notes measured CUDA/CPU backward-error ratios of
@@ -288,6 +313,17 @@ and restores it in `tearDown`.
   8193 and 40000 (`test_very_large`), all structures that stress the grid-wide
   argmax (ties across blocks, maximum in the last block), single precision,
   batched, determinism.
+- **`test_huge`** (GB200-sized, guarded by `largeTensorTest`; 8 CUDA instances, ~10
+  min). It uses `zero_diagonal`: a 2x2 pivot with an interchange at every step,
+  taken from anywhere in the column.
+  - `int32_offsets`: n = 46341, so n² > 2³¹, for all dtypes.
+  - `blocks_per_sm`: n = 115000 / 80000 / 80000 / 56000 for float32 / float64 /
+    complex64 / complex128, i.e. 450 / 313 / 313 / 219 cooperative blocks, ~3 / 2 /
+    2 / 1.4 per SM.
+  - The grid sizes were confirmed with a profiler trace
+    (`agent_space/huge_probe.py`).
+  - `integer_valued` was left out: the residual cannot tell whether ties were
+    broken correctly, which is what determinism and the standalone harness check.
 - `ldl_solve` on CUDA for real dtypes with the custom kernel's output (both
   `hermitian` flags).
 
@@ -295,14 +331,30 @@ and restores it in `tearDown`.
 LAPACK's scaled solve residual, as in `xPOT02`/`xSYT02` (from memory, not checked
 against the source): `||B - AX||_1 / (||A||_1 ||X||_1 eps)` with `eps =
 finfo.eps / 2` (LAPACK's `dlamch('E')` counts rounding). LAPACK's own drivers use a
-threshold of 30. Measured on all structures up to n=2049 it is 0.1 to 22 for CUDA
-and CPU LAPACK alike. It is **not** independent of `n`: on the hardest inputs it
-grows like `0.5·sqrt(n)` on both backends (22 at 2049, 32 at 4100, 42 at 8193, 98
-at 40000), the usual random-walk accumulation of rounding errors. So the bound is
-`max(30, 0.7·sqrt(n))` (`_resid_threshold`), about 1.4x to 1.5x above the worst
-measured case at every size. The earlier tolerances (`1000·n·eps` with
-max-norms, and `max(50·cpu, 200·n·eps)`) were ad hoc and 3 orders of magnitude
-loose; they are gone.
+threshold of 30.
+
+The bound is `max(30, 1.5 · ref)` (`_resid_threshold(A, B)`), where `ref` is the
+residual of `torch.linalg.solve` (LU) on the same `A`, `B`, on `A`'s device. The
+residual's absolute level is **machine dependent**, so a fixed formula in `n` does
+not travel:
+- On H100/x86 it grew like `0.5·sqrt(n)` on the hardest inputs (22 at 2049, 98 at
+  40000), and the first version of the bound was `max(30, 0.7·sqrt(n))`.
+- On GB200/aarch64 (CPU LAPACK is ATLAS with Eigen BLAS there) it is about 2x that
+  for complex: 40-46 at 2049, 136-158 at 8193, 188 at 40000 for float64.
+- That 2x shows on every solver, CPU LDL, CPU LU and cuSOLVER LU included, and on
+  pure-CPU test instances that never touch CUDA. 34 tests failed on GB200 until
+  the bound was made relative.
+
+Against cuSOLVER LU the custom kernel measured at most 1.02x, and against CPU LDL at
+most 1.09x. CPU LDL against CPU LU (the reference on CPU-device instances) measured
+at most 1.2x. The exception is `integer_valued`: there, Bunch-Kaufman LDL sits about
+1.3x above LU from n ≈ 8000 on (1.33 at 8193, 1.30 at 40000, 1.36 at 56000), and CPU
+LAPACK's LDL does the same within 0.03. That is the algorithm, not the kernel, and
+it leaves `test_cooperative_panel`'s integer_valued n=8193 case with ~13% headroom
+under the 1.5 factor (`agent_space/ratio_trend.py`). The bound still has teeth: multiplying `LD` by `1 + 30·eps·randn`
+pushes the residual 5-10x over it at every size (`agent_space/bound_mutation.py`).
+The earlier tolerances (`1000·n·eps` with max-norms, and `max(50·cpu, 200·n·eps)`)
+were ad hoc and 3 orders of magnitude loose; they are gone.
 
 ### Standalone kernel harness
 `ldl_panel_standalone.cu` (repo root, **not** under `aten/.../linalg/`, which

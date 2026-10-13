@@ -421,7 +421,6 @@ void ldl_factor_kernel(
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
        {
-         // DEBUG
          if (hermitian) {
            ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
          } else {
