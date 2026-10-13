@@ -3413,6 +3413,57 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @parametrize("materialize", ["data_ptr", "add_"])
+    def test_graph_lazy_clone_materialize(self, materialize):
+        # Materializing a lazy clone during capture must record the copy in
+        # the graph, so that replays read the current contents of the source.
+        # https://github.com/pytorch/pytorch/issues/200155
+        static_in = torch.full((1 << 20,), float("nan"), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            y = static_in._lazy_clone()
+            if materialize == "data_ptr":
+                y.data_ptr()
+            else:
+                y.add_(0)
+            self.assertFalse(torch._C._is_cow_tensor(y))
+            out = y * 2
+
+        for _ in range(2):
+            static_in.copy_(torch.randn_like(static_in))
+            g.replay()
+            self.assertEqual(out, static_in * 2)
+
+    def test_lazy_clone_materialize_side_stream(self):
+        # The materializing copy must be ordered after pending writes to the
+        # source on the current stream.
+        s = torch.cuda.Stream()
+        with torch.cuda.stream(s):
+            x = torch.zeros(1 << 20, device="cuda")
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            x.fill_(1)
+            y = x._lazy_clone()
+            y.add_(0)
+            self.assertFalse(torch._C._is_cow_tensor(y))
+            self.assertTrue(torch._C._is_cow_tensor(x))
+            self.assertEqual(y, torch.ones_like(y))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_lazy_clone_materialize_other_device(self):
+        # Materializing must allocate on the storage's device even if it is
+        # not the current device (Tensor.data_ptr() sets no device guard).
+        with torch.cuda.device(1):
+            x = torch.ones(1 << 20, device="cuda")
+        y = x._lazy_clone()
+        with torch.cuda.device(0):
+            y.data_ptr()
+        self.assertFalse(torch._C._is_cow_tensor(y))
+        self.assertEqual(y.untyped_storage().device, torch.device("cuda", 1))
+        self.assertEqual(y, torch.ones_like(y))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     @unittest.skipIf(
         not torch.cuda.get_arch_list(),
         "torch was built without CUDA kernels (GPU sections stripped)",

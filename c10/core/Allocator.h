@@ -220,6 +220,11 @@ struct C10_API Allocator {
   // Derived class implementation can simply call `default_copy_data`
   // to use `std::memcpy`.
   //
+  // For devices with streams, the copy should be enqueued on the current
+  // stream of the current device, so that it is ordered with respect to
+  // other work on that stream (and gets captured by CUDA graphs). It may
+  // return before the copy has completed.
+  //
   // Requires: src and dest were allocated by this allocator
   // Requires: src and dest both have length >= count
   virtual void copy_data(void* dest, const void* src, std::size_t count)
