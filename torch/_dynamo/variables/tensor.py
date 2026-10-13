@@ -1801,7 +1801,7 @@ class TensorVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
-        return DataPtrVariable(self)
+        return DataPtrVariable.create(self)
 
     def method_const_data_ptr(
         self,
@@ -1809,7 +1809,7 @@ class TensorVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
-        return DataPtrVariable(self, method_name="const_data_ptr")
+        return DataPtrVariable.create(self, method_name="const_data_ptr")
 
     def method_record_stream(
         self,
@@ -2416,13 +2416,9 @@ class TensorVariable(VariableTracker):
             ]
             self.proxy = hooked_proxy
             self.synchronize_attributes(tx)
-            return variables.RemovableHandleVariable(
-                mutation_type=variables.base.ValueMutationNew(),
-            )
+            return variables.RemovableHandleVariable.create()
 
-        handle_variable = variables.RemovableHandleVariable(
-            mutation_type=variables.base.ValueMutationNew(),
-        )
+        handle_variable = variables.RemovableHandleVariable.create()
         tx.output.side_effects.register_hook(self, hook, handle_variable, name)
         return handle_variable
 
@@ -2586,7 +2582,7 @@ class TensorVariable(VariableTracker):
     def method_untyped_storage(
         self, tx: "InstructionTranslatorBase"
     ) -> "UntypedStorageVariable":
-        return UntypedStorageVariable(
+        return UntypedStorageVariable(  # noqa: RAW_VT_CONSTRUCTION
             self, self.as_proxy().node.meta["example_value"].untyped_storage()
         )
 
@@ -3722,7 +3718,7 @@ class UnspecializedPythonVariable(TensorVariable):
         need_unwrap: bool = True,
     ) -> "UnspecializedPythonVariable":
         # Convert a `TensorVariable` instance into an `UnspecializedPythonVariable` instance.
-        return UnspecializedPythonVariable(
+        return cls(
             **dict(tensor_variable.__dict__),
             raw_value=raw_value,
             need_unwrap=need_unwrap,
@@ -3747,7 +3743,7 @@ class FakeItemVariable(TensorVariable):
     def from_tensor_variable(
         cls, tensor_variable: TensorVariable
     ) -> "FakeItemVariable":
-        return FakeItemVariable(**dict(tensor_variable.__dict__))
+        return cls(**dict(tensor_variable.__dict__))
 
 
 class TensorSubclassVariable(UserDefinedClassVariable):
@@ -3878,6 +3874,14 @@ class DataPtrVariable(VariableTracker):
         ("call_method", "detach"),
         ("call_function", torch.ops.aten.detach.default),
     }
+
+    @staticmethod
+    def create(
+        from_tensor: TensorVariable,
+        method_name: str = "data_ptr",
+        **kwargs: Any,
+    ) -> "DataPtrVariable":
+        return DataPtrVariable(from_tensor, method_name=method_name, **kwargs)
 
     def __init__(
         self,

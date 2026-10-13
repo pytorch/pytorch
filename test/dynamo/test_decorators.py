@@ -328,6 +328,17 @@ class DecoratorTests(PytreeRegisteringTestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x, y, z), fn(x, y, z))
 
+    def test_internal_pytree_helper_ignores_allow_in_graph(self):
+        from torch.utils import _pytree
+
+        def fn(x):
+            return x + (1 if _pytree.tree_is_leaf(x) else 2)
+
+        self._override_trace_rule(_pytree._get_node_type)
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
     def test_computed_lazy_operator_ignores_disallow_in_graph(self):
         def fn(x, a, b):
