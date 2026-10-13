@@ -3162,7 +3162,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "TensorWise",
           at::blas::ScalingType::TensorWise,
-          "Single scale per-tensor")
+          "Single scale per tensor or per group for grouped GEMM")
       .value(
           "RowWise", at::blas::ScalingType::RowWise, "Scale per-row of tensor")
       .value(
