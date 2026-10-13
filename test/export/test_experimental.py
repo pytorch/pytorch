@@ -1293,7 +1293,7 @@ def forward(self, args_0):
                 mask_rule,
                 attn_regions=attn_regions,
                 document_ids=document_ids,
-            ),
+            )
         )
 
     def test_blockmask_recursive_partial_extraction_replays_bound_tensors(self):
@@ -1301,7 +1301,7 @@ def forward(self, args_0):
             lambda mask_rule, attn_regions, document_ids: functools.partial(
                 functools.partial(mask_rule, attn_regions=attn_regions),
                 document_ids=document_ids,
-            ),
+            )
         )
 
     def test_blockmask_self_referential_function_closure_extraction(self):
