@@ -300,7 +300,7 @@ def _failing_guard_parts(
     if global_scope is None or closure_vars is None:
         return parts
     scope = {"L": f_locals, "G": global_scope.get("G"), **closure_vars}
-    failed = []
+    failed: list[Any] = []
     for part in parts:
         try:
             ok = eval(str(part), dict(global_scope), scope)

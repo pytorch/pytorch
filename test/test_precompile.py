@@ -5328,9 +5328,7 @@ class TestPrecompileDynamoCapture(TestCase):
             f(self.model, self.x3)
 
     def test_a_function_compiled_before_capture_is_still_captured(self):
-        from torch._C._dynamo.eval_frame import (
-            get_eval_frame_isolate_recompiles_strict,
-        )
+        from torch._C._dynamo.eval_frame import get_eval_frame_isolate_recompiles_strict
 
         single = self.mod.single
         # The same backend the capture compiles with, so this default-region
