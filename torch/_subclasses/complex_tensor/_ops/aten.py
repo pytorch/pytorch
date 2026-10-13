@@ -235,8 +235,7 @@ def complex_impl(re: torch.Tensor, im: torch.Tensor) -> ComplexTensor:
 def pow_impl(self: ComplexTensor, exponent: ComplexTensor) -> ComplexTensor:
     out_dt, (self, exponent) = promote_tensors(self, exponent)
     result = torch.exp(exponent * torch.log(self))
-    base_re, base_im = split_complex_arg(self)
-    zero_base = (base_re == 0) & (base_im == 0) & (split_complex_arg(exponent)[0] > 0)
+    zero_base = (self == 0) & (exponent.real > 0)
     return torch.where(zero_base, 0, result).to(out_dt)  # type: ignore[bad-return]
 
 
