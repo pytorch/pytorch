@@ -72,7 +72,7 @@ an RPC.
 As an example, this is what the autograd graph for our example above would look
 like (t5.sum() excluded for simplicity):
 
-![send and recv functions](../_static/img/distributed_autograd/send_recv_functions.png)
+![send and recv functions](../../_static/img/distributed_autograd/send_recv_functions.png)
 
 (autograd_context)=
 
@@ -137,7 +137,7 @@ d.sum().backward()
 
 This is what the autograd graph for the code above would look like:
 
-![local dependencies](../_static/img/distributed_autograd/local_dependencies.png)
+![local dependencies](../../_static/img/distributed_autograd/local_dependencies.png)
 
 The first step the autograd engine performs as part of the backward pass is
 computing the number of dependencies for each node in the autograd graph. This
@@ -167,7 +167,7 @@ loss = d.sum()
 
 The associated autograd graph for the code above would be:
 
-![distributed dependencies](../_static/img/distributed_autograd/distributed_dependencies.png)
+![distributed dependencies](../../_static/img/distributed_autograd/distributed_dependencies.png)
 
 Computing dependencies of this distributed autograd graph is much more
 challenging and requires some overhead (either in terms of computation or
@@ -262,7 +262,7 @@ with dist_autograd.context() as context_id:
 
 The distributed autograd graph with dependencies would be as follows (t5.sum() excluded for simplicity):
 
-![distributed dependencies computed](../_static/img/distributed_autograd/distributed_dependencies_computed.png)
+![distributed dependencies computed](../../_static/img/distributed_autograd/distributed_dependencies_computed.png)
 
 The [FAST mode algorithm](#fast-mode-algorithm) applied to the above example would be as follows:
 
