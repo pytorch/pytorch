@@ -58,6 +58,44 @@ _ROCSHMEM_CMP_EQ = 0
 _SIG_VAL_BIT31 = -2147483648
 
 
+_CPU_PG = None
+
+
+def _cpu_barrier() -> None:
+    # NCCL barrier waits for the current stream. The waiter kernel blocks
+    # that stream until the producer posts, so an NCCL barrier between those
+    # two launches deadlocks.
+    global _CPU_PG
+    if _CPU_PG is None:
+        _CPU_PG = dist.new_group(backend="gloo")
+    dist.barrier(group=_CPU_PG)
+
+
+def _run_waiter_first(rank, waiter_rank, reset, launch_waiter, launch_producer) -> None:
+    # The first launch compiles and loads the device binary. That outlasts
+    # the producer kernel, so a no-op fence, quiet, or wait still observes
+    # finished puts. Reset, submit the waiter, and only then let the
+    # producer post. The wait is the first thing that kernel does, so it
+    # is inside the wait while the producer writes.
+    _cpu_barrier()
+    if rank == waiter_rank:
+        launch_waiter()
+    else:
+        launch_producer()
+    torch.cuda.synchronize()
+    dist.barrier()
+
+    reset()
+    torch.cuda.synchronize()
+    dist.barrier()
+
+    if rank == waiter_rank:
+        launch_waiter()
+    _cpu_barrier()
+    if rank != waiter_rank:
+        launch_producer()
+
+
 @functools.cache
 def _kernels():
     import flydsl.compiler as flyc
@@ -114,12 +152,35 @@ def _kernels():
         rocshmem_flydsl.quiet()
 
     @flyc.kernel
-    def wait_until_kernel(ivar, cmp_op, cmp_val):
+    def wait_until_kernel(ivar, cmp_op, cmp_val, seen):
         rocshmem_flydsl.wait_until(ivar, cmp_op, cmp_val)
+        seen[0] = ivar[0]
 
     @flyc.kernel
-    def signal_wait_until_kernel(signal, cmp_op, cmp_val):
+    def quiet_wait_kernel(flag, cmp_op, cmp_val, payload, seen, seen_flag, nelems):
+        rocshmem_flydsl.wait_until(flag, cmp_op, cmp_val)
+        for i in range(nelems):
+            seen[i] = payload[i]
+        seen_flag[0] = flag[0]
+
+    @flyc.kernel
+    def fence_wait_kernel(
+        flag, cmp_op, cmp_val, payload1, payload2, seen1, seen2, seen_flag, nelems
+    ):
+        rocshmem_flydsl.wait_until(flag, cmp_op, cmp_val)
+        for i in range(nelems):
+            seen1[i] = payload1[i]
+            seen2[i] = payload2[i]
+        seen_flag[0] = flag[0]
+
+    @flyc.kernel
+    def signal_wait_until_kernel(
+        signal, cmp_op, cmp_val, payload, seen_payload, seen_signal, nelems
+    ):
         rocshmem_flydsl.signal_wait_until(signal, cmp_op, cmp_val)
+        for i in range(nelems):
+            seen_payload[i] = payload[i]
+        seen_signal[0] = signal[0]
 
     @flyc.kernel
     def my_pe_kernel(out):
@@ -180,16 +241,51 @@ def _kernels():
         )
 
     @flyc.jit
-    def launch_wait_until(ivar, cmp_op, cmp_val, stream):
-        wait_until_kernel(ivar, cmp_op, cmp_val).launch(
+    def launch_wait_until(ivar, cmp_op, cmp_val, seen, stream):
+        wait_until_kernel(ivar, cmp_op, cmp_val, seen).launch(
             grid=(1, 1, 1), block=(1, 1, 1), stream=stream
         )
 
     @flyc.jit
-    def launch_signal_wait_until(signal, cmp_op, cmp_val, stream):
-        signal_wait_until_kernel(signal, cmp_op, cmp_val).launch(
-            grid=(1, 1, 1), block=(1, 1, 1), stream=stream
-        )
+    def launch_quiet_wait(
+        flag, cmp_op, cmp_val, payload, seen, seen_flag, nelems, stream
+    ):
+        quiet_wait_kernel(
+            flag, cmp_op, cmp_val, payload, seen, seen_flag, nelems
+        ).launch(grid=(1, 1, 1), block=(1, 1, 1), stream=stream)
+
+    @flyc.jit
+    def launch_fence_wait(
+        flag,
+        cmp_op,
+        cmp_val,
+        payload1,
+        payload2,
+        seen1,
+        seen2,
+        seen_flag,
+        nelems,
+        stream,
+    ):
+        fence_wait_kernel(
+            flag,
+            cmp_op,
+            cmp_val,
+            payload1,
+            payload2,
+            seen1,
+            seen2,
+            seen_flag,
+            nelems,
+        ).launch(grid=(1, 1, 1), block=(1, 1, 1), stream=stream)
+
+    @flyc.jit
+    def launch_signal_wait_until(
+        signal, cmp_op, cmp_val, payload, seen_payload, seen_signal, nelems, stream
+    ):
+        signal_wait_until_kernel(
+            signal, cmp_op, cmp_val, payload, seen_payload, seen_signal, nelems
+        ).launch(grid=(1, 1, 1), block=(1, 1, 1), stream=stream)
 
     @flyc.jit
     def launch_my_pe(out, stream):
@@ -209,6 +305,8 @@ def _kernels():
         "barrier": launch_barrier,
         "sync": launch_sync,
         "wait_until": launch_wait_until,
+        "quiet_wait": launch_quiet_wait,
+        "fence_wait": launch_fence_wait,
         "signal_wait_until": launch_signal_wait_until,
         "my_pe": launch_my_pe,
         "n_pes": launch_n_pes,
@@ -391,22 +489,34 @@ class RocshmemFlyDSLTest(MultiProcContinuousTest):
         src = symm_mem.empty(1, dtype=dtype, device=self.device).fill_(flag_val)
         symm_mem.rendezvous(flag, group=group_name)
         symm_mem.rendezvous(src, group=group_name)
+        # Private snapshot. Checking `flag` after a host barrier would pass
+        # even if wait_until() returned immediately.
+        seen = torch.empty(1, dtype=dtype, device=self.device).fill_(0)
         dist.barrier()
 
         stream = torch.cuda.current_stream()
-        # Rank 0 blocks inside the kernel until rank 1's put lands. A host
-        # barrier between the two launches would deadlock that wait.
-        if self.rank == 0:
-            _kernels()["wait_until"](flag, _ROCSHMEM_CMP_EQ, flag_val, stream=stream)
-        else:
-            _kernels()["put"](flag, src, 1, 0, stream=stream)
-        torch.cuda.synchronize()
-        dist.barrier()
 
-        if self.rank == 0:
-            self.assertEqual(
-                flag, torch.tensor([flag_val], dtype=dtype, device=self.device)
+        def reset() -> None:
+            flag.fill_(0)
+            seen.fill_(0)
+
+        def launch_waiter() -> None:
+            _kernels()["wait_until"](
+                flag, _ROCSHMEM_CMP_EQ, flag_val, seen, stream=stream
             )
+
+        def launch_producer() -> None:
+            _kernels()["put"](flag, src, 1, 0, stream=stream)
+
+        _run_waiter_first(self.rank, 0, reset, launch_waiter, launch_producer)
+        try:
+            if self.rank == 0:
+                torch.cuda.synchronize()
+                self.assertEqual(
+                    seen, torch.tensor([flag_val], dtype=dtype, device=self.device)
+                )
+        finally:
+            dist.barrier()
 
     @requires_flydsl
     def test_flydsl_signal_wait_until(self) -> None:
@@ -421,34 +531,56 @@ class RocshmemFlyDSLTest(MultiProcContinuousTest):
         symm_mem.rendezvous(inp, group=group_name)
         out_hdl = symm_mem.rendezvous(out, group=group_name)
         flag = out_hdl.get_signal_pad(self.rank, (1,), dtype=torch.int64).fill_(0)
+        seen = torch.empty(numel, dtype=dtype, device=self.device).fill_(-2)
+        seen_signal = torch.empty(1, dtype=torch.int64, device=self.device).fill_(0)
         dist.barrier()
 
         stream = torch.cuda.current_stream()
-        if self.rank == 0:
+        nbytes = numel * dtype.itemsize
+
+        def reset() -> None:
+            out.fill_(-1)
+            flag.fill_(0)
+            seen.fill_(-2)
+            seen_signal.fill_(0)
+
+        def launch_waiter() -> None:
+            _kernels()["signal_wait_until"](
+                flag,
+                _ROCSHMEM_CMP_EQ,
+                signal_val,
+                out,
+                seen,
+                seen_signal,
+                numel,
+                stream=stream,
+            )
+
+        def launch_producer() -> None:
             _kernels()["putmem_signal_block"](
                 out,
                 inp,
-                numel * dtype.itemsize,
+                nbytes,
                 flag,
                 signal_val,
                 _ROCSHMEM_SIGNAL_SET,
                 1,
                 stream=stream,
             )
-        else:
-            _kernels()["signal_wait_until"](
-                flag, _ROCSHMEM_CMP_EQ, signal_val, stream=stream
-            )
-        torch.cuda.synchronize()
-        dist.barrier()
 
-        if self.rank == 1:
-            self.assertEqual(
-                out, val * torch.ones(numel, dtype=dtype, device=self.device)
-            )
-            self.assertEqual(
-                flag, torch.tensor([signal_val], dtype=torch.int64, device=self.device)
-            )
+        _run_waiter_first(self.rank, 1, reset, launch_waiter, launch_producer)
+        try:
+            if self.rank == 1:
+                torch.cuda.synchronize()
+                self.assertEqual(
+                    seen, val * torch.ones(numel, dtype=dtype, device=self.device)
+                )
+                self.assertEqual(
+                    seen_signal,
+                    torch.tensor([signal_val], dtype=torch.int64, device=self.device),
+                )
+        finally:
+            dist.barrier()
 
     @requires_flydsl
     def test_flydsl_putmem_signal_add(self) -> None:
@@ -464,35 +596,58 @@ class RocshmemFlyDSLTest(MultiProcContinuousTest):
         symm_mem.rendezvous(inp, group=group_name)
         out_hdl = symm_mem.rendezvous(out, group=group_name)
         flag = out_hdl.get_signal_pad(self.rank, (1,), dtype=torch.int64).fill_(0)
+        seen = torch.empty(numel, dtype=dtype, device=self.device).fill_(-2)
+        seen_signal = torch.empty(1, dtype=torch.int64, device=self.device).fill_(0)
         dist.barrier()
 
         stream = torch.cuda.current_stream()
-        if self.rank == 0:
+        nbytes = numel * dtype.itemsize
+
+        def reset() -> None:
+            out.fill_(-1)
+            flag.fill_(0)
+            seen.fill_(-2)
+            seen_signal.fill_(0)
+
+        def launch_waiter() -> None:
+            _kernels()["signal_wait_until"](
+                flag,
+                _ROCSHMEM_CMP_EQ,
+                signal_val,
+                out,
+                seen,
+                seen_signal,
+                numel,
+                stream=stream,
+            )
+
+        def launch_producer() -> None:
             _kernels()["putmem_signal_block"](
                 out,
                 inp,
-                numel * dtype.itemsize,
+                nbytes,
                 flag,
                 signal_val,
                 _ROCSHMEM_SIGNAL_ADD,
                 1,
                 stream=stream,
             )
-        else:
-            _kernels()["signal_wait_until"](
-                flag, _ROCSHMEM_CMP_EQ, signal_val, stream=stream
-            )
-        torch.cuda.synchronize()
-        dist.barrier()
 
-        if self.rank == 1:
-            self.assertEqual(
-                out, val * torch.ones(numel, dtype=dtype, device=self.device)
-            )
-            self.assertEqual(
-                flag,
-                torch.tensor([expected_signal], dtype=torch.int64, device=self.device),
-            )
+        _run_waiter_first(self.rank, 1, reset, launch_waiter, launch_producer)
+        try:
+            if self.rank == 1:
+                torch.cuda.synchronize()
+                self.assertEqual(
+                    seen, val * torch.ones(numel, dtype=dtype, device=self.device)
+                )
+                self.assertEqual(
+                    seen_signal,
+                    torch.tensor(
+                        [expected_signal], dtype=torch.int64, device=self.device
+                    ),
+                )
+        finally:
+            dist.barrier()
 
     @requires_flydsl
     def test_flydsl_wait_until_width(self) -> None:
@@ -555,13 +710,39 @@ class RocshmemFlyDSLTest(MultiProcContinuousTest):
         flag_update = torch.tensor([flag_val], dtype=torch.int32, device=self.device)
         for tensor in (inp1, inp2, out1, out2, flag):
             symm_mem.rendezvous(tensor, group=group_name)
+        # Snapshot is taken when wait_until returns, before the producer is
+        # released. A later read of out1/out2 would pass if fence() were a
+        # no-op, because both puts would already have completed.
+        seen1 = torch.empty(numel, dtype=dtype, device=self.device).fill_(-2)
+        seen2 = torch.empty(numel, dtype=dtype, device=self.device).fill_(-2)
+        seen_flag = torch.empty(1, dtype=torch.int32, device=self.device).fill_(0)
         dist.barrier()
 
         stream = torch.cuda.current_stream()
-        # Rank 1 blocks until the flag put is visible. fence() orders both
-        # payload puts ahead of that flag, so its arrival implies they landed.
-        # A host barrier between the two launches would deadlock the wait.
-        if self.rank == 0:
+
+        def reset() -> None:
+            out1.fill_(-1)
+            out2.fill_(-1)
+            flag.fill_(0)
+            seen1.fill_(-2)
+            seen2.fill_(-2)
+            seen_flag.fill_(0)
+
+        def launch_waiter() -> None:
+            _kernels()["fence_wait"](
+                flag,
+                _ROCSHMEM_CMP_EQ,
+                flag_val,
+                out1,
+                out2,
+                seen1,
+                seen2,
+                seen_flag,
+                numel,
+                stream=stream,
+            )
+
+        def launch_producer() -> None:
             _kernels()["fence"](
                 out1,
                 inp1,
@@ -573,21 +754,23 @@ class RocshmemFlyDSLTest(MultiProcContinuousTest):
                 1,
                 stream=stream,
             )
-        else:
-            _kernels()["wait_until"](flag, _ROCSHMEM_CMP_EQ, flag_val, stream=stream)
-        torch.cuda.synchronize()
-        dist.barrier()
 
-        if self.rank == 1:
-            self.assertEqual(
-                out1, val1 * torch.ones(numel, dtype=dtype, device=self.device)
-            )
-            self.assertEqual(
-                out2, val2 * torch.ones(numel, dtype=dtype, device=self.device)
-            )
-            self.assertEqual(
-                flag, torch.tensor([flag_val], dtype=torch.int32, device=self.device)
-            )
+        _run_waiter_first(self.rank, 1, reset, launch_waiter, launch_producer)
+        try:
+            if self.rank == 1:
+                torch.cuda.synchronize()
+                self.assertEqual(
+                    seen1, val1 * torch.ones(numel, dtype=dtype, device=self.device)
+                )
+                self.assertEqual(
+                    seen2, val2 * torch.ones(numel, dtype=dtype, device=self.device)
+                )
+                self.assertEqual(
+                    seen_flag,
+                    torch.tensor([flag_val], dtype=torch.int32, device=self.device),
+                )
+        finally:
+            dist.barrier()
 
     @requires_flydsl
     def test_flydsl_quiet(self) -> None:
@@ -603,12 +786,33 @@ class RocshmemFlyDSLTest(MultiProcContinuousTest):
         flag_update = torch.tensor([flag_val], dtype=torch.int32, device=self.device)
         for tensor in (inp, out, flag):
             symm_mem.rendezvous(tensor, group=group_name)
+        # Same as fence: the payload is copied when wait_until returns, not
+        # after the producer has been released.
+        seen = torch.empty(numel, dtype=dtype, device=self.device).fill_(-2)
+        seen_flag = torch.empty(1, dtype=torch.int32, device=self.device).fill_(0)
         dist.barrier()
 
         stream = torch.cuda.current_stream()
-        # Rank 0 blocks until the flag put is visible. quiet() completes the
-        # payload put before that flag, so its arrival implies the payload landed.
-        if self.rank == 1:
+
+        def reset() -> None:
+            out.fill_(-1)
+            flag.fill_(0)
+            seen.fill_(-2)
+            seen_flag.fill_(0)
+
+        def launch_waiter() -> None:
+            _kernels()["quiet_wait"](
+                flag,
+                _ROCSHMEM_CMP_EQ,
+                flag_val,
+                out,
+                seen,
+                seen_flag,
+                numel,
+                stream=stream,
+            )
+
+        def launch_producer() -> None:
             _kernels()["quiet"](
                 out,
                 inp,
@@ -618,18 +822,20 @@ class RocshmemFlyDSLTest(MultiProcContinuousTest):
                 0,
                 stream=stream,
             )
-        else:
-            _kernels()["wait_until"](flag, _ROCSHMEM_CMP_EQ, flag_val, stream=stream)
-        torch.cuda.synchronize()
-        dist.barrier()
 
-        if self.rank == 0:
-            self.assertEqual(
-                out, val * torch.ones(numel, dtype=dtype, device=self.device)
-            )
-            self.assertEqual(
-                flag, torch.tensor([flag_val], dtype=torch.int32, device=self.device)
-            )
+        _run_waiter_first(self.rank, 0, reset, launch_waiter, launch_producer)
+        try:
+            if self.rank == 0:
+                torch.cuda.synchronize()
+                self.assertEqual(
+                    seen, val * torch.ones(numel, dtype=dtype, device=self.device)
+                )
+                self.assertEqual(
+                    seen_flag,
+                    torch.tensor([flag_val], dtype=torch.int32, device=self.device),
+                )
+        finally:
+            dist.barrier()
 
     @requires_flydsl
     def test_flydsl_barrier_all(self) -> None:
