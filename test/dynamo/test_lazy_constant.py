@@ -42,7 +42,7 @@ class CachedConstantSourceLocationTests(TestCase):
 
     @parametrize(
         "value",
-        (None, True, False),
+        (None, True, False, NotImplemented),
         name_fn=lambda value: repr(value).lower(),
     )
     def test_cached_singleton_source_location_cow(self, value):

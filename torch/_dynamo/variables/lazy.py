@@ -112,6 +112,7 @@ class ComputedLazyCache:
 
             tx = InstructionTranslator.current_tx()
             realized_args = [arg.realize() for arg in self.args]
+            # This stored internal operator must ignore trace-rule overrides.
             self.vt = BuiltinVariable(self.op).call_function(tx, realized_args, {})
         else:
             self.vt = ConstantVariable.create(self.value)
