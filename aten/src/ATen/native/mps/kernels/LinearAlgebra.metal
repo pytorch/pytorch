@@ -4056,10 +4056,16 @@ kernel void svd_jacobi(
   device T* V_b = V + batch_idx * params.v_bstride;
   device T* Vacc_b = Vacc + batch_idx * n * n;
 
+  float amax = 0;
+  for (uint32_t i = simd_lane; i < m * n * sizeof(T) / 4; i += kSimd) {
+    amax = max(amax, fabs(reinterpret_cast<device const float*>(A_b)[i]));
+  }
+  const int scale_exp = clamp(ilogb(c10::metal::simd_max(amax)), -126, 126);
+
   // Stage A column-major so each lane's row access is contiguous.
   for (uint32_t idx = tid; idx < m * n; idx += group_size) {
     uint32_t row = idx / n, col = idx % n;
-    Atg[col * m + row] = A_b[idx];
+    Atg[col * m + row] = A_b[idx] * ldexp(1.0f, -scale_exp);
   }
   if (params.compute_uv) {
     if (params.stage_v) {
@@ -4230,7 +4236,7 @@ kernel void svd_jacobi(
     uint32_t src = ord[j];
     float sigma = sig[src];
     if (simd_lane == 0) {
-      S[batch_idx * n + j] = sigma;
+      S[batch_idx * n + j] = ldexp(sigma, scale_exp);
     }
     float inv = sigma > 0.0f ? (1 / sigma) : 0.0f;
     threadgroup T* colsrc = Atg + src * m;
