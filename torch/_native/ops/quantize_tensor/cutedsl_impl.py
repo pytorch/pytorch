@@ -16,10 +16,9 @@ def _validate_rounding(
     input: torch.Tensor,
     qdata_rounding_mode: int,
     random_key: torch.Tensor | None,
-    swizzle_type: int,
     scaling_type_use_square_block_size: bool,
 ) -> bool:
-    from torch.nn.functional import RoundingMode, SwizzleType
+    from torch.nn.functional import RoundingMode
 
     if qdata_rounding_mode == RoundingMode.RTNE.value:
         if random_key is not None:
@@ -27,11 +26,8 @@ def _validate_rounding(
         return False
     if qdata_rounding_mode != RoundingMode.STOCHASTIC.value:
         raise ValueError("unsupported qdata_rounding_mode")
-    if (
-        swizzle_type != SwizzleType.SWIZZLE_32_4_4.value
-        or scaling_type_use_square_block_size
-    ):
-        raise ValueError("stochastic rounding requires swizzled 1x32 scales")
+    if scaling_type_use_square_block_size:
+        raise ValueError("stochastic rounding requires 1x32 scales")
     if random_key is not None:
         if random_key.dtype != torch.uint64 or random_key.numel() != 2:
             raise ValueError("random_key must be a two-element uint64 tensor")
@@ -74,7 +70,6 @@ def _quantize_tensor_impl(
         input,
         qdata_rounding_mode,
         random_key,
-        swizzle_type,
         scaling_type_use_square_block_size,
     )
     is_scale_swizzled = swizzle_type == SwizzleType.SWIZZLE_32_4_4.value
@@ -113,6 +108,8 @@ def _quantize_tensor_dual_impl(
     qdata_rounding_mode: int = 0,
     random_key: torch.Tensor | None = None,
 ) -> list[torch.Tensor]:
+    from torch.nn.functional import SwizzleType
+
     if input.dim() != 2:
         raise ValueError("quantize_tensor_dual requires a 2D input")
     if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
@@ -135,7 +132,6 @@ def _quantize_tensor_dual_impl(
         input,
         qdata_rounding_mode,
         random_key,
-        swizzle_type,
         scaling_type_use_square_block_size,
     )
     if input.device.type != "cuda" or torch.version.hip is not None:
@@ -152,7 +148,7 @@ def _quantize_tensor_dual_impl(
             input,
             "dim_km",
             scaling_type_use_square_block_size,
-            True,
+            swizzle_type == SwizzleType.SWIZZLE_32_4_4.value,
             stochastic_rounding=stochastic_rounding,
             random_key=random_key,
         )

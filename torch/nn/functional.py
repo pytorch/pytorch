@@ -7338,15 +7338,13 @@ def quantize_tensor(
           Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
         swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
           Currently supported values: ``SwizzleType.NO_SWIZZLE`` and
-          ``SwizzleType.SWIZZLE_32_4_4``. If the input is not contiguous, currently
-          only ``SwizzleType.SWIZZLE_32_4_4`` is supported.
+          ``SwizzleType.SWIZZLE_32_4_4`` for both dim-k and dim-m inputs.
         scaling_type_use_square_block_size (bool, optional): When ``True``,
           modify the size of the local region corresponding to a single scale
           value to be a square (for example, modify ``1x32`` to be ``32x32``).
           Note that the output scale size is still controlled by ``scaling_type``
-          and ``swizzle_type``. If this flag is ``True``, currently
-          ``SwizzleType.SWIZZLE_32_4_4`` and a contiguous input are required.
-          Default: ``False``.
+          and ``swizzle_type``. If this flag is ``True``, currently a contiguous
+          input and ``RoundingMode.RTNE`` are required. Default: ``False``.
         qdata_rounding_mode (RoundingMode, optional): Round qdata to nearest,
           ties to even (``RTNE``), or use stochastic rounding (``STOCHASTIC``).
           Default: ``RoundingMode.RTNE``.
@@ -7359,7 +7357,7 @@ def quantize_tensor(
         tuple[Tensor, Tensor]: Quantized data in the logical input shape and
           scales with the dtype and layout honoring the ``scaling_algorithm``,
           ``scaling_type``, and ``swizzle_type`` settings. For example, for
-          ``mxfp8``, compact dim-k scales have shape ``(rows, cols // 32)``;
+          ``mxfp8``, compact scales have shape ``(rows, cols // 32)``;
           swizzled scales have shape ``(ceil(rows / 128), ceil(cols / 128), 32, 16)``.
 
     Examples::
@@ -7450,7 +7448,8 @@ def quantize_tensor_dual(
           to the inner scale and inverse inner scale corresponding to that region.
           Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
         swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
-          Currently supported values: ``SwizzleType.SWIZZLE_32_4_4``.
+          Currently supported values: ``SwizzleType.NO_SWIZZLE`` and
+          ``SwizzleType.SWIZZLE_32_4_4``.
         scaling_type_use_square_block_size (bool, optional): When ``True``,
           modify the size of the local region corresponding to a single scale
           value to be a square (for example, modify ``1x32`` to be ``32x32``).
@@ -7470,8 +7469,9 @@ def quantize_tensor_dual(
           For example, for input of shape ``(M, K)`` and the
           ``mxfp8`` format, the quantized tensors have shapes ``(M, K)`` and
           ``(K, M)``. Their E8M0 scales have shapes
+          ``(M, K // 32)`` and ``(K, M // 32)`` with ``NO_SWIZZLE``, or
           ``(ceil(M / 128), ceil(K / 128), 32, 16)`` and
-          ``(ceil(K / 128), ceil(M / 128), 32, 16)``, respectively.
+          ``(ceil(K / 128), ceil(M / 128), 32, 16)`` with ``SWIZZLE_32_4_4``.
 
     Examples::
 
@@ -7487,6 +7487,9 @@ def quantize_tensor_dual(
         ... )
         >>> # mxfp8 dim-km with swizzled scales
         >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(x, **mxfp8_kwargs)
+        >>> # mxfp8 dim-km with compact scales
+        >>> plain_kwargs = {**mxfp8_kwargs, "swizzle_type": F.SwizzleType.NO_SWIZZLE}
+        >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(x, **plain_kwargs)
         >>> # mxfp8 dim-km with scales shared over 32x32 blocks
         >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(
         ...     x, **mxfp8_kwargs, scaling_type_use_square_block_size=True

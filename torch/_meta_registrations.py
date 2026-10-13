@@ -7531,11 +7531,10 @@ def _check_quantize_tensor_rounding(
     input: torch.Tensor,
     qdata_rounding_mode: int,
     random_key: torch.Tensor | None,
-    swizzle_type: int,
     scaling_type_use_square_block_size: bool,
     op_name: str,
 ) -> None:
-    from torch.nn.functional import RoundingMode, SwizzleType
+    from torch.nn.functional import RoundingMode
 
     torch._check_value(
         qdata_rounding_mode in (RoundingMode.RTNE.value, RoundingMode.STOCHASTIC.value),
@@ -7545,9 +7544,8 @@ def _check_quantize_tensor_rounding(
         torch._check_value(random_key is None, lambda: "RTNE does not use random_key")
         return
     torch._check_value(
-        swizzle_type == SwizzleType.SWIZZLE_32_4_4.value
-        and not scaling_type_use_square_block_size,
-        lambda: f"{op_name} stochastic rounding requires swizzled 1x32 scales",
+        not scaling_type_use_square_block_size,
+        lambda: f"{op_name} stochastic rounding requires 1x32 scales",
     )
     if random_key is not None:
         torch._check_value(
@@ -7599,7 +7597,6 @@ def meta_quantize_tensor(
             input,
             qdata_rounding_mode,
             random_key,
-            swizzle_type,
             scaling_type_use_square_block_size,
             "quantize_tensor",
         )
@@ -7631,6 +7628,8 @@ def meta_quantize_tensor_dual(
     qdata_rounding_mode: int = 0,
     random_key: torch.Tensor | None = None,
 ) -> list[torch.Tensor]:
+    from torch.nn.functional import SwizzleType
+
     if input.device.type not in ("cuda", "meta") or (
         input.device.type == "cuda" and torch.version.hip is not None
     ):
@@ -7659,24 +7658,21 @@ def meta_quantize_tensor_dual(
             input,
             qdata_rounding_mode,
             random_key,
-            swizzle_type,
             scaling_type_use_square_block_size,
             "quantize_tensor_dual",
         )
         rows, cols = input.shape
+        if swizzle_type == SwizzleType.SWIZZLE_32_4_4.value:
+            scale_k_shape = ((rows + 127) // 128, (cols + 127) // 128, 32, 16)
+            scale_m_shape = ((cols + 127) // 128, (rows + 127) // 128, 32, 16)
+        else:
+            scale_k_shape = (rows, cols // 32)
+            scale_m_shape = (cols, rows // 32)
         return [
             torch.empty((rows, cols), device=input.device, dtype=qdata_dtype),
-            torch.empty(
-                ((rows + 127) // 128, (cols + 127) // 128, 32, 16),
-                device=input.device,
-                dtype=torch.float8_e8m0fnu,
-            ),
+            torch.empty(scale_k_shape, device=input.device, dtype=torch.float8_e8m0fnu),
             torch.empty((cols, rows), device=input.device, dtype=qdata_dtype),
-            torch.empty(
-                ((cols + 127) // 128, (rows + 127) // 128, 32, 16),
-                device=input.device,
-                dtype=torch.float8_e8m0fnu,
-            ),
+            torch.empty(scale_m_shape, device=input.device, dtype=torch.float8_e8m0fnu),
         ]
 
     else:

@@ -58,14 +58,9 @@ def _quantize_tensor_validate_inputs(
             swizzle_type in (SwizzleType.NO_SWIZZLE.value, swizzled_value),
             lambda: "unsupported swizzle type",
         )
-        is_scale_swizzled = swizzle_type == swizzled_value
         torch._check_value(
-            is_dim_k or is_scale_swizzled,
-            lambda: "dim-m mxfp8 quantization currently requires SWIZZLE_32_4_4",
-        )
-        torch._check_value(
-            not scaling_type_use_square_block_size or (is_dim_k and is_scale_swizzled),
-            lambda: "32x32 mxfp8 scaling currently requires dim-k and SWIZZLE_32_4_4",
+            not scaling_type_use_square_block_size or is_dim_k,
+            lambda: "32x32 mxfp8 scaling currently requires dim-k",
         )
         if not is_dim_k:
             torch._check_value(rows % 16 == 0)
@@ -105,8 +100,9 @@ def _quantize_tensor_dual_validate_inputs(
             lambda: "dual mxfp8 quantization requires contiguous input",
         )
         torch._check_value(
-            swizzle_type == SwizzleType.SWIZZLE_32_4_4.value,
-            lambda: "dual mxfp8 quantization currently requires SWIZZLE_32_4_4",
+            swizzle_type
+            in (SwizzleType.NO_SWIZZLE.value, SwizzleType.SWIZZLE_32_4_4.value),
+            lambda: "unsupported swizzle type",
         )
     else:
         raise AssertionError(f"Unsupported {quant_format=}")
