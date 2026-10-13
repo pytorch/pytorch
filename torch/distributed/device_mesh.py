@@ -105,6 +105,9 @@ else:
         _functional_collectives._resolve_group, but also covers eager collectives
         (dist.all_reduce -> c10d.allreduce_) that bind the ProcessGroup directly.
 
+        get_group's flattened-dim-name branch does not go through this helper,
+        so a group looked up by a flattened dim name is still baked.
+
         This is a module-level helper rather than a DeviceMesh method so that
         Dynamo does not reject it as an unregistered opaque-object member.
         """
