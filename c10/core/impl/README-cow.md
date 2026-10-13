@@ -65,3 +65,35 @@ We implement this by taking a shared lock when copying the data and
 taking an exclusive lock when stealing the data. The exclusive lock
 acquisition ensures that all pending shared locks are finished before
 we steal the data.
+
+Asynchronous reads
+------------------
+On devices with streams (e.g., CUDA), materialization copies the data
+asynchronously: the copy is enqueued on the current stream of the
+storage's device and may still be running when materialization
+returns. As with any other asynchronous work, we assume that all users
+of the data (including the lazy copies sharing it) use the same
+stream, so that work enqueued afterwards, such as a write to the
+source by the copy that steals it, or the reuse of its memory after it
+is freed, is ordered after the copy. This is also what lets the copy
+be captured by CUDA graphs.
+
+Stealing introduces a hazard that the usual stream discipline does not
+cover. When the last remaining lazy copy steals the data, it may write
+to it right away. That write is not ordered with respect to a pending
+asynchronous read of the data on some other stream. `record_stream`
+does not help: it only delays the reuse of memory by the allocator
+after it is freed, and stealing is not a free.
+
+Therefore, it is illegal to issue an asynchronous read directly on a
+tensor that is a lazy copy, or that may be lazily copied while the read
+is pending. Instead, take a lazy copy of the tensor, issue the read on
+that lazy copy, and keep a reference to the lazy copy (not just a
+`record_stream` on it) until the read has completed. While the lazy copy is alive, no other copy can steal the
+data, so any write to one of them materializes a fresh copy instead of
+writing to the data being read.
+
+Materialization follows this rule itself: the materializing copy holds
+its reference to the data (via the shared lock described above) until
+its copy has been enqueued, so a steal can only happen afterwards, and
+the stealer's writes are ordered after the copy on the shared stream.
