@@ -56,6 +56,9 @@ class MPSEvent {
   std::atomic<uint64_t> m_signalCounter{0};
   // Stream on which this event is recorded.
   MPSStream* m_stream = nullptr;
+  // Stream on which the latest signal was recorded. This is used to detect if
+  // `m_stream` has changed since the last `record`.
+  MPSStream* m_signal_stream = nullptr;
   // Metal event used to signal and wait for GPU progress.
   MTLSharedEvent_t m_event = nullptr;
   // Guards timing state shared with command-buffer completion handlers.
