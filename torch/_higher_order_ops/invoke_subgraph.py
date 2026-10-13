@@ -27,6 +27,7 @@ from torch._higher_order_ops.utils import (
     register_fake,
     save_values_for_backward,
     saved_values,
+    validate_subgraph_args_types,
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
@@ -342,17 +343,10 @@ class InvokeSubgraphHOP(HigherOrderOperator):
                 f"identifier must be None or a string, got {type(identifier)}"
             )
 
-        if not all(
-            isinstance(
-                o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
-            )
-            or is_custom_class(type(o))
-            for o in operands
-            if o is not None
-        ):
-            raise AssertionError(
-                f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator, got {operands}"
-            )
+        validate_subgraph_args_types(
+            [o for o in operands if o is not None and not is_custom_class(type(o))],
+            extra_allowed_types=(torch.Generator, FakeScriptObject),
+        )
 
         # pyrefly: ignore [missing-attribute]
         return super().__call__(subgraph, identifier, *operands)
@@ -693,6 +687,8 @@ def get_output_metadata(subgraph, *operands):
     output_node = next(reversed(subgraph.graph.find_nodes(op="output")))
     output_metadata.num_fw_outs = len(output_node.args[0])
 
+    tensor_out_idxs = []
+
     for idx, output_arg in enumerate(output_node.args[0]):
         if not isinstance(output_arg, torch.fx.Node):
             if isinstance(output_arg, int):
@@ -712,13 +708,22 @@ def get_output_metadata(subgraph, *operands):
             output_metadata.indexes_with_symint.add(idx)
             output_metadata.indexes_with_no_grad.add(idx)
         elif isinstance(val, torch.Tensor):
-            # Check if tensor requires grad from metadata
-            if hasattr(val, "requires_grad") and not val.requires_grad:
-                output_metadata.indexes_with_no_grad.add(idx)
+            tensor_out_idxs.append(idx)
         else:
             # Non-tensor, non-symint (shouldn't happen but be safe)
             output_metadata.indexes_with_no_grad.add(idx)
 
+    # meta["val"] is recorded below autograd, so its requires_grad can't be
+    # trusted (see Note [invariants for node meta 'val']). Which tensor outputs
+    # need a grad is only knowable by execution, and only matters if some
+    # operand requires grad.
+    if tensor_out_idxs and any(
+        isinstance(operand, torch.Tensor) and operand.requires_grad
+        for operand in operands
+    ):
+        return _get_output_metadata_by_execution(subgraph, *operands)
+
+    output_metadata.indexes_with_no_grad.update(tensor_out_idxs)
     return output_metadata
 
 
