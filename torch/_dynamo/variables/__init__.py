@@ -202,6 +202,7 @@ from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .torch_function import TensorWithTFOverrideVariable
 from .user_defined import (
     DefaultDictVariable,
+    EnvironVariable,
     FrozenDataClassVariable,
     InspectVariable,
     MutableMappingVariable,
@@ -259,6 +260,7 @@ __all__ = [
     "DictBuiltinVariable",
     "DictKeySetVariable",
     "DynamoConfigPatchVariable",
+    "EnvironVariable",
     "ErrorOnGraphBreakVariable",
     "FakeItemVariable",
     "get_device_context_manager",
