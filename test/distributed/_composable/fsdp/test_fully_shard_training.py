@@ -45,6 +45,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
@@ -614,6 +615,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_multi_group,
         )
 
+    @with_tf32_off
     def _test_train_parity_multi_group(
         self,
         reshard_after_forward: bool | int,
