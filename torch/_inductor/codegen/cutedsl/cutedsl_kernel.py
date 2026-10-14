@@ -62,7 +62,6 @@ class CuteDSLKernelWrapper:
     def __init__(self, kernel_fn: Callable[..., Any], kernel_path: str | None = None):
         self.kernel_fn = kernel_fn
         self.kernel_path = kernel_path
-        self._jitted = False
         kernel_code_log.info("CuteDSL kernel path: %s", kernel_path)
 
     def run(self, *args, stream=None, **kwargs):
@@ -77,14 +76,7 @@ class CuteDSLKernelWrapper:
         Returns:
             Result of the kernel execution
         """
-        # kernel_fn JIT-compiles on its first call.
-        if not self._jitted:
-            from torch.compiler._no_compile import check_compilation_allowed
-
-            check_compilation_allowed("CuTe DSL runtime JIT")
-        result = self.kernel_fn(*args, stream=stream, **kwargs)
-        self._jitted = True
-        return result
+        return self.kernel_fn(*args, stream=stream, **kwargs)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
