@@ -3,18 +3,20 @@
 Kineto copies ``record_param_comms`` onto eager NCCL kernels. Replayed CUDA graphs
 have no CPU op to copy from, and Cuspy does not see ``record_param_comms``, so
 :func:`register_collective_annotation_hooks` provides the same fields from c10d's
-per-collective pre/post hooks instead.
+per-collective pre/post hooks instead, until
+:func:`unregister_collective_annotation_hooks` removes them.
 """
 
 from collections.abc import Callable
 from typing import TYPE_CHECKING, TypeAlias
 
-from torch._C._distributed_c10d import PreHookArgs, ProcessGroup
+from torch._C._distributed_c10d import HookOpName, PreHookArgs, ProcessGroup
 from torch.distributed.distributed_c10d import (
     _world,
     Backend,
     BackendConfig,
     get_backend,
+    get_global_rank,
     get_process_group_ranks,
 )
 
@@ -22,138 +24,179 @@ from torch.distributed.distributed_c10d import (
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
+    from torch.cuda.graphs import graph
+    from torch.profiler._cuspy.observers.base import CuspyObserver
 
-# record_param_comms field name -> value, e.g. "Collective name" -> "allreduce".
+
+# The fields saveNcclMeta in torch/csrc/profiler/util.cpp writes onto a
+# collective's record_param_comms event, e.g. "Collective name" -> "allreduce".
 CollectiveMetadata: TypeAlias = dict[str, str | int | bool]
 
 
-class _GroupInfo:
-    """A group's fixed ``record_param_comms`` fields, computed once at registration
-    rather than on every collective."""
+# The collective name ProcessGroupNCCL passes to record_param_comms for each op
+# that fires c10d hooks. gather_into_tensor also fires GATHER, so it is named
+# "gather" where ProcessGroupNCCL records "gather_single".
+_NCCL_COLLECTIVE_NAMES: dict[HookOpName, str] = {
+    HookOpName.SEND: "send",
+    HookOpName.RECV: "recv",
+    HookOpName.BROADCAST: "broadcast",
+    HookOpName.ALLREDUCE: "allreduce",
+    HookOpName.ALLREDUCE_COALESCED: "allreduce_coalesced",
+    HookOpName.REDUCE: "reduce",
+    HookOpName.ALLGATHER: "all_gather",
+    HookOpName.ALLGATHER_BASE: "_allgather_base",
+    HookOpName.ALLGATHER_INTO_TENSOR_COALESCED: "allgather_into_tensor_coalesced",
+    HookOpName.REDUCE_SCATTER: "reduce_scatter",
+    HookOpName.REDUCE_SCATTER_BASE: "_reduce_scatter_base",
+    HookOpName.REDUCE_SCATTER_TENSOR_COALESCED: "reduce_scatter_tensor_coalesced",
+    HookOpName.ALLTOALL: "all_to_all",
+    HookOpName.ALLTOALL_BASE: "all_to_allv",
+    HookOpName.GATHER: "gather",
+    HookOpName.SCATTER: "scatter",
+    HookOpName.BARRIER: "barrier",
+}
 
-    def __init__(self, group: ProcessGroup) -> None:
-        self.group = group
-        self.ranks = get_process_group_ranks(group)
-        self.rank = group.rank()
-        self.fields: CollectiveMetadata = {
-            "Group size": len(self.ranks),
-            "Process Group Name": group.group_name,
-        }
-        if group.group_desc:
-            self.fields["Process Group Description"] = group.group_desc
-        # format_list in util.cpp truncates past 30 entries.
-        if len(self.ranks) > 30:
-            head = ", ".join(map(str, self.ranks[:29]))
-            self.fields["Process Group Ranks"] = f"[{head}, ..., {self.ranks[-1]}]"
-        else:
-            self.fields["Process Group Ranks"] = f"[{', '.join(map(str, self.ranks))}]"
+# Ops whose outputs are their inputs, so the hook gets no output tensors.
+_IN_PLACE_OPS = (
+    HookOpName.BROADCAST,
+    HookOpName.ALLREDUCE,
+    HookOpName.ALLREDUCE_COALESCED,
+    HookOpName.REDUCE,
+)
 
 
-def _collective_metadata(info: _GroupInfo, args: PreHookArgs) -> CollectiveMetadata:
-    """Mirrors the ``record_param_comms`` fields that ``saveNcclMeta`` in
-    torch/csrc/profiler/util.cpp writes for a collective, in the same format. Split
+def _process_group_fields(group: ProcessGroup) -> CollectiveMetadata:
+    """The group-level subset of :func:`_nccl_collective_metadata`: the
+    ``saveNcclMeta`` fields that are fixed per group (size, name, description and
+    ranks). Computed once per group at registration, since formatting the rank list
+    costs O(group size) and would otherwise run on every collective."""
+    ranks = get_process_group_ranks(group)
+    fields: CollectiveMetadata = {
+        "Group size": len(ranks),
+        "Process Group Name": group.group_name,
+    }
+    if group.group_desc:
+        fields["Process Group Description"] = group.group_desc
+    # format_list in util.cpp truncates past 30 entries.
+    if len(ranks) > 30:
+        head = ", ".join(map(str, ranks[:29]))
+        fields["Process Group Ranks"] = f"[{head}, ..., {ranks[-1]}]"
+    else:
+        fields["Process Group Ranks"] = f"[{', '.join(map(str, ranks))}]"
+    return fields
+
+
+def _nccl_collective_metadata(
+    group: ProcessGroup, group_fields: CollectiveMetadata, args: PreHookArgs
+) -> CollectiveMetadata:
+    """Mirrors the fields ``saveNcclMeta`` writes for a ProcessGroupNCCL
+    collective, in the same format, with the group's from ``group_fields``. Split
     sizes, Comms Id, the p2p Seq and the global rank start/stride aren't available
     from the hook."""
-    op = args.name.name
-    # The collective name ProcessGroupNCCL passes to record_param_comms, where it
-    # isn't the lowercased op.
-    name = {
-        "ALLGATHER": "all_gather",
-        "ALLTOALL": "all_to_all",
-        "ALLGATHER_BASE": "_allgather_base",
-        "REDUCE_SCATTER_BASE": "_reduce_scatter_base",
-        "ALLTOALL_BASE": "all_to_allv",
-    }.get(op, op.lower())
+    op = args.name
     inputs = args.input_tensors
-    in_place = op in ("BROADCAST", "ALLREDUCE", "REDUCE", "ALLREDUCE_COALESCED")
-    outputs = inputs if in_place else args.output_tensors
+    outputs = inputs if op in _IN_PLACE_OPS else args.output_tensors
     metadata: CollectiveMetadata = {
-        "Collective name": name,
+        # An op c10d adds later gets its lowercased name rather than raising,
+        # which would fail the collective.
+        "Collective name": _NCCL_COLLECTIVE_NAMES.get(op, op.name.lower()),
         "In msg nelems": sum(t.numel() for t in inputs),
         "Out msg nelems": sum(t.numel() for t in outputs),
-        **info.fields,
+        **group_fields,
         "Is asynchronized op": args.async_op,
     }
-    if inputs or outputs:
-        # c10::toString(ScalarType), as util.cpp writes it ("Float", "BFloat16"):
-        # Tensor.type() is "torch[.cuda].<that name>Tensor".
-        tensor_type = (inputs or outputs)[0].type()
-        metadata["dtype"] = tensor_type.rsplit(".", 1)[-1].removesuffix("Tensor")
-    if op in ("SEND", "RECV"):
+    # c10::toString(ScalarType), as util.cpp writes it ("Float", "BFloat16").
+    # Tensor.type() is built as "<backend>." + that name + "Tensor"
+    # (options_to_string in torch/csrc/utils/tensor_types.cpp). Like
+    # ProcessGroupNCCL, use the first input's dtype, and Byte with no tensors.
+    tensors = inputs or outputs
+    metadata["dtype"] = (
+        tensors[0].type().rsplit(".", 1)[-1].removesuffix("Tensor")
+        if tensors
+        else "Byte"
+    )
+    if op in (HookOpName.SEND, HookOpName.RECV):
         # P2P ops advance a separate counter the group does not expose, so no Seq.
         # Like record_param_comms, "Rank" is the peer's group rank here.
         metadata["Rank"] = args.root
-        key = "Dst Rank" if op == "SEND" else "Src Rank"
-        metadata[key] = info.ranks[args.root]
+        key = "Dst Rank" if op == HookOpName.SEND else "Src Rank"
+        metadata[key] = get_global_rank(group, args.root)
     else:
-        metadata["Rank"] = info.rank
+        metadata["Rank"] = group.rank()
         # The hook fires before the backend bumps its counter.
         metadata["Seq"] = (
-            info.group._get_sequence_number_for_group()  # pyrefly: ignore[missing-attribute]
+            group._get_sequence_number_for_group()  # pyrefly: ignore[missing-attribute]
             + 1
         )
     return metadata
 
 
-def _runs_cuda_on_nccl(group: ProcessGroup) -> bool:
-    """Whether the group is configured to run CUDA collectives on NCCL, whose
-    kernels these hooks annotate."""
-    device_backends = BackendConfig(get_backend(group)).get_device_backend_map()
-    return device_backends.get("cuda") == Backend.NCCL
-
-
-class CollectiveAnnotationHandle:
-    """Hooks set by :func:`register_collective_annotation_hooks`; :meth:`remove`
-    unregisters them. Keep the handle until then: its id() is the hook id."""
-
-    def __init__(self, groups: list[ProcessGroup]) -> None:
-        self._groups = groups
-
-    def remove(self) -> None:
-        """Unregister the hooks from every group they were set on. Idempotent."""
-        for group in self._groups:
-            group.unregister_pre_hook(id(self))
-            group.unregister_post_hook(id(self))
-        self._groups = []
+def _pgs_to_annotate() -> list[ProcessGroup]:
+    """Existing process groups configured to run CUDA collectives on NCCL, whose
+    kernels the hooks annotate."""
+    return [
+        group
+        for group in _world.pg_names
+        if BackendConfig(get_backend(group)).get_device_backend_map().get("cuda")
+        == Backend.NCCL
+    ]
 
 
 def register_collective_annotation_hooks(
+    annotator: "graph | CuspyObserver",
     push: Callable[[CollectiveMetadata], None],
     pop: Callable[[], None],
-) -> CollectiveAnnotationHandle:
+) -> None:
     """Hook every existing process group that runs CUDA collectives on NCCL, so that
     each of its collectives calls ``push(metadata)`` just before it launches its
     kernels and ``pop()`` just after. ``push`` must attach ``metadata`` to every
     kernel the calling thread launches until the matching ``pop``.
+
+    ``annotator`` is the object annotating the kernels, a CUDA graph capture or a
+    Cuspy observer. The hooks are keyed on it (the hook id is ``id(annotator)``), so
+    registrations by different annotators can overlap (e.g. a graph capture inside
+    a Cuspy window). ``annotator`` must stay alive until
+    :func:`unregister_collective_annotation_hooks` is called with it.
 
     Groups created after this call are not hooked, and collectives inside
     ``_coalescing_manager`` or a batched ``batch_isend_irecv`` are not annotated:
     their kernels launch when the group ends, outside any hook. c10d skips the post
     hook, and so the ``pop``, of a collective that raises.
 
-    Each call gets its own hooks, so registrations can overlap (e.g. a graph capture
-    inside a Cuspy window). c10d does not lock its hook maps, so register and remove
-    while no other thread is issuing collectives on a hooked group, e.g. between
-    steps. Other groups, such as async checkpointing's Gloo group, are never hooked.
+    c10d does not lock its hook maps, so register and unregister while no other
+    thread is issuing collectives on a hooked group, e.g. between steps. Other
+    groups, such as async checkpointing's Gloo group, are never touched.
     """
-    handle = CollectiveAnnotationHandle(
-        [group for group in _world.pg_names if _runs_cuda_on_nccl(group)]
-    )
-    for group in handle._groups:
-        info = _GroupInfo(group)
+    for group in _pgs_to_annotate():
+        group_fields = _process_group_fields(group)
 
-        # The default binds this group's info; a closure would see the last group's.
-        def pre_hook(args: PreHookArgs, info: _GroupInfo = info) -> None:
-            push(_collective_metadata(info, args))
+        # The defaults bind this group; a closure would see the last group.
+        def pre_hook(
+            args: PreHookArgs,
+            group: ProcessGroup = group,
+            group_fields: CollectiveMetadata = group_fields,
+        ) -> None:
+            push(_nccl_collective_metadata(group, group_fields, args))
 
-        group.register_pre_hook(id(handle), pre_hook)
-        group.register_post_hook(id(handle), lambda _: pop())
-    return handle
+        group.register_pre_hook(id(annotator), pre_hook)
+        group.register_post_hook(id(annotator), lambda _: pop())
 
 
-def register_graph_capture_annotation_hooks() -> CollectiveAnnotationHandle:
-    """Register hooks that tag the kernels a CUDA graph capture records for each
-    collective, via ``mark_kernels``. Used by ``torch.cuda.graph``."""
+def unregister_collective_annotation_hooks(
+    annotator: "graph | CuspyObserver",
+) -> None:
+    """Remove the hooks :func:`register_collective_annotation_hooks` set for
+    ``annotator``. A no-op on groups ``annotator`` never hooked, so calling it twice,
+    or without registering, is safe."""
+    for group in _pgs_to_annotate():
+        group.unregister_pre_hook(id(annotator))
+        group.unregister_post_hook(id(annotator))
+
+
+def register_graph_capture_annotation_hooks(capture: "graph") -> None:
+    """Register hooks, keyed on ``capture``, that tag the kernels the capture
+    records for each collective, via ``mark_kernels``. Used by
+    ``torch.cuda.graph``."""
     from torch.cuda._graph_annotations import mark_kernels
 
     # The scope a collective's push opened, until its pop closes it.
@@ -169,4 +212,4 @@ def register_graph_capture_annotation_hooks() -> CollectiveAnnotationHandle:
     def pop() -> None:
         scopes.pop().__exit__(None, None, None)
 
-    return register_collective_annotation_hooks(push, pop)
+    register_collective_annotation_hooks(capture, push, pop)

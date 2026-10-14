@@ -7,6 +7,7 @@ import torch.distributed as dist
 from torch._C._distributed_c10d import HookOpName
 from torch.distributed._collective_annotations import (
     register_collective_annotation_hooks,
+    unregister_collective_annotation_hooks,
 )
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
@@ -14,7 +15,7 @@ from torch.testing._internal.common_utils import HardwareClassification, run_tes
 
 
 # The annotation hooks only register on NCCL groups; let them hook these Gloo groups.
-_RUNS_CUDA_ON_NCCL = "torch.distributed._collective_annotations._runs_cuda_on_nccl"
+_PGS_TO_ANNOTATE = "torch.distributed._collective_annotations._pgs_to_annotate"
 
 
 class TestProcessGroupHooks(MultiProcContinuousTest):
@@ -158,9 +159,9 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         seq = pg._get_sequence_number_for_group()
         ws = self.world_size
         peer = (self.rank + 1) % ws
-        push, pop = mock.Mock(), mock.Mock()
-        with mock.patch(_RUNS_CUDA_ON_NCCL, return_value=True):
-            handle = register_collective_annotation_hooks(push, pop)
+        annotator, push, pop = object(), mock.Mock(), mock.Mock()
+        with mock.patch(_PGS_TO_ANNOTATE, return_value=[pg]):
+            register_collective_annotation_hooks(annotator, push, pop)
         try:
             dist.all_reduce(torch.ones(3))
             dist.all_gather_into_tensor(torch.zeros(2 * ws), torch.ones(2))
@@ -169,7 +170,8 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
             else:
                 dist.recv(torch.zeros(2), src=peer)
         finally:
-            handle.remove()
+            with mock.patch(_PGS_TO_ANNOTATE, return_value=[pg]):
+                unregister_collective_annotation_hooks(annotator)
 
         self.assertEqual(pop.call_count, push.call_count)
         allreduce, allgather, p2p = (c.args[0] for c in push.call_args_list)
@@ -206,12 +208,12 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
 
     def test_collective_annotation_hooks(self):
         group = dist.new_group()
-        calls = mock.Mock()
-        with mock.patch(_RUNS_CUDA_ON_NCCL, return_value=True):
-            handle = register_collective_annotation_hooks(calls.push, calls.pop)
-        dist.all_reduce(torch.ones(1), group=group)
-        handle.remove()
-        handle.remove()  # idempotent
+        annotator, calls = object(), mock.Mock()
+        with mock.patch(_PGS_TO_ANNOTATE, return_value=[group]):
+            register_collective_annotation_hooks(annotator, calls.push, calls.pop)
+            dist.all_reduce(torch.ones(1), group=group)
+            unregister_collective_annotation_hooks(annotator)
+            unregister_collective_annotation_hooks(annotator)  # idempotent
         dist.all_reduce(torch.ones(1), group=group)
         self.assertEqual([name for name, _, _ in calls.mock_calls], ["push", "pop"])
         metadata = calls.push.call_args.args[0]
