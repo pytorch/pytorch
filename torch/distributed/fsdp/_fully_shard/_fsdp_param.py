@@ -1003,7 +1003,7 @@ class FSDPParam:
                 f"Resharding {self._display_name} to smaller mesh is not supported "
                 "for DTensor parameters yet"
             )
-        if (num_outputs := len(self.all_gather_outputs)) > 1:
+        if (num_outputs := len(self.all_gather_outputs)) != 1:
             raise NotImplementedError(
                 f"Resharding {self._display_name} to smaller mesh is not supported "
                 f"for all-gather extensions with {num_outputs} inputs yet"
@@ -1224,7 +1224,7 @@ class FSDPParam:
         return [torch.empty(0)]  # mypy
 
     def _get_extension_all_gather_inputs(
-        self, inputs: Sequence[torch.Tensor | AllGatherInput], check_padding: bool
+        self, inputs: Sequence[torch.Tensor | AllGatherInput], *, check_padding: bool
     ) -> list[torch.Tensor]:
         # Invalid record dims key as None, which the layouts check rejects
         key = tuple(
