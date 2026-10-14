@@ -10457,6 +10457,50 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             run(arch, idx)
             self.assertEqual(arch.msg, f"max_idx={n - 1}, bad=[-1]")
 
+    def test_equal_sets_render_the_same_guard_text(self):
+        from torch._dynamo.guards import _order_stable_repr
+
+        live, rebuilt = {1, 9}, set()
+        rebuilt.add(9)
+        rebuilt.add(1)
+        self.assertEqual(live, rebuilt)
+        self.assertNotEqual(repr(live), repr(rebuilt))
+        self.assertEqual(_order_stable_repr(live), _order_stable_repr(rebuilt))
+        self.assertEqual(
+            _order_stable_repr(("a", frozenset(rebuilt), [rebuilt])),
+            "('a', frozenset({1, 9}), [{1, 9}])",
+        )
+        keys_xy, keys_yx = {"x": 1, "y": 2}.keys(), {"y": 2, "x": 1}.keys()
+        self.assertEqual(keys_xy, keys_yx)
+        self.assertNotEqual(repr(keys_xy), repr(keys_yx))
+        self.assertEqual(_order_stable_repr(keys_yx), "dict_keys(['x', 'y'])")
+        self.assertEqual(_order_stable_repr({}.keys()), repr({}.keys()))
+        for value in (set(), frozenset(), (1,), (), "s", 1.5):
+            self.assertEqual(_order_stable_repr(value), repr(value))
+            self.assertEqual(eval(_order_stable_repr(value)), value)
+
+        def guard_text(s):
+            torch._dynamo.reset()
+            guards = []
+
+            def fn(x, s):
+                if 9 in s:
+                    return x + 1
+                return x - 1
+
+            opt_fn = torch._dynamo.optimize("eager", guard_export_fn=guards.extend)(fn)
+            opt_fn(torch.zeros(1), s)
+            return [
+                code
+                for guard in guards
+                for code in guard.code_list or ()
+                if code.startswith("L['s'] ==")
+            ]
+
+        live_text = guard_text(live)
+        self.assertIn("L['s'] == {1, 9}", live_text)
+        self.assertEqual(live_text, guard_text(rebuilt))
+
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
         # and then rolls back due to control flow.
@@ -10831,6 +10875,70 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             _reset_precompile_entries(fn.__code__)
 
+    def test_guard_complete_hook_can_reset_hit(self):
+        from torch._C._dynamo.eval_frame import set_guard_complete_hook
+
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        compiled_fn = torch.compile(fn, backend="eager")
+        compiled_fn(x)
+        entry = torch._dynamo.eval_frame._debug_get_cache_entry_list(fn.__code__)[0]
+        expected_annotation = entry.trace_annotation
+        del entry
+        guard_results = []
+
+        def reset_hit(hit):
+            guard_results.append(hit)
+            # Frees the entry, and with it the only reference to its code and
+            # annotation that the cache held.
+            torch._dynamo.reset_code(fn.__code__)
+            gc.collect()
+            [str(i) * 64 for i in range(1000)]
+            return hit
+
+        old_hook = set_guard_complete_hook(reset_hit)
+        try:
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU]
+            ) as prof:
+                self.assertEqual(compiled_fn(x), fn(x))
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(guard_results, [True])
+        self.assertIn(expected_annotation, [e.name for e in prof.events()])
+
+    def test_guard_complete_hook_can_reset_hit_and_force_recompile(self):
+        from torch._C._dynamo.eval_frame import set_guard_complete_hook
+
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        compiled_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        guard_results = []
+
+        def reset_hit_and_force_miss(hit):
+            guard_results.append(hit)
+            torch._dynamo.reset_code(fn.__code__)
+            return False
+
+        old_hook = set_guard_complete_hook(reset_hit_and_force_miss)
+        try:
+            self.assertEqual(compiled_fn(x), fn(x))
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(guard_results, [True])
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(
+            len(torch._dynamo.eval_frame._debug_get_cache_entry_list(fn.__code__)),
+            1,
+        )
+
     def test_shape_and_tuple_equality(self):
         def fn(x, y, t):
             z = x * y
@@ -10988,6 +11096,21 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
+    def test_cast_result_is_guarded(self):
+        from typing import cast
+
+        class Config:
+            scale = 1
+
+        def fn(x):
+            return x * cast(type, Config).scale
+
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        x = torch.ones(2)
+        self.assertEqual(opt_fn(x), fn(x))
+        Config.scale = 3
+        self.assertEqual(opt_fn(x), x * 3)
+
     def test_cast_no_recompile_after_graph_break(self):
         # In FSDP, cast(nn.Module, self) can be called after a
         # graph break. Without the polyfill + skip_code fix, PEP 523 compiles
@@ -11020,14 +11143,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 1
 
         x = torch.randn(4)
-        fn(a, x)
-        fn(b, x)
-        if torch._dynamo.config.nested_graph_breaks:
-            # NGB inlines get_state() and handles the graph break inline,
-            # producing 2 subgraphs (before/after break) per call.
-            self.assertEqual(cnt.frame_count, 2)
-        else:
-            self.assertEqual(cnt.frame_count, 1)
+        for mod in (a, b, a, b):
+            self.assertEqual(fn(mod, x), x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        if not torch._dynamo.config.nested_graph_breaks:
             # 5 frames: fn (x2), get_state before graph_break (x2),
             # get_state resume after graph_break (x1, no recompile).
             # Without skip_code, typing.cast would add 2 more frames (7 total).
@@ -13632,6 +13751,87 @@ def ___make_guard_fn():
         compiled_out = compiled_fn()
         self.assertEqual(fn_out, compiled_out)
         self.assertFalse(fn_out)
+
+    def test_fn_hasattr_guarded(self):
+        def bar(x):
+            return x
+
+        def fn(x):
+            if hasattr(bar, "flag"):
+                return x + 1
+            return x - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(3)
+        self.assertEqual(opt_fn(x), fn(x))
+        bar.flag = True
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(cnt.frame_count, 2)
+        del bar.flag
+        self.assertEqual(opt_fn(x), x - 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_torch_fn_hasattr_guarded(self):
+        def fn(x):
+            if hasattr(torch.nn.functional.relu, "_test_flag"):
+                return x + 1
+            return x - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(3)
+        self.assertEqual(opt_fn(x), x - 1)
+        torch.nn.functional.relu._test_flag = True
+        try:
+            self.assertEqual(opt_fn(x), x + 1)
+        finally:
+            del torch.nn.functional.relu._test_flag
+        self.assertEqual(opt_fn(x), x - 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_lru_cache_fn_hasattr(self):
+        @functools.lru_cache
+        def g(x):
+            return x
+
+        class M:
+            @functools.lru_cache
+            def m(self, x):
+                return x
+
+        obj = M()
+
+        def fn(x):
+            if hasattr(g, "cache_info") and hasattr(obj.m, "cache_info"):
+                return x + 1
+            return x - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(3)
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_fn_hasattr_known_dunder_unguarded(self):
+        def bar(x):
+            return x
+
+        def fn(x):
+            if hasattr(bar, "__name__"):
+                return x + 1
+            return x - 1
+
+        guards = []
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, guard_export_fn=guards.extend)(fn)
+        x = torch.zeros(3)
+        self.assertEqual(opt_fn(x), x + 1)
+        bar.__name__ = "renamed"
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertFalse(any(g.create_fn_name() == "HASATTR" for g in guards))
 
     def test_constant_hasattr_returns_bool(self):
         """Test that hasattr on constant values properly returns boolean ConstantVariable."""
@@ -16360,6 +16560,54 @@ fn
 
         with self.assertRaisesRegex(RuntimeError, "specialized"):
             fn(x, y)
+
+    @torch.fx.experimental._config.patch(dynamic_storage_offset=True)
+    def test_dynamic_storage_offset_no_zero_one_recompile(self):
+        buf = torch.randn(64)
+        # (8, 3): the first offset equals the size 8, which duck sizing would tie.
+        for offsets in ((5, 0, 1, 7), (0, 5, 1, 7), (1, 0, 5), (8, 3)):
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounter()
+
+            @torch.compile(backend=cnt, dynamic=True)
+            def fn(x):
+                return x * 2
+
+            for offset in offsets:
+                x = buf[offset : offset + 8]
+                self.assertEqual(fn(x), x * 2)
+            self.assertEqual(cnt.frame_count, 1, offsets)
+
+    @torch.fx.experimental._config.patch(dynamic_storage_offset=True)
+    def test_dynamic_storage_offset_range(self):
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            StatelessSymbolicContext,
+        )
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        shape_env = ShapeEnv()
+        _, _, offset = shape_env.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(64)[0:8],
+            ConstantSource("x"),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC]
+            ),
+        )
+        self.assertEqual(
+            shape_env.var_to_range[offset.node.expr], ValueRanges(0, int_oo)
+        )
+
+        def fn(x):
+            if x.storage_offset() > 0:
+                return x * 2
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True)
+        buf = torch.randn(64)
+        for offset in (5, 0):
+            x = buf[offset : offset + 8]
+            self.assertEqual(opt_fn(x), fn(x))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_infer_unbacked_size_gt_zero(self):

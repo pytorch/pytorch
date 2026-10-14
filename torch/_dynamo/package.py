@@ -28,7 +28,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, IO, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import torch
@@ -727,12 +727,20 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
         raise PackageError(f"Cannot find module for code {code}")
 
     toplevel: Any = module
-    if sys.version_info >= (3, 11):
+    search_module_tree = sys.version_info < (3, 11)
+    if not search_module_tree:
         parts = code.co_qualname.split(".")
 
         for part in parts:
             if not hasattr(toplevel, part):
-                _raise_resolution_error(code, toplevel)
+                # co_qualname is fixed at compile time and names where the def
+                # statement ran: a factory deleted afterwards, or one that
+                # exec'd it under a module's filename. The function can still
+                # be reachable from the module under a rewritten __qualname__,
+                # so search the module the way Python < 3.11 always does.
+                toplevel = module
+                search_module_tree = True
+                break
             toplevel = getattr(toplevel, part)
             if (
                 inspect.isfunction(toplevel)
@@ -797,7 +805,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                         toplevel = obj
                         return f".__closure__[{i}].cell_contents{res}"
 
-        if sys.version_info < (3, 11):
+        if search_module_tree:
             if inspect.ismodule(obj):
                 for value in obj.__dict__.values():
                     if not (
@@ -838,7 +846,22 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     code_source = _find_code_source(toplevel)
     if code_source is None:
         _raise_resolution_error(code, toplevel)
-    return toplevel.__qualname__, code_source.strip(".")
+    function_name, code_source = toplevel.__qualname__, code_source.strip(".")
+    if search_module_tree:
+        # The search can land on a function whose __qualname__ is as stale as
+        # co_qualname, so replay the lookup the loader will do.
+        entry = types.SimpleNamespace(
+            python_module=module.__name__,
+            function_names=[function_name],
+            code_source=code_source,
+        )
+        try:
+            round_trips = _lookup_code(cast(_DynamoCodeCacheEntry, entry)) is code
+        except Exception:
+            round_trips = False
+        if not round_trips:
+            _raise_resolution_error(code, toplevel)
+    return function_name, code_source
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1412,6 +1435,7 @@ class CompilePackage:
 
         from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
+        from .symbolic_convert import UNNAMED_SCOPE_PREFIX
 
         self.uninstall()
         for code, entry in self._codes.items():
@@ -1427,8 +1451,8 @@ class CompilePackage:
                 # AOTCompiledFunction._seed_guard_scope seeds those aliases into
                 # a live module scope and nothing re-seeds them -- so uninstall()
                 # must leave a binding this package did not create alone. The
-                # aliases are the only names install() records that are ever
-                # seeded that way.
+                # aliases and the ___unnamed_scope keys below are the only names
+                # install() records that are ever seeded that way.
                 for alias, module_name in entry.import_sources.items():
                     self._install_global(
                         module,
@@ -1495,6 +1519,20 @@ class CompilePackage:
                     with dynamo_timed("precompile_load_guards"):
                         guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
+                    # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict
+                    # in the tracing process, so a fresh process has no binding
+                    # for it; the artifact carries the dict. A binding already
+                    # here (a live compile's, or anyone else's) is kept and not
+                    # recorded, so uninstall() leaves it alone, and the guards
+                    # check whatever it holds.
+                    for name, value in guards_state.output_graph.global_scope.items():
+                        if name.startswith(UNNAMED_SCOPE_PREFIX):
+                            self._install_global(
+                                module,
+                                name,
+                                module.__dict__.get(name, value),
+                                record_only_if_new=True,
+                            )
                     # The installed builtins dict might be absent from the runtime
                     # while loading guards. Populate it if it's missing.
                     if (

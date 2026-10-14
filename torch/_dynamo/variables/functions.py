@@ -70,6 +70,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    CallFunctionNoArgsSource,
     CellContentsSource,
     ClosureSource,
     ConstantSource,
@@ -161,6 +162,10 @@ _TIME_FUNCTION_NAMES = (
     "time",
     "time_ns",
 )
+
+polyfill_constant_fold_functions_need_guards = {sys.getrecursionlimit}
+if hasattr(sys, "get_int_max_str_digits"):
+    polyfill_constant_fold_functions_need_guards.add(sys.get_int_max_str_digits)
 
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
@@ -684,6 +689,11 @@ class BaseUserFunctionVariable(VariableTracker):
             allow_nested_graph_breaks=True,
         )
 
+    def _hasattr_target(self) -> object:
+        # Must be the object get_source() denotes, since the HASATTR guard
+        # installed below checks that object.
+        return self.get_function()
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
@@ -697,9 +707,16 @@ class BaseUserFunctionVariable(VariableTracker):
             result = True
         else:
             try:
-                result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
+                result = hasattr(self._hasattr_target(), name)
             except NotImplementedError:
                 result = False
+            source = self.get_source()
+            if source is not None:
+                install_guard(
+                    source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=name)
+                    )
+                )
         return VariableTracker.build(tx, result)
 
     def closure_vars(
@@ -3059,6 +3076,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     def get_function(self):
         return getattr(self.wrapper_obj, self.attr_to_trace)
 
+    def _hasattr_target(self) -> object:
+        return self.wrapper_obj
+
     def lookup_instance_dict(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker | None":
@@ -3215,6 +3235,11 @@ class WrapperUserMethodVariable(BaseUserFunctionVariable):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker | None":
         return self.fn.lookup_instance_dict(tx, name)
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        return self.fn.call_obj_hasattr(tx, name)
 
     def call_function(
         self,
@@ -3782,6 +3807,15 @@ class PolyfilledFunctionVariable(VariableTracker):
         ):
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            if (
+                self.source is not None
+                and self.fn in polyfill_constant_fold_functions_need_guards
+            ):
+                install_guard(
+                    CallFunctionNoArgsSource(self.source).make_guard(
+                        GuardBuilder.EQUALS_MATCH
+                    )
+                )
             try:
                 # use the original function which is faster than the polyfill
                 result = self.fn(*const_args, **const_kwargs)
