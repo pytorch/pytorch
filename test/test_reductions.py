@@ -435,6 +435,38 @@ class TestReductions(TestCase):
         """Compares op against reference for a very large input tensor that requires 64 bit indexing"""
         self._test_ref(op, make_tensor((275000000,), dtype=dtype, device=device, low=-1, high=1, exclude_zero=True))
 
+    @onlyCUDA
+    @largeTensorTest("16GB")
+    def test_prod_large_input_16bit(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/190964:
+        # jitted_gpu_reduce_kernel sized its accumulation buffer with the output
+        # dtype instead of the accumulator dtype, so dtypes that cannot
+        # accumulate in the output overflowed the buffer once the input needed
+        # 64-bit indexing. Reducing dim=0 leaves a large output, which is what
+        # made the overflow fault rather than just corrupt.
+        for dtype in (torch.float16, torch.bfloat16):
+            x = torch.ones((2, 2**31 // 2 + 1024), device=device, dtype=dtype)
+            self.assertEqual(
+                torch.prod(x, dim=0),
+                torch.ones(x.size(1), device=device, dtype=dtype),
+            )
+            del x
+            torch.cuda.empty_cache()
+
+    @onlyCUDA
+    @largeTensorTest("12GB")
+    def test_prod_large_input_complex_half(self, device):
+        # Same accumulation buffer bug as test_prod_large_input_16bit, for
+        # complex32, whose accumulator (complex<float>) is twice the width of the
+        # output. Reducing to a two-element output keeps this affordable: with the
+        # buffer mis-sized the two accumulators overlap, so the result is wrong
+        # even where the overflow does not fault.
+        x = torch.ones((2**31 // 2 + 1024, 2), device=device, dtype=torch.complex32)
+        self.assertEqual(
+            torch.prod(x, dim=0),
+            torch.ones(2, device=device, dtype=torch.complex32),
+        )
+
     @skipIfMPS
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=all_types_and_complex_and(torch.half, torch.bool))
