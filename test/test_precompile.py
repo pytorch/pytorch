@@ -6910,9 +6910,10 @@ class TestPrecompileRuntimeCache(TestCase):
             _runtime_cache.InductorCppCacheArtifact(digest, payload).populate_cache()
         self.assertEqual(_runtime_cache._frozen_cpp_kernels, {})
 
+    @parametrize("build_separate", (False, True))
     @parametrize("precompile_headers", (False, True))
     def test_frozen_cpu_graph_serves_strict_load_from_empty_caches(
-        self, precompile_headers
+        self, precompile_headers, build_separate
     ):
         from torch._inductor import codecache, config as inductor_config
         from torch._inductor.utils import clear_caches
@@ -6944,7 +6945,12 @@ class TestPrecompileRuntimeCache(TestCase):
         # Windows can't delete the loaded kernel modules.
         with (
             tempfile.TemporaryDirectory(ignore_cleanup_errors=IS_WINDOWS) as directory,
-            inductor_config.patch(cpp_cache_precompile_headers=precompile_headers),
+            inductor_config.patch(
+                cpp_cache_precompile_headers=precompile_headers,
+                # Builds the C++ wrapper as main.o + optimized.o + a link step.
+                cpp_wrapper=build_separate,
+                cpp_wrapper_build_separate=build_separate,
+            ),
         ):
             clear_caches()
             try:
@@ -6969,6 +6975,9 @@ class TestPrecompileRuntimeCache(TestCase):
                     runnable = pc.load(source, cache)
                     with torch.no_grad():
                         self.assertEqual(runnable(x), fn(x))
+                walk = os.walk(os.path.join(directory, "c"))
+                objects = [f for _, _, fs in walk for f in fs if f.endswith(".o")]
+                self.assertEqual(objects, [])
             finally:
                 clear_caches()
 
