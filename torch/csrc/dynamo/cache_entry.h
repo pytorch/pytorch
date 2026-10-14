@@ -62,6 +62,9 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   int64_t _isolate_recompiles_id{-1};
   // Reference to string representation of the CompileContext
   std::string trace_annotation;
+  // When this entry was created or last moved to the front; orders it against
+  // the frame's precompile entries.
+  uint64_t recency{0};
 
   CacheEntry(const py::handle& guarded_code, PyObject* backend);
   CacheEntry(const CacheEntry&) = default;
