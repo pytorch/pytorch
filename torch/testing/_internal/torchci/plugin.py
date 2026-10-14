@@ -7,10 +7,13 @@ from __future__ import annotations
 import contextlib
 import inspect
 import os
+import shutil
 import sys
+import tempfile
 import uuid
 from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 import pytest
@@ -30,9 +33,13 @@ if TYPE_CHECKING:
 # Set where the test runs; xdist ships it to the controller with the report. Not
 # item.user_properties, which pytest also writes into the junit XML CI ingests.
 _TEST_ID = "_torchci_test_id"
+_DEF_FILE = "_torchci_def_file"
 
 _disabled = False
 _writer: ReportWriter | None = None
+# Where this process's gtest listings go, and each binary's def_file by test name.
+_gtest_listings: str | None = None
+_gtest_def_files: dict[str, dict[str, str]] = {}
 
 
 def _disable(error: Exception) -> None:
@@ -87,6 +94,21 @@ def identity(item: pytest.Item) -> report.TestId | None:
     )
 
 
+def _gtest_def_file(item: Any) -> str:
+    if _gtest_listings is None:
+        return ""
+    binary = str(item.path)
+    if binary not in _gtest_def_files:
+        # gtest names the listing for the executable, without a Windows .exe. The
+        # checkout isn't pytest's rootdir, which is the binary's directory when it
+        # is outside the repo, as torch/bin is.
+        listing = Path(_gtest_listings) / f"{item.path.stem}.json"
+        cwd = item.config.invocation_params.dir
+        root = next((d for d in (cwd, *cwd.parents) if (d / ".git").exists()), cwd)
+        _gtest_def_files[binary] = report.gtest_def_files(listing, root)
+    return _gtest_def_files[binary].get(item.name, "")
+
+
 def _failure_summary(test_report: TestReport) -> str:
     crash = getattr(test_report.longrepr, "reprcrash", None)
     return crash.message if crash is not None else str(test_report.longrepr)
@@ -96,6 +118,7 @@ def _failure_summary(test_report: TestReport) -> str:
 class _Run:
     started: float = 0.0
     test: report.TestId | None = None
+    def_file: str = ""
     ended: float = 0.0
     failed_phase: str = ""
     skipped: bool = False
@@ -161,6 +184,7 @@ class ReportWriter:
             test_id = getattr(test_report, _TEST_ID, None)
             run.started = test_report.start
             run.test = report.TestId(**test_id) if test_id else self.tests.get(nodeid)
+            run.def_file = getattr(test_report, _DEF_FILE, "")
         # A failing subtest fails the run. Both pytest-subtests' SubTestReport and
         # pytest 9's built-in pytest.SubtestReport carry a context; only the latter
         # is public.
@@ -196,6 +220,7 @@ class ReportWriter:
                 run.started,
                 run.ended,
                 outcome_summary=run.outcome_summary,
+                def_file=run.def_file,
             )
             self.file.write(report.line(record))
             self.file.flush()
@@ -224,8 +249,36 @@ def pytest_runtest_makereport(item: Any, call: Any) -> Generator[None, Any, None
         return
     with _guard():
         if test := identity(item):
+            result = outcome.get_result()
             # A dict, which xdist can serialize.
-            setattr(outcome.get_result(), _TEST_ID, test._asdict())
+            setattr(result, _TEST_ID, test._asdict())
+            if test.language == "cpp":
+                setattr(result, _DEF_FILE, _gtest_def_file(item))
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_make_collect_report(collector: Any) -> Generator[None, Any, None]:
+    # pytest-cpp runs a binary's --gtest_list_tests while collecting it. With
+    # GTEST_OUTPUT set, gtest also writes the list to <binary>.json, with each
+    # test's file.
+    if _disabled or not type(collector).__module__.startswith("pytest_cpp."):
+        yield
+        return
+    global _gtest_listings
+    previous = os.environ.get("GTEST_OUTPUT")
+    with _guard():
+        _gtest_listings = _gtest_listings or tempfile.mkdtemp(prefix="torchci-gtest-")
+        os.environ["GTEST_OUTPUT"] = f"json:{_gtest_listings}{os.sep}"
+    yield
+    if previous is None:
+        os.environ.pop("GTEST_OUTPUT", None)
+    else:
+        os.environ["GTEST_OUTPUT"] = previous
+
+
+def pytest_unconfigure(config: Config) -> None:
+    if _gtest_listings is not None:
+        shutil.rmtree(_gtest_listings, ignore_errors=True)
 
 
 def pytest_addoption(parser: Parser) -> None:

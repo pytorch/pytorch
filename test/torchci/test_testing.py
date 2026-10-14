@@ -1,5 +1,6 @@
 # Owner(s): ["module: ci"]
 
+import contextlib
 import functools
 import importlib
 import importlib.util
@@ -77,6 +78,7 @@ _RUN_TYPES = {
     "case_name": str,
     "language": str,
     "declared_case_name": str,
+    "def_file": str,
     "rerun_number": int,
     "outcome": str,
     "outcome_summary": str,
@@ -259,12 +261,13 @@ test_no_rerun_needed      | 0            | passed  |""",
         self.assertEqual(flags["PYTORCH_CUDA_ALLOC_CONF"], "expandable_segments:True")
         self.assertEqual(flags["OPINFO_RESTRICT_TO_DSL"], "triton")
         self.assertEqual(flags["PYTORCH_TEST_WITH_INDUCTOR"], "")
+        self.assertEqual(flags["TEST_CONFIG"], "report-config")
         self.assertEqual(report["properties"]["build_environment"], "report-build")
-        self.assertEqual(report["properties"]["test_config"], "report-config")
         self.assertEqual(report["properties"]["runner_name"], "report-runner")
         for run in runs:
             _assert_run_line(self, run, self.t0_ms, self.t1_ms)
             self.assertEqual(run["language"], "python")
+            self.assertEqual(run["def_file"], "")
 
     def test_identities(self) -> None:
         rendered = {}
@@ -616,6 +619,75 @@ class TestReportHelpers(TestCase):
             plugin.identity(item), ("cpp/test_api", "Suite", "Test", "cpp", "Test")
         )
 
+    def test_gtest_def_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            checkout = Path(tmp) / "checkout"
+            for name in ("test/cpp/api/tensor.cpp", "c10/test/util/complex_common.h"):
+                (checkout / name).parent.mkdir(parents=True)
+                (checkout / name).touch()
+            tensor_tests = [
+                # Built in the checkout the tests run from, as on Linux.
+                {"name": "ToDtype", "file": f"{checkout}/test/cpp/api/tensor.cpp"},
+                # Built in another runner's workspace.
+                {"name": "ToDevice", "file": r"C:\w\pytorch\test\cpp\api\tensor.cpp"},
+            ]
+            suites = [
+                {"name": "TensorTest", "testsuite": tensor_tests},
+                # Defined in a header.
+                {
+                    "name": "Inst/ComplexTest",
+                    "testsuite": [
+                        {"name": "Add/0", "file": "/w/c10/test/util/complex_common.h"}
+                    ],
+                },
+                # Compiled from a hipified copy, which isn't in the checkout.
+                {
+                    "name": "ApplyTest",
+                    "testsuite": [
+                        {"name": "Contiguous", "file": "/w/aten/test/hip/hip_apply.hip"}
+                    ],
+                },
+            ]
+            listing = Path(tmp) / "test_api.json"
+            listing.write_text(json.dumps({"testsuites": suites}))
+            self.assertEqual(
+                torchci_report.gtest_def_files(listing, checkout),
+                {
+                    "TensorTest.ToDtype": "test/cpp/api/tensor.cpp",
+                    "TensorTest.ToDevice": "test/cpp/api/tensor.cpp",
+                    "Inst/ComplexTest.Add/0": "c10/test/util/complex_common.h",
+                    "ApplyTest.Contiguous": "",
+                },
+            )
+            missing = Path(tmp) / "missing.json"
+            self.assertEqual(torchci_report.gtest_def_files(missing, checkout), {})
+
+    @unittest.skipIf(
+        importlib.util.find_spec("pytest_cpp") is None, "pytest-cpp isn't installed"
+    )
+    def test_gtest_listing_only_while_collecting_binaries(self) -> None:
+        from pytest_cpp.plugin import CppFile
+
+        plugin = importlib.import_module("torch.testing._internal.torchci.plugin")
+
+        def collect(collector: Any) -> str:
+            wrapper = plugin.pytest_make_collect_report(collector)
+            next(wrapper)
+            during = os.environ["GTEST_OUTPUT"]
+            with contextlib.suppress(StopIteration):
+                next(wrapper)
+            return during
+
+        env = {"GTEST_OUTPUT": "xml:job.xml"}
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            unittest.mock.patch.dict(os.environ, env),
+            unittest.mock.patch.object(plugin, "_gtest_listings", tmp),
+        ):
+            self.assertEqual(collect(object.__new__(CppFile)), f"json:{tmp}{os.sep}")
+            self.assertEqual(os.environ["GTEST_OUTPUT"], "xml:job.xml")
+            self.assertEqual(collect(object()), "xml:job.xml")
+
     def test_identity_survives_unwrap_errors(self):
         import pytest
 
@@ -677,35 +749,27 @@ class TestReportHelpers(TestCase):
             # The ROCm release, not HIP's version.
             self.assertEqual(environment._accelerator(), ("rocm", "10.1.0"))
 
+    @skipIfTorchDynamo("patches torch.__config__")
     @parametrize(
-        "config, expected",
+        "compiler, expected",
         [
-            # clang defines __GNUC__, so a clang build also prints a GCC line.
-            subtest(
-                (
-                    "  - GCC 4.2\n  - C++ Version: 201703\n  - clang 21.1.0\n",
-                    ("clang", "21"),
-                ),
-                name="clang",
-            ),
-            subtest(
-                ("  - GCC 11.4\n  - C++ Version: 201703\n", ("gcc", "11")), name="gcc"
-            ),
+            subtest((("clang", "21.1.0"), ("clang", "21.1.0")), name="clang"),
+            subtest((("gcc", "11.4"), ("gcc", "11.4")), name="gcc"),
             # _MSC_FULL_VER of MSVC 19.41.34120.
-            subtest(
-                ("  - C++ Version: 201703\n  - MSVC 194134120\n", ("msvc", "19")),
-                name="msvc",
-            ),
-            subtest(("  - C++ Version: 201703\n", ("", "")), name="unknown"),
+            subtest((("msvc", "194134120"), ("msvc", "194134120")), name="msvc"),
+            # A torch that predates torch.__config__._cxx_compiler.
+            subtest((None, ("", "")), name="missing"),
         ],
     )
-    def test_compiler(self, config, expected):
+    def test_compiler(self, compiler, expected):
         environment = importlib.import_module(
             "torch.testing._internal.torchci.environment"
         )
-        self.assertEqual(
-            environment._compiler(f"PyTorch built with:\n{config}"), expected
-        )
+        cxx_compiler = None if compiler is None else (lambda: compiler)
+        with unittest.mock.patch.object(
+            torch.__config__, "_cxx_compiler", cxx_compiler, create=True
+        ):
+            self.assertEqual(environment._compiler(), expected)
 
     def test_windows_os_version(self):
         environment = importlib.import_module(
@@ -766,7 +830,6 @@ class TestReportHelpers(TestCase):
             "driver_version",
             "host_memory_mib",
             "build_environment",
-            "test_config",
             "runner_name",
         }
         self.assertTrue(set(captured.properties) <= property_names)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -34,6 +35,35 @@ def gtest_identity(binary: str, name: str) -> TestId:
     suite, _, case_name = name.partition(".")
     declared = case_name.partition("/")[0]
     return TestId(f"cpp/{Path(binary).stem}", suite, case_name, "cpp", declared)
+
+
+def gtest_def_files(listing: Path, root: Path) -> dict[str, str]:
+    """``<suite>.<test>`` to the file under ``root`` that defines it, from the JSON
+    that ``--gtest_list_tests`` writes under GTEST_OUTPUT; {} without a listing.
+
+    gtest records each test's file as the compiler was given it, an absolute path
+    under the build's checkout, which needn't be ``root``. The file is the longest
+    suffix of that path that exists under ``root``, or "" if none does, as for the
+    sources ROCm builds compile from hipified copies."""
+    try:
+        suites = json.loads(listing.read_text(encoding="utf-8"))["testsuites"]
+    except (OSError, ValueError, KeyError):
+        return {}
+    resolved: dict[str, str] = {}
+
+    def def_file(path: str) -> str:
+        if path not in resolved:
+            # Without the root or drive, so every suffix is relative to root.
+            parts = [p for p in re.split(r"[\\/]", path) if p and not p.endswith(":")]
+            suffixes = ("/".join(parts[i:]) for i in range(len(parts)))
+            resolved[path] = next((s for s in suffixes if (root / s).is_file()), "")
+        return resolved[path]
+
+    return {
+        f"{suite['name']}.{test['name']}": def_file(test.get("file", ""))
+        for suite in suites
+        for test in suite["testsuite"]
+    }
 
 
 def report_path(prefix: str, report_uuid: str) -> str:
@@ -69,11 +99,13 @@ def run_record(
     started: float,
     ended: float,
     outcome_summary: str = "",
+    def_file: str = "",
 ) -> dict[str, Any]:
     return {
         "type": "run",
         "schema_version": SCHEMA_VERSION,
         **test._asdict(),
+        "def_file": def_file,
         "rerun_number": rerun_number,
         "outcome": outcome,
         "outcome_summary": outcome_summary,
