@@ -572,7 +572,7 @@ class TestSegmentReductions(TestCase):
 
 
 
-instantiate_device_type_tests(TestSegmentReductions, globals())
+instantiate_device_type_tests(TestSegmentReductions, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
