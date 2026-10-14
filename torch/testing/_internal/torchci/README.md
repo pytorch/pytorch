@@ -63,11 +63,12 @@ physical RAM; it is omitted where neither is available.
 |---|---|---|
 | `type` | string | `"run"` |
 | `schema_version` | string | `"0.1"` |
-| `file` | string | Launched Python file |
-| `suite` | string | Innermost Python class |
+| `file` | string | Launched Python file, or `cpp/<binary>` |
+| `suite` | string | Innermost Python class or gtest suite |
 | `case_name` | string | Collected test name, including generated parameters |
-| `language` | string | `python` |
+| `language` | string | `python` or `cpp` |
 | `declared_case_name` | string | Source test name before generated device, dtype, op, or parameter suffixes |
+| `def_file` | string | For a gtest, the repo-relative file that defines it; `""` for Python tests and when unknown |
 | `rerun_number` | int | Execution number within one process, starting at `0` |
 | `outcome` | string | `passed`, `failed`, `error`, `skipped`, `xfailed`, or `xpassed` |
 | `outcome_summary` | string | Failure, skip, or xfail summary; otherwise `""` |
@@ -77,7 +78,16 @@ physical RAM; it is omitted where neither is available.
 
 Pytest reruns and flakefinder repeats within one process count up
 `rerun_number`. A test's subtests share its run line, and a failing subtest fails
-it.
+it. For a value-parameterized gtest, `declared_case_name` drops the `/<param>`
+suffix. A gtest whose process crashed is `failed`, with pytest-cpp's message, as in
+junit.
+
+A gtest's `def_file` is where its `TEST` macro is, which can be a header. gtest
+lists it with the binary's tests, as the absolute path the build compiled; the
+writer keeps the longest suffix of that path that is a file in the checkout the
+tests run from. It is `""` when none is, as for the hipified copies ROCm builds
+compile, so readers should take a test's `def_file` from any of its runs that
+have one.
 
 A test aliased under a longer name (`test_x_dynamic = TestX.test_x`) reports the
 original's `declared_case_name`, `test_x`.
