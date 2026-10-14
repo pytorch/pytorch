@@ -4207,7 +4207,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 new_source = None
                 if self.source:
                     new_source = AttrSource(self.source, "__getattr__")
-                if self.cls_source is not None:
+                # getattr_static(type(value), "__getattr__") also finds a
+                # __getattr__ defined on the *metaclass* (e.g. EnumType on
+                # Python < 3.12), which is not in type(value).__mro__ and
+                # therefore cannot be sourced by walking the MRO.  Only
+                # source (and guard) the function when a class in the MRO
+                # actually defines it.
+                if self.cls_source is not None and any(
+                    "__getattr__" in klass.__dict__
+                    for klass in type(self.value).__mro__
+                ):
                     fn_source = self.get_source_by_walking_mro(tx, "__getattr__")
                     fn_vt = variables.UserFunctionVariable.create_with_source(
                         getattr_fn, fn_source

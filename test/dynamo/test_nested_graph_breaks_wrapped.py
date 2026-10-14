@@ -164,7 +164,6 @@ xfails = [
     NestedGraphBreaksDecoratorTests.test_fullgraph_eval_frame_override_nested_graph_breaks,
     NestedGraphBreaksDecoratorTests.test_torch_guards_stack_frame_register_inlining_disable_nested_graph_breaks,
     NestedGraphBreaksSubGraphTests.test_resume_paths_join_nested_graph_breaks,
-    NestedGraphBreaksReproTests.test_udf_classes_reconstruction_nested_graph_breaks,
 ]
 
 case = None
