@@ -439,9 +439,6 @@ if __name__ == '__main__':
             self.assertIn('errors=1', stderr)
 
 
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/106308")
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
-    @onlyCUDA
     @slowTest
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
         # test to ensure common_distributed.py override should not early terminate CUDA.
