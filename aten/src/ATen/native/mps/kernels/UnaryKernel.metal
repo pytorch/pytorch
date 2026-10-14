@@ -231,72 +231,195 @@ struct tanh_functor {
   }
 };
 
-struct asin_functor {
-  template <typename T>
-  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
-    return T(precise::asin(x));
+// Complex inverse sine/cosine family, ported from FreeBSD's catrigf.c, which
+// implements Hull, Fairgrieve and Tang, "Implementing the complex arcsine and
+// arccosine functions using exception handling" (1997). thrust (and therefore
+// CUDA) uses the same algorithm. casin/cacosh are derived from casinh/cacos.
+namespace catrig {
+constant constexpr float RECIP_EPSILON = 1 / FLT_EPSILON;
+constant constexpr float A_CROSSOVER = 10;
+constant constexpr float B_CROSSOVER = 0.6417;
+constant constexpr float FOUR_SQRT_MIN = 0x1p-61;
+constant constexpr float SQRT_6_EPSILON = 8.4572793338e-4;
+
+// (hypot(a, b) - b) / 2 computed without cancellation
+inline float f(float a, float b, float hypot_a_b) {
+  if (b < 0) {
+    return (hypot_a_b - b) / 2;
   }
-  template <typename T>
-  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
-    return precise::asin(static_cast<float>(x));
+  if (b == 0) {
+    return a / 2;
   }
-  template <typename T>
-  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // asin(z) = atan(z/sqrt(1-z^2)) if z != ±1
-    if (x.x == 1 && x.y == 0)
-      return T(M_PI_F / 2, 0);
-    else if (x.x == -1 && x.y == 0)
-      return T(M_PI_F / -2, 0);
-    auto atan_val = div(x, c10::metal::sqrt(T(1, 0) - c10::metal::mul(x, x)));
-    // calculate atan (see atan_functor)
-    auto coef = div(T(1, 0), T(0, 2));
-    auto log_arg =
-        div(T(-1 * atan_val.x, 1 - atan_val.y), T(atan_val.x, 1 + atan_val.y));
-    // Calculate log using method from log_functor
-    auto magnitude =
-        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (log_arg.x == 0 && log_arg.y == 0)
-        ? 0
-        : ::precise::atan2(log_arg.y, log_arg.x);
-    // return coefficient * log value
-    return c10::metal::mul(coef, T(real, imag));
-  }
+  return a * a / (hypot_a_b + b) / 2;
+}
+
+struct hard_work_result {
+  float rx; // acosh(A)
+  bool B_is_usable;
+  float B; // y / A
+  float sqrt_A2my2; // when !B_is_usable, asin(B) == atan2(new_y, sqrt_A2my2)
+  float new_y;
 };
 
-struct acos_functor {
-  template <typename T>
-  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
-    return T(precise::acos(x));
+// For x, y >= 0 and A = (|x + i(y + 1)| + |x + i(y - 1)|) / 2
+inline hard_work_result do_hard_work(float x, float y) {
+  hard_work_result r;
+  const float R = c10::metal::hypot(x, y + 1);
+  const float S = c10::metal::hypot(x, y - 1);
+  const float A = ::metal::max((R + S) / 2, 1.0f);
+  if (A < A_CROSSOVER) {
+    if (y == 1 && x < FLT_EPSILON * FLT_EPSILON / 128) {
+      r.rx = precise::sqrt(x);
+    } else if (x >= FLT_EPSILON * ::metal::fabs(y - 1)) {
+      const float Am1 = f(x, 1 + y, R) + f(x, 1 - y, S);
+      r.rx = c10::metal::log1p(Am1 + precise::sqrt(Am1 * (A + 1)));
+    } else if (y < 1) {
+      r.rx = x / precise::sqrt((1 - y) * (1 + y));
+    } else {
+      r.rx = c10::metal::log1p((y - 1) + precise::sqrt((y - 1) * (y + 1)));
+    }
+  } else {
+    r.rx = precise::log(A + precise::sqrt(A * A - 1));
   }
-  template <typename T>
-  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
-    return precise::acos(static_cast<float>(x));
+  r.new_y = y;
+  if (y < FOUR_SQRT_MIN) {
+    r.B_is_usable = false;
+    r.sqrt_A2my2 = A * (2 / FLT_EPSILON);
+    r.new_y = y * (2 / FLT_EPSILON);
+    return r;
   }
-  template <typename T>
-  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // acos(z) = pi/2 - asin(z) if z != ±1
-    // calculate asin
-    if (x.x == 1 && x.y == 0)
-      return T(M_PI_F, 0);
-    else if (x.x == -1 && x.y == 0)
-      return T(-M_PI_F, 0);
-    auto atan_val = div(x, c10::metal::sqrt(T(1, 0) - c10::metal::mul(x, x)));
-    // calculate atan (see atan_functor)
-    auto coef = div(T(1, 0), T(0, 2));
-    auto log_arg =
-        div(T(-1 * atan_val.x, 1 - atan_val.y), T(atan_val.x, 1 + atan_val.y));
-    // Calculate log using method from log_functor
-    auto magnitude =
-        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (log_arg.x == 0 && log_arg.y == 0)
-        ? 0
-        : ::precise::atan2(log_arg.y, log_arg.x);
-    // return coefficient * log value
-    return T(M_PI_F / 2, 0) - c10::metal::mul(coef, T(real, imag));
+  r.B = y / A;
+  r.B_is_usable = r.B <= B_CROSSOVER;
+  if (!r.B_is_usable) {
+    if (y == 1 && x < FLT_EPSILON / 128) {
+      r.sqrt_A2my2 = precise::sqrt(x) * precise::sqrt((A + y) / 2);
+    } else if (x >= FLT_EPSILON * ::metal::fabs(y - 1)) {
+      const float Amy = f(x, y + 1, R) + f(x, y - 1, S);
+      r.sqrt_A2my2 = precise::sqrt(Amy * (A + y));
+    } else if (y > 1) {
+      r.sqrt_A2my2 = x * (4 / FLT_EPSILON / FLT_EPSILON) * y /
+          precise::sqrt((y + 1) * (y - 1));
+      r.new_y = y * (4 / FLT_EPSILON / FLT_EPSILON);
+    } else {
+      r.sqrt_A2my2 = precise::sqrt((1 - y) * (1 + y));
+    }
   }
-};
+  return r;
+}
+
+inline float2 clog_for_large_values(float2 z) {
+  const auto a = ::metal::fabs(z);
+  const float re = ::metal::max(a.x, a.y) > FLT_MAX / 2
+      ? precise::log(c10::metal::hypot(z.x / M_E_F, z.y / M_E_F)) + 1
+      : precise::log(c10::metal::hypot(z.x, z.y));
+  return float2(re, precise::atan2(z.y, z.x));
+}
+
+inline float2 casinh(float2 z) {
+  const float x = z.x, y = z.y;
+  const float ax = ::metal::fabs(x), ay = ::metal::fabs(y);
+  if (::metal::isnan(x) || ::metal::isnan(y)) {
+    if (::metal::isinf(x)) {
+      return float2(x, y + y);
+    }
+    if (::metal::isinf(y)) {
+      return float2(y, x + x);
+    }
+    if (y == 0) {
+      return float2(x + x, y);
+    }
+    return float2(NAN, NAN);
+  }
+  if (ax > RECIP_EPSILON || ay > RECIP_EPSILON) {
+    const auto w = clog_for_large_values(::metal::signbit(x) ? -z : z);
+    return float2(
+        ::metal::copysign(w.x + M_LN2_F, x), ::metal::copysign(w.y, y));
+  }
+  if (ax < SQRT_6_EPSILON / 4 && ay < SQRT_6_EPSILON / 4) {
+    return z;
+  }
+  const auto r = do_hard_work(ax, ay);
+  const float ry = r.B_is_usable ? precise::asin(r.B)
+                                 : precise::atan2(r.new_y, r.sqrt_A2my2);
+  return float2(::metal::copysign(r.rx, x), ::metal::copysign(ry, y));
+}
+
+inline float2 casin(float2 z) {
+  const auto w = casinh(float2(z.y, z.x));
+  return float2(w.y, w.x);
+}
+
+inline float2 cacos(float2 z) {
+  const float x = z.x, y = z.y;
+  const float ax = ::metal::fabs(x), ay = ::metal::fabs(y);
+  const bool sx = ::metal::signbit(x), sy = ::metal::signbit(y);
+  if (::metal::isnan(x) || ::metal::isnan(y)) {
+    if (::metal::isinf(x)) {
+      return float2(y + y, -INFINITY);
+    }
+    if (::metal::isinf(y)) {
+      return float2(x + x, -y);
+    }
+    if (x == 0) {
+      return float2(M_PI_2_F, y + y);
+    }
+    return float2(NAN, NAN);
+  }
+  if (ax > RECIP_EPSILON || ay > RECIP_EPSILON) {
+    const auto w = clog_for_large_values(z);
+    const float ry = w.x + M_LN2_F;
+    return float2(::metal::fabs(w.y), sy ? ry : -ry);
+  }
+  if (x == 1 && y == 0) {
+    return float2(0, -y);
+  }
+  if (ax < SQRT_6_EPSILON / 4 && ay < SQRT_6_EPSILON / 4) {
+    return float2(M_PI_2_F - x, -y);
+  }
+  // Same decomposition as casinh with the roles of x and y swapped
+  const auto r = do_hard_work(ay, ax);
+  const float new_x = sx ? -r.new_y : r.new_y;
+  const float rx = r.B_is_usable ? precise::acos(sx ? -r.B : r.B)
+                                 : precise::atan2(r.sqrt_A2my2, new_x);
+  return float2(rx, sy ? r.rx : -r.rx);
+}
+
+inline float2 cacosh(float2 z) {
+  const auto w = cacos(z);
+  if (::metal::isnan(w.x) && ::metal::isnan(w.y)) {
+    return float2(w.y, w.x);
+  }
+  if (::metal::isnan(w.x)) {
+    return float2(::metal::fabs(w.y), w.x);
+  }
+  if (::metal::isnan(w.y)) {
+    return float2(w.y, w.y);
+  }
+  return float2(::metal::fabs(w.y), ::metal::copysign(w.x, z.y));
+}
+} // namespace catrig
+
+#define DEFINE_INVERSE_TRIG_FUNCTOR(NAME)                                      \
+  struct NAME##_functor {                                                      \
+    template <typename T>                                                      \
+    inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(           \
+        const T x) {                                                           \
+      return T(precise::NAME(float(x)));                                       \
+    }                                                                          \
+    template <typename T>                                                      \
+    inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) { \
+      return precise::NAME(static_cast<float>(x));                             \
+    }                                                                          \
+    template <typename T>                                                      \
+    inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {             \
+      return T(catrig::c##NAME(float2(x)));                                    \
+    }                                                                          \
+  }
+
+DEFINE_INVERSE_TRIG_FUNCTOR(asin);
+DEFINE_INVERSE_TRIG_FUNCTOR(acos);
+DEFINE_INVERSE_TRIG_FUNCTOR(asinh);
+DEFINE_INVERSE_TRIG_FUNCTOR(acosh);
 
 struct atan_functor {
   template <typename T>
@@ -711,6 +834,8 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(tan, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(asin, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(acos, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(asinh, DTYPE1, DTYPE0);        \
+  REGISTER_UNARY_OP(acosh, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(atan, DTYPE1, DTYPE0)
 
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
@@ -751,6 +876,8 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2);        \
   REGISTER_UNARY_OP(asin, DTYPE##2, DTYPE##2);       \
   REGISTER_UNARY_OP(acos, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(asinh, DTYPE##2, DTYPE##2);      \
+  REGISTER_UNARY_OP(acosh, DTYPE##2, DTYPE##2);      \
   REGISTER_UNARY_OP(atan, DTYPE##2, DTYPE##2)
 
 INSTANTIATE_UNARY_KERNELS_VEC2(half);

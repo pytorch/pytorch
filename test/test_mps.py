@@ -8403,6 +8403,17 @@ class TestMPS(TestCaseMPS):
             ref = torch.view_as_real(op(x.cfloat()).to(dtype))
             self.assertEqual(rc, ref)
 
+    def test_complex_inverse_trig(self):
+        # Exact +-1, near-real, huge and infinite inputs, where the textbook formulas lose
+        # precision, overflow or return NaN. Compare against numpy, as CPU libc++ overflows
+        # for huge inputs.
+        x = torch.tensor([1, -1, 1 + 1e-4j, -1 + 1e-4j, 0.5 + 1e-4j, 1e30j, 1 + 1e30j, -1e30 + 1j,
+                          complex(math.inf, 0), complex(-math.inf, 1), complex(1, math.inf)], dtype=torch.cfloat)
+        for op, ref in ((torch.asin, np.arcsin), (torch.acos, np.arccos), (torch.asinh, np.arcsinh), (torch.acosh, np.arccosh)):
+            rc = torch.view_as_real(op(x.to('mps')).cpu())
+            expected = torch.view_as_real(torch.from_numpy(ref(x.numpy())))
+            self.assertEqual(rc, expected, msg=op.__name__)
+
     # Test selu, elu, celu
     def test_elu(self):
         def helper(shape, alpha=1.0, memory_format=torch.contiguous_format):

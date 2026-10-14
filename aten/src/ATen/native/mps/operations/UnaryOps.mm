@@ -138,8 +138,6 @@ TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
   }                                                                                                                    \
   REGISTER_DISPATCH(func##_stub, mps_##func##_kernel)
 
-REGISTER_MPS_UNARY_STUB(acosh, acosh);
-REGISTER_MPS_UNARY_STUB(asinh, asinh);
 REGISTER_MPS_UNARY_STUB(atanh, atanh);
 
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
