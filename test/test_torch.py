@@ -121,8 +121,9 @@ def _test_gather_backward_one_dim(test_case, device, deterministic: bool = False
 
 # Runs dst.copy_(src) and reports whether a kernel whose name contains
 # kernel_name ran. The ROCm profiler occasionally drops kernel records but never
-# reports a kernel that did not run, so a miss is retried.
-def _copy_uses_kernel(dst, src, kernel_name, attempts=3):
+# reports a kernel that did not run, so on ROCm a miss is retried.
+def _copy_uses_kernel(dst, src, kernel_name):
+    attempts = 3 if torch.version.hip else 1
     for _ in range(attempts):
         with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
             dst.copy_(src)
