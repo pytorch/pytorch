@@ -11,7 +11,6 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -98,13 +97,9 @@ class CodegenInductorGeneric(CodegenTestBase):
 class CodegenInductorTest(CodegenTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
     @requires_triton()
     @requires_block_ptr
     def test_cse_make_block_ptr_reduction(self, device):
-        if self.device_type == "mps":
-            self.skipTest("Triton is not available for MPS")
-
         def func(a, b):
             tmp0 = a * b
             tmp1 = a + b
@@ -130,12 +125,8 @@ class CodegenInductorTest(CodegenTestBase):
         self.count_code("= tl.make_block_ptr(in_ptr", code, 2)
         self.count_code("= tl.load(block_ptr", code, 2)
 
-    @onlyAccelerator
     @requires_triton()
     def test_block_ptr_falls_back_when_api_missing(self, device):
-        if self.device_type == "mps":
-            self.skipTest("Triton is not available for MPS")
-
         def func(a, b):
             tmp0 = a * b
             tmp1 = a + b
@@ -165,13 +156,9 @@ class CodegenInductorTest(CodegenTestBase):
             )
         self.count_code("tl.make_block_ptr", code, 0)
 
-    @onlyAccelerator
     @requires_triton()
     @parametrize("disable_welford_reduction", [True, False])
     def test_disable_welford_reduction(self, disable_welford_reduction: bool, device):
-        if self.device_type == "mps":
-            self.skipTest("Triton is not available for MPS")
-
         def func(x):
             return torch.var_mean(x, dim=1)
 
@@ -193,12 +180,8 @@ class CodegenInductorTest(CodegenTestBase):
         else:
             self.assertGreater(welford_count, 0)
 
-    @onlyAccelerator
     @requires_triton()
     def test_kernel_fusion_thresholds(self, device):
-        if self.device_type == "mps":
-            self.skipTest("Triton is not available for MPS")
-
         def func(a, b):
             tmp0 = a + 1
             tmp1 = tmp0 + 2
