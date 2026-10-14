@@ -5,7 +5,7 @@
     if M * N == 0:
         # early exit due to zero-size input(s)
         return
-    tl.static_assert(BLOCK_K % 128 == 0, "K128 UE8M0 scaling requires BLOCK_K % 128 == 0")
+    tl.static_assert(BLOCK_K % 128 == 0, "K128 block scaling requires BLOCK_K % 128 == 0")
     tl.static_assert(BLOCK_M == 128, "Block-scaled MMAv5 requires BLOCK_M == 128")
     tl.static_assert(BLOCK_N % 128 == 0, "BLOCK_N must be divisible by 128")
     SCALE_N_TILES: tl.constexpr = BLOCK_N // 128

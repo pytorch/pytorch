@@ -1818,16 +1818,14 @@ class TestFP8Lowering(TestCase):
             )
 
         if path == "native":
-            template_name = (
-                "triton_blackwell_ws_persistent_device_tma_k128_ue8m0_scaling_"
-            )
+            template_name = "blackwell_ws_persistent_device_tma_main_loop_scaling_"
             forced_config = (
                 "BLOCK_M=128, BLOCK_N=256",
                 "BLOCK_K=128",
                 "num_stages=3, num_warps=8",
             )
         else:
-            template_name = "triton_k128_ue8m0_sw_scaled_mm_"
+            template_name = "main_loop_sw_scaled_mm_"
             forced_config = ()
         choice_records = []
 

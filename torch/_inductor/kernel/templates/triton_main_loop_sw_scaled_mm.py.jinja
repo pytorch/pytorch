@@ -5,7 +5,7 @@
     if M * N == 0:
         # early exit due to zero-size input(s)
         return
-    tl.static_assert(128 % BLOCK_K == 0, "K128 UE8M0 software scaling requires BLOCK_K to divide 128")
+    tl.static_assert(128 % BLOCK_K == 0, "K128 block scaling requires BLOCK_K to divide 128")
     stride_am = {{stride("A", 0)}}
     stride_ak = {{stride("A", 1)}}
     stride_bk = {{stride("B", 0)}}

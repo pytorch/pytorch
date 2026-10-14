@@ -21,9 +21,9 @@ from ... import config
 from ...autows_utils import meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
-    blackwell_ws_persistent_device_tma_k128_ue8m0_scaling_template,
+    blackwell_ws_persistent_device_tma_main_loop_scaling_template,
     blackwell_ws_persistent_tma_mm_template,
-    k128_ue8m0_sw_scaled_mm_template,
+    main_loop_sw_scaled_mm_template,
     mm_template,
     persistent_mm_template,
     persistent_tdm_mm_template,
@@ -3690,15 +3690,15 @@ class CUDAScaledBlackwellTMATemplateConfigHeuristic(
 
 
 @register_template_heuristic(
-    blackwell_ws_persistent_device_tma_k128_ue8m0_scaling_template.uid,
+    blackwell_ws_persistent_device_tma_main_loop_scaling_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="scaled_mm",
 )
-class CUDAScaledBlackwellK128UE8M0TemplateConfigHeuristic(
+class CUDAScaledBlackwellTMAMainLoopScalingTemplateConfigHeuristic(
     BlackwellTMATemplateConfigMixin, BaseScaledMMConfigMixin, CUDAConfigHeuristic
 ):
-    """K128 UE8M0 Blackwell persistent TMA template heuristic."""
+    """Blackwell WS persistent TMA template heuristic for main-loop (blockwise) scaling."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -3741,15 +3741,15 @@ class CUDAScaledBlackwellK128UE8M0TemplateConfigHeuristic(
 
 
 @register_template_heuristic(
-    k128_ue8m0_sw_scaled_mm_template.uid,
+    main_loop_sw_scaled_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="scaled_mm",
 )
-class CUDAScaledK128UE8M0SoftwareScalingTemplateConfigHeuristic(
+class CUDAScaledMainLoopSoftwareScalingTemplateConfigHeuristic(
     MMTemplateConfigMixin, CUDAConfigHeuristic
 ):
-    """Small-tile K128 UE8M0 template heuristic: fp8 tl.dot plus register scaling.
+    """Small-tile main-loop scaling template heuristic: fp8 tl.dot plus register scaling.
 
     Built on the plain MM mixin rather than BaseScaledMMConfigMixin because the
     scaled-MM mixin's scale checks assume the fp32 recipes' layouts, not the

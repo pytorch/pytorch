@@ -161,18 +161,18 @@ flydsl_mm_template = FlyDSLTemplate(
     source=load_kernel_template("flydsl_mm"),
 )
 
-blackwell_ws_persistent_device_tma_k128_ue8m0_scaling_template = TritonTemplate(
-    name="blackwell_ws_persistent_device_tma_k128_ue8m0_scaling",
+blackwell_ws_persistent_device_tma_main_loop_scaling_template = TritonTemplate(
+    name="blackwell_ws_persistent_device_tma_main_loop_scaling",
     grid=persistent_mm_grid,
     source=load_kernel_template(
-        "triton_blackwell_ws_persistent_device_tma_k128_ue8m0_scaled_mm"
+        "triton_blackwell_ws_persistent_device_tma_main_loop_scaled_mm"
     ),
 )
 
-k128_ue8m0_sw_scaled_mm_template = TritonTemplate(
-    name="k128_ue8m0_sw_scaled_mm",
+main_loop_sw_scaled_mm_template = TritonTemplate(
+    name="main_loop_sw_scaled_mm",
     grid=mm_grid,
-    source=load_kernel_template("triton_k128_ue8m0_sw_scaled_mm"),
+    source=load_kernel_template("triton_main_loop_sw_scaled_mm"),
 )
 
 blackwell_ws_persistent_tma_mm_template = TritonTemplate(
@@ -1253,16 +1253,16 @@ def _scale_is_transposed(
     return _uses_cublas_blockwise128x128_layout(scale, mat, scale_option, transpose)
 
 
-def _is_cuda_k128_ue8m0_scale(
+def _is_blackwell_main_loop_scale(
     scale: IRNode,
     block_rows: int,
     outer_size: _IntLike,
     k_size: _IntLike,
 ) -> bool:
     """
-    K128 UE8M0 scales hold one code per (block_rows rows, K128 block) with the
-    K block fastest, so a row's codes for consecutive K steps share cache
-    lines. Both operands use the caller-facing v2 layout, contiguous
+    Blackwell main-loop scales hold one scale per (block_rows rows, K128 block)
+    with the K block fastest, so a row's scales for consecutive K steps share
+    cache lines. Both operands use the caller-facing v2 layout, contiguous
     [ceil(outer / block_rows), ceil(K / 128)]. Strides of size-1 dims are ignored.
     """
     size = scale.get_size()
@@ -1407,8 +1407,8 @@ def scaled_mm_v2_constraint(
                 )
                 if ambiguous or scale.get_dtype() == torch.float8_e8m0fnu:
                     # Ambiguous scale shapes encode their orientation in strides,
-                    # and K128 UE8M0 scales are validated against the caller's
-                    # layout (see _is_cuda_k128_ue8m0_scale), not the fp32 one.
+                    # and E8M0 scales are validated against the caller's layout
+                    # (see _is_blackwell_main_loop_scale), not the fp32 one.
                     # Use FX metadata even when a producer's IR layout is flexible.
                     _, fake_args, fake_kwargs = get_fake_args_kwargs(fx_node)
                     fake_operands = dict(zip(names, fake_args))
@@ -1449,13 +1449,15 @@ scaled_mm_v2_fallback = fallback_handler(
 )
 
 
-def _is_k128_ue8m0_scaled_mm(
+def _is_blackwell_main_loop_scaled_mm(
     mat_a, mat_b, scale_a, recipe_a, swizzle_a, scale_b, recipe_b, swizzle_b
 ) -> bool:
     # The eager BlockWise1x128 / BlockWise128x128 contracts remain FP32. This
-    # compiled-only specialization takes UE8M0 scales in either recipe on
-    # either operand, one code per row (1x128) or per 128 rows (128x128) with
-    # the K block fastest; see _is_cuda_k128_ue8m0_scale.
+    # compiled-only specialization takes either recipe on either operand, one
+    # scale per row (1x128) or per 128 rows (128x128) with the K block fastest;
+    # see _is_blackwell_main_loop_scale. Only E8M0 scales are accepted for now,
+    # since they map onto tcgen05 block-scaled MMA; other scale dtypes take the
+    # generic scaled_mm lowering.
     k128_recipes = (
         ScalingType.BlockWise1x128.value,
         ScalingType.BlockWise128x128.value,
@@ -1478,7 +1480,7 @@ def _is_k128_ue8m0_scaled_mm(
     )
 
 
-def _tuned_k128_ue8m0_scaled_mm(
+def _tuned_blackwell_main_loop_scaled_mm(
     mat_a,
     mat_b,
     scale_a,
@@ -1490,8 +1492,8 @@ def _tuned_k128_ue8m0_scaled_mm(
     use_fast_accum,
     layout,
 ):
-    """SM100 Triton-only lowering for K128 UE8M0 block scales. Returns None when
-    no template applies so the caller falls back to eager."""
+    """SM100 Triton-only lowering for BlockWise1x128 / BlockWise128x128 scales.
+    Returns None when no template applies so the caller falls back to eager."""
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
@@ -1522,8 +1524,8 @@ def _tuned_k128_ue8m0_scaled_mm(
     block_rows_a = 128 if recipe_a == ScalingType.BlockWise128x128 else 1
     block_rows_b = 128 if recipe_b == ScalingType.BlockWise128x128 else 1
     torch._check(
-        _is_cuda_k128_ue8m0_scale(scale_a, block_rows_a, m, k)
-        and _is_cuda_k128_ue8m0_scale(scale_b, block_rows_b, n, k),
+        _is_blackwell_main_loop_scale(scale_a, block_rows_a, m, k)
+        and _is_blackwell_main_loop_scale(scale_b, block_rows_b, n, k),
         lambda: (
             "K128 UE8M0 scales must hold one code per (rows, K128 block) with the "
             "K block fastest, rows being 1 for BlockWise1x128 and 128 for "
@@ -1551,7 +1553,7 @@ def _tuned_k128_ue8m0_scaled_mm(
     )
     kwarg_overrides = {}
     if use_native:
-        template = blackwell_ws_persistent_device_tma_k128_ue8m0_scaling_template
+        template = blackwell_ws_persistent_device_tma_main_loop_scaling_template
         input_nodes = [
             mat_a,
             mat_b,
@@ -1559,7 +1561,7 @@ def _tuned_k128_ue8m0_scaled_mm(
             _k128_ue8m0_scale_mx_layout(scale_b, block_rows_b, n),
         ]
     else:
-        template = k128_ue8m0_sw_scaled_mm_template
+        template = main_loop_sw_scaled_mm_template
         input_nodes = [mat_a, mat_b, scale_a, scale_b]
         kwarg_overrides[template.uid] = {
             "SCALE_BLOCK_ROWS_A": block_rows_a,
@@ -1614,8 +1616,9 @@ def tuned_scaled_mm_v2(
     #   - the blockwise MX/NVFP4 recipes BlockWise1x32/1x16 (also how XPU
     #     expresses MX/NVFP4, with NO_SWIZZLE)
     #   - multi-level scales (two-level NVFP4)
-    #   - any non-fp32 block scale, except SM100 K128 UE8M0 scales, which
-    #     _tuned_k128_ue8m0_scaled_mm handles when a Triton template applies
+    #   - any non-fp32 block scale, except SM100 E8M0 BlockWise1x128/128x128
+    #     scales, which _tuned_blackwell_main_loop_scaled_mm handles when a
+    #     Triton template applies
     # Call the eager v2 op directly to preserve its recipes and scale conventions.
     def fallback():
         # contraction_dim is a non-optional int[] in the schema (default []);
@@ -1644,7 +1647,7 @@ def tuned_scaled_mm_v2(
     supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
         recipe_b
     )
-    if _is_k128_ue8m0_scaled_mm(
+    if _is_blackwell_main_loop_scaled_mm(
         mat_a, mat_b, scale_a, recipe_a, swizzle_a, scale_b, recipe_b, swizzle_b
     ) and (
         not contraction_dim
@@ -1654,7 +1657,7 @@ def tuned_scaled_mm_v2(
             and contraction_dim[1] in (0, -2)
         )
     ):
-        node = _tuned_k128_ue8m0_scaled_mm(
+        node = _tuned_blackwell_main_loop_scaled_mm(
             mat_a,
             mat_b,
             scale_a[0],
