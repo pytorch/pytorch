@@ -85,8 +85,9 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   std::unordered_map<int64_t, FrameExecStrategy> region_strategy_map;
   // A loaded artifact recorded this frame with no compiled variants and set
   // its strategy to SKIP. Under guard collectives that skip is reported, so a
-  // peer whose artifact compiled the frame does not run it alone. Setting the
-  // strategy again clears it.
+  // peer whose artifact compiled the frame does not run it alone.
+  // set_code_exec_strategy clears it; a compile result does not, so a forced
+  // recompile that again traces no graph keeps reporting the skip.
   bool precompile_skip{false};
 
   ExtraState(PyCodeObject* orig_code_arg);
