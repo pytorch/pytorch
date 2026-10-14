@@ -8,7 +8,7 @@ on:
       - .github/workflows/test-gb300.yml
   workflow_dispatch:
   schedule:
-    - cron: 17 6 * * *
+    - cron: 18 6 * * *
   push:
     tags:
       - ciflow/gb300/*
