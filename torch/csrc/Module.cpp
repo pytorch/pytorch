@@ -14,6 +14,7 @@
 #include <ATen/CachedTensorUtils.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/FakeTensor.h>
 #include <ATen/FakeTensorDispatchTables.h>
 #include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
@@ -102,6 +103,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_layouts.h>
+#include <torch/csrc/utils/tensor_list.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
@@ -260,6 +262,7 @@ static PyObject* THPModule_crashIfCsrcASAN(PyObject* module, PyObject* arg) {
       THPUtils_typename(arg));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
   volatile char x[3];
+  // NOLINTNEXTLINE(clang-analyzer-security.ArrayBound)
   x[THPUtils_unpackInt(arg)] = 0;
   // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   return THPUtils_packInt32(x[0]);
@@ -573,6 +576,17 @@ static PyObject* THPModule_cxxFlags(PyObject* module, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_cxxCompiler(PyObject* module, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto [name, version] = at::get_cxx_compiler();
+  auto tuple = PyTuple_New(2);
+  TORCH_CHECK_PYTHON(tuple);
+  PyTuple_SET_ITEM(tuple, 0, THPUtils_packString(name));
+  PyTuple_SET_ITEM(tuple, 1, THPUtils_packString(version));
+  return tuple;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_parallelInfo(PyObject* module, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(at::get_parallel_info());
@@ -781,7 +795,9 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
               .dtype(at::toScalarType(prototype->dtype))
               .device(at::dlDeviceToTorchDevice(
                   prototype->device.device_type,
-                  static_cast<c10::DeviceIndex>(prototype->device.device_id)));
+                  static_cast<c10::DeviceIndex>(prototype->device.device_id),
+                  prototype->data));
+
       at::Tensor tensor = at::empty(shape, options);
       *out = at::toDLPackVersioned(tensor);
       return 0;
@@ -2075,6 +2091,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_show_config", THPModule_showConfig, METH_NOARGS, nullptr},
     {"_cxx_flags", THPModule_cxxFlags, METH_NOARGS, nullptr},
+    {"_cxx_compiler", THPModule_cxxCompiler, METH_NOARGS, nullptr},
     {"_parallel_info", THPModule_parallelInfo, METH_NOARGS, nullptr},
     {"_get_cpu_capability", THPModule_getCpuCapability, METH_NOARGS, nullptr},
     {"_set_backcompat_broadcast_warn",
@@ -2774,10 +2791,23 @@ PyObject* initModule() {
         "_fake_dispatch_register_prim_meta",
         add_for(FakeDispatchCategory::PrimMeta));
     py_module.def(
+        "_fake_dispatch_register_python_cia",
+        add_for(FakeDispatchCategory::PythonCIA));
+    py_module.def(
+        "_fake_dispatch_register_custom_op_impl",
+        add_for(FakeDispatchCategory::CustomOpImpl));
+    py_module.def(
         "_fake_dispatch_deregister_op_impl",
         [](const std::string& name, const std::string& overload) {
           at::impl::fakeDispatchTableRemove(
               FakeDispatchCategory::OpImpl, c10::OperatorName(name, overload));
+        });
+    py_module.def(
+        "_fake_dispatch_deregister_custom_op_impl",
+        [](const std::string& name, const std::string& overload) {
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::CustomOpImpl,
+              c10::OperatorName(name, overload));
         });
   }
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
@@ -2831,6 +2861,77 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
     return t.is_fake();
+  });
+
+  py_module.def("_fake_device", [](const at::Tensor& t) -> c10::Device {
+    auto fd = t.unsafeGetTensorImpl()->fake_device();
+    TORCH_CHECK(fd.has_value(), "Tensor does not have a fake device");
+    return *fd;
+  });
+
+  py_module.def(
+      "_set_fake_device",
+      [](const at::Tensor& t, c10::Device device) {
+        at::set_and_normalize_fake_device(t.unsafeGetTensorImpl(), device);
+      },
+      py::arg("t"),
+      py::arg("device"));
+
+  py_module.def(
+      "_set_real_tensor",
+      [](const at::Tensor& fake, const at::Tensor& real) {
+        fake.unsafeGetTensorImpl()->set_real_tensor(real.getIntrusivePtr());
+      },
+      py::arg("fake"),
+      py::arg("real"));
+
+  py_module.def("_get_real_tensor", [](const at::Tensor& fake) -> py::object {
+    auto real = fake.unsafeGetTensorImpl()->real_tensor();
+    if (!real) {
+      return py::none();
+    }
+    return py::cast(at::Tensor(std::move(real)));
+  });
+
+  py_module.def("_clear_fake_real_tensor", [](const at::Tensor& fake) {
+    fake.unsafeGetTensorImpl()->set_real_tensor(nullptr);
+  });
+
+  py_module.def("_get_fake_constant", [](const at::Tensor& t) -> py::object {
+    TORCH_CHECK(t.defined(), "Expected a defined tensor");
+    TORCH_CHECK(t.is_fake(), "Expected a fake tensor");
+    auto mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
+    TORCH_CHECK(mode, "Fake tensor has no associated FakeTensorMode");
+    const auto& constant = mode->get_constant(t.unsafeGetTensorImpl());
+    if (!constant) {
+      return py::none();
+    }
+    return py::cast(at::Tensor(constant));
+  });
+
+  py_module.def(
+      "_set_fake_constant",
+      [](const at::Tensor& fake, const std::optional<at::Tensor>& constant) {
+        TORCH_CHECK(fake.defined(), "Expected a defined tensor");
+        TORCH_CHECK(fake.is_fake(), "Expected a fake tensor");
+        if (constant) {
+          TORCH_CHECK(
+              constant->defined(), "Expected a defined constant tensor");
+          TORCH_CHECK(
+              !constant->is_fake(), "Expected a non-fake constant tensor");
+        }
+        auto mode = fake.unsafeGetTensorImpl()->fake_tensor_mode();
+        TORCH_CHECK(mode, "Fake tensor has no associated FakeTensorMode");
+        mode->set_constant(
+            fake.unsafeGetTensorImpl(),
+            constant ? constant->getIntrusivePtr() : nullptr);
+      },
+      py::arg("fake"),
+      py::arg("constant"));
+
+  py_module.def("_fake_tensor_to_list", [](const at::Tensor& t) {
+    return py::reinterpret_steal<py::object>(
+        torch::utils::fake_tensor_to_list(t));
   });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
@@ -3416,8 +3517,9 @@ Call this whenever a new thread is created in order to propagate values from
       "_is_cow_tensor",
       [](const at::Tensor& tensor) {
         TORCH_CHECK(
-            !tensor.key_set().has(c10::DispatchKey::Python),
-            "_is_cow_tensor is not defined for Python tensor subclasses");
+            !tensor.is_fake() &&
+                !tensor.key_set().has(c10::DispatchKey::Python),
+            "_is_cow_tensor is not defined for Python tensor subclasses or FakeTensors");
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");

@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/metal/common.h>
@@ -206,8 +207,6 @@ static void scatter_reduce_metal(const Tensor& self,
   // intrinsic is only available at runtime on macOS 15+.
   const bool needs_signbit_xor = self.scalar_type() == ScalarType::Long && (op == "amin" || op == "amax");
   if (needs_signbit_xor) {
-    TORCH_CHECK(is_macos_at_least(MacOSVersion::MACOS_15_0),
-                "scatter_reduce(amin/amax) on int64 requires macOS 15 or newer");
     TORCH_CHECK(self.is_contiguous(), "scatter_reduce(amin/amax) on int64 currently requires contiguous self");
   }
 
