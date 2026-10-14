@@ -22,6 +22,7 @@ from unittest import mock
 import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
+from torch._dynamo.testing import lru_cache_reordering
 from torch._precompile import _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.compiler.precompile import (
@@ -4822,6 +4823,7 @@ class TestPrecompileDynamoCapture(TestCase):
         )
 
     @skipIfCrossRef
+    @lru_cache_reordering(True)
     def test_installed_artifact_dispatches_overlapping_variants_like_torch_compile(
         self,
     ):
@@ -4850,6 +4852,7 @@ class TestPrecompileDynamoCapture(TestCase):
         script = (
             "import sys, torch\n"
             "from torch._C._dynamo.eval_frame import _debug_get_precompile_entries\n"
+            "torch._C._dynamo.eval_frame._set_lru_cache(True)\n"
             "sys.path.insert(0, sys.argv[1])\n"
             "mod = __import__(sys.argv[4])\n"
             "f = torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
@@ -4866,6 +4869,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("dynamic first True", out.stdout)
 
+    @lru_cache_reordering(True)
     def test_standalone_artifact_dispatches_overlapping_variants_like_torch_compile(
         self,
     ):
@@ -4892,6 +4896,37 @@ class TestPrecompileDynamoCapture(TestCase):
             loaded(self.model, torch.randn(7, 4))
             dynamic_variant = admitted[-1]
         self.assertIs(served_first_shape, dynamic_variant)
+
+    @parametrize("lru", [True, False])
+    def test_standalone_artifact_orders_variants_like_torch_compile(self, lru):
+        # Two static variants that admit disjoint shapes. Under LRU the newest
+        # is tried first and a hit moves to the front; without it, capture
+        # order is kept.
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        static = DynamoTracer(dynamic=False)
+        with self._capture(self.mod.single, backend="eager", tracer=static) as cap:
+            cap(self.model, self.x2)
+            cap(self.model, self.x3)
+        tried_first, served = [], []
+        real_check = GuardManagerWrapper.check
+
+        def recording_check(manager, f_locals):
+            ok = real_check(manager, f_locals)
+            if len(tried_first) == len(served):
+                tried_first.append(manager)
+            if ok:
+                served.append(manager)
+            return ok
+
+        with lru_cache_reordering(lru):
+            loaded = load(self.artifact, self.cache)
+            with mock.patch.object(GuardManagerWrapper, "check", recording_check):
+                for x in (self.x2, self.x3, self.x2):
+                    loaded(self.model, x)
+        shape = {id(served[0]): "x2", id(served[1]): "x3"}
+        expected = ["x3", "x2", "x3"] if lru else ["x2", "x2", "x2"]
+        self.assertEqual([shape[id(m)] for m in tried_first], expected)
 
     @skipIfCrossRef
     @parametrize("backend", ["inductor", "eager"])
