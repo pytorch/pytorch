@@ -3,6 +3,10 @@
 # single DPX+NPS1 runner. Shard 2 is not requested: this machine has
 # one 1-GPU runner, so a second shard would wait behind the first.
 # CUDA, CPU, and multi-GPU inductor jobs are not scheduled.
+#
+# simulate-dpx-nps2-stale-l2 is not a real NPS2 result. The GPU stays
+# NPS1. The real probe must still print stale_launches=0. The next step
+# only copies the CI failure shape from Jeff Daily's DPX+NPS2 gist.
 name: inductor-rocm-mi350-dpx-nps1
 
 on:
@@ -62,3 +66,38 @@ jobs:
       docker-image: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.test-matrix }}
     secrets: inherit
+
+  simulate-dpx-nps2-stale-l2:
+    name: simulate-dpx-nps2-stale-l2
+    runs-on: linux.rocm.gpu.mi350.1.dpx.nps1
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Real coherence probe (must stay green)
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          src="${GITHUB_WORKSPACE}/.github/ci/rocm-dpx-nps1"
+          command -v hipcc
+          hipcc --version
+          amd-smi partition || true
+          hipcc -O2 -w --offload-arch=gfx950 "$src/coh.hip" -o "$RUNNER_TEMP/coh"
+          export HIP_FORCE_DEV_KERNARG=0
+          unset ROCR_VISIBLE_DEVICES || true
+          "$RUNNER_TEMP/coh" 2000 gpu | tee "$RUNNER_TEMP/gpu.txt"
+          "$RUNNER_TEMP/coh" 2000 h2d | tee "$RUNNER_TEMP/h2d.txt"
+          grep -q 'stale_launches=0 stale_blocks=0' "$RUNNER_TEMP/gpu.txt"
+          grep -q 'stale_launches=0 stale_blocks=0' "$RUNNER_TEMP/h2d.txt"
+          echo "DPX+NPS1 cross-XCC probe is coherent"
+
+      - name: Simulate DPX+NPS2 stale-L2 CI failure
+        run: |
+          set -euo pipefail
+          echo "SIMULATION ONLY. This is not a measurement from this GPU."
+          echo "SIMULATION of the DPX+NPS2 gist result: stale_launches=1999"
+          echo "SIMULATION gist line: RESULT mode=gpu iters=2000 stale_launches=1999 stale_blocks=767616"
+          echo "The real probe in the previous step passed with stale_launches=0 stale_blocks=0."
+          echo "No memory partition was changed. This runner stayed on NPS1."
+          exit 1
