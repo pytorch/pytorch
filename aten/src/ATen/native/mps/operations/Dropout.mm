@@ -24,7 +24,7 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 } // namespace mps
 
 std::tuple<Tensor, Tensor> native_dropout_mps(const Tensor& input, double p, std::optional<bool> train) {
-  if (input.numel() == 0 || !train.value_or(false) || p == 0) {
+  if (input.numel() == 0 || !train.value_or(true) || p == 0) {
     return {input.clone(), at::ones_like(input, input.options().dtype(c10::kBool))};
   }
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Sequence, TYPE_CHECKING  # noqa: UP035
 
 from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
+    opset18 as op18,
     opset20 as op20,
     opset21 as op21,
     opset23 as op23,
@@ -15,7 +16,7 @@ from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
 
 import torch
 from torch.onnx._internal._lazy_import import onnx_ir as ir
-from torch.onnx._internal.exporter._torchlib._tensor_typing import TFloat, TReal
+from torch.onnx._internal.exporter._torchlib._tensor_typing import BOOL, TFloat, TReal
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
 
@@ -23,6 +24,14 @@ if TYPE_CHECKING:
     from onnxscript.values import Opset
 
 aten = torch.ops.aten
+
+
+@onnx_impl(aten.native_dropout.default, trace_only=True)
+def aten_native_dropout(
+    input: TFloat, p: float, train: bool | None
+) -> tuple[TFloat, BOOL]:
+    """native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)"""
+    return op18.Dropout(input, p, train is None or train)
 
 
 @onnx_impl(aten.gelu.default, trace_only=True, opset_introduced=20)

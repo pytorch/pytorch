@@ -1,4 +1,5 @@
 # Owner(s): ["module: onnx"]
+import onnx
 import onnxruntime
 import pytorch_test_common
 from pytorch_test_common import skipIfNoCuda
@@ -175,6 +176,26 @@ class _TestJITIRToONNX:
         """
         x = torch.randn(5, 2).half().to("cuda")
         self.run_test(graph_ir, (x,))
+
+    def test_native_dropout_none(self):
+        graph_ir = """
+        graph(%x : Float(256)):
+          %p : float = prim::Constant[value=0.5]()
+          %training : NoneType = prim::Constant()
+          %output : Tensor, %mask : Tensor = aten::native_dropout(%x, %p, %training)
+          return (%output, %mask)
+        """
+        graph = torch._C.parse_ir(graph_ir)
+        proto = _jit_graph_to_onnx_model(
+            graph, torch.onnx.OperatorExportTypes.ONNX, self.opset_version
+        )
+        onnx.checker.check_model(proto)
+        session = onnxruntime.InferenceSession(proto, providers=self.ort_providers)
+        x = torch.ones(256)
+        output, mask = session.run(None, {session.get_inputs()[0].name: x.numpy()})
+        self.assertEqual(torch.from_numpy(output), x * torch.from_numpy(mask) * 2)
+        self.assertTrue(mask.any())
+        self.assertFalse(mask.all())
 
     def test_native_dropout(self):
         graph_ir = """
