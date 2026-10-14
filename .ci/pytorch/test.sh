@@ -2428,7 +2428,9 @@ test_torchtitan() {
   pip_install helion
 
   pushd torchtitan
-  pip_install -e .
+  # pyarrow 26 requires NumPy 2 but does not declare it, and the CI image has
+  # NumPy 1.26.4. torchtitan main adds the same pin (pytorch/torchtitan#5372).
+  pip_install -e . 'pyarrow<26'
 
   local installed_versions
   installed_versions=$(get_pkg_versions torch torchao torchcomms)
