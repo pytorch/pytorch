@@ -471,14 +471,32 @@ State at the end of the GB200 session:
 - **Committed:** `0bbcef0`. The full suite passes on it on GB200 (10928 tests, 52 min).
 - **Committed later:** `5a3dd9c` (the `n == 1` fix, `test_n1`,
   `test_nonfinite_imag_diagonal_is_ignored`) and `f0e4a2b` (these TODOs).
-- **Uncommitted:** `at::imag` instead of `.imag()` (10.1.2) and its include.
+- **Committed later still:** `e27fc3b`, `353ffe0` (`at::imag` instead of `.imag()`,
+  10.1.2/10.1.3). The working tree was clean on the H100 box after that.
 - `unittest -k` with a `*` matches the full test id, so a pattern needs a leading
   `*`: `-k "*test_n1_*cuda*"`. Several `-k` flags are OR-ed.
 
 ### 10.1 Bugs, in order
 
-1. **2x2 pivot forms `det(D)` directly. Confirmed, not fixed.**
-   - The panel kernel computes `det = D00·D11 − D01·D10` and divides by it.
+1. **2x2 pivot forms `det(D)` directly. Fixed (H100 session, uncommitted at the
+   time of writing).**
+   - The fix has two parts. The 2x2 inverse now uses LAPACK's scaled form:
+     `det(D) = d01·d10·(r0·r1 − 1)` with `r0 = d00/d01`, `r1 = d11/d10`, and the
+     scales `t/d01`, `t/d10` are applied in the L21 loop. The Bunch-Kaufman pivot
+     test also formed a product: `sigma·diag_abs >= ALPHA·lambda²` is now
+     `diag_abs >= ALPHA·lambda·(lambda/sigma)`, as in LAPACK. That product was
+     the source of the false `info` below: at 1e-165 both sides underflow to 0,
+     and `0 >= 0` picks a 1x1 pivot on the zero diagonal.
+   - A 2x2 block can no longer be singular: the pivot test bounds `|r0·r1|`
+     below `2·ALPHA² ≈ 0.82` (cabs1 vs modulus gives the 2). `info` now comes
+     from 1x1 pivots only, which matches LAPACK (a zero column).
+   - `test_extreme_scale`: zero_diagonal and indefinite, n = 2/64/300, scales
+     1e±{153,160,165,250} (f64) and 1e±{19,21,23,30} (f32). On the old build 110
+     of the 192 CUDA subtests failed. Measured after the fix
+     (n up to 2049, scales up to 1e±300): the residual is scale-independent and
+     within noise of CPU LDL.
+   - The original analysis, before the fix:
+   - The panel kernel computed `det = D00·D11 − D01·D10` and divided by it.
      Past ~sqrt(finfo.max) the product overflows; below ~sqrt(finfo.tiny) it
      underflows.
    - Overflow gives `x / inf = 0`: finite, plausible-looking garbage with
@@ -491,22 +509,16 @@ State at the end of the GB200 session:
      | float64 | scale ≥ 1e153 (resid 8e13-1e15) and 1e-160 to 1e-162 (resid 4e9-2e13) | scale 1e-165 |
      | float32 | scale ≥ 1e19 (resid 2e6) and 1e-21 (resid 10.8) | scale ≤ 1e-23 |
 
-   - Fix: LAPACK's scaled form (`zhetf2`/`zlahef`). With `d21 = A(k+1,k)`:
-     `d11 = A(k+1,k+1)/d21`, `d22 = A(k,k)/conj(d21)`, `t = 1/(d11·d22 − 1)`,
-     `d21 = t/d21`. No raw determinant is formed.
-   - Singularity: then test what LAPACK tests (`max(absakk, colmax) == 0`),
-     not `|det| == 0`.
-   - Test: `zero_diagonal` and `indefinite` at scales up to 1e±160 (f64) and
-     1e±21 (f32). Compare `info` with CPU and check the residual. The existing
-     `huge_scale`/`tiny_scale` (1e±30, 1e±15) are far inside the safe range,
-     which is why nothing caught this.
-   - Remember to refresh the standalone copy of the kernel.
+   - The existing `huge_scale`/`tiny_scale` (1e±30, 1e±15) are far inside the
+     safe range, which is why nothing caught this.
 2. **`n == 1` ignored the Hermitian imaginary part. Fixed (folded into 10.1.3)
    and verified.** Note: `5a3dd9c` alone does not compile; it calls `LD.imag()`,
    and `imag` is a free function only in ATen (`at::imag`).
    - For `[[1j]]` CUDA returned `LD = 1j, info = 0`; CPU LAPACK and MAGMA return
      `LD = 0, info = 1`.
-   - The fix zeroes `LD.ima3. **A non-finite `Im(diag)` poisoned the real part. Fixed and verified (all 96
+   - The fix zeroed the imaginary part of `LD` in the `n == 1` shortcut. It is now
+     covered by the general fix of 10.1.3, which runs before that shortcut.
+3. **A non-finite `Im(diag)` poisoned the real part. Fixed and verified (all 96
    CUDA instances of the two tests below pass).**
    - LAPACK ignores the imaginary part of a Hermitian diagonal. The kernel used to
      drop it only when the column became current (`update_rowcol`).
@@ -525,9 +537,6 @@ State at the end of the GB200 session:
      The CPU instances take ~35 min (ATLAS) and already passed.
    - The realification inside the kernel (`update_rowcol`) stays: the GEMM
      updates themselves leave rounding-level imaginary parts on the diagonal.
-
- stays either way: the
-     GEMM updates themselves leave rounding-level imaginary parts on the diagonal.
 
 ### 10.2 Missing tests: non-finite input
 

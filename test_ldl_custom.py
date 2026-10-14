@@ -1287,6 +1287,23 @@ class TestLDLCustomKernel(TestCase):
         torch.manual_seed(0)
         self.assertLess(*_residual_after_solve(A, *torch.linalg.ldl_factor_ex(A, hermitian=True)[:2]))
 
+    # huge_scale and tiny_scale stay far inside the range where a product of two
+    # entries is finite and normal, i.e. sqrt(finfo.tiny) to sqrt(finfo.max).
+    @parametrize("structure", ["indefinite", "zero_diagonal"])
+    @parametrize("n", [2, 64, 300])
+    @dtypes(*floating_and_complex_types())
+    def test_extreme_scale(self, device, dtype, n, structure):
+        """Neither the pivot test nor the inverse of a 2x2 block may form a product
+        of two entries: past sqrt(finfo.max) it overflows into finite garbage with
+        info == 0, below sqrt(finfo.tiny) it underflows into a false info > 0."""
+        exponents = (19, 21, 23, 30) if _real_dtype(dtype) == torch.float32 else (153, 160, 165, 250)
+        torch.manual_seed(n)
+        A = STRUCTURES[structure](n, (), dtype, device)
+        for e in exponents:
+            for scale in (10.0**e, 10.0**-e):
+                with self.subTest(scale=scale):
+                    self._check(A * scale, hermitian=True)
+
     @parametrize("n", [2, 5, 33, 34, 65, 150, 2049, 4100])
     @dtypes(*floating_and_complex_types())
     def test_zero_last_pivot_from_updates(self, device, dtype, n):

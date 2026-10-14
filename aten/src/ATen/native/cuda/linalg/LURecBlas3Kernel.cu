@@ -1012,8 +1012,6 @@ ldl_diagonal_panel_fused_kernel(
   const auto panel_start = curr_step;
   const auto panel_end = panel_start + nb;
 
-  scalar_t D[2][2];
-
   const auto sync = [] {
     if constexpr (cooperative) {
       cooperative_groups::this_grid().sync();
@@ -1171,8 +1169,9 @@ ldl_diagonal_panel_fused_kernel(
       const auto [sigma_below, _] = reduce_argmax(update_rowcol(ilambda, /*first=*/curr_step + 1, /*skip=*/-1));
       const auto sigma = sigma_below > lambda ? sigma_below : lambda;
       ilambda_updated = true;
-      // Checking whether ilambda diagonal pivot is "stable"
-      if (sigma * diag_abs >= ALPHA * lambda * lambda) {
+      // Checking whether ilambda diagonal pivot is "stable".
+      // As in LAPACK, lambda / sigma <= 1 avoids the overflowing lambda * lambda.
+      if (diag_abs >= ALPHA * lambda * (lambda / sigma)) {
         // No permutation, 1x1 pivot
         piv = curr_step;
       } else if (ldl::abs(dLD[LinOff(ilambda, ilambda, lda)]) >= ALPHA * sigma) {
@@ -1192,9 +1191,8 @@ ldl_diagonal_panel_fused_kernel(
     }
     // }
 
-    // Update piv vector. info is set further below, once D is known: for a 2x2
-    // block a zero diagonal is the normal case (it is why the block was chosen),
-    // so singularity there is det(D) == 0, not a zero entry.
+    // Update piv vector. info is set further below, for a 1x1 pivot only:
+    // a 2x2 block is never singular (see there).
     if (gtid == 0) {
       if (pivot_rank == 1) {
         dipiv[curr_step] = piv + 1;
@@ -1237,8 +1235,8 @@ ldl_diagonal_panel_fused_kernel(
     // Update L21 {
     // L21 = dLD[curr_step + pivot_rank:, curr_step:curr_step + pivot_rank]
     // L21 = L21 @ inv(D)
-    // NOTE: keeping D11 and det as scalar_t as to not cause desyncs
-    // between U12 and D
+    // NOTE: D is kept in scalar_t, not made real as in zhetf2,
+    // so as not to desync it from U12
     bool D_is_singular = false;
     if (pivot_rank == 1) {
       auto D11 = dLD[LinOff(curr_step, curr_step, lda)];
@@ -1250,28 +1248,23 @@ ldl_diagonal_panel_fused_kernel(
         }
       }
     } else {
-      // NOTE: D stores inv(D) * det(D)
-      D[1][1] = dLD[LinOff(curr_step, curr_step, lda)];
-      D[0][1] = -dLD[LinOff(curr_step, curr_step + 1, lda)];
-      D[1][0] = -dLD[LinOff(curr_step + 1, curr_step, lda)];
-      D[0][0] = dLD[LinOff(curr_step + 1, curr_step + 1, lda)];
-
-      // scale by det(D)
-      auto det = D[0][0] * D[1][1] - D[0][1] * D[1][0];
-      if (ldl::abs(det) == static_cast<real_t>(0)) {
-        D_is_singular = true;
-      } else {
-        D[1][1] /= det;
-        D[0][0] /= det;
-        D[0][1] /= det;
-        D[1][0] /= det;
-
-        for (int i = curr_step + pivot_rank + gtid; i < n; i += nthreads) {
-          auto l0 = dLD[LinOff(i, curr_step + 0, lda)];
-          auto l1 = dLD[LinOff(i, curr_step + 1, lda)];
-          dLD[LinOff(i, curr_step + 0, lda)] = l0 * D[0][0] + l1 * D[1][0];
-          dLD[LinOff(i, curr_step + 1, lda)] = l0 * D[0][1] + l1 * D[1][1];
-        }
+      // D = [[d00, d01], [d10, d11]]. Its determinant overflows past sqrt(max) and
+      // underflows below sqrt(min), so, as in LAPACK, it is never formed. Instead,
+      // det(D) = d01 * d10 * (r0 * r1 - 1) with r0 = d00 / d01, r1 = d11 / d10,
+      // and its scale is applied in the loop. The pivot test bounds |r0 * r1|
+      // well below 1, so a 2x2 block is never singular.
+      const auto d01 = dLD[LinOff(curr_step, curr_step + 1, lda)];
+      const auto d10 = dLD[LinOff(curr_step + 1, curr_step, lda)];
+      const auto r0 = dLD[LinOff(curr_step, curr_step, lda)] / d01;
+      const auto r1 = dLD[LinOff(curr_step + 1, curr_step + 1, lda)] / d10;
+      const auto t = static_cast<scalar_t>(1) / (r0 * r1 - static_cast<scalar_t>(1));
+      const auto s0 = t / d01;
+      const auto s1 = t / d10;
+      for (int i = curr_step + pivot_rank + gtid; i < n; i += nthreads) {
+        const auto l0 = dLD[LinOff(i, curr_step + 0, lda)];
+        const auto l1 = dLD[LinOff(i, curr_step + 1, lda)];
+        dLD[LinOff(i, curr_step + 0, lda)] = s0 * (r1 * l0 - l1);
+        dLD[LinOff(i, curr_step + 1, lda)] = s1 * (r0 * l1 - l0);
       }
     }
     // Update info if singular and if detected for the first time.
