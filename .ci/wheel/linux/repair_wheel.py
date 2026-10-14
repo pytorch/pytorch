@@ -15,14 +15,21 @@ Environment variables:
     GPU_ARCH_VERSION   - 12.6, 13.0, 13.2, 6.4.1, etc. (empty for CPU)
     USE_CUDA           - "0" or "1"
     ROCM_HOME          - /opt/rocm (ROCm only)
+    PYTORCH_RUNTIME_DEPENDENCY_POLICY - default (unset) or custom
+    PYTORCH_CUSTOM_WHEEL_PLATFORM_TAG - optional replacement platform tag (custom only)
+    PYTORCH_CUSTOM_WHEEL_DEPENDENCY_HOOK - Python file defining copy_runtime_dependencies (required for custom)
 """
 
 import argparse
+import inspect
 import os
 import platform
+import re
+import runpy
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +38,7 @@ from build_env_setup import PLATFORM_TAGS
 
 
 PATCHELF = "/usr/local/bin/patchelf"
+DependencyCopier = Callable[..., None]
 
 
 def wheel_platform_tags(wheel_name: str) -> list[str]:
@@ -225,6 +233,8 @@ def repair_wheel(
     c_so_rpath: str,
     lib_so_rpath: str,
     force_rpath: bool,
+    runtime_dependency_policy: str,
+    dependency_copier: DependencyCopier,
 ) -> None:
     # InWheelCtx unpacks via auditwheel's zip2dir on enter and, once out_wheel is
     # set, regenerates RECORD and repacks via dir2zip on exit. dir2zip uses the
@@ -236,9 +246,18 @@ def repair_wheel(
             torch_dir = ctx.path / "torch"
             torch_lib = torch_dir / "lib"
 
-            copy_runtime_dependencies(
-                torch_dir, arch, use_cuda, gpu_arch_type, gpu_arch_version
+            result = dependency_copier(
+                torch_dir,
+                arch,
+                use_cuda,
+                gpu_arch_type,
+                gpu_arch_version,
             )
+            if result is not None:
+                raise TypeError(
+                    "copy_runtime_dependencies must return None; "
+                    "raise an exception to report failure"
+                )
 
             # Set RPATH on top-level (_C.so etc.) and lib/ shared objects
             for sofile in torch_dir.glob("*.so*"):
@@ -248,15 +267,35 @@ def repair_wheel(
                 if sofile.is_file():
                     set_rpath(sofile, lib_so_rpath, force_rpath)
 
-            if arch not in PLATFORM_TAGS:
-                sys.exit(f"Unknown arch {arch}")
-            platform_tag = PLATFORM_TAGS[arch]
-            # Retag linux_* -> manylinux_2_28_* in both the filename and the WHEEL
-            # metadata. add_platforms updates ctx.out_wheel to the new name; RECORD
-            # regeneration and repacking happen when the context exits.
-            add_platforms(
-                ctx, [platform_tag], remove_platforms=wheel_platform_tags(wheel.name)
-            )
+            if runtime_dependency_policy == "default":
+                if arch not in PLATFORM_TAGS:
+                    sys.exit(f"Unknown arch {arch}")
+                platform_tag = PLATFORM_TAGS[arch]
+                # Retag linux_* -> manylinux_2_28_* in both the filename and the WHEEL
+                # metadata. add_platforms updates ctx.out_wheel to the new name; RECORD
+                # regeneration and repacking happen when the context exits.
+                add_platforms(
+                    ctx,
+                    [platform_tag],
+                    remove_platforms=wheel_platform_tags(wheel.name),
+                )
+            else:
+                platform_tag = os.environ.get("PYTORCH_CUSTOM_WHEEL_PLATFORM_TAG")
+                # Skip retagging when PYTORCH_CUSTOM_WHEEL_PLATFORM_TAG is unset.
+                if platform_tag is not None:
+                    platform_tag = platform_tag.strip()
+                    if not platform_tag:
+                        raise ValueError(
+                            "PYTORCH_CUSTOM_WHEEL_PLATFORM_TAG must not be empty"
+                        )
+                    if re.fullmatch(r"[A-Za-z0-9_]+", platform_tag) is None:
+                        raise ValueError(
+                            f"Invalid PYTORCH_CUSTOM_WHEEL_PLATFORM_TAG: {platform_tag!r}; "
+                            "expected a platform tag with only ASCII letters, digits, and underscores"
+                        )
+                    old_tags = wheel_platform_tags(wheel.name)
+                    remove_tags = [tag for tag in old_tags if tag != platform_tag]
+                    add_platforms(ctx, [platform_tag], remove_platforms=remove_tags)
             completed = True
         finally:
             if not completed:
@@ -264,9 +303,15 @@ def repair_wheel(
 
 
 def prepare_runtime_paths(
-    use_cuda: bool, gpu_arch_type: str, gpu_arch_version: str
+    use_cuda: bool,
+    gpu_arch_type: str,
+    gpu_arch_version: str,
+    runtime_dependency_policy: str,
 ) -> tuple[str, str, bool]:
     is_rocm = gpu_arch_type == "rocm" or "rocm" in os.environ.get("DESIRED_CUDA", "")
+    if runtime_dependency_policy == "custom":
+        return "$ORIGIN:$ORIGIN/lib", "$ORIGIN", True
+
     if use_cuda:
         rpaths = cuda_rpaths(gpu_arch_version)
         c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
@@ -304,13 +349,48 @@ def main() -> None:
     parser.add_argument("output_dir", type=Path)
     args = parser.parse_args()
 
+    runtime_dependency_policy = os.environ.get(
+        "PYTORCH_RUNTIME_DEPENDENCY_POLICY", "default"
+    )
+    if runtime_dependency_policy not in ("default", "custom"):
+        raise ValueError(
+            f"Invalid PYTORCH_RUNTIME_DEPENDENCY_POLICY: {runtime_dependency_policy!r}; "
+            "expected 'default' or 'custom'"
+        )
+    print(f"PYTORCH_RUNTIME_DEPENDENCY_POLICY={runtime_dependency_policy}")
+
+    if runtime_dependency_policy == "default":
+        dependency_copier = copy_runtime_dependencies
+    else:
+        hook_path = os.environ.get("PYTORCH_CUSTOM_WHEEL_DEPENDENCY_HOOK")
+        if not hook_path:
+            raise ValueError(
+                "PYTORCH_CUSTOM_WHEEL_DEPENDENCY_HOOK is required for custom wheels"
+            )
+        hook = runpy.run_path(str(Path(hook_path).resolve()))
+        dependency_copier = hook.get("copy_runtime_dependencies")
+        if not callable(dependency_copier):
+            raise ValueError(
+                f"{hook_path} must define a callable copy_runtime_dependencies"
+            )
+        expected = inspect.signature(copy_runtime_dependencies)
+        try:
+            inspect.signature(dependency_copier).bind(
+                *[None for _ in expected.parameters]
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"{hook_path}: copy_runtime_dependencies must accept the positional "
+                f"arguments of {expected}: {error}"
+            ) from error
+
     arch = platform.machine()
     use_cuda = os.environ.get("USE_CUDA", "0") == "1"
     gpu_arch_type = os.environ.get("GPU_ARCH_TYPE", "")
     gpu_arch_version = os.environ.get("GPU_ARCH_VERSION", "")
 
     c_so_rpath, lib_so_rpath, force_rpath = prepare_runtime_paths(
-        use_cuda, gpu_arch_type, gpu_arch_version
+        use_cuda, gpu_arch_type, gpu_arch_version, runtime_dependency_policy
     )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -329,6 +409,8 @@ def main() -> None:
             c_so_rpath,
             lib_so_rpath,
             force_rpath,
+            runtime_dependency_policy,
+            dependency_copier,
         )
 
     repaired = list(args.output_dir.glob("*.whl"))
