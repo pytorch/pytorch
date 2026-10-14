@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <type_traits>
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
@@ -1328,6 +1329,203 @@ inline bool is_pinned(const torch::stable::Tensor& self) {
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::is_pinned", "", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<bool>(stack[0]);
+}
+
+/// Stable version of the sort op.
+///
+/// Sorts the input tensor along dim, returning the values and their indices.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param self The input tensor.
+/// @param dim The dimension to sort along.
+/// @param descending Whether to sort in descending order.
+/// @return A tuple of the sorted values and their indices.
+inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> sort(
+    const torch::stable::Tensor& self,
+    int64_t dim = -1,
+    bool descending = false) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(descending)};
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_call_dispatcher("aten::sort", "", stack.data(), TORCH_ABI_VERSION));
+  return std::make_tuple(
+      torch::stable::detail::to<torch::stable::Tensor>(stack[0]),
+      torch::stable::detail::to<torch::stable::Tensor>(stack[1]));
+}
+
+/// Stable version of the sort.stable op.
+///
+/// Sorts the input tensor along dim, returning the values and their indices.
+/// This is a different overload than the sort op without the stable argument.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param self The input tensor.
+/// @param stable Whether equal elements keep their original order.
+/// @param dim The dimension to sort along.
+/// @param descending Whether to sort in descending order.
+/// @return A tuple of the sorted values and their indices.
+inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> sort(
+    const torch::stable::Tensor& self,
+    std::optional<bool> stable,
+    int64_t dim = -1,
+    bool descending = false) {
+  const auto num_args = 4;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(stable),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(descending)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::sort", "stable", stack.data(), TORCH_ABI_VERSION));
+  return std::make_tuple(
+      torch::stable::detail::to<torch::stable::Tensor>(stack[0]),
+      torch::stable::detail::to<torch::stable::Tensor>(stack[1]));
+}
+
+/// Stable version of the masked_select op.
+///
+/// Returns a 1-D tensor of the elements of self where mask is true.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param self The input tensor.
+/// @param mask A boolean tensor broadcastable with self.
+/// @return A 1-D tensor of the selected elements.
+inline torch::stable::Tensor masked_select(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mask) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(mask)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::masked_select", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the mm.out op.
+///
+/// Computes the matrix product of the 2-D tensors self and mat2, storing the
+/// result in out.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 2-D input tensor.
+/// @param mat2 The second 2-D input tensor.
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& mm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::mm", "out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+/// Stable version of the mm.dtype_out op.
+///
+/// Computes the matrix product of self and mat2 in out_dtype. This is a
+/// different overload than mm_out without the out_dtype argument.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 2-D input tensor.
+/// @param mat2 The second 2-D input tensor.
+/// @param out_dtype The dtype of the result.
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& mm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2,
+    torch::headeronly::ScalarType out_dtype) {
+  const auto num_args = 4;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out_dtype),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::mm", "dtype_out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+/// Stable version of the bmm.out op.
+///
+/// Computes the batch matrix product of the 3-D tensors self and mat2,
+/// storing the result in out.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 3-D input tensor of shape (b, n, m).
+/// @param mat2 The second 3-D input tensor of shape (b, m, p).
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& bmm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bmm", "out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+/// Stable version of the bmm.dtype_out op.
+///
+/// Computes the batch matrix product of self and mat2 in out_dtype. This is a
+/// different overload than bmm_out without the out_dtype argument.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 3-D input tensor of shape (b, n, m).
+/// @param mat2 The second 3-D input tensor of shape (b, m, p).
+/// @param out_dtype The dtype of the result.
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& bmm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2,
+    torch::headeronly::ScalarType out_dtype) {
+  const auto num_args = 4;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out_dtype),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bmm", "dtype_out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
 }
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0

@@ -27,6 +27,7 @@ LOCAL_REDUCE_FRAGMENT_WIDTH = GEMM_REDUCTION_FRAGMENT_WIDTH
 # Built-in local-reduce callback names; any other string is a generated callable.
 LOCAL_REDUCE_COMBINE_NAMES: Final = frozenset(OrderedSet(["add", "mul", "max", "min"]))
 LOCAL_REDUCE_FINALIZE_NAMES: Final = frozenset(OrderedSet(["mean"]))
+NESTED_TENSORSSA_PHYSICAL_SPAN = 2
 LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only same-warp axis-0 "
     f"groups <= {LOCAL_REDUCE_FRAGMENT_WIDTH}"
@@ -92,8 +93,8 @@ LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR = (
 FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR = "FlexGEMM output plans require tensor output nodes"
 FLEX_GEMM_OUTPUT_TENSOR_ERROR = "FlexGEMM expects tensor outputs"
 FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
-    "FlexGEMM grouped main outputs do not yet compose with auxiliary outputs or "
-    "reductions"
+    "FlexGEMM grouped main outputs compose only with the unchanged physical "
+    "GEMM output as an auxiliary"
 )
 FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: contracted output shape must equal the "
@@ -102,6 +103,19 @@ FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
 FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: main output shape must equal the physical "
     "GEMM output shape"
+)
+FLEX_GEMM_CAPTURE_SHAPE_ERROR = (
+    "FlexGEMM captured tensor epilogue args must match the GEMM output shape "
+    "[M, N] or broadcast as [1, N] / [M, 1] / [1, 1]; 1-D captures are read as "
+    "[1, N] when used directly or as w[None, :], and as [M, 1] as w[:, None]"
+)
+FLEX_GEMM_LANE_DOMAIN_MIXED_ERROR = (
+    "FlexGEMM lane-domain expressions must combine values selected from the same "
+    "physical lanes; mixing them with other GEMM-derived values is not supported"
+)
+FLEX_GEMM_LANE_DOMAIN_REDUCTION_SPAN_ERROR = (
+    "FlexGEMM grouped reductions over selected lanes support physical span "
+    f"{NESTED_TENSORSSA_PHYSICAL_SPAN} only"
 )
 LOCAL_REDUCE_MATCH_NODE_ERROR = "local-reduce matches require tensor nodes"
 LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR = "local-reduce output plans require tensor nodes"

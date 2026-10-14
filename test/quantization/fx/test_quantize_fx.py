@@ -154,8 +154,9 @@ from torch.ao.quantization.observer import (
 )
 
 # test utils
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantization import (
     LinearReluLinearModel,
     LinearReluModel,
@@ -268,6 +269,8 @@ def _user_func_with_complex_return_type(x):
     return list(torch.split(x, 1, 1))
 
 class TestFuseFx(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_fuse_conv_bn_relu(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -6835,6 +6838,8 @@ class TestQuantizeFx(QuantizationTestCase):
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.custom_qconfig = torch.ao.quantization.QConfig(
@@ -9818,11 +9823,17 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 self.checkNoQconfig(model)
             checkQuantized(quant_model)
 
-
-class TestQuantizeFxQATAccelerator(QuantizationTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
+    @given(
+        device=st.sampled_from(
+            ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+        )
+    )
+    @settings(deadline=None)
+    @override_qengines
     def test_qat_functional_linear(self, device):
+        if torch.backends.quantized.engine not in ('fbgemm', 'qnnpack'):
+            return
+
         class Linear(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -9843,96 +9854,90 @@ class TestQuantizeFxQATAccelerator(QuantizationTestCase):
                 x = self.mods2(x)
                 return x
 
-        for qengine in supported_qengines:
-            if qengine not in ('fbgemm', 'qnnpack'):
-                continue
-            with override_quantized_engine(qengine):
-                model = M().train()
-                ref_fake_quant = FakeQuantize.with_args(
-                    observer=MovingAverageMinMaxObserver,
-                    quant_min=0,
-                    quant_max=255,
-                    dtype=torch.quint8,
-                    reduce_range=False,
-                )
-                ref_weight_fake_quant = FakeQuantize.with_args(
-                    observer=MovingAverageMinMaxObserver,
-                    quant_min=-128,
-                    quant_max=127,
-                    dtype=torch.qint8,
-                    reduce_range=False,
-                )
-                ref_qat_qconfig = QConfig(
-                    activation=ref_fake_quant, weight=ref_weight_fake_quant
-                )
-                qconfig_dict = {"": ref_qat_qconfig}
-                example_inputs = (torch.randn(1, 5),)
-                prepared_ref = prepare_qat_fx(model, qconfig_dict, example_inputs=example_inputs)
+        model = M().train()
+        ref_fake_quant = FakeQuantize.with_args(
+            observer=MovingAverageMinMaxObserver,
+            quant_min=0,
+            quant_max=255,
+            dtype=torch.quint8,
+            reduce_range=False,
+        )
+        ref_weight_fake_quant = FakeQuantize.with_args(
+            observer=MovingAverageMinMaxObserver,
+            quant_min=-128,
+            quant_max=127,
+            dtype=torch.qint8,
+            reduce_range=False,
+        )
+        ref_qat_qconfig = QConfig(
+            activation=ref_fake_quant, weight=ref_weight_fake_quant
+        )
+        qconfig_dict = {"": ref_qat_qconfig}
+        example_inputs = (torch.randn(1, 5),)
+        prepared_ref = prepare_qat_fx(model, qconfig_dict, example_inputs=example_inputs)
 
-                custom_fake_quant = FusedMovingAvgObsFakeQuantize.with_args(
-                    observer=MovingAverageMinMaxObserver,
-                    quant_min=0,
-                    quant_max=255,
-                    dtype=torch.quint8,
-                    reduce_range=False,
-                )
-                custom_weight_fake_quant = FusedMovingAvgObsFakeQuantize.with_args(
-                    observer=MovingAverageMinMaxObserver,
-                    quant_min=-128,
-                    quant_max=127,
-                    dtype=torch.qint8,
-                    reduce_range=False,
-                )
-                custom_qconfig = QConfig(
-                    activation=custom_fake_quant, weight=custom_weight_fake_quant
-                )
-                custom_qconfig_dict = {"": custom_qconfig}
-                prepared = prepare_qat_fx(model, custom_qconfig_dict, example_inputs=example_inputs)
+        custom_fake_quant = FusedMovingAvgObsFakeQuantize.with_args(
+            observer=MovingAverageMinMaxObserver,
+            quant_min=0,
+            quant_max=255,
+            dtype=torch.quint8,
+            reduce_range=False,
+        )
+        custom_weight_fake_quant = FusedMovingAvgObsFakeQuantize.with_args(
+            observer=MovingAverageMinMaxObserver,
+            quant_min=-128,
+            quant_max=127,
+            dtype=torch.qint8,
+            reduce_range=False,
+        )
+        custom_qconfig = QConfig(
+            activation=custom_fake_quant, weight=custom_weight_fake_quant
+        )
+        custom_qconfig_dict = {"": custom_qconfig}
+        prepared = prepare_qat_fx(model, custom_qconfig_dict, example_inputs=example_inputs)
 
-                prepared.to(device)
-                prepared_ref.to(device)
+        prepared.to(device)
+        prepared_ref.to(device)
 
-                prepared.apply(torch.ao.quantization.disable_fake_quant)
-                prepared.apply(torch.ao.quantization.disable_observer)
-                prepared_ref.apply(torch.ao.quantization.disable_fake_quant)
-                prepared_ref.apply(torch.ao.quantization.disable_observer)
+        prepared.apply(torch.ao.quantization.disable_fake_quant)
+        prepared.apply(torch.ao.quantization.disable_observer)
+        prepared_ref.apply(torch.ao.quantization.disable_fake_quant)
+        prepared_ref.apply(torch.ao.quantization.disable_observer)
 
-                inp = torch.randn(5, 5, device=device, requires_grad=True)
-                for i in range(10):
-                    if i == 2:
-                        prepared.apply(torch.ao.quantization.enable_observer)
-                        prepared_ref.apply(torch.ao.quantization.enable_observer)
-                    if i == 4:
-                        prepared.apply(torch.ao.quantization.enable_fake_quant)
-                        prepared_ref.apply(torch.ao.quantization.enable_fake_quant)
+        inp = torch.randn(5, 5, device=device, requires_grad=True)
+        for i in range(10):
+            if i == 2:
+                prepared.apply(torch.ao.quantization.enable_observer)
+                prepared_ref.apply(torch.ao.quantization.enable_observer)
+            if i == 4:
+                prepared.apply(torch.ao.quantization.enable_fake_quant)
+                prepared_ref.apply(torch.ao.quantization.enable_fake_quant)
 
-                    inp = torch.randn(5, 5, device=device, requires_grad=True)
-                    out_ref = prepared_ref(inp)
-                    out = prepared(inp)
-                    torch.testing.assert_close(out, out_ref)
+            inp = torch.randn(5, 5, device=device, requires_grad=True)
+            out_ref = prepared_ref(inp)
+            out = prepared(inp)
+            torch.testing.assert_close(out, out_ref)
 
-                    labels = torch.randn(5, 5, device=device)
-                    loss = (out - labels).sum()
-                    grad = torch.autograd.grad(loss, [inp])
-                    loss_ref = (out_ref - labels).sum()
-                    grad_ref = torch.autograd.grad(loss_ref, [inp])
-                    torch.testing.assert_close(grad[0], grad_ref[0])
+            # try backward pass
+            labels = torch.randn(5, 5, device=device)
+            loss = (out - labels).sum()
+            grad = torch.autograd.grad(loss, [inp])
+            loss_ref = (out_ref - labels).sum()
+            grad_ref = torch.autograd.grad(loss_ref, [inp])
+            torch.testing.assert_close(grad[0], grad_ref[0])
 
-                if 'fbgemm' in torch.backends.quantized.supported_engines:
-                    # Convert on CPU because the quantized prepack kernel requires it.
-                    prepared.cpu()
-                    prepared_ref.cpu()
-                    converted = convert_fx(prepared)
-                    converted_ref = convert_fx(prepared_ref)
-                    inp = torch.rand(5, 5)
-                    out = converted(inp)
-                    out_ref = converted_ref(inp)
+        if 'fbgemm' in torch.backends.quantized.supported_engines:
+            # During the lowering step in convert, fold_weight calls quantized::linear_prepack
+            # which doesn't support QuantizedCuda backend
+            prepared.cpu()
+            prepared_ref.cpu()
+            converted = convert_fx(prepared)
+            converted_ref = convert_fx(prepared_ref)
+            inp = torch.rand(5, 5)
+            out = converted(inp)
+            out_ref = converted_ref(inp)
 
-                    torch.testing.assert_close(out, out_ref)
-
-
-instantiate_device_type_tests(TestQuantizeFxQATAccelerator, globals())
-
+            torch.testing.assert_close(out, out_ref)
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"

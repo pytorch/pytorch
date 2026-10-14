@@ -1678,20 +1678,9 @@ class DeviceCachingAllocator {
              alloc_block(params, true, context))));
     }
     if (!block_found) {
-      const auto& raw_device = c10::xpu::get_raw_device(device);
-      const auto device_total =
-          raw_device.get_info<sycl::info::device::global_mem_size>();
-      // Estimate the available device memory when the SYCL runtime does not
-      // support the corresponding aspect (ext_intel_free_memory).
-      size_t device_free = device_total -
-          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
-              .current;
-      // TODO: Remove the aspect check once the SYCL runtime bug is fixed on
-      // affected devices.
-      if (raw_device.has(sycl::aspect::ext_intel_free_memory)) {
-        device_free =
-            raw_device.get_info<sycl::ext::intel::info::device::free_memory>();
-      }
+      const auto [device_free, device_total] =
+          allocator.load()->getMemoryInfo(device_index);
+
       std::string allowed_info;
       if (set_fraction) {
         allowed_info = format_size(allowed_memory_maximum) + " allowed; ";
@@ -2121,21 +2110,6 @@ class DeviceCachingAllocator {
   void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     trace_trackers_.emplace_back(std::move(tracker));
-  }
-
-  std::pair<size_t, size_t> getMemoryInfo() {
-    const auto& device = c10::xpu::get_raw_device(device_index);
-    const size_t total = device.get_info<sycl::info::device::global_mem_size>();
-    TORCH_CHECK(
-        device.has(sycl::aspect::ext_intel_free_memory),
-        "The device (",
-        device.get_info<sycl::info::device::name>(),
-        ") doesn't support querying the available free memory. ",
-        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
-        "to help us prioritize its implementation.");
-    const size_t free =
-        device.get_info<sycl::ext::intel::info::device::free_memory>();
-    return {free, total};
   }
 
   double getMemoryFraction() {
@@ -2606,11 +2580,6 @@ class NativeCachingAllocator : public XPUAllocator {
     assertValidDevice(dev_to_access);
     c10::xpu::get_raw_device(dev).ext_oneapi_enable_peer_access(
         c10::xpu::get_raw_device(dev_to_access));
-  }
-
-  std::pair<size_t, size_t> getMemoryInfo(DeviceIndex device) override {
-    assertValidDevice(device);
-    return device_allocators[device]->getMemoryInfo();
   }
 
   double getMemoryFraction(DeviceIndex device) {
