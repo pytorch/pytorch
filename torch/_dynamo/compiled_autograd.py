@@ -1092,10 +1092,11 @@ class AutogradCompilerInstance:
                     # all users are prims/aten, can move safely
                     to_move[i] = node
 
-        # only move cpu scalars when the graph has exactly one non-cpu/meta device
-        # and it is cuda or renamed PrivateUse1; mixed-accelerator graphs skip.
-        # If any CPU non-scalar input remains, moving scalars to the accelerator
-        # can break ops like aten.mul(cpu_vector, npu_scalar).
+        # Move CPU scalars only for one concrete device, including index, and only
+        # when that device is cuda or renamed PrivateUse1. Mixed cuda indices and
+        # mixed accelerator types skip; this is narrower than "any cuda input".
+        # CPU non-scalar inputs also skip the move: aten.mul(cpu_vector, cuda_scalar)
+        # is not a pure-accelerator cudagraph.
         if has_cpu_non_scalar:
             return [], None
         if len(non_cpu_meta_devices) == 1:

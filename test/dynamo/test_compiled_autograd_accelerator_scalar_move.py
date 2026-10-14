@@ -5,13 +5,20 @@ import unittest
 from unittest import mock
 
 import torch
+from torch._dynamo import compiled_autograd
 from torch._dynamo.compiled_autograd import (
     _graph_placeholders,
+    _is_compiled_autograd_accelerator_device,
     _move_cpu_scalar_to_device,
     AutogradCompilerInstance,
     Op,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 OOT_DEVICE = "fakeoot"
@@ -62,6 +69,8 @@ def _run_move_graph_nodes_to_cuda(
 
 
 class TestCompiledAutogradAcceleratorScalarMove(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @mock.patch.object(
         torch._C, "_get_privateuse1_backend_name", return_value=OOT_DEVICE
     )
@@ -190,6 +199,72 @@ class TestCompiledAutogradAcceleratorScalarMove(TestCase):
         self.assertEqual(indices, [])
         self.assertEqual(target, _DeviceStub(OOT_DEVICE, 0))
 
+    def test_single_cuda_device_moves_scalar(self) -> None:
+        graph = _build_compiled_autograd_inputs_graph(
+            [
+                _MetaVal(torch.device("cuda", 0), (2,)),
+                _MetaVal(torch.device("cpu")),
+            ]
+        )
+        inputs = next(n for n in graph.nodes if n.target == "inputs")
+        getitems = list(inputs.users.keys())
+        graph.create_node(
+            "call_function",
+            torch.ops.aten.mul.Tensor,
+            (getitems[1], getitems[0]),
+            {},
+        )
+
+        inst = object.__new__(AutogradCompilerInstance)
+        with mock.patch(
+            "torch._dynamo.compiled_autograd._move_cpu_scalar_to_device",
+            side_effect=lambda val, device, **kwargs: _MetaVal(device),
+        ) as move_mock:
+            indices, target = inst.move_graph_nodes_to_cuda(graph)
+
+        self.assertEqual(indices, [1])
+        self.assertEqual(target, torch.device("cuda", 0))
+        move_mock.assert_called_once()
+
+    def test_mixed_cuda_indices_skip(self) -> None:
+        indices, target, _ = _run_move_graph_nodes_to_cuda(
+            [
+                _MetaVal(torch.device("cuda", 0), (2,)),
+                _MetaVal(torch.device("cuda", 1), (2,)),
+                _MetaVal(torch.device("cpu")),
+            ]
+        )
+        self.assertEqual(indices, [])
+        self.assertIsNone(target)
+
+    def test_cuda_cpu_vector_and_scalar_skip(self) -> None:
+        graph = _build_compiled_autograd_inputs_graph(
+            [
+                _MetaVal(torch.device("cuda", 0), (2,)),
+                _MetaVal(torch.device("cpu"), (2,)),
+                _MetaVal(torch.device("cpu")),
+            ]
+        )
+        inputs = next(n for n in graph.nodes if n.target == "inputs")
+        getitems = list(inputs.users.keys())
+        graph.create_node(
+            "call_function",
+            torch.ops.aten.mul.Tensor,
+            (getitems[1], getitems[2]),
+            {},
+        )
+
+        inst = object.__new__(AutogradCompilerInstance)
+        with mock.patch(
+            "torch._dynamo.compiled_autograd._move_cpu_scalar_to_device",
+            side_effect=lambda val, device, **kwargs: _MetaVal(device),
+        ) as move_mock:
+            indices, target = inst.move_graph_nodes_to_cuda(graph)
+
+        self.assertEqual(indices, [])
+        self.assertIsNone(target)
+        move_mock.assert_not_called()
+
     @requires_cuda
     def test_move_cpu_scalar_to_device_preserves_cuda_index(self) -> None:
         if torch.cuda.device_count() < 2:
@@ -200,6 +275,71 @@ class TestCompiledAutogradAcceleratorScalarMove(TestCase):
         self.assertEqual(moved.device, target)
         runtime_moved = _move_cpu_scalar_to_device(scalar, target, for_runtime=True)
         self.assertEqual(runtime_moved.device, target)
+
+
+class TestCompiledAutogradScalarMoveRuntime(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_div_backward_scalar_reaches_runtime(self, device) -> None:
+        # x / 2.5 traces DivBackward0.other_ as a CPU 0-dim input. The compiler
+        # does not capture a cudagraph; it only records the tensors that
+        # runtime_wrapper handed it, so a missed or mis-indexed move fails here.
+        divisor = 2.5
+        torch.manual_seed(0)
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        eager = x.detach().clone().requires_grad_()
+        (eager / divisor).sum().backward()
+
+        seen: list[list[tuple[torch.Size, torch.device, float | None]]] = []
+
+        def compiler_fn(gm):
+            def compiled(inputs, sizes, scalars, hooks, packed):
+                seen.append(
+                    [
+                        (t.shape, t.device, t.item() if t.ndim == 0 else None)
+                        for t in inputs
+                        if isinstance(t, torch.Tensor)
+                    ]
+                )
+                return gm(inputs, sizes, scalars, hooks, packed)
+
+            return compiled
+
+        compiled_autograd.reset()
+        with torch._inductor.config.patch({"triton.cudagraphs": True}):
+            with compiled_autograd._enable(compiler_fn):
+                (x / divisor).sum().backward()
+                first = x.grad.detach().clone()
+                x.grad = None
+                (x / divisor).sum().backward()
+
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(first, eager.grad)
+        self.assertEqual(x.grad, eager.grad)
+
+        dev = torch.device(device)
+        expects_move = _is_compiled_autograd_accelerator_device(
+            dev, torch._C._get_privateuse1_backend_name()
+        )
+        for call in seen:
+            divisors = [
+                item
+                for item in call
+                if item[0] == torch.Size([]) and item[2] == divisor
+            ]
+            vectors = [item for item in call if item[0] == torch.Size([4, 4])]
+            self.assertEqual(len(divisors), 1)
+            self.assertEqual(len(vectors), 1)
+            self.assertEqual(vectors[0][1].type, dev.type)
+            if expects_move:
+                self.assertEqual(divisors[0][1].type, dev.type)
+            else:
+                self.assertEqual(divisors[0][1].type, "cpu")
+
+
+instantiate_device_type_tests(
+    TestCompiledAutogradScalarMoveRuntime, globals(), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
