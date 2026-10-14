@@ -61,7 +61,7 @@ on:
         description: true when the GHCR mirror of the CI image exists.
         value: ${{ jobs.resolve-image.outputs.mirrored }}
       dind-test-matrix:
-        description: test-matrix with linux.rocm.gpu.mi350.dpx.dind.N runners.
+        description: test-matrix with linux.rocm.gpu.mi350.dpx.dind.N or linux.rocm.gpu.mi350.dind.N runners.
         value: ${{ jobs.resolve-image.outputs.dind-test-matrix }}
 
 env:
@@ -99,14 +99,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          # mi350.dpx.N and mi350.N both become linux.rocm.gpu.mi350.dpx.dind.N.
+          # Drop a leading amd-sandbox- before picking N. dpx.N stays on the
+          # DPX DinD pool; plain mi350.N stays on the non-DPX DinD pool.
           dind_matrix="$(jq -c '
             .include |= map(
-              if (.runner | test("linux\\.rocm\\.gpu\\.mi350\\.(dpx\\.)?[0-9]+$")) then
-                .runner = "linux.rocm.gpu.mi350.dpx.dind." + (.runner | capture("(?<n>[0-9]+)$").n)
-              else
-                .
-              end
+              (.runner | sub("^amd-sandbox-"; "")) as $base
+              | if ($base | test("^linux\\.rocm\\.gpu\\.mi350\\.dpx\\.[0-9]+$")) then
+                  .runner = "linux.rocm.gpu.mi350.dpx.dind." + ($base | capture("(?<n>[0-9]+)$").n)
+                elif ($base | test("^linux\\.rocm\\.gpu\\.mi350\\.[0-9]+$")) then
+                  .runner = "linux.rocm.gpu.mi350.dind." + ($base | capture("(?<n>[0-9]+)$").n)
+                else
+                  .
+                end
             )
           ' <<<"${TEST_MATRIX}")"
           echo "dind-test-matrix=${dind_matrix}" >> "${GITHUB_OUTPUT}"
@@ -132,7 +136,7 @@ jobs:
           done
 
           echo "mirrored=false" >> "${GITHUB_OUTPUT}"
-          echo "::notice::${image} is absent from the GHCR mirror. The caller runs the same shards on the DinD workflow with linux.rocm.gpu.mi350.dpx.dind.N."
+          echo "::notice::${image} is absent from the GHCR mirror. The caller runs the same shards on the DinD workflow: linux.rocm.gpu.mi350.dpx.N uses linux.rocm.gpu.mi350.dpx.dind.N, and linux.rocm.gpu.mi350.N uses linux.rocm.gpu.mi350.dind.N."
           exit 0
 
   test:
