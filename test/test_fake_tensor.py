@@ -1374,209 +1374,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             y = x + x
             self.assertTrue(mode.in_kernel_invocation)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @parametrize(
-        "allow_fallback_kernels",
-        [False, True],
-        lambda a: "with_fallback" if a else "without_fallback",
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cudnn_rnn(self, allow_fallback_kernels):
-        def fn(
-            a0,
-            b0,
-            b1,
-            b2,
-            b3,
-            b4,
-            b5,
-            b6,
-            b7,
-            b8,
-            b9,
-            b10,
-            b11,
-            b12,
-            b13,
-            b14,
-            b15,
-            a3,
-            a4,
-            a5,
-        ):
-            a1 = [
-                b0,
-                b1,
-                b2,
-                b3,
-                b4,
-                b5,
-                b6,
-                b7,
-                b8,
-                b9,
-                b10,
-                b11,
-                b12,
-                b13,
-                b14,
-                b15,
-            ]
-
-            if torch.version.cuda:
-                return torch.ops.aten._cudnn_rnn(
-                    a0,
-                    a1,
-                    4,
-                    a3,
-                    a4,
-                    a5,
-                    2,
-                    2048,
-                    0,
-                    2,
-                    False,
-                    0.0,
-                    False,
-                    True,
-                    [],
-                    None,
-                )
-            else:
-                return torch.ops.aten.miopen_rnn(
-                    a0,
-                    a1,
-                    4,
-                    # weight_buf is cudnn only
-                    a4,
-                    a5,
-                    2,
-                    2048,
-                    # proj_size is cudnn only
-                    2,
-                    False,
-                    0.0,
-                    False,
-                    True,
-                    [],
-                    None,
-                )
-
-        mode = FakeTensorMode(allow_fallback_kernels=allow_fallback_kernels)
-        for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
-            with context():
-                inps1 = [
-                    torch.randn([92, 8, 2048]).cuda(),
-                    torch.randn([8192, 2048]).cuda(),
-                    torch.randn([8192, 2048]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192, 2048]).cuda(),
-                    torch.randn([8192, 2048]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192, 4096]).cuda(),
-                    torch.randn([8192, 2048]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192, 4096]).cuda(),
-                    torch.randn([8192, 2048]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([167837696]).cuda(),
-                    torch.randn([4, 8, 2048]).cuda(),
-                    torch.randn([4, 8, 2048]).cuda(),
-                ]
-                inps2 = inps1
-                inps2[len(inps2) - 1] = None  # argument `cx` can be None
-
-                for inps in [inps1, inps2]:
-                    out = fn(*inps)
-                    # weight_buf is cudnn only <- this is a3 and inps[-3]
-                    # in cudnn_rnn, it passthroughs the inps[-3] to out[4],
-                    #   so the test expects self.assertIs(out[4], inps[-3])
-                    # in miopen_rnn, it does not need the input argument weight_buf,
-                    #   the miopen_rnn generate a new weight_buf instead,
-                    #   and it returns via out[4]
-                    if torch.version.hip:
-                        self.assertIsNotNone(out[4])
-                    else:
-                        self.assertIs(out[4], inps[-3])
-                    for ten in out:
-                        if i == 1:
-                            self.assertTrue(is_fake_tensor(ten))
-                        self.assertEqual(ten.device.type, "cuda")
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cuda_lstm(self):
-        # Ensure CUDA (non-cuDNN) impl succeeds with fake tensors.
-        with torch.backends.cudnn.flags(enabled=False):
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
-            with fake_tensor_mode:
-                N = 5
-                L = 4
-                H_in = 2
-                hidden_size = 3
-                proj_size = 2
-                num_layers = 2
-                bidir = False
-                D = 2 if bidir else 1
-                H_out = proj_size if proj_size > 0 else hidden_size
-
-                lstm = torch.nn.LSTM(
-                    input_size=H_in,
-                    hidden_size=hidden_size,
-                    num_layers=num_layers,
-                    proj_size=proj_size,
-                    batch_first=False,
-                    bias=True,
-                    bidirectional=bidir,
-                    device="cuda",
-                )
-
-                h_0 = torch.randn((num_layers * D, N, H_out), device="cuda")
-                c_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
-                inp = torch.randn((L, N, H_in), device="cuda")
-                (output, (h_n, c_n)) = lstm(inp, (h_0, c_0))
-                output.sum().backward()
-
-                self.assertEqual(output.shape, (L, N, D * H_out))
-                self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
-                self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cuda_gru(self):
-        with torch.backends.cudnn.flags(enabled=False):
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
-            with fake_tensor_mode:
-                N = 5
-                L = 4
-                H_in = 2
-                hidden_size = 3
-                num_layers = 2
-                bidir = False
-                D = 2 if bidir else 1
-
-                gru = torch.nn.GRU(
-                    input_size=H_in,
-                    hidden_size=hidden_size,
-                    num_layers=num_layers,
-                    batch_first=False,
-                    bias=True,
-                    bidirectional=bidir,
-                    device="cuda",
-                )
-
-                h_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
-                inp = torch.randn((L, N, H_in), device="cuda")
-                output, h_n = gru(inp, h_0)
-                output.sum().backward()
-
-                self.assertEqual(output.shape, (L, N, D * hidden_size))
-                self.assertEqual(h_n.shape, (D * num_layers, N, hidden_size))
-
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):
             x = torch.rand([10, 10])
@@ -2802,6 +2599,219 @@ instantiate_device_type_tests(
 )
 
 
+class TestFakeTensorCUDA(TestCase):
+    """TestFakeTensor cases that need real CUDA hardware."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @parametrize(
+        "allow_fallback_kernels",
+        [False, True],
+        lambda a: "with_fallback" if a else "without_fallback",
+    )
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cudnn_rnn(self, allow_fallback_kernels):
+        def fn(
+            a0,
+            b0,
+            b1,
+            b2,
+            b3,
+            b4,
+            b5,
+            b6,
+            b7,
+            b8,
+            b9,
+            b10,
+            b11,
+            b12,
+            b13,
+            b14,
+            b15,
+            a3,
+            a4,
+            a5,
+        ):
+            a1 = [
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7,
+                b8,
+                b9,
+                b10,
+                b11,
+                b12,
+                b13,
+                b14,
+                b15,
+            ]
+
+            if torch.version.cuda:
+                return torch.ops.aten._cudnn_rnn(
+                    a0,
+                    a1,
+                    4,
+                    a3,
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    0,
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
+            else:
+                return torch.ops.aten.miopen_rnn(
+                    a0,
+                    a1,
+                    4,
+                    # weight_buf is cudnn only
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    # proj_size is cudnn only
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
+
+        mode = FakeTensorMode(allow_fallback_kernels=allow_fallback_kernels)
+        for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
+            with context():
+                inps1 = [
+                    torch.randn([92, 8, 2048]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192, 4096]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192, 4096]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([167837696]).cuda(),
+                    torch.randn([4, 8, 2048]).cuda(),
+                    torch.randn([4, 8, 2048]).cuda(),
+                ]
+                inps2 = inps1
+                inps2[len(inps2) - 1] = None  # argument `cx` can be None
+
+                for inps in [inps1, inps2]:
+                    out = fn(*inps)
+                    # weight_buf is cudnn only <- this is a3 and inps[-3]
+                    # in cudnn_rnn, it passthroughs the inps[-3] to out[4],
+                    #   so the test expects self.assertIs(out[4], inps[-3])
+                    # in miopen_rnn, it does not need the input argument weight_buf,
+                    #   the miopen_rnn generate a new weight_buf instead,
+                    #   and it returns via out[4]
+                    if torch.version.hip:
+                        self.assertIsNotNone(out[4])
+                    else:
+                        self.assertIs(out[4], inps[-3])
+                    for ten in out:
+                        if i == 1:
+                            self.assertTrue(is_fake_tensor(ten))
+                        self.assertEqual(ten.device.type, "cuda")
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_lstm(self):
+        # Ensure CUDA (non-cuDNN) impl succeeds with fake tensors.
+        with torch.backends.cudnn.flags(enabled=False):
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            with fake_tensor_mode:
+                N = 5
+                L = 4
+                H_in = 2
+                hidden_size = 3
+                proj_size = 2
+                num_layers = 2
+                bidir = False
+                D = 2 if bidir else 1
+                H_out = proj_size if proj_size > 0 else hidden_size
+
+                lstm = torch.nn.LSTM(
+                    input_size=H_in,
+                    hidden_size=hidden_size,
+                    num_layers=num_layers,
+                    proj_size=proj_size,
+                    batch_first=False,
+                    bias=True,
+                    bidirectional=bidir,
+                    device="cuda",
+                )
+
+                h_0 = torch.randn((num_layers * D, N, H_out), device="cuda")
+                c_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
+                inp = torch.randn((L, N, H_in), device="cuda")
+                (output, (h_n, c_n)) = lstm(inp, (h_0, c_0))
+                output.sum().backward()
+
+                self.assertEqual(output.shape, (L, N, D * H_out))
+                self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
+                self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_gru(self):
+        with torch.backends.cudnn.flags(enabled=False):
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            with fake_tensor_mode:
+                N = 5
+                L = 4
+                H_in = 2
+                hidden_size = 3
+                num_layers = 2
+                bidir = False
+                D = 2 if bidir else 1
+
+                gru = torch.nn.GRU(
+                    input_size=H_in,
+                    hidden_size=hidden_size,
+                    num_layers=num_layers,
+                    batch_first=False,
+                    bias=True,
+                    bidirectional=bidir,
+                    device="cuda",
+                )
+
+                h_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
+                inp = torch.randn((L, N, H_in), device="cuda")
+                output, h_n = gru(inp, h_0)
+                output.sum().backward()
+
+                self.assertEqual(output.shape, (L, N, D * hidden_size))
+                self.assertEqual(h_n.shape, (D * num_layers, N, hidden_size))
+
+
+instantiate_parametrized_tests(TestFakeTensorCUDA)
+make_propagate_real_tensors_cls(TestFakeTensorCUDA)
+
+
 class TestFakeTensorConstHandling(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -4016,30 +4026,6 @@ class TestFakeTensorDispatchCache(_TestFakeTensorDispatchCacheHelpers, TestCase)
             z = x.as_strided((4, 2), (1, 2))
             self._test_cache_key(fm, x, y, z)
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cache_key_indexless_device_pins_current_index(self):
-        # An index-less device argument means "the current one", so it denotes a
-        # different device depending on ambient state. Keying it unresolved lets a
-        # call made while cuda:0 is current serve one made while cuda:1 is, and the
-        # cached output then carries the wrong device. Patching current_device is
-        # enough to see it: the resolution happens in the key, so this needs one GPU.
-        func = aten.zeros.default
-        state = _CacheKeyState()
-        with FakeTensorMode() as fm:
-            args = [[4, 3]]
-            kwargs = {"device": torch.device("cuda")}
-            with patch.object(torch.cuda, "current_device", return_value=0):
-                key_dev0 = fm._cache_key(state, func, args, kwargs)
-            with patch.object(torch.cuda, "current_device", return_value=1):
-                key_dev1 = fm._cache_key(state, func, args, kwargs)
-            # An explicit index is already unambiguous and must be unaffected.
-            explicit = {"device": torch.device("cuda", 0)}
-            with patch.object(torch.cuda, "current_device", return_value=1):
-                key_explicit = fm._cache_key(state, func, args, explicit)
-
-        self.assertNotEqual(key_dev0, key_dev1)
-        self.assertEqual(key_dev0, key_explicit)
-
     def test_cache_key_memory_format(self):
         with FakeTensorMode() as fm:
             x = torch.randn(1, 2, 3, 4)
@@ -4664,6 +4650,31 @@ class TestFakeTensorDispatchCacheDevice(_TestFakeTensorDispatchCacheHelpers, Tes
             y = torch.randn(4, 3)
             z = x.to(device=device)
             self._test_cache_key(fm, x, y, z)
+
+    def test_cache_key_indexless_device_pins_current_index(self, device):
+        # An index-less device argument means "the current one", so it denotes a
+        # different device depending on ambient state. Keying it unresolved lets a
+        # call made while device 0 is current serve one made while device 1 is, and
+        # the cached output then carries the wrong device. Patching current_device
+        # is enough to see it: the resolution happens in the key, so this needs one
+        # device.
+        func = aten.zeros.default
+        state = _CacheKeyState()
+        device_module = getattr(torch, self.device_type)
+        with FakeTensorMode() as fm:
+            args = [[4, 3]]
+            kwargs = {"device": torch.device(self.device_type)}
+            with patch.object(device_module, "current_device", return_value=0):
+                key_dev0 = fm._cache_key(state, func, args, kwargs)
+            with patch.object(device_module, "current_device", return_value=1):
+                key_dev1 = fm._cache_key(state, func, args, kwargs)
+            # An explicit index is already unambiguous and must be unaffected.
+            explicit = {"device": torch.device(self.device_type, 0)}
+            with patch.object(device_module, "current_device", return_value=1):
+                key_explicit = fm._cache_key(state, func, args, explicit)
+
+        self.assertNotEqual(key_dev0, key_dev1)
+        self.assertEqual(key_dev0, key_explicit)
 
     def test_cache_default_device(self, device):
         """
