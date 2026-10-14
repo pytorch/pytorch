@@ -585,6 +585,13 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         }
       }
 
+      if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+        matmul.setAttribute(
+          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+          at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
+            at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+      }
+
       size_t workspace_size = at::cuda::getCUDABlasLtWorkspaceSize();
 
       auto op_handle = at::cuda::getCurrentCUDABlasLtHandle();
