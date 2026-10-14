@@ -4,7 +4,10 @@
 #include <torch/csrc/utils/pybind.h>
 
 #if defined(USE_CUFILE)
+#include <ATen/ATen.h>
+#include <ATen/core/CachingHostAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 
 #include <cuda_runtime.h>
 #include <cufile.h>
@@ -32,6 +35,60 @@ std::string cuGDSFileGetErrorString(T status) {
     errStr.append(".").append(
         cudaGetErrorString(static_cast<cudaError_t>(status.cu_err)));
   return errStr;
+}
+
+using GdsAsyncIOFn = decltype(&cuFileReadAsync);
+
+// Enqueues fn on the current stream of the storage's device and returns a
+// 0-dim tensor that holds the number of bytes transferred once the stream has
+// passed the I/O.
+at::Tensor gds_io_async(
+    GdsAsyncIOFn fn,
+    const char* fn_name,
+    int64_t handle,
+    const at::Storage& storage,
+    off_t offset) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
+  c10::cuda::CUDAGuard gpuGuard(storage.device());
+  c10::cuda::CUDAStream stream = c10::cuda::getCurrentCUDAStream();
+  // The stream APIs do not support CUDA graphs. Reject before enqueueing
+  // anything so the caller's capture stays valid.
+  TORCH_CHECK(
+      !stream.is_capturing(),
+      fn_name,
+      " is not supported during CUDA graph capture");
+
+  // The size, offsets and byte count are accessed after this call returns.
+  // Keep them in pinned memory that the caching host allocator does not reuse
+  // until the stream passes the event recorded below, even if the caller drops
+  // the result.
+  static_assert(sizeof(size_t) == sizeof(int64_t));
+  at::Tensor params =
+      at::empty({4}, at::TensorOptions().dtype(at::kLong).pinned_memory(true));
+  int64_t* p = params.mutable_data_ptr<int64_t>();
+  p[0] = static_cast<int64_t>(storage.nbytes());
+  p[1] = offset;
+  p[2] = 0;
+  p[3] = 0;
+
+  CUfileError_t status =
+      fn(cf_handle,
+         storage.mutable_data(),
+         reinterpret_cast<size_t*>(&p[0]),
+         &p[1],
+         &p[2],
+         &p[3],
+         stream.stream());
+  // Record even if fn failed, since it may have enqueued work that uses p.
+  TORCH_INTERNAL_ASSERT(at::getHostAllocator(at::kCUDA)->record_event(
+      p, params.storage().data_ptr().get_context(), stream.unwrap()));
+  TORCH_CHECK(
+      status.err == CU_FILE_SUCCESS,
+      fn_name,
+      " failed: ",
+      cuGDSFileGetErrorString(status));
+  return params.select(0, 3);
 }
 } // namespace
 
@@ -65,6 +122,22 @@ void gds_save_storage(
   // Write device memory contents to the file
   ssize_t ret = cuFileWrite(cf_handle, dataPtr, nbytes, offset, 0);
   TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
+}
+
+at::Tensor gds_load_storage_async(
+    int64_t handle,
+    const at::Storage& storage,
+    off_t offset) {
+  return gds_io_async(
+      cuFileReadAsync, "cuFileReadAsync", handle, storage, offset);
+}
+
+at::Tensor gds_save_storage_async(
+    int64_t handle,
+    const at::Storage& storage,
+    off_t offset) {
+  return gds_io_async(
+      cuFileWriteAsync, "cuFileWriteAsync", handle, storage, offset);
 }
 
 void gds_register_buffer(const at::Storage& storage) {
@@ -127,6 +200,14 @@ void initGdsBindings(PyObject* module) {
   m.def("_gds_deregister_buffer", &gds_deregister_buffer);
   m.def("_gds_load_storage", &gds_load_storage);
   m.def("_gds_save_storage", &gds_save_storage);
+  m.def(
+      "_gds_load_storage_async",
+      &gds_load_storage_async,
+      py::call_guard<py::gil_scoped_release>());
+  m.def(
+      "_gds_save_storage_async",
+      &gds_save_storage_async,
+      py::call_guard<py::gil_scoped_release>());
 #endif
 }
 

@@ -477,6 +477,13 @@ configuration steps, which differ from the CUDA ones, are covered in
 
 See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use these.
 
+{meth}`~torch.cuda.gds.GdsFile.load_storage` and {meth}`~torch.cuda.gds.GdsFile.save_storage`
+block the host but are not ordered with respect to any stream, so pending work that produces or
+consumes the storage must be synchronized first. {meth}`~torch.cuda.gds.GdsFile.load_storage_async`
+and {meth}`~torch.cuda.gds.GdsFile.save_storage_async` are instead enqueued on the current stream
+and return without waiting when the fast path is used, and follow the usual
+{ref}`stream semantics<cuda-stream-semantics>`. They raise an error during CUDA graph capture.
+
 ```{eval-rst}
 .. currentmodule:: torch.cuda.gds
 ```

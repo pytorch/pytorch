@@ -53,6 +53,14 @@ if not is_available():
         raise AssertionError(
             "_gds_save_storage exists but _gds_register_buffer does not"
         )
+    if hasattr(torch._C, "_gds_load_storage_async"):
+        raise AssertionError(
+            "_gds_load_storage_async exists but _gds_register_buffer does not"
+        )
+    if hasattr(torch._C, "_gds_save_storage_async"):
+        raise AssertionError(
+            "_gds_save_storage_async exists but _gds_register_buffer does not"
+        )
     # Define functions
     torch._C.__dict__["_gds_register_buffer"] = _dummy_fn("_gds_register_buffer")
     torch._C.__dict__["_gds_deregister_buffer"] = _dummy_fn("_gds_deregister_buffer")
@@ -60,6 +68,8 @@ if not is_available():
     torch._C.__dict__["_gds_deregister_handle"] = _dummy_fn("_gds_deregister_handle")
     torch._C.__dict__["_gds_load_storage"] = _dummy_fn("_gds_load_storage")
     torch._C.__dict__["_gds_save_storage"] = _dummy_fn("_gds_save_storage")
+    torch._C.__dict__["_gds_load_storage_async"] = _dummy_fn("_gds_load_storage_async")
+    torch._C.__dict__["_gds_save_storage_async"] = _dummy_fn("_gds_save_storage_async")
 
 
 def gds_register_buffer(s: Storage) -> None:
@@ -141,13 +151,19 @@ class GdsFile:
         self.filename = filename
         self.flags = flags
         self.fd = os.open(filename, flags | os.O_DIRECT)  # type: ignore[attr-defined]
+        # Latest async I/O on each stream, keyed by (device index, raw stream
+        # handle) since default streams share a handle across devices. The
+        # handle must stay registered until these have run.
+        self._async_io_events: dict[tuple[int, int], torch.cuda.Event] = {}
         self.handle: int | None = None
         self.register_handle()
 
     def __del__(self) -> None:
-        if self.handle is not None:
-            self.deregister_handle()
-        os.close(self.fd)
+        try:
+            if self.handle is not None:
+                self.deregister_handle()
+        finally:
+            os.close(self.fd)
 
     def register_handle(self) -> None:
         """Registers file descriptor to the GDS driver.
@@ -162,11 +178,23 @@ class GdsFile:
         """Deregisters file descriptor from the GDS driver.
 
         This is a wrapper around ``cuFileHandleDeregister`` (CUDA) / ``hipFileHandleDeregister`` (ROCm).
+        It first blocks until every :meth:`load_storage_async` and
+        :meth:`save_storage_async` issued through this file has run.
         """
         if self.handle is None:
             raise AssertionError("Cannot deregister a handle that is not registered.")
+        for event in self._async_io_events.values():
+            event.synchronize()
+        self._async_io_events.clear()
         torch._C._gds_deregister_handle(self.handle)
         self.handle = None
+
+    def _record_async_io(self, storage: Storage) -> None:
+        stream = torch.cuda.current_stream(storage.device)
+        key = (stream.device_index, stream.cuda_stream)
+        if key not in self._async_io_events:
+            self._async_io_events[key] = torch.cuda.Event()
+        self._async_io_events[key].record(stream)
 
     def load_storage(self, storage: Storage, offset: int = 0) -> None:
         """Loads data from the file into the storage.
@@ -183,6 +211,7 @@ class GdsFile:
             This means the user must ensure they synchronize the stream or
             device in order to guarantee that ``load_storage`` executes after
             previously enqueued asynchronous operations.
+            :meth:`load_storage_async` is the stream-ordered alternative.
 
         Args:
             storage (Storage): Storage to load data into.
@@ -191,6 +220,52 @@ class GdsFile:
         if self.handle is None:
             raise AssertionError("Cannot load data from a file that is not registered.")
         torch._C._gds_load_storage(self.handle, storage, offset)
+
+    def load_storage_async(self, storage: Storage, offset: int = 0) -> torch.Tensor:
+        """Loads data from the file into the storage, ordered on the current stream.
+
+        This is a wrapper around ``cuFileReadAsync`` (CUDA) / ``hipFileReadAsync`` (ROCm).
+        ``storage.nbytes()`` of data will be loaded from the file at ``offset``
+        into the storage.
+
+        The load is enqueued on the current stream of ``storage``'s device,
+        and this function returns without waiting for it to run. It runs after
+        work previously enqueued on that stream, and work enqueued on that
+        stream afterwards sees the loaded data. As with a kernel launch, other
+        streams and the host must synchronize with the stream before using the
+        storage or the file (see :ref:`cuda-stream-semantics`).
+        :meth:`deregister_handle`, and therefore deleting this object, waits
+        for the load to run.
+
+        .. note::
+            cuFile's stream APIs do not support CUDA graphs, so this raises a
+            ``RuntimeError`` if called during graph capture.
+
+        Example::
+
+            >>> # xdoctest: +SKIP("gds filesystem requirements")
+            >>> dest = torch.empty(1024, device="cuda")
+            >>> nbytes = file.load_storage_async(dest.untyped_storage())
+            >>> torch.cuda.current_stream().synchronize()
+            >>> assert nbytes.item() == dest.nbytes
+
+        Args:
+            storage (Storage): Storage to load data into.
+            offset (int, optional): Offset into the file to start loading from. (Default: 0)
+
+        Returns:
+            Tensor: A 0-dim ``torch.int64`` CPU tensor that, once the load has
+            run, holds the number of bytes read. A negative value means the
+            read failed. A value less than ``storage.nbytes()`` means the end
+            of the file was reached. The value is not meaningful until the
+            stream has been synchronized. Errors detected before the load is
+            enqueued raise instead.
+        """
+        if self.handle is None:
+            raise AssertionError("Cannot load data from a file that is not registered.")
+        nbytes = torch._C._gds_load_storage_async(self.handle, storage, offset)
+        self._record_async_io(storage)
+        return nbytes
 
     def save_storage(self, storage: Storage, offset: int = 0) -> None:
         """Saves data from the storage into the file.
@@ -206,6 +281,7 @@ class GdsFile:
             This means the user must ensure they synchronize the stream or
             device in order to guarantee that ``save_storage`` executes after
             previously enqueued asynchronous operations.
+            :meth:`save_storage_async` is the stream-ordered alternative.
 
         Args:
             storage (Storage): Storage to save data from.
@@ -214,3 +290,48 @@ class GdsFile:
         if self.handle is None:
             raise AssertionError("Cannot save data to a file that is not registered.")
         torch._C._gds_save_storage(self.handle, storage, offset)
+
+    def save_storage_async(self, storage: Storage, offset: int = 0) -> torch.Tensor:
+        """Saves data from the storage into the file, ordered on the current stream.
+
+        This is a wrapper around ``cuFileWriteAsync`` (CUDA) / ``hipFileWriteAsync`` (ROCm).
+        The bytes of the storage are written to the file at ``offset``; check
+        the returned count to confirm all of them were.
+
+        The save is enqueued on the current stream of ``storage``'s device,
+        and this function returns without waiting for it to run. It runs after
+        work previously enqueued on that stream, so it writes the data that
+        work produced. As with a kernel launch, other streams and the host must
+        synchronize with the stream before modifying the storage or using the
+        file (see :ref:`cuda-stream-semantics`). :meth:`deregister_handle`,
+        and therefore deleting this object, waits for the save to run.
+
+        .. note::
+            cuFile's stream APIs do not support CUDA graphs, so this raises a
+            ``RuntimeError`` if called during graph capture.
+
+        Example::
+
+            >>> # xdoctest: +SKIP("gds filesystem requirements")
+            >>> src = torch.randn(1024, device="cuda")
+            >>> # No synchronize needed: the save runs after torch.randn.
+            >>> nbytes = file.save_storage_async(src.untyped_storage())
+            >>> torch.cuda.current_stream().synchronize()
+            >>> assert nbytes.item() == src.nbytes
+
+        Args:
+            storage (Storage): Storage to save data from.
+            offset (int, optional): Offset into the file to start saving to. (Default: 0)
+
+        Returns:
+            Tensor: A 0-dim ``torch.int64`` CPU tensor that, once the save has
+            run, holds the number of bytes written. A negative value means the
+            write failed. The value is not meaningful until the stream has
+            been synchronized. Errors detected before the save is enqueued
+            raise instead.
+        """
+        if self.handle is None:
+            raise AssertionError("Cannot save data to a file that is not registered.")
+        nbytes = torch._C._gds_save_storage_async(self.handle, storage, offset)
+        self._record_async_io(storage)
+        return nbytes
