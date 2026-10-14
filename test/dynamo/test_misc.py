@@ -11012,7 +11012,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 ) as ctx:
                     compiled_fn(*args)
             # The failing guard, not the entry's whole guard tree.
-            self.assertIn("[0] isinstance(L['x'], bool)", str(ctx.exception))
+            self.assertIn("[0] isinstance(x, bool)", str(ctx.exception))
             self.assertNotIn("TREE_GUARD_MANAGER", str(ctx.exception))
         finally:
             _reset_precompile_entries(fn.__code__)
@@ -11048,7 +11048,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                     RuntimeError, r"Failed on all 1 precompiled variant\(s\)"
                 ) as ctx:
                     compiled_fn(torch.randn(3, 5))
-            self.assertIn("[0] L['x'].size(1) == 2", str(ctx.exception))
+            self.assertIn("[0] x.size(1) == 2", str(ctx.exception))
             self.assertNotIn("size(0)", str(ctx.exception))
         finally:
             _reset_precompile_entries(fn.__code__)
@@ -11056,13 +11056,13 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_fail_on_recompile_groups_precompiled_entries_by_reason(self):
         from torch._dynamo.eval_frame import _precompile_no_match_message
 
-        def entry(reason=None, raises=None):
-            manager = mock.Mock()
+        def entry(*parts, raises=None, result=False):
+            manager = mock.Mock(global_scope=None, closure_vars=None)
             if raises is not None:
                 manager.check_verbose.side_effect = raises
             else:
                 manager.check_verbose.return_value = types.SimpleNamespace(
-                    result=False, verbose_code_parts=[reason]
+                    result=result, verbose_code_parts=list(parts)
                 )
             return types.SimpleNamespace(guard_manager=manager)
 
@@ -11077,16 +11077,30 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(
             message,
             "Failed on all 8 precompiled variant(s):\n"
-            "  [0-4, 7] KeyError on L['self']._modules['pma']\n"
-            "  [5] L['self'].n_heads == 4\n"
+            "  [0-4, 7] KeyError on self._modules['pma']\n"
+            "  [5] self.n_heads == 4\n"
             "  [6] <guard check raised ValueError: boom>",
         )
 
         many = [entry(f"L['x'] == {i}") for i in range(7)]
         message = _precompile_no_match_message(many, {})
-        self.assertIn("[4] L['x'] == 4", message)
-        self.assertNotIn("L['x'] == 5", message)
+        self.assertIn("[4] x == 4", message)
+        self.assertNotIn("x == 5", message)
         self.assertIn("... and 2 more distinct reason(s) not shown.", message)
+
+        # No clause can be re-evaluated without a global scope, so every part
+        # is named, capped; a check that passes on re-check says so.
+        clauses = [f"L['x'].size({i}) == 1" for i in range(7)]
+        message = _precompile_no_match_message(
+            [entry(*clauses), entry(result=True)], {}
+        )
+        self.assertEqual(
+            message,
+            "Failed on all 2 precompiled variant(s):\n"
+            "  [0] x.size(0) == 1; x.size(1) == 1; x.size(2) == 1; "
+            "x.size(3) == 1; x.size(4) == 1; ... (2 more clauses)\n"
+            "  [1] <matched on re-check>",
+        )
 
     def test_guard_complete_hook_can_reset_hit(self):
         from torch._C._dynamo.eval_frame import set_guard_complete_hook
@@ -11187,6 +11201,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             with (
                 log_settings(kwargs_to_settings(recompiles=True)),
                 self.assertLogs("torch._dynamo.convert_frame", level="DEBUG") as logs,
+                patch(
+                    "torch._logging.trace_structured",
+                    wraps=torch._logging.trace_structured,
+                ) as trace,
             ):
                 self.assertEqual(compiled_fn(x), fn(x))
         finally:
@@ -11194,11 +11212,20 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         reason = torch._dynamo.utils._compilation_metrics[-1].recompile_reason
         self.assertEqual(
             reason,
-            "Failed on all 1 precompiled variant(s):\n  [0] isinstance(L['x'], bool)",
+            "Failed on all 1 precompiled variant(s):\n  [0] isinstance(x, bool)",
+        )
+        self.assertIn(
+            reason,
+            [
+                c.kwargs["payload_fn"]()
+                for c in trace.call_args_list
+                if c.args == ("artifact",)
+                and c.kwargs["metadata_fn"]()["name"] == "recompile_reasons"
+            ],
         )
         self.assertTrue(
             any(
-                "Compiling function fn" in m and "[0] isinstance(L['x'], bool)" in m
+                "Compiling function fn" in m and "[0] isinstance(x, bool)" in m
                 for m in logs.output
             ),
             logs.output,
