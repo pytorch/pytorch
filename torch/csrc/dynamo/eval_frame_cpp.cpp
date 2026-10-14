@@ -583,7 +583,9 @@ PyObject* dynamo__custom_eval_frame(
   // for the current region (or the default region), precompile entries or a
   // skip loaded from an artifact; this reduces overtriggering and we don't
   // need to do guard collectives the very first time we've seen a frame in
-  // this region.
+  // this region. Counting precompile entries and skips assumes every rank
+  // installed the same artifact; a rank without them skips the collective the
+  // others wait in.
   if (guard_complete_hook != nullptr &&
       (precompile_skip ||
        has_relevant_cache_entries(code, isolate_recompiles_id))) {
