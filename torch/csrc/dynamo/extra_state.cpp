@@ -637,6 +637,10 @@ void _load_precompile_entry(
   }
 }
 
+bool _get_lru_cache() {
+  return use_lru;
+}
+
 bool _set_lru_cache(py::object boolean) {
   bool prior = use_lru;
   use_lru = py::cast<bool>(boolean);
