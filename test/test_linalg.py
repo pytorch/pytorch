@@ -9808,6 +9808,18 @@ class TestLinalgSVD(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @dtypes(torch.float32, torch.complex64)
+    @parametrize("shape", [(3, 8, 2), (3, 2, 8)])
+    def test_svd_full_matrices_diagonal(self, device, dtype, shape):
+        A = torch.zeros(shape, dtype=dtype, device=device)
+        A.diagonal(dim1=-2, dim2=-1).copy_(torch.arange(1, 3))
+        U, S, Vh = torch.linalg.svd(A)
+        self.assertEqual(U.mH @ U, torch.eye(U.size(-1), dtype=dtype, device=device).expand_as(U))
+        self.assertEqual(Vh @ Vh.mH, torch.eye(Vh.size(-1), dtype=dtype, device=device).expand_as(Vh))
+        self.assertEqual((U[..., :2] * S.unsqueeze(-2)) @ Vh[..., :2, :], A)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_svd_ill_conditioned(self, device, dtype):
         # Small columns must still undergo Jacobi rotations: skipping them at
