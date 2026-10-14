@@ -8,15 +8,14 @@ from collections.abc import Iterable
 import torch
 
 
-def _move_parameter(module, name, index):
-    """Put ``name`` at ``index`` in ``module._parameters``.
-
-    ``register_parameter`` / ``setattr`` append, which reorders ``state_dict()``
-    keys. Keep those APIs (RNN modules listen to ``setattr``) and rotate in
-    place so existing references to ``_parameters`` stay valid.
-    """
+def _move_parameter(module, name, before):
+    """Move ``name`` before ``before`` in place; ``register_parameter`` appends."""
     params = module._parameters
-    for key in list(params)[index:]:
+    keys = list(params)
+    index = keys.index(before)
+    if keys.index(name) < index:
+        return
+    for key in keys[index:]:
         if key != name:
             params[key] = params.pop(key)
 
@@ -29,6 +28,7 @@ class BasePruningMethod(ABC):
     """
 
     _tensor_name: str
+    _preserves_parameter_order: bool = False
 
     def __call__(self, module, inputs):
         r"""Multiply the mask into original tensor and store the result.
@@ -154,6 +154,9 @@ class BasePruningMethod(ABC):
                     # Have the pruning method remember the name of its tensor
                     # setattr(container, '_tensor_name', name)
                     container.add_pruning_method(method)
+                    container._preserves_parameter_order = (
+                        old_method._preserves_parameter_order
+                    )
                     method = container  # rename container --> method
             return method
 
@@ -181,13 +184,13 @@ class BasePruningMethod(ABC):
         # the original tensor to a new parameter called name + '_orig'
         # and deleting the original parameter
         if not isinstance(method, PruningContainer):
-            param_index = list(module._parameters).index(name)
             # copy `module[name]` to `module[name + '_orig']`
             module.register_parameter(name + "_orig", orig)
+            # `_orig` occupies the slot `name` had; remove() restores from that slot.
+            _move_parameter(module, name + "_orig", name)
             # temporarily delete `module[name]`
             del module._parameters[name]
-            # `_orig` occupies the slot `name` had; remove() restores from that slot.
-            _move_parameter(module, name + "_orig", param_index)
+            method._preserves_parameter_order = True
             default_mask = torch.ones_like(orig)  # temp
         # If this is not the first time pruning is applied, all of the above
         # has been done before in a previous pruning iteration, so we're good
@@ -215,10 +218,9 @@ class BasePruningMethod(ABC):
         except Exception as e:
             if not isinstance(method, PruningContainer):
                 orig = getattr(module, name + "_orig")
-                orig_index = list(module._parameters).index(name + "_orig")
                 module.register_parameter(name, orig)
+                _move_parameter(module, name, name + "_orig")
                 del module._parameters[name + "_orig"]
-                _move_parameter(module, name, orig_index)
             raise e
 
         return method
@@ -276,16 +278,28 @@ class BasePruningMethod(ABC):
 
         # delete and reset
         orig_key = self._tensor_name + "_orig"
+        # Old pickled pruned Linear/Conv modules lack the slot marker. Recover
+        # their conventional weight-before-bias order, including pruned bias.
+        if (
+            not self._preserves_parameter_order
+            and self._tensor_name in ("weight", "bias")
+            and isinstance(module, (torch.nn.Linear, torch.nn.modules.conv._ConvNd))
+        ):
+            weight_key = (
+                "weight_orig" if "weight_orig" in module._parameters else "weight"
+            )
+            bias_key = "bias_orig" if "bias_orig" in module._parameters else "bias"
+            if weight_key in module._parameters and bias_key in module._parameters:
+                _move_parameter(module, weight_key, bias_key)
         if hasattr(module, self._tensor_name):
             delattr(module, self._tensor_name)
         orig = module._parameters[orig_key]
         orig.data = weight.data
-        # `_orig` is in the slot `name` had (see apply); reclaim that slot after delete.
-        param_index = list(module._parameters).index(orig_key)
-        del module._parameters[orig_key]
         del module._buffers[self._tensor_name + "_mask"]
         setattr(module, self._tensor_name, orig)
-        _move_parameter(module, self._tensor_name, param_index)
+        # `_orig` occupies the original `name` slot (see apply).
+        _move_parameter(module, self._tensor_name, orig_key)
+        del module._parameters[orig_key]
 
 
 class PruningContainer(BasePruningMethod):

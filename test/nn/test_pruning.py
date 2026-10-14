@@ -10,6 +10,7 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TemporaryFileName,
     TEST_NUMPY,
@@ -338,7 +339,10 @@ class TestPruningNN(NNTestCase):
     def test_multiple_pruning_calls(self):
         # if you call pruning twice, the hook becomes a PruningContainer
         m = nn.Conv3d(2, 2, 2)
+        original_order = list(m.state_dict())
+        params = m._parameters
         prune.l1_unstructured(m, name="weight", amount=0.1)
+        pruned_order = list(m.state_dict())
         weight_mask0 = m.weight_mask  # save it for later sanity check
 
         # prune again
@@ -368,14 +372,12 @@ class TestPruningNN(NNTestCase):
         # many pruning methods are in the container
         hook = next(iter(m._forward_pre_hooks.values()))
         self.assertEqual(hook._tensor_name, "weight")
-
-        # Iterative prune then remove: `_orig` stays in the first-apply slot.
-        m2 = nn.Conv3d(2, 2, 2)
-        original = list(m2.state_dict().keys())
-        prune.l1_unstructured(m2, name="weight", amount=0.1)
-        prune.ln_structured(m2, name="weight", amount=0.3, n=2, dim=0)
-        prune.remove(m2, name="weight")
-        self.assertEqual(list(m2.state_dict().keys()), original)
+        self.assertEqual(list(m.state_dict()), pruned_order)
+        pruned_weight = m.weight.detach().clone()
+        prune.remove(m, name="weight")
+        self.assertEqual(list(m.state_dict()), original_order)
+        self.assertEqual(m.weight, pruned_weight)
+        self.assertIs(m._parameters, params)
 
     def test_pruning_container(self):
         # create an empty container
@@ -628,61 +630,68 @@ class TestPruningNN(NNTestCase):
 
                     self.assertEqual(pruned_t, final_t)
 
-    def test_remove_pruning_preserves_parameter_order(self):
+    @parametrize(
+        "names", [("weight",), ("bias",), ("weight", "bias"), ("bias", "weight")]
+    )
+    @parametrize("reverse_remove", [False, True])
+    def test_remove_pruning_preserves_parameter_order(self, names, reverse_remove):
         r"""``prune.remove`` must restore the original parameter order.
 
         See https://github.com/pytorch/pytorch/issues/85397
         """
-        module = nn.Conv2d(1, 6, 3)
-        original = list(module.state_dict().keys())
-        self.assertEqual(original, ["weight", "bias"])
+        module = nn.Linear(4, 3)
+        original_order = list(module.state_dict())
+        params = module._parameters
+        for name in names:
+            prune.random_unstructured(module, name=name, amount=0.3)
+        self.assertEqual(
+            list(module.state_dict()),
+            [key + "_orig" if key in names else key for key in original_order]
+            + [name + "_mask" for name in names],
+        )
+        for name in reversed(names) if reverse_remove else names:
+            prune.remove(module, name=name)
+        self.assertEqual(list(module.state_dict()), original_order)
+        self.assertIs(module._parameters, params)
+
+    @parametrize("bias", [False, True])
+    def test_remove_pruning_preserves_conv2d_order(self, bias):
+        module = nn.Conv2d(1, 6, 3, bias=bias)
+        module.register_buffer("running", torch.ones(1))
+        original_order = list(module.state_dict())
+        params = module._parameters
+        weight = module.weight
         prune.random_unstructured(module, name="weight", amount=0.3)
-        with self.subTest("apply keeps _orig in the original slot"):
-            self.assertEqual(
-                list(module.state_dict().keys()),
-                ["weight_orig", "bias", "weight_mask"],
-            )
+        self.assertEqual(
+            list(module.state_dict()),
+            ["weight_orig"] + (["bias"] if bias else []) + ["running", "weight_mask"],
+        )
         prune.remove(module, name="weight")
-        self.assertEqual(list(module.state_dict().keys()), original)
+        self.assertEqual(list(module.state_dict()), original_order)
+        self.assertIs(module._parameters, params)
+        self.assertIs(module.weight, weight)
 
-        with self.subTest("Linear bias"):
-            module = nn.Linear(4, 3)
-            original = list(module.state_dict().keys())
-            prune.random_unstructured(module, name="bias", amount=0.3)
-            prune.remove(module, name="bias")
-            self.assertEqual(list(module.state_dict().keys()), original)
+    def test_remove_pruning_preserves_nested_order(self):
+        module = nn.Sequential(nn.Linear(4, 3), nn.BatchNorm1d(3))
+        original_order = list(module.state_dict())
+        parameter_order = list(dict(module.named_parameters()))
+        prune.random_unstructured(module[0], name="weight", amount=0.3)
+        prune.remove(module[0], name="weight")
+        self.assertEqual(list(module.state_dict()), original_order)
+        self.assertEqual(list(dict(module.named_parameters())), parameter_order)
 
-        with self.subTest("Linear weight then bias"):
-            module = nn.Linear(4, 3)
-            original = list(module.state_dict().keys())
-            prune.random_unstructured(module, name="weight", amount=0.3)
-            prune.random_unstructured(module, name="bias", amount=0.3)
-            prune.remove(module, name="weight")
-            prune.remove(module, name="bias")
-            self.assertEqual(list(module.state_dict().keys()), original)
-
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc = nn.Linear(4, 3)
-                self.bn = nn.BatchNorm1d(3)
-
-        with self.subTest("nested module"):
-            m = M()
-            original = list(dict(m.named_parameters()).keys())
-            prune.random_unstructured(m.fc, name="weight", amount=0.3)
-            prune.remove(m.fc, name="weight")
-            self.assertEqual(list(dict(m.named_parameters()).keys()), original)
-
-        with self.subTest("LSTM _flat_weights"):
-            lstm = nn.LSTM(8, 8)
-            original = list(dict(lstm.named_parameters()).keys())
-            prune.l1_unstructured(lstm, "weight_ih_l0", 0.5)
-            prune.remove(lstm, "weight_ih_l0")
-            self.assertEqual(list(dict(lstm.named_parameters()).keys()), original)
-            self.assertTrue(
-                all(isinstance(p, nn.Parameter) for p in lstm._flat_weights)
-            )
+    @parametrize("name", ["weight_ih_l0", "weight_hh_l0", "bias_ih_l0", "bias_hh_l0"])
+    def test_remove_pruning_preserves_lstm_order(self, name):
+        lstm = nn.LSTM(8, 8)
+        original_order = list(lstm.state_dict())
+        params = lstm._parameters
+        prune.l1_unstructured(lstm, name, 0.5)
+        prune.remove(lstm, name)
+        self.assertEqual(list(lstm.state_dict()), original_order)
+        self.assertIs(lstm._parameters, params)
+        self.assertTrue(all(isinstance(p, nn.Parameter) for p in lstm._flat_weights))
+        for flat_name, weight in zip(lstm._flat_weights_names, lstm._flat_weights):
+            self.assertIs(weight, getattr(lstm, flat_name))
 
     def test_remove_pruning_exception(self):
         r"""Removing from an unpruned tensor throws an assertion error"""
@@ -808,6 +817,9 @@ class TestPruningNN(NNTestCase):
             for name in names:
                 with self.subTest(m=m, name=name):
                     original_order = list(m._parameters)
+                    state_order = list(m.state_dict())
+                    params = m._parameters
+                    parameter = getattr(m, name)
                     with mock.patch(
                         "torch.nn.utils.prune.L1Unstructured.compute_mask"
                     ) as compute_mask:
@@ -819,6 +831,9 @@ class TestPruningNN(NNTestCase):
                         self.assertFalse(name + "_mask" in dict(m.named_buffers()))
                         self.assertFalse(name + "_orig" in dict(m.named_parameters()))
                         self.assertEqual(list(m._parameters), original_order)
+                        self.assertEqual(list(m.state_dict()), state_order)
+                        self.assertIs(m._parameters, params)
+                        self.assertIs(getattr(m, name), parameter)
 
     def test_pruning_serialization_model(self):
         # create a model
@@ -827,6 +842,7 @@ class TestPruningNN(NNTestCase):
             torch.nn.ReLU(),
             torch.nn.Linear(10, 1),
         )
+        original_order = list(model.state_dict())
         # check that everything looks normal before pruning
         self.assertNotIn("0.weight_orig", model.state_dict())
         self.assertNotIn("0.weight_mask", model.state_dict())
@@ -842,6 +858,7 @@ class TestPruningNN(NNTestCase):
         self.assertTrue(hasattr(model[0], "weight"))
 
         pruned_weight = model[0].weight
+        pruned_order = list(model.state_dict())
 
         with TemporaryFileName() as fname:
             torch.save(model, fname)
@@ -855,6 +872,109 @@ class TestPruningNN(NNTestCase):
         self.assertTrue(hasattr(new_model[0], "weight"))
 
         self.assertEqual(pruned_weight, new_model[0].weight)
+        self.assertEqual(list(new_model.state_dict()), pruned_order)
+        prune.remove(new_model[0], name="weight")
+        self.assertEqual(list(new_model.state_dict()), original_order)
+        self.assertEqual(pruned_weight, new_model[0].weight)
+
+    @parametrize("module_kind", ["linear", "conv2d"])
+    @parametrize("names", [("weight",), ("weight", "bias"), ("bias", "weight")])
+    @parametrize("repeat_pruning", ["none", "before_save", "after_load"])
+    @parametrize("reverse_remove", [False, True])
+    def test_pruning_serialization_legacy_parameter_order(
+        self, module_kind, names, repeat_pruning, reverse_remove
+    ):
+        module = nn.Linear(4, 3) if module_kind == "linear" else nn.Conv2d(1, 6, 3)
+        module.register_buffer("running", torch.ones(1))
+        original_order = list(module.state_dict())
+        parameter_order = list(dict(module.named_parameters()))
+        for name in names:
+            prune.l1_unstructured(module, name, amount=0.3)
+            # Reproduce old apply using module APIs: _orig was appended and
+            # the pickled hook had no parameter-order marker.
+            orig = getattr(module, name + "_orig")
+            delattr(module, name + "_orig")
+            module.register_parameter(name + "_orig", orig)
+            hook = next(
+                hook
+                for hook in module._forward_pre_hooks.values()
+                if hook._tensor_name == name
+            )
+            del hook._preserves_parameter_order
+            if repeat_pruning == "before_save":
+                prune.l1_unstructured(module, name, amount=0.1)
+                hook = next(
+                    hook
+                    for hook in module._forward_pre_hooks.values()
+                    if hook._tensor_name == name
+                )
+                del hook._preserves_parameter_order
+        self.assertEqual(
+            list(module.state_dict()),
+            [key for key in parameter_order if key not in names]
+            + [name + "_orig" for name in names]
+            + ["running"]
+            + [name + "_mask" for name in names],
+        )
+        with TemporaryFileName() as fname:
+            torch.save(module, fname)
+            loaded = torch.load(fname, weights_only=False)
+        params = loaded._parameters
+        remaining = set(names)
+        for name in reversed(names) if reverse_remove else names:
+            if repeat_pruning == "after_load":
+                prune.l1_unstructured(loaded, name, amount=0.1)
+            parameter = getattr(loaded, name + "_orig")
+            pruned_weight = getattr(loaded, name).detach().clone()
+            prune.remove(loaded, name)
+            remaining.remove(name)
+            self.assertIs(getattr(loaded, name), parameter)
+            self.assertEqual(getattr(loaded, name), pruned_weight)
+            self.assertIs(loaded._parameters, params)
+            self.assertEqual(
+                list(loaded.state_dict()),
+                [key + "_orig" if key in remaining else key for key in parameter_order]
+                + ["running"]
+                + [key + "_mask" for key in names if key in remaining],
+            )
+        self.assertEqual(list(loaded.state_dict()), original_order)
+        self.assertEqual(list(dict(loaded.named_parameters())), parameter_order)
+
+    @parametrize("repeat_pruning", [False, True])
+    def test_pruning_serialization_nonstandard_parameter_order(self, repeat_pruning):
+        module = nn.Linear(4, 3)
+        # A user can deliberately register weight after bias.
+        weight = module.weight
+        del module.weight
+        module.register_parameter("weight", weight)
+        original_order = list(module.state_dict())
+        self.assertEqual(original_order, ["bias", "weight"])
+        prune.l1_unstructured(module, "weight", amount=0.3)
+        if repeat_pruning:
+            prune.l1_unstructured(module, "weight", amount=0.1)
+        with TemporaryFileName() as fname:
+            torch.save(module, fname)
+            loaded = torch.load(fname, weights_only=False)
+        prune.remove(loaded, "weight")
+        self.assertEqual(list(loaded.state_dict()), original_order)
+
+    @parametrize("legacy_order", [False, True])
+    def test_pruning_state_dict_order_independent_load(self, legacy_order):
+        source = nn.Linear(4, 3)
+        prune.l1_unstructured(source, "weight", amount=0.3)
+        if legacy_order:
+            weight = source.weight_orig
+            del source.weight_orig
+            source.register_parameter("weight_orig", weight)
+        target = nn.Linear(4, 3)
+        prune.identity(target, "weight")
+        target.load_state_dict(dict(reversed(list(source.state_dict().items()))))
+        self.assertEqual(target.state_dict(), source.state_dict())
+        self.assertEqual(
+            list(target.state_dict()), ["weight_orig", "bias", "weight_mask"]
+        )
+        inputs = torch.randn(2, 4)
+        self.assertEqual(target(inputs), source(inputs))
 
     def test_pruning_serialization_state_dict(self):
         # create a model
