@@ -9,6 +9,7 @@ import traceback
 import weakref
 from collections.abc import Callable
 from typing import TYPE_CHECKING
+from typing_extensions import TypeIs
 
 import torch
 from torch._subclasses.fake_tensor import is_fake_tensor
@@ -20,6 +21,7 @@ from torch.utils.weak import WeakIdRef
 
 
 if TYPE_CHECKING:
+    from torch.distributed.tensor import DTensor
     from torch.utils._debug_mode._calls import _DebugCall
 
 
@@ -89,13 +91,21 @@ class TensorIdTracker:
             return self.tensor_memo[o]
 
 
+def _is_dtensor(x) -> TypeIs["DTensor"]:
+    if not torch.distributed.is_available():
+        return False
+    from torch.distributed.tensor import DTensor
+
+    return isinstance(x, DTensor)
+
+
 def _tensor_debug_string(tensor, attributes, tensor_memo=None) -> str:
     """Convert tensor to debug string representation."""
 
     if isinstance(tensor, torch.Tensor):
         tensor_debug_str = f"{dtype_abbrs[tensor.dtype]}{_stringify_shape(tensor.shape)}{_stringify_attributes(tensor, attributes)}"
         id_str = f"${tensor_memo._id(tensor)}" if tensor_memo is not None else ""
-        if isinstance(tensor, torch.distributed.tensor.DTensor):
+        if _is_dtensor(tensor):
             # omitted device mesh
             return f"dt{id_str}: {tensor_debug_str}| {_stringify_dtensor_spec(tensor._spec)}"
         elif is_fake_tensor(tensor):
@@ -107,12 +117,14 @@ def _tensor_debug_string(tensor, attributes, tensor_memo=None) -> str:
 
 
 def _arg_to_str(arg, attributes, tensor_memo=None) -> str:
-    from torch.distributed.tensor._dtensor_spec import DTensorSpec
+    is_distributed = torch.distributed.is_available()
+    if is_distributed:
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
     def to_str(x):
         if isinstance(x, torch.Tensor):
             return _tensor_debug_string(x, attributes, tensor_memo)
-        elif isinstance(x, DTensorSpec):
+        elif is_distributed and isinstance(x, DTensorSpec):
             return _stringify_dtensor_spec(x)
         return x
 
@@ -153,7 +165,7 @@ def hash_tensor_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor | 
     """
     wrapper over torch.hash_tensor
     """
-    if isinstance(t, torch.distributed.tensor.DTensor):
+    if _is_dtensor(t):
         t = t.to_local()
 
     if t.is_floating_point():
