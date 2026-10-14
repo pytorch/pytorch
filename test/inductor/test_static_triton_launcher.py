@@ -187,7 +187,6 @@ class TestStaticTritonLauncherUnit(TestCase):
         kernel.arg_tys = "OOi"
         kernel.has_global_scratch = False
         kernel.has_profile_scratch = False
-        kernel._current_device = lambda: 2
 
         def load_kernel(device):
             loaded.append(device)
@@ -209,7 +208,10 @@ class TestStaticTritonLauncherUnit(TestCase):
         autotuner = object.__new__(CachingAutotuner)
         autotuner.inductor_meta = {"use_fast_triton_launcher": True}
         autotuner.device_props = SimpleNamespace(type="cuda")
-        with mock.patch("torch._C._FastCudaLauncher", FakeFastLauncher, create=True):
+        with (
+            mock.patch("torch._C._FastCudaLauncher", FakeFastLauncher, create=True),
+            mock.patch("torch._C._cuda_getDevice", return_value=2),
+        ):
             fast_launcher = autotuner._build_fast_launcher(launcher)
         return kernel, fast_launcher, built, calls, FakeFastLauncher
 
@@ -519,6 +521,47 @@ class TestStaticTritonLauncher(TestCase):
         stream = device_interface.get_raw_stream(device_interface.current_device())
         launcher.run(1, 1, 1, stream, new_arg0, 50, 50, 50, 50)
         self.assertEqual(new_arg0, arg0)
+
+    def test_device_agnostic_kernel_takes_fast_launcher(self):
+        # A compile-on-one-rank kernel, launched for real through the launcher
+        # CachingAutotuner._build_fast_launcher builds for it.
+        @triton.jit
+        def simple_kernel(arg0, arg1):
+            x = tl.load(arg0)
+            tl.store(arg0, x + arg1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        kernel = self._make_launcher(simple_kernel[(1,)](arg0, 5))
+        device = get_interface_for_device(GPU_TYPE).current_device()
+        kernel.device_agnostic = True
+        kernel.functions = {device: kernel.function}
+        kernel.modules = {device: kernel.module}
+        kernel.function = None
+        kernel.module = None
+
+        ns = {"runner": kernel.run}
+        exec(
+            "def launcher(arg0, arg1, stream):\n"
+            "    runner(1, 1, 1, stream, arg0, arg1)\n",
+            ns,
+        )
+        launcher = ns["launcher"]
+        launcher._is_static = True
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
+        autotuner.device_props = SimpleNamespace(type="cuda")
+        fast_launcher = autotuner._build_fast_launcher(launcher)
+        self.assertIsNotNone(fast_launcher)
+
+        # Any launch through the regular launcher (the fallback) is recorded.
+        fallback_calls = []
+        ns["runner"] = lambda *args: fallback_calls.append(args) or kernel.run(*args)
+
+        out = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        stream = get_interface_for_device(GPU_TYPE).get_raw_stream(device)
+        fast_launcher(out, 5, stream=stream)
+        self.assertEqual(out, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE))
+        self.assertEqual(fallback_calls, [])
 
     def test_float_scalars(self):
         @triton.jit
