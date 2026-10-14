@@ -896,6 +896,19 @@ def my_bmm_out_dtype(out, self, mat2, out_dtype) -> Tensor:
     )
 
 
+def my_flip(self, dims) -> Tensor:
+    """
+    Reverses the order of elements along the given dimensions.
+
+    Args:
+        self: Tensor - input tensor
+        dims: list[int] - dimensions to flip, negative values are wrapped
+
+    Returns: Tensor - a new tensor with the given dimensions reversed
+    """
+    return torch.ops.libtorch_agn_2_10.my_flip.default(self, dims)
+
+
 # =============================================================================
 # Proxy for inherited ops (from libtorch_agn_2_9_extension/csrc/)
 #
