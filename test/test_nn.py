@@ -8762,6 +8762,39 @@ class TestNNDeviceType(NNTestCase):
             l.backward()
         self.assertTrue(len(f.getvalue()) == 0)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)
+    @parametrize_test("reduction", ["mean", "sum"])
+    @parametrize_test("mixed_dtype", [False, True])
+    def test_mse_loss_reduced_storage(self, device, dtype, reduction, mixed_dtype):
+        input_dtype = torch.float16 if mixed_dtype else dtype
+        input = torch.randn(4, 5, 6, device=device, dtype=input_dtype)
+        target = torch.randn_like(input, dtype=dtype)
+        loss = F.mse_loss(input, target, reduction=reduction)
+
+        self.assertEqual(loss.shape, ())
+        self.assertEqual(loss.dtype, dtype)
+        # https://github.com/pytorch/pytorch/issues/198951
+        self.assertEqual(loss.untyped_storage().nbytes(), loss.element_size())
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)
+    @parametrize_test("reduction", [subtest(1, name="mean"), subtest(2, name="sum")])
+    @parametrize_test("out_shape", [(), (0,)])
+    def test_mse_loss_reduced_out_storage(self, device, dtype, reduction, out_shape):
+        input = torch.randn(4, 5, 6, device=device, dtype=dtype)
+        target = torch.randn_like(input)
+        out = torch.empty(out_shape, device=device, dtype=dtype)
+        result = torch.ops.aten.mse_loss.out(input, target, reduction, out=out)
+
+        self.assertIs(result, out)
+        self.assertEqual(out.shape, ())
+        self.assertEqual(out.untyped_storage().nbytes(), out.element_size())
+        expected = (input - target).square()
+        self.assertEqual(out, expected.mean() if reduction == 1 else expected.sum())
+
     @onlyAccelerator
     def test_mse_loss_error(self, device):
         i = torch.randn((10, 1), device=device)
@@ -12741,6 +12774,36 @@ class TestNNDeviceType(NNTestCase):
         expected_bf16 = torch.tensor([0., 0., 1.], device=device, dtype=dtype)
         self.assertEqual(a_bf16.grad, expected_bf16)
 
+    @onlyCPU
+    def test_rrelu_with_noise_out_smaller_than_input(self, device):
+        # A short out used to be written past its end and corrupt the heap.
+        x = torch.randn(64, device=device)
+        noise = torch.empty_like(x)
+        out = torch.empty(2, device=device)
+        torch._C._nn.rrelu_with_noise(x, noise, 0.1, 0.3, True, None, out=out)
+        self.assertEqual(out.shape, x.shape)
+
+    @onlyCPU
+    def test_rrelu_with_noise_noncontiguous_noise(self, device):
+        # A strided noise materializes, the same way a strided out does.
+        x = torch.randn(4, 16, device=device)
+        noise = torch.randn(4, 32, device=device)[:, ::2]
+        out = torch._C._nn.rrelu_with_noise(x, noise, 0.1, 0.3, True)
+        self.assertEqual(out, x * noise)
+
+    @onlyCPU
+    def test_rrelu_with_noise_expanded_noise(self, device):
+        # An expanded noise's storage holds one element; writing through its
+        # data pointer used to go past the storage. Distinct per-element noise
+        # values cannot land there, so the copy back rejects it.
+        x = torch.randn(64, device=device)
+        expanded_noise = torch.zeros(1, device=device).expand(64)
+        with self.assertRaisesRegex(
+            RuntimeError, "refers to a single memory location"
+        ):
+            torch._C._nn.rrelu_with_noise(x, expanded_noise, 0.1, 0.3, True)
+
+    @onlyCPU
     @expectedFailureMPS  # NotImplementedError: aten::rrelu_with_noise https://github.com/pytorch/pytorch/issues/77764
     def test_rrelu_bounds_validation(self, device):
         """Test RReLU bounds validation for finite and infinite values."""
