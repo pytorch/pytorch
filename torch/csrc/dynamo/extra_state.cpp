@@ -345,9 +345,17 @@ void lookup(
   CacheEntry* found = nullptr;
   bool guard_error = false;
 
-  for (const auto& entry : extra_state->precompile_entries) {
-    if (torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
-      result->code = entry.code;
+  // Ordered and reordered like the cache entries below, so a call that two
+  // variants both admit is served by the variant torch.compile would serve.
+  auto& precompile_entries = extra_state->precompile_entries;
+  for (auto it = precompile_entries.begin(); it != precompile_entries.end();
+       ++it) {
+    if (torch::dynamo::run_root_guard_manager(it->root_mgr, f_locals)) {
+      if (use_lru) {
+        precompile_entries.splice(
+            precompile_entries.begin(), precompile_entries, it);
+      }
+      result->code = it->code;
       return;
     }
   }
@@ -549,7 +557,17 @@ void _load_precompile_entry(
   ExtraState* extra = get_or_init_extra_state(code);
   auto entry =
       PrecompileEntry(std::move(guard_manager), std::move(dynamo_code));
-  extra->precompile_entries.push_back(std::move(entry));
+  // Install walks a frame's variants in compile order, so inserting each at
+  // the front reproduces the order record_compile_result left them in.
+  if (use_lru) {
+    extra->precompile_entries.push_front(std::move(entry));
+  } else {
+    extra->precompile_entries.push_back(std::move(entry));
+  }
+}
+
+bool _get_lru_cache() {
+  return use_lru;
 }
 
 bool _set_lru_cache(py::object boolean) {
