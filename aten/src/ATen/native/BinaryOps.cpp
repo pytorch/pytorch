@@ -1601,7 +1601,7 @@ Tensor ldexp(const Tensor& self, const Tensor& other) {
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
       isFloatingType(self.scalar_type()) &&
       ldexp_stub.is_device_supported(self.device().type())) {
-    Tensor result = at::empty_like(self);
+    Tensor result = at::empty({0}, self.options());
     return _ldexp_int_exponent(self, other, result);
   }
 
