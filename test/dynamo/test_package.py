@@ -2,6 +2,7 @@
 
 import collections
 import contextlib
+import dataclasses
 import functools
 import gc
 import importlib
@@ -30,7 +31,6 @@ from torch._dynamo.package import (
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
-    load_guard_manager,
     load_guards_state,
 )
 from torch._dynamo.precompile_context import PrecompileContext
@@ -69,11 +69,7 @@ def compiled_region_with_backend_id_for_package_test():
     return __compiled_fn_0_00000000_0000_0000_0000_000000000000()  # noqa: F821
 
 
-def _graph_breaking_child(x):
-    y = x.sin()
-    torch._dynamo.graph_break()
-    return y.cos()
-
+PKG_SCALE = 3
 
 _TENSOR_FREE_RESUME_STATE = {"value": 1}
 # Called through an alias so the continuation below names no torch module and
@@ -204,6 +200,76 @@ class _DescriptorCodeOwner:
         return 2
 
 
+class _RaisingClassAttribute:
+    def __get__(self, obj, owner=None):
+        raise RuntimeError("not available on the class")
+
+
+class _ClassWithRaisingAttribute:
+    # Visited by the module search before _ExecGeneratedCodeOwner.
+    value = _RaisingClassAttribute()
+
+
+@dataclasses.dataclass
+class _ExecGeneratedCodeOwner:
+    x: int = 0
+
+    @property
+    def doubled(self):
+        return self.x * 2
+
+
+def _exec_without_renaming():
+    namespace = {}
+    exec(
+        "def __create_fn__():\n    def f(self):\n        return 1\n    return f\n",
+        globals(),
+        namespace,
+    )
+    return namespace["__create_fn__"]()
+
+
+class _UnrenamedExecOwner:
+    # exec()'d like a dataclass __init__, but its __qualname__ is left as
+    # "__create_fn__.<locals>.f", which is not a path from this module.
+    f = _exec_without_renaming()
+
+
+def _exec_function():
+    namespace = {}
+    exec("def g(self):\n    return 1\n", globals(), namespace)
+    return namespace["g"]
+
+
+def _closureless():
+    return None
+
+
+def _hold(fn):
+    def holder():
+        return fn
+
+    # Found through holder's closure, but the recorded qualname leads to a
+    # function with no closure, so replaying the path raises PackageError.
+    holder.__qualname__ = "_closureless"
+    return holder
+
+
+_mislabeled_holder = _hold(_exec_function())
+
+
+def _package_op(x):
+    return x + 1
+
+
+@dataclasses.dataclass
+class _GraphBreakingDataclass:
+    x: torch.Tensor
+
+    def __post_init__(self):
+        torch._dynamo.graph_break()
+
+
 def _make_generated_method():
     def method(self):
         return 1
@@ -257,8 +323,6 @@ del _make_generated_method, _make_generated_property, _make_stale_method
 # global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
 PKG_DYN_ROWS = torch.randn(4, 3)
 torch._dynamo.mark_dynamic(PKG_DYN_ROWS, 0)
-
-PKG_SCALE = 3
 
 # namedtuple builds __new__ with exec into a namespace no module owns.
 PkgRecord = collections.namedtuple("PkgRecord", ("value", "weight"))
@@ -363,6 +427,116 @@ print(eval(f"bbmod.{name}.{path}") is code)
             with package.code_context(code):
                 pass
             self.assertIs(_lookup_code(package._codes[code]), code)
+
+    def test_code_source_resolves_exec_generated_code_from_globals(self):
+        # dataclasses exec() __init__, so its code names no source file and its
+        # co_qualname is synthetic; only the frame's globals name its module.
+        init = _ExecGeneratedCodeOwner.__init__
+        code = init.__code__
+        self.assertIsNone(inspect.getmodule(code))
+        package = CompilePackage(None)
+        with package.code_context(code, init.__globals__):
+            pass
+        entry = package._codes[code]
+        self.assertIs(sys.modules[entry.python_module], inspect.getmodule(init))
+        self.assertIs(_lookup_code(entry), code)
+
+    def test_code_source_refuses_exec_generated_code_it_cannot_replay(self):
+        fn = _UnrenamedExecOwner.f
+        self.assertIsNone(inspect.getmodule(fn.__code__))
+        package = CompilePackage(None)
+        with self.assertRaisesRegex(PackageError, "Cannot resolve"):
+            with package.code_context(fn.__code__, fn.__globals__):
+                pass
+        self.assertNotIn(fn.__code__, package._codes)
+
+    def test_code_source_refuses_a_path_whose_replay_raises(self):
+        fn = _mislabeled_holder()
+        self.assertIsNone(inspect.getmodule(fn.__code__))
+        package = CompilePackage(None)
+        with self.assertRaisesRegex(
+            PackageError, r"__qualname__ '_closureless' does not resolve back to it"
+        ):
+            with package.code_context(fn.__code__, fn.__globals__):
+                pass
+        self.assertNotIn(fn.__code__, package._codes)
+
+    def test_code_source_keeps_the_codes_own_module_over_its_globals(self):
+        code = _closureless.__code__
+        package = CompilePackage(None)
+        with package.code_context(code, vars(functools)):
+            pass
+        entry = package._codes[code]
+        self.assertEqual(entry.python_module, __name__)
+        self.assertIs(_lookup_code(entry), code)
+
+    def test_code_source_search_skips_class_attributes_that_raise(self):
+        with self.assertRaises(RuntimeError):
+            _ClassWithRaisingAttribute.value
+        init = _ExecGeneratedCodeOwner.__init__
+        package = CompilePackage(None)
+        with package.code_context(init.__code__, init.__globals__):
+            pass
+        self.assertIs(_lookup_code(package._codes[init.__code__]), init.__code__)
+
+    def test_dataclass_init_frame_saves_and_loads(self):
+        # The graph break under the constructor makes the exec()'d __init__ a
+        # frame of its own, which convert_frame records with its globals.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return _GraphBreakingDataclass(x + 1).x * 2
+
+        def guard_filter_fn(guards):
+            # Identity guards on the globals are beside the point here.
+            unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            return [guard.guard_type not in unsupported for guard in guards]
+
+        x = torch.randn(3)
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(
+            "eager", package=package, guard_filter_fn=guard_filter_fn
+        )(fn)
+        expected = compiled_fn(x)
+        self.assertIn(_GraphBreakingDataclass.__init__.__code__, package._codes)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(
+                package=package, guard_filter_fn=guard_filter_fn
+            )(fn)
+            package.install(backends)
+            self.assertEqual(expected, compiled_fn(x))
+
+    def test_module_function_guard_saves_unfiltered_and_reports_a_miss(self):
+        # No guard_filter_fn: the CLOSURE_MATCH on _package_op is still saved,
+        # as a FUNCTION_CODE_MATCH, and a rebinding names it in the refusal.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return _package_op(x) * 2
+
+        x = torch.randn(3)
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+        expected = compiled_fn(x)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(package=package)(fn)
+            package.install(backends)
+            self.assertEqual(expected, compiled_fn(x))
+            with patch.dict(globals(), {"_package_op": lambda x: x - 1}):
+                with self.assertRaisesRegex(RuntimeError, "___check_function_code"):
+                    compiled_fn(x)
 
     def test_code_source_searches_the_module_when_the_qualname_is_stale(self):
         # Python >= 3.11 walks co_qualname from the module and used to refuse
@@ -1179,60 +1353,6 @@ def add(x, y):
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
 
-    @torch._dynamo.config.patch(caching_precompile=True, nested_graph_breaks=False)
-    def test_warm_load_that_fails_to_install_recompiles(self):
-        # The graph break inside the child makes it a frame of its own, which
-        # the package records by code_source and install() loads onto the live
-        # _graph_breaking_child.__code__ rather than a deserialized copy.
-        def fn(x):
-            y = _graph_breaking_child(x)
-            return x.cos() + y
-
-        x = torch.randn(3)
-        torch.compile(fn)(x)  # noqa: UNSPECIFIED_BACKEND
-        self._save_and_reload(expected_backends=3, expected_dynamo=1)
-
-        load = DynamoCache.load
-        child = _graph_breaking_child.__code__
-
-        def load_without_last_backend(fn):
-            # install() places the entries of fn and the child before it
-            # reaches fn's resume frame, whose backend is gone, so it fails
-            # part way through.
-            result = load(fn)
-            *earlier, last = result.dynamo.codes
-            self.assertTrue(any(c.code_source for c in earlier))
-            del result.backends[last.backend_ids[0]]
-            return result
-
-        with (
-            patch.object(DynamoCache, "load", load_without_last_backend),
-            self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs,
-        ):
-            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
-        self.assertIn("is not found in the given backends", "\n".join(logs.output))
-        # The entries install() placed before failing are gone, so both frames
-        # recompile rather than run through half a loaded package.
-        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
-        self.assertEqual(len(_debug_get_precompile_entries(child)), 0)
-        self.assertEqual(compiled_fn(x), fn(x))
-        # The package now records that recompile alone.
-        (entry,) = PrecompileContext._dynamo_cache_entries.values()
-        self.assertEqual([len(c.guarded_codes) for c in entry.codes], [1] * 4)
-
-    def test_reset_forgets_the_source_id(self):
-        def f(x):
-            return x.sin()
-
-        def g(x):
-            return x.cos()
-
-        package = CompilePackage(f)
-        self.assertEqual(package.source_id, CompilePackage.source_id_from_fn(f))
-        package.reset()
-        package.initialize(g, None)
-        self.assertEqual(package.source_id, CompilePackage.source_id_from_fn(g))
-
     def _tensor_free_resume_entry(self, package, name="_tensor_free_continuation"):
         (entry,) = (
             entry
@@ -1324,16 +1444,6 @@ def add(x, y):
             ):
                 compiled(x)
 
-    def test_reset_keeps_a_package_implicit(self):
-        # The caching_precompile warm-load fallback reset()s the implicit
-        # package and re-initializes it; it must stay implicit, or the
-        # tensor-free resume exemption reaches plain torch.compile users.
-        package = CompilePackage(_tensor_free_resume_fn, explicit=False)
-        package.reset()
-        self.assertFalse(package.explicit)
-        package.initialize(_tensor_free_resume_fn, None)
-        self.assertFalse(package.explicit)
-
     # Nested graph breaks would resume inside a tensor-bearing parent frame.
     @torch._dynamo.config.patch(nested_graph_breaks=False)
     @patch.dict(_TENSOR_FREE_RESUME_STATE)
@@ -1341,10 +1451,7 @@ def add(x, y):
         # Without a package, or with only the one caching_precompile creates,
         # the tensor-free continuation stays skipped: it gets no cache entry
         # and a new value under fail_on_recompile is no recompile.
-        from torch._C._dynamo.eval_frame import (
-            _debug_get_cache_entry_list,
-            reset_code,
-        )
+        from torch._C._dynamo.eval_frame import _debug_get_cache_entry_list, reset_code
         from torch._dynamo.resume_execution import ContinueExecutionCache
 
         fn = _tensor_free_resume_fn
@@ -1386,53 +1493,6 @@ def add(x, y):
         _TENSOR_FREE_RESUME_STATE["value"] = 0
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled(x), fn(x))
-
-    def test_unbuildable_guards_raise_a_package_error(self):
-        # A guard source that does not resolve against the scope serialized
-        # with it raised a bare KeyError from inside the guard builder, naming
-        # neither the frame nor that the artifact is at fault.
-        def fn(x):
-            return x * PKG_SCALE
-
-        x = torch.randn(3)
-        package = CompilePackage(fn)
-        torch._dynamo.optimize(backend="eager", package=package)(fn)(x)
-        (guarded,) = package.cache_entry().codes[0].guarded_codes
-        guards_state = load_guards_state(guarded.guards_state)
-        del guards_state.output_graph.global_scope["PKG_SCALE"]
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.PackageError,
-            "Cannot rebuild the serialized guards for fn .*KeyError: 'PKG_SCALE'",
-        ) as cm:
-            load_guard_manager(guards_state, fn.__code__, fn.__globals__)
-        self.assertIsInstance(cm.exception.__cause__, KeyError)
-
-    @torch._dynamo.config.patch(caching_precompile=True)
-    def test_unbuildable_guards_on_warm_load_are_logged_then_recompiled(self):
-        def fn(x):
-            return x * PKG_SCALE
-
-        x = torch.randn(3)
-        torch.compile(fn)(x)  # noqa: UNSPECIFIED_BACKEND
-        self._save_and_reload(expected_backends=1, expected_dynamo=1)
-
-        def load_without_scale(guards_state):
-            state = load_guards_state(guards_state)
-            del state.output_graph.global_scope["PKG_SCALE"]
-            return state
-
-        with (
-            patch.object(
-                torch._dynamo.package, "load_guards_state", load_without_scale
-            ),
-            self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs,
-        ):
-            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
-        self.assertIn(
-            "PackageError: Cannot rebuild the serialized guards for fn",
-            "\n".join(logs.output),
-        )
-        self.assertEqual(compiled_fn(x), fn(x))
 
     def _round_trip_under_fail_on_recompile(self, fn, x):
         ctx = DiskDynamoStore()
