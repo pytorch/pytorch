@@ -1632,8 +1632,13 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         with device_module.device(0):
             compiled(torch.zeros(1, device=f"{device_type}:0"))
         with device_module.device(1):
+            # f reads x and writes its result on a side stream that is not
+            # ordered with the default stream, so sync on both sides.
             x = torch.zeros(1, device=f"{device_type}:1")
-            self.assertEqual(compiled(x), f(x))
+            device_module.synchronize()
+            actual, expected = compiled(x), f(x)
+            device_module.synchronize()
+            self.assertEqual(actual, expected)
 
         self.assertEqual(cnt.frame_count, 1)
 
