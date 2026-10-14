@@ -7489,12 +7489,14 @@ def sample_inputs_cutedsl_quantize_tensor_dual(op_info, device, dtype, requires_
     from torch.nn import functional as F
 
     input = make_tensor((160, 192), device=device, dtype=dtype, requires_grad=False)
-    yield SampleInput(input, kwargs={
+    recipe = {
         "qdata_dtype": torch.float8_e4m3fn,
         "scaling_algorithm": F.ScalingAlgorithm.MXFP_E8M0_RU,
         "scaling_type": F.ScalingType.BlockWise1x32,
         "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4,
-    })
+    }
+    yield SampleInput(input, kwargs=recipe)
+    yield SampleInput(input, kwargs={**recipe, "scaling_type_use_square_block_size": True})
 
 
 def _cutedsl_linear_cross_entropy_eligible(sample):

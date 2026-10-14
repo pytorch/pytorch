@@ -7455,9 +7455,9 @@ def quantize_tensor_dual(
         scaling_type_use_square_block_size (bool, optional): When ``True``,
           modify the size of the local region corresponding to a single scale
           value to be a square (for example, modify ``1x32`` to be ``32x32``).
-          Note that the output scale size is still controlled by ``scaling_type``
-          and ``swizzle_type``. Note: currently only ``False`` is supported.
-          Default: ``False``.
+          This applies to both dim-k and dim-m scales; their output layouts
+          are still controlled by ``scaling_type`` and ``swizzle_type``.
+          Currently requires ``RoundingMode.RTNE``. Default: ``False``.
         qdata_rounding_mode (RoundingMode, optional): Round qdata to nearest,
           ties to even (``RTNE``), or use stochastic rounding (``STOCHASTIC``).
           Default: ``RoundingMode.RTNE``.
@@ -7488,6 +7488,10 @@ def quantize_tensor_dual(
         ... )
         >>> # mxfp8 dim-km with swizzled scales
         >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(x, **mxfp8_kwargs)
+        >>> # mxfp8 dim-km with scales shared over 32x32 blocks
+        >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(
+        ...     x, **mxfp8_kwargs, scaling_type_use_square_block_size=True
+        ... )
     """
     outputs = torch.ops.aten._quantize_tensor_dual.default(
         input,

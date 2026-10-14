@@ -328,7 +328,7 @@ class _BlockscaledTma:
                     qdata_m, scale_m = _blockscaled_quantize_group(
                         vm,
                         scale_group_size,
-                        False,
+                        is_square_scaling,
                         rounding_variant,
                         sr_operation_block,
                         sr_logical_block_m,
