@@ -1062,7 +1062,6 @@ struct AttentionKernel {
                 kKeysPerBlock;
           }
 
-          // int first_key_block = 0;
           MM1::Mma::drain_cp_asyncs();
           DISPATCH_BOOL(
               iter_key_start == first_key, kIsFirst, ([&] {

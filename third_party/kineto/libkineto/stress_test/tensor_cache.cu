@@ -138,7 +138,7 @@ void generate_tensor_cache(tensor_cache_args cache_args) {
   // Number of actual pairs
   num_tensor_pairs = 0;
 
-  // At firs the pool is empty
+  // At first the pool is empty
   sz_memory_pool_KB = 0;
 
   // Pre-allocate num_pairs_max and if num_tensor_pairs comes lower, well,

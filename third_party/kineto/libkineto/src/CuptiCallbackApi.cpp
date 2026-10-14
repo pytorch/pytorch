@@ -39,7 +39,7 @@ constexpr uint32_t MAX_CUPTI_CALLBACK_ID_ALL = 0xffffffff;
  *                     -> cb id n -> std::list of callbacks
  *   <callback domain1> |
  *                    ...
- *  CallbackTable is the finaly table type above
+ *  CallbackTable is the final table type above
  *  See type declrartions in header file.
  */
 
@@ -166,7 +166,7 @@ void CuptiCallbackApi::initCallbackApi() {
       nullptr));
 
   // TODO: Remove temporarily to work around static initialization order issue
-  // betweent this and GLOG.
+  // between this and GLOG.
   // if (lastCuptiStatus_ != CUPTI_SUCCESS) {
   //   LOG(INFO) << "Failed cuptiSubscribe, status: " << lastCuptiStatus_;
   // }
