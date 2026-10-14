@@ -629,10 +629,8 @@ def foreach_reduce(
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
-    shard_dims = [fsdp_param.fsdp_placement.dim for fsdp_param in fsdp_params]
-    padded_sharded_numels = [
-        fsdp_param.padded_sharded_param_size.numel() for fsdp_param in fsdp_params
-    ]
+    shard_dims = [p.fsdp_placement.dim for p in fsdp_params]
+    padded_sharded_numels = [p.padded_sharded_param_size.numel() for p in fsdp_params]
     # See Note [Reduce-scatter input fn]
     copy_in = prepare_reduce_scatter_inputs(
         unsharded_grads, shard_dims=shard_dims, world_size=world_size
