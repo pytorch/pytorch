@@ -1097,6 +1097,40 @@ def add(x, y):
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
 
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_warm_load_that_fails_to_install_recompiles(self):
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return x.cos() + y
+
+        x = torch.randn(3)
+        torch.compile(fn)(x)  # noqa: UNSPECIFIED_BACKEND
+        self._save_and_reload(expected_backends=2, expected_dynamo=1)
+
+        load = DynamoCache.load
+
+        def load_without_resume_backend(fn):
+            # install() places fn's own entry before it reaches the resume
+            # frame whose backend is gone, so it fails part way through.
+            result = load(fn)
+            del result.backends[result.dynamo.codes[-1].backend_ids[0]]
+            return result
+
+        with (
+            patch.object(DynamoCache, "load", load_without_resume_backend),
+            self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs,
+        ):
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertIn("is not found in the given backends", "\n".join(logs.output))
+        self.assertEqual(compiled_fn(x), fn(x))
+        # The entry install() placed on fn before failing is gone, so fn was
+        # recompiled rather than run through half a loaded package, and the
+        # package now records that recompile alone.
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        self.assertEqual([len(c.guarded_codes) for c in entry.codes], [1, 1])
+
     def test_import_source_unpickle_without_trace(self):
         # Deserializing an ImportSource happens at torch.compile() time with no
         # active TracingContext (e.g. precompile warm-load). Reconstructing the
