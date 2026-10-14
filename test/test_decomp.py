@@ -1199,6 +1199,28 @@ class DecompOneOffTests(TestCase):
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
+    def test_softshrink_backward_lambd_range(self, device):
+        # Like the kernel, reject finite lambd outside the computation dtype's
+        # range, but accept inf and nan.
+        from torch._decomp.decompositions import softshrink_backward
+
+        for dtype in (torch.float16, torch.bfloat16, torch.float32):
+            grad = torch.ones(3, device=device, dtype=dtype)
+            x = torch.tensor([0.0, 1.0, float("nan")], device=device, dtype=dtype)
+            limit = torch.finfo(dtype).max
+            for lambd in (limit, -limit, float("inf"), float("nan")):
+                self.assertEqual(
+                    softshrink_backward(grad, x, lambd),
+                    torch.ops.aten.softshrink_backward(grad, x, lambd),
+                )
+            for lambd in (1e40, -1e40, limit * (1 + 2**-20)):
+                with self.assertRaisesRegex(RuntimeError, "overflow"):
+                    torch.ops.aten.softshrink_backward(grad, x, lambd)
+                with self.assertRaisesRegex(RuntimeError, "overflow"):
+                    softshrink_backward(grad, x, lambd)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
     def test_contiguous_softmax(self, device):
         size = (2, 4, 3, 3)
         stride = (9, 18, 3, 1)

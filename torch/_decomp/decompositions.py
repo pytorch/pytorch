@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+import math
 import numbers
 import operator
 import sys
@@ -248,6 +249,14 @@ def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tens
     # lambd rounded to it
     dtype = torch.result_type(grad_output, self)
     grad_output, self = grad_output.to(dtype), self.to(dtype)
+    if not isinstance(lambd, torch.SymFloat):
+        # The kernel's lambd.to<scalar_t>() rejects finite values out of range.
+        # A symbolic lambd was already range-checked by the forward.
+        limit = torch.finfo(dtype).max
+        torch._check(
+            not (math.isfinite(lambd) and abs(lambd) > limit),
+            lambda: f"value cannot be converted to type {dtype} without overflow",
+        )
     if dtype in (torch.bfloat16, torch.float16):
         lambd = torch.scalar_tensor(lambd, dtype=dtype, device=self.device)  # type: ignore[assignment]
     return torch.where((self >= -lambd) & (self <= lambd), 0, grad_output)
