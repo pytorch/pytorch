@@ -231,21 +231,19 @@ struct threshold_functor {
   }
 };
 
-// THRESHOLD_T must match at::opmath_type on the host, which, unlike
-// c10::metal::opmath_t, does not widen small integer types
-#define REGISTER_THRESHOLD_OP(T, THRESHOLD_T)                  \
-  typedef ThresholdParams<T, THRESHOLD_T> ThresholdParams_##T; \
+#define REGISTER_THRESHOLD_OP(T)                  \
+  typedef ThresholdParams<T> ThresholdParams_##T; \
   REGISTER_BINARY_ALPHA_OP(threshold, T, ThresholdParams_##T, T)
 
-REGISTER_THRESHOLD_OP(float, float);
-REGISTER_THRESHOLD_OP(half, float);
-REGISTER_THRESHOLD_OP(bfloat, float);
-REGISTER_THRESHOLD_OP(long, long);
-REGISTER_THRESHOLD_OP(int, int);
-REGISTER_THRESHOLD_OP(short, short);
-REGISTER_THRESHOLD_OP(char, char);
-REGISTER_THRESHOLD_OP(uchar, uchar);
-REGISTER_THRESHOLD_OP(bool, bool);
+REGISTER_THRESHOLD_OP(float);
+REGISTER_THRESHOLD_OP(half);
+REGISTER_THRESHOLD_OP(bfloat);
+REGISTER_THRESHOLD_OP(long);
+REGISTER_THRESHOLD_OP(int);
+REGISTER_THRESHOLD_OP(short);
+REGISTER_THRESHOLD_OP(char);
+REGISTER_THRESHOLD_OP(uchar);
+REGISTER_THRESHOLD_OP(bool);
 
 struct prelu_functor {
   template <typename T>

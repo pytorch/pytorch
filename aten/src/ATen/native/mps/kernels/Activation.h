@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/metal/common.h>
 
 template <typename T>
 struct ELUParams {
@@ -22,9 +23,8 @@ struct SoftplusParams {
   float threshold;
 };
 
-// threshold is compared at host opmath precision (at::opmath_type), as on CPU
-template <typename T, typename ThresholdT>
+template <typename T>
 struct ThresholdParams {
-  ThresholdT threshold;
+  c10::metal::opmath_t<T> threshold;
   T value;
 };

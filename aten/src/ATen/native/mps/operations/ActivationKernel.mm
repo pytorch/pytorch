@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
-#include <ATen/OpMathType.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Activation.h>
@@ -102,8 +101,7 @@ static void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& bet
 
 static void threshold_kernel(TensorIteratorBase& iter, const Scalar& threshold, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND3(c10::kHalf, c10::kBFloat16, c10::kBool, iter.common_dtype(), "threshold_mps", [&]() {
-    using opmath_t = at::opmath_type<scalar_t>;
-    ThresholdParams<scalar_t, opmath_t> params{threshold.to<opmath_t>(), value.to<scalar_t>()};
+    ThresholdParams<scalar_t> params{threshold.to<c10::metal::opmath_t<scalar_t>>(), value.to<scalar_t>()};
     lib.exec_binary_kernel_with_params(
         iter,
         "threshold",
