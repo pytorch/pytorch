@@ -2938,7 +2938,6 @@ fake_backward_mps_xfails = {
         ("nn.functional.max_unpool2d", "grad"),
         ("nn.functional.multi_margin_loss", ""),
         ("nn.functional.multilabel_margin_loss", ""),
-        ("nn.functional.multilabel_soft_margin_loss", ""),
         ("nn.functional.pdist", ""),
         ("nn.functional.rrelu", ""),
         ("normal", "number_mean"),
