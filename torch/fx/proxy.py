@@ -169,6 +169,22 @@ _COPY_META_FIELDS = [
 ]
 
 
+# PyTorch source file suffixes that should be excluded from recorded stack
+# traces. Used by ``_filter_traceback_frames`` and ``_find_user_frame`` so that
+# recorded traces point to user code rather than PyTorch internals.
+_FX_INTERNAL_FILE_SUFFIXES = [
+    "torch/fx/proxy.py",
+    "torch/fx/_symbolic_trace.py",
+    "torch/fx/experimental/proxy_tensor.py",
+    "torch/_ops.py",
+    "torch/_tensor.py",
+    "torch/utils/_python_dispatch.py",
+    "torch/_prims_common/wrappers.py",
+    "torch/_refs/__init__.py",
+    "torch/_refs/nn/functional/__init__.py",
+    "torch/utils/_stats.py",
+]
+
 # Set of (filename, co_name) pairs registered as user-code anchors. Frames
 # matching any entry are preserved by ``_filter_traceback_frames`` when
 # ``_record_forward_stack_traces_only`` is True. Populated via
@@ -322,6 +338,12 @@ class TracerBase:
             if first_forward == -1:
                 user_frames: list[traceback.FrameSummary] = []
 
+        user_frames = [
+            frame
+            for frame in user_frames
+            if not any(frame.filename.endswith(f) for f in _FX_INTERNAL_FILE_SUFFIXES)
+        ]
+
         from torch.fx.experimental.symbolic_shapes import uninteresting_files
 
         user_frames = [
@@ -383,22 +405,11 @@ class TracerBase:
         # the user code during tracing.
         frame = inspect.currentframe()
 
-        pt_files = [
-            "torch/fx/proxy.py",
-            "torch/fx/_symbolic_trace.py",
-            "torch/fx/experimental/proxy_tensor.py",
-            "torch/_ops.py",
-            "torch/_tensor.py",
-            "torch/utils/_python_dispatch.py",
-            "torch/_prims_common/wrappers.py",
-            "torch/_refs/__init__.py",
-            "torch/_refs/nn/functional/__init__.py",
-            "torch/utils/_stats.py",
-        ]
         while frame:
             frame = frame.f_back
             if frame and all(
-                not frame.f_code.co_filename.endswith(file) for file in pt_files
+                not frame.f_code.co_filename.endswith(file)
+                for file in _FX_INTERNAL_FILE_SUFFIXES
             ):
                 break
 
