@@ -434,16 +434,12 @@ void ldl_factor_kernel(
         return;
 }
     default:
-    // By default use cusolver if available and magma otherwise.
-    // If cusolver and magma 2.5.4+ are both available and hermitian=true,
-    // call magma for complex inputs
-#ifdef USE_LINALG_SOLVER
-#if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 20504)
-      if (LD.is_complex() && hermitian) {
-        return ldl_factor_magma(
-            LD, pivots, info, upper, hermitian);
+    // By default the custom kernel takes hermitian=true,
+    // and the rest goes to cusolver if available and to magma otherwise.
+      if (hermitian) {
+        return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
       }
-#endif
+#ifdef USE_LINALG_SOLVER
     { ldl_factor_cusolver(
       LD, pivots, info, upper, hermitian);
       return;

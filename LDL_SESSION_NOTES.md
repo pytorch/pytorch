@@ -26,26 +26,25 @@ the LAPACK residual, section 7).
 
 ## 1. READ THIS FIRST — how to actually reach the kernel
 
-The custom kernel is **not** used under the default linalg backend. It lives
-under `case LinalgBackend::Cusolver` in `ldl_factor_kernel`
-(`aten/src/ATen/native/cuda/linalg/BatchLinearAlgebra.cpp`, ~line 575) and is
-gated on `hermitian`:
+`ldl_factor_kernel` (`aten/src/ATen/native/cuda/linalg/BatchLinearAlgebra.cpp`)
+sends `hermitian=True` to the custom kernel under the **default** and the
+**cusolver** backends; the `magma` backend goes to MAGMA and `hermitian=False`
+(real symmetric or complex symmetric) to cuSOLVER (MAGMA when built without it):
 
 ```python
-torch.backends.cuda.preferred_linalg_library("cusolver")   # REQUIRED
 torch.linalg.ldl_factor_ex(A, hermitian=True)              # hermitian=True REQUIRED
 ```
 
-With the default backend, `complex && hermitian` goes to **MAGMA** and
-everything else to **cuSOLVER**, so the custom kernel never runs.
-
-This cost hours in the first session: a full green test suite was reported as
-validating the kernel when it was in fact exercising MAGMA. `test_ldl_custom.py`
-forces the backend in `setUp()`.
+The default routing was added on 2026-10-14 (section 5). Before it,
+the default backend sent `complex && hermitian` to **MAGMA** and everything else
+to **cuSOLVER**, so the kernel was reached only with
+`preferred_linalg_library("cusolver")`. That cost hours in the first session: a
+full green test suite was reported as validating the kernel when it was in fact
+exercising MAGMA. `test_ldl_custom.py` still pins `cusolver` in `setUp()`, so it
+reaches the kernel either way, and `test_dispatch` checks every route with the
+profiler (kernel name `ldl_diagonal_panel_fused_kernel`).
 
 The gate is on `hermitian` only; **real dtypes reach the kernel too**.
-`hermitian=False` (real symmetric or complex symmetric) goes to cuSOLVER, not
-to the custom kernel.
 
 The kernel and everything around it is in
 `aten/src/ATen/native/cuda/linalg/LURecBlas3Kernel.cu`
@@ -219,16 +218,24 @@ at the `info` update in the kernel records this; there is deliberately **no
 test** that requires it. `test_zero_row_col_completes` requires only completion
 and an in-range `info`.
 
-**Dispatch (intended, not implemented).** `hermitian=True` should go to the custom
-kernel under both the default and the `cusolver` backends, with `magma` still
-going to MAGMA. Today only the `cusolver` case is wired (the `// DEBUG` comment is
-gone; the odd brace formatting is upstream's).
+**Dispatch. Done (2026-10-14).** `hermitian=True` goes to the custom kernel under
+both the default and the `cusolver` backends, `magma` still goes to MAGMA, and
+`hermitian=False` to cuSOLVER (MAGMA without it). The default case used to send
+complex `hermitian=True` to MAGMA 2.5.4+; that block is gone. Both routes call
+`ldl_factor_blas3_kernel(LD, pivots, info, hermitian)` identically, so the suite
+is not run twice: it stays pinned to `cusolver`, and `test_dispatch` checks all
+routes (default/cusolver/magma x hermitian x dtype) for the kernel name in the
+profiler. (The odd brace formatting in that switch is upstream's.)
 
 **`check_errors=True` on singular input** raises
 `INTERNAL ASSERT FAILED ... Unknown error code: 1` from
 `aten/src/ATen/native/BatchLinearAlgebra.cpp:1679`. **Reproduces on CPU** — a
-pre-existing gap in the error mapping, unrelated to this kernel. Worth reporting
-upstream separately. Not pinned by a test (it is a bug, not a contract).
+pre-existing gap in the error mapping, unrelated to this kernel. Not pinned by a
+test (it is a bug, not a contract). **Already known upstream, nothing posted:**
+issue pytorch/pytorch#83624 (open, "Unhelpful error message from
+torch.linalg.ldl_factor") and draft PR #197234 (open, "Fix INTERNAL ASSERT in
+_linalg_check_errors for ldl_factor"). Related: #172825 (closed draft, "[MAGMA]
+ldl_factor: deprecate magma backend and dispatch to cusolver unconditionally").
 
 **Not testable on either machine:** the cooperative cap and the
 `cudaErrorCooperativeLaunchTooLarge` fallback in the real library (see section
@@ -239,7 +246,7 @@ upstream separately. Not pinned by a test (it is a bug, not a contract).
   151-303 GB.
 - The fallback could be forced with a green context with few SMs
   (`torch.cuda.green_contexts`). That needs `cuda.bindings`, which is not installed
-  in the `kernel` env. GB200 itself (sm_100, its panel widths) is now covered by the
+  in the `kernel` env on either machine (H100 checked 2026-10-14). GB200 itself (sm_100, its panel widths) is now covered by the
   full suite.
 
 **Resolved since the first notes:** `n = 1`; batching location; the "accuracy gap
@@ -297,14 +304,27 @@ and restores it in `tearDown`.
   `n = 0/1` with all batch shapes incl. empty batch dims.
 - All 230 compositions of `n` into 1s and 2s for n=2..10, with the achieved pivot
   layout **asserted**; ~90% 2×2 configurations at n=150..513.
-- Batch shapes through `(2,2,2)`, non-contiguous batches (strided, permuted),
-  batched `lda > n`, `out=`, `nrhs`, non-default stream, input on another GPU,
+- Batch shapes through `(2,2,2)`, non-contiguous batches (strided, permuted,
+  expanded with stride 0), lazy conj/neg views (`test_lazy_views`, bitwise equal
+  to the resolved input), batched `lda > n`, `out=`, `nrhs`, non-default stream,
+  input on another GPU,
   CUDA-graph capture (must fail cleanly or reproduce eager), determinism (also
   under concurrent GPU load), half/bfloat16 (`NotImplementedError`).
 - NaN/Inf input (column, single entry, all) through the real library.
 - Only the lower triangle is read (junk in the upper triangle and in the
   imaginary part of a Hermitian diagonal must not matter), and a Hermitian `D`
   has a real diagonal.
+- **Pivot encoding:** every test that checks pivots (`_check` and the singular /
+  non-finite / cabs1 tests) uses `_pivot_encoding_error`, the full LAPACK lower
+  encoding (1x1: `k + 1 <= p <= n`; 2x2: equal `-p` pair with `p >= k + 2`), not
+  just the range.
+- **Upper triangle of the output.** The front-end `tril_out`s the input into `LD`
+  before dispatch, so every backend starts from zeros there. LAPACK and cuSOLVER
+  leave them; MAGMA writes there from n ~ 300 on; the custom kernel leaves
+  working values there at every n (max |upper| 3.5 at n = 5, 48 at n = 300).
+  Decided (2026-10-14): leave it, since `ldl_solve` reads only the lower triangle,
+  which `test_solve_ignores_upper_triangle` pins (NaN in the upper triangle gives
+  a bitwise identical solve, on CPU and on CUDA for real dtypes).
 - **Last column:** zero last pivot sets `info = n` (sizes 2..4100, all dtypes);
   `info` keeps an earlier zero; tiny nonzero last pivot is not singular; per-batch
   `info`; layouts with a last 1×1 or 2×2 pivot and 2×2 blocks straddling every
@@ -353,7 +373,8 @@ at most 1.2x. The exception is `integer_valued`: there, Bunch-Kaufman LDL sits a
 1.3x above LU from n ≈ 8000 on (1.33 at 8193, 1.30 at 40000, 1.36 at 56000), and CPU
 LAPACK's LDL does the same within 0.03. That is the algorithm, not the kernel, and
 it leaves `test_cooperative_panel`'s integer_valued n=8193 case with ~13% headroom
-under the 1.5 factor (`agent_space/ratio_trend.py`). The bound still has teeth: multiplying `LD` by `1 + 30·eps·randn`
+under the 1.5 factor (`agent_space/ratio_trend.py`). On H100 (MKL) the same case is
+at 0.5-0.6x LU (10.3, residual factor), so the 1.3x is machine-dependent. The bound still has teeth: multiplying `LD` by `1 + 30·eps·randn`
 pushes the residual 5-10x over it at every size (`agent_space/bound_mutation.py`).
 The earlier tolerances (`1000·n·eps` with max-norms, and `max(50·cpu, 200·n·eps)`)
 were ad hoc and 3 orders of magnitude loose; they are gone.
@@ -473,6 +494,9 @@ State at the end of the GB200 session:
   `test_nonfinite_imag_diagonal_is_ignored`) and `f0e4a2b` (these TODOs).
 - **Committed later still:** `e27fc3b`, `353ffe0` (`at::imag` instead of `.imag()`,
   10.1.2/10.1.3). The working tree was clean on the H100 box after that.
+- **H100 session, 2026-10-14:** `8263c00` (10.1.1), `9a57b5f` and `c15de04` (10.2),
+  then 10.3: default dispatch, the kernel NOTE on subnormal and near-overflow 2x2
+  pivots, `test_cabs1_overflow`, `test_peak_memory`, `test_dispatch`.
 - `unittest -k` with a `*` matches the full test id, so a pattern needs a leading
   `*`: `-k "*test_n1_*cuda*"`. Several `-k` flags are OR-ed.
 
@@ -593,21 +617,75 @@ Missing:
 ### 10.3 Missing tests: other
 
 - **Subnormal input** (e.g. f32 entries ~1e-40). Compare with CPU in case
-  anything on the GPU path (cuBLAS GEMM?) flushes denormals.
+  anything on the GPU path (cuBLAS GEMM?) flushes denormals. **Decided: not
+  supported, documented by a NOTE above the L21 update in the kernel.** Findings:
+  - No sign of flushing on the GPU. At the subnormal boundary (1e-38 f32, 1e-306
+    f64) CUDA matches CPU. Deep in it (1e-40, 1e-43, 1e-310, 1e-320) both give a
+    mostly non-finite LD: once a pivot is below 1 / max, `t / d01`, `t / d10`
+    and the complex `/= D11` overflow. CPU calls non-rook `?sytrf`/`?hetrf`,
+    whose `?lasyf`/`?lahef` form `R1 = ONE / A(K,K)` and `D21 = T / D21` the
+    same way (and `?sytrs` forms 1 / D too, so the CPU solve is NaN as well).
+  - `c10::complex` division is Smith's algorithm (numpy's variant), but it forms
+    `scl = 1 / (c + d * rat)` and multiplies by it, so it overflows for a
+    subnormal divisor even when the quotient is representable.
+  - LAPACK's fix lives in `?lasyf_rook`/`?lahef_rook` (3.5+): `SFMIN =
+    DLAMCH('S')`; 1x1 multiplies by the reciprocal only if `|D| >= SFMIN`, else
+    divides element-wise; 2x2 divides inside the loop,
+    `T*((D11*W(J,KW-1) - W(J,KW)) / D21)`. The complex `/` there is the
+    compiler's: gfortran (`-fcx-fortran-rules`, `expand_complex_div_wide`) does
+    Smith's and divides by the denominator.
+  - A rook-style fix was prototyped and works: 2x2 loop
+    `div(t * (r1 * l0 - l1), d01)`, r0/r1 and the 1x1 column through a Smith
+    `ldl::div` that divides by its denominator. All dtypes then finite at
+    1e-40/1e-43/1e-310/1e-320, residual (D rescaled by 2^k) within 1.5x of CPU LU
+    in the same arithmetic. Not kept; the patch is
+    `agent_space/subnormal_div_fix.patch` (`git apply` it, on top of `c15de04fcc3`
+    it needs only line offsets).
 - **Near-overflow complex magnitude.** cabs1 = |re| + |im| overflows at about
   finfo.max / 2. LAPACK uses the same cabs1, so compare with CPU rather than
-  expect success.
-- **Memory regression test.** Peak device memory of `ldl_factor_ex` must stay at
-  input + 2 copies (+ slack) for every dtype, single and batched. This guards
-  `conj_physical_()` and the scoped temporary (section 4). Measure after a
-  warm-up call: the first call allocates cuBLAS/cuSOLVER workspaces.
-- **Default backend.** Once dispatch is extended (section 5), run the suite
-  under the default backend too (parametrize `setUp`), and assert that `magma`
-  still reaches MAGMA.
-- **Residual factor.** On `integer_valued`, `test_cooperative_panel` n=8193 sits
-  at 1.33x LU against the 1.5 bound (section 7). Keep 1.5, or go to 2.0, which
-  still flags a 30·eps perturbation by 4-7x?
-- **Cooperative fallback (optional).** Force `cudaErrorCooperativeLaunchTooLarge`
-  with a few-SM green context. Needs `cuda.bindings` in the `kernel` env.
+  expect success. **Done: `test_cabs1_overflow`** (one entry 0.7 max (1 + i),
+  modulus 0.99 max, in column 0 / the middle / the trailing corner; wherever CPU
+  gives a finite LD with info 0, so must CUDA). Findings:
+  - The normwise residual is useless here: `||A|| ||X||` overflows (residual
+    reads 0), and with the overflow avoided it is ~1e-31 / 1e-293 whatever the
+    answer, since `||A||` is ~max. LU (`linalg.solve`) fails on these inputs.
+  - Componentwise (Oettli-Prager) backward error is ~1/eps on CUDA in nearly all
+    cases: the entry lands in a 2x2 pivot as d01, and Smith's denominator
+    `c + d (d / c)` overflows to inf, so `r0`, `r1`, `t / d01` and L are 0 instead
+    of ~1e-38 / ~1e-308, and the solve loses the components on that block. CPU's
+    blocked `?lahef` (MKL, n >= 300) gives the *identical* error; CPU's unblocked
+    `?hetf2` (n <= 64, and the trailing columns) is accurate, because it divides
+    by the real `|d01|` (`DLAPY2`). Not fixed (as for subnormals), recorded in
+    the kernel NOTE above the L21 update. A fix would be `?hetf2`'s: normalize the
+    Hermitian 2x2 by `a = |d01|`, `r0 = d00 / a`, `r1 = d11 / a`, `u = d10 / a`,
+    `t = 1 / (r0 r1 - 1)`, then `l0' = (t / a)(r1 l0 - u l1)`,
+    `l1' = (t / a)(r0 l1 - conj(u) l0)`.
+  - zero_diagonal n=64 (complex64 trailing, complex128 mid): CUDA gives a finite
+    LD with info 1. With sigma = cabs1 = inf, the pivot test
+    `|a_kk| >= alpha lambda (lambda / sigma)` reads `0 >= 0` and takes the zero
+    diagonal as a 1x1 pivot. LAPACK has the same formula; CPU is non-finite with
+    info 4 there.
+  - Whole matrix scaled to 0.25 / 0.9 / 1.2 max: the GEMM updates overflow on
+    both sides from n = 64, and which side stays finite at n = 5 or 64 is luck of
+    summation order, so not tested.
+- **Memory regression test. Done: `test_peak_memory`** (n = 4096, batch () and
+  (2,), all dtypes, after a warm-up: peak extra <= 2 copies + 1 MiB). Measured
+  2.0001-2.0003 copies (+16.5 KiB). Below ~32 MiB per copy the peak is instead
+  1 copy + 32 MiB: upstream `gemm_internal_cublas` takes a fresh 32 MiB workspace
+  per GEMM from the caching allocator (`getCurrentCUDABlasHandleWithWorkspace`,
+  unless `TORCH_CUBLAS_WORKSPACE_CACHE=1`), while the tril temporary is already
+  freed. That is why the test uses n = 4096.
+- **Default backend. Done:** dispatch extended and `test_dispatch` (section 5).
+  The suite is not run twice, since both routes call the same function.
+- **Residual factor. Decided: keep 1.5.** On H100 (CPU solve via MKL) the worst
+  real case over `test_cooperative_panel`'s structures at n = 2049/4100/8193 is
+  0.47 of the 1.5 bound (complex128 integer_valued n = 4100); integer_valued
+  n = 8193 is 0.57x / 0.49x LU. So GB200's 1.33x (section 7) does not reproduce
+  here; not isolated whether its CPU solve (ATLAS) or its LU reference differs. A
+  30·eps relative perturbation of L clears the 1.5 bound by 1.39-5.1x but the 2.0
+  bound by only 1.15-3.9x (weakest: complex128 zero_diagonal n = 8193).
+- **Cooperative fallback (optional). Not done:** `cuda.bindings` is not
+  installed in the `kernel` env on H100 either.
 - **Upstream, separate from this branch:** `check_errors=True` on singular input
-  hits an INTERNAL ASSERT (section 5). Report it.
+  hits an INTERNAL ASSERT (section 5). Already reported (#83624, draft fix
+  #197234), nothing posted.

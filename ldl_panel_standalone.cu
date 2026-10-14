@@ -313,6 +313,16 @@ ldl_diagonal_panel_fused_kernel(
     // L21 = L21 @ inv(D)
     // NOTE: D is kept in scalar_t, not made real as in zhetf2,
     // so as not to desync it from U12
+    // NOTE: as in LAPACK's ?sytrf/?hetrf, subnormal pivots below 1 / max are not
+    // supported: t / d01 and t / d10 below overflow, and so does a complex /= D11,
+    // as c10::complex multiplies by the reciprocal of the denominator. Supporting
+    // them means dividing by d01, d10 inside the loop as ?lahef_rook does, with a
+    // complex division that divides by the denominator instead.
+    // Nor is a complex d01 close to overflow, e.g. with both parts above max / 2,
+    // where the denominator of c10::complex division overflows: r0, r1, s0, s1, L
+    // come out 0 rather than ~1 / |d01|. This is normwise stable, but loses the
+    // components of a solve on that block. ?lahef does the same, while ?hetf2
+    // divides by the real |d01| instead.
     bool D_is_singular = false;
     if (pivot_rank == 1) {
       auto D11 = dLD[LinOff(curr_step, curr_step, lda)];

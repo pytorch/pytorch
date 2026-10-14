@@ -17,12 +17,11 @@ Two things shape how correctness is measured:
     hermitian=True on CUDA -- exactly the combination the custom kernel exists
     for -- so CPU is the only available vehicle for checking it.
 
-Reaching the kernel at all takes two things. It sits under
-LinalgBackend::Cusolver and is gated on hermitian, so the tests force the
-cusolver backend in setUp and pass hermitian=True. Under the default backend
-complex+hermitian goes to MAGMA and everything else to cuSOLVER, so the custom
-kernel is never called and the whole file silently tests something else. The
-gate is on hermitian only -- real dtypes reach it just as complex ones do.
+The kernel takes hermitian=True under the default and cusolver backends; the
+magma backend and hermitian=False go to MAGMA and cuSOLVER (test_dispatch). The
+tests pass hermitian=True and pin the cusolver backend in setUp, so they keep
+reaching the kernel whatever the default routes to. The gate is on hermitian
+only -- real dtypes reach it just as complex ones do.
 """
 
 import functools
@@ -143,6 +142,26 @@ def _huge_bytes(dtype, regime, copies):
 def _equal_with_nonfinite(a, b):
     """Bitwise equality that tolerates NaNs, whose payload is not specified."""
     return torch.equal(a.isnan(), b.isnan()) and torch.equal(a.nan_to_num(), b.nan_to_num())
+
+
+def _pivot_encoding_error(pivots):
+    """None if pivots follow LAPACK's 1-based encoding for the lower triangle: a 1x1
+    pivot at k holds the row p >= k + 1 it was swapped with, a 2x2 pivot at k, k + 1
+    holds -p in both, with p >= k + 2 swapped with k + 1. Otherwise the first
+    violation, which catches a panel that never wrote part of the vector (it reads
+    back as uninitialized memory) or split a 2x2 block."""
+    n = pivots.shape[-1]
+    for b, piv in enumerate(pivots.reshape(-1, n).tolist() if n else []):
+        k = 0
+        while k < n:
+            p = piv[k]
+            if k + 1 <= p <= n:
+                k += 1
+            elif k + 1 < n and piv[k + 1] == p and k + 2 <= -p <= n:
+                k += 2
+            else:
+                return f"batch element {b}, pivots[{k}:{k + 2}] = {piv[k:k + 2]}"
+    return None
 
 
 def _kernel_source(path, begin, end):
@@ -465,7 +484,7 @@ class TestLDLCustomKernel(TestCase):
         super().setUp()
         self._prev_backend = None
         if torch.cuda.is_available():
-            # Without this the custom kernel is unreachable -- see module docstring.
+            # Pins the route to the custom kernel -- see module docstring.
             self._prev_backend = torch.backends.cuda.preferred_linalg_library()
             torch.backends.cuda.preferred_linalg_library("cusolver")
 
@@ -480,12 +499,7 @@ class TestLDLCustomKernel(TestCase):
 
         self.assertEqual(info, torch.zeros_like(info))
 
-        # LAPACK's compact pivot encoding: 1-based, sign marks a 2x2 block, so
-        # every entry must be a usable index. Catches a panel that never wrote
-        # part of the vector, which reads back as uninitialized memory.
-        n = A.shape[-1]
-        self.assertTrue((pivots.abs() >= 1).all(), f"pivot with |p| < 1: {pivots}")
-        self.assertTrue((pivots.abs() <= n).all(), f"pivot out of range: {pivots}")
+        self.assertIsNone(_pivot_encoding_error(pivots))
 
         # LAPACK's scaled solve residual. The per-dtype defaults of assertEqual are far too
         # tight here: they reject valid float32 results from n=33 up, on CPU as
@@ -1064,10 +1078,12 @@ class TestLDLCustomKernel(TestCase):
     @parametrize("n", [33, 150])
     @dtypes(torch.float64, torch.complex128)
     def test_noncontiguous_batch(self, device, dtype, n):
-        """Batch dims that are strided or permuted, not just the matrix dims."""
+        """Batch dims that are strided, permuted or broadcast, not just the matrix dims."""
         torch.manual_seed(n)
         A = indefinite(n, (4, 6), dtype, device)
-        for name, view in (("strided", A[::2]), ("transposed", A.transpose(0, 1)), ("both", A[::2, ::3])):
+        views = {"strided": A[::2], "transposed": A.transpose(0, 1), "both": A[::2, ::3]}
+        views["expanded"] = A[0, 0].expand(3, n, n)
+        for name, view in views.items():
             with self.subTest(view=name):
                 self.assertFalse(view.is_contiguous())
                 LD_v, piv_v, info_v = torch.linalg.ldl_factor_ex(view, hermitian=True)
@@ -1075,6 +1091,20 @@ class TestLDLCustomKernel(TestCase):
                 self.assertTrue(torch.equal(piv_v, piv_c))
                 self.assertTrue(torch.equal(info_v, info_c))
                 self.assertEqual(LD_v, LD_c)
+
+    @parametrize("view", ["conj", "neg"])
+    @parametrize("n", [5, 65, 300])
+    @dtypes(*floating_and_complex_types())
+    def test_lazy_views(self, device, dtype, n, view):
+        """A lazily conjugated or negated input factors exactly as its resolved copy."""
+        if view == "conj" and not dtype.is_complex:
+            self.skipTest("conj() is a no-op for real dtypes")
+        torch.manual_seed(n)
+        A = indefinite(n, (), dtype, device)
+        V = A.conj() if view == "conj" else torch._neg_view(A)
+        expected = torch.linalg.ldl_factor_ex(V.resolve_conj().resolve_neg(), hermitian=True)
+        for got, exp in zip(torch.linalg.ldl_factor_ex(V, hermitian=True), expected):
+            self.assertTrue(torch.equal(got, exp))
 
     @parametrize("kind", ["column", "single", "all"])
     @parametrize("bad", [float("nan"), float("inf")])
@@ -1096,8 +1126,7 @@ class TestLDLCustomKernel(TestCase):
             A.fill_(bad)
         _, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
         piv, info = piv.cpu(), info.item()
-        self.assertTrue((piv.abs() >= 1).all(), f"pivot with |p| < 1: {piv}")
-        self.assertTrue((piv.abs() <= n).all(), f"pivot out of range: {piv}")
+        self.assertIsNone(_pivot_encoding_error(piv))
         self.assertTrue(0 <= info <= n)
 
     # Non-finite entries of the lower triangle as (row, col, value), negative indices
@@ -1138,7 +1167,7 @@ class TestLDLCustomKernel(TestCase):
         LD, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
         self.assertFalse(LD.tril().isfinite().all())
         self.assertEqual(info.item(), 0)
-        self.assertTrue(((piv.abs() >= 1) & (piv.abs() <= n)).all(), f"pivot out of range: {piv}")
+        self.assertIsNone(_pivot_encoding_error(piv))
         torch.linalg.ldl_factor(A, hermitian=True)  # check_errors=True must not raise
         if not dtype.is_complex:
             # cuSOLVER's solve must take the non-finite factorization without failing
@@ -1309,8 +1338,7 @@ class TestLDLCustomKernel(TestCase):
         _, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
 
         # completed: every pivot slot holds a usable 1-based index
-        self.assertTrue((piv.abs() >= 1).all(), f"pivot with |p| < 1: {piv}")
-        self.assertTrue((piv.abs() <= n).all(), f"pivot out of range: {piv}")
+        self.assertIsNone(_pivot_encoding_error(piv))
         self.assertGreaterEqual(info.item(), 0)
         self.assertLessEqual(info.item(), n)
 
@@ -1354,6 +1382,25 @@ class TestLDLCustomKernel(TestCase):
         X = torch.linalg.ldl_solve(LD, piv, B, hermitian=hermitian)
         self.assertLess(_lapack_residual(A, X, B), _resid_threshold(A, B))
 
+    @parametrize("n", [5, 64, 300])
+    @dtypes(*floating_and_complex_types())
+    def test_solve_ignores_upper_triangle(self, device, dtype, n):
+        """The kernel leaves working values in the strictly upper triangle of LD,
+        where the other backends mostly leave the zeros of the tril'ed input. That is
+        harmless only as long as ldl_solve reads the lower triangle alone."""
+        torch.manual_seed(n)
+        A = indefinite(n, (), dtype, device)
+        LD, piv, _ = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        junk = LD.tril() + torch.full_like(LD, float("nan")).triu(1)
+        B = make_tensor((n, 3), dtype=dtype, device=device)
+        # Complex+Hermitian has no CUDA solver
+        on_cpu_only = dtype.is_complex or torch.device(device).type == "cpu"
+        for dev in ["cpu"] if on_cpu_only else ["cpu", device]:
+            with self.subTest(solve_on=dev):
+                X = torch.linalg.ldl_solve(junk.to(dev), piv.to(dev), B.to(dev), hermitian=True)
+                X_ref = torch.linalg.ldl_solve(LD.tril().to(dev), piv.to(dev), B.to(dev), hermitian=True)
+                self.assertTrue(torch.equal(X, X_ref))
+
     @dtypes(torch.float16, torch.bfloat16)
     def test_unsupported_dtype(self, device, dtype):
         with self.assertRaises(NotImplementedError):
@@ -1389,6 +1436,30 @@ class TestLDLCustomKernel(TestCase):
             for scale in (10.0**e, 10.0**-e):
                 with self.subTest(scale=scale):
                     self._check(A * scale, hermitian=True)
+
+    @onlyCUDA
+    @parametrize("placement", ["col0", "mid", "trailing"])
+    @parametrize("structure", ["indefinite", "zero_diagonal"])
+    @parametrize("n", [5, 64, 300])
+    @dtypes(torch.complex64, torch.complex128)
+    def test_cabs1_overflow(self, device, dtype, n, structure, placement):
+        """One entry of modulus 0.99 max, whose |re| + |im| (the cabs1 that the pivot
+        search shares with LAPACK) overflows. Wherever CPU gives a finite LD and
+        info == 0, so must the kernel. Neither the solve residual nor LU can serve
+        as a reference: ||A|| * ||X|| overflows, and LU fails on this input. (The
+        solve is normwise stable, but not componentwise -- see the NOTE above the
+        L21 update in the kernel.)"""
+        torch.manual_seed(n)
+        A = STRUCTURES[structure](n, (), dtype, "cpu")
+        i, j = {"col0": (3, 0), "mid": (n // 2 + 1, n // 2), "trailing": (n - 2, n - 3)}[placement]
+        fmax = torch.finfo(_real_dtype(dtype)).max
+        A[i, j] = complex(0.7 * fmax, 0.7 * fmax)
+        LD, piv, info = torch.linalg.ldl_factor_ex(A.to(device), hermitian=True)
+        self.assertIsNone(_pivot_encoding_error(piv))
+        LD_cpu, _, info_cpu = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        if LD_cpu.tril().isfinite().all() and info_cpu.item() == 0:
+            self.assertTrue(LD.tril().isfinite().all())
+            self.assertEqual(info.item(), 0)
 
     @parametrize("n", [2, 5, 33, 34, 65, 150, 2049, 4100])
     @dtypes(*floating_and_complex_types())
@@ -1515,8 +1586,7 @@ class TestLDLCustomKernel(TestCase):
         A[:, 0] = 0
         _, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
         self.assertEqual(info.item(), 1)
-        self.assertTrue((piv.abs() >= 1).all())
-        self.assertTrue((piv.abs() <= n).all())
+        self.assertIsNone(_pivot_encoding_error(piv))
 
     @parametrize("n", [64, 150])
     @dtypes(torch.float64, torch.complex128)
@@ -1533,7 +1603,7 @@ class TestLDLCustomKernel(TestCase):
             A[i, :, 0] = 0
         _, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
         self.assertEqual([v.item() > 0 for v in info.cpu()], [True, False, True])
-        self.assertTrue((piv.abs() >= 1).all())
+        self.assertIsNone(_pivot_encoding_error(piv))
 
     @parametrize("n", [64, 150])
     @dtypes(torch.float64, torch.complex128)
@@ -1556,7 +1626,48 @@ class TestLDLCustomKernel(TestCase):
         self.assertGreater(info.item(), 0)
         # NOTE: check_errors=True currently raises an INTERNAL ASSERT rather than
         # a clean error for this info code -- reproduces on CPU too, so it is a
-        # pre-existing gap in the error mapping, not a property of this kernel.
+        # pre-existing gap in the error mapping, not a property of this kernel
+        # (pytorch/pytorch#83624, draft fix in #197234).
+
+    @onlyCUDA
+    @parametrize("hermitian", [True, False])
+    @parametrize("backend", ["default", "cusolver", "magma"])
+    @dtypes(*floating_and_complex_types())
+    def test_dispatch(self, device, dtype, backend, hermitian):
+        """hermitian=True goes to the custom kernel under the default and cusolver
+        backends. The magma backend and hermitian=False stay with the libraries."""
+        if backend == "magma" and not torch.cuda.has_magma:
+            self.skipTest("built without MAGMA")
+        if backend == "magma" and dtype.is_complex and not hermitian:
+            self.skipTest("MAGMA has no complex symmetric LDL")
+        torch.backends.cuda.preferred_linalg_library(backend)
+        A = indefinite(100, (), dtype, device)
+        with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
+            torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
+        used = any("ldl_diagonal_panel_fused_kernel" in e.name for e in prof.events())
+        self.assertEqual(used, hermitian and backend != "magma")
+
+    # At n = 4096 the input-sized temporary outweighs cuBLAS's GEMM workspace (up to
+    # 32 MiB, allocated per GEMM unless TORCH_CUBLAS_WORKSPACE_CACHE=1), which sets the
+    # peak at smaller sizes, so one more input-sized temporary would show.
+    @onlyCUDA
+    @parametrize("batch", [(), (2,)])
+    @dtypes(*floating_and_complex_types())
+    def test_peak_memory(self, device, dtype, batch):
+        """LD plus one input-sized temporary on top of the input, and nothing left
+        behind. Guards the symmetrization: without the in-place conj_physical_()
+        complex costs one more copy, and without the scoped tril copy it stays alive
+        under the GEMM workspace."""
+        A = indefinite(4096, batch, dtype, device)
+        torch.linalg.ldl_factor_ex(A, hermitian=True)  # warm-up: library handles and workspaces
+        torch.cuda.synchronize(device)
+        before = torch.cuda.memory_allocated(device)
+        torch.cuda.reset_peak_memory_stats(device)
+        torch.linalg.ldl_factor_ex(A, hermitian=True)
+        torch.cuda.synchronize(device)
+        copy = A.numel() * A.element_size()
+        self.assertLessEqual(torch.cuda.max_memory_allocated(device) - before, 2 * copy + 2**20)
+        self.assertEqual(torch.cuda.memory_allocated(device), before)  # the results are dropped, nothing else may stay
 
 
 instantiate_device_type_tests(TestLDLCustomKernel, globals())
