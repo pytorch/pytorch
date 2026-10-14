@@ -96,4 +96,9 @@ endfunction()
 
 add_sycl_test(XpuptiProfilerTest.cpp)
 target_link_libraries(XpuptiProfilerTest PRIVATE nlohmann_json::nlohmann_json)
-add_sycl_test(XpuptiScopeProfilerTest.cpp PROPERTIES ENVIRONMENT "ZET_ENABLE_METRICS=1")
+# PTI < 1.2 needs ZET_ENABLE_METRICS=1.
+if(XPUPTI_PTI_VERSION VERSION_LESS 1.2)
+  add_sycl_test(XpuptiScopeProfilerTest.cpp PROPERTIES ENVIRONMENT "ZET_ENABLE_METRICS=1")
+else()
+  add_sycl_test(XpuptiScopeProfilerTest.cpp)
+endif()
