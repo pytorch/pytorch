@@ -569,8 +569,8 @@ def _get_cache_entries_for_region(
 
     Returns only entries owned by the requested bucket. During an actual
     lookup, isolated regions also fall back read-only to the default
-    bucket for BC-friendly reuse — this helper does not include those
-    fallback entries.
+    bucket for BC-friendly reuse, except strict ones that record into a
+    package — this helper does not include those fallback entries.
     """
     if callable(code):
         code = code.__code__
