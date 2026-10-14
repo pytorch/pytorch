@@ -19,8 +19,10 @@ if Version(cutlass.__version__) >= Version("4.8.0"):
 else:
     from cutlass.utils import SmemAllocator
 
+from .blockscaled_tma_config import RoundingVariant
 from .utils import (
     _blockscaled_quantize_group,
+    _resolve_philox_state,
     _store_swizzled_scale_groups_as_uint,
     _store_unswizzled_scale_groups_as_uint,
 )
@@ -46,6 +48,7 @@ class _BlockscaledTma:
         cluster_k: int,
         needs_boundary_masking: bool,
         quant_orientation: int,
+        rounding_variant: RoundingVariant,
         is_square_scaling: bool,
         is_scale_swizzled: bool,
     ) -> None:
@@ -55,6 +58,7 @@ class _BlockscaledTma:
         self.cluster_k = cluster_k
         self.needs_boundary_masking = needs_boundary_masking
         self.quant_orientation = quant_orientation
+        self.rounding_variant = rounding_variant
         self.is_square_scaling = is_square_scaling
         self.is_scale_swizzled = is_scale_swizzled
 
@@ -69,6 +73,11 @@ class _BlockscaledTma:
         output_m_tma_tensor: cute.Tensor | None,
         mScaleKLogical: cute.Tensor | None,
         mScaleMLogical: cute.Tensor | None,
+        mSeed: cute.Tensor | None,
+        mOffset: cute.Tensor | None,
+        rng_seed: cutlass.Int64 | None,
+        rng_offset_words: cutlass.Int64 | None,
+        intragraph_offset_words: cutlass.Int64 | None,
         input_smem_layout: cute.ComposedLayout,
         output_k_smem_layout: cute.ComposedLayout | None,
         output_m_smem_layout: cute.ComposedLayout | None,
@@ -108,6 +117,10 @@ class _BlockscaledTma:
         tile_k_size = cutlass.const_expr(self.tile_k_size)
         needs_boundary_masking = cutlass.const_expr(self.needs_boundary_masking)
         quant_orientation = cutlass.const_expr(self.quant_orientation)
+        rounding_variant = cutlass.const_expr(self.rounding_variant)
+        is_stochastic_qdata_rounding = cutlass.const_expr(
+            rounding_variant != RoundingVariant.RTNE
+        )
         is_square_scaling = cutlass.const_expr(self.is_square_scaling)
         is_scale_swizzled = cutlass.const_expr(self.is_scale_swizzled)
         scale_group_size = 32
@@ -236,6 +249,17 @@ class _BlockscaledTma:
                 tma_bar_ptr=tma_bar_ptr,
             )
 
+        philox_k0 = philox_k1 = sr_operation_block = None
+        if cutlass.const_expr(is_stochastic_qdata_rounding):
+            philox_k0, philox_k1, sr_operation_block = _resolve_philox_state(
+                rounding_variant,
+                mSeed,
+                mOffset,
+                rng_seed,
+                rng_offset_words,
+                intragraph_offset_words,
+            )
+
         # wait for input data to arrive
         cute.arch.mbarrier_wait(tma_bar_ptr, 0)
 
@@ -265,6 +289,21 @@ class _BlockscaledTma:
             output_row_m = tile_k_idx * tile_k_size + tidx
             scale_col_m = tile_m_idx * scale_groups_m
             rScaleM = cute.make_rmem_tensor(scale_groups_m, cutlass.Uint8)
+            if cutlass.const_expr(is_stochastic_qdata_rounding):
+                global_col_m = tile_k_idx * tile_k_size + tidx
+                if cutlass.const_expr(do_dim_k):
+                    # Place dim-M after dim-K's M*K values in the logical Philox stream.
+                    sr_logical_block_base_m = (
+                        cutlass.Uint64(K) + cutlass.Uint64(global_col_m)
+                    ) * cutlass.Uint64(M // 16) + cutlass.Uint64(
+                        tile_m_idx * tile_m_size // 16
+                    )
+                else:
+                    sr_logical_block_base_m = cutlass.Uint64(
+                        global_col_m
+                    ) * cutlass.Uint64(M // 16) + cutlass.Uint64(
+                        tile_m_idx * tile_m_size // 16
+                    )
             for row_block in cutlass.range_constexpr(row_blocks):
                 rQM = cute.make_rmem_tensor(
                     qdata_storage_elements_per_32,
@@ -279,10 +318,22 @@ class _BlockscaledTma:
                     for value in cutlass.range_constexpr(scale_group_size):
                         rInputM[value] = sInput[(row_start + value, tidx)]
                     vm = rInputM.load().to(cutlass.Float32)
+                    if cutlass.const_expr(is_stochastic_qdata_rounding):
+                        # pyrefly: ignore[unbound-name]
+                        sr_logical_block_m = sr_logical_block_base_m + cutlass.Uint64(
+                            row_block * (32 // 16) + group * (scale_group_size // 16)
+                        )
+                    else:
+                        sr_logical_block_m = None
                     qdata_m, scale_m = _blockscaled_quantize_group(
                         vm,
                         scale_group_size,
                         False,
+                        rounding_variant,
+                        sr_operation_block,
+                        sr_logical_block_m,
+                        philox_k0,
+                        philox_k1,
                     )
                     rQMGroups[(None, group)].store(qdata_m)
                     rScaleM[row_block * groups_per_row_block + group] = scale_m.to(
@@ -363,7 +414,44 @@ class _BlockscaledTma:
                 qdata_storage_element_type,
             )
             rQGroupsK = cute.tiled_divide(rQK, (qdata_storage_elements_per_group,))
+            if cutlass.const_expr(is_stochastic_qdata_rounding):
+                if cutlass.const_expr(row_owned_k):
+                    # pyrefly: ignore[unbound-name]
+                    global_row_k = tile_m_idx * tile_m_size + tidx // threads_per_row_k
+                    global_scale_col_k = (
+                        tile_k_idx * groups_per_row_k
+                        # pyrefly: ignore[unbound-name]
+                        + (tidx % threads_per_row_k) * iters
+                    )
+                    sr_logical_block_base_k = cutlass.Uint64(
+                        global_row_k
+                    ) * cutlass.Uint64(K // 16) + cutlass.Uint64(
+                        global_scale_col_k * (scale_group_size // 16)
+                    )
+                else:
+                    global_row_k = tile_m_idx * tile_m_size + tidx // groups_per_row_k
+                    global_group_k = (
+                        tile_k_idx * groups_per_row_k + tidx % groups_per_row_k
+                    )
+                    sr_logical_block_base_k = cutlass.Uint64(
+                        global_row_k
+                    ) * cutlass.Uint64(K // 16) + cutlass.Uint64(
+                        global_group_k * (scale_group_size // 16)
+                    )
             for it in cutlass.range_constexpr(iters):
+                if cutlass.const_expr(is_stochastic_qdata_rounding):
+                    if cutlass.const_expr(row_owned_k):
+                        # pyrefly: ignore[unbound-name]
+                        sr_logical_block_k = sr_logical_block_base_k + cutlass.Uint64(
+                            it * (scale_group_size // 16)
+                        )
+                    else:
+                        # pyrefly: ignore[unbound-name]
+                        sr_logical_block_k = sr_logical_block_base_k + cutlass.Uint64(
+                            it * 2
+                        ) * cutlass.Uint64(K)
+                else:
+                    sr_logical_block_k = None
                 sGroupK = thrInputGroupsK[((None, it),)]
                 rInputK = cute.make_rmem_tensor(scale_group_size, input_element_type)
                 input_values_per_copy = 128 // input_element_type.width
@@ -382,6 +470,11 @@ class _BlockscaledTma:
                     vk,
                     scale_group_size,
                     is_square_scaling,
+                    rounding_variant,
+                    sr_operation_block,
+                    sr_logical_block_k,
+                    philox_k0,
+                    philox_k1,
                 )
                 rQGroupsK[(None, it)].store(qdata_k)
                 rScaleK[it] = scale_k.to(rScaleK.element_type)
@@ -413,7 +506,12 @@ class _BlockscaledTma:
                 )
                 cute.arch.cp_async_bulk_commit_group()
         if cutlass.const_expr(do_dim_m):
-            if warp == 0:
+            output_m_warp = (
+                1
+                if cutlass.const_expr(is_stochastic_qdata_rounding and do_dim_k)
+                else 0
+            )
+            if warp == output_m_warp:
                 cute.copy(
                     output_m_tma_atom,
                     tOutputsM,  # pyrefly: ignore[unbound-name]
@@ -537,7 +635,8 @@ class _BlockscaledTma:
             if warp == 0:
                 cute.arch.cp_async_bulk_wait_group(0, read=True)
         if cutlass.const_expr(do_dim_m):
-            if warp == 0:
+            # pyrefly: ignore[unbound-name]
+            if warp == output_m_warp:
                 cute.arch.cp_async_bulk_wait_group(0, read=True)
 
     @cute.jit
@@ -548,6 +647,11 @@ class _BlockscaledTma:
         mScaleK: cute.Tensor | None,
         mOutputM: cute.Tensor | None,
         mScaleM: cute.Tensor | None,
+        mSeed: cute.Tensor | None,
+        mOffset: cute.Tensor | None,
+        rng_seed: cutlass.Int64 | None,
+        rng_offset_words: cutlass.Int64 | None,
+        intragraph_offset_words: cutlass.Int64 | None,
         stream: cuda.CUstream,
         M: cutlass.Int64,
         K: cutlass.Int64,
@@ -558,6 +662,7 @@ class _BlockscaledTma:
         tile_k_size = cutlass.const_expr(self.tile_k_size)
         cluster_k = cutlass.const_expr(self.cluster_k)
         quant_orientation = cutlass.const_expr(self.quant_orientation)
+        rounding_variant = cutlass.const_expr(self.rounding_variant)
         is_square_scaling = cutlass.const_expr(self.is_square_scaling)
         is_scale_swizzled = cutlass.const_expr(self.is_scale_swizzled)
         scale_group_size = 32
@@ -793,6 +898,11 @@ class _BlockscaledTma:
             output_m_tma_tensor,
             mScaleKLogical,
             mScaleMLogical,
+            mSeed,
+            mOffset,
+            rng_seed,
+            rng_offset_words,
+            intragraph_offset_words,
             input_smem_layout,
             output_k_smem_layout,
             output_m_smem_layout,
@@ -805,7 +915,9 @@ class _BlockscaledTma:
         block_threads = max(_MIN_CTA_THREADS_128, tile_k_size)
         block = (block_threads, 1, 1)
         if cutlass.const_expr(
-            quant_orientation == _QUANT_ORIENTATION_DIM_KM and tile_m_size != 32
+            quant_orientation == _QUANT_ORIENTATION_DIM_KM
+            and rounding_variant == RoundingVariant.RTNE
+            and tile_m_size != 32
         ):
             # A degenerate cluster constrains residency for this larger two-output
             # specialization; an ordinary launch lets Blackwell keep nine CTAs resident per SM.
@@ -846,6 +958,12 @@ def _make_dynamic_compact_scale_fake() -> cute.Tensor:
     )
 
 
+def _make_philox_state_fake(size: int) -> cute.Tensor:
+    return cute.runtime.make_fake_tensor(
+        cutlass.Int64, (size,), stride=(1,), assumed_align=8
+    )
+
+
 def _blockscaled_tma_compile_log_key(
     input_dtype: torch.dtype,
     tile_m_size: int,
@@ -853,13 +971,14 @@ def _blockscaled_tma_compile_log_key(
     cluster_k: int,
     needs_boundary_masking: bool,
     quant_orientation: int,
+    rounding_variant: RoundingVariant,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ) -> str:
     return (
         f"dtype={input_dtype} orientation={quant_orientation} "
         f"tile={tile_m_size}x{tile_k_size} cluster_k={cluster_k} "
-        f"masking={needs_boundary_masking} rounding=RTNE "
+        f"masking={needs_boundary_masking} rounding={rounding_variant.name} "
         f"square={is_square_scaling} scale_swizzled={is_scale_swizzled}"
     )
 
@@ -875,6 +994,7 @@ def _compile_blockscaled_tma(
     cluster_k: int,
     needs_boundary_masking: bool,
     quant_orientation: int,
+    rounding_variant: RoundingVariant,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ) -> Callable[..., None]:
@@ -889,6 +1009,7 @@ def _compile_blockscaled_tma(
         cluster_k,
         needs_boundary_masking,
         quant_orientation,
+        rounding_variant,
         is_square_scaling,
         is_scale_swizzled,
     )
@@ -906,6 +1027,32 @@ def _compile_blockscaled_tma(
     )
     mOutputM = _make_dynamic_matrix_fake(cutlass.Float8E4M3FN) if do_dim_m else None
     mScaleM = _make_dynamic_scale_fake() if do_dim_m else None
+    if rounding_variant == RoundingVariant.STATELESS_SR:
+        mSeed = _make_philox_state_fake(2)
+    elif rounding_variant == RoundingVariant.STATEFUL_SR_CAPTURE:
+        mSeed = _make_philox_state_fake(1)
+    else:
+        mSeed = None
+    mOffset = (
+        _make_philox_state_fake(1)
+        if rounding_variant == RoundingVariant.STATEFUL_SR_CAPTURE
+        else None
+    )
+    rng_seed = (
+        cutlass.Int64(0)
+        if rounding_variant == RoundingVariant.STATEFUL_SR_EAGER
+        else None
+    )
+    rng_offset_words = (
+        cutlass.Int64(0)
+        if rounding_variant == RoundingVariant.STATEFUL_SR_EAGER
+        else None
+    )
+    intragraph_offset_words = (
+        cutlass.Int64(0)
+        if rounding_variant == RoundingVariant.STATEFUL_SR_CAPTURE
+        else None
+    )
     return cute.compile(
         operation,
         mInput,
@@ -913,6 +1060,11 @@ def _compile_blockscaled_tma(
         mScaleK,
         mOutputM,
         mScaleM,
+        mSeed,
+        mOffset,
+        rng_seed,
+        rng_offset_words,
+        intragraph_offset_words,
         cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
         cutlass.Int64(0),
         cutlass.Int64(0),

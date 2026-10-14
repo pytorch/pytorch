@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/Exception.h>
 
+#include <optional>
 #include <vector>
 
 namespace at::native {
@@ -12,7 +13,9 @@ std::vector<Tensor> _quantize_tensor_cuda(
     ScalarType /*qdata_dtype*/,
     int64_t /*scaling_algorithm*/,
     int64_t /*swizzle_type*/,
-    bool /*scaling_type_use_square_block_size*/) {
+    bool /*scaling_type_use_square_block_size*/,
+    int64_t /*qdata_rounding_mode*/,
+    const std::optional<Tensor>& /*random_key*/) {
   TORCH_CHECK(
       false,
       "torch._quantize_tensor requires an NVIDIA GPU with CUDA compute "
@@ -27,7 +30,9 @@ std::vector<Tensor> _quantize_tensor_dual_cuda(
     ScalarType /*qdata_dtype*/,
     int64_t /*scaling_algorithm*/,
     int64_t /*swizzle_type*/,
-    bool /*scaling_type_use_square_block_size*/) {
+    bool /*scaling_type_use_square_block_size*/,
+    int64_t /*qdata_rounding_mode*/,
+    const std::optional<Tensor>& /*random_key*/) {
   TORCH_CHECK(
       false,
       "torch._quantize_tensor_dual requires an NVIDIA GPU with CUDA compute "
