@@ -1121,7 +1121,7 @@ class TestAllGatherInputValidation(TestCase):
         byte_view = torch.ones(4, 4).view(torch.uint8)
         for tensor in (torch.ones(2, 4), torch.ones(0, 4), byte_view):
             self._get_layouts([tensor], [output])
-        with self.assertRaisesRegex(ValueError, "must match the size of its first"):
+        with self.assertRaisesRegex(ValueError, "but has 32 bytes of torch.uint8"):
             self._get_layouts([byte_view[:2]], [output])
         with self.assertRaisesRegex(ValueError, "must fit in the size of its first"):
             self._get_layouts([torch.ones(8, 4)], [output])
