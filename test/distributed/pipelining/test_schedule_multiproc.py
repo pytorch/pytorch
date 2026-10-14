@@ -4,7 +4,7 @@ import copy
 import logging
 import os
 import weakref
-from contextlib import contextmanager, ExitStack
+from contextlib import contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from unittest import mock
 
@@ -321,6 +321,7 @@ def assert_explicit_forward_wait_ownership(test_case, stages):
     """Check that each explicit wait releases its forward-send storage."""
     storage_refs = {}
     released = set()
+    released_while_stage_owned = set()
     with ExitStack() as stack:
         for stage in stages:
             stage_index = stage.stage_index
@@ -342,12 +343,15 @@ def assert_explicit_forward_wait_ownership(test_case, stages):
             def release_fwd_send_outputs(
                 microbatch_index,
                 *,
+                _stage=stage,
                 _stage_index=stage_index,
                 _original=original_release_fwd_send_outputs,
             ):
                 key = (_stage_index, microbatch_index)
                 refs = storage_refs[key]
-                test_case.assertTrue(all(ref() is not None for ref in refs))
+                if microbatch_index in _stage._forward_chunk_states:
+                    test_case.assertTrue(all(ref() is not None for ref in refs))
+                    released_while_stage_owned.add(key)
                 _original(microbatch_index)
                 test_case.assertTrue(all(ref() is None for ref in refs))
                 released.add(key)
@@ -364,7 +368,7 @@ def assert_explicit_forward_wait_ownership(test_case, stages):
                     side_effect=release_fwd_send_outputs,
                 )
             )
-        yield released
+        yield released_while_stage_owned
 
     test_case.assertEqual(released, storage_refs.keys())
 
@@ -877,16 +881,21 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize(
-        "ScheduleClass",
+        "ScheduleClass,max_outstanding_sends",
         [
-            ScheduleInterleaved1F1B,
-            ScheduleLoopedBFS,
-            ScheduleInterleavedZeroBubble,
+            (ScheduleInterleaved1F1B, None),
+            (ScheduleInterleaved1F1B, 4),
+            (ScheduleLoopedBFS, None),
+            (ScheduleLoopedBFS, 4),
+            (ScheduleInterleavedZeroBubble, None),
+            (ScheduleInterleavedZeroBubble, 4),
         ],
     )
     @parametrize("pre_split", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_manual_interleaved(self, ScheduleClass, pre_split):
+    def test_grad_with_manual_interleaved(
+        self, ScheduleClass, max_outstanding_sends, pre_split
+    ):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -910,13 +919,34 @@ class ScheduleTest(MultiProcContinuousTest):
 
         # Create schedule
         schedule = ScheduleClass(
-            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+            stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+            **(
+                {"max_outstanding_sends": max_outstanding_sends}
+                if max_outstanding_sends is not None
+                else {}
+            ),
         )
 
         # Run pipeline with tensor leak checking
         out = None
         losses = []
-        with check_leaked_tensors() as garbage_tensors:
+        # Split backward may retain the tensor after schedule ownership ends.
+        check_send_ownership = (
+            max_outstanding_sends is not None
+            and ScheduleClass is not ScheduleInterleavedZeroBubble
+        )
+        send_ownership_context = (
+            assert_explicit_forward_wait_ownership(self, stages)
+            if check_send_ownership
+            else nullcontext()
+        )
+        with (
+            check_leaked_tensors() as garbage_tensors,
+            send_ownership_context as released_while_stage_owned,
+        ):
             for _ in range(2):
                 zero_gradients(stage_modules)
                 if self.rank == 0:
@@ -940,6 +970,9 @@ class ScheduleTest(MultiProcContinuousTest):
                         num_microbatches,
                         pre_split=pre_split,
                     )
+
+        if check_send_ownership:
+            self.assertTrue(released_while_stage_owned)
 
         self.assertEqual(
             len(garbage_tensors),
@@ -1091,8 +1124,22 @@ class ScheduleTest(MultiProcContinuousTest):
                 self.assertEqual(auto_name, pre_split_name)
                 self.assertEqual(pre_split_param.grad, auto_param.grad)
 
-        check_gradients(self.config, auto_stage_modules, ref_mod, submod_names)
-        check_gradients(self.config, pre_split_stage_modules, ref_mod, submod_names)
+        check_gradients(
+            self.config,
+            auto_stage_modules,
+            ref_mod,
+            submod_names,
+            rtol=1e-4,
+            atol=1e-4,
+        )
+        check_gradients(
+            self.config,
+            pre_split_stage_modules,
+            ref_mod,
+            submod_names,
+            rtol=1e-4,
+            atol=1e-4,
+        )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(

@@ -3,6 +3,7 @@
 
 import collections
 import copy
+import inspect
 import itertools
 import os
 import tempfile
@@ -1317,6 +1318,33 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 6)
 
+    def test_rnn_graph_break_resumes_after_call(self):
+        class RecurrentModel(torch.nn.Module):
+            def __init__(self, recurrent_cls) -> None:
+                super().__init__()
+                self.pre = torch.nn.Linear(8, 8)
+                self.rnn = recurrent_cls(8, 8, batch_first=True)
+                self.post = torch.nn.Linear(8, 4)
+
+            def forward(self, x):
+                x = self.pre(x)
+                x, _ = self.rnn(x)
+                return self.post(x[:, -1, :])
+
+        inp = torch.randn(2, 3, 8)
+
+        for recurrent_cls in (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM):
+            with self.subTest(recurrent_cls=recurrent_cls):
+                m = RecurrentModel(recurrent_cls).eval()
+                cnt = torch._dynamo.testing.CompileCounter()
+                opt_m = torch.compile(m, backend=cnt)
+
+                r = opt_m(inp)
+
+                self.assertTrue(torch._dynamo.testing.same(r, m(inp)))
+                self.assertEqual(cnt.frame_count, 2)
+                self.assertEqual(cnt.op_count, 3)
+
     @patch.object(torch._dynamo.config, "allow_unspec_int_on_nn_module", True)
     def test_self_mutating1(self):
         m1 = torch.nn.Linear(10, 10)
@@ -1859,6 +1887,24 @@ class MockModule(torch.nn.Module):
 
 class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_wrapping_does_not_use_getattr_static(self):
+        # Wrapping a module can happen while the eval frame callback is
+        # installed (compiled autograd compiles the backward graph that way),
+        # and Dynamo then intercepts and traces CPython's inspect internals.
+        # Use _static_getattr instead (gh-190500).
+        seen = []
+        orig = inspect.getattr_static
+
+        def spy(obj, name, default=None):
+            seen.append(name)
+            return orig(obj, name, default)
+
+        with patch("inspect.getattr_static", spy):
+            torch.compile(MockModule(), backend="eager")
+
+        static = [n for n in seen if n in ("_initialize_hook", "get_compiler_config")]
+        self.assertFalse(static, "should be looked up with _static_getattr")
 
     def test_nn_module(self):
         mod = MockModule()
@@ -3357,6 +3403,155 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnt.frame_count, 2)
 
         helper()
+
+    @parametrize("name", ["sub", "w", "b"])
+    @parametrize("nested", [False, True])
+    @parametrize("specialize", [False, True])
+    @parametrize("registry_type", [dict, collections.OrderedDict])
+    @parametrize("delegating_getattr", [False, True])
+    def test_instance_dict_shadows_registered_attr(
+        self, name, nested, specialize, registry_type, delegating_getattr
+    ):
+        class Wrapper(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = torch.nn.Linear(4, 4, bias=False)
+                self.w = torch.nn.Parameter(torch.ones(4))
+                self.register_buffer("b", torch.zeros(4))
+                with torch.no_grad():
+                    self.sub.weight.copy_(torch.eye(4))
+                # Dict subclasses exercise the non-manual __getattr__ path.
+                self._modules = registry_type(self._modules)
+                self._parameters = registry_type(self._parameters)
+                self._buffers = registry_type(self._buffers)
+
+            def forward(self, x):
+                return self.sub(x) * self.w + self.b
+
+        class Outer(torch.nn.Module):
+            def __init__(self, block):
+                super().__init__()
+                self.block = block
+
+            def forward(self, x):
+                return self.block(x)
+
+        class DelegatingWrapper(Wrapper):
+            def __getattr__(self, name):
+                return super().__getattr__(name)
+
+        target = DelegatingWrapper() if delegating_getattr else Wrapper()
+        model = Outer(target) if nested else target
+        if specialize:
+            model.torchdynamo_force_dynamic = False
+            target.torchdynamo_force_dynamic = False
+        x = torch.arange(4.0)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(model, backend=cnt, fullgraph=True)
+        for _ in range(2):
+            self.assertEqual(compiled(x), model(x))
+            self.assertEqual(cnt.frame_count, 1)
+
+        if name == "sub":
+            replacement = torch.nn.Linear(4, 4, bias=False)
+            with torch.no_grad():
+                replacement.weight.fill_(5.0)
+        elif name == "w":
+            replacement = torch.nn.Parameter(torch.full((4,), 2.0))
+        else:
+            replacement = torch.full((4,), 7.0)
+
+        object.__setattr__(target, name, replacement)
+        for _ in range(2):
+            self.assertEqual(compiled(x), model(x))
+            self.assertEqual(cnt.frame_count, 2)
+
+        del target.__dict__[name]
+        for _ in range(2):
+            self.assertEqual(compiled(x), model(x))
+            self.assertEqual(cnt.frame_count, 2)
+
+        object.__setattr__(target, name, replacement)
+        self.assertEqual(compiled(x), model(x))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("replace_dict", [False, True])
+    @parametrize("delegating_getattr", [False, True])
+    def test_registered_attr_after_pending_instance_dict_mutation(
+        self, replace_dict, delegating_getattr
+    ):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b", torch.zeros(4))
+
+        def fn(model, x):
+            if replace_dict:
+                model.__dict__ = {k: v for k, v in model.__dict__.items() if k != "b"}
+            else:
+                del model.__dict__["b"]
+            return x + model.b
+
+        class DelegatingMod(Mod):
+            def __getattr__(self, name):
+                return super().__getattr__(name)
+
+        model = DelegatingMod() if delegating_getattr else Mod()
+        x = torch.arange(4.0)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        for _ in range(2):
+            object.__setattr__(model, "b", torch.ones(4))
+            self.assertEqual(compiled(model, x), x)
+            self.assertNotIn("b", model.__dict__)
+            self.assertEqual(model.b, torch.zeros(4))
+            self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("specialize", [False, True])
+    @parametrize("case", ["own_buffer", "forwarded_name", "wrapped_buffer"])
+    def test_forwarding_getattr_shadows_registered_attr(self, case, specialize):
+        class Inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b", torch.zeros(4))
+
+        # Same __getattr__ as FSDP and ActivationWrapper: defer to nn.Module,
+        # then forward unknown names to the wrapped module.
+        class Wrapper(torch.nn.Module):
+            def __init__(self, inner):
+                super().__init__()
+                self._wrapped = inner
+                self.register_buffer("w", torch.zeros(4))
+
+            def __getattr__(self, name):
+                try:
+                    return super().__getattr__(name)
+                except AttributeError:
+                    return getattr(self._wrapped, name)
+
+            def forward(self, x):
+                return x + self.w + self.b
+
+        inner = Inner()
+        model = Wrapper(inner)
+        if specialize:
+            model.torchdynamo_force_dynamic = False
+            inner.torchdynamo_force_dynamic = False
+        x = torch.arange(4.0)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(model, backend=cnt, fullgraph=True)
+        self.assertEqual(compiled(x), model(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+        target, name, value = {
+            "own_buffer": (model, "w", torch.ones(4)),
+            "forwarded_name": (model, "b", torch.full((4,), 5.0)),
+            "wrapped_buffer": (inner, "b", torch.full((4,), 7.0)),
+        }[case]
+        object.__setattr__(target, name, value)
+        for _ in range(2):
+            self.assertEqual(compiled(x), model(x))
+            self.assertEqual(cnt.frame_count, 2)
 
     def test_monkeypatching_forward_inside_compiled_region(self):
         class Mod(torch.nn.Module):

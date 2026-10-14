@@ -30,6 +30,7 @@ from torch._dynamo.utils import (
     chromium_event_log_active,
     CompileEventLogger,
     counters,
+    is_safe_constant,
     is_safe_numpy_wrapper,
     numpy_wrapper_cache_key,
     warn_once,
@@ -67,7 +68,6 @@ from torch.compiler._cache import (
 )
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
-from torch.fx.traceback import _get_memory_budget_annotation
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -248,13 +248,19 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_sum",
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
-        # An autocast context manager *inside* a compiled region is traced into
-        # these calls. What they do is fully determined by their arguments
-        # (device type, dtype, enabled, cache_enabled), which are constants in
-        # the graph and therefore part of the cache key, so a graph compiled
-        # under one autocast setting can never be reused for another.
+        # Autocast/inference_mode regions inside a compiled function trace these
+        # _enter_*/_exit_* nodes into the graph. Their args are hashed into the
+        # cache key; autocast's dtype=None resolves to the ambient autocast
+        # dtype, which _record_runtime_state also keys on. See #191106.
         "torch.amp.autocast_mode._enter_autocast",
         "torch.amp.autocast_mode._exit_autocast",
+        "torch.autograd.grad_mode._enter_inference_mode",
+        "torch.autograd.grad_mode._exit_inference_mode",
+        # torch.tensor(data) with a data-dependent scalar in `data` traces a raw
+        # torch._refs.tensor node instead of decomposing. Its behavior is fully
+        # determined by its args (the data list), which are in the graph and
+        # hashed into the cache key. See #191106.
+        "torch._refs.tensor",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -431,6 +437,18 @@ def _iter_graph_modules(
             yield module
 
 
+def _get_constant_annotations(node: Node) -> tuple[tuple[str, Any], ...]:
+    """
+    Read the fx.traceback.annotate entries of a node whose values are constants
+    Dynamo can embed in bytecode, i.e. the annotations it carries across graph
+    breaks.
+    """
+    custom = node.meta.get("custom")
+    if not isinstance(custom, dict):
+        return ()
+    return tuple((k, v) for k, v in custom.items() if is_safe_constant(v))
+
+
 def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list[str]:
     """
     Collect cache hashes from all context_fn used in SAC HOPs within the graph module.
@@ -604,13 +622,16 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
 
         # node.meta is stripped by GraphModule.__reduce__, so preserve the
-        # location and value of every budget annotation in the cache key.
-        self.region_activation_memory_budget_annotations = tuple(
-            (module_name, node_index, budget)
+        # location and value of every constant fx.traceback.annotate entry in
+        # the cache key. Joint passes may read them (e.g. the
+        # region_activation_memory_budget partitioner), and Dynamo recompiles
+        # a frame per annotation value, producing graphs that differ only here.
+        self.constant_annotations = tuple(
+            (module_name, node_index, annotations)
             for module_name, module in gm.named_modules()
             if isinstance(module, torch.fx.GraphModule)
             for node_index, node in enumerate(module.graph.nodes)
-            if (budget := _get_memory_budget_annotation(node)) is not None
+            if (annotations := _get_constant_annotations(node))
         )
 
         # Note: We use the live config module, not self.autograd_config (the
@@ -623,13 +644,18 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
     def _record_runtime_state(self, gm: torch.fx.GraphModule) -> None:
         self.grad_enabled = torch.is_grad_enabled()
-        # Include per-device autocast dtype in cache key to avoid reusing
+        # Include per-device autocast state in cache key to avoid reusing
         # a graph compiled for one autocast dtype (e.g. bfloat16) when
-        # running under a different autocast dtype (e.g. float16).
-        self.autocast_state: dict[str, torch.dtype] = {}
-        for device_type in torch._C._autocast_supported_devices():
-            if torch.is_autocast_enabled(device_type):
-                self.autocast_state[device_type] = torch.get_autocast_dtype(device_type)
+        # running under a different autocast dtype (e.g. float16). The dtype
+        # is recorded even when autocast is disabled because an in-graph
+        # torch.autocast(device) with no dtype picks up the ambient one.
+        self.autocast_state: dict[str, tuple[bool, torch.dtype]] = {
+            device_type: (
+                torch.is_autocast_enabled(device_type),
+                torch.get_autocast_dtype(device_type),
+            )
+            for device_type in torch._C._autocast_supported_devices()
+        }
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
         if has_triton_package():
