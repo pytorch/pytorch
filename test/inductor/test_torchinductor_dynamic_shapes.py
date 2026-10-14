@@ -10,6 +10,7 @@ from functools import partial
 
 import torch
 import torch.library
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
@@ -780,6 +781,20 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
         torch.compile(fullgraph=True)(f)(x, w).sum().backward()
         self.assertEqual(orig_w, w.grad)
+
+    @onlyOn(GPU_TYPE)
+    @parametrize("avoid_guards", [False, True])
+    def test_avoid_32bit_indexing_guards(self, device, avoid_guards):
+        def fn(x):
+            return x * 2 + 1
+
+        x = torch.randn(8, 1152, device=device)
+        with config.patch(avoid_32bit_indexing_guards=avoid_guards):
+            actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x))
+        guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
+        self.assertEqual("<= 2147483647" in guards, not avoid_guards)
+        self.assertEqual("'xnumel': 'i64'" in code, avoid_guards)
 
     @onlyOn(GPU_TYPE)
     @torch._dynamo.config.patch(
