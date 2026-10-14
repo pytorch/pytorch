@@ -520,6 +520,7 @@
   - rtimpe
   - trichmo
   - hameerabbasi
+  - riccardofelluga
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -590,6 +591,23 @@
   - Lint
   - pull
 
+- name: Complex Compilation
+  patterns:
+  - torch/_subclasses/complex_tensor/**
+  - test/complex_tensor/**
+  - torch/_functorch/_aot_autograd/complex_decomposition.py
+  - test/dynamo/test_complex.py
+  approved_by:
+  - hameerabbasi
+  - amjames
+  - eellison
+  - ezyang
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+  - inductor
+
 - name: Testing (Temporarily used for test refactoring)
   patterns:
   - torch/testing/**
@@ -606,7 +624,6 @@
   - '*'
   approved_by:
   - aditvenk
-  - AmesingFlank
   - angelayi
   - anshul-si
   - aorenste
@@ -637,7 +654,9 @@
   - karthickai
   - laithsakka
   - liangel-02
+  - MengjiaoZhou
   - Microve
+  - Mingming-Ding
   - mlazos
   - nandesuka
   - NicolasHug
@@ -654,13 +673,13 @@
   - slayton58
   - soulitzer
   - tushar00jain
-  - vkuzo
   - warrendeng
   - wconstab
   - weifengpy
   - williamwen42
   - ydwu4
   - yushangdi
+  - zoranzhao
   mandatory_checks_name:
   - EasyCLA
   - Lint
