@@ -20,12 +20,17 @@ inline bool fast_gather_kernel_eligible(const TensorIterator& iter, char * const
   // and we need the src tensor to keep 0 stride from restriding
   // (it could have been deleted by dimension collapse, in this case iterator would still be 2d
   // but we cannot use fast path)
+  // the vectorized kernel launches at least a warp per index, so slices holding fewer
+  // than a warp's worth of vectors leave most threads idle and run slower than the
+  // elementwise kernel; require at least 32 vectors (512 bytes at 16-byte alignment)
 
+  const auto slice_size_bytes = static_cast<size_t>(iter.shape()[0]) * element_size;
   return iter.ndim() == 2 && iter.strides(2)[0]==0 && iter.strides(2)[1]==index_element_size &&
          static_cast<size_t>(iter.strides(0)[0])==element_size &&
          static_cast<size_t>(iter.strides(1)[0])==element_size && iter.strides(1)[1] == 0 &&
          get_alignment(out_ptr) == alignment && get_alignment(in_ptr) == alignment &&
-         get_alignment(static_cast<size_t>(iter.shape()[0] * element_size)) == alignment &&
+         slice_size_bytes >= 32 * static_cast<size_t>(alignment) &&
+         get_alignment(slice_size_bytes) == alignment &&
          get_alignment(static_cast<size_t>(index_stride_bytes)) == alignment &&
          get_alignment(static_cast<size_t>(iter.strides(0)[1])) == alignment;
 }

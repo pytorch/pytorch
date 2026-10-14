@@ -210,7 +210,10 @@ class TestScatterGatherDevice(TestCase):
     @dtypes(torch.int8, torch.bfloat16)
     def test_gather_large(self, device, dtype):
         # test larger shapes to check vectorized implementation
-        for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192)):
+        # (4096, 3072, 16), (4096, 3072, 32) and (4096, 1024, 8) cover
+        # 16/32-byte rows that must skip the vectorized kernel
+        for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192),
+                          (4096, 3072, 16), (4096, 3072, 32), (4096, 1024, 8)):
             if torch.accelerator.is_available():
                 torch.accelerator.empty_cache()
             src = make_tensor((m, k), device=device, dtype=dtype)
