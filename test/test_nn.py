@@ -50,7 +50,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipCUDAIfNotRocm, largeMPSBufferTest, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
-    expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
+    expectedFailureMPS, skipMeta, skipCUDAIfNoSparseGeneric
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -3135,179 +3135,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             with self.assertRaisesRegex(ValueError, error_msg):
                 rnn = getattr(nn, mode)(30, 20, 2, proj_size=10)
 
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @set_default_dtype(torch.double)
-    def test_RNN_dropout(self):
-        # checking the assumption that cuDNN sticks dropout in between
-        # RNN layers
-        for p in (0, 0.276, 0.731, 1):
-            for train in (True, False):
-                for cuda in (True, False):
-                    rnn = nn.RNN(10, 1000, 2, bias=False, dropout=p, nonlinearity='relu')
-                    if cuda:
-                        rnn.cuda()
-
-                    if train:
-                        rnn.train()
-                    else:
-                        rnn.eval()
-                    rnn.weight_ih_l0.data.fill_(1)
-                    rnn.weight_hh_l0.data.fill_(1)
-                    rnn.weight_ih_l1.data.fill_(1)
-                    rnn.weight_hh_l1.data.fill_(1)
-                    input = torch.ones(1, 1, 10)
-                    hx = torch.zeros(2, 1, 1000)
-                    if cuda:
-                        input = input.cuda()
-                        hx = hx.cuda()
-
-                    output, hy = rnn(input, hx)
-                    self.assertEqual(output.data.min(), output.data.max())
-                    output_val = output.data[0][0][0]
-                    if p == 0 or not train:
-                        self.assertEqual(output_val, 10000)
-                    elif p == 1:
-                        self.assertEqual(output_val, 0)
-                    else:
-                        self.assertGreater(output_val, 8000)
-                        self.assertLess(output_val, 12000)
-                        denorm_mod = (output_val * (1 - p)) % 10
-                        self.assertLess(min(denorm_mod, 10 - denorm_mod), 1e-2)
-
-                    self.assertEqual(hy[0].data.min(), hy[0].data.max())
-                    self.assertEqual(hy[1].data.min(), hy[1].data.max())
-                    self.assertEqual(hy.data[0][0][0], 10)
-                    self.assertEqual(hy.data[1][0][0], output_val)
-
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @set_default_dtype(torch.double)
-    def test_error_RNN_seq_len_zero(self):
-        # checking error message when RNN has seq_len = 0
-        for module in (nn.RNN, nn.LSTM, nn.GRU):
-            for bidirectional in [True, False]:
-                for device in get_all_device_types():
-                    input = torch.ones(0, 10, 5)
-                    rnn = module(5, 6, bidirectional=bidirectional)
-                    if device == 'cuda':
-                        rnn.cuda()
-                        input = input.cuda()
-
-                    with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
-                        rnn(input)
-
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    def test_RNN_dropout_state(self):
-        for p in (0, 0.1234):
-            for train in (True, False):
-                for cuda in (True, False):
-                    rnn = nn.RNN(100, 100, 2, bias=False, dropout=p, nonlinearity='relu')
-                    if cuda:
-                        rnn.cuda()
-
-                    if train:
-                        rnn.train()
-                    else:
-                        rnn.eval()
-                    input = torch.rand(1, 1, 100)
-                    hx = torch.rand(2, 1, 100)
-                    if cuda:
-                        input = input.cuda()
-                        hx = hx.cuda()
-
-                    output1, hy1 = rnn(input, hx)
-                    output2, hy2 = rnn(input, hx)
-
-                    buf = io.BytesIO()
-                    rnn_pickle = torch.save(rnn, buf)
-                    buf.seek(0)
-                    # weights_only=False as this is legacy code that saves the model
-                    rnn2 = torch.load(buf, weights_only=False)
-                    rnn2.flatten_parameters()
-                    output3, hy3 = rnn2(input, hx)
-
-                    if p == 0 or not train:
-                        self.assertEqual(output1, output2)
-                        self.assertEqual(output1, output3)
-                        self.assertEqual(hy1, hy2)
-                        self.assertEqual(hy1, hy3)
-                    else:
-                        self.assertNotEqual(output1, output2)
-                        self.assertNotEqual(output1, output3)
-                        self.assertNotEqual(hy1, hy2)
-                        self.assertNotEqual(hy1, hy3)
-
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @set_default_dtype(torch.double)
-    def test_RNN_change_dropout(self):
-        for train, cuda in product((True, False), repeat=2):
-            rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
-            input = torch.rand(3, 2, 100)
-            if cuda:
-                input.data = input.data.cuda()
-                rnn.cuda()
-
-            if train:
-                rnn.train()
-            else:
-                rnn.eval()
-
-            prev_output = None
-            for p in (0, 0.5, 0, 0.7, 0.2, 1, 0.2, 0):
-                rnn.dropout = p
-                output1, hy1 = rnn(input)
-                output2, hy2 = rnn(input)
-
-                if p == 0 or p == 1 or not train:
-                    self.assertEqual(output1, output2)
-                    self.assertEqual(hy1, hy2)
-                else:
-                    self.assertNotEqual(output1, output2)
-                    self.assertNotEqual(hy1, hy2)
-
-                if prev_output is not None:
-                    if not train:
-                        self.assertEqual(output1.data, prev_output)
-                        self.assertEqual(output2.data, prev_output)
-                    else:
-                        self.assertNotEqual(output1.data, prev_output)
-                        self.assertNotEqual(output2.data, prev_output)
-                prev_output = output1.data
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_RNN_dropout_gradients(self):
-        # Regression test for ROCm/ROCm#6339: a multi-layer GRU with dropout set
-        # via the module parameter (which routes through the fused cuDNN/MIOpen
-        # dropout path) must produce a fresh mask each training step and must not
-        # zero the input-to-hidden gradients. A prior MIOpen bug reused a single
-        # all-drop mask, which zeroed weight_ih_l* gradients and stalled training.
-        torch.manual_seed(0)
-        rnn = nn.GRU(16, 32, num_layers=2, dropout=0.5).cuda()
-        rnn.train()
-        input = torch.randn(7, 4, 16, device="cuda")
-        target = torch.randn(7, 4, 32, device="cuda")
-
-        # Consecutive training forwards on the same input must differ (dropout is
-        # actually stochastic across steps, not a fixed mask). Compare multiple
-        # consecutive pairs: under the original bug the first forward generated a
-        # real mask and only later steps repeated the fixed all-drop mask, so
-        # out1 != out2 held even on broken code while out2 == out3 exposed it.
-        out1, _ = rnn(input)
-        out2, _ = rnn(input)
-        out3, _ = rnn(input)
-        self.assertNotEqual(out1, out2)
-        self.assertNotEqual(out2, out3)
-        self.assertNotEqual(out1, out3)
-
-        # After a backward, the input-to-hidden gradients of the dropped layer
-        # must not be entirely zero.
-        rnn.zero_grad()
-        out, _ = rnn(input)
-        (out - target).pow(2).mean().backward()
-        for name, param in rnn.named_parameters():
-            if name.startswith("weight_ih"):
-                self.assertIsNotNone(param.grad)
-                self.assertGreater(param.grad.abs().sum().item(), 0.0)
-
     def test_inplace_thnn(self):
         modules = [nn.ReLU, nn.ELU, nn.SELU, nn.CELU, nn.RReLU]
         for mod in modules:
@@ -3910,63 +3737,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         helper(self, torch.bfloat16)
         helper(self, torch.float16)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    def test_batchnorm_cudnn_nhwc(self):
-        def run_test(input, grad_output):
-            c = input.size(1)
-            mod = nn.BatchNorm2d(c).cuda().float()
-            mod.weight.data.uniform_()
-            mod.bias.data.uniform_()
-            ref_input = input.detach().clone().contiguous().requires_grad_(True)
-            ref_grad = grad.detach().clone().contiguous()
-            ref_mod = nn.BatchNorm2d(c).cuda().float()
-            ref_mod.load_state_dict(mod.state_dict())
-            out = mod(input)
-            out.backward(grad_output)
-            ref_out = ref_mod(ref_input)
-            ref_out.backward(ref_grad)
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-            self.assertTrue(ref_out.is_contiguous())
-            self.assertEqual(out, ref_out)
-            self.assertEqual(mod.weight.grad, ref_mod.weight.grad)
-            self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
-            self.assertEqual(input.grad, ref_input.grad)
-
-        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
-        input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
-
-        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
-        grad = grad.contiguous(memory_format=torch.channels_last)
-        run_test(input, grad)
-        # see #42588, grad is channels_last contiguous, but grad.suggest_memory_format (rightly) return "contiguous"
-        # not channels_last
-        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
-        input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
-        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
-        grad = grad.permute(0, 2, 1, 3)
-        run_test(input, grad)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_batchnorm_cudnn_half(self):
-        # THNN
-        input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device="cuda", requires_grad=True)
-        m = nn.BatchNorm2d(3).half().cuda()
-        thnn_output = m(input)
-        thnn_output.sum().backward()
-        thnn_input_grad = input.grad.data.clone()
-        self.assertEqualTypeString(thnn_output, input)
-        # cuDNN
-        if TEST_CUDNN:
-            input.grad = None
-            m = m.float()
-            cudnn_output = m(input)
-            cudnn_output.sum().backward()
-            cudnn_input_grad = input.grad.data.clone()
-            self.assertEqualTypeString(cudnn_output, input)
-            self.assertEqual(cudnn_output, thnn_output)
-            self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
 
     def test_batchnorm_raises_error_if_less_than_one_value_per_channel(self):
         x = torch.rand(10)[None, :, None]
@@ -15617,6 +15387,163 @@ class TestNNDeviceType(NNTestCase):
             outs[0].sum().backward()
 
     @skipMPS
+    @skipCUDAIfNoCudnn
+    @set_default_dtype(torch.double)
+    @parametrize_test('train', [True, False])
+    @parametrize_test('p', [0, 0.276, 0.731, 1])
+    def test_RNN_dropout(self, device, p, train):
+        # checking the assumption that cuDNN sticks dropout in between
+        # RNN layers
+        rnn = nn.RNN(10, 1000, 2, bias=False, dropout=p, nonlinearity='relu').to(device)
+
+        if train:
+            rnn.train()
+        else:
+            rnn.eval()
+        rnn.weight_ih_l0.data.fill_(1)
+        rnn.weight_hh_l0.data.fill_(1)
+        rnn.weight_ih_l1.data.fill_(1)
+        rnn.weight_hh_l1.data.fill_(1)
+        input = torch.ones(1, 1, 10, device=device)
+        hx = torch.zeros(2, 1, 1000, device=device)
+
+        output, hy = rnn(input, hx)
+        self.assertEqual(output.data.min(), output.data.max())
+        output_val = output.data[0][0][0]
+        if p == 0 or not train:
+            self.assertEqual(output_val, 10000)
+        elif p == 1:
+            self.assertEqual(output_val, 0)
+        else:
+            self.assertGreater(output_val, 8000)
+            self.assertLess(output_val, 12000)
+            denorm_mod = (output_val * (1 - p)) % 10
+            self.assertLess(min(denorm_mod, 10 - denorm_mod), 1e-2)
+
+        self.assertEqual(hy[0].data.min(), hy[0].data.max())
+        self.assertEqual(hy[1].data.min(), hy[1].data.max())
+        self.assertEqual(hy.data[0][0][0], 10)
+        self.assertEqual(hy.data[1][0][0], output_val)
+
+    @skipMPS
+    @skipCUDAIfNoCudnn
+    @set_default_dtype(torch.double)
+    @parametrize_test('bidirectional', [True, False])
+    @parametrize_test('mode', ['RNN', 'LSTM', 'GRU'])
+    def test_error_RNN_seq_len_zero(self, device, mode, bidirectional):
+        # checking error message when RNN has seq_len = 0
+        input = torch.ones(0, 10, 5, device=device)
+        rnn = getattr(nn, mode)(5, 6, bidirectional=bidirectional).to(device)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
+            rnn(input)
+
+    @skipCUDAIfNoCudnn
+    @parametrize_test('train', [True, False])
+    @parametrize_test('p', [0, 0.1234])
+    def test_RNN_dropout_state(self, device, p, train):
+        rnn = nn.RNN(100, 100, 2, bias=False, dropout=p, nonlinearity='relu').to(device)
+
+        if train:
+            rnn.train()
+        else:
+            rnn.eval()
+        input = torch.rand(1, 1, 100, device=device)
+        hx = torch.rand(2, 1, 100, device=device)
+
+        output1, hy1 = rnn(input, hx)
+        output2, hy2 = rnn(input, hx)
+
+        buf = io.BytesIO()
+        torch.save(rnn, buf)
+        buf.seek(0)
+        # weights_only=False as this is legacy code that saves the model
+        rnn2 = torch.load(buf, weights_only=False)
+        rnn2.flatten_parameters()
+        output3, hy3 = rnn2(input, hx)
+
+        if p == 0 or not train:
+            self.assertEqual(output1, output2)
+            self.assertEqual(output1, output3)
+            self.assertEqual(hy1, hy2)
+            self.assertEqual(hy1, hy3)
+        else:
+            self.assertNotEqual(output1, output2)
+            self.assertNotEqual(output1, output3)
+            self.assertNotEqual(hy1, hy2)
+            self.assertNotEqual(hy1, hy3)
+
+    @skipMPS
+    @skipCUDAIfNoCudnn
+    @set_default_dtype(torch.double)
+    @parametrize_test('train', [True, False])
+    def test_RNN_change_dropout(self, device, train):
+        rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu').to(device)
+        input = torch.rand(3, 2, 100, device=device)
+
+        if train:
+            rnn.train()
+        else:
+            rnn.eval()
+
+        prev_output = None
+        for p in (0, 0.5, 0, 0.7, 0.2, 1, 0.2, 0):
+            rnn.dropout = p
+            output1, hy1 = rnn(input)
+            output2, hy2 = rnn(input)
+
+            if p == 0 or p == 1 or not train:
+                self.assertEqual(output1, output2)
+                self.assertEqual(hy1, hy2)
+            else:
+                self.assertNotEqual(output1, output2)
+                self.assertNotEqual(hy1, hy2)
+
+            if prev_output is not None:
+                if not train:
+                    self.assertEqual(output1.data, prev_output)
+                    self.assertEqual(output2.data, prev_output)
+                else:
+                    self.assertNotEqual(output1.data, prev_output)
+                    self.assertNotEqual(output2.data, prev_output)
+            prev_output = output1.data
+
+    @onlyAccelerator
+    def test_RNN_dropout_gradients(self, device):
+        # Regression test for ROCm/ROCm#6339: a multi-layer GRU with dropout set
+        # via the module parameter (which routes through the fused cuDNN/MIOpen
+        # dropout path) must produce a fresh mask each training step and must not
+        # zero the input-to-hidden gradients. A prior MIOpen bug reused a single
+        # all-drop mask, which zeroed weight_ih_l* gradients and stalled training.
+        torch.manual_seed(0)
+        rnn = nn.GRU(16, 32, num_layers=2, dropout=0.5).to(device)
+        rnn.train()
+        input = torch.randn(7, 4, 16, device=device)
+        target = torch.randn(7, 4, 32, device=device)
+
+        # Consecutive training forwards on the same input must differ (dropout is
+        # actually stochastic across steps, not a fixed mask). Compare multiple
+        # consecutive pairs: under the original bug the first forward generated a
+        # real mask and only later steps repeated the fixed all-drop mask, so
+        # out1 != out2 held even on broken code while out2 == out3 exposed it.
+        out1, _ = rnn(input)
+        out2, _ = rnn(input)
+        out3, _ = rnn(input)
+        self.assertNotEqual(out1, out2)
+        self.assertNotEqual(out2, out3)
+        self.assertNotEqual(out1, out3)
+
+        # After a backward, the input-to-hidden gradients of the dropped layer
+        # must not be entirely zero.
+        rnn.zero_grad()
+        out, _ = rnn(input)
+        (out - target).pow(2).mean().backward()
+        for name, param in rnn.named_parameters():
+            if name.startswith("weight_ih"):
+                self.assertIsNotNone(param.grad)
+                self.assertGreater(param.grad.abs().sum().item(), 0.0)
+
+    @skipMPS
     def test_PReLU_backward_requires_grad_false(self, device):
         m = nn.PReLU().to(device)
         x = torch.randn(2, 3, 4, 5, device=device, requires_grad=False)
@@ -16258,6 +16185,16 @@ class TestNNDeviceType(NNTestCase):
             _train(memory_format, ref_backend, mixed, dtype)
         else:
             _inference(memory_format, ref_backend, mixed, dtype)
+
+    @skipMPS
+    @onlyAccelerator
+    def test_batchnorm_half(self, device):
+        # THNN
+        input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device=device, requires_grad=True)
+        m = nn.BatchNorm2d(3).half().to(device)
+        thnn_output = m(input)
+        thnn_output.sum().backward()
+        self.assertEqualTypeString(thnn_output, input)
 
     @skipMPS
     @onlyAccelerator
@@ -17431,6 +17368,61 @@ if __name__ == '__main__':
                 continue
             self.assertEqual(grad.shape, torch.Size(normalized_shape), f"{name}.grad")
             self.assertEqual(grad.cpu(), ref, f"{name}.grad", atol=1e-3, rtol=1e-3)
+
+    @skipCUDAIfNoCudnn
+    def test_batchnorm_cudnn_nhwc(self):
+        def run_test(input, grad_output):
+            c = input.size(1)
+            mod = nn.BatchNorm2d(c).cuda().float()
+            mod.weight.data.uniform_()
+            mod.bias.data.uniform_()
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_mod = nn.BatchNorm2d(c).cuda().float()
+            ref_mod.load_state_dict(mod.state_dict())
+            out = mod(input)
+            out.backward(grad_output)
+            ref_out = ref_mod(ref_input)
+            ref_out.backward(ref_grad)
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(mod.weight.grad, ref_mod.weight.grad)
+            self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
+            self.assertEqual(input.grad, ref_input.grad)
+
+        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
+
+        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
+        grad = grad.contiguous(memory_format=torch.channels_last)
+        run_test(input, grad)
+        # see #42588, grad is channels_last contiguous, but grad.suggest_memory_format (rightly) return "contiguous"
+        # not channels_last
+        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
+        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
+        grad = grad.permute(0, 2, 1, 3)
+        run_test(input, grad)
+
+    @skipCUDAIfNoCudnn
+    def test_batchnorm_cudnn_half(self):
+        # THNN
+        input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device="cuda", requires_grad=True)
+        m = nn.BatchNorm2d(3).half().cuda()
+        thnn_output = m(input)
+        thnn_output.sum().backward()
+        thnn_input_grad = input.grad.data.clone()
+        self.assertEqualTypeString(thnn_output, input)
+        # cuDNN
+        input.grad = None
+        m = m.float()
+        cudnn_output = m(input)
+        cudnn_output.sum().backward()
+        cudnn_input_grad = input.grad.data.clone()
+        self.assertEqualTypeString(cudnn_output, input)
+        self.assertEqual(cudnn_output, thnn_output)
+        self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
 
 
 class TestFunctionalPickle(TestCase):
