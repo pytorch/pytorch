@@ -117,7 +117,7 @@ def concat(a: Sequence[_T], b: Sequence[_T2], /) -> Sequence[_T | _T2]:
 # Reference: https://docs.python.org/3/library/operator.html#operator.countOf
 @substitute_in_graph(operator.countOf, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
 def countOf(a: Iterable[_T], b: _T, /) -> int:
-    return sum(it is b or it == b for it in a)
+    return sum(it is b or bool(it == b) for it in a)
 
 
 # Reference: https://docs.python.org/3/library/operator.html#operator.iconcat

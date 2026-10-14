@@ -11,7 +11,7 @@ from __future__ import annotations
 import enum
 import operator
 from collections.abc import Iterable
-from typing import Any, Literal, overload, TYPE_CHECKING
+from typing import Any, cast, Literal, overload, TYPE_CHECKING
 
 import torch
 from torch._dynamo.source import GetItemSource
@@ -25,7 +25,7 @@ from ..utils import (
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import _RICHCOMPARE_OPS, ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
@@ -114,7 +114,7 @@ class ConstantVariable(VariableTracker):
 
         return ConstantVariable(value, **kwargs)
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: Any = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if not ConstantVariable.is_base_literal(value):
             raise AssertionError(
@@ -230,7 +230,19 @@ class ConstantVariable(VariableTracker):
 
     def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
-        return hash(self.value), False
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+        from .user_defined import _CONSTANT_BASE_TYPES
+
+        if isinstance(self.value, torch.device) and _coor_enabled():
+            # Drop the index so an explicit cuda:N lands in the same bucket as a
+            # rank-relative CurrentDeviceVariable; see its hash_impl.
+            return hash(torch.device(self.value.type)), False
+
+        value_type = cast(Any, type(self.value))
+        mro = value_type.__mro__
+        base = next((c for c in mro if c in _CONSTANT_BASE_TYPES), value_type)
+        return base.__hash__(self.value), False
 
     def tp_richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
@@ -257,6 +269,20 @@ class ConstantVariable(VariableTracker):
         """Mapping length - delegates to len_impl for constants."""
         return self.len_impl(tx)
 
+    def mp_subscript_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        key: VariableTracker,
+    ) -> VariableTracker:
+        from .object_protocol import type_implements_mp_subscript
+
+        if type_implements_mp_subscript(type(self.value)) and key.is_python_constant():
+            try:
+                return ConstantVariable.create(self.value[key.as_python_constant()])
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+        return super().mp_subscript_impl(tx, key)
+
     def const_getattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker:
@@ -266,6 +292,18 @@ class ConstantVariable(VariableTracker):
         if callable(member):
             raise NotImplementedError
         return member
+
+    def sq_concat_impl(
+        self, tx: InstructionTranslatorBase, other: VariableTracker
+    ) -> VariableTracker:
+        from .object_protocol import type_implements_sq_concat
+
+        if type_implements_sq_concat(type(self.value)) and other.is_python_constant():
+            try:
+                return ConstantVariable.create(self.value + other.as_python_constant())
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+        return super().sq_concat_impl(tx, other)
 
     def sq_contains_impl(self, tx: InstructionTranslatorBase, item: VariableTracker):
         """Sequence contains for constants."""
@@ -324,6 +362,8 @@ class ConstantVariable(VariableTracker):
                 return ConstantVariable.create(self.value.join(arg_const))
             except NotImplementedError:
                 return super().call_method(tx, name, args, kwargs)
+            except TypeError as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
@@ -345,13 +385,13 @@ class ConstantVariable(VariableTracker):
             try:
                 result = method(*const_args, **const_kwargs)
             except Exception as e:
-                raise_observed_exception(type(e), tx)
+                raise_observed_exception(type(e), tx, args=list(e.args))
             # str.split/rsplit/splitlines return a fresh caller-owned list;
             # mark it mutable so in-place ops (.sort(), shuffle, etc.) are tracked.
             if name in ("split", "rsplit", "splitlines"):
                 return ConstantVariable.create(result, mutation_type=ValueMutationNew())
             return ConstantVariable.create(result)
-        elif isinstance(self.value, (float, int)) and hasattr(self.value, name):
+        elif istype(self.value, (float, int)) and hasattr(self.value, name):
             if not (args or kwargs):
                 try:
                     return ConstantVariable.create(getattr(self.value, name)())
@@ -363,6 +403,7 @@ class ConstantVariable(VariableTracker):
                     )
             if (
                 hasattr(operator, name)
+                and name not in _RICHCOMPARE_OPS
                 and len(args) == 1
                 and args[0].is_python_constant()
             ):
@@ -468,6 +509,18 @@ class ConstantVariable(VariableTracker):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
+    def nb_bool_impl(
+        self,
+        tx: InstructionTranslatorBase,
+    ) -> VariableTracker:
+        # CPython: int, float, and bool define nb_bool (returns self for int,
+        # bool(self) for float). All other constant types do not.
+        from .object_protocol import type_implements_nb_bool
+
+        if type_implements_nb_bool(type(self.value)):
+            return ConstantVariable.create(bool(self.value))
+        return super().nb_bool_impl(tx)
+
     def nb_index_impl(
         self,
         tx: InstructionTranslatorBase,
@@ -487,7 +540,10 @@ class ConstantVariable(VariableTracker):
         # CPython: int defines nb_int (long_long, returns copy).
         # bool inherits nb_int from int via slot inheritance.
         # float defines nb_int (truncates toward zero via PyLong_FromDouble).
-        return ConstantVariable.create(int(self.value))
+        try:
+            return ConstantVariable.create(int(self.value))
+        except (OverflowError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def nb_float_impl(
         self,
@@ -496,7 +552,10 @@ class ConstantVariable(VariableTracker):
         # CPython: float defines nb_float (float_float, returns copy).
         # int defines nb_float (long_float, converts to float).
         # bool inherits nb_float from int via slot inheritance.
-        return ConstantVariable.create(float(self.value))
+        try:
+            return ConstantVariable.create(float(self.value))
+        except (OverflowError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def _nb_binary_impl(
         self,
@@ -912,6 +971,11 @@ class FakeIdVariable(VariableTracker):
         # the fake id is preserved in the resulting string, matching how
         # FakeIdVariable already resolves same-kind id()/hash() comparisons.
         return ConstantVariable.create(repr(self.value))
+
+    def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        # Mirrors long_bool. The fake value is only meaningful at compile time,
+        # but its truthiness is, like tp_repr_impl, a plain function of it.
+        return ConstantVariable.create(bool(self.value))
 
     def tp_richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str

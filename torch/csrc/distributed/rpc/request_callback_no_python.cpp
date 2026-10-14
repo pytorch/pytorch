@@ -155,13 +155,13 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processPythonCall(
-    RpcCommandBase& rpc,
+    RpcCommandBase& /*rpc*/,
     const std::vector<c10::Stream>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processPythonRemoteCall(
-    RpcCommandBase& rpc,
+    RpcCommandBase& /*rpc*/,
     const std::vector<c10::Stream>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
@@ -249,7 +249,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
-    processPythonRRefFetchCall(RpcCommandBase& rpc) const {
+    processPythonRRefFetchCall(RpcCommandBase& /*rpc*/) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -490,7 +490,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefBackward(
-    RpcCommandBase& rpc) const {
+    RpcCommandBase& /*rpc*/) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 

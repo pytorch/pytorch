@@ -39,6 +39,21 @@ on:
         type: string
         default: ""
         description: Space-separated tests to exclude (empty string implies none)
+      force-keep-going:
+        required: false
+        type: boolean
+        default: false
+        description: Enable keep-going regardless of the PR label or body setting.
+      force-no-td:
+        required: false
+        type: boolean
+        default: false
+        description: Explicitly disable target determination.
+      soft-fail-tests:
+        required: false
+        type: boolean
+        default: false
+        description: Allow the test step to fail without failing the job.
       use-gha:
         required: false
         type: string
@@ -261,6 +276,7 @@ jobs:
 
       - name: Test
         id: test
+        continue-on-error: ${{ inputs.soft-fail-tests }}
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
@@ -282,11 +298,11 @@ jobs:
           EXTRA_FLAGS: ${{ matrix.extra_flags || '' }}
           OP_BENCHMARK_TESTS: ${{ matrix.op_benchmark_tests }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
-          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          CONTINUE_THROUGH_ERROR: ${{ inputs.force-keep-going && '1' || steps.keep-going.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
-          NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
+          NO_TD: ${{ inputs.force-no-td && '1' || steps.keep-going.outputs.ci-no-td }}
           TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
@@ -344,6 +360,11 @@ jobs:
           # shellcheck disable=SC2046
           python3 -m pip install $(echo dist/*.whl)[opt-einsum]
           ${TEST_COMMAND}
+
+      - name: Report soft-failed tests
+        if: always() && inputs.soft-fail-tests && steps.test.outcome == 'failure'
+        shell: bash
+        run: echo "::warning title=Soft-failed tests::The test step failed; inspect the test artifacts for details."
 
       - name: Configure AWS credentials
         id: aws-creds-benchmark

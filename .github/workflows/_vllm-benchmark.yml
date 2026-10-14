@@ -14,7 +14,7 @@ on:
       build_environment:
         required: true
         type: string
-        description: The build environment name, e.g. linux-jammy-cuda13.0-py3.12-gcc11
+        description: The build environment name, e.g. linux-jammy-cuda13.2-py3.12-gcc11
       pytorch_branch:
         required: false
         type: string
@@ -62,14 +62,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git unzip
 
-      # OSDC runner pods reuse the workspace across jobs, leaving root-owned
-      # content that actions/checkout can't delete (uid mismatch: GH hook 1001 vs
-      # CI image 1000). Same fix as setup-linux's "Fix workspace permissions".
-      - name: Fix workspace permissions
-        if: ${{ !contains(inputs.runner, 'dgx') }}
+      - name: Ack Git cache ownership
         shell: bash
         run: |
-          sudo chmod -R 777 "$GITHUB_WORKSPACE"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout PyTorch
@@ -130,7 +125,7 @@ jobs:
             dist/ao/torchao-*.whl \
             dist/vllm/vllm-*.whl \
             dist/deepgemm/deep_gemm-*.whl \
-            --extra-index-url https://download.pytorch.org/whl/cu130 \
+            --extra-index-url https://download.pytorch.org/whl/cu132 \
             --index-strategy unsafe-best-match
 
       - name: Print some debug information
