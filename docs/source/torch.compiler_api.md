@@ -90,8 +90,6 @@ trace under the contract of Note [precompile programming model] in `torch/_preco
 
 .. autofunction:: torch.compiler.precompile.capture_runtime
 
-.. autofunction:: torch.compiler.precompile.finalize_cache
-
 .. autofunction:: torch.compiler.precompile.prepare_runtime
 
 .. autoexception:: torch.compiler.PrecompileError
