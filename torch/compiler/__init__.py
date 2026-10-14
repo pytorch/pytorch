@@ -486,7 +486,9 @@ def set_enable_guard_collectives(enabled: bool):
     compiler collectives, you can only run this on SPMD programs; you will hang
     otherwise.  Note that a guard collective is only issued if there is any
     compiled code to guard on; if this is the first time we encounter a frame or
-    the frame is skipped, we don't issue collectives.
+    the frame is skipped, we don't issue collectives.  Entries installed from a
+    precompile artifact count as compiled code, so every rank must install the
+    same artifact.
 
     Returns the previous setting of enabled.
     """
