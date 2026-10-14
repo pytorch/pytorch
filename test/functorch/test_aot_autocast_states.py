@@ -7,7 +7,12 @@ from unittest.mock import patch
 import torch
 from torch._functorch._aot_autograd import utils as aot_utils
 from torch._functorch._aot_autograd.utils import _get_autocast_states
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 class TestAOTAutocastStates(TestCase):
@@ -346,6 +351,7 @@ class TestAOTAutocastStates(TestCase):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_cache_enabled(not cache_enabled)
             return [x + 1]
 
         collect = run_functionalized_fw_and_collect_metadata(
@@ -359,6 +365,7 @@ class TestAOTAutocastStates(TestCase):
         try:
             torch.set_autocast_cache_enabled(cache_enabled)
             collect(x)
+            self.assertEqual(torch.is_autocast_cache_enabled(), cache_enabled)
         finally:
             torch.set_autocast_cache_enabled(prior_cache_enabled)
 
@@ -401,6 +408,9 @@ class TestAOTAutocastStates(TestCase):
             self.assertEqual(torch.get_autocast_dtype(extra), prior_dtype)
         finally:
             torch.set_autocast_dtype(extra, prior_dtype)
+
+
+instantiate_parametrized_tests(TestAOTAutocastStates)
 
 
 if __name__ == "__main__":
