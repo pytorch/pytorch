@@ -485,10 +485,15 @@ def set_enable_guard_collectives(enabled: bool):
     for all ranks to compile at the same time to run compiler collectives).  Like
     compiler collectives, you can only run this on SPMD programs; you will hang
     otherwise.  Note that a guard collective is only issued if there is any
-    compiled code to guard on; if this is the first time we encounter a frame or
-    the frame is skipped, we don't issue collectives.  Entries installed from a
-    precompile artifact count as compiled code, so every rank must install the
-    same artifact.
+    compiled code to guard on, including entries installed from a loaded
+    precompiled artifact; if this is the first time we encounter a frame or
+    the frame is skipped, we don't issue collectives.  The exception is a frame
+    that a loaded artifact recorded with no compiled code and therefore skips:
+    it reports the skip, since another rank's artifact may have compiled that
+    frame.  The frame runs eagerly only if every rank reports the same skip; a
+    mixture of hits, misses and skips forces the miss path (recompilation) on
+    every rank.  Entries and skips installed from a precompile artifact assume
+    every rank installed the same artifact.
 
     Returns the previous setting of enabled.
     """

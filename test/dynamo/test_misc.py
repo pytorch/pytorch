@@ -11261,6 +11261,142 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     @torch._dynamo.config.patch(
         debug_force_nested_calls=False, nested_graph_breaks=False
     )
+    def test_precompile_skip_reports_guard_collective_skip(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.types import GuardCollectiveState
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_skip(fn.__code__)
+        guard_results = []
+
+        def record(state):
+            guard_results.append(state)
+            return state
+
+        old_hook = set_guard_complete_hook(record)
+        try:
+            self.assertEqual(compiled_fn(x), fn(x))
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(guard_results, [GuardCollectiveState.SKIP])
+        self.assertIs(type(guard_results[0]), int)
+        self.assertEqual(cnt.frame_count, 0)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    def test_precompile_skip_compiles_when_guard_collective_misses(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.types import GuardCollectiveState
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_skip(fn.__code__)
+        guard_results = []
+
+        # What the guard collective returns when another rank hit or missed.
+        def peer_disagreed(state):
+            guard_results.append(state)
+            return GuardCollectiveState.MISS
+
+        def record(state):
+            guard_results.append(state)
+            return state
+
+        old_hook = set_guard_complete_hook(peer_disagreed)
+        try:
+            self.assertEqual(compiled_fn(x), fn(x))
+            self.assertEqual(guard_results, [GuardCollectiveState.SKIP])
+            self.assertEqual(cnt.frame_count, 1)
+            # The entry compiled for the peer now serves the frame.
+            guard_results.clear()
+            set_guard_complete_hook(record)
+            self.assertEqual(compiled_fn(x), fn(x))
+            self.assertEqual(guard_results, [GuardCollectiveState.HIT])
+            self.assertEqual(cnt.frame_count, 1)
+        finally:
+            set_guard_complete_hook(old_hook)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    def test_precompile_skip_survives_a_recompile_that_traces_no_graph(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.types import GuardCollectiveState
+
+        def fn(x):
+            return x + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_skip(fn.__code__)
+        guard_results = []
+
+        def peer_disagreed(state):
+            guard_results.append(state)
+            return GuardCollectiveState.MISS
+
+        old_hook = set_guard_complete_hook(peer_disagreed)
+        try:
+            # An int input traces no graph, so the forced recompile skips the
+            # frame again, and the next call must still join the collective.
+            self.assertEqual(compiled_fn(3), 4)
+            self.assertEqual(compiled_fn(3), 4)
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(
+            guard_results, [GuardCollectiveState.SKIP, GuardCollectiveState.SKIP]
+        )
+        self.assertEqual(cnt.frame_count, 0)
+
+    def test_skip_code_does_not_run_guard_complete_hook(self):
+        from torch._C._dynamo.eval_frame import set_guard_complete_hook
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        torch._dynamo.eval_frame.skip_code(fn.__code__)
+        guard_results = []
+
+        def record(state):
+            guard_results.append(state)
+            return state
+
+        old_hook = set_guard_complete_hook(record)
+        try:
+            self.assertEqual(compiled_fn(x), fn(x))
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(guard_results, [])
+        self.assertEqual(cnt.frame_count, 0)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_guard_complete_hook_can_reset_hit(self):
         from torch._C._dynamo.eval_frame import set_guard_complete_hook
 

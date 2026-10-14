@@ -1637,6 +1637,38 @@ def entry(x):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
+    def test_installed_skip_reports_guard_collective_skip(self):
+        from torch._C._dynamo.eval_frame import set_guard_complete_hook
+        from torch._dynamo.types import GuardCollectiveState
+
+        def fn(x):
+            return x + 1
+
+        # No tensor ops: the frame is recorded with no guarded code.
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(3)
+        dynamo = package.cache_entry()
+        self.assertEqual([len(c.guarded_codes) for c in dynamo.codes], [0])
+
+        torch._dynamo.reset()
+        package = CompilePackage(fn, dynamo)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch._dynamo.optimize(backend=counter, package=package)(fn)
+        package.install({})
+        guard_results = []
+
+        def record(state):
+            guard_results.append(state)
+            return state
+
+        old_hook = set_guard_complete_hook(record)
+        try:
+            self.assertEqual(compiled_fn(3), 4)
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(guard_results, [GuardCollectiveState.SKIP])
+        self.assertEqual(counter.frame_count, 0)
+
     def test_import_source_unpickle_without_trace(self):
         # Deserializing an ImportSource happens at torch.compile() time with no
         # active TracingContext (e.g. precompile warm-load). Reconstructing the
