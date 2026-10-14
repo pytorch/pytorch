@@ -578,7 +578,8 @@ inline float2 conj(float2 a) {
 // the square terms. If `a` or `b` are very large or very small floating point
 // numbers, then their squares will resolve to inf or 0.
 //
-// Assume `a >= b >= 0`. We can first change the formula to:
+// Inputs are replaced by their absolute values, so assume `a >= b >= 0`.
+// We can first change the formula to:
 // `h = a sqrt(1 + (b / a)^2)`
 // `h = a sqrt(1 + r)`
 // where `r = (b / a)^2`. Since `a >= b >= 0`, then `1 >= r >= 0`.
@@ -600,6 +601,8 @@ inline float hypot(float a_, float b_) {
   if (::metal::isinf(a_) || ::metal::isinf(b_)) {
     return INFINITY;
   }
+  a_ = ::metal::abs(a_);
+  b_ = ::metal::abs(b_);
   auto a = max(a_, b_);
   auto b = min(a_, b_);
 
@@ -614,6 +617,23 @@ inline float hypot(float a_, float b_) {
   bool is_h2 = ((sqrt_1_plus_r == 1) && (r > 0));
 
   return ::metal::select(::metal::select(h3, h2, is_h2), h1, is_h1);
+}
+
+// Computes the larger component as sqrt((|re| + |z|) / 2) and derives the other
+// one by division, avoiding the cancellation in |z| - |re| when |im| << |re|
+template <typename T, ::metal::enable_if_t<is_complex_v<T>, bool> = true>
+inline T sqrt(const T x) {
+  const auto z = float2(x);
+  if (::metal::isinf(z.y)) {
+    return T(INFINITY, z.y);
+  }
+  const auto a = ::metal::abs(z);
+  const auto t = ::metal::precise::sqrt((a.x + hypot(a.x, a.y)) * .5);
+  if (t == 0) {
+    return T(0, z.y);
+  }
+  return z.x >= 0 ? T(t, z.y / (2 * t))
+                  : T(a.y / (2 * t), ::metal::copysign(t, z.y));
 }
 
 #define INSTANTIATE_FOR_ALL_TYPES(MACRO) \
