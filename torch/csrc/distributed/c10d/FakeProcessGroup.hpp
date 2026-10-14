@@ -5,6 +5,7 @@
 #include <iterator>
 
 #include <ATen/DeviceAccelerator.h>
+#include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -38,7 +39,7 @@ class FakeWork : public Work {
 
   void blockCurrentStream() override {
     if (future_) {
-      synchronize();
+      future_->waitAndThrow();
       return;
     }
     Work::blockCurrentStream();
@@ -75,29 +76,29 @@ class FakeWork : public Work {
     std::vector<c10::Device> devices;
     std::vector<c10::ivalue::Future::WeakStorage> storages;
     devices.reserve(result.size());
-    storages.reserve(2 * result.size());
+    storages.reserve(3 * result.size());
     for (const auto& tensor : result) {
       if (!tensor.defined()) {
         continue;
       }
       const auto device = tensor.device();
-      if (device.is_cpu() || device.is_meta()) {
+      if (!at::accelerator::isAccelerator(device.type())) {
         continue;
       }
-      TORCH_CHECK(
-          at::accelerator::isAccelerator(device.type()),
-          "FakeWork: unsupported result device ",
-          device);
       devices.push_back(device);
+      std::vector<at::Tensor> parts;
       if (tensor.is_sparse()) {
-        storages.emplace_back(tensor._indices().storage().getWeakStorageImpl());
-        storages.emplace_back(tensor._values().storage().getWeakStorageImpl());
-      } else {
-        TORCH_CHECK(
-            tensor.layout() == at::kStrided,
-            "FakeWork: accelerator result must be strided or COO sparse, got ",
-            tensor.layout());
-        storages.emplace_back(tensor.storage().getWeakStorageImpl());
+        parts = {tensor._indices(), tensor._values()};
+      } else if (tensor.unsafeGetTensorImpl()->is_sparse_compressed()) {
+        const auto* impl = static_cast<const at::SparseCsrTensorImpl*>(
+            tensor.unsafeGetTensorImpl());
+        parts = {
+            impl->compressed_indices(), impl->plain_indices(), impl->values()};
+      } else if (tensor.has_storage()) {
+        parts = {tensor};
+      }
+      for (const auto& part : parts) {
+        storages.emplace_back(part.storage().getWeakStorageImpl());
       }
     }
     auto future = c10::make_intrusive<c10::ivalue::Future>(
