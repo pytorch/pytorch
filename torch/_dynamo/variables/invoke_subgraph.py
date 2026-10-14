@@ -1089,7 +1089,21 @@ def stamp_out_subgraph(
         tx.output.current_tracer.traced_sources.update(remapped_sources)
 
     if cached.condition is not None and source_replacement:
+        # Re-install the cached reuse condition's guards under the current
+        # call's sources so that an enclosing nested_compile_region picks them
+        # up when it builds its own reuse condition from traced_sources.
+        #
+        # Skip guards on the args themselves and TENSOR_MATCH guards: the
+        # caller already guarded the new args when it wrapped them, and
+        # captured tensor sources are re-wrapped through VariableBuilder below
+        # (which installs their TENSOR_MATCH).  TENSOR_MATCH is also bound to
+        # the original tensor via functools.partial, so cloning it onto a new
+        # source would install a second, stale tensor guard on that source and
+        # fail guard construction with "Duplicate tensors found".
+        old_arg_sources = {s for s in cached.arg_sources if s is not None}
         for source, _handler, _expected, guard in cached.condition.guards:
+            if source in old_arg_sources or guard.create_fn_name() == "TENSOR_MATCH":
+                continue
             new_source = source.clone(lambda src: source_replacement.get(src, src))
             if new_source != source:
                 new_guard = new_source.make_guard(guard.create_fn)
