@@ -2,6 +2,7 @@
 #include <ATen/FunctionalInverses.h>
 
 #include <ATen/ATen.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 
@@ -171,13 +172,91 @@ Tensor FunctionalInverses::expand_inverse(const Tensor& base, const Tensor& muta
       // We should NOT do this for functionalization
       return mutated_view.as_strided_symint(
           base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
-    } else {
-      return base + at::sum_to(
-          mutated_view - base,
-          base.sym_sizes(),
-          /*always_return_non_view=*/inverse_return_mode == InverseReturnMode::NeverView
-      );
     }
+    // expand() can broadcast, so several elements of mutated_view may alias one element of base, and
+    // the mutation may have written any subset of them. For each element of base, take the max over the
+    // aliases that changed, or keep base's value if none did. In a well-defined program the aliases that
+    // changed all hold the same value, so the max is exactly that value; if they don't, the largest wins.
+    // (Summing the changes instead is wrong when several aliases were written, and inexact: inf - inf = nan.)
+    // Limitations of detecting writes by comparing against base:
+    // - A write of the value an alias already held looks like no write. The result is still correct, but
+    //   if autograd differentiates this inverse, the gradient flows to base instead of the written value.
+    //   torch.func.grad(functionalize(f)) does that; torch.compile doesn't, since AOTAutograd runs
+    //   autograd above functionalization.
+    // - Values are taken per element of base (per part for complex values). If a dtype view lets a single
+    //   mutation write different bytes of one element through different aliases, only one alias's value
+    //   is kept.
+    // - amax doesn't preserve NaN payloads, so a NaN written through an alias may come back as a
+    //   different NaN.
+    const auto sizes = mutated_view.sym_sizes();
+    const auto base_sizes = base.sym_sizes();
+    const auto leading_dims = static_cast<int64_t>(sizes.size() - base_sizes.size());
+    c10::SmallVector<int64_t, 8> broadcast_dims;
+    for (int64_t d = 0; d < static_cast<int64_t>(sizes.size()); ++d) {
+      if (TORCH_GUARD_OR_TRUE(sym_ne(sizes[d], 1)) &&
+          (d < leading_dims || TORCH_GUARD_OR_FALSE(sym_eq(base_sizes[d - leading_dims], 1)))) {
+        broadcast_dims.push_back(d);
+      }
+    }
+    const bool never_view = inverse_return_mode == InverseReturnMode::NeverView;
+    // Without broadcasting there are no aliases, and the exact inverse is a reshape.
+    auto result = mutated_view;
+    if (!broadcast_dims.empty()) {
+      // The real and imaginary parts of an element can be written through different aliases.
+      const bool is_complex = mutated_view.is_complex();
+      auto as_real = [&](const Tensor& t) {
+        return never_view ? at::view_as_real_copy(t.resolve_conj()) : at::view_as_real(t.resolve_conj());
+      };
+      auto mutated = is_complex ? as_real(mutated_view) : mutated_view;
+      auto original = is_complex ? as_real(base) : base;
+      // Compare floating point values by their bits, so that a NaN that stays the same is unchanged, and
+      // so that -0.0 vs. 0.0 is a change.
+      auto bits = [&](const Tensor& t) {
+        if (!at::isFloatingType(t.scalar_type())) {
+          return t;
+        }
+        const auto size = t.element_size();
+        TORCH_INTERNAL_ASSERT(size == 1 || size == 2 || size == 4 || size == 8);
+        const auto int_type = size == 1 ? kByte : size == 2 ? kShort : size == 4 ? kInt : kLong;
+        // Reinterpreting sees the physical bits, so resolve the neg bit first.
+        return never_view ? at::view_copy(t.resolve_neg(), int_type) : t.resolve_neg().view(int_type);
+      };
+      auto changed = bits(mutated).ne(bits(original));
+      c10::Scalar lowest;
+      AT_DISPATCH_V2(mutated.scalar_type(), "expand_inverse", AT_WRAP([&] {
+        using limits = std::numeric_limits<scalar_t>;
+        if constexpr (std::is_same_v<scalar_t, bool>) {
+          lowest = false;
+        } else if constexpr (limits::has_infinity) {
+          lowest = -std::numeric_limits<double>::infinity();
+        } else if constexpr (limits::is_integer) {
+          lowest = static_cast<int64_t>(limits::lowest());
+        } else {
+          lowest = static_cast<double>(limits::lowest());
+        }
+      }), AT_EXPAND(AT_ALL_TYPES), kBool, kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+      auto masked = at::where(changed, mutated, lowest);
+      for (const auto d : broadcast_dims) {
+        // amax can't reduce an empty dim, so pad any dim that isn't known to be nonzero. (Don't ask the
+        // shape env: under backed_size_oblivious a size may be assumed nonzero yet be 0 at runtime.)
+        const auto static_size = sizes[d].maybe_as_int();
+        if (!static_size.has_value() || *static_size == 0) {
+          auto pad_sizes = masked.sym_sizes().vec();
+          pad_sizes[d] = 1;
+          masked = at::cat({masked, masked.new_full_symint(pad_sizes, lowest)}, d);
+        }
+      }
+      result = at::where(
+          changed.any(broadcast_dims, /*keepdim=*/true), masked.amax(broadcast_dims, /*keepdim=*/true), original);
+      if (is_complex) {
+        result = never_view ? at::view_as_complex_copy(result) : at::view_as_complex(result);
+      }
+    }
+    result = never_view ? at::view_copy_symint(result, base_sizes) : result.contiguous().view_symint(base_sizes);
+    // Keep base's layout: views replayed from the updated base may depend on it (e.g. view()). where()
+    // takes its output layout from its first operand, which ones_like() gives base's layout. (Unlike
+    // at::copy, this works for subclasses such as DTensor.)
+    return base.is_contiguous_or_false() ? result : at::where(at::ones_like(base, at::kBool), result, base);
 }
 
 Tensor FunctionalInverses::permute_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::IntArrayRef dims) {
