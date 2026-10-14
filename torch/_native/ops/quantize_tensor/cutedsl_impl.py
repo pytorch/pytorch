@@ -81,7 +81,7 @@ def _quantize_tensor_dual_impl(
     qdata_rounding_mode: int = 0,
     random_key: torch.Tensor | None = None,
 ) -> list[torch.Tensor]:
-    from torch.nn.functional import RoundingMode
+    from torch.nn.functional import RoundingMode, SwizzleType
 
     if input.dim() != 2:
         raise ValueError("quantize_tensor_dual requires a 2D input")
@@ -118,7 +118,7 @@ def _quantize_tensor_dual_impl(
             input,
             "dim_km",
             scaling_type_use_square_block_size,
-            True,
+            swizzle_type == SwizzleType.SWIZZLE_32_4_4.value,
             stochastic_rounding=stochastic_rounding,
             random_key=random_key,
         )

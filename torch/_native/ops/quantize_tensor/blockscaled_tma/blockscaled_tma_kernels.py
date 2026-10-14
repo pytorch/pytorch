@@ -365,7 +365,25 @@ class _BlockscaledTma:
             use_full_tile_m = cutlass.const_expr(not needs_boundary_masking) or (
                 (tile_m_idx < M // tile_m_size) & (tile_k_idx < K // tile_k_size)
             )
-            if use_full_tile_m:
+            if cutlass.const_expr(not is_scale_swizzled):
+                compact_scale_cols_m = M // scale_group_size
+                if use_full_tile_m and compact_scale_cols_m % scale_groups_m == 0:
+                    _store_unswizzled_scale_groups_as_uint(
+                        mScaleMLogical,
+                        rScaleM,
+                        output_row_m,
+                        scale_col_m,
+                        compact_scale_cols_m,
+                        scale_groups_m,
+                    )
+                elif output_row_m < K:
+                    for group in cutlass.range_constexpr(scale_groups_m):
+                        if scale_col_m + group < compact_scale_cols_m:
+                            offset = cutlass.Int64(output_row_m) * cutlass.Int64(
+                                compact_scale_cols_m
+                            ) + cutlass.Int64(scale_col_m + group)
+                            mScaleMLogical[offset] = rScaleM[group]
+            elif use_full_tile_m:
                 _store_swizzled_scale_groups_as_uint(
                     mScaleMLogical,
                     rScaleM,
@@ -875,14 +893,17 @@ class _BlockscaledTma:
                 (tile_k_size, tile_m_size),
             )
 
-            s_num_row_blk_m = cute.ceil_div(K, 128)
-            s_num_col_blk_m = cute.ceil_div(M, scale_group_size * 4)
-            scale_m_row_block_stride = cutlass.Int64(s_num_col_blk_m) * 32 * 16
-            scale_m_layout = cute.make_layout(
-                ((32, 4, s_num_row_blk_m), (4, s_num_col_blk_m)),
-                stride=((16, 4, scale_m_row_block_stride), (1, 32 * 16)),
-            )
-            mScaleMLogical = cute.make_tensor(mScaleM.iterator, scale_m_layout)
+            if cutlass.const_expr(is_scale_swizzled):
+                s_num_row_blk_m = cute.ceil_div(K, 128)
+                s_num_col_blk_m = cute.ceil_div(M, scale_group_size * 4)
+                scale_m_row_block_stride = cutlass.Int64(s_num_col_blk_m) * 32 * 16
+                scale_m_layout = cute.make_layout(
+                    ((32, 4, s_num_row_blk_m), (4, s_num_col_blk_m)),
+                    stride=((16, 4, scale_m_row_block_stride), (1, 32 * 16)),
+                )
+                mScaleMLogical = cute.make_tensor(mScaleM.iterator, scale_m_layout)
+            else:
+                mScaleMLogical = mScaleM
         else:
             output_m_smem_layout = None
             output_m_tma_atom = None
@@ -1026,7 +1047,15 @@ def _compile_blockscaled_tma(
         else None
     )
     mOutputM = _make_dynamic_matrix_fake(cutlass.Float8E4M3FN) if do_dim_m else None
-    mScaleM = _make_dynamic_scale_fake() if do_dim_m else None
+    mScaleM = (
+        (
+            _make_dynamic_scale_fake()
+            if is_scale_swizzled
+            else _make_dynamic_compact_scale_fake()
+        )
+        if do_dim_m
+        else None
+    )
     if rounding_variant == RoundingVariant.STATELESS_SR:
         mSeed = _make_philox_state_fake(2)
     elif rounding_variant == RoundingVariant.STATEFUL_SR_CAPTURE:

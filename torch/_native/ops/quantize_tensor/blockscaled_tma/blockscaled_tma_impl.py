@@ -127,19 +127,13 @@ def _validate_and_normalize_blockscaled_tma(
     do_dim_k = quant_orientation != "dim_m"
     do_dim_m = quant_orientation != "dim_k"
 
-    if not is_scale_swizzled:
-        if quant_orientation != "dim_k":
-            raise ValueError("compact scales currently support only dim-k output")
-        if is_square_scaling:
-            raise ValueError("compact scales do not support square scaling")
-
     if not stochastic_rounding:
         if random_key is not None:
             raise ValueError("RTNE does not use random_key")
         rounding_variant = RoundingVariant.RTNE
     else:
-        if not is_scale_swizzled or is_square_scaling:
-            raise ValueError("stochastic rounding requires swizzled 1x32 scales")
+        if is_square_scaling:
+            raise ValueError("stochastic rounding requires 1x32 scales")
         if random_key is not None:
             if random_key.dtype != torch.uint64 or random_key.numel() != 2:
                 raise ValueError("random_key must be a two-element uint64 tensor")
@@ -262,11 +256,16 @@ def _prepare_blockscaled_tma_launch(
             dtype=torch.float8_e4m3fn,
             device=input.device,
         )
-        scale_m = torch.empty(
-            spec.s_num_row_blk_m * spec.s_num_col_blk_m * 32 * 16,
-            dtype=torch.uint8,
-            device=input.device,
-        )
+        if spec.is_scale_swizzled:
+            scale_m = torch.empty(
+                spec.s_num_row_blk_m * spec.s_num_col_blk_m * 32 * 16,
+                dtype=torch.uint8,
+                device=input.device,
+            )
+        else:
+            scale_m = torch.empty(
+                spec.K * (spec.M // 32), dtype=torch.uint8, device=input.device
+            )
 
     output_k = scale_k = None
     if spec.do_dim_k:
@@ -330,9 +329,11 @@ def _format_blockscaled_tma_output(
             raise AssertionError(
                 f"expected s_num_col_blk_m, got {spec.s_num_col_blk_m}"
             )
-        scale_m = scale_m.view(spec.s_num_row_blk_m, spec.s_num_col_blk_m, 32, 16).view(
-            torch.float8_e8m0fnu
-        )
+        if spec.is_scale_swizzled:
+            scale_m = scale_m.view(spec.s_num_row_blk_m, spec.s_num_col_blk_m, 32, 16)
+        else:
+            scale_m = scale_m.view(spec.K, spec.M // 32)
+        scale_m = scale_m.view(torch.float8_e8m0fnu)
     if spec.do_dim_k:
         if output_k is None:
             raise AssertionError("expected output_k, got None")

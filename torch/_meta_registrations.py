@@ -7592,6 +7592,8 @@ def meta_quantize_tensor_dual(
     qdata_rounding_mode: int = 0,
     random_key: torch.Tensor | None = None,
 ) -> list[torch.Tensor]:
+    from torch.nn.functional import SwizzleType
+
     if input.device.type not in ("cuda", "meta") or (
         input.device.type == "cuda" and torch.version.hip is not None
     ):
@@ -7619,19 +7621,17 @@ def meta_quantize_tensor_dual(
             random_key,
         )
         rows, cols = input.shape
+        if swizzle_type == SwizzleType.SWIZZLE_32_4_4.value:
+            scale_k_shape = ((rows + 127) // 128, (cols + 127) // 128, 32, 16)
+            scale_m_shape = ((cols + 127) // 128, (rows + 127) // 128, 32, 16)
+        else:
+            scale_k_shape = (rows, cols // 32)
+            scale_m_shape = (cols, rows // 32)
         return [
             torch.empty((rows, cols), device=input.device, dtype=qdata_dtype),
-            torch.empty(
-                ((rows + 127) // 128, (cols + 127) // 128, 32, 16),
-                device=input.device,
-                dtype=torch.float8_e8m0fnu,
-            ),
+            torch.empty(scale_k_shape, device=input.device, dtype=torch.float8_e8m0fnu),
             torch.empty((cols, rows), device=input.device, dtype=qdata_dtype),
-            torch.empty(
-                ((cols + 127) // 128, (rows + 127) // 128, 32, 16),
-                device=input.device,
-                dtype=torch.float8_e8m0fnu,
-            ),
+            torch.empty(scale_m_shape, device=input.device, dtype=torch.float8_e8m0fnu),
         ]
 
     else:
