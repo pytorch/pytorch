@@ -1,8 +1,13 @@
 import copy
 import heapq
 
+import torch
 import torch.fx
 from torch.fx._compatibility import compatibility
+from torch.fx.experimental.symbolic_shapes import (
+    find_symbol_binding_fx_nodes,
+    free_symbols,
+)
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
@@ -173,6 +178,33 @@ def fuse_as_graphmodule(
             ):
                 external_inputs.append(input_node)
                 external_inputs_set.add(input_node)
+
+    # If extracting nodes have symbolic shape expressions,
+    # we have to extract those sympy symbols as extra inputs.
+    # Input:: (u0 is a graph input)
+    #     u1 = count.item()
+    #     y = torch.cat([x[:u0], x[:u1]])  # shape: [u0 + u1]
+    #     out = y.sin()  # extract this node
+    #
+    # Output:: (u1 and y stay in the outer graph)
+    #     def fused(y, u0, u1): return y.sin()
+    #     out = fused(y, u0, u1)
+    input_vals: list[torch.Tensor | torch.SymInt] = []
+    for input_node in external_inputs:
+        val = input_node.meta.get("val", input_node.meta.get("example_value"))
+        if isinstance(val, (torch.Tensor, torch.SymInt)):
+            input_vals.append(val)
+    if symbols := free_symbols(input_vals):
+        symbol_bindings = find_symbol_binding_fx_nodes(gm.graph)
+        for symbol in sorted(symbols, key=str):
+            binding = symbol_bindings.get(symbol)
+            if (
+                binding is not None
+                and binding not in partition_lookup_table
+                and binding not in external_inputs_set
+            ):
+                external_inputs.append(binding)
+                external_inputs_set.add(binding)
 
     if external_inputs and all(
         input_node.op == "placeholder" for input_node in external_inputs
