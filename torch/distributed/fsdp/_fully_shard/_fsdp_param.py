@@ -1577,7 +1577,7 @@ def _get_all_gather_output_layouts(
         )
     # The copy-out reassembles the rows of Tensor inputs along a nonzero shard
     # dim, reading them as the padded sharded parameter's rows. A single rank
-    # copies them flat, so there the parameter's rows only forbid shrinking.
+    # copies them flat, so there several rows only forbid shrinking.
     leading_dims = padded_sharded_size[:shard_dim]
     shard_outer_size = math.prod(leading_dims)
     reassembled = shard_world_size > 1 and shard_outer_size > 1
@@ -1587,7 +1587,7 @@ def _get_all_gather_output_layouts(
         tensor = inp.tensor if is_record else inp
         size = tensor.size()
         output = all_gather_outputs[i] if all_gather_outputs else None
-        # Bytes of a typed output keep its size and are reassembled in its layout
+        # Tensor inputs may be bytes of a typed output, which keep its size and layout
         byte_view = output is not None and tensor.dtype == torch.uint8 != output.dtype
         if is_record:
             ndim = max(len(size), 1)
@@ -1637,8 +1637,8 @@ def _get_all_gather_output_layouts(
                 f"All-gather input {i} of {param_name} must keep the dtype "
                 f"{output.dtype} of its first call, but has dtype {tensor.dtype}"
             )
-        # Tensor inputs may shrink unless they are byte views, have rows, or have a
-        # zero trailing dim that fixes their output size
+        # Tensor inputs may shrink unless they are byte views, have several rows, or
+        # have a zero trailing dim that fixes their output size
         exact = is_record or byte_view or shard_outer_size > 1 or 0 in size[1:]
         nbytes = tensor.nbytes * shard_world_size
         fits = nbytes == output.nbytes if exact else nbytes <= output.nbytes
