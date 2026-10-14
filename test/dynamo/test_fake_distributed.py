@@ -291,7 +291,7 @@ class GraphModule(torch.nn.Module):
 
         isend: "f32[0]" = torch.ops._c10d_functional.isend(l_tensor_, 1, 0, '0');  l_tensor_ = None
 
-        wait_tensor: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(isend);  isend = wait_tensor = None
+        wait_tensor: "f32[0]" = torch.distributed.functional_collectives.wait_tensor(isend);  isend = wait_tensor = None
         return ()
 """,
         )
@@ -343,7 +343,7 @@ class GraphModule(torch.nn.Module):
 
         wait_tensor: "f32[10]" = torch.ops._c10d_functional.wait_tensor(irecv);  irecv = None
 
-        wait_tensor_1: "f32[10]" = torch.distributed._functional_collectives.wait_tensor(wait_tensor);  wait_tensor = wait_tensor_1 = None
+        wait_tensor_1: "f32[10]" = torch.distributed.functional_collectives.wait_tensor(wait_tensor);  wait_tensor = wait_tensor_1 = None
         return ()
 """,
         )
@@ -422,7 +422,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(backend.graphs), 1)
         graph = normalize_graph(backend.graphs[0])
         self.assertNotIn("wait_tensors", graph)
-        self.assertEqual(graph.count("_functional_collectives.wait_tensor("), 2)
+        self.assertEqual(graph.count("functional_collectives.wait_tensor("), 2)
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
     @torch._dynamo.config.patch(enable_p2p_compilation=True)

@@ -191,6 +191,22 @@ REGISTER_BINARY_ALPHA_OP(softplus_backward, float, SoftplusParams, float);
 REGISTER_BINARY_ALPHA_OP(softplus_backward, half, SoftplusParams, half);
 REGISTER_BINARY_ALPHA_OP(softplus_backward, bfloat, SoftplusParams, bfloat);
 
+struct hardtanh_backward_functor {
+  template <typename T>
+  inline T operator()(
+      const T grad_output,
+      const T self_,
+      const HardtanhParams params) {
+    const auto self = static_cast<opmath_t<T>>(self_);
+    return self <= params.min_val || self >= params.max_val ? T(0)
+                                                            : grad_output;
+  }
+};
+
+REGISTER_BINARY_ALPHA_OP(hardtanh_backward, float, HardtanhParams, float);
+REGISTER_BINARY_ALPHA_OP(hardtanh_backward, half, HardtanhParams, half);
+REGISTER_BINARY_ALPHA_OP(hardtanh_backward, bfloat, HardtanhParams, bfloat);
+
 struct leaky_relu_functor {
   template <typename T>
   inline T operator()(const T x, const T negative_slope) {
