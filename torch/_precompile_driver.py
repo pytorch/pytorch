@@ -633,7 +633,7 @@ def _build_multigraph_forward():
         cells = tuple(types.CellType() for _ in target.co_freevars)
         signature = inspect.signature(_function(target, cells or None))
 
-        def _dispatch_with(bound, closure, args, kwargs):
+        def _dispatch_with(functions, closure, args, kwargs):
             # Guards are written against the frame's locals: the free variables
             # (a cell unbound at the graph break is absent, as it is from a real
             # frame's f_locals), then the bound arguments.
@@ -652,14 +652,17 @@ def _build_multigraph_forward():
             # A tag-safe root's fast path (GuardManager::check_nopybind) can
             # refuse without running its tree and disarms itself; check twice.
             for _ in range(2):
-                # bound is shared by every caller of this frame: walk a copy and
-                # reorder with one slice assignment, so no caller sees an entry
-                # missing.
-                entries = tuple(bound)
-                for i, (manager, variant) in enumerate(entries):
+                # variants is shared by every caller of this frame, closures
+                # included: walk a copy and reorder with one slice assignment,
+                # so no caller sees an entry missing.
+                entries = tuple(variants)
+                for i, (manager, body) in enumerate(entries):
                     if manager.check(f_locals):
                         if i and _get_lru_cache():
-                            bound[:] = (entries[i], *entries[:i], *entries[i + 1 :])
+                            variants[:] = (entries[i], *entries[:i], *entries[i + 1 :])
+                        variant = functions.get(body)
+                        if variant is None:
+                            variant = functions[body] = _function(body, closure)
                         return variant(*args, **kwargs)
             raise _PrecompileError(
                 f"precompile: no captured variant of {target.co_name!r} matches this "
@@ -670,26 +673,23 @@ def _build_multigraph_forward():
                 f"an example covering it and recapture."
             )
 
-        def _bind(closure):
-            return [(manager, _function(body, closure)) for manager, body in variants]
-
         if target.co_freevars:
             # Dynamo binds a continuation that closes over locals as a FACTORY
             # taking the closure tuple, and the frame ahead of it passes one.
             def factory(closure):
-                bound = _bind(closure)
+                functions = {}
 
                 def dispatch(*args, **kwargs):
-                    return _dispatch_with(bound, closure, args, kwargs)
+                    return _dispatch_with(functions, closure, args, kwargs)
 
                 return dispatch
 
             return factory
 
-        bound = _bind(None)
+        functions = {}
 
         def dispatch(*args, **kwargs):
-            return _dispatch_with(bound, None, args, kwargs)
+            return _dispatch_with(functions, None, args, kwargs)
 
         return dispatch
 
