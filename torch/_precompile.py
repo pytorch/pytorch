@@ -3377,6 +3377,10 @@ def load(
     variants are still served first, and they count toward
     ``torch._dynamo.config.recompile_limit`` for their frame, so a frame that
     already holds that many runs a missed call eagerly instead of compiling it.
+    Serve-time compiles are recorded nowhere, but they are built under the
+    process's Dynamo config: with ``torch._dynamo.config.caching_precompile`` on
+    they drop identity guards (``ID_MATCH``, ``CLOSURE_MATCH``, ...) exactly as
+    any other compile in that process does.
     The flag does not lift the ``compiled_autograd`` refusal above. A standalone
     artifact has no compiler behind it, and an installed artifact captured
     before the flag existed cannot honor it, so passing the flag for either
