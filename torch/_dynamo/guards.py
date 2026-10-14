@@ -943,12 +943,15 @@ def get_verbose_code_part(code_part: str, guard: Guard | None) -> str:
 
 
 def _order_stable_repr(value: object) -> str:
-    """repr() with set elements sorted.
+    """repr() with set and dict_keys elements sorted.
 
     Set iteration order depends on hash seed and insertion history, so two
-    equal sets can repr differently, e.g. across processes. Guard text should
-    only depend on the guarded value.
+    equal sets can repr differently, e.g. across processes. dict_keys compare
+    like sets but repr in insertion order. Guard text should only depend on the
+    guarded value.
     """
+    if istype(value, dict_keys):
+        return f"dict_keys([{', '.join(sorted(_order_stable_repr(v) for v in value))}])"
     if istype(value, (set, frozenset)):
         if not value:
             return repr(value)
