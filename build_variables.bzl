@@ -681,6 +681,11 @@ libtorch_nativert_cuda_sources = [
     "torch/nativert/executor/AOTInductorModelContainerCudaShim.cpp",
 ]
 
+libtorch_nativert_xpu_sources = [
+    "torch/nativert/executor/triton/XpuTritonKernelManager.cpp",
+   "torch/nativert/executor/AOTInductorModelContainerXpuShim.cpp",
+]
+
 torch_mobile_tracer_sources = [
     "torch/csrc/jit/mobile/model_tracer/tracer.cpp",
     "torch/csrc/jit/mobile/model_tracer/TensorUtils.cpp",
@@ -939,7 +944,7 @@ libtorch_python_xpu_sources = [
 
 libtorch_xpu_sources = libtorch_python_xpu_sources + [
     "torch/csrc/xpu/XPUPluggableAllocator.cpp",
-]
+] + libtorch_nativert_xpu_sources
 
 libtorch_python_core_sources = [
     "torch/csrc/DataLoader.cpp",
