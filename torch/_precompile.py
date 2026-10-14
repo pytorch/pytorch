@@ -1847,6 +1847,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     optional = {
         "TRACER",
         "SERVING_MODE",
+        "_ALLOW_SERVE_TIME_COMPILES",
         "POLICY_DROPPED_GUARDS",
         "DROPPED_GUARD_CODE",
     }
@@ -2259,6 +2260,9 @@ def _build_multigraph_python_source(
     buf.writeline(f"BACKEND = {backend!r}")
     buf.writeline('TRACER = "dynamo"')
     buf.writeline(f'SERVING_MODE = "{mode}"')
+    if mode == "installed":
+        # load(allow_serve_time_compiles=True) flips this to True before exec.
+        buf.writeline("_ALLOW_SERVE_TIME_COMPILES = False")
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
     buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
     buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
@@ -2758,10 +2762,13 @@ def _make_inlined_forward(
             "exec python_code you produced or otherwise trust (Note [precompile "
             "programming model], invariant 7)."
         )
-    module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
     if allow_serve_time_compiles:
-        # Read by _build_installed_forward while the exec below installs.
-        module_ns["_ALLOW_SERVE_TIME_COMPILES"] = True
+        python_code = python_code.replace(
+            "\n_ALLOW_SERVE_TIME_COMPILES = False\n",
+            "\n_ALLOW_SERVE_TIME_COMPILES = True\n",
+            1,
+        )
+    module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
     exec(compile(python_code, "<precompile>", "exec"), module_ns)
     return cast("Callable[..., object]", module_ns["forward"])
 
@@ -3072,6 +3079,12 @@ def _runnable_from_pair(
             "artifact is standalone and has no compiler behind it. Load it without "
             "the flag, or recapture to cover the calls it misses."
         )
+    if allow_serve_time_compiles and "_ALLOW_SERVE_TIME_COMPILES" not in meta:
+        raise PrecompileError(
+            "allow_serve_time_compiles=True: this installed artifact predates the "
+            "flag and would still refuse every uncovered call. Recapture it under "
+            "this torch."
+        )
 
     # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes
     # are the inductor save_cache_artifacts bundle, used below to prime the kernel
@@ -3361,8 +3374,13 @@ def load(
     backend, as ``torch.compile`` would, under the process-wide stance like any
     other compile, and the compile records which guard each captured variant
     failed as its recompile reason (``TORCH_LOGS="recompiles"``). The captured
-    variants are still served first. A standalone artifact has no compiler
-    behind it, so passing the flag for one raises ``PrecompileError``.
+    variants are still served first, and they count toward
+    ``torch._dynamo.config.recompile_limit`` for their frame, so a frame that
+    already holds that many runs a missed call eagerly instead of compiling it.
+    The flag does not lift the ``compiled_autograd`` refusal above. A standalone
+    artifact has no compiler behind it, and an installed artifact captured
+    before the flag existed cannot honor it, so passing the flag for either
+    raises ``PrecompileError``.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
