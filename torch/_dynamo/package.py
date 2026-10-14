@@ -1412,6 +1412,7 @@ class CompilePackage:
 
         from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
+        from .symbolic_convert import UNNAMED_SCOPE_PREFIX
 
         self.uninstall()
         for code, entry in self._codes.items():
@@ -1427,8 +1428,8 @@ class CompilePackage:
                 # AOTCompiledFunction._seed_guard_scope seeds those aliases into
                 # a live module scope and nothing re-seeds them -- so uninstall()
                 # must leave a binding this package did not create alone. The
-                # aliases are the only names install() records that are ever
-                # seeded that way.
+                # aliases and the ___unnamed_scope keys below are the only names
+                # install() records that are ever seeded that way.
                 for alias, module_name in entry.import_sources.items():
                     self._install_global(
                         module,
@@ -1495,6 +1496,20 @@ class CompilePackage:
                     with dynamo_timed("precompile_load_guards"):
                         guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
+                    # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict
+                    # in the tracing process, so a fresh process has no binding
+                    # for it; the artifact carries the dict. A binding already
+                    # here (a live compile's, or anyone else's) is kept and not
+                    # recorded, so uninstall() leaves it alone, and the guards
+                    # check whatever it holds.
+                    for name, value in guards_state.output_graph.global_scope.items():
+                        if name.startswith(UNNAMED_SCOPE_PREFIX):
+                            self._install_global(
+                                module,
+                                name,
+                                module.__dict__.get(name, value),
+                                record_only_if_new=True,
+                            )
                     # The installed builtins dict might be absent from the runtime
                     # while loading guards. Populate it if it's missing.
                     if (
