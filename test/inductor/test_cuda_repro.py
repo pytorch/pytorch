@@ -2813,6 +2813,30 @@ class CudaReproTests(TestCase):
             for actual_input, expected_input in zip(compiled_inputs, eager_inputs):
                 self.assertEqual(actual_input.grad, expected_input.grad)
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    def test_flash_attention_misaligned_input(self):
+        # The input's data pointer is misaligned while its strides are aligned.
+        B, H, S, D = 2, 2, 128, 64
+        storage = torch.randn(
+            B * H * S * D + 1, dtype=torch.float16, device=device_type
+        )
+        q = storage[1:].view(B, H, S, D).requires_grad_()
+        k = torch.randn(B, H, S, D, dtype=torch.float16, device=device_type)
+        v = torch.randn(B, H, S, D, dtype=torch.float16, device=device_type)
+
+        def fn(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v)
+
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+            actual = torch.compile(fn)(q, k, v)
+            (actual_grad,) = torch.autograd.grad(actual.sum(), q)
+            expected = fn(q, k, v)
+            (expected_grad,) = torch.autograd.grad(expected.sum(), q)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_grad, expected_grad)
+
     def test_non_contiguous_unaligned_input_indices(self):
         from torch._inductor.compile_fx import remove_unaligned_input_idxs
 
@@ -3811,6 +3835,46 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             return torch.linalg.vector_norm(x, dim=(-2, -1))
 
         self.common(fn4, [y])
+
+    @unittest.skipUnless(HAS_GPU, "requires GPU")
+    @config.patch(force_layout_optimization=True)
+    def test_conv2d_backward_keeps_eager_grad_input_stride(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/197514
+        # force_layout_optimization can make convolution_backward fake-prop
+        # channels-last before original output strides are recorded, leaking
+        # NHWC into user-visible grad_input.
+        def fn(x, w, b):
+            return F.conv2d(x, w, b, stride=(2, 2), padding=2, groups=1)
+
+        torch.manual_seed(0)
+        x0 = torch.randn(
+            1, 3, 4, 4, device=self.device, dtype=torch.float32, requires_grad=True
+        )
+        w0 = torch.randn(
+            3, 3, 3, 3, device=self.device, dtype=torch.float32, requires_grad=True
+        )
+        b0 = torch.randn(3, device=self.device, dtype=torch.float32, requires_grad=True)
+
+        y_ref = fn(x0, w0, b0)
+        grad = torch.randn_like(y_ref)
+        grad = grad / grad.norm()
+        ref_grads = torch.autograd.grad(y_ref, (x0, w0, b0), grad)
+
+        x1 = x0.detach().clone().requires_grad_(True)
+        w1 = w0.detach().clone().requires_grad_(True)
+        b1 = b0.detach().clone().requires_grad_(True)
+
+        torch._dynamo.reset()
+        y_compiled = torch.compile(fn, backend="inductor")(x1, w1, b1)
+        compiled_grads = torch.autograd.grad(y_compiled, (x1, w1, b1), grad)
+
+        self.assertEqual(
+            compiled_grads[0],
+            ref_grads[0],
+            atol=1e-5,
+            rtol=1e-5,
+            exact_stride=True,
+        )
 
 
 if __name__ == "__main__":
