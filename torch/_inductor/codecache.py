@@ -4171,8 +4171,7 @@ class CppCodeCache:
             lib = None
 
             # if requested, pre-compile any headers. A frozen binary is restored
-            # below and never built, so it needs no header, and precompiling one
-            # on a host with an empty header cache fails under no_compilation().
+            # below and never built, so it needs no header.
             if (
                 config.cpp_cache_precompile_headers
                 and not _IS_WINDOWS
@@ -4285,6 +4284,8 @@ def _worker_compile_cpp(
     from torch.utils._filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+        if os.path.exists(cpp_builders[-1].get_target_file_path()):
+            return
         for builder in cpp_builders:
             if not os.path.exists(builder.get_target_file_path()):
                 builder.build()
