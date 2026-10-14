@@ -11,6 +11,7 @@
 #include <fmt/format.h>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 
 #include <torch/csrc/utils/pythoncapi_compat.h>
@@ -298,7 +299,7 @@ inline sycl::kernel* _createKernel(
   return fun;
 }
 
-sycl::kernel* loadKernel(
+std::unique_ptr<sycl::kernel> loadKernel(
     const char* filePath,
     const char* funcName,
     uint32_t sharedMemBytes,
@@ -311,7 +312,8 @@ sycl::kernel* loadKernel(
   auto mod = _createModule(
       reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), device_idx);
 
-  return _createKernel(mod, funcName, nSpillsPtr);
+  return std::unique_ptr<sycl::kernel>(
+      _createKernel(mod, funcName, nSpillsPtr));
 }
 
 template <typename T>
@@ -436,16 +438,23 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   // Level-zero does not support get n_regs, so we return 0 here.
   uint32_t n_regs = 0;
   uint32_t n_spills = 0;
-  sycl::kernel* func =
+  std::unique_ptr<sycl::kernel> func =
       loadKernel(filePath, funcName, sharedMemBytes, &n_spills, device);
 
   PyObject* kernel_py = PyCapsule_New(
-      reinterpret_cast<void*>(func), "sycl_kernel", [](PyObject* cap) {
+      reinterpret_cast<void*>(func.get()), "sycl_kernel", [](PyObject* cap) {
         void* ptr = PyCapsule_GetPointer(cap, "sycl_kernel");
         delete reinterpret_cast<sycl::kernel*>(ptr);
       });
+  if (kernel_py == nullptr) {
+    return nullptr;
+  }
+  func.release();
 
-  return Py_BuildValue("(Oii)", kernel_py, n_regs, n_spills);
+  // "N" steals the capsule reference PyCapsule_New returned. With "O" the
+  // capsule keeps that extra reference for the process lifetime, its destructor
+  // never runs, and close() cannot release the kernel or its Level Zero module.
+  return Py_BuildValue("(Nii)", kernel_py, n_regs, n_spills);
   END_HANDLE_TH_ERRORS
 }
 
