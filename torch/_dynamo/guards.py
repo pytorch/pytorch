@@ -5037,6 +5037,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)
 
+        if obj is dict_keys:
+            return type, (dict[Any, Any]().keys(),)
+
         if inspect.iscode(obj):
             return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
 
