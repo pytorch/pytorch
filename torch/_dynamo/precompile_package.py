@@ -1677,11 +1677,10 @@ class PrecompileSession(Generic[_P, _R]):
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
-        self._dropped_guards: set[tuple[str, str]] = set()
-        self._kept_guards: set[tuple[str, str]] = set()
         self._risky_dropped_guards: set[tuple[str, str]] = set()
         self._dropped_guard_code: dict[tuple[str, str], str] = {}
-        # dropped slot -> the frames whose compiles dropped it
+        # slot -> the frames whose compiles kept / dropped it
+        self._keep_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
         self._drop_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
         # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
         self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
@@ -1736,9 +1735,8 @@ class PrecompileSession(Generic[_P, _R]):
                     _is_noop_guard_type(entry.guard_type) and global_state_kept
                 )
                 if enforced:
-                    self._kept_guards.add(slot)
+                    self._keep_frames.setdefault(slot, set()).add(key)
                 else:
-                    self._dropped_guards.add(slot)
                     self._drop_frames.setdefault(slot, set()).add(key)
                     rendered = " ; ".join(_render_code(entry.code_parts))
                     if rendered:
@@ -1897,8 +1895,8 @@ class PrecompileSession(Generic[_P, _R]):
         # its drops describe what the artifact serves.
         guard_sets = {k: v for k, v in self._guard_sets.items() if k not in eager}
 
-        def served(slots: set[tuple[str, str]]) -> set[tuple[str, str]]:
-            return {slot for slot in slots if not self._drop_frames[slot] <= eager}
+        dropped = {s for s, frames in self._drop_frames.items() if not frames <= eager}
+        kept = {s for s, frames in self._keep_frames.items() if not frames <= eager}
 
         # A dropped slot is risky when the SAME source held DIFFERENT values
         # across a frame's variants: a dropped guard that told the variants
@@ -1907,7 +1905,7 @@ class PrecompileSession(Generic[_P, _R]):
         # Only variants some kept guard split apart can be compared, so a
         # dropped slot that is the sole difference between two calls never
         # recompiles and is never reported here.
-        risky = served(self._risky_dropped_guards)
+        risky = self._risky_dropped_guards & dropped
         for variants in guard_sets.values():
             values: dict[tuple[str, str], set[str]] = {}
             for facts in variants:
@@ -1917,8 +1915,8 @@ class PrecompileSession(Generic[_P, _R]):
             risky |= {slot for slot, seen in values.items() if len(seen) > 1}
         return _summarize(
             entry,
-            dropped=served(self._dropped_guards),
-            kept=self._kept_guards,
+            dropped=dropped,
+            kept=kept,
             policy_dropped=set(),
             risky=risky,
             truncated=frozenset(),
