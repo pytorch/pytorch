@@ -739,9 +739,7 @@ def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     )
 
 
-def _get_code_source(
-    code: types.CodeType, module: types.ModuleType | None = None
-) -> tuple[str, str]:
+def _get_code_source(code: types.CodeType, module: types.ModuleType) -> tuple[str, str]:
     """
     Given a code object, return a fully qualified name which will be used as
     a serialized handle to access the code object from the new process.
@@ -750,14 +748,8 @@ def _get_code_source(
        inside a closure with the wrapper object.
     2. When a function is defined as a nested function, then the code object will be
        stored on the co_consts field of the parent code object by Python compiler.
-    This function handles all of the corner cases above. ``module`` is where to
-    look, by default the module ``inspect.getmodule`` finds for ``code``.
+    This function handles all of the corner cases above, searching ``module``.
     """
-
-    if module is None:
-        module = inspect.getmodule(code)
-    if module is None:
-        raise PackageError(f"Cannot find module for code {code}")
 
     toplevel: Any = module
     search_module_tree = sys.version_info < (3, 11)
@@ -1388,12 +1380,12 @@ class CompilePackage:
     def add_resume_function(
         self,
         python_code: types.CodeType,
-        python_module: str,
+        global_scope: dict[str, Any],
         function_name: str,
     ) -> None:
         self._add_function(
             python_code,
-            python_module,
+            _globals_module_name(global_scope) or global_scope["__name__"],
             function_name=_FunctionId(function_name),
             install_to_global=True,
         )
