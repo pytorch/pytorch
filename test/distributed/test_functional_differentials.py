@@ -436,20 +436,21 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
     @parametrize("device", devices)
     @parametrize("coalesced", [False, True])
     @parametrize("reduce_op", product_reduce_ops)
-    def test_all_reduce_product_backward(self, device, coalesced, reduce_op):
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_all_reduce_product_backward(self, device, coalesced, reduce_op, dtype):
         """product backward is the summed grad times the other ranks' product.
 
-        Column 0 has no zeros, column 1 a zero on rank 0 only and column 2
-        zeros on ranks 0 and 1.
+        Column 0 has no zeros, column 1 a zero on rank 0 only, column 2 zeros
+        on ranks 0 and 1 and column 3 a zero on rank 1 only.
         """
         group_name = dist.group.WORLD.group_name
         rank = dist.get_rank()
         ws = self.world_size
 
-        values = torch.arange(1, ws + 1, dtype=torch.float32, device=device)
-        values = values[:, None].repeat(1, 3)
-        values[0, 1:] = 0
-        values[1, 2] = 0
+        values = -torch.arange(1, ws + 1, dtype=dtype, device=device)
+        values = values[:, None].repeat(1, 4)
+        values[0, 1:3] = 0
+        values[1, 2:] = 0
         input_tensor = values[rank].clone().requires_grad_()
 
         if coalesced:
