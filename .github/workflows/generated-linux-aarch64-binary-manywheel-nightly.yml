@@ -161,7 +161,7 @@ jobs:
     name: manywheel-cpu-aarch64-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     needs: [get-label-type, get-docker-tag]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}"
+    runs-on: "mt-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}"
     timeout-minutes: 420
     container:
       image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28_aarch64-builder:cpu-aarch64${{ needs.get-docker-tag.outputs.docker_image_suffix }}
@@ -244,7 +244,7 @@ jobs:
     name: manywheel-cuda-aarch64-cu130-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     needs: [get-label-type, get-docker-tag]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}"
+    runs-on: "mt-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}"
     timeout-minutes: 420
     container:
       image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinuxaarch64-builder:cuda13.0${{ needs.get-docker-tag.outputs.docker_image_suffix }}
@@ -328,7 +328,7 @@ jobs:
     name: manywheel-cuda-aarch64-cu132-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     needs: [get-label-type, get-docker-tag]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}"
+    runs-on: "mt-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}"
     timeout-minutes: 420
     container:
       image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinuxaarch64-builder:cuda13.2${{ needs.get-docker-tag.outputs.docker_image_suffix }}
@@ -412,7 +412,7 @@ jobs:
     name: manywheel-cuda-aarch64-cu134-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     needs: [get-label-type, get-docker-tag]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}"
+    runs-on: "mt-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}"
     timeout-minutes: 420
     container:
       image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinuxaarch64-builder:cuda13.4${{ needs.get-docker-tag.outputs.docker_image_suffix }}
@@ -569,7 +569,7 @@ jobs:
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
       build_environment: linux-aarch64-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "mt-"
       runs_on: ${{ matrix.runs_on }}
       use_container_directive: true
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -653,7 +653,7 @@ jobs:
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
       build_environment: linux-aarch64-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "mt-"
       runs_on: ${{ matrix.runs_on }}
       use_container_directive: true
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -737,7 +737,7 @@ jobs:
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
       build_environment: linux-aarch64-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "mt-"
       runs_on: ${{ matrix.runs_on }}
       use_container_directive: true
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -821,7 +821,7 @@ jobs:
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
       build_environment: linux-aarch64-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "mt-"
       runs_on: ${{ matrix.runs_on }}
       use_container_directive: true
       ALPINE_IMAGE: "arm64v8/alpine"

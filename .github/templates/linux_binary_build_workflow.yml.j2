@@ -44,7 +44,7 @@ name: !{{ build_environment }}
 
 {#- Per-OS values that shape the build/test runner labels.
     s390x runners are self-hosted, register only with the bare `linux.s390x`
-    label (no `lf.` prefix), and lack a host-level `docker` CLI compatible
+    label (no `mt-`/`lf-` prefix), and lack a host-level `docker` CLI compatible
     with GHA's native `container:` directive. They share the same reusable
     workflows but pass `use_container_directive: false` so the build/test
     container is launched via `docker run` from a step instead. -#}
@@ -53,7 +53,7 @@ name: !{{ build_environment }}
   {%- set build_runs_on = "${{ " ~ release_runner_if ~ " && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}" %}
   {%- set alpine_image  = "arm64v8/alpine" %}
   {%- set timeout_minutes = 420 %}
-  {%- set runner_prefix = "${{ needs.get-label-type.outputs.label-type }}" %}
+  {%- set runner_prefix = "mt-" %}
   {%- set use_container_directive = true %}
 {%- elif "s390x" in build_environment %}
   {%- set build_runs_on = "linux.s390x" %}
@@ -65,7 +65,7 @@ name: !{{ build_environment }}
   {%- set build_runs_on = "${{ " ~ release_runner_if ~ " && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}" %}
   {%- set alpine_image  = "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine" %}
   {%- set timeout_minutes = common.timeout_minutes %}
-  {%- set runner_prefix = "${{ needs.get-label-type.outputs.label-type }}" %}
+  {%- set runner_prefix = "mt-" %}
   {%- set use_container_directive = true %}
 {%- endif %}
 
