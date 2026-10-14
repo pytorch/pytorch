@@ -23,7 +23,10 @@ from torch._functorch.partitioners import _extract_fwd_bwd_modules
 from torch._guards import CompileContext, StorageOverlap, TracingContext
 from torch._inductor.graph import GraphLowering
 from torch._inductor.virtualized import V
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    FakeTensorMode,
+)
 from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -1005,7 +1008,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
             fake_mode = torch._dynamo.utils.detect_fake_mode(sample_inputs)
 
-            with patch.object(fake_mode, "allow_non_fake_inputs", True), fake_mode:
+            with allow_non_fake_inputs_temporarily(fake_mode), fake_mode:
                 return aot_export_joint_simple(gm, sample_inputs, trace_joint=False)
 
         sample_inputs = [torch.rand((3, 4, 5))]
@@ -1155,6 +1158,21 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         x_opt = x.detach().clone()
         self.assertEqual(fn(x), opt_fn(x_opt))
         self.assertEqual(x, x_opt)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_aot_autograd_expand_mutation_unbacked_empty(self):
+        # The broadcast dim is unbacked, so it may be 0 at runtime.
+        def fn(x, n):
+            x.expand(n.item(), *x.shape).fill_(5)
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        for n in (3, 0):
+            x = torch.zeros(2)
+            x_opt = x.clone()
+            self.assertEqual(fn(x, torch.tensor(n)), opt_fn(x_opt, torch.tensor(n)))
+            self.assertEqual(x, x_opt)
 
     def test_aot_autograd_expand_mutation_backwards(self):
         def fn(x, z):

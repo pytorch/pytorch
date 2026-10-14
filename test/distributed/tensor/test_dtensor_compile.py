@@ -845,6 +845,25 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_functionalize_mutation_through_expand(self):
+        # Unlike torch.compile, which desugars subclasses first, functionalize runs the view
+        # inverses (here expand_inverse) on the DTensor itself.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            x.expand(3, *x.shape)[1].fill_(2)
+            return x + 1
+
+        t = torch.arange(6.0, device=self.device_type).view(2, 3)
+        # The transposed local tensor also covers a non-contiguous base.
+        for local, placements in [(t.t(), [Replicate()]), (t, [Shard(0)])]:
+            x = local.clone()
+            ref = fn(x)
+            dx = DTensor.from_local(local.clone(), mesh, placements, run_check=False)
+            res = torch.func.functionalize(fn)(dx)
+            self.assertEqual(res.to_local(), ref)
+            self.assertEqual(dx.to_local(), x)
+
     @unittest.skip("https://github.com/pytorch/pytorch/issues/171934")
     def test_dtensor_input_mutations(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -2787,14 +2806,16 @@ class outer_fn(torch.nn.Module):
         h1 = dt._stable_hash_for_caching()
         self.assertNotEqual(h0, h1)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    @unittest.skipIf(
+        torch.accelerator.device_count() < 2, "requires 2 accelerator devices"
+    )
     def test_stable_hash_for_caching_cuda_ranks(self):
         # Exercise the exact scenario from #188390: two DTensors with identical
-        # global specs but local tensors on cuda:0 vs cuda:1 must produce
+        # global specs but local tensors on device 0 vs device 1 must produce
         # different AOTAutograd cache keys.
-        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
-        local0 = torch.empty(2, 4, device="cuda:0")
-        local1 = torch.empty(2, 4, device="cuda:1")
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
+        local0 = torch.empty(2, 4, device=f"{device_type}:0")
+        local1 = torch.empty(2, 4, device=f"{device_type}:1")
         dt0 = DTensor.from_local(local0, mesh, [Shard(0)], run_check=False)
         dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
         h0, h1 = dt0._stable_hash_for_caching(), dt1._stable_hash_for_caching()
