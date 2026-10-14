@@ -251,7 +251,7 @@ it.
 from __future__ import annotations
 
 import base64
-import contextlib  # noqa: TC003
+import contextlib
 import dataclasses
 import errno
 import functools
@@ -296,8 +296,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
-    from contextlib import AbstractContextManager
+    from collections.abc import Mapping
     from typing_extensions import Self
 
     from torch._dynamo.precompile_package import PrecompileSession
@@ -716,7 +715,7 @@ class _DynamoCapture(Capture[_P, _R]):
             "require_no_risky_drops": require_no_risky_drops,
         }
         self._call: Callable[..., object] | None = None
-        self._fresh_cache: AbstractContextManager[None] | None = None
+        self._block = contextlib.ExitStack()
         self._in_call = False
         self._calls = 0
         # The call count the last save() wrote. -1, not 0, so a block that never
@@ -734,19 +733,20 @@ class _DynamoCapture(Capture[_P, _R]):
 
     def _start(self) -> None:
         from torch.compiler._cache import CacheArtifactManager
+        from torch.compiler._runtime_cache import capture_scope
 
         # The capture's compiles record into the process-global cache-artifact
         # list, which the cache half of the artifact bundles to prime the
         # kernel caches on load. A fresh one so the bundle holds only this
         # capture's compiles; left in _finish. The swap spans the whole
-        # block, so anything else compiled inside the block records here too.
-        self._fresh_cache = CacheArtifactManager.with_fresh_cache()
-        self._fresh_cache.__enter__()
+        # block, so anything else compiled inside the block records here too,
+        # as it does into the runtime scope whose dependencies _write freezes.
         try:
+            self._block.enter_context(capture_scope())
+            self._block.enter_context(CacheArtifactManager.with_fresh_cache())
             self._call = self._map(self._session.__enter__)
         except BaseException:
-            self._fresh_cache.__exit__(None, None, None)
-            self._fresh_cache = None
+            self._block.close()
             raise
 
     def _run(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
@@ -767,15 +767,38 @@ class _DynamoCapture(Capture[_P, _R]):
         finally:
             self._in_call = False
 
-    def _write(self) -> None:
-        rendered = self._map(self._session.snapshot_artifact, **self._gates)
+    def _write(self, *, final: bool = False) -> None:
+        from torch.compiler._runtime_cache import freeze_runtime_cache
+
+        python_code, cache = self._map(self._session.snapshot_artifact, **self._gates)
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+
+        def write(artifact: bytes | None) -> None:
+            buf = io.BytesIO()
+            torch.save({**blob, "artifact": artifact}, buf)
+            _write_artifact(
+                self._artifact_path, self._cache_path, python_code, buf.getvalue()
+            )
+
         try:
-            _write_artifact(self._artifact_path, self._cache_path, *rendered)
+            freeze_runtime_cache(
+                blob["artifact"],
+                write,
+                final=final,
+                compiled=blob["backend"] != "eager",
+            )
         except OSError as e:
             # Only the on-disk rewrite failed; _write_artifact leaves whatever
             # pair was already at these paths in place.
             raise PrecompileError(
                 f"precompile could not write the artifact: {e}"
+            ) from e
+        except PrecompileError:
+            raise
+        except Exception as e:
+            raise PrecompileError(
+                "precompile could not freeze the runtime dependencies of "
+                f"cache_path={os.fspath(self._cache_path)!r}: {e}"
             ) from e
         self._saved_calls = self._calls
 
@@ -807,9 +830,13 @@ class _DynamoCapture(Capture[_P, _R]):
                             "nothing was captured: call the capture with your "
                             "example arguments inside the `with` block."
                         )
-                    self._write()
+                    self._write(final=True)
                 except BaseException as e:
                     error = e
+            elif exc[0] is None:
+                from torch.compiler._runtime_cache import seal_runtime_scope
+
+                seal_runtime_scope()
             try:
                 self._map(self._session.__exit__, *exc)
             except BaseException as e:
@@ -817,9 +844,7 @@ class _DynamoCapture(Capture[_P, _R]):
                     raise
                 raise e from error
         finally:
-            if self._fresh_cache is not None:
-                self._fresh_cache.__exit__(None, None, None)
-                self._fresh_cache = None
+            self._block.close()
         if exc[0] is None and error is not None:
             raise error
 
@@ -2804,77 +2829,6 @@ def _unlink_quietly(path: str | os.PathLike[str]) -> None:
         pass
 
 
-def _scratch_path(path: str | os.PathLike[str]) -> str:
-    # A unique name per writer: two captures targeting one path must not share a
-    # scratch file. Beside the target, so the rename stays on one filesystem.
-    return f"{os.fspath(path)}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-
-
-def _write_scratch_file(
-    tmp: str, path: str | os.PathLike[str], payload: str | bytes
-) -> None:
-    """Create ``tmp`` holding ``payload``, fsync'd, with the mode of ``path``."""
-    parent = os.path.dirname(os.fspath(path))
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    # The temp is CREATED with the mode of the file its rename replaces: chmod'ing
-    # it down only after the write would publish the whole new payload at the umask
-    # mode, in a directory the caller chose. Permission bits only: setuid/setgid on a
-    # new inode owned by the WRITING user name a different principal. O_BINARY:
-    # os.open on Windows translates the newlines code_hash covers.
-    try:
-        mode: int | None = stat.S_IMODE(os.stat(path).st_mode) & 0o777
-    except OSError:
-        mode = None
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
-    perm = 0o666 if mode is None else mode
-    # opener=, not a bare os.open: an fd is unowned until open() wraps it.
-    with open(tmp, "wb", opener=lambda p, _: os.open(p, flags, perm)) as f:
-        f.write(payload.encode() if isinstance(payload, str) else payload)
-        f.flush()
-        os.fsync(f.fileno())
-    if mode is not None:
-        # O_CREAT's mode is umask-masked, so the exact bits need this too; best
-        # effort, a filesystem that drops modes must not fail the write.
-        try:
-            os.chmod(tmp, mode)
-        except OSError:
-            pass
-
-
-def _fsync_parent_dirs(paths: Iterable[str | os.PathLike[str]]) -> None:
-    # Durably record the renames: without an fsync of the containing directory a crash
-    # just after os.replace returns can still lose the new entry and resurrect the old.
-    for parent in {os.path.dirname(os.fspath(path)) or "." for path in paths}:
-        try:
-            fd = os.open(parent, os.O_RDONLY)
-        except OSError:
-            continue
-        try:
-            # Best effort like the os.open above, close included: by here the renames
-            # have returned, so an error out of either would fail a loadable file.
-            os.fsync(fd)
-        except OSError:
-            pass
-        finally:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-
-
-def _replace_file(path: str | os.PathLike[str], payload: bytes) -> None:
-    """Replace one file the way ``_write_artifact`` writes each half of a pair."""
-    tmp = _scratch_path(path)
-    try:
-        _write_scratch_file(tmp, path, payload)
-        os.replace(tmp, path)
-    except BaseException:
-        _unlink_quietly(tmp)
-        raise
-    _fsync_parent_dirs([path])
-
-
 def _write_artifact(
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
@@ -2903,9 +2857,36 @@ def _write_artifact(
     new_stats: list[os.stat_result] = []
     try:
         for path, payload in ((artifact_path, python_code), (cache_path, cache)):
-            tmp = _scratch_path(path)
+            parent = os.path.dirname(os.fspath(path))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            # A unique name per writer: two captures targeting one path must not share a
+            # scratch file. Beside the target, so the rename stays on one filesystem.
+            tmp = f"{os.fspath(path)}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
             written.append((tmp, path))
-            _write_scratch_file(tmp, path, payload)
+            # The temp is CREATED with the mode of the file its rename replaces: chmod'ing
+            # it down only after the write would publish the whole new payload at the umask
+            # mode, in a directory the caller chose. Permission bits only: setuid/setgid on a
+            # new inode owned by the WRITING user name a different principal. O_BINARY:
+            # os.open on Windows translates the newlines code_hash covers.
+            try:
+                mode: int | None = stat.S_IMODE(os.stat(path).st_mode) & 0o777
+            except OSError:
+                mode = None
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+            perm = 0o666 if mode is None else mode
+            # opener=, not a bare os.open: an fd is unowned until open() wraps it.
+            with open(tmp, "wb", opener=lambda p, _: os.open(p, flags, perm)) as f:
+                f.write(payload.encode() if isinstance(payload, str) else payload)
+                f.flush()
+                os.fsync(f.fileno())
+            if mode is not None:
+                # O_CREAT's mode is umask-masked, so the exact bits need this too; best
+                # effort, a filesystem that drops modes must not fail the write.
+                try:
+                    os.chmod(tmp, mode)
+                except OSError:
+                    pass
             # Name the bytes about to be renamed in by inode, for the undo below.
             new_stats.append(os.stat(tmp))
     except BaseException:
@@ -3033,7 +3014,25 @@ def _write_artifact(
             for tmp, _ in written:
                 _unlink_quietly(tmp)
         raise
-    _fsync_parent_dirs(path for _, path in written)
+    parents = {os.path.dirname(os.fspath(path)) or "." for _, path in written}
+    # Durably record the renames: without an fsync of the containing directory a crash
+    # just after os.replace returns can still lose the new entry and resurrect the old.
+    for parent in parents:
+        try:
+            fd = os.open(parent, os.O_RDONLY)
+        except OSError:
+            continue
+        try:
+            # Best effort like the os.open above, close included: by here both renames have
+            # returned, so an error out of either would fail an already loadable pair.
+            os.fsync(fd)
+        except OSError:
+            pass
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def _read_artifact(
@@ -3255,97 +3254,54 @@ def no_compilation() -> contextlib.AbstractContextManager[None]:
 
 def capture_runtime() -> contextlib.AbstractContextManager[None]:
     """
-    Scope one producer worker's lifetime for :func:`finalize_cache`.
+    Record runtime dependencies from earlier than :func:`capture`, and seal after it.
 
-    Enter it before the application imports and compiles anything, and exit it only
-    after the application's own cleanup has returned::
+    A :class:`DynamoTracer` capture freezes the runtime dependencies compiled
+    while its block is open into ``cache_path`` on its own. Wrap the producer in
+    ``capture_runtime()`` when the application compiles before the block, or to
+    check that nothing compiles once the cache is written. Enter it before the
+    application imports and compiles anything, and exit it only after the
+    application's own cleanup has returned::
 
         with torch.compiler.precompile.capture_runtime():
+            warm_up_application()  # recorded too
             with torch.compiler.precompile.capture(
                 fn, artifact_path="m.py", cache_path="m.cache"
             ) as cap:
                 cap(model, x)
-            torch.compiler.precompile.finalize_cache(
-                artifact_path="m.py", cache_path="m.cache"
-            )
             shutdown_application()  # raises if it would still compile
 
-    :func:`finalize_cache` seals the scope before it rewrites the cache: from then
-    until the scope exits, compilation is forbidden as under :func:`no_compilation`,
-    so any compile the finalized cache would not cover raises
-    :class:`~torch.compiler.PrecompileError` instead of passing silently.
+    The scope records from its entry, and the capture inside it seals it once
+    the capture's final write succeeds: from then until the scope exits,
+    compilation is forbidden as under :func:`no_compilation`, so any compile the
+    written cache would not cover raises :class:`~torch.compiler.PrecompileError`
+    instead of passing silently. A sealed scope takes no second capture.
 
     Raises :class:`~torch.compiler.PrecompileError` if entered while compilation
-    is already forbidden, or while this process already has an active scope. A
-    scope inherited across ``fork`` belongs to the parent and does not block the
-    child.
+    is already forbidden, or while this process already has an active scope or
+    an open capture. A scope inherited across ``fork`` belongs to the parent and
+    does not block the child.
     """
     from torch.compiler._runtime_cache import capture_runtime as _capture_runtime
 
     return _capture_runtime()
 
 
-def finalize_cache(
-    *, artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
-) -> None:
-    """
-    Freeze this process's runtime dependencies into a saved Dynamo capture.
-
-    Call it inside :func:`capture_runtime`, after the capture at
-    ``(artifact_path, cache_path)`` has been saved and the workload has run. It
-    verifies that the pair matches without executing the artifact, waits for
-    pending compile work, and rewrites ``cache_path`` in place (written beside it
-    and renamed over it, keeping its mode) with the runtime dependencies recorded
-    during the scope added.
-    The enclosing :func:`capture_runtime` scope is sealed while the cache is
-    rewritten and stays sealed once the rewrite succeeds; if the rewrite fails, the
-    scope is unsealed again and ``cache_path`` is left as it was, so the call can
-    be retried. Stop compiling on every thread before
-    calling it: compile work submitted while it runs is not guaranteed to be
-    waited on or rejected.
-
-    Raises :class:`~torch.compiler.PrecompileError` outside a
-    :func:`capture_runtime` scope, when called a second time in one scope, for a
-    make_fx capture, for an inductor capture that saved no compiled cache artifact
-    (which strict :func:`load` could not serve either), or when the pair cannot be
-    read or does not match.
-    """
-    from torch.compiler._runtime_cache import finalize_runtime_cache
-
-    blob = _read_runtime_cache_envelope(artifact_path, cache_path, "finalize_cache")
-    if blob.get("backend") == "inductor" and not blob.get("artifact"):
-        raise PrecompileError(
-            f"precompile.finalize_cache {_runtime_cache_pair(artifact_path, cache_path)} "
-            "requires the compiled cache artifact of an inductor capture, and this "
-            "graph saved none"
-        )
-
-    def write(artifact: bytes | None) -> None:
-        buf = io.BytesIO()
-        torch.save({**blob, "artifact": artifact}, buf)
-        _replace_file(cache_path, buf.getvalue())
-
-    try:
-        finalize_runtime_cache(blob.get("artifact"), write)
-    except Exception as exc:
-        raise PrecompileError(
-            "precompile.finalize_cache: Could not finalize precompile runtime "
-            f"dependencies for cache_path={os.fspath(cache_path)!r}: {exc}"
-        ) from exc
-
-
 def prepare_runtime(
     *, artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
 ) -> None:
     """
-    Verify a finalized cache's runtime dependencies before the application starts.
+    Verify a capture's runtime dependencies before the application starts.
 
-    Call it early in a serving worker, before the application imports anything that
-    compiles, and then :func:`load` the same pair::
+    :func:`load` installs them itself, so call this only when the serving worker
+    compiles before it loads the pair: early, before the application imports
+    anything that compiles::
 
         torch.compiler.precompile.prepare_runtime(
             artifact_path="m.py", cache_path="m.cache"
         )
+        import application  # compiles against the installed dependencies
+
         runnable = torch.compiler.precompile.load("m.py", "m.cache")
 
     It verifies that the pair matches by streaming the artifact's bytes into its
@@ -3359,8 +3315,8 @@ def prepare_runtime(
     ``clear_caches()`` resets Inductor's caches.
 
     Raises :class:`~torch.compiler.PrecompileError` for a make_fx capture, a
-    mismatched or unreadable pair, or a cache :func:`finalize_cache` did not
-    produce.
+    mismatched or unreadable pair, or a cache whose capture did not freeze its
+    runtime dependencies.
     """
     from torch.compiler._runtime_cache import prepare_runtime_cache
 
