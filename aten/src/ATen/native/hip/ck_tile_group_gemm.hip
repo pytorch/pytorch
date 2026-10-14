@@ -149,8 +149,8 @@ namespace at::hip::detail {
 				Strides tensor_StrideOutput,                // out.strides() in elements
 				Strides tensor_ShapeA,                      // mat_a.sizes(); used to check offs stays inside A
 				Strides tensor_ShapeB,                      // mat_b.sizes(); used to check offs stays inside B
-				bool a_row_major,                           // true if A is layed out in row-major order
-				bool b_row_major) {                         // true if B is layed out in row-major order
+				bool a_row_major,                           // true if A is laid out in row-major order
+				bool b_row_major) {                         // true if B is laid out in row-major order
 			const int32_t thread_id = threadIdx.x;
 
 			const DataType* a_ptr = nullptr; //pointer to the start of A[thread_id]
