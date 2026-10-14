@@ -8720,14 +8720,16 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             old_log, ["old_enter", "old", "old_cm", "old_enter", "old_cm", "old_enter"]
         )
-        self.assertEqual(new_log, ["new", "new", "new_cm", "new_enter", "new", "new_cm"])
+        self.assertEqual(
+            new_log, ["new", "new", "new_cm", "new_enter", "new", "new_cm"]
+        )
         self.assertEqual(backend.frame_count, 4)
 
     def test_lru_cache_method_closure_mutation(self):
         log = []
 
         class Helper:
-            @functools.lru_cache(0)
+            @functools.lru_cache(0)  # noqa: B019
             def touch(self):
                 log.append("touch")
 
