@@ -52,9 +52,6 @@ class MockTensorNode:
     def get_stride(self) -> tuple[int, ...]:
         return tuple(self.tensor.stride())
 
-    def get_stride_hint(self) -> tuple[int, ...]:
-        return tuple(self.tensor.stride())
-
 
 class MockMMKernelInputs(MMKernelInputs):
     """Mock MMKernelInputs that subclasses the real class and uses real tensors"""

@@ -505,15 +505,9 @@ def is_cpu(x: IRNode | torch.device | None | str) -> bool:
 
 
 def is_aligned_realized_tensor(x: Buffer | TensorBox, alignment: int) -> bool:
-    if not isinstance(x, IRNode) or x.maybe_get_layout() is None:
-        return False
-    # A flexible layout has no settled strides to check. Report unaligned so
-    # the caller takes its require_* path, which freezes a flexible layout
-    # into the wanted order in place (no copy).
-    if isinstance(x.get_layout(), FlexibleLayout):
-        return False
     if (
-        x.maybe_get_stride() is None
+        not isinstance(x, IRNode)
+        or x.maybe_get_stride() is None
         or free_unbacked_symbols(x.get_stride())
         or free_unbacked_symbols(x.get_size())
     ):
@@ -569,13 +563,6 @@ def try_match_insignificant_strides(
     if not is_storage_and_layout(tensor):
         return tensor
 
-    if all(V.graph.sizevars.statically_known_gt(s, 1) for s in tensor.get_size()):
-        return tensor
-
-    # freeze first: the "already matches" early return below persists the
-    # decision, so it must be made against final strides
-    storage, old_layout = as_storage_and_layout(tensor)
-
     if all(
         V.graph.sizevars.statically_known_equals(s1, s2)
         for s1, s2 in zip(strides, tensor.get_stride())
@@ -584,6 +571,8 @@ def try_match_insignificant_strides(
 
     if not significant_strides_equal(strides, tensor.get_stride(), tensor.get_size()):
         return tensor
+
+    storage, old_layout = as_storage_and_layout(tensor)
     new_stride = [*old_layout.stride]
     is_empty = tensor.is_zero_elements()
     for i, s in enumerate(tensor.get_size()):
@@ -4292,7 +4281,9 @@ class ReinterpretView(BaseView):
         # reordered or padded at freeze time (e.g. comprehensive padding),
         # which would silently invalidate this view. See #192575.
         base_layout = self.data.maybe_get_layout()
-        if isinstance(base_layout, FlexibleLayout):
+        if config.strict_flexible_layout_strides and isinstance(
+            base_layout, FlexibleLayout
+        ):
             raise AssertionError(
                 f"ReinterpretView created over a flexible layout: {base_layout}. "
                 "Freeze the base first, e.g. via as_storage_and_layout(x)."
@@ -6595,10 +6586,6 @@ class ChoiceCaller:
     def output_node(self) -> TensorBox:
         raise NotImplementedError
 
-    def is_layout_compatible(self) -> bool:
-        """Whether this choice can still use the current input layouts."""
-        return True
-
     def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {}
@@ -6767,12 +6754,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self, hint_override: int | None = None
     ) -> tuple[ChoiceCaller, float]:
         timings = self.choice_timings(hint_override=hint_override)
-        choices = [choice for choice in timings if choice.is_layout_compatible()]
-        if not choices:
-            raise torch._inductor.select_algorithm.NoValidChoicesError(
-                "No choices remain compatible with the input layouts"
-            )
-        min_choice = min(choices, key=timings.get)  # type: ignore[arg-type]
+        min_choice = min(timings, key=timings.get)  # type: ignore[arg-type]
         return (min_choice, timings[min_choice])
 
     def finalize_as_triton_callers(
@@ -8752,10 +8734,6 @@ class TMADescriptor(ExternKernel):
     def __init__(
         self, tensor: IRNode, inputs: Sequence[Any], constant_args: Sequence[Any]
     ) -> None:
-        # Freeze so the ownership ReinterpretView below does not capture a
-        # still-flexible layout (reachable when
-        # triton_kernel_default_layout_constraint is "flexible_layout").
-        as_storage_and_layout(tensor)
         super().__init__(
             None,
             # link back to the underlying tensor in terms of ownership

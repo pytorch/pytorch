@@ -2942,10 +2942,9 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             # separately here is how a [1, K] operand ended up transposed.
             # Resolve symbols the way can_use_tma does: tma_inner_dim compares
             # against 1, and an unhinted backed symbol never compares equal.
-            # Stable TMA stride hooks constrain the selected kernel's layout.
             stride = [
                 V.graph.sizevars.replace_backed_symbols_with_hints(st)
-                for st in node.get_stride_hint()
+                for st in node.layout.stride
             ]
             inner = tma_inner_dim(stride)
             if inner is None:
