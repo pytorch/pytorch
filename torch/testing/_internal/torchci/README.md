@@ -85,17 +85,22 @@ original's `declared_case_name`, `test_x`.
 ## Crashes and timeouts
 
 A process that dies can't record the test it was running. Under `run_test.py`'s
-retry loop (`--sc`, `--scs` or `--rs` without xdist), the writer publishes the run
-in flight, with its report's absolute path, as `report_inflight` next to the
-stepcurrent plugin's `lastrun` in `.pytest_cache/v/cache/stepcurrent/<key>/`, from
-each test's start until just before its run line is written. On a non-zero exit,
-`run_test.py` consumes it and, unless pytest exited on an interrupt (exit code 2),
-appends the run: `timed_out` when `run_test.py` killed the process at its time
-limit (exit code 124), otherwise `crashed`, with the time limit or the exit code
-and signal in `outcome_summary` and `ended_at` set when `run_test.py` recorded it.
+retry loop (`--sc`, `--scs` or `--rs` without `-n`), the writer publishes the run
+in flight as `report_inflight` next to the stepcurrent plugin's `lastrun` in
+`.pytest_cache/v/cache/stepcurrent/<key>/`, from each test's start until just
+before its run line is written, and `null` in between. The record holds `path`
+(the report's absolute path), `report_size` (its size when the run started),
+`test` (the run line's identity fields), `rerun_number` and `started_at` (epoch
+seconds). On a non-zero exit, `run_test.py` removes it and, unless the exit was
+pytest's own (2 interrupted, 3 internal error, 4 usage error) or the report grew
+since (the run did finish), appends the run: `timed_out` on `retry_shell`'s 124
+(the process hit its time limit, whether it exited on the SIGINT or was killed),
+otherwise `crashed`: a signal, an abort, or any other exit with the run still in
+flight. `outcome_summary` carries the time limit or the exit code and signal, and
+`ended_at` is when `run_test.py` recorded it.
 
-Not covered: processes xdist starts (`-n`, which includes every C++ test),
-`run_tests --subprocess` children, and rerun-disabled-tests mode.
+Not covered: launches with `-n` (xdist, every C++ test, mpiexec), `run_tests
+--subprocess` children, and rerun-disabled-tests mode.
 
 ## Versioning
 

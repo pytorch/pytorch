@@ -24,6 +24,8 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, cast, NamedTuple
 
+from conftest import STEPCURRENT_CACHE_DIR
+
 import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
@@ -843,7 +845,8 @@ def run_test_retries(
         print(s, file=output, flush=True)
 
     num_failures = defaultdict(int)
-    cache_dir = REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
+    # pytest keeps cache values under <cache_dir>/v/<key>.
+    cache_dir = REPO_ROOT / ".pytest_cache/v" / STEPCURRENT_CACHE_DIR / stepcurrent_key
 
     def read_pytest_cache(key: str) -> Any:
         try:
@@ -858,20 +861,22 @@ def run_test_retries(
         if not HAS_TORCHCI_REPORTS:
             return
         try:
-            outcome: str | None
-            if ret_code == 124:
-                outcome = "timed_out"
-                summary = f"timed out after {timeout // 60}min"
-            elif ret_code == 2:
-                # pytest's interrupted exit (Ctrl-C, a cancelled job, pytest.exit()):
-                # the process didn't die, so the run is only consumed.
-                outcome, summary = None, ""
-            else:
-                outcome = "crashed"
-                summary = f"exit code {ret_code}{signal_name}"
             from torch.testing._internal.torchci import plugin
 
-            plugin.finish_inflight(cache_dir, outcome, summary)
+            # An installed torch whose plugin predates the publication.
+            if not hasattr(plugin, "take_inflight"):
+                return
+            inflight = plugin.take_inflight(cache_dir)
+            # pytest's own exits (interrupted, internal error, usage error): the
+            # process didn't die, so the run is only consumed.
+            if inflight is None or ret_code in (2, 3, 4):
+                return
+            if ret_code == 124:
+                limit = f" after {timeout // 60}min" if timeout else ""
+                plugin.append_run(inflight, "timed_out", f"timed out{limit}")
+            else:
+                summary = f"exit code {ret_code}{signal_name}"
+                plugin.append_run(inflight, "crashed", summary)
         except Exception as e:
             print_to_file(f"Could not finish the test run report: {e}")
 
