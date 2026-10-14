@@ -7,6 +7,7 @@ import contextlib
 import copy
 import hashlib
 import json
+import logging
 import os
 import pickle
 import threading
@@ -21,6 +22,9 @@ from torch.compiler._cache import (
 )
 from torch.compiler._no_compile import is_compilation_forbidden, no_compilation
 from torch.utils._appending_byte_serializer import AppendingByteSerializer
+
+
+log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -251,18 +255,18 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
 
 
 class _RuntimeCapture:
-    def __init__(self) -> None:
+    def __init__(self, *, explicit: bool) -> None:
         self.pid = os.getpid()
+        # Opened by capture_runtime(), else by the first open precompile.capture
+        # and closed by the last one to exit.
+        self.explicit = explicit
+        self.captures = 0
         self.sealed = False
         self.policy = contextlib.ExitStack()
-        self.finalize_lock = threading.Lock()
+        self.freeze_lock = threading.Lock()
         self.triton_kernels: dict[str, list[CachingAutotuner]] = {}
 
     def seal(self) -> None:
-        if self.sealed:
-            raise RuntimeError(
-                "The precompile runtime cache has already been finalized"
-            )
         self.policy.enter_context(no_compilation())
         self.sealed = True
 
@@ -282,68 +286,156 @@ def _active_capture() -> _RuntimeCapture | None:
     return owner if owner is not None and owner.pid == os.getpid() else None
 
 
+def _close(owner: _RuntimeCapture) -> None:
+    global _capture
+    try:
+        owner.policy.close()
+    finally:
+        with _capture_lock:
+            owner.triton_kernels.clear()
+            if _capture is owner:
+                _capture = None
+
+
 @contextlib.contextmanager
 def capture_runtime() -> Iterator[None]:
     """Own one producer lifetime, including strict validation and cleanup.
 
-    Finalizing the cache seals this scope against further compiler work until the
-    outer application cleanup has returned.
+    The capture inside it seals the scope against further compiler work until
+    the outer application cleanup has returned.
     """
     global _capture
     if is_compilation_forbidden():
         raise _precompile_error(
             "precompile.capture_runtime cannot start while compilation is forbidden"
         )
-    owner = _RuntimeCapture()
+    owner = _RuntimeCapture(explicit=True)
     with _capture_lock:
         if _active_capture() is not None:
             raise _precompile_error(
-                "Another precompile runtime capture is already active"
+                "Another precompile runtime capture or an open precompile.capture "
+                "is already active"
             )
         _capture = owner
     try:
         yield
     finally:
+        _close(owner)
+
+
+@contextlib.contextmanager
+def capture_scope() -> Iterator[None]:
+    """The scope a precompile.capture block records into: the enclosing
+    capture_runtime() scope, else one shared by the captures open in this process.
+    """
+    global _capture
+    with _capture_lock:
+        owner = _active_capture()
+        if owner is None:
+            owner = _capture = _RuntimeCapture(explicit=False)
+        owner.captures += 1
+    try:
+        yield
+    finally:
+        with _capture_lock:
+            owner.captures -= 1
+            last = not owner.explicit and owner.captures == 0
+        if last:
+            _close(owner)
+
+
+def seal_runtime_scope() -> None:
+    """Seal an enclosing capture_runtime() scope whose cache is already written."""
+    owner = _active_capture()
+    if owner is None or not owner.explicit:
+        return
+    with owner.freeze_lock, _capture_lock:
+        if not owner.sealed:
+            owner.seal()
+
+
+def _freeze_triton_kernels(
+    kernels: dict[str, list[CachingAutotuner]], *, strict: bool
+) -> bytes:
+    import torch
+
+    static_kernels: dict[str, bytes] = {}
+    rejected_sources: list[dict[str, object]] = []
+    for key, instances in kernels.items():
         try:
-            owner.policy.close()
-        finally:
-            with _capture_lock:
-                owner.triton_kernels.clear()
-                if _capture is owner:
-                    _capture = None
+            static_kernels[key] = _freeze_triton_kernel(key, instances)
+        except _UnresolvedTritonExport as exc:
+            rejected_sources.extend(exc.sources)
+    if rejected_sources:
+        error = _UnresolvedTritonExport(rejected_sources)
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "precompile_triton_export_failures",
+                "encoding": "json",
+            },
+            payload_fn=lambda: error.report,
+            expect_trace_id=False,
+            record_logging_overhead=False,
+        )
+        if strict:
+            raise error
+        log.warning(
+            "precompile left %d Triton kernel source(s) out of the cache, which "
+            "compile again on first use in the serving process: %s",
+            len(rejected_sources),
+            error,
+        )
+    return pickle.dumps(static_kernels)
 
 
-def finalize_runtime_cache(
-    artifact: bytes | None, write: Callable[[bytes | None], None]
+def freeze_runtime_cache(
+    artifact: bytes | None,
+    write: Callable[[bytes | None], None],
+    *,
+    final: bool,
+    compiled: bool,
 ) -> None:
-    """Freeze the scope's static Triton kernels into the cache artifact, pass it
-    to ``write``, then keep the scope sealed.
+    """Freeze the scope's static Triton kernels into the cache artifact and pass
+    it to ``write``.
 
-    Pending async compiles are waited on first, then the scope is sealed so any
-    later compile raises before kernels are frozen, and it is unsealed again if
-    freezing, serialization or ``write`` raises so the caller can retry. The
-    caller must stop compiling before calling this: a kernel submitted on
-    another thread after the wait but before the seal is neither waited on nor
-    rejected, and is left out of the cache.
+    Pending async compiles are waited on first. A ``final`` write inside a
+    capture_runtime() scope then seals it so any later compile raises before
+    kernels are frozen, and keeps it sealed unless freezing, serialization or
+    ``write`` raises. A capture_runtime() scope also refuses a kernel that cannot
+    be frozen, where a plain capture leaves it out with a warning. A capture
+    that did not run eagerly (``compiled``) but saved no artifact has no
+    dependencies to carry; a capture_runtime() scope refuses it, since strict
+    precompile.load could not serve it either. The caller must stop compiling
+    before calling this: a kernel submitted on another thread after the wait but
+    before the seal is neither waited on nor rejected, and is left out of the
+    cache.
     """
     import torch
     from torch._inductor.async_compile import AsyncCompile
 
     owner = _active_capture()
     if owner is None:
-        raise RuntimeError(
-            "precompile.finalize_cache requires the worker's capture_runtime scope"
-        )
-    with owner.finalize_lock:
+        raise RuntimeError("precompile.capture has no runtime capture scope")
+    if compiled and artifact is None:
+        if owner.explicit:
+            raise RuntimeError(
+                "precompile.capture_runtime requires the compiled cache artifact of "
+                "a compiled capture, and this capture saved none"
+            )
+        write(None)
+        return
+    with owner.freeze_lock:
         if owner.sealed:
             raise RuntimeError(
-                "The precompile runtime cache has already been finalized"
+                "The precompile.capture_runtime scope was already sealed by an "
+                "earlier capture"
             )
         artifacts = (
             CacheArtifactManager.deserialize(artifact) if artifact is not None else {}
         )
         if artifacts is None:
-            raise RuntimeError("Cannot finalize an unreadable precompile cache")
+            raise RuntimeError("Cannot freeze an unreadable precompile cache")
         if InductorTritonCacheArtifact.type() in artifacts:
             raise RuntimeError(
                 "The precompile cache already contains frozen runtime dependencies"
@@ -353,31 +445,13 @@ def finalize_runtime_cache(
         AsyncCompile.drain_pending()
         if torch.cuda.is_initialized():
             torch.cuda.synchronize()
+        seal = final and owner.explicit
         with _capture_lock:
-            owner.seal()
-            kernels = dict(owner.triton_kernels)
+            if seal:
+                owner.seal()
+            kernels = {key: list(found) for key, found in owner.triton_kernels.items()}
         try:
-            static_kernels: dict[str, bytes] = {}
-            rejected_sources: list[dict[str, object]] = []
-            for key, instances in kernels.items():
-                try:
-                    static_kernels[key] = _freeze_triton_kernel(key, instances)
-                except _UnresolvedTritonExport as exc:
-                    rejected_sources.extend(exc.sources)
-            if rejected_sources:
-                error = _UnresolvedTritonExport(rejected_sources)
-                torch._logging.trace_structured(
-                    "artifact",
-                    metadata_fn=lambda: {
-                        "name": "precompile_triton_export_failures",
-                        "encoding": "json",
-                    },
-                    payload_fn=lambda: error.report,
-                    expect_trace_id=False,
-                    record_logging_overhead=False,
-                )
-                raise error
-            static_payload = pickle.dumps(static_kernels)
+            static_payload = _freeze_triton_kernels(kernels, strict=owner.explicit)
             artifacts[InductorTritonCacheArtifact.type()] = [
                 InductorTritonCacheArtifact(
                     hashlib.sha256(static_payload).hexdigest(), static_payload
@@ -387,8 +461,9 @@ def finalize_runtime_cache(
             serializer.extend(artifacts.items())
             write(serializer.to_bytes())
         except BaseException:
-            with _capture_lock:
-                owner.unseal()
+            if seal:
+                with _capture_lock:
+                    owner.unseal()
             raise
 
 
@@ -401,6 +476,6 @@ def prepare_runtime_cache(artifact: bytes | None) -> None:
         )
     if len(artifacts.get(InductorTritonCacheArtifact.type(), ())) != 1:
         raise RuntimeError(
-            "precompile.prepare_runtime requires a cache produced by "
-            "precompile.finalize_cache"
+            "precompile.prepare_runtime requires a cache whose capture froze its "
+            "runtime dependencies"
         )
