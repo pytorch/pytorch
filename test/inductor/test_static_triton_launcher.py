@@ -31,7 +31,13 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_WINDOWS,
+    parametrize,
+    skipIfRocm,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._triton import has_triton_tma_device
@@ -254,6 +260,7 @@ class TestStaticTritonLauncherUnit(TestCase):
 
 
 @requires_gpu_and_triton
+@instantiate_parametrized_tests
 class TestStaticTritonLauncher(TestCase):
     def setUp(self):
         super().setUp()
@@ -642,6 +649,47 @@ class TestStaticTritonLauncher(TestCase):
                 (arg0, 0),
                 stream,
             )
+
+    @unittest.skipUnless(GPU_TYPE == "xpu", "XPU only")
+    @parametrize("warp_size", (16, 32))
+    def test_xpu_compiled_simd_width(self, warp_size):
+        # The work-group size is num_warps * the SIMD width the kernel was
+        # compiled for, which the launcher reads from the kernel once at load
+        # time rather than querying on every launch. Triton bakes
+        # reqd_work_group_size into the binary, so the wrong width is rejected
+        # by the runtime at submit instead of producing wrong numerics.
+        if warp_size not in torch.xpu.get_device_properties(0).sub_group_sizes:
+            raise unittest.SkipTest(f"device has no {warp_size}-wide sub-group")
+
+        @triton.jit
+        def reduce_kernel(z, BLOCK: tl.constexpr):
+            off = tl.arange(0, BLOCK)
+            a = tl.load(z + off)
+            tl.store(z + off, a + tl.sum(a, axis=0, keep_dims=True))
+
+        BLOCK = 256
+        z = torch.ones(BLOCK, dtype=torch.float32, device=GPU_TYPE)
+        compiled_kernel = reduce_kernel[(1,)](
+            z, BLOCK=BLOCK, num_warps=4, warp_size=warp_size
+        )
+        if compiled_kernel.metadata.threads_per_warp != warp_size:
+            raise unittest.SkipTest("triton did not honor the requested width")
+        # Pins the shared memory this kernel needs, so a kernel tweak cannot
+        # silently drop the shared memory argument path from this test.
+        self.assertGreater(compiled_kernel.metadata.shared, 0)
+
+        launcher = self._make_launcher(compiled_kernel)
+        expected = torch.full(
+            (BLOCK,), 1.0 + BLOCK, dtype=torch.float32, device=GPU_TYPE
+        )
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        # Launch twice: the width and the argument count are read once at load
+        # and reused, so a stale cached value shows up on the second launch.
+        for _ in range(2):
+            out = torch.ones(BLOCK, dtype=torch.float32, device=GPU_TYPE)
+            launcher.run(1, 1, 1, stream, out)
+            self.assertEqual(out, expected)
 
     @unittest.skipUnless(GPU_TYPE == "xpu", "XPU only")
     def test_xpu_load_kernel_hands_over_capsule_reference(self):

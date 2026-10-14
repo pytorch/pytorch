@@ -52,6 +52,17 @@ const at::xpu::LevelZero& ze() {
 #define MAX_ARGS 121
 typedef void* syclDevicePtr_t;
 
+/**
+ * A loaded kernel and the launch properties that are fixed once it is loaded:
+ * the SIMD width it was compiled for (which with num_warps gives the work-group
+ * size) and its argument count.
+ */
+struct LoadedKernel {
+  sycl::kernel kernel;
+  uint32_t threadsPerWarp = 0;
+  uint32_t numArgs = 0;
+};
+
 syclDevicePtr_t getPointer(
     PyObject* obj,
     int idx,
@@ -251,10 +262,10 @@ inline ze_module_handle_t _createModule(
   return module;
 }
 
-inline sycl::kernel* _createKernel(
+inline LoadedKernel _createKernel(
     ze_module_handle_t module,
     const char* kernelName,
-    uint32_t* nSpillsPtr = nullptr) {
+    uint32_t* nSpillsPtr) {
   assert(module);
   assert(kernelName);
   ze_kernel_handle_t kernel = nullptr;
@@ -264,42 +275,47 @@ inline sycl::kernel* _createKernel(
   kernelDescription.flags = ZE_KERNEL_FLAG_FORCE_RESIDENCY;
   kernelDescription.pKernelName = kernelName;
   ZE_CHECK(ze().zeKernelCreate(module, &kernelDescription, &kernel));
-  if (nSpillsPtr) {
-    ze_kernel_properties_t props{};
-    props.stype = ZE_STRUCTURE_TYPE_KERNEL_PROPERTIES;
-    props.pNext = nullptr;
-    ZE_CHECK(ze().zeKernelGetProperties(kernel, &props));
-    // Level Zero reports spillMemSize in bytes per hardware thread, while
-    // CUDA/HIP report n_spills as LOCAL_SIZE_BYTES / 4, i.e. dword-equivalents
-    // per lane. Inductor's spill thresholds are calibrated on the latter, so
-    // normalize the same way the Intel triton driver does; otherwise the
-    // statically launched kernel reports a value 4 * SIMD width too large.
-    // requiredSubgroupSize comes from the intel_reqd_sub_group_size attribute
-    // triton always emits; maxSubgroupSize is the compiled SIMD width when
-    // that attribute is absent.
-    const uint32_t subgroupSize = props.requiredSubgroupSize != 0
-        ? props.requiredSubgroupSize
-        : props.maxSubgroupSize;
-    // Truncating division matches CUDA/HIP, so a scratch allocation below one
-    // dword per lane reports 0. With an unknown SIMD width, report the raw
-    // bytes: over-reporting beats hiding an allocation.
-    *nSpillsPtr = subgroupSize != 0 ? props.spillMemSize / (4 * subgroupSize)
-                                    : props.spillMemSize;
-  }
+  ze_kernel_properties_t props{};
+  props.stype = ZE_STRUCTURE_TYPE_KERNEL_PROPERTIES;
+  props.pNext = nullptr;
+  ZE_CHECK(ze().zeKernelGetProperties(kernel, &props));
+  // requiredSubgroupSize is the intel_reqd_sub_group_size attribute triton
+  // always emits, and is exactly what the per-launch
+  // sycl::info::kernel_device_specific::compile_sub_group_size query it
+  // replaces returned, down to the default of 32 for a kernel that declares no
+  // required size.
+  const uint32_t requiredSimd = props.requiredSubgroupSize;
+  const uint32_t threadsPerWarp = requiredSimd != 0 ? requiredSimd : 32;
+  // Level Zero reports spillMemSize in bytes per hardware thread, while
+  // CUDA/HIP report n_spills as LOCAL_SIZE_BYTES / 4, i.e. dword-equivalents
+  // per lane. Inductor's spill thresholds are calibrated on the latter, so
+  // normalize the same way the Intel triton driver does; otherwise the
+  // statically launched kernel reports a value 4 * SIMD width too large.
+  // maxSubgroupSize is only a best-effort stand-in here: Level Zero documents
+  // it as a maximum, not as the compiled width. Truncating division matches
+  // CUDA/HIP, so a scratch allocation below one dword per lane reports 0. With
+  // an unknown SIMD width, report the raw bytes: over-reporting beats hiding an
+  // allocation.
+  const uint32_t spillSimd =
+      requiredSimd != 0 ? requiredSimd : props.maxSubgroupSize;
+  *nSpillsPtr = spillSimd != 0 ? props.spillMemSize / (4 * spillSimd)
+                               : props.spillMemSize;
   auto& syclContext = c10::xpu::get_device_context();
   auto mod = sycl::make_kernel_bundle<
       sycl::backend::ext_oneapi_level_zero,
       sycl::bundle_state::executable>(
       {module, sycl::ext::oneapi::level_zero::ownership::transfer},
       syclContext);
-  auto fun =
-      new sycl::kernel(sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
+  // numKernelArgs is the same value sycl::info::kernel::num_args reports.
+  return LoadedKernel{
+      sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
           {mod, kernel, sycl::ext::oneapi::level_zero::ownership::transfer},
-          syclContext));
-  return fun;
+          syclContext),
+      threadsPerWarp,
+      props.numKernelArgs};
 }
 
-std::unique_ptr<sycl::kernel> loadKernel(
+std::unique_ptr<LoadedKernel> loadKernel(
     const char* filePath,
     const char* funcName,
     uint32_t sharedMemBytes,
@@ -312,7 +328,7 @@ std::unique_ptr<sycl::kernel> loadKernel(
   auto mod = _createModule(
       reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), device_idx);
 
-  return std::unique_ptr<sycl::kernel>(
+  return std::make_unique<LoadedKernel>(
       _createKernel(mod, funcName, nSpillsPtr));
 }
 
@@ -366,7 +382,7 @@ void setKernelArg(
 }
 
 void launchKernel(
-    sycl::kernel* kernelPtr,
+    const LoadedKernel* loadedKernel,
     uint32_t gridX,
     uint32_t gridY,
     uint32_t gridZ,
@@ -375,14 +391,9 @@ void launchKernel(
     const char* argTypes,
     void** params,
     sycl::queue* queuePtr) {
-  uint32_t threadsPerWarp = kernelPtr->get_info<
-      sycl::info::kernel_device_specific::compile_sub_group_size>(
-      queuePtr->get_device());
-  if (threadsPerWarp == 0) {
-    threadsPerWarp = 32; // default to 32 if not set
-  }
-  const uint32_t kernelNumArgs =
-      kernelPtr->get_info<sycl::info::kernel::num_args>();
+  const sycl::kernel& kernel = loadedKernel->kernel;
+  const uint32_t threadsPerWarp = loadedKernel->threadsPerWarp;
+  const uint32_t kernelNumArgs = loadedKernel->numArgs;
   const uint32_t numParams = static_cast<uint32_t>(std::strlen(argTypes));
   size_t globalRangeX = static_cast<size_t>(gridX) * threadsPerWarp * numWarps;
   size_t globalRangeY = gridY;
@@ -411,9 +422,9 @@ void launchKernel(
       using share_mem_t = sycl::local_accessor<int8_t, 1>;
       share_mem_t localBuffer = share_mem_t(sharedMemBytes, cgh);
       cgh.set_arg(static_cast<int>(numParams), localBuffer);
-      cgh.parallel_for(parallelWorkSize, *kernelPtr);
+      cgh.parallel_for(parallelWorkSize, kernel);
     } else {
-      cgh.parallel_for(parallelWorkSize, *kernelPtr);
+      cgh.parallel_for(parallelWorkSize, kernel);
     }
   };
   queuePtr->submit(cgf);
@@ -438,13 +449,15 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   // Level-zero does not support get n_regs, so we return 0 here.
   uint32_t n_regs = 0;
   uint32_t n_spills = 0;
-  std::unique_ptr<sycl::kernel> func =
+  std::unique_ptr<LoadedKernel> func =
       loadKernel(filePath, funcName, sharedMemBytes, &n_spills, device);
 
   PyObject* kernel_py = PyCapsule_New(
-      reinterpret_cast<void*>(func.get()), "sycl_kernel", [](PyObject* cap) {
-        void* ptr = PyCapsule_GetPointer(cap, "sycl_kernel");
-        delete reinterpret_cast<sycl::kernel*>(ptr);
+      reinterpret_cast<void*>(func.get()),
+      "static_xpu_kernel",
+      [](PyObject* cap) {
+        void* ptr = PyCapsule_GetPointer(cap, "static_xpu_kernel");
+        delete reinterpret_cast<LoadedKernel*>(ptr);
       });
   if (kernel_py == nullptr) {
     return nullptr;
@@ -459,7 +472,7 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
 }
 
 PyObject* launch_kernel_inner(
-    sycl::kernel* func,
+    const LoadedKernel* func,
     int gridX,
     int gridY,
     int gridZ,
@@ -492,7 +505,7 @@ PyObject* launch_kernel_inner(
 }
 
 PyObject* launch_kernel_slow(
-    sycl::kernel* func,
+    const LoadedKernel* func,
     int gridX,
     int gridY,
     int gridZ,
@@ -566,8 +579,14 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
     Py_RETURN_NONE;
   }
 
-  sycl::kernel* func = reinterpret_cast<sycl::kernel*>(
-      PyCapsule_GetPointer(kernel_py, "sycl_kernel")); // NOLINT
+  const LoadedKernel* func = reinterpret_cast<const LoadedKernel*>(
+      PyCapsule_GetPointer(kernel_py, "static_xpu_kernel")); // NOLINT
+  if (func == nullptr) {
+    // PyCapsule_GetPointer set a Python error; report it as a TORCH_CHECK
+    // failure rather than dereferencing null below.
+    PyErr_Clear();
+    TORCH_CHECK(false, "_launch_kernel was not passed a loaded XPU kernel");
+  }
   sycl::queue* queuePtr = reinterpret_cast<sycl::queue*>(stream); // NOLINT
   auto num_args = std::strlen(argTypes);
   // Kernels with no arguments should just pass nullptr to cuLaunchKernel
