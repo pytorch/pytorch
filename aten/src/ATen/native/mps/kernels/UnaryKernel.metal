@@ -551,15 +551,10 @@ struct rsqrt_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // modulus
-    auto m = precise::sqrt(x.x * x.x + x.y * x.y);
-    // real part: sqrt((m + a)/2)
-    auto real_part = precise::sqrt((m + x.x) * .5);
-    // imaginary part: sign(b) * sqrt((m - a)/2)
-    auto imag_part = copysign(
-        static_cast<decltype(x.y)>(precise::sqrt((m - x.x) * .5)), x.y);
-    auto denominator = (real_part * real_part) + (imag_part * imag_part);
-    return T(real_part / denominator, -1 * imag_part / denominator);
+    // rsqrt(z) = conj(sqrt(z)) / |z|, as |sqrt(z)|^2 = |z|
+    const auto s = c10::metal::sqrt(float2(x));
+    const auto m = c10::metal::hypot(x.x, x.y);
+    return T(s.x / m, -s.y / m);
   }
 };
 
