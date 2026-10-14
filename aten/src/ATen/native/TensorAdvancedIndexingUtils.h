@@ -4,6 +4,8 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/TensorIterator.h>
 
+#include <algorithm>
+
 namespace at::native {
 namespace {
 #ifndef STRIP_ERROR_MESSAGES
@@ -32,6 +34,20 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
     return std::make_tuple(false, Tensor());
   }
   return at::indexing::impl::canDispatchToMaskedFill(self, indices);
+}
+
+inline void checkAtLeastOneIndexTensor(IOptTensorListRef indices) {
+  if (indices.empty()) {
+    return;
+  }
+  TORCH_CHECK_INDEX(
+      std::any_of(
+          indices.begin(),
+          indices.end(),
+          [](const OptionalTensorRef& index) {
+            return index.has_value() && index->defined();
+          }),
+      "at least one index tensor must be provided");
 }
 
 inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
