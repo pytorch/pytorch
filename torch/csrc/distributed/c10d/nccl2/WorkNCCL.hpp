@@ -6,10 +6,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <shared_mutex>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -25,6 +27,13 @@
 namespace c10d::nccl2 {
 
 class ProcessGroupNCCL;
+
+// Shared by all Work instances owned by a communicator generation. Reconfigure
+// uses this mutex to establish a precise cutoff for successful Work completion.
+struct WorkGenerationState {
+  std::mutex mutex;
+  bool invalidated{false};
+};
 
 // Kept separate from ProcessGroupNCCL so a Work can safely drop its events
 // after the process group is destroyed without extending the group's lifetime.
@@ -117,6 +126,7 @@ class WorkNCCL : public c10d::Work {
   friend class ProcessGroupNCCL;
   friend class WorkNCCLQueue;
   friend class WindowNCCL;
+  friend class NCCL2ReconfigureContractTestAccess;
 
  private:
   struct Events;
@@ -136,7 +146,9 @@ class WorkNCCL : public c10d::Work {
 
     WorkStatus status() const;
     std::exception_ptr exception() const;
-    bool setTerminalStatus(WorkStatus status);
+    bool setTerminalStatus(
+        WorkStatus status,
+        std::exception_ptr exception = nullptr);
     WorkStatus checkStatus(
         std::optional<std::chrono::milliseconds> timeout = std::nullopt);
     void notifyCompletion();
@@ -160,6 +172,7 @@ class WorkNCCL : public c10d::Work {
     std::atomic<WorkStatus> workStatus{WorkStatus::NOT_STARTED};
     std::exception_ptr workException;
     c10::intrusive_ptr<c10::ivalue::Future> futureWorkResult;
+    std::shared_ptr<WorkGenerationState> generationState;
     bool hostBlocking{false};
   };
   struct TrackedWork {
@@ -176,6 +189,9 @@ class WorkNCCL : public c10d::Work {
   void synchronizeInternal();
 
   std::shared_ptr<State> state_;
+  // Retained from createWork() until enqueueWork() has recorded this operation
+  // in the generation queue.
+  std::shared_lock<std::shared_mutex> submissionLock_;
   std::shared_ptr<InputTensorShelf> inputTensors_;
   std::vector<at::Tensor> outputs_;
   std::optional<at::RecordFunction> recordFunction_;
@@ -190,6 +206,12 @@ class WorkNCCLQueue {
   WorkNCCL::WorkStatus garbageCollect();
   // Finalize function can only be called from the main thread
   WorkNCCL::WorkStatus finalize();
+  // Terminalize pending works belonging to a generation being revoked. Input
+  // tensor shelves remain in the queue until finalize() runs after the old
+  // communicator has been quiesced.
+  void failPendingGeneration(
+      int64_t reconfigure_uuid,
+      std::exception_ptr exception = nullptr);
   void enqueueWork(
       const c10::intrusive_ptr<WorkNCCL>& work,
       cudaStream_t stream);

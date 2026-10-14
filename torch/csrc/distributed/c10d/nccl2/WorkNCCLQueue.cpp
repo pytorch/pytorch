@@ -4,6 +4,8 @@
 
 #include <torch/csrc/distributed/c10d/nccl2/WorkNCCL.hpp>
 
+#include <c10/util/Exception.h>
+
 namespace c10d::nccl2 {
 
 WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
@@ -111,6 +113,38 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
     completedInputTensors.pop();
   }
   return status;
+}
+
+void WorkNCCLQueue::failPendingGeneration(
+    int64_t reconfigure_uuid,
+    std::exception_ptr exception) {
+  std::vector<std::shared_ptr<WorkNCCL::State>> pending;
+  {
+    std::lock_guard<std::mutex> lock(work_queues_mutex_);
+    for (const auto& [stream, queued_works] : stream_work_queues_) {
+      (void)stream;
+      auto work_queue = queued_works;
+      while (!work_queue.empty()) {
+        const auto& state = work_queue.front().state;
+        if (state->reconfigureUuid == reconfigure_uuid) {
+          pending.push_back(state);
+        }
+        work_queue.pop();
+      }
+    }
+  }
+
+  // Completing a Future may synchronously run user callbacks. Keep that work
+  // outside work_queues_mutex_ so callbacks cannot deadlock queue operations.
+  if (!exception) {
+    exception = std::make_exception_ptr(C10_BUILD_ERROR(
+        DistBackendError,
+        "NCCL operation was cancelled because its communicator is being "
+        "reconfigured"));
+  }
+  for (const auto& state : pending) {
+    state->setTerminalStatus(WorkNCCL::WorkStatus::ERROR, exception);
+  }
 }
 
 void WorkNCCLQueue::enqueueWork(
