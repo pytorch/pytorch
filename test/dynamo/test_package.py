@@ -69,6 +69,12 @@ def compiled_region_with_backend_id_for_package_test():
     return __compiled_fn_0_00000000_0000_0000_0000_000000000000()  # noqa: F821
 
 
+def _graph_breaking_child(x):
+    y = x.sin()
+    torch._dynamo.graph_break()
+    return y.cos()
+
+
 _TENSOR_FREE_RESUME_STATE = {"value": 1}
 # Called through an alias so the continuation below names no torch module and
 # has_tensor_in_frame treats it as tensor-free.
@@ -1166,39 +1172,59 @@ def add(x, y):
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
 
-    @torch._dynamo.config.patch(caching_precompile=True)
+    @torch._dynamo.config.patch(caching_precompile=True, nested_graph_breaks=False)
     def test_warm_load_that_fails_to_install_recompiles(self):
+        # The graph break inside the child makes it a frame of its own, which
+        # the package records by code_source and install() loads onto the live
+        # _graph_breaking_child.__code__ rather than a deserialized copy.
         def fn(x):
-            y = x.sin()
-            torch._dynamo.graph_break()
+            y = _graph_breaking_child(x)
             return x.cos() + y
 
         x = torch.randn(3)
         torch.compile(fn)(x)  # noqa: UNSPECIFIED_BACKEND
-        self._save_and_reload(expected_backends=2, expected_dynamo=1)
+        self._save_and_reload(expected_backends=3, expected_dynamo=1)
 
         load = DynamoCache.load
+        child = _graph_breaking_child.__code__
 
-        def load_without_resume_backend(fn):
-            # install() places fn's own entry before it reaches the resume
-            # frame whose backend is gone, so it fails part way through.
+        def load_without_last_backend(fn):
+            # install() places the entries of fn and the child before it
+            # reaches fn's resume frame, whose backend is gone, so it fails
+            # part way through.
             result = load(fn)
-            del result.backends[result.dynamo.codes[-1].backend_ids[0]]
+            *earlier, last = result.dynamo.codes
+            self.assertTrue(any(c.code_source for c in earlier))
+            del result.backends[last.backend_ids[0]]
             return result
 
         with (
-            patch.object(DynamoCache, "load", load_without_resume_backend),
+            patch.object(DynamoCache, "load", load_without_last_backend),
             self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs,
         ):
             compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         self.assertIn("is not found in the given backends", "\n".join(logs.output))
-        self.assertEqual(compiled_fn(x), fn(x))
-        # The entry install() placed on fn before failing is gone, so fn was
-        # recompiled rather than run through half a loaded package, and the
-        # package now records that recompile alone.
+        # The entries install() placed before failing are gone, so both frames
+        # recompile rather than run through half a loaded package.
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        self.assertEqual(len(_debug_get_precompile_entries(child)), 0)
+        self.assertEqual(compiled_fn(x), fn(x))
+        # The package now records that recompile alone.
         (entry,) = PrecompileContext._dynamo_cache_entries.values()
-        self.assertEqual([len(c.guarded_codes) for c in entry.codes], [1, 1])
+        self.assertEqual([len(c.guarded_codes) for c in entry.codes], [1] * 4)
+
+    def test_reset_forgets_the_source_id(self):
+        def f(x):
+            return x.sin()
+
+        def g(x):
+            return x.cos()
+
+        package = CompilePackage(f)
+        self.assertEqual(package.source_id, CompilePackage.source_id_from_fn(f))
+        package.reset()
+        package.initialize(g, None)
+        self.assertEqual(package.source_id, CompilePackage.source_id_from_fn(g))
 
     def _tensor_free_resume_entry(self, package):
         (entry,) = (
@@ -1273,6 +1299,16 @@ def add(x, y):
             for value in (1, 2):
                 _TENSOR_FREE_RESUME_STATE["value"] = value
                 self.assertEqual(compiled(x), fn(x))
+
+    def test_reset_keeps_a_package_implicit(self):
+        # The caching_precompile warm-load fallback reset()s the implicit
+        # package and re-initializes it; it must stay implicit, or the
+        # tensor-free resume exemption reaches plain torch.compile users.
+        package = CompilePackage(_tensor_free_resume_fn, explicit=False)
+        package.reset()
+        self.assertFalse(package.explicit)
+        package.initialize(_tensor_free_resume_fn, None)
+        self.assertFalse(package.explicit)
 
     # Nested graph breaks would resume inside a tensor-bearing parent frame.
     @torch._dynamo.config.patch(nested_graph_breaks=False)
