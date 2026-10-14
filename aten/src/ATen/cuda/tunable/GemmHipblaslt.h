@@ -585,12 +585,14 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         }
       }
 
+# if ROCM_VERSION >= 100000
       if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
         matmul.setAttribute(
           HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
           at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
             at::globalContext()._SMCarveout_EXPERIMENTAL().value());
       }
+#endif
 
       size_t workspace_size = at::cuda::getCUDABlasLtWorkspaceSize();
 
