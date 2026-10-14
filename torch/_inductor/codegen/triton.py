@@ -5308,19 +5308,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
     def _record_negative_offset(self, name: str, index: sympy.Expr) -> None:
-        if (
-            torch.version.hip is None
-            or self.negative_offset_found
-            or name not in V.graph.inputs_with_negative_as_strided_offset
-        ):
+        if torch.version.hip is None or self.negative_offset_found:
+            return
+        # A store into a mutated input names the mutation buffer, not the input.
+        if V.graph.scheduler:
+            name = V.graph.scheduler.mutation_real_name.get(name, name)
+        if name not in V.graph.inputs_with_negative_as_strided_offset:
             return
 
-        index = sympy.expand(index)
+        index = sympy.expand(index, identity=True)
         if not index.free_symbols:
             self.negative_offset_found = index < 0
             return
 
-        index = sympy.expand(V.graph.sizevars.remove_precomputed_replacements(index))
+        index = sympy.expand(
+            V.graph.sizevars.remove_precomputed_replacements(index), identity=True
+        )
         if not index.free_symbols:
             self.negative_offset_found = index < 0
             return
@@ -5337,7 +5340,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 size_upper = bound_sympy(Max(size - 1, 0), shape_ranges).upper
                 var_ranges[var] = ValueRanges(0, size_upper)
             self.negative_offset_found = bound_sympy(index, var_ranges).lower < 0
-        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        except Exception:
             # A negative term with unknown bounds cannot safely use unsigned offsets.
             self.negative_offset_found = True
 

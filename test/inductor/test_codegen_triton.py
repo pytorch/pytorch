@@ -7,7 +7,7 @@ import unittest
 from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import sympy
 
@@ -61,7 +61,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU_AND_TRITON,
     TRITON_HAS_CPU,
 )
-from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
+from torch.utils._sympy.functions import FloorDiv, Identity, TruncToFloat, TruncToInt
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
@@ -1522,9 +1522,15 @@ def helper(x):
         code_str = " ".join(code)
         self.assertIn("tt.pointer_range", code_str)
 
+    def _pointwise_kernel(self, numel=12):
+        with self._graph.set_current_device(torch.device("cpu")):
+            return TritonKernel(
+                {"x": sympy.Integer(numel)},
+                features=SIMDKernelFeatures([], sympy.Integer(numel)),
+            )
+
     def test_record_negative_offset_non_hip(self):
-        kernel = TritonKernel.__new__(TritonKernel)
-        kernel.negative_offset_found = False
+        kernel = self._pointwise_kernel()
         with (
             patch.object(torch.version, "hip", None),
             patch.object(
@@ -1535,11 +1541,8 @@ def helper(x):
         self.assertFalse(kernel.negative_offset_found)
 
     @parametrize("rebased", [False, True])
-    @parametrize("masked", [False, True])
-    def test_record_negative_offset_rebase(self, rebased, masked):
-        kernel = TritonKernel.__new__(TritonKernel)
-        kernel.negative_offset_found = False
-        kernel._load_mask = "mask" if masked else None
+    def test_record_negative_offset_rebase(self, rebased):
+        kernel = self._pointwise_kernel()
         if rebased:
             self._graph.inputs_with_negative_as_strided_offset.add("arg0")
         with patch.object(torch.version, "hip", "test"):
@@ -1548,21 +1551,37 @@ def helper(x):
 
     @parametrize("precomputed", [False, True])
     def test_record_negative_offset_symbolic_rebase(self, precomputed):
-        kernel = TritonKernel.__new__(TritonKernel)
-        kernel.negative_offset_found = False
-        x = make_symbol(SymT.INDEX, 0)
+        kernel = self._pointwise_kernel()
         size = make_symbol(SymT.SIZE, 0)
-        kernel.var_ranges = lambda: {x: sympy.Integer(12)}
         self._graph.sizevars.shape_env.var_to_range[size] = ValueRanges(6, 12)
         self._graph.inputs_with_negative_as_strided_offset.add("arg0")
         offset = size + 1
         if precomputed:
             offset = self._graph.sizevars.lookup_precomputed_size(offset)
-        with patch.object(torch.version, "hip", "test"):
+        with kernel, patch.object(torch.version, "hip", "test"):
+            x = kernel.range_trees[0].full_range().symbol()
             kernel._record_negative_offset("arg0", x + offset)
             self.assertFalse(kernel.negative_offset_found)
             kernel._record_negative_offset("arg0", x - offset)
             self.assertTrue(kernel.negative_offset_found)
+
+    def test_record_negative_offset_constant_identity(self):
+        kernel = self._pointwise_kernel()
+        self._graph.inputs_with_negative_as_strided_offset.add("arg0")
+        with patch.object(torch.version, "hip", "test"):
+            kernel._record_negative_offset("arg0", Identity(sympy.Integer(-6)) + 1)
+        self.assertTrue(kernel.negative_offset_found)
+
+    def test_record_negative_offset_store_to_mutated_input(self):
+        kernel = self._pointwise_kernel()
+        self._graph.inputs_with_negative_as_strided_offset.add("arg0")
+        scheduler = MagicMock(mutation_real_name={"buf0": "arg0"})
+        with (
+            patch.object(self._graph, "scheduler", scheduler),
+            patch.object(torch.version, "hip", "test"),
+        ):
+            kernel._record_negative_offset("buf0", sympy.Integer(-6))
+        self.assertTrue(kernel.negative_offset_found)
 
     @parametrize("hip", [None, "test"])
     @parametrize("offset", [0, 6, 7])
@@ -1616,6 +1635,30 @@ def helper(x):
             " ".join(code).count("tt.pointer_range"),
             0 if case in ("as_strided", "masked_as_strided") else 2,
         )
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch("triton.emit_pointer_range_32", True)
+    @parametrize("op", ["fill", "copy"])
+    def test_pointer_range_negative_rebase_store(self, op):
+        self._skip_unless_annotation_is_literal()
+
+        def fn(x, y):
+            view = x.as_strided((12,), (1,), 0)
+            if op == "fill":
+                view.fill_(3.0)
+            else:
+                view.copy_(y)
+
+        # The kernel only stores through the rebased view; the whole storage,
+        # including the six elements before ``x``, must be written.
+        y = torch.arange(100, 112, device=GPU_TYPE, dtype=torch.float32)
+        expected = torch.arange(12, device=GPU_TYPE, dtype=torch.float32)
+        fn(expected[6:], y)
+        actual = torch.arange(12, device=GPU_TYPE, dtype=torch.float32)
+        _, code = run_and_get_code(torch.compile(fn, fullgraph=True), actual[6:], y)
+        self.assertEqual(actual, expected)
+        self.assertEqual(" ".join(code).count("tt.pointer_range"), 0)
 
     def _skip_unless_annotation_is_literal(self):
         """Only the V4 descriptor puts ``tt.pointer_range`` in the generated code.
