@@ -5921,6 +5921,49 @@ class TestPrecompileRuntimeCache(TestCase):
             with pc.capture_runtime():
                 self.fail("capture_runtime started under no_compilation")
 
+    def test_capture_runtime_rejects_a_make_fx_capture(self):
+        from torch.compiler._no_compile import is_compilation_forbidden
+
+        pc = torch.compiler.precompile
+        with pc.capture_runtime():
+            with self.assertRaisesRegex(PrecompileError, "only DynamoTracer"):
+                _capture_files(
+                    self,
+                    _no_compilation_single_graph,
+                    [(torch.ones(4),)],
+                    backend="eager",
+                    tracer=MakeFxTracer(),
+                )
+            _capture_files(
+                self, _no_compilation_single_graph, [(torch.ones(4),)], "eager"
+            )
+            self.assertTrue(is_compilation_forbidden())
+
+    @parametrize("explicit", (False, True))
+    def test_only_a_sealing_write_shuts_down_compile_workers(self, explicit):
+        from torch._inductor.async_compile import AsyncCompile
+
+        pc = torch.compiler.precompile
+        shutdowns = []
+        drain = mock.patch.object(
+            AsyncCompile,
+            "drain_pending",
+            side_effect=lambda **kw: shutdowns.append(kw["shutdown"]),
+        )
+        scope = pc.capture_runtime() if explicit else contextlib.nullcontext()
+        with tempfile.TemporaryDirectory() as directory, drain, scope:
+            with pc.capture(
+                _no_compilation_single_graph,
+                artifact_path=os.path.join(directory, "m.py"),
+                cache_path=os.path.join(directory, "m.cache"),
+                tracer=DynamoTracer(require_no_risky_drops=False),
+                backend="eager",
+            ) as cap:
+                cap(torch.ones(4))
+                cap.save()
+                cap(torch.ones(2, 3))  # leaves the final write something to add
+        self.assertEqual(shutdowns, [False, explicit])
+
     def test_capture_runtime_inherited_across_fork_does_not_block_the_child(self):
         from torch.compiler import _runtime_cache
         from torch.compiler._no_compile import is_compilation_forbidden
@@ -6499,13 +6542,24 @@ class TestPrecompileRuntimeCache(TestCase):
         unlaunched.launchers = []
         unlaunched._cached_launcher = None
         eligible = _static_runtime_kernel(64)
+        unpicklable = _static_runtime_kernel(128)
+        freeze = _runtime_cache._freeze_triton_kernel
+
+        def freeze_or_fail(key, instances):
+            if key == "unpicklable":
+                raise pickle.PicklingError("incomplete dependency")
+            return freeze(key, instances)
 
         def record():
             _runtime_cache.record_triton_kernel("unlaunched", unlaunched)
             _runtime_cache.record_triton_kernel("eligible", eligible)
+            _runtime_cache.record_triton_kernel("unpicklable", unpicklable)
 
         with (
             mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"),
+            mock.patch.object(
+                _runtime_cache, "_freeze_triton_kernel", side_effect=freeze_or_fail
+            ),
             self.assertLogs(_runtime_cache.log, "WARNING") as logs,
         ):
             _, cache = _capture_files(
@@ -6515,7 +6569,8 @@ class TestPrecompileRuntimeCache(TestCase):
                 backend="eager",
                 then=record,
             )
-        self.assertIn("left 1 Triton kernel source(s) out", logs.output[0])
+        self.assertIn("left 2 Triton kernel source(s) out", logs.output[0])
+        self.assertIn("incomplete dependency", logs.output[0])
         with open(cache, "rb") as f:
             blob = torch.load(io.BytesIO(f.read()), weights_only=True)
         artifacts = torch.compiler._cache.CacheArtifactManager.deserialize(
