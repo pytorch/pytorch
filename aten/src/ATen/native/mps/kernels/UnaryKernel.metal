@@ -117,8 +117,7 @@ struct abs_functor {
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
-    const auto abs_2 = ::precise::abs(float2(x));
-    return T(c10::metal::hypot(abs_2.x, abs_2.y));
+    return T(c10::metal::hypot(x.x, x.y));
   }
 };
 
@@ -341,7 +340,7 @@ struct log_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // log(x+yi) = ln(sqrt(x^2 + y^2)) + iarctan(y/x)
-    auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
+    auto magnitude = c10::metal::hypot(x.x, x.y);
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
     return T(real, imag);
@@ -363,7 +362,7 @@ struct log10_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // Base 10 complex log = ln(x+yi)/ln(10)
-    auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
+    auto magnitude = c10::metal::hypot(x.x, x.y);
     auto real = ::precise::log10(magnitude);
     auto imag =
         (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG10E_F;
@@ -386,7 +385,7 @@ struct log1p_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // TODO: Implement proper log1p algorithm
-    auto magnitude = ::precise::sqrt((1.0f + x.x) * (1.0f + x.x) + x.y * x.y);
+    auto magnitude = c10::metal::hypot(1.0f + x.x, x.y);
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == -1 && x.y == 0) ? 0 : ::precise::atan2(x.y, 1.0 + x.x);
     return T(real, imag);
@@ -408,7 +407,7 @@ struct log2_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // Base 2 complex log = ln(x+yi)/ln(2)
-    auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
+    auto magnitude = c10::metal::hypot(x.x, x.y);
     auto real = ::precise::log2(magnitude);
     auto imag =
         (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG2E_F;
