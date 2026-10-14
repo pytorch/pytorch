@@ -1013,27 +1013,23 @@ class FSDPParam:
             )
         if self.post_forward_mesh_info is None:
             raise AssertionError("Expected post_forward_mesh_info to not be None")
-        shard_dim = self.fsdp_placement.dim
+        shard_dim, orig_size = self.fsdp_placement.dim, self._orig_size
         world_size = self.post_forward_mesh_info.shard_mesh_size
-        if (
-            shard_dim > 0
-            and self._orig_size.numel()
-            and self._orig_size[0] % world_size
-        ):
+        if shard_dim > 0 and orig_size.numel() and orig_size[0] % world_size:
             # Flat post-forward shards of unpadded Shard(i>0) parameters match dim-0
             # chunks only if the world size divides dim 0
             raise NotImplementedError(
                 f"Resharding the Shard({shard_dim}) parameter {self._display_name} to "
                 f"{world_size} ranks after forward requires dim 0 of its size "
-                f"{tuple(self._orig_size)} to be divisible by {world_size}"
+                f"{tuple(orig_size)} to be divisible by {world_size}"
             )
         if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
             # The post-forward parameter views a chunk of the extension's output. The
             # largest post-forward shard is the same bound on every rank, so all
             # ranks raise together.
             output = self.all_gather_outputs[0]
-            rows = -(-self._orig_size[0] // world_size)
-            shard_numel = rows * math.prod(self._orig_size[1:])
+            rows = -(-orig_size[0] // world_size)
+            shard_numel = rows * math.prod(orig_size[1:])
             if output.numel() // world_size < shard_numel:
                 raise NotImplementedError(
                     f"Resharding {self._display_name} to smaller mesh needs "
@@ -1549,9 +1545,7 @@ def _record_dim(dim: Any) -> int | None:
 
 
 def _get_all_gather_output_layout(
-    input_size: torch.Size,
-    dim: int,
-    world_size: int,
+    input_size: torch.Size, dim: int, world_size: int
 ) -> _AllGatherOutputLayout:
     input_size = torch.Size(input_size or (1,))
     dim %= len(input_size)
@@ -1583,7 +1577,7 @@ def _get_all_gather_output_layouts(
         )
     # The copy-out reassembles the rows of Tensor inputs along a nonzero shard
     # dim, reading them as the padded sharded parameter's rows. A single rank
-    # copies them flat, so their shape only matters there for shrinking.
+    # copies them flat, so there the parameter's rows only forbid shrinking.
     leading_dims = padded_sharded_size[:shard_dim]
     shard_outer_size = math.prod(leading_dims)
     reassembled = shard_world_size > 1 and shard_outer_size > 1
@@ -1593,6 +1587,12 @@ def _get_all_gather_output_layouts(
         tensor = inp.tensor if is_record else inp
         size = tensor.size()
         output = all_gather_outputs[i] if all_gather_outputs else None
+        # Bytes of a typed output keep its size and are reassembled in its layout
+        byte_view = (
+            not is_record
+            and output is not None
+            and tensor.dtype == torch.uint8 != output.dtype
+        )
         if is_record:
             ndim = max(len(size), 1)
             dim = _record_dim(inp.dim)
@@ -1611,16 +1611,10 @@ def _get_all_gather_output_layouts(
                     f"inputs must have the padded sharded size "
                     f"{tuple(padded_sharded_size)}, but input {i} has size {tuple(size)}"
                 )
-            # Bytes of a typed output are reassembled in the output's layout
-            typed_bytes = (
-                output is not None
-                and tensor.dtype == torch.uint8
-                and output.dtype != torch.uint8
-            )
             if (
                 reassembled
                 and size.numel()
-                and not typed_bytes
+                and not byte_view
                 and size.numel() != padded_sharded_size.numel()
                 and size[:shard_dim] != leading_dims
             ):
@@ -1642,15 +1636,14 @@ def _get_all_gather_output_layouts(
         layouts.append(layout)
         if output is None:
             continue
-        # Tensor inputs may become byte views of their outputs, and shrink unless
-        # they have rows or a zero trailing dim fixes their output size
-        byte_view = not is_record and tensor.dtype == torch.uint8
         if tensor.dtype != output.dtype and not byte_view:
             raise ValueError(
                 f"All-gather input {i} of {param_name} must keep the dtype "
                 f"{output.dtype} of its first call, but has dtype {tensor.dtype}"
             )
-        exact = is_record or shard_outer_size > 1 or 0 in size[1:]
+        # Tensor inputs may shrink unless they are byte views, have rows, or have a
+        # zero trailing dim that fixes their output size
+        exact = is_record or byte_view or shard_outer_size > 1 or 0 in size[1:]
         nbytes = tensor.nbytes * shard_world_size
         fits = nbytes == output.nbytes if exact else nbytes <= output.nbytes
         if not fits:
