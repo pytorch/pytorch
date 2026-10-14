@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Activation.h>
@@ -97,6 +98,22 @@ static void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& bet
   TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.dtype()), "softplus_backward not implemented for ", iter.dtype());
   SoftplusParams params{beta.to<float>(), threshold.to<float>()};
   lib.exec_binary_kernel_with_params(iter, "softplus_backward", params, "SoftplusParams");
+}
+
+static void threshold_kernel(TensorIteratorBase& iter, const Scalar& threshold, const Scalar& value) {
+  AT_DISPATCH_ALL_TYPES_AND3(c10::kHalf, c10::kBFloat16, c10::kBool, iter.common_dtype(), "threshold_mps", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    ThresholdParams<scalar_t, opmath_t> params{threshold.to<opmath_t>(), value.to<scalar_t>()};
+    lib.exec_binary_kernel_with_params(
+        iter,
+        "threshold",
+        params,
+        fmt::format("ThresholdParams_{}", mps::scalarToMetalTypeString(iter.common_dtype())));
+  });
+}
+
+static void prelu_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "prelu");
 }
 
 static void silu_kernel(TensorIteratorBase& iter) {
@@ -354,6 +371,8 @@ REGISTER_DISPATCH(softplus_stub, softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, softplus_backward_kernel);
 REGISTER_DISPATCH(leaky_relu_stub, leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, leaky_relu_backward_kernel);
+REGISTER_DISPATCH(threshold_stub, threshold_kernel);
+REGISTER_DISPATCH(prelu_stub, prelu_kernel);
 REGISTER_DISPATCH(silu_stub, silu_kernel);
 REGISTER_DISPATCH(silu_backward_stub, silu_backward_kernel);
 REGISTER_DISPATCH(mish_stub, mish_kernel);

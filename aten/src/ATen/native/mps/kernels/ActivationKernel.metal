@@ -219,6 +219,45 @@ REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, float, float, float);
 REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, half, half, half);
 REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, bfloat, bfloat, bfloat);
 
+// `x <= threshold ? value : other`, so that NaN inputs propagate through
+// `other`. Forward passes (self, self), backward passes (self, grad_output)
+// with value 0.
+struct threshold_functor {
+  template <typename T, typename P>
+  inline T operator()(const T x, const T other, const P params) {
+    using threshold_t = decltype(params.threshold);
+    return static_cast<threshold_t>(x) <= params.threshold ? params.value
+                                                           : other;
+  }
+};
+
+// THRESHOLD_T must match at::opmath_type on the host, which, unlike
+// c10::metal::opmath_t, does not widen small integer types
+#define REGISTER_THRESHOLD_OP(T, THRESHOLD_T)                  \
+  typedef ThresholdParams<T, THRESHOLD_T> ThresholdParams_##T; \
+  REGISTER_BINARY_ALPHA_OP(threshold, T, ThresholdParams_##T, T)
+
+REGISTER_THRESHOLD_OP(float, float);
+REGISTER_THRESHOLD_OP(half, float);
+REGISTER_THRESHOLD_OP(bfloat, float);
+REGISTER_THRESHOLD_OP(long, long);
+REGISTER_THRESHOLD_OP(int, int);
+REGISTER_THRESHOLD_OP(short, short);
+REGISTER_THRESHOLD_OP(char, char);
+REGISTER_THRESHOLD_OP(uchar, uchar);
+REGISTER_THRESHOLD_OP(bool, bool);
+
+struct prelu_functor {
+  template <typename T>
+  inline T operator()(const T x, const T weight) {
+    return float(x) > 0 ? x : static_cast<T>(float(weight) * float(x));
+  }
+};
+
+REGISTER_BINARY_OP(prelu, float, float);
+REGISTER_BINARY_OP(prelu, half, half);
+REGISTER_BINARY_OP(prelu, bfloat, bfloat);
+
 struct silu_functor {
   template <typename T>
   inline T operator()(const T x) {

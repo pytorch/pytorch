@@ -21,3 +21,10 @@ struct SoftplusParams {
   float beta;
   float threshold;
 };
+
+// threshold is compared at host opmath precision (at::opmath_type), as on CPU
+template <typename T, typename ThresholdT>
+struct ThresholdParams {
+  ThresholdT threshold;
+  T value;
+};
