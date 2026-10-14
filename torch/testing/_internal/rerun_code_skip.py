@@ -16,6 +16,10 @@ RERUN_CODE_SKIP_ATTR = "__pt_rerun_code_skip__"
 # Device-instantiation skips (skipMPS and friends). Collection runs the
 # body only when the instantiated class device matches this value.
 RERUN_SKIP_DEVICE_ATTR = "__pt_rerun_skip_device__"
+# functools.wraps copies the stamps above onto every outer wrapper.
+# The value is the id of the function that was actually stamped, so a
+# copy on onlyCUDA or instantiated_test does not look owned.
+RERUN_STAMP_OWNER_ATTR = "__pt_rerun_stamp_owner__"
 
 # Messages that mean "this ROCm/CUDA API is not there", not "this test is
 # a known failure". Checked before the known-bug phrases.
@@ -29,6 +33,14 @@ _UNSUPPORTED_API_MARKERS = (
 )
 
 
+def _own_rerun_stamp(fn):
+    try:
+        setattr(fn, RERUN_STAMP_OWNER_ATTR, id(fn))
+    except (AttributeError, TypeError):
+        return fn
+    return fn
+
+
 def rerun_code_skip(reason):
     """unittest.skip that rerun-disabled-tests will execute."""
 
@@ -38,7 +50,7 @@ def rerun_code_skip(reason):
             setattr(skipped, RERUN_CODE_SKIP_ATTR, True)
         except (AttributeError, TypeError):
             return skipped
-        return skipped
+        return _own_rerun_stamp(skipped)
 
     return decorator
 
@@ -50,7 +62,7 @@ def stamp_rerun_device_skip(fn, device_type: str):
         setattr(fn, RERUN_SKIP_DEVICE_ATTR, device_type)
     except (AttributeError, TypeError):
         return fn
-    return fn
+    return _own_rerun_stamp(fn)
 
 
 def has_rerun_skip_stamp(func, cls=None) -> bool:
