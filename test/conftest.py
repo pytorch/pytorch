@@ -31,9 +31,10 @@ from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestSha
 _UNCONDITIONAL_SKIP_ATTR = "__pt_unconditional_skip__"
 _RERUN_CODE_SKIP_ATTR = "__pt_rerun_code_skip__"
 _RERUN_SKIP_DEVICE_ATTR = "__pt_rerun_skip_device__"
+_RERUN_STAMP_OWNER_ATTR = "__pt_rerun_stamp_owner__"
 
 
-def _load_rerun_code_skip_attrs() -> tuple[str, str, str]:
+def _load_rerun_code_skip_attrs() -> tuple[str, str, str, str]:
     # Prefer the source file so this plugin loads when torch is not built.
     import importlib.util
     from pathlib import Path
@@ -54,20 +55,28 @@ def _load_rerun_code_skip_attrs() -> tuple[str, str, str]:
                 mod.UNCONDITIONAL_SKIP_ATTR,
                 mod.RERUN_CODE_SKIP_ATTR,
                 mod.RERUN_SKIP_DEVICE_ATTR,
+                mod.RERUN_STAMP_OWNER_ATTR,
             )
     from torch.testing._internal.rerun_code_skip import (
         RERUN_CODE_SKIP_ATTR,
         RERUN_SKIP_DEVICE_ATTR,
+        RERUN_STAMP_OWNER_ATTR,
         UNCONDITIONAL_SKIP_ATTR,
     )
 
-    return UNCONDITIONAL_SKIP_ATTR, RERUN_CODE_SKIP_ATTR, RERUN_SKIP_DEVICE_ATTR
+    return (
+        UNCONDITIONAL_SKIP_ATTR,
+        RERUN_CODE_SKIP_ATTR,
+        RERUN_SKIP_DEVICE_ATTR,
+        RERUN_STAMP_OWNER_ATTR,
+    )
 
 
 (
     _UNCONDITIONAL_SKIP_ATTR,
     _RERUN_CODE_SKIP_ATTR,
     _RERUN_SKIP_DEVICE_ATTR,
+    _RERUN_STAMP_OWNER_ATTR,
 ) = _load_rerun_code_skip_attrs()
 
 _ORIG_UNITTEST_SKIP = _unittest_case.skip
@@ -80,6 +89,7 @@ _CONDITIONAL_SKIP_CODES = (
 def _stamp_unconditional_skip(test_item: Any) -> Any:
     try:
         setattr(test_item, _UNCONDITIONAL_SKIP_ATTR, True)
+        setattr(test_item, _RERUN_STAMP_OWNER_ATTR, id(test_item))
     except (AttributeError, TypeError):
         return test_item
     return test_item
@@ -518,9 +528,11 @@ def _code_raises_skiptest(code: Any) -> bool:
 
 def _is_skiptest_wrapper(fn: Any) -> bool:
     # A skip wrapper raises SkipTest and wraps the next function. The body
-    # does neither, so peeling stops there. __unittest_skip__ is not enough:
-    # functools.wraps copies that flag from unittest.skip onto
-    # instantiated_test, which passes device and dtype and does not raise.
+    # does neither. A wrapper that only catches SkipTest and re-raises it
+    # (the @ops test_wrapper) fails _code_raises_skiptest, so it is not one.
+    # __unittest_skip__ is not enough: functools.wraps copies that flag from
+    # unittest.skip onto instantiated_test, which passes device and dtype
+    # and does not raise.
     if fn is None:
         return False
     code = getattr(fn, "__code__", None)
@@ -557,26 +569,10 @@ def _wrapper_skip_reason(fn: Any) -> str:
     return _closure_skip_reason(fn)
 
 
-def _unwrap_skiptest_chain(item: Any, fn: Any) -> Any:
-    seen: set[int] = set()
-    current = fn
-    while (
-        current is not None
-        and id(current) not in seen
-        and _is_skiptest_wrapper(current)
-    ):
-        seen.add(id(current))
-        _remember_code_skip_reason(item, _wrapper_skip_reason(current))
-        wrapped = getattr(current, "__wrapped__", None)
-        if wrapped is None:
-            break
-        current = wrapped
-    return current
-
-
 def _retarget_outer_wrapper(outer: Any, body: Any) -> None:
-    # instantiated_test calls the closed-over test, not __wrapped__.
-    # Point that cell at the body so device and dtype are still passed.
+    # instantiated_test and the @ops test_wrapper call the closed-over
+    # function, not __wrapped__. Point that cell at the next kept function
+    # so device and dtype are still passed.
     previous = getattr(outer, "__wrapped__", None)
     closure = getattr(outer, "__closure__", None)
     if closure and previous is not None:
@@ -593,20 +589,57 @@ def _retarget_outer_wrapper(outer: Any, body: Any) -> None:
         return
 
 
+def _wrapper_chain(fn: Any) -> list[Any]:
+    chain: list[Any] = []
+    seen: set[int] = set()
+    current = fn
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(current)
+        nxt = getattr(current, "__wrapped__", None)
+        if nxt is None:
+            break
+        current = nxt
+    return chain
+
+
+def _owns_rerun_stamp(fn: Any) -> bool:
+    # True on the wrapper rerun_code_skip or stamp_rerun_device_skip marked.
+    # functools.wraps copies the stamp bits, but the owner id stays the
+    # inner function's id, so onlyCUDA and instantiated_test do not match.
+    return getattr(fn, _RERUN_STAMP_OWNER_ATTR, None) == id(fn)
+
+
+def _is_removable_code_skip(item: Any, fn: Any) -> bool:
+    if not _is_skiptest_wrapper(fn) or not _owns_rerun_stamp(fn):
+        return False
+    # A device stamp runs only on that device. Another device's stamp stays.
+    return _device_allows_rerun(item, fn)
+
+
 def _peel_rerun_skip_wrappers(item: Any, fn: Any) -> Any:
-    # instantiated_test does not raise SkipTest. It calls the device skip
-    # as test(self, **param_kwargs) and restores numeric tolerance. Remove
-    # only that inner skip and leave the outer wrapper in place. A skip
-    # with no outer instantiate wrapper still peels down to the body.
-    if fn is not None and not _is_skiptest_wrapper(fn):
-        wrapped = getattr(fn, "__wrapped__", None)
-        if _is_skiptest_wrapper(wrapped):
-            body = _unwrap_skiptest_chain(item, wrapped)
-            if body is not wrapped:
-                _retarget_outer_wrapper(fn, body)
-            return fn
+    # Walk the whole __wrapped__ chain, however long it is. Keep
+    # instantiated_test and any wrapper that only catches SkipTest and
+    # re-raises it. Drop every owned code-skip wrapper. Leave unstamped
+    # capability skips (onlyCUDA, skipIf, skipUnless) where they sit.
+    if fn is None:
         return fn
-    return _unwrap_skiptest_chain(item, fn)
+    keep: list[Any] = []
+    for node in _wrapper_chain(fn):
+        if _is_removable_code_skip(item, node):
+            _remember_code_skip_reason(item, _wrapper_skip_reason(node))
+            continue
+        keep.append(node)
+    if not keep:
+        return fn
+    for idx, node in enumerate(keep):
+        if idx + 1 >= len(keep):
+            break
+        nxt = keep[idx + 1]
+        if getattr(node, "__wrapped__", None) in (None, nxt):
+            continue
+        _retarget_outer_wrapper(node, nxt)
+    return keep[0]
 
 
 def _pytest_skip_reason(markers: list[Any]) -> str:

@@ -683,6 +683,274 @@ class TestRerunDisabledCodeSkip(TestCase):
         self.assertEqual(proc.returncode, 0, msg=output)
         self.assertEqual("COPIED_FLAG_OK" in proc.stdout, True, msg=output)
 
+    def test_peel_walks_any_number_of_reraise_wrappers(self) -> None:
+        # The stamped skip sits under instantiated_test and three
+        # catch-and-reraise wrappers. A walk that stops at depth 3 never
+        # reaches it, so the body would still raise SkipTest.
+        test_dir = Path(__file__).resolve().parent
+        script = textwrap.dedent(
+            """\
+            import functools
+            import importlib.util
+            import os
+            import sys
+            import unittest
+
+            sys.path.insert(0, os.environ["TEST_DIR"])
+            import conftest
+
+            spec = importlib.util.spec_from_file_location(
+                "rerun_code_skip", os.environ["RERUN_CODE_SKIP_PY"]
+            )
+            helper = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(helper)
+
+            ran = []
+            reason = "skipIfRocm: known bug"
+
+            def body(self, device, dtype):
+                ran.append((device, dtype))
+                self.precision = 0
+
+            def _reraise(fn):
+                @functools.wraps(fn)
+                def test_wrapper(*args, **kwargs):
+                    try:
+                        return fn(*args, **kwargs)
+                    except unittest.SkipTest as exc:
+                        raise exc
+
+                return test_wrapper
+
+            def _outer(test, param_kwargs):
+                @functools.wraps(test)
+                def instantiated_test(self, param_kwargs=param_kwargs):
+                    guard = self.precision
+                    try:
+                        return test(self, **param_kwargs)
+                    finally:
+                        self.precision = guard
+
+                return instantiated_test
+
+            skipped = helper.rerun_code_skip(reason)(body)
+            reraise_c = _reraise(skipped)
+            reraise_b = _reraise(reraise_c)
+            reraise_a = _reraise(reraise_b)
+            param_kwargs = {"device": "mps", "dtype": "float32"}
+            outer = _outer(reraise_a, param_kwargs)
+            if outer.__wrapped__ is not reraise_a:
+                raise SystemExit("outer did not wrap the first re-raise")
+            if reraise_c.__wrapped__ is not skipped or skipped.__wrapped__ is not body:
+                raise SystemExit("expected the skip under three re-raise wrappers")
+            if not getattr(outer, "__unittest_skip__", False):
+                raise SystemExit("wraps did not copy __unittest_skip__ onto the outer")
+
+            class OnDevice:
+                device_type = "mps"
+                test_device = outer
+
+            class Item:
+                def __init__(self, cls):
+                    self.cls = cls
+                    self.name = "test_device"
+                    self.originalname = "test_device"
+                    self.obj = cls.test_device
+
+            item = Item(OnDevice)
+            if not conftest._enable_unconditional_unittest_skip(item):
+                raise SystemExit("stamped skip under re-raise wrappers should rerun")
+            if OnDevice.test_device is not outer:
+                raise SystemExit("instantiate wrapper was replaced")
+            if outer.__wrapped__ is not reraise_a:
+                raise SystemExit("first re-raise wrapper was dropped")
+            if reraise_a.__wrapped__ is not reraise_b:
+                raise SystemExit("second re-raise wrapper was dropped")
+            if reraise_b.__wrapped__ is not reraise_c:
+                raise SystemExit("third re-raise wrapper was dropped")
+            if reraise_c.__wrapped__ is not body:
+                raise SystemExit("stamped skip was still in the chain")
+            if getattr(outer, "__unittest_skip__", False):
+                raise SystemExit("copied unittest.skip flag was not cleared")
+            case = OnDevice()
+            case.precision = 1
+            try:
+                OnDevice.test_device(case)
+            except TypeError as exc:
+                raise SystemExit(f"device was not passed: {exc}") from exc
+            except unittest.SkipTest as exc:
+                raise SystemExit(f"skip wrapper was still called: {exc}") from exc
+            if ran != [("mps", "float32")]:
+                raise SystemExit(f"ran={ran!r}")
+            if case.precision != 1:
+                raise SystemExit(f"precision={case.precision!r}")
+            got_reason = getattr(item, conftest._CODE_SKIP_REASON_ATTR, None)
+            if got_reason != reason:
+                raise SystemExit(f"reason={got_reason!r}")
+            print("DEEP_CHAIN_OK")
+            """
+        )
+        env = os.environ.copy()
+        env["TEST_DIR"] = str(test_dir)
+        env["RERUN_CODE_SKIP_PY"] = str(_HELPER)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=test_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        output = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 0, msg=output)
+        self.assertEqual("DEEP_CHAIN_OK" in proc.stdout, True, msg=output)
+
+    def test_unstamped_capability_skip_stays_beside_code_skips(self) -> None:
+        # onlyCUDA-shaped wrapper: raises SkipTest when this machine cannot
+        # run the test, and functools.wraps copies the inner code-skip stamp.
+        # It sits between two owned code skips, under a re-raise wrapper, so
+        # neither "delete the first skip" nor "delete every SkipTest raiser"
+        # leaves the right chain.
+        test_dir = Path(__file__).resolve().parent
+        script = textwrap.dedent(
+            """\
+            import functools
+            import importlib.util
+            import os
+            import sys
+            import unittest
+
+            sys.path.insert(0, os.environ["TEST_DIR"])
+            import conftest
+
+            spec = importlib.util.spec_from_file_location(
+                "rerun_code_skip", os.environ["RERUN_CODE_SKIP_PY"]
+            )
+            helper = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(helper)
+
+            ran = []
+            reason_a = "skipIfRocm: known bug"
+            reason_b = "skipIfWindows: known bug"
+            cap_reason = "Only runs on cuda"
+
+            def body(self, device, dtype):
+                ran.append((device, dtype))
+                self.precision = 0
+
+            def _reraise(fn):
+                @functools.wraps(fn)
+                def test_wrapper(*args, **kwargs):
+                    try:
+                        return fn(*args, **kwargs)
+                    except unittest.SkipTest as exc:
+                        raise exc
+
+                return test_wrapper
+
+            def _only_cuda(fn):
+                @functools.wraps(fn)
+                def only_fn(self, *args, **kwargs):
+                    if not getattr(self, "machine_can_run", False):
+                        raise unittest.SkipTest(cap_reason)
+                    return fn(self, *args, **kwargs)
+
+                return only_fn
+
+            def _outer(test, param_kwargs):
+                @functools.wraps(test)
+                def instantiated_test(self, param_kwargs=param_kwargs):
+                    guard = self.precision
+                    try:
+                        return test(self, **param_kwargs)
+                    finally:
+                        self.precision = guard
+
+                return instantiated_test
+
+            skip_b = helper.rerun_code_skip(reason_b)(body)
+            capability = _only_cuda(skip_b)
+            if not getattr(capability, "__pt_rerun_code_skip__", False):
+                raise SystemExit("wraps did not copy the inner code-skip stamp")
+            skip_a = helper.rerun_code_skip(reason_a)(capability)
+            reraise = _reraise(skip_a)
+            param_kwargs = {"device": "mps", "dtype": "float32"}
+            outer = _outer(reraise, param_kwargs)
+
+            class OnDevice:
+                device_type = "mps"
+                test_device = outer
+
+            class Item:
+                def __init__(self, cls):
+                    self.cls = cls
+                    self.name = "test_device"
+                    self.originalname = "test_device"
+                    self.obj = cls.test_device
+
+            item = Item(OnDevice)
+            if not conftest._enable_unconditional_unittest_skip(item):
+                raise SystemExit("stamped skips should rerun")
+            if OnDevice.test_device is not outer:
+                raise SystemExit("instantiate wrapper was replaced")
+            if outer.__wrapped__ is not reraise:
+                raise SystemExit("re-raise wrapper was dropped")
+            if reraise.__wrapped__ is not capability:
+                raise SystemExit("capability skip was removed")
+            if capability.__wrapped__ is not body:
+                raise SystemExit(f"inner chain={capability.__wrapped__!r}")
+            if getattr(outer, "__unittest_skip__", False):
+                raise SystemExit("copied unittest.skip flag was not cleared")
+
+            blocked = OnDevice()
+            blocked.precision = 1
+            blocked.machine_can_run = False
+            try:
+                OnDevice.test_device(blocked)
+            except unittest.SkipTest as exc:
+                if str(exc) != cap_reason:
+                    raise SystemExit(f"capability reason lost: {exc}") from exc
+            else:
+                raise SystemExit("capability skip did not raise")
+            if ran:
+                raise SystemExit(f"body ran despite capability skip: {ran!r}")
+            if blocked.precision != 1:
+                raise SystemExit(f"precision={blocked.precision!r}")
+
+            case = OnDevice()
+            case.precision = 1
+            case.machine_can_run = True
+            try:
+                OnDevice.test_device(case)
+            except TypeError as exc:
+                raise SystemExit(f"device was not passed: {exc}") from exc
+            except unittest.SkipTest as exc:
+                raise SystemExit(f"stamped skip was still called: {exc}") from exc
+            if ran != [("mps", "float32")]:
+                raise SystemExit(f"ran={ran!r}")
+            if case.precision != 1:
+                raise SystemExit(f"precision={case.precision!r}")
+            got_reason = getattr(item, conftest._CODE_SKIP_REASON_ATTR, None) or ""
+            if reason_a not in got_reason or reason_b not in got_reason:
+                raise SystemExit(f"reason={got_reason!r}")
+            print("CAPABILITY_OK")
+            """
+        )
+        env = os.environ.copy()
+        env["TEST_DIR"] = str(test_dir)
+        env["RERUN_CODE_SKIP_PY"] = str(_HELPER)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=test_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        output = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 0, msg=output)
+        self.assertEqual("CAPABILITY_OK" in proc.stdout, True, msg=output)
+
     def test_process_report_records_code_skip_reason(self) -> None:
         sys.path.insert(0, str(_REPO))
         from tools.stats.check_disabled_tests import process_report
