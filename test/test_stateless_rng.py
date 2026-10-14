@@ -5,6 +5,7 @@ import contextlib
 import torch
 import torch.func._random as random
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.autograd import gradcheck, gradgradcheck
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -634,10 +635,11 @@ class TestStatelessRNGDistribution(TestCase):
             self.assertEqual(gen(low=low, high=high), expected, atol=0, rtol=0)
 
     @parametrize("keys", ["single", "batched"])
+    @parametrize("cols", [subtest(36, name="aligned"), subtest(37, name="unaligned")])
     @dtypes(*all_floating_dtypes)
-    def test_uniform_tensor_bounds_rows_vary(self, device, dtype, keys):
+    def test_uniform_tensor_bounds_rows_vary(self, device, dtype, keys, cols):
         low_vals, high_vals = [-1000.0, -3.0, 2.5], [0.001, 5.5, 2.5000001]
-        shape = (3, 37)
+        shape = (3, cols)
         key = random.key(42, device=device)
         if keys == "batched":
             key = random.split(key, 3).unsqueeze(-2)
@@ -696,12 +698,21 @@ class TestStatelessRNGDistribution(TestCase):
 
     def test_uniform_tensor_bounds_grad(self, device):
         key = random.key(42, device=device)
-        low = torch.zeros(5, device=device, requires_grad=True)
-        high = torch.full((5,), 2.0, device=device, requires_grad=True)
-        random.uniform(key, (5,), low=low, high=high).sum().backward()
-        u = random.uniform(key, (5,))
-        self.assertEqual(low.grad, 1 - u)
-        self.assertEqual(high.grad, u)
+        low = torch.zeros(8, 1, device=device, requires_grad=True)
+        high = torch.full((8, 1), 2.0, device=device, requires_grad=True)
+        grad = torch.randn(8, 33, device=device)
+        random.uniform(key, (8, 33), low=low, high=high).backward(grad)
+        u = random.uniform(key, (8, 33))
+        self.assertEqual(low.grad, (grad * (1 - u)).sum(1, keepdim=True))
+        self.assertEqual(high.grad, (grad * u).sum(1, keepdim=True))
+
+        def f(low, high):
+            return random.uniform(key, (8, 5), low=low, high=high, dtype=torch.float64)
+
+        f64 = {"dtype": torch.float64, "device": device, "requires_grad": True}
+        bounds = (torch.zeros(8, 1, **f64), torch.ones(1, 5, **f64))
+        self.assertTrue(gradcheck(f, bounds))
+        self.assertTrue(gradgradcheck(f, bounds))
 
     @dtypes(*all_floating_dtypes)
     def test_uniform_tensor_bounds_dtype(self, device, dtype):
@@ -730,6 +741,9 @@ class TestStatelessRNGDistribution(TestCase):
                 if torch.device(device).type == "cuda":
                     with self.assertRaisesRegex(RuntimeError, "on the same device"):
                         random.uniform(key, (4, 3), low=torch.zeros(4, 1))
+        out = torch.zeros(4, 3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "refer to a single memory location"):
+            random.uniform_(random.key(42, device=device), out, low=out)
 
     @dtypes(*all_floating_dtypes)
     @parametrize("batched", [False, True])

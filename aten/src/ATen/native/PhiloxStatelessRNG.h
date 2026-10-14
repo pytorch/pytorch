@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/core/Tensor.h>
 #include <cstdint>
 
@@ -29,6 +30,7 @@ inline void philox_check_bound(
   TORCH_CHECK(is_expandable_to(bound.sizes(), self.sizes()),
       op_name, ": ", name, " shape ", bound.sizes(),
       " is not broadcastable to the output shape ", self.sizes());
+  at::assert_no_overlap(self, bound);
 }
 
 } // namespace at::native
