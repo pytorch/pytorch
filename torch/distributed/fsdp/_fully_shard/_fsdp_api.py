@@ -270,13 +270,13 @@ class AllGatherInput:
     The number of inputs, and each record's element count and dtype, must stay
     fixed across calls, and every rank must return the same shapes and dtypes.
     Plain tensors may also become uint8 byte views of their whole outputs, which
-    are passed back in the outputs' dtype, or, with a single row (as for Shard(0)),
-    shrink, leaving unspecified data after the gathered prefix. Extensions own any
-    padding: the local shard is unpadded on ranks with a smaller shard, so per-row
-    payloads such as scales need padding too. When ``fsdp_pre_all_gather`` takes
-    ``outer_size``, FSDP requires every plain tensor of an unevenly sharded
-    parameter to have the padded sharded size, so return payloads of other
-    shapes, such as scales, as records.
+    are passed back in the outputs' dtype, or, with a single row (as for Shard(0))
+    and nonzero trailing dims, shrink, leaving unspecified data after the gathered
+    prefix. Extensions own any padding: the local shard is unpadded on ranks with
+    a smaller shard, so per-row payloads such as scales need padding too. When
+    ``fsdp_pre_all_gather`` takes ``outer_size``, FSDP requires every plain tensor
+    of an unevenly sharded parameter to have the padded sharded size, so return
+    payloads of other shapes, such as scales, as records.
 
     Attributes:
         tensor (Tensor): Local payload, flattened with ``view(-1)``. Scalars count
