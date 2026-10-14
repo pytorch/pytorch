@@ -941,6 +941,29 @@ def get_verbose_code_part(code_part: str, guard: Guard | None) -> str:
     return f"{code_part:<60}{extra}"
 
 
+def _order_stable_repr(value: object) -> str:
+    """repr() with set and dict_keys elements sorted.
+
+    Set iteration order depends on hash seed and insertion history, so two
+    equal sets can repr differently, e.g. across processes. dict_keys compare
+    like sets but repr in insertion order. Guard text should only depend on the
+    guarded value.
+    """
+    if istype(value, dict_keys):
+        return f"dict_keys([{', '.join(sorted(_order_stable_repr(v) for v in value))}])"
+    if istype(value, (set, frozenset)):
+        if not value:
+            return repr(value)
+        body = "{" + ", ".join(sorted(_order_stable_repr(v) for v in value)) + "}"
+        return body if istype(value, set) else f"frozenset({body})"
+    if istype(value, tuple):
+        items = [_order_stable_repr(v) for v in value]
+        return "(" + ", ".join(items) + ("," if len(items) == 1 else "") + ")"
+    if istype(value, list):
+        return "[" + ", ".join(_order_stable_repr(v) for v in value) + "]"
+    return repr(value)
+
+
 def get_verbose_code_parts(
     code_parts: str | list[str],
     guard: Guard | None,
@@ -3069,7 +3092,7 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         # Construct a debug string to put into the c++ equals match guard.
-        code = [f"{ref} == {val!r}"]
+        code = [f"{ref} == {_order_stable_repr(val)}"]
         if istype(val, ok_mutable_types):
             # C++ guards perform a pointer equality check to speedup guards, but the assumption is that the object
             # is immutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
