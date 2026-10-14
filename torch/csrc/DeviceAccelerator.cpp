@@ -244,6 +244,10 @@ void initModule(PyObject* module) {
           torch::wrap_pybind_function_no_gil(
               &::at::accelerator::Graph::debug_dump),
           py::arg("path"));
+
+  m.def("_accelerator_isGraphAvailable", []() {
+    return at::accelerator::isGraphAvailable();
+  });
 }
 
 } // namespace torch::accelerator

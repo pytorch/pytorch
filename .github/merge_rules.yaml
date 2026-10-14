@@ -531,6 +531,7 @@
   - torch/csrc/DeviceAccelerator.*
   - torch/csrc/profiler/standalone/privateuse1_observer.*
   - aten/src/ATen/DeviceAccelerator.*
+  - aten/src/ATen/accelerator/**
   - aten/src/ATen/core/GeneratorForPrivateuseone.*
   - aten/src/ATen/detail/PrivateUse1HooksInterface.*
   - docs/source/accelerator/**

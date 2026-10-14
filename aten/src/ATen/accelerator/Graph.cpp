@@ -13,4 +13,9 @@ Graph::Graph(bool keep_graph) {
   impl_ = create_graph_impl(device_type, args);
 }
 
+bool isGraphAvailable() {
+  auto device_type = at::accelerator::getAccelerator(false);
+  return device_type.has_value() && has_graph_impl(device_type.value());
+}
+
 } // namespace at::accelerator
