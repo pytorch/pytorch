@@ -55,6 +55,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
+    IS_SM10X,
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FP8,
 )
@@ -4792,6 +4793,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    @skipUnless(IS_SM10X, "guards an sm_10x Triton miscompile")
     @common_utils.parametrize("qk_head_dim", [64, 512])
     def test_head_dim_512_default_configs(self, device, qk_head_dim):
         # https://github.com/triton-lang/triton/issues/10309
