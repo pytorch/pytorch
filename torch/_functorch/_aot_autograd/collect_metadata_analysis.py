@@ -202,6 +202,10 @@ def run_functionalized_fw_and_collect_metadata(
 
         prior_grad_enabled = torch.is_grad_enabled()
         prior_autocast_states = _get_autocast_states()
+        prior_autocast_dtypes = {
+            device_type: torch.get_autocast_dtype(device_type)
+            for device_type in torch._C._autocast_supported_devices()
+        }
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(
@@ -219,7 +223,7 @@ def run_functionalized_fw_and_collect_metadata(
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
         # ExcludeDispatchKeyGuard restores autocast TLS when it exits, so the
-        # comparison has to run first. The cache flag is already restored.
+        # comparison has to run before the cache flag is restored.
         with disable_above:
             with mode, suppress_pending, disable_autocast_cache():
                 # precondition: The passed in function already handles unflattening inputs + flattening outputs
@@ -248,13 +252,19 @@ def run_functionalized_fw_and_collect_metadata(
                     fake_mode.epoch += 1
                     fake_mode.reset_nt_tensor_id_counter()
 
-            if prior_autocast_states != _get_autocast_states():
-                raise RuntimeError(
-                    "AOTAutograd does not support tracing graphs that mutate the autocast state. "
-                    "Dynamo will only insert autocast context managers (e.g. with torch.autocast(..)) into the graph, "
-                    "which will unwind all of their mutations to autocast state before the graph exits. "
-                    "If you encounter this error while using torch.compile, please file a bug."
-                )
+                current_autocast_states = _get_autocast_states()
+                if (
+                    current_autocast_states[:-1] != prior_autocast_states[:-1]
+                    or current_autocast_states[-1]
+                ):
+                    for device_type, dtype in prior_autocast_dtypes.items():
+                        torch.set_autocast_dtype(device_type, dtype)
+                    raise RuntimeError(
+                        "AOTAutograd does not support tracing graphs that mutate the autocast state. "
+                        "Dynamo will only insert autocast context managers (e.g. with torch.autocast(..)) into the graph, "
+                        "which will unwind all of their mutations to autocast state before the graph exits. "
+                        "If you encounter this error while using torch.compile, please file a bug."
+                    )
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
