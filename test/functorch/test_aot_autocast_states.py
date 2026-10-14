@@ -7,7 +7,7 @@ from unittest.mock import patch
 import torch
 from torch._functorch._aot_autograd import utils as aot_utils
 from torch._functorch._aot_autograd.utils import _get_autocast_states
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 
 class TestAOTAutocastStates(TestCase):
@@ -258,6 +258,110 @@ class TestAOTAutocastStates(TestCase):
             torch.set_autocast_enabled(extra, prior_enabled)
             torch.set_autocast_dtype(extra, prior_dtype)
 
+    def test_collect_metadata_detects_cpu_autocast_enabled_mutation(self) -> None:
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        prior_enabled = torch.is_autocast_enabled("cpu")
+        prior_dtype = torch.get_autocast_dtype("cpu")
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_enabled("cpu", not prior_enabled)
+            return [x + 1]
+
+        collect = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=False,
+        )
+        fake_mode = FakeTensorMode()
+        x = fake_mode.from_tensor(torch.randn(2))
+        try:
+            with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
+                collect(x)
+            self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
+        finally:
+            torch.set_autocast_enabled("cpu", prior_enabled)
+            torch.set_autocast_dtype("cpu", prior_dtype)
+
+    def test_collect_metadata_detects_cpu_autocast_dtype_mutation(self) -> None:
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        prior_dtype = torch.get_autocast_dtype("cpu")
+        new_dtype = torch.bfloat16 if prior_dtype != torch.bfloat16 else torch.float16
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_dtype("cpu", new_dtype)
+            return [x + 1]
+
+        collect = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=False,
+        )
+        fake_mode = FakeTensorMode()
+        x = fake_mode.from_tensor(torch.randn(2))
+        try:
+            with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
+                collect(x)
+            self.assertEqual(torch.get_autocast_dtype("cpu"), prior_dtype)
+        finally:
+            torch.set_autocast_dtype("cpu", prior_dtype)
+
+    def test_collect_metadata_allows_balanced_cpu_autocast_context(self) -> None:
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            with torch.autocast("cpu"):
+                return [x + 1]
+
+        collect = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=False,
+        )
+        fake_mode = FakeTensorMode()
+        x = fake_mode.from_tensor(torch.randn(2))
+        collect(x)
+
+    @parametrize("cache_enabled", [True, False])
+    def test_collect_metadata_ignores_autocast_cache_enabled(
+        self, cache_enabled: bool
+    ) -> None:
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            return [x + 1]
+
+        collect = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=False,
+        )
+        fake_mode = FakeTensorMode()
+        x = fake_mode.from_tensor(torch.randn(2))
+        prior_cache_enabled = torch.is_autocast_cache_enabled()
+        try:
+            torch.set_autocast_cache_enabled(cache_enabled)
+            collect(x)
+        finally:
+            torch.set_autocast_cache_enabled(prior_cache_enabled)
+
     def test_collect_metadata_restores_autocast_dtype_after_mutation(self) -> None:
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
             run_functionalized_fw_and_collect_metadata,
@@ -291,10 +395,12 @@ class TestAOTAutocastStates(TestCase):
         fake_mode = FakeTensorMode()
         x = fake_mode.from_tensor(torch.randn(2))
 
-        with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
-            collect(x)
-
-        self.assertEqual(torch.get_autocast_dtype(extra), prior_dtype)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
+                collect(x)
+            self.assertEqual(torch.get_autocast_dtype(extra), prior_dtype)
+        finally:
+            torch.set_autocast_dtype(extra, prior_dtype)
 
 
 if __name__ == "__main__":

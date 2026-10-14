@@ -222,8 +222,9 @@ def run_functionalized_fw_and_collect_metadata(
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
-        # ExcludeDispatchKeyGuard restores autocast TLS when it exits, so the
-        # comparison has to run before the dispatch-key guard restores autocast TLS.
+        # ExcludeDispatchKeyGuard restores the excluded dispatch-key set on exit,
+        # which includes the keys tracking autocast enabled state (not dtype), so
+        # the comparison has to run before the guard restores those keys.
         with disable_above:
             with mode, suppress_pending, disable_autocast_cache():
                 # precondition: The passed in function already handles unflattening inputs + flattening outputs
