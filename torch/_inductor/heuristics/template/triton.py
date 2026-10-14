@@ -12,6 +12,7 @@ from typing import Any, cast, TYPE_CHECKING
 import sympy
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.heuristics.registry import register_template_heuristic
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min, Mod
@@ -2378,17 +2379,22 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 # Template-specific mixin classes
 def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
     """Whether a Triton GEMM template should use TF32, matching eager matmul."""
-    if device_type == "xpu":
-        # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
-        return bool(torch.backends.mkldnn.allow_tf32)
+    allow_tf32 = False
+    if isinstance(device_type, str):
+        try:
+            iface = get_interface_for_device(device_type)
+        except NotImplementedError:
+            iface = None
+        else:
+            allow_tf32 = bool(iface.allow_tf32())
     if device_type == "cuda":
-        # allow_tf32 alignment heuristics based on reverse engineering
-        # H100 CUDA 12.8 behavior
+        # CUDA applies a shape threshold on top of the backend flag.
+        # Based on reverse engineering H100 CUDA 12.8 behavior.
         size_threshold = V.graph.sizevars.statically_known_true(
             sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
         )
-        return torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
-    return False
+        return allow_tf32 and size_threshold
+    return allow_tf32
 
 
 class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
