@@ -57,8 +57,20 @@ def _guard() -> Iterator[None]:
         _disable(error)
 
 
+def _is_gtest(item: pytest.Item) -> bool:
+    # pytest-cpp isn't a torch dependency, so check the item's module before
+    # importing it. Its Boost.Test and Catch2 items are CppItems too.
+    if not type(item).__module__.startswith("pytest_cpp."):
+        return False
+    from pytest_cpp.google import GoogleTestFacade
+
+    return isinstance(getattr(item, "facade", None), GoogleTestFacade)
+
+
 def identity(item: pytest.Item) -> report.TestId | None:
-    """None for an item that isn't a Python test function."""
+    """None for an item that is neither a Python test function nor a gtest."""
+    if _is_gtest(item):
+        return report.gtest_identity(str(item.path), item.name)
     if not isinstance(item, pytest.Function):
         return None
     # originalname drops pytest parameters. Unwrapping the function recovers the
@@ -181,9 +193,9 @@ class ReportWriter:
     def _finish(self, key: tuple[str, Any], run: _Run) -> None:
         del self.runs[key]
         nodeid = key[0]
-        # No identity: the item isn't a Python test function, its setup report never
-        # arrived (the attempt was interrupted), or, under xdist, the worker's writer
-        # turned itself off and its setup report came without one.
+        # No identity: the item is neither a Python test function nor a gtest, its
+        # setup report never arrived (the attempt was interrupted), or, under xdist,
+        # the worker's writer turned itself off and its setup report came without one.
         if self.file is not None and run.test is not None:
             record = report.run_record(
                 run.test,
@@ -201,6 +213,12 @@ class ReportWriter:
         if _disabled:
             return
         with _guard():
+            # run_test.py runs C++ tests under xdist with -x, which stops right after
+            # the final failing report, so that run's teardown report never arrives;
+            # its outcome is already known.
+            for key, run in list(self.runs.items()):
+                if run.failed_phase:
+                    self._finish(key, run)
             if self.file is not None:
                 self.file.close()
                 self.file = None
