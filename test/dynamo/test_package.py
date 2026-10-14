@@ -30,6 +30,7 @@ from torch._dynamo.package import (
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
+    load_guard_manager,
     load_guards_state,
 )
 from torch._dynamo.precompile_context import PrecompileContext
@@ -209,6 +210,8 @@ del _make_generated_method, _make_generated_property, _make_stale_method
 # global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
 PKG_DYN_ROWS = torch.randn(4, 3)
 torch._dynamo.mark_dynamic(PKG_DYN_ROWS, 0)
+
+PKG_SCALE = 3
 
 # namedtuple builds __new__ with exec into a namespace no module owns.
 PkgRecord = collections.namedtuple("PkgRecord", ("value", "weight"))
@@ -1182,6 +1185,53 @@ def add(x, y):
         package.reset()
         package.initialize(g, None)
         self.assertEqual(package.source_id, CompilePackage.source_id_from_fn(g))
+
+    def test_unbuildable_guards_raise_a_package_error(self):
+        # A guard source that does not resolve against the scope serialized
+        # with it raised a bare KeyError from inside the guard builder, naming
+        # neither the frame nor that the artifact is at fault.
+        def fn(x):
+            return x * PKG_SCALE
+
+        x = torch.randn(3)
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(x)
+        (guarded,) = package.cache_entry().codes[0].guarded_codes
+        guards_state = load_guards_state(guarded.guards_state)
+        del guards_state.output_graph.global_scope["PKG_SCALE"]
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.PackageError,
+            "Cannot rebuild the serialized guards for fn .*KeyError: 'PKG_SCALE'",
+        ) as cm:
+            load_guard_manager(guards_state, fn.__code__, fn.__globals__)
+        self.assertIsInstance(cm.exception.__cause__, KeyError)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_unbuildable_guards_on_warm_load_are_logged_then_recompiled(self):
+        def fn(x):
+            return x * PKG_SCALE
+
+        x = torch.randn(3)
+        torch.compile(fn)(x)  # noqa: UNSPECIFIED_BACKEND
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        def load_without_scale(guards_state):
+            state = load_guards_state(guards_state)
+            del state.output_graph.global_scope["PKG_SCALE"]
+            return state
+
+        with (
+            patch.object(
+                torch._dynamo.package, "load_guards_state", load_without_scale
+            ),
+            self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs,
+        ):
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertIn(
+            "PackageError: Cannot rebuild the serialized guards for fn",
+            "\n".join(logs.output),
+        )
+        self.assertEqual(compiled_fn(x), fn(x))
 
     def test_import_source_unpickle_without_trace(self):
         # Deserializing an ImportSource happens at torch.compile() time with no

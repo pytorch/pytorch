@@ -536,13 +536,23 @@ def load_guard_manager(
     # globals serialized with the artifact, which only None selects.
     from .output_graph import OutputGraphCommon
 
-    return torch._dynamo.guards.CheckFunctionManager(
-        target_code,
-        OutputGraphCommon(guards_state.output_graph),
-        shape_code_parts=guards_state.shape_code_parts,
-        runtime_global_scope=runtime_global_scope,
-        guard_build_local_state=getattr(guards_state, "local_state", None),
-    ).guard_manager
+    try:
+        return torch._dynamo.guards.CheckFunctionManager(
+            target_code,
+            OutputGraphCommon(guards_state.output_graph),
+            shape_code_parts=guards_state.shape_code_parts,
+            runtime_global_scope=runtime_global_scope,
+            guard_build_local_state=getattr(guards_state, "local_state", None),
+        ).guard_manager
+    except KeyError as e:
+        # A global the guards read but the scope serialized with them lacks
+        # otherwise surfaces as a bare KeyError from deep inside the guard
+        # builder, naming neither the frame nor the artifact.
+        raise PackageError(
+            f"Cannot rebuild the serialized guards for {target_code.co_name} "
+            f"({target_code.co_filename}:{target_code.co_firstlineno}): "
+            f"{type(e).__name__}: {e}"
+        ) from e
 
 
 _BackendId = NewType("_BackendId", str)  # __compiled_fn
