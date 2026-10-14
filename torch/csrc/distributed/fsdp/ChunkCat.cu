@@ -424,7 +424,7 @@ void fused_chunk_cat(
       block_idx_to_tensor_idx.end(), cast_blocks.begin(), cast_blocks.end());
   at::native::resize_output(out, {num_chunks, chunk_size / out.element_size()});
   // `packed` keeps the device metadata alive until the kernels are enqueued.
-  auto [packed, ptrs] = pack_vecs(
+  auto packed = pack_vecs(
       {&srcs,
        &block_idx_to_tensor_idx,
        &tensor_idx_to_start_tensor_bytes,
@@ -433,6 +433,7 @@ void fused_chunk_cat(
        &pad_tensor_chunk_sizes,
        &num_blocks_per_tensor_chunk},
       out.device());
+  const auto& ptrs = packed.second;
   if (num_copy_blocks > 0) {
     launch_chunk_cat<char, char>(
         ptrs, ptrs[1], num_copy_blocks, num_chunks, chunk_size, out);
