@@ -46,6 +46,11 @@ reduce_ops = [
     subtest(("premul_sum", dist.ReduceOp.PREMUL_SUM(0.5)), name="premul_sum_obj"),
 ]
 
+product_reduce_ops = [
+    subtest("product", name="product_str"),
+    subtest(dist.ReduceOp.PRODUCT, name="product_obj"),
+]
+
 min_max_reduce_ops = [
     subtest(("min", "min"), name="min_str"),
     subtest(("min", dist.ReduceOp.MIN), name="min_obj"),
@@ -429,6 +434,36 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         self.assertEqual(input_tensor.grad.dtype, dtype)
 
     @parametrize("device", devices)
+    @parametrize("coalesced", [False, True])
+    @parametrize("reduce_op", product_reduce_ops)
+    def test_all_reduce_product_backward(self, device, coalesced, reduce_op):
+        """product backward is the summed grad times the other ranks' product.
+
+        Column 0 has no zeros, column 1 a zero on rank 0 only and column 2
+        zeros on ranks 0 and 1.
+        """
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+        ws = self.world_size
+
+        values = torch.arange(1, ws + 1, dtype=torch.float32, device=device)
+        values = values[:, None].repeat(1, 3)
+        values[0, 1:] = 0
+        values[1, 2] = 0
+        input_tensor = values[rank].clone().requires_grad_()
+
+        if coalesced:
+            (output,) = fcols.all_reduce_coalesced(
+                [input_tensor], reduce_op, group=group_name
+            )
+        else:
+            output = fcols.all_reduce(input_tensor, reduce_op, group=group_name)
+        output.sum().backward()
+
+        others = torch.cat([values[:rank], values[rank + 1 :]])
+        self.assertEqual(input_tensor.grad, ws * others.prod(0))
+
+    @parametrize("device", devices)
     @parametrize("gather_dim", [0, 1, 2])
     def test_all_gather_tensor_backward(self, device, gather_dim):
         """Test all_gather_tensor backward does reduce_scatter.
@@ -466,7 +501,8 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
 
     @parametrize("device", devices)
     @parametrize("scatter_dim", [0, 1])
-    def test_reduce_scatter_tensor_backward(self, device, scatter_dim):
+    @parametrize("reduce_op", ["sum", "avg"])
+    def test_reduce_scatter_tensor_backward(self, device, scatter_dim, reduce_op):
         """Test reduce_scatter_tensor backward does all_gather.
 
         Both tensor AND gradients are VARYING (different across ranks).
@@ -485,8 +521,9 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             )
 
         output = fcols.reduce_scatter_single(
-            input_tensor, "sum", scatter_dim=scatter_dim, group=group_name
+            input_tensor, reduce_op, scatter_dim=scatter_dim, group=group_name
         )
+        scale = 1 / self.world_size if reduce_op == "avg" else 1
 
         # Backward with ones
         output.sum().backward()
@@ -496,7 +533,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         self.assertEqual(input_tensor.grad.shape, input_tensor.shape)
 
         # All gradients should be 1 (gathered from all ranks)
-        expected_grad = torch.ones_like(input_tensor)
+        expected_grad = torch.full_like(input_tensor, scale)
         self.assertEqual(input_tensor.grad, expected_grad)
 
         # Backward is all_gather (sum)
@@ -507,7 +544,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         expected_grad_input = fcols.all_gather_single(
             grad_outputs, scatter_dim, group=group_name
         )
-        self.assertEqual(grad_input, expected_grad_input)
+        self.assertEqual(grad_input, expected_grad_input * scale)
 
     @parametrize("device", devices)
     def test_all_to_all_single_backward(self, device):
@@ -700,7 +737,8 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             self.assertEqual(input_tensor.grad, expected_grad)
 
     @parametrize("device", devices)
-    def test_reduce_scatter_tensor_coalesced_backward(self, device):
+    @parametrize("reduce_op", ["sum", "avg"])
+    def test_reduce_scatter_tensor_coalesced_backward(self, device, reduce_op):
         """Test reduce_scatter_tensor_coalesced backward does all_gather on each gradient.
 
         Tensors AND gradients are VARYING (different across ranks).
@@ -715,8 +753,9 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         scatter_dims = [0, 0]
 
         outputs = fcols.reduce_scatter_single_coalesced(
-            input_tensors, "sum", scatter_dims, group=group_name
+            input_tensors, reduce_op, scatter_dims, group=group_name
         )
+        scale = 1 / self.world_size if reduce_op == "avg" else 1
 
         # Backward with ones
         loss = sum(output.sum() for output in outputs)
@@ -725,7 +764,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         # Each gradient should be all_gather of ones
         for input_tensor in input_tensors:
             self.assertIsNotNone(input_tensor.grad)
-            expected_grad = torch.ones_like(input_tensor)
+            expected_grad = torch.full_like(input_tensor, scale)
             self.assertEqual(input_tensor.grad, expected_grad)
 
     # ============================================================
