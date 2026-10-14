@@ -481,6 +481,10 @@ def _default_all_gather_output_fn(
         if outer_size > 1:
             copy_output = torch.empty_like(output)
             reassembled.append((copy_output, output, outer_size))
+        if byte_views and copy_output.nbytes == world_size * split_size:
+            # View as bytes last: a view of a byte view keeps the byte view alive
+            split_outputs.append(copy_output.view(world_size, -1).view(torch.uint8))
+            continue
         split_output = copy_output.view(torch.uint8) if byte_views else copy_output
         if split_output.numel() != world_size * split_size:  # a smaller payload
             split_output = split_output[: world_size * split_size]
