@@ -40,7 +40,6 @@ import random  # noqa: F401 -- eval_frame_cpp.cpp imports random at runtime; tor
 import subprocess
 import sys
 import tempfile
-import textwrap
 import threading
 import time
 import traceback
@@ -106,7 +105,6 @@ from .code_context import code_context
 from .eval_frame import (
     _get_cache_entries_for_region,
     _get_total_cache_entry_count,
-    _precompile_no_match_message,
     add_skip_reason,
     always_optimize_code_objects,
     Constraint,
@@ -208,7 +206,6 @@ if typing.TYPE_CHECKING:
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
-recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 
 
 compile_lock = threading.RLock()
@@ -1727,37 +1724,6 @@ def compile_frame(  # type: ignore[return]
             raise
 
 
-def _precompile_miss_reason(code: CodeType, frame: DynamoFrameType) -> str | None:
-    """Why a frame with precompiled entries is being compiled anyway.
-
-    Precompiled entries are not this process's cache entries, so a call that
-    misses all of them is not counted as a recompilation and would otherwise
-    record no reason.
-    """
-    from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-
-    entries = _debug_get_precompile_entries(code)
-    if not entries:
-        return None
-    message = _precompile_no_match_message(entries, frame.f_locals)
-    recompiles_log.debug(
-        "Compiling function %s in %s:%d\n%s",
-        code.co_name,
-        code.co_filename,
-        code.co_firstlineno,
-        textwrap.indent(message, "    "),
-    )
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "recompile_reasons",
-            "encoding": "json",
-        },
-        payload_fn=lambda: message,
-    )
-    return message
-
-
 def _compile(
     code: CodeType,
     globals: dict[str, object],
@@ -2107,16 +2073,13 @@ def _compile(
 
         # Check recompilations
         recompile_reason: str | None = None
-        recompilation = is_recompilation(cache_size)
-        if recompilation and frame:
+        if is_recompilation(cache_size) and frame:
             reasons = get_and_maybe_log_recompilation_reasons(
                 cache_entries_for_reasons, frame, innermost_backend(compiler_fn)
             )
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
-        elif frame:
-            recompile_reason = _precompile_miss_reason(code, frame)
         metrics_context.update_outer(
             {
                 "recompile_reason": recompile_reason,
@@ -2267,11 +2230,7 @@ def _compile(
                 and output_graph.has_outputs()
             ):
                 log_frame_dynamic_whitelist(code)
-                if (
-                    recompilation
-                    and recompile_reason
-                    and "size mismatch at index" in recompile_reason
-                ):
+                if recompile_reason and "size mismatch at index" in recompile_reason:
                     _log_size_mismatch_recompile()
 
             clear_compile_context_weakrefs(tracer_output, compiler_fn)

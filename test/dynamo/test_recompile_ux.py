@@ -1435,9 +1435,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(default_fails, [])
 
     def test_package_region_restores_strict_flag_when_the_call_raises(self):
-        from torch._C._dynamo.eval_frame import (
-            get_eval_frame_isolate_recompiles_strict,
-        )
+        from torch._C._dynamo.eval_frame import get_eval_frame_isolate_recompiles_strict
         from torch._dynamo.package import CompilePackage
 
         def f(x):
