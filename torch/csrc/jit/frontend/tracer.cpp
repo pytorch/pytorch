@@ -3,6 +3,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/TracerMode.h>
 #include <ATen/core/Dict.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
