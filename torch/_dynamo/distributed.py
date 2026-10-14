@@ -14,7 +14,6 @@ is properly initialized, making it safe to import and use this module even in
 non-distributed scenarios.
 """
 
-import torch
 import torch.distributed as dist
 
 from . import config
@@ -50,7 +49,12 @@ def get_guard_pg() -> dist.ProcessGroup | None:
     if dist.is_available() and dist.is_initialized():
         global _GUARD_PG
         if _GUARD_PG is None:
-            guard_pg = dist.distributed_c10d._new_group_with_tag(pg_tag="pt2_guard_pg")
+            # Left to itself, _new_group_with_tag picks the global default timeout
+            # constant rather than the timeout the default group was configured with.
+            guard_pg = dist.distributed_c10d._new_group_with_tag(
+                timeout=dist.distributed_c10d._get_process_group_timeout(),
+                pg_tag="pt2_guard_pg",
+            )
             if guard_pg == dist.GroupMember.NON_GROUP_MEMBER:
                 raise AssertionError("Guard process group must include all ranks")
             _GUARD_PG = guard_pg
@@ -86,14 +90,9 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
                     "torch._functorch.config._sync_decision_cross_ranks and "
                     "torch._functorch.config._sync_cache_decision_cross_ranks."
                 )
-            # Left to itself, _new_group_with_tag picks the global default_pg_timeout
-            # constant rather than the timeout init_process_group was configured with.
-            default_pg = dist.distributed_c10d._get_default_group()
-            coll_device = dist.distributed_c10d._get_object_coll_device(default_pg)
-            default_backend = default_pg._get_backend(torch.device(coll_device))
             compile_sync_pg = dist.distributed_c10d._new_group_with_tag(
                 backend="gloo",
-                timeout=default_backend.options._timeout,
+                timeout=dist.distributed_c10d._get_process_group_timeout(),
                 pg_tag="pt2_compile_sync_pg",
             )
             if compile_sync_pg == dist.GroupMember.NON_GROUP_MEMBER:
