@@ -432,6 +432,7 @@ def _build_multigraph_forward():
     import types
 
     import torch
+    from torch._C._dynamo.eval_frame import _get_lru_cache
     from torch._dynamo.aot_compile import bind_locals
     from torch._dynamo.output_graph import get_builtins_dict
     from torch._dynamo.package import (
@@ -620,10 +621,11 @@ def _build_multigraph_forward():
             manager = load_guard_manager(guards_state, target, scope)
             body = SerializedCode.to_code_object(guarded["dynamo_code"])
             variants.append((manager, body))
-        # Dynamo's cache serves the newest compile first and moves a hit to the
-        # front, so a call that two variants both admit gets the variant
-        # torch.compile would serve. Mirror both.
-        variants.reverse()
+        # Under use_lru Dynamo's cache serves the newest compile first and
+        # moves a hit to the front, so a call that two variants both admit gets
+        # the variant torch.compile would serve. Mirror both.
+        if _get_lru_cache():
+            variants.reverse()
 
         # Calls are bound to f_locals the way Python binds them (keyword-only,
         # *args and **kwargs included); the transformed bytecode keeps the
@@ -650,10 +652,14 @@ def _build_multigraph_forward():
             # A tag-safe root's fast path (GuardManager::check_nopybind) can
             # refuse without running its tree and disarms itself; check twice.
             for _ in range(2):
-                for i, (manager, variant) in enumerate(bound):
+                # bound is shared by every caller of this frame: walk a copy and
+                # reorder with one slice assignment, so no caller sees an entry
+                # missing.
+                entries = tuple(bound)
+                for i, (manager, variant) in enumerate(entries):
                     if manager.check(f_locals):
-                        if i:
-                            bound.insert(0, bound.pop(i))
+                        if i and _get_lru_cache():
+                            bound[:] = (entries[i], *entries[:i], *entries[i + 1 :])
                         return variant(*args, **kwargs)
             raise _PrecompileError(
                 f"precompile: no captured variant of {target.co_name!r} matches this "
