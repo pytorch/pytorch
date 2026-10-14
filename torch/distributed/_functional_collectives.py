@@ -809,29 +809,28 @@ def _is_reduceop_supported(op: str | ReduceOp):
     )
 
 
-def _product_backward(grads, fwd_inputs, fwd_outputs, group_name, config):
+def _product_backward(grads, fwd_inputs, group_name, config):
     """Scale summed grads by the product of the other ranks' inputs.
 
-    That product is output / input where input != 0. Where input == 0 it is
-    the product of the nonzero inputs if this is the only zero, else 0. Both
-    come from one product all_reduce by encoding the zero count as 2**count.
+    One product all_reduce gives the product of the nonzero inputs and
+    2**zero_count. With no zeros the other ranks' product is that product /
+    input, which like torch.prod backward can overflow or underflow. With a
+    zero it is the nonzero product on the only zero's rank, else 0.
     """
     is_zero = [fwd_input == 0 for fwd_input in fwd_inputs]
+    nonzero = [torch.where(z, 1, x) for z, x in zip(is_zero, fwd_inputs)]
+    zero_pow = [torch.where(z, 2, 1).to(x.dtype) for z, x in zip(is_zero, fwd_inputs)]
     reduced = wait_tensors(
         torch.ops._c10d_functional.all_reduce_coalesced(
-            [
-                torch.stack([torch.where(z, 1, x), torch.where(z, 2, 1).to(x.dtype)])
-                for z, x in zip(is_zero, fwd_inputs)
-            ],
-            "product",
-            group_name,
-            config=config,
+            nonzero + zero_pow, "product", group_name, config=config
         )
     )
-    return [
-        g * torch.where(z, torch.where(r[1] == 2, r[0], 0), y / x)
-        for g, z, r, x, y in zip(grads, is_zero, reduced, fwd_inputs, fwd_outputs)
+    n = len(fwd_inputs)
+    others = [
+        torch.where(z, torch.where(p == 2, prod, 0), torch.where(p == 1, prod / x, 0))
+        for z, prod, p, x in zip(is_zero, reduced[:n], reduced[n:], fwd_inputs)
     ]
+    return [g * other for g, other in zip(grads, others)]
 
 
 def _min_max_extremum_mask(fwd_input: torch.Tensor, fwd_output: torch.Tensor):
@@ -892,9 +891,8 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
         scaled = (output / tie_count).to(output.dtype)
         output = torch.ops.aten.where.ScalarOther(mask, scaled, 0)
     if _is_product(reduce_op):
-        fwd_input, fwd_output = ctx.saved_tensors
         (output,) = _product_backward(
-            [output], [fwd_input], [wait_tensor(fwd_output)], group_name, ctx.config
+            [output], [ctx.saved_tensors[0]], group_name, ctx.config
         )
     return (output,) + (None,) * (ctx.num_inputs - 1)
 
@@ -912,8 +910,10 @@ def all_reduce_setup_context(ctx, inputs, output):
     ctx.num_inputs = len(inputs)
     ctx.group_name = group_name
     ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
-    if _is_min_max(ctx.reduce_op) or _is_product(ctx.reduce_op):
+    if _is_min_max(ctx.reduce_op):
         ctx.save_for_backward(input, output)
+    elif _is_product(ctx.reduce_op):
+        ctx.save_for_backward(input)
 
 
 torch.library.register_autograd(
@@ -1233,14 +1233,8 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
             for g, mask, count in zip(grad_inputs, masks, tie_counts)
         ]
     if _is_product(reduce_op):
-        saved = ctx.saved_tensors
-        n = len(grad_inputs)
         grad_inputs = _product_backward(
-            grad_inputs,
-            saved[:n],
-            wait_tensors(list(saved[n:])),
-            group_name,
-            ctx.config,
+            grad_inputs, list(ctx.saved_tensors), group_name, ctx.config
         )
     return (grad_inputs,) + (None,) * (ctx.num_inputs - 1)
 
@@ -1259,8 +1253,10 @@ def all_reduce_coalesced_setup_context(ctx, inputs, output):
     ctx.num_inputs = len(inputs)
     ctx.group_name = group_name
     ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
-    if _is_min_max(ctx.reduce_op) or _is_product(ctx.reduce_op):
+    if _is_min_max(ctx.reduce_op):
         ctx.save_for_backward(*tensor_list, *output)
+    elif _is_product(ctx.reduce_op):
+        ctx.save_for_backward(*tensor_list)
 
 
 torch.library.register_autograd(
