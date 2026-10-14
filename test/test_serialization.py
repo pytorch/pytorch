@@ -913,6 +913,10 @@ class serialization_method:
 
 Point = namedtuple('Point', ['x', 'y'])
 
+class ListSubclass(list):
+    pass
+
+
 class ClassThatUsesBuildInstruction:
     def __init__(self, num):
         self.num = num
@@ -1365,6 +1369,15 @@ class TestSerialization(TestCase, SerializationMixin):
             # safe_globals doesn't work even with allowlist
             with safe_globals([os.execv]):
                 with self.assertRaisesRegex(pickle.UnpicklingError, error_msg):
+                    torch.load(f, weights_only=True)
+
+    def test_weights_only_list_subclass_append(self):
+        # APPEND/APPENDS would call overridden methods of list subclasses.
+        with BytesIOContext() as f:
+            torch.save(ListSubclass([1, 2]), f)
+            f.seek(0)
+            with safe_globals([ListSubclass]):
+                with self.assertRaisesRegex(pickle.UnpicklingError, "Can only extend lists"):
                     torch.load(f, weights_only=True)
 
     @parametrize("unsafe_global", [True, False])
