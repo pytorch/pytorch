@@ -19,15 +19,22 @@ from torch.testing._internal.common_quantized import (
 
 
 _KERNELS = {
+    "mxfp8_dim_k": ("dim_k", False, False, False),
+    "mxfp8_dim_k_sr": ("dim_k", False, False, True),
     "mxfp8_dim_k_swizzle": ("dim_k", False, True, False),
     "mxfp8_dim_k_swizzle_sr": ("dim_k", False, True, True),
+    "mxfp8_dim_k_32x32": ("dim_k", True, False, False),
+    "mxfp8_dim_k_32x32_swizzle": ("dim_k", True, True, False),
+    "mxfp8_dim_m": ("dim_m", False, False, False),
+    "mxfp8_dim_m_sr": ("dim_m", False, False, True),
     "mxfp8_dim_m_swizzle": ("dim_m", False, True, False),
     "mxfp8_dim_m_swizzle_sr": ("dim_m", False, True, True),
+    "mxfp8_dim_km": ("dim_km", False, False, False),
+    "mxfp8_dim_km_sr": ("dim_km", False, False, True),
     "mxfp8_dim_km_swizzle": ("dim_km", False, True, False),
     "mxfp8_dim_km_swizzle_sr": ("dim_km", False, True, True),
+    "mxfp8_dim_km_32x32": ("dim_km", True, False, False),
     "mxfp8_dim_km_32x32_swizzle": ("dim_km", True, True, False),
-    "mxfp8_dim_k_32x32_swizzle": ("dim_k", True, True, False),
-    "mxfp8_dim_k": ("dim_k", False, False, False),
 }
 _DTYPES = {
     "bfloat16": torch.bfloat16,
@@ -56,7 +63,18 @@ def _parse_sizes(value, name):
 
 def _reference_dim_k(input, square, swizzled, random_key):
     if square:
-        return mxfp8_32x32_swizzle_f(input)
+        qdata, scales = mxfp8_32x32_swizzle_f(input)
+        if not swizzled:
+            rows, cols = input.shape
+            row_blocks = (rows + 127) // 128
+            col_blocks = (cols + 127) // 128
+            # Undo the reference's 128x4 scale tiling without a Python element loop.
+            scales = (
+                scales.view(row_blocks, col_blocks, 32, 4, 4)
+                .permute(0, 3, 2, 1, 4)
+                .reshape(row_blocks * 128, col_blocks * 4)[:rows, : cols // 32]
+            )
+        return qdata, scales
     swizzle_type = SwizzleType.SWIZZLE_32_4_4 if swizzled else SwizzleType.NO_SWIZZLE
     scales, qdata = to_mxfp(
         input,
@@ -70,19 +88,21 @@ def _reference_dim_k(input, square, swizzled, random_key):
 
 def _reference(input, orientation, square, swizzled, random_key):
     if orientation == "dim_m":
-        return _reference_dim_k(input.t().contiguous(), False, True, random_key)
+        return _reference_dim_k(input.t().contiguous(), False, swizzled, random_key)
     if orientation == "dim_km":
         if random_key is not None:
             scales_k, qdata_k, scales_m, qdata_m = to_mxfp_dual(
                 input,
-                swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+                swizzle_type=(
+                    SwizzleType.SWIZZLE_32_4_4 if swizzled else SwizzleType.NO_SWIZZLE
+                ),
                 rounding_mode="stochastic",
                 random_key=random_key,
             )
             return qdata_k, scales_k, qdata_m, scales_m
         return (
-            *_reference_dim_k(input, square, True, None),
-            *_reference_dim_k(input.t().contiguous(), square, True, None),
+            *_reference_dim_k(input, square, swizzled, None),
+            *_reference_dim_k(input.t().contiguous(), square, swizzled, None),
         )
     return _reference_dim_k(input, square, swizzled, random_key)
 
