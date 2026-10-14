@@ -117,7 +117,23 @@ struct abs_functor {
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
-    return T(c10::metal::hypot(x.x, x.y));
+    return T(c10::metal::hypot(x.x, x.y), 0);
+  }
+};
+
+struct sign_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    return T((T(0) < x) - (x < T(0)));
+  }
+};
+
+struct sgn_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    const auto z = float2(x);
+    const auto m = c10::metal::hypot(z.x, z.y);
+    return m == 0 ? T(0, 0) : T(z / m);
   }
 };
 
@@ -804,6 +820,19 @@ REGISTER_UNARY_OP(abs, char, char);
 REGISTER_UNARY_OP(abs, uchar, uchar);
 REGISTER_UNARY_OP(abs, float, float);
 REGISTER_UNARY_OP(abs, half, half);
+
+#define REGISTER_SIGN_OP(DTYPE) REGISTER_UNARY_OP(sign, DTYPE, DTYPE)
+REGISTER_SIGN_OP(bool);
+REGISTER_SIGN_OP(uchar);
+REGISTER_SIGN_OP(char);
+REGISTER_SIGN_OP(short);
+REGISTER_SIGN_OP(int);
+REGISTER_SIGN_OP(long);
+REGISTER_SIGN_OP(half);
+REGISTER_SIGN_OP(bfloat);
+REGISTER_SIGN_OP(float);
+REGISTER_UNARY_OP(sgn, float2, float2);
+REGISTER_UNARY_OP(sgn, half2, half2);
 
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
   REGISTER_UNARY_OP(angle, DTYPE1, DTYPE0);        \
