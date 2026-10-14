@@ -112,7 +112,7 @@ from .functions import (
     UserFunctionVariable,
 )
 from .lists import ListVariable, SizeVariable, TupleVariable
-from .object_protocol import pynumber_index, vt_is_iterable
+from .object_protocol import mro_lookup, pynumber_index, vt_is_iterable
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -193,6 +193,8 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
         torch.fx.traceback._dynamo_region_activation_memory_budget,
         torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
+        torch.fx.traceback._dynamo_annotate,
+        torch.fx.traceback._dynamo_annotate.__wrapped__,  # type: ignore[attr-defined]
         # We'll let Dynamo inline into the contextlib part of these context
         # manager instances, all the way till it invokes the wrapped function
         # itself (at which point we wrap it back to special context manager
@@ -802,6 +804,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 )
             return FxTracebackAnnotateVariable(
                 args[0].as_python_constant(), source=self.source
+            )
+        elif self.value in (
+            torch.fx.traceback._dynamo_annotate,
+            torch.fx.traceback._dynamo_annotate.__wrapped__,  # type: ignore[attr-defined]
+        ):
+            if len(args) != 1 or kwargs:
+                raise AssertionError("_dynamo_annotate expects one positional argument")
+            return FxTracebackAnnotateVariable(
+                dict(args[0].as_python_constant()), source=self.source
             )
         elif self.value in (
             torch.fx.traceback._dynamo_region_activation_memory_budget,
@@ -1859,12 +1870,38 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if tf_state.skip_next:
                 tf_state.skip_next = False
                 return VariableTracker.build(tx, False)
+            # Mirrors check_has_torch_function in C++: an active torch
+            # function mode makes every argument "have" a torch function.
+            if (
+                tf_state.torch_function_mode_enabled
+                and tf_state.in_torch_function_mode()
+            ):
+                return VariableTracker.build(tx, True)
             elems = (
                 unpack_iterable(tx, args[0])
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
                 else args
             )
             return VariableTracker.build(tx, any(has_torch_function(x) for x in elems))
+
+        @register(torch.overrides.handle_torch_function)
+        def handle_handle_torch_function(
+            self,
+            tx: "InstructionTranslatorBase",
+            public_api: VariableTracker,
+            relevant_args: VariableTracker,
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            from .torch_function import dispatch_torch_function
+
+            return dispatch_torch_function(
+                tx,
+                public_api,
+                list(args),
+                kwargs,
+                relevant_args=unpack_iterable(tx, relevant_args),
+            )
 
         @register(torch._C._skip_one_hop_torch_function)
         def handle_skip_one_hop_torch_function(
@@ -3825,7 +3862,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                                 "Ensure you do not modify input tensor in place.",
                             ],
                         )
-            return self.call_tensor_method(tx, list(args), kwargs)
+            # call_tensor_method records `x.<name>(...)`, which resolves on
+            # type(x) when the graph runs. If a tensor subclass overrides the
+            # method, fall through so the graph calls the descriptor itself.
+            self_type = args[0].python_type() if args and args[0].is_tensor() else None
+            if (
+                self_type is None
+                or self_type is torch.Tensor
+                or mro_lookup(self_type, name) is mro_lookup(torch.Tensor, name)
+            ):
+                return self.call_tensor_method(tx, list(args), kwargs)
 
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
