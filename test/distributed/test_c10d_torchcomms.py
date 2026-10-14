@@ -1291,6 +1291,54 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
             self.assertCountEqual(calls.mock_calls[2:], freed)
             self.assertEqual(c10d._world.comms, [])
 
+    def test_abort_cleanup_continues_when_finalize_raises(self):
+        calls = mock.Mock()
+        comm_a, comm_b = calls.comm_a, calls.comm_b
+        world = self._register_abortable_pg(calls, None, "world")
+        group_a = self._register_abortable_pg(calls, comm_a, "a")
+        group_b = self._register_abortable_pg(calls, comm_b, "b")
+        c10d._world.default_pg = world
+        c10d._world.comms.extend([comm_a, comm_b])
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _release_nvshmem_team_pool=calls.release,
+            _unregister_process_group=lambda group_name: None,
+            _unregister_all_process_groups=lambda: None,
+            _update_default_pg=lambda pg: setattr(c10d._world, "default_pg", pg),
+            create=True,
+        ):
+            comm_a.finalize.side_effect = RuntimeError("Work timed out during finalize")
+            with self.assertLogs(c10d.logger, level="WARNING") as logs:
+                c10d._abort_process_group(group_a)
+            self.assertIn(
+                "Failed to finalize TorchComms communicator after abort",
+                "\n".join(logs.output),
+            )
+            calls.release.assert_called_once_with("a")
+            self.assertEqual(c10d._world.comms, [comm_b])
+            self.assertNotIn(group_a, c10d._world.pg_map)
+            self.assertIn(group_b, c10d._world.pg_map)
+
+            calls.reset_mock()
+            comm_b.finalize.side_effect = RuntimeError("Work timed out during finalize")
+            with self.assertLogs(c10d.logger, level="WARNING") as logs:
+                c10d._abort_process_group()
+            self.assertIn(
+                "Failed to finalize TorchComms communicator after abort",
+                "\n".join(logs.output),
+            )
+            calls.release.assert_has_calls(
+                [mock.call("world"), mock.call("b")], any_order=True
+            )
+            self.assertEqual(c10d._world.comms, [])
+            self.assertEqual(c10d._world.pg_map, {})
+            self.assertEqual(c10d._world.pg_names, {})
+            self.assertEqual(c10d._world.pg_group_ranks, {})
+            self.assertIsNone(c10d._world.default_pg)
+
 
 class TestC10dTorchCommsBackendConfig(TestCase):
     def test_registered_device_qualified_torchcomms_backend_uses_custom_type(self):

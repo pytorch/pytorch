@@ -3245,7 +3245,18 @@ def _release_nvshmem_team_pool(group_name: str) -> None:
         release(group_name)
 
 
-def _finalize_torchcomms(pg: ProcessGroup) -> None:
+def _finalize_torchcomm(comm, *, best_effort: bool) -> None:
+    try:
+        comm.finalize()
+    except Exception:
+        if not best_effort:
+            raise
+        logger.warning(
+            "Failed to finalize TorchComms communicator after abort", exc_info=True
+        )
+
+
+def _finalize_torchcomms(pg: ProcessGroup, *, best_effort: bool = False) -> None:
     if not _TORCHCOMM_AVAILABLE:
         return
     # A single comm may be shared across multiple device types (e.g. a
@@ -3259,7 +3270,7 @@ def _finalize_torchcomms(pg: ProcessGroup) -> None:
         if isinstance(backend, _BackendWrapper):
             comm = backend.get_comm()
             if id(comm) not in finalized_comm_ids:
-                comm.finalize()
+                _finalize_torchcomm(comm, best_effort=best_effort)
                 finalized_comm_ids.add(id(comm))
     if finalized_comm_ids:
         _world.comms[:] = [
@@ -3427,7 +3438,7 @@ def _abort_process_group(
         # its collective destroy, and the NVSHMEM release synchronizes the
         # device, which would wait on hung NCCL kernels before the abort.
         for comm in _world.comms:
-            comm.finalize()
+            _finalize_torchcomm(comm, best_effort=True)
         _world.comms.clear()
         for pg_name in _world.pg_names.values():
             _release_nvshmem_team_pool(pg_name)
@@ -3455,7 +3466,7 @@ def _abort_process_group(
     else:
         pg.abort()
         # As for WORLD above, only after the abort.
-        _finalize_torchcomms(pg)
+        _finalize_torchcomms(pg, best_effort=True)
         _release_nvshmem_team_pool(_world.pg_names[pg])
         del _world.pg_map[pg]
         del _world.pg_names[pg]
