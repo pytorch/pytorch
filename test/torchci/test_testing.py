@@ -1,5 +1,6 @@
 # Owner(s): ["module: ci"]
 
+import contextlib
 import functools
 import importlib
 import importlib.util
@@ -11,6 +12,7 @@ import sys
 import sysconfig
 import tempfile
 import time
+import types
 import unittest.mock
 import uuid
 import xml.etree.ElementTree as ET
@@ -504,6 +506,271 @@ class TestReportEnablement(TestCase):
             self.assertEqual(args(None), [])
         with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", False):
             self.assertEqual(args("/reports"), [])
+
+
+@unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+@unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(
+    TEST_CUDA or TEST_WITH_ROCM, "crash recording doesn't depend on the device"
+)
+class TestReportCrashes(TestCase):
+    """run_test.py's retry loop records the run a process was running when it
+    died, from what the writer published in the stepcurrent cache."""
+
+    @staticmethod
+    def _cache_dir(tmp: str) -> Path:
+        return Path(tmp) / ".pytest_cache/v/cache/stepcurrent/key"
+
+    @staticmethod
+    def _pytest(tmp: str, fixture: str, prefix: Path) -> list[str]:
+        """A pytest command whose cache is under tmp, as run_test.py's would be."""
+        return [
+            sys.executable,
+            "-m",
+            "pytest",
+            fixture,
+            "-q",
+            "-o",
+            f"cache_dir={tmp}/.pytest_cache",
+            "-p",
+            "torch.testing._internal.torchci.plugin",
+            f"--torchci-report-prefix={prefix}",
+        ]
+
+    def _run_test_retries(
+        self, tmp, command, retry_shell=None, retries=0, env=None, timeout=None
+    ) -> str:
+        """Runs run_test.py's retry loop on command and returns its log. With no
+        process retries, a failure is consistent after one process."""
+        run_test_module = importlib.import_module("run_test")
+        options = types.SimpleNamespace(upload_artifacts_while_running=False)
+        log = Path(tmp) / "run_test.log"
+        with contextlib.ExitStack() as stack:
+            patch = functools.partial(unittest.mock.patch.object, run_test_module)
+            stack.enter_context(patch("REPO_ROOT", Path(tmp)))
+            stack.enter_context(patch("NUM_PROCESS_RETRIES", retries))
+            if retry_shell is not None:
+                stack.enter_context(patch("retry_shell", retry_shell))
+            output = stack.enter_context(open(log, "w"))
+            run_test_module.run_test_retries(
+                command,
+                str(_REPORT_TESTDATA),
+                _REPORT_CHILD_ENV | (env or {}),
+                timeout,
+                "key",
+                output,
+                False,
+                "crash_report",
+                options,
+            )
+        return log.read_text()
+
+    def _publish(self, tmp: str, report: Path, test, rerun: int, start: float):
+        """Publishes a run in flight as the writer does; returns the cache dir."""
+        cache_dir = self._cache_dir(tmp)
+        cache_dir.mkdir(parents=True)
+        inflight = {
+            "path": str(report),
+            "test": test._asdict(),
+            "rerun_number": rerun,
+            "started_at": start,
+        }
+        (cache_dir / "report_inflight").write_text(json.dumps(inflight))
+        return cache_dir
+
+    def test_crash_under_run_test(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = Path(tmp) / "reports/crash_report"
+            command = self._pytest(tmp, "crash_report.py", prefix) + ["--reruns=1"]
+            t0_ms = int(time.time() * 1000)
+            log = self._run_test_retries(tmp, command)
+            t1_ms = int(time.time() * 1000)
+            reports = _report_files(prefix)
+            self.assertEqual(len(reports), 1, log)
+            runs = _runs(reports[0])
+            left = sorted(path.name for path in self._cache_dir(tmp).iterdir())
+        self.assertIn("Got exit code -9 (SIGKILL)", log)
+        self.assertIn(
+            "FAILED CONSISTENTLY: test/torchci/testdata/crash_report.py::TestCrash::test_crash[one]",
+            log,
+        )
+        for run in runs:
+            _assert_run_line(self, run, t0_ms, t1_ms)
+        columns = ("suite", "case_name", "declared_case_name", "rerun_number", "outcome", "outcome_summary")  # fmt: skip
+        self.assertExpectedInline(
+            _table(columns, [tuple(run[column] for column in columns) for run in runs]),
+            """\
+suite     | case_name       | declared_case_name | rerun_number | outcome | outcome_summary
+          | test_before     | test_before        | 0            | passed  |
+TestCrash | test_crash[one] | test_crash         | 0            | failed  | AssertionError: first attempt fails
+TestCrash | test_crash[one] | test_crash         | 1            | crashed | exit code -9 (SIGKILL)""",
+        )
+        # Consumed, so no later process records the run again.
+        self.assertEqual(left, ["lastrun", "made_failing_xml"])
+
+    def test_retry_sequence(self) -> None:
+        # test_b crashes under --sc and passes under --rs; test_c crashes under
+        # --scs and again under --rs, so it fails consistently after one retry.
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = Path(tmp) / "reports/crash_sequence_report"
+            state = Path(tmp) / "state"
+            state.mkdir()
+            command = self._pytest(tmp, "crash_sequence_report.py", prefix)
+            env = {"CRASH_SEQUENCE_STATE": str(state)}
+            log = self._run_test_retries(tmp, command, retries=1, env=env)
+            columns = ("case_name", "rerun_number", "outcome")
+            rows = sorted(
+                [tuple(run[column] for column in columns) for run in _runs(report)]
+                for report in _report_files(prefix)
+            )
+            left = sorted(file.name for file in self._cache_dir(tmp).iterdir())
+        self.assertIn("Test succeeded in new process", log)
+        self.assertIn(
+            "FAILED CONSISTENTLY: test/torchci/testdata/crash_sequence_report.py::test_c",
+            log,
+        )
+        # One report per process. The passing --rs process leaves nothing in flight
+        # for the --scs process after it, and a crash in a new process is rerun 0.
+        self.assertEqual(
+            rows,
+            [
+                [("test_a", 0, "passed"), ("test_b", 0, "crashed")],
+                [("test_b", 0, "passed")],
+                [("test_c", 0, "crashed")],
+                [("test_c", 0, "crashed")],
+            ],
+        )
+        self.assertEqual(left, ["lastrun", "made_failing_xml"])
+
+    def test_shutdown_crash_records_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = Path(tmp) / "reports/shutdown_crash_report"
+            command = self._pytest(tmp, "shutdown_crash_report.py", prefix)
+            log = self._run_test_retries(tmp, command)
+            (report,) = _report_files(prefix)
+            runs = _runs(report)
+            left = sorted(file.name for file in self._cache_dir(tmp).iterdir())
+        # The process died after its last run line was written and the in-flight
+        # record cleared, so there is no run to record.
+        self.assertIn("Got exit code -9 (SIGKILL)", log)
+        self.assertEqual(
+            [(run["case_name"], run["outcome"]) for run in runs],
+            [("test_only", "passed")],
+        )
+        self.assertEqual(left, ["lastrun", "made_failing_xml"])
+
+    def test_disabled_writer_clears_the_run_in_flight(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command = self._pytest(tmp, "failure_isolation.py", Path(tmp) / "finish")
+            proc = subprocess.run(
+                command + ["--sc=key"],
+                cwd=_REPORT_TESTDATA / "failure_isolation",
+                env=_REPORT_CHILD_ENV | {"FAIL_MODE": "finish"},
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            inflight = (self._cache_dir(tmp) / "report_inflight").read_text()
+        self.assertIn("torchci: report disabled after error:", proc.stderr)
+        # The writer published its first test, then broke in _finish. Nothing it
+        # published may outlive it for run_test.py to record.
+        self.assertEqual(inflight, "null")
+
+    def test_interrupt_leaves_the_run_in_flight(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = Path(tmp) / "interrupted"
+            command = self._pytest(tmp, "interrupted_setup_report.py", prefix)
+            proc = subprocess.run(
+                command + ["--sc=key"],
+                cwd=_REPORT_TESTDATA,
+                env=_REPORT_CHILD_ENV,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            cache_dir = self._cache_dir(tmp)
+            inflight = json.loads((cache_dir / "report_inflight").read_text())
+            (report,) = _report_files(prefix)
+            before = report.read_text()
+            # run_test.py's retry loop, with retry_shell reporting the timeout.
+            killed = unittest.mock.Mock(return_value=(124, False))
+            self._run_test_retries(tmp, [], retry_shell=killed, timeout=30 * 60)
+            runs = _runs(report)
+            left = sorted(file.name for file in cache_dir.iterdir())
+        # pytest exits 2 on the KeyboardInterrupt a timeout's SIGINT raises; the
+        # test, interrupted before its setup report, wrote no run line and stays
+        # published for run_test.py.
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertEqual(inflight["path"], str(report))
+        self.assertEqual(before.count("\n"), 1)
+        self.assertEqual(inflight["test"]["case_name"], "test_interrupted")
+        self.assertEqual(inflight["rerun_number"], 0)
+        (run,) = runs
+        self.assertEqual(run["case_name"], "test_interrupted")
+        self.assertEqual(run["outcome"], "timed_out")
+        self.assertEqual(run["outcome_summary"], "timed out after 30min")
+        self.assertEqual(left, ["lastrun", "made_failing_xml"])
+
+    def test_timeout_reaches_retry_shell(self) -> None:
+        # pytest exits on the SIGINT that follows a timeout, within the grace
+        # period; retry_shell must still report the timeout as 124.
+        command = [sys.executable, "-c", "import time; time.sleep(60)"]
+        with tempfile.TemporaryFile("w+") as output:
+            code, _ = common_utils.retry_shell(
+                command, stdout=output, stderr=output, timeout=1, retries=0
+            )
+            output.seek(0)
+            log = output.read()
+        self.assertEqual(code, 124)
+        self.assertIn("Command took >0min, returning 124", log)
+
+    def test_run_test_finishes_the_run_in_flight(self) -> None:
+        test = torchci_report.TestId(
+            "test/test_x.py", "TestX", "test_x[p]", "python", "test_x"
+        )
+        t0 = time.time()
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "x.report.jsonl"
+            report.write_text('{"type":"report"}\n', encoding="utf-8")
+            self._publish(tmp, report, test, 2, t0)
+            crash = unittest.mock.Mock(return_value=(-11, False))
+            self._run_test_retries(tmp, [], retry_shell=crash)
+            # Consumed: nothing more to record.
+            self._run_test_retries(tmp, [], retry_shell=crash)
+            lines = report.read_text(encoding="utf-8").split("\n")
+        self.assertEqual(len(lines), 3, lines)
+        self.assertEqual(lines[2], "")
+        run = json.loads(lines[1])
+        _assert_run_line(self, run, int(t0 * 1000), int(time.time() * 1000))
+        self.assertEqual(run["declared_case_name"], "test_x")
+        self.assertEqual((run["rerun_number"], run["outcome"]), (2, "crashed"))
+        self.assertEqual(run["outcome_summary"], "exit code -11 (SIGSEGV)")
+
+    def test_run_test_skips_an_interrupt(self) -> None:
+        test = torchci_report.TestId("test/x.py", "", "test_x", "python", "test_x")
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "x.report.jsonl"
+            report.write_text('{"type":"report"}\n', encoding="utf-8")
+            cache_dir = self._publish(tmp, report, test, 0, time.time())
+            # pytest's interrupted exit: a Ctrl-C or a cancelled job, not a death.
+            interrupted = unittest.mock.Mock(return_value=(2, False))
+            self._run_test_retries(tmp, [], retry_shell=interrupted)
+            lines = report.read_text(encoding="utf-8").splitlines()
+            left = sorted(file.name for file in cache_dir.iterdir())
+        self.assertEqual(lines, ['{"type":"report"}'])
+        self.assertEqual(left, [])
+
+    def test_run_test_survives_a_corrupt_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = self._cache_dir(tmp)
+            cache_dir.mkdir(parents=True)
+            (cache_dir / "report_inflight").write_text("{")
+            crash = unittest.mock.Mock(return_value=(-11, False))
+            log = self._run_test_retries(tmp, [], retry_shell=crash)
+        self.assertIn("Could not finish the test run report:", log)
+        self.assertIn("No stepcurrent file found", log)
 
 
 class TestReportHelpers(TestCase):

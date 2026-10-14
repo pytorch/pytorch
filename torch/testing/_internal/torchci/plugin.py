@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import json
 import os
 import sys
+import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass
@@ -42,9 +44,12 @@ def _disable(error: Exception) -> None:
     _disabled = True
     try:
         print(f"torchci: report disabled after error: {error!r}", file=sys.stderr)
-        if _writer is not None and _writer.file is not None:
-            report_file, _writer.file = _writer.file, None
-            report_file.close()
+        if _writer is not None:
+            # Nothing more gets published, so what's there would go stale.
+            _writer._publish(None)
+            if _writer.file is not None:
+                report_file, _writer.file = _writer.file, None
+                report_file.close()
     except Exception:
         pass
 
@@ -108,7 +113,8 @@ class _Run:
 
 class ReportWriter:
     def __init__(self, path: str, report_uuid: str) -> None:
-        self.path = path
+        # run_test.py reads the published path from another working directory.
+        self.path = os.path.abspath(path)
         self.report_uuid = report_uuid
         self.file: IO[str] | None = None
         # By node id and xdist worker (report.node, None without xdist), as junitxml
@@ -117,11 +123,29 @@ class ReportWriter:
         self.runs: dict[tuple[str, Any], _Run] = {}
         self.rerun_numbers: Counter[str] = Counter()
         self.tests: dict[str, report.TestId | None] = {}
+        # Set when run_test.py's retry loop runs this process (--sc, --scs or --rs
+        # without xdist), the only reader of the run in flight (finish_inflight).
+        self.cache: pytest.Cache | None = None
+        self.inflight_key = ""
+
+    def _publish(self, inflight: dict[str, Any] | None) -> None:
+        # Best effort: a failed publication must not turn the report off.
+        if self.cache is not None:
+            with contextlib.suppress(Exception):
+                self.cache.set(self.inflight_key, inflight)
 
     def pytest_sessionstart(self, session: Session) -> None:
         if _disabled:
             return
         with _guard():
+            config = session.config
+            # Read here: test/conftest.py's pytest_configure folds --scs and --rs
+            # into stepcurrent.
+            key = config.getoption("stepcurrent", default=None)
+            if key and not config.getoption("numprocesses", default=None):
+                self.cache = config.cache
+                # Next to test/conftest.py's stepcurrent files, read by run_test.py.
+                self.inflight_key = f"cache/stepcurrent/{key}/report_inflight"
             record = report.report_record(self.report_uuid, environment.capture())
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
             self.file = open(self.path, "w", encoding="utf-8", newline="\n")  # noqa: SIM115
@@ -132,8 +156,24 @@ class ReportWriter:
         if _disabled:
             return
         with _guard():
-            # Empty on an xdist controller; workers send identities via makereport.
+            # Names the run in flight at logstart. Empty on an xdist controller,
+            # whose workers send identities via makereport.
             self.tests = {item.nodeid: identity(item) for item in session.items}
+
+    def pytest_runtest_logstart(self, nodeid: str, location: Any) -> None:
+        if _disabled:
+            return
+        with _guard():
+            # Before setup, so run_test.py can record the run if the process dies.
+            # pytest-rerunfailures starts each attempt here.
+            if (test := self.tests.get(nodeid)) is not None:
+                inflight = {
+                    "path": self.path,
+                    "test": test._asdict(),
+                    "rerun_number": self.rerun_numbers[nodeid],
+                    "started_at": time.time(),
+                }
+                self._publish(inflight)
 
     # Before test/conftest.py's LogXMLReruns rewrites skip longreprs.
     @pytest.hookimpl(tryfirst=True)
@@ -181,6 +221,10 @@ class ReportWriter:
     def _finish(self, key: tuple[str, Any], run: _Run) -> None:
         del self.runs[key]
         nodeid = key[0]
+        # Cleared before the line is written: a process killed between the two
+        # loses the run rather than recording it twice, and a published run means
+        # the report's last line is complete.
+        self._publish(None)
         # No identity: the item isn't a Python test function, its setup report never
         # arrived (the attempt was interrupted), or, under xdist, the worker's writer
         # turned itself off and its setup report came without one.
@@ -204,6 +248,34 @@ class ReportWriter:
             if self.file is not None:
                 self.file.close()
                 self.file = None
+
+
+def finish_inflight(
+    cache_dir: str | os.PathLike[str], outcome: str | None, outcome_summary: str = ""
+) -> None:
+    """For run_test.py: appends the run a dead process left in flight to its report
+    with ``outcome``, or only consumes it when ``outcome`` is None (the process was
+    interrupted). Consumed first, so no later process records it again."""
+    file = os.path.join(cache_dir, "report_inflight")
+    try:
+        with open(file, encoding="utf-8") as f:
+            data = f.read()
+    except FileNotFoundError:
+        return
+    os.unlink(file)
+    inflight = json.loads(data)
+    if inflight is None or outcome is None:
+        return
+    run = report.run_record(
+        report.TestId(**inflight["test"]),
+        inflight["rerun_number"],
+        outcome,
+        inflight["started_at"],
+        time.time(),
+        outcome_summary=outcome_summary,
+    )
+    with open(inflight["path"], "a", encoding="utf-8", newline="\n") as f:
+        f.write(report.line(run))
 
 
 @pytest.hookimpl(hookwrapper=True)

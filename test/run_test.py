@@ -843,16 +843,37 @@ def run_test_retries(
         print(s, file=output, flush=True)
 
     num_failures = defaultdict(int)
+    cache_dir = REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
 
     def read_pytest_cache(key: str) -> Any:
-        cache_file = (
-            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
-        )
         try:
-            with open(cache_file) as f:
+            with open(cache_dir / key) as f:
                 return f.read()
         except FileNotFoundError:
             return None
+
+    def finish_torchci_report(ret_code: int, signal_name: str) -> None:
+        # The report writer publishes the run in flight next to lastrun; a process
+        # that died left it unrecorded (torchci/README.md).
+        if not HAS_TORCHCI_REPORTS:
+            return
+        try:
+            outcome: str | None
+            if ret_code == 124:
+                outcome = "timed_out"
+                summary = f"timed out after {timeout // 60}min"
+            elif ret_code == 2:
+                # pytest's interrupted exit (Ctrl-C, a cancelled job, pytest.exit()):
+                # the process didn't die, so the run is only consumed.
+                outcome, summary = None, ""
+            else:
+                outcome = "crashed"
+                summary = f"exit code {ret_code}{signal_name}"
+            from torch.testing._internal.torchci import plugin
+
+            plugin.finish_inflight(cache_dir, outcome, summary)
+        except Exception as e:
+            print_to_file(f"Could not finish the test run report: {e}")
 
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
@@ -872,6 +893,8 @@ def run_test_retries(
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
+        if ret_code != 0:
+            finish_torchci_report(ret_code, signal_name)
 
         # Read what just failed/ran
         try:

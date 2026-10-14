@@ -69,8 +69,8 @@ physical RAM; it is omitted where neither is available.
 | `language` | string | `python` |
 | `declared_case_name` | string | Source test name before generated device, dtype, op, or parameter suffixes |
 | `rerun_number` | int | Execution number within one process, starting at `0` |
-| `outcome` | string | `passed`, `failed`, `error`, `skipped`, `xfailed`, or `xpassed` |
-| `outcome_summary` | string | Failure, skip, or xfail summary; otherwise `""` |
+| `outcome` | string | `passed`, `failed`, `error`, `skipped`, `xfailed`, or `xpassed`; `crashed` or `timed_out` for a run recorded by `run_test.py` (below) |
+| `outcome_summary` | string | Failure, skip, xfail, crash, or timeout summary; otherwise `""` |
 | `started_at` | int | Setup start as Unix epoch milliseconds |
 | `ended_at` | int | Last phase stop as Unix epoch milliseconds |
 | `properties` | object | Empty in version 0.1 |
@@ -81,6 +81,21 @@ it.
 
 A test aliased under a longer name (`test_x_dynamic = TestX.test_x`) reports the
 original's `declared_case_name`, `test_x`.
+
+## Crashes and timeouts
+
+A process that dies can't record the test it was running. Under `run_test.py`'s
+retry loop (`--sc`, `--scs` or `--rs` without xdist), the writer publishes the run
+in flight, with its report's absolute path, as `report_inflight` next to the
+stepcurrent plugin's `lastrun` in `.pytest_cache/v/cache/stepcurrent/<key>/`, from
+each test's start until just before its run line is written. On a non-zero exit,
+`run_test.py` consumes it and, unless pytest exited on an interrupt (exit code 2),
+appends the run: `timed_out` when `run_test.py` killed the process at its time
+limit (exit code 124), otherwise `crashed`, with the time limit or the exit code
+and signal in `outcome_summary` and `ended_at` set when `run_test.py` recorded it.
+
+Not covered: processes xdist starts (`-n`, which includes every C++ test),
+`run_tests --subprocess` children, and rerun-disabled-tests mode.
 
 ## Versioning
 
