@@ -4,6 +4,7 @@ import contextlib
 import copy
 import functools
 import math
+import re
 import threading
 from typing import Any
 
@@ -14,6 +15,8 @@ import torch.utils._pytree as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -266,6 +269,16 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             check_sharded_parity(self, ref_model, model)
+
+
+def _finish_post_all_gather(
+    weight: torch.Tensor, out: torch.Tensor | None
+) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
+    if out is None:
+        return weight, (weight,)
+    with _unsafe_preserve_version_counter(out):
+        out.copy_(weight)
+    return None
 
 
 class TestFullyShardAllGatherExtensionsMultiThread(
@@ -622,6 +635,11 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         self.assertEqual(tls.mesh.ndim, 1)
         self.assertEqual(tls.mesh.size(), shard_size)
 
+    def _patch_extension(self, module: nn.Module, pre_fn, post_fn):
+        local_weight = module.weight._local_tensor
+        local_weight.fsdp_pre_all_gather = pre_fn.__get__(local_weight)
+        local_weight.fsdp_post_all_gather = post_fn.__get__(local_weight)
+
     @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_single_rank_byte_payload(self):
         # A size-1 shard mesh skips the all-gather, so FSDP copies the payload
@@ -666,6 +684,67 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             output.sum().backward()
             ref_output.sum().backward()
             check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_post_forward_reshard(self):
+        # Single payloads that can back the post-forward parameter reshard, but
+        # cannot be all-gathered again; others fail before any parameter reshards
+        payloads = {
+            # Each rank's (1, 8) shard of the (8, 8) weight
+            "one": lambda t: (t,),
+            "complex": lambda t: (t.to(torch.complex64),),  # Shard(1) of a (4, 8) one
+            "frozen_bytes": lambda t: (t.view(torch.uint8),),
+            "zero": lambda t: (),
+            "two": lambda t: (t, torch.ones_like(t)),
+            "half": lambda t: (t.view(-1)[:4],),
+            "bytes": lambda t: (t.view(torch.uint8),),
+            "int8": lambda t: (t.to(torch.int8),),
+            # A (7, 8) weight has post-forward shards of 4 and 3 rows
+            "uneven": lambda t: (t.new_ones(6),),
+        }
+
+        # The 1-argument hook is not checked for the padded size
+        def fsdp_pre_all_gather(local_tensor, mesh):
+            return payloads[payload](local_tensor), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            weight = torch.ones(rows, 8, device=device_type)
+            return _finish_post_all_gather(weight, out)
+
+        inp = torch.randn((2, 8), device=device_type)
+        all_gather_msg = (
+            "All-gathering the post-forward shard of 1.weight is not supported"
+        )
+        msgs = {
+            "one": all_gather_msg,
+            "complex": all_gather_msg,
+            "frozen_bytes": all_gather_msg,
+            "zero": "Resharding 1.weight to smaller mesh is not supported for all-gather extensions with 0 inputs yet",
+            "two": "Resharding 1.weight to smaller mesh is not supported for all-gather extensions with 2 inputs yet",
+            "half": "Resharding 1.weight to smaller mesh needs post-forward shards of up to 32 elements, but its all-gather extension output has 16 per rank",
+            "bytes": "Resharding 1.weight to smaller mesh needs a floating or complex all-gather extension output to require gradients, but its output has dtype torch.uint8",
+            "int8": "but its output has dtype torch.int8",
+            "uneven": "Resharding 1.weight to smaller mesh needs post-forward shards of up to 32 elements, but its all-gather extension output has 24 per rank",
+        }
+        for payload, msg in msgs.items():
+            rows = {"uneven": 7, "complex": 4}.get(payload, 8)
+            model = nn.Sequential(
+                nn.Linear(8, 8, bias=False, device=device_type),
+                nn.Linear(8, rows, bias=False, device=device_type),
+            )
+            model[1].weight.requires_grad_(payload != "frozen_bytes")
+            s = Shard(int(payload == "complex"))
+            fully_shard(model, reshard_after_forward=2, shard_placement_fn=lambda _: s)
+            self._patch_extension(model[1], fsdp_pre_all_gather, fsdp_post_all_gather)
+            fsdp_params = fully_shard.state(model)._fsdp_param_group.fsdp_params
+            with self.assertRaisesRegex(NotImplementedError, re.escape(msg)):
+                model(inp).sum().backward()
+            if msg != all_gather_msg:
+                states = [fsdp_param.sharded_state for fsdp_param in fsdp_params]
+                self.assertEqual(states, [ShardedState.UNSHARDED] * 2)
 
 
 if __name__ == "__main__":
