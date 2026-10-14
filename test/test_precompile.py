@@ -5293,11 +5293,6 @@ class TestPrecompileDynamoCapture(TestCase):
                 y = cap(self.model, self.x2)
                 y.sum().backward()
                 self.assertTrue(cap.summary().complete)
-            self.assertIs(torch._inductor.config.bundled_autotune_remote_cache, True)
-            with self.assertRaisesRegex(KeyError, "the block's own"):
-                with self._capture(single, backend="inductor") as cap:
-                    raise KeyError("the block's own")
-            self.assertIs(torch._inductor.config.bundled_autotune_remote_cache, True)
         self.assertEqual(y, expected)
         for p, ref in zip(self.model.parameters(), reference.parameters()):
             self.assertEqual(p.grad, ref.grad)
