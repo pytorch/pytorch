@@ -150,6 +150,11 @@ if has_triton():
     import triton.language as tl
     from triton.language import core
 
+    # ROCm < 10.1 ships rocSHMEM < 3.7.0, whose device reduce breaks when n_pes * nreduce > 1024.
+    _ROCSHMEM_REDUCE_SIZE_LIMITED = tl.constexpr(
+        tuple(int(v) for v in (torch.version.rocm or "0.0").split(".")[:2]) < (10, 1)
+    )
+
     # -----------------------------------------------------------------------
     # rocSHMEM device API — Triton-callable device functions.
     #
@@ -472,6 +477,7 @@ if has_triton():
             - All threads of the work-group must call this function.
             - This is a collective operation that must be called by all PEs.
             - Supported dtypes: int16, int32, int64, float32, float64.
+            - On ROCm < 10.1 (rocSHMEM < 3.7.0), returns -1 without reducing if n_pes * nreduce > 1024.
 
         Example:
             ```
@@ -483,6 +489,9 @@ if has_triton():
         dtype = dest.type.element_ty
         # team and nreduce are int32: the rocSHMEM reduce API takes C `int` for both.
         # team is cast in _reduce_wg, after its compile-time check.
+        if _ROCSHMEM_REDUCE_SIZE_LIMITED:
+            if n_pes().to(tl.int64) * nreduce > 1024:
+                return -1
         return _reduce_wg(
             team,
             tl.cast(dest, tl.int64),

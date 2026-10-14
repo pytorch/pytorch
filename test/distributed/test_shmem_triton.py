@@ -970,13 +970,15 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.uint8,
             torch.float16,
             torch.float32,
-            *([torch.float64] if TEST_WITH_ROCM else []),  # ROCm only; fails on CUDA
+            torch.float64,
             torch.bfloat16,
         ],
     )
     def test_triton_sum_reduce(self, dtype) -> None:
         if TEST_WITH_ROCM and dtype not in ROCSHMEM_REDUCE_SUPPORTED_DTYPES:
             self.skipTest(f"rocSHMEM does not support {dtype} reduce")
+        if not TEST_WITH_ROCM and dtype == torch.float64:
+            self.skipTest("NVSHMEM float64 reduce: Tensor-likes are not close")
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
@@ -1118,13 +1120,15 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.int64,
             torch.float16,
             torch.float32,
-            *([torch.float64] if TEST_WITH_ROCM else []),  # ROCm only; fails on CUDA
+            torch.float64,
             torch.bfloat16,
         ],
     )
     def test_triton_prod_reduce(self, dtype) -> None:
         if TEST_WITH_ROCM and dtype not in ROCSHMEM_REDUCE_SUPPORTED_DTYPES:
             self.skipTest(f"rocSHMEM does not support {dtype} reduce")
+        if not TEST_WITH_ROCM and dtype == torch.float64:
+            self.skipTest("NVSHMEM float64 reduce: Tensor-likes are not close")
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
