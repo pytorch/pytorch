@@ -1729,4 +1729,21 @@ Tensor div_Tensor_meta(const Tensor& self, const Tensor& other) {
   return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::INT_TO_FLOAT, symbolic);
 }
 
+// Mirrors meta_binop_inplace_alpha, which ignores alpha. A wrapped number's
+// dtype matches the Python type the checks see there.
+Tensor& add__Tensor_meta(Tensor& self, const Tensor& other, const Scalar& /*alpha*/) {
+  const auto self_dtype = self.scalar_type();
+  const auto other_dtype = other.scalar_type();
+  TORCH_CHECK(
+      !(isIntegralType(self_dtype, /*includeBool=*/false) && isFloatingType(other_dtype)),
+      "Promotion of int.add/sub_(float) in in-place ops are not possible due to element size change.");
+  TORCH_CHECK(
+      self_dtype != kBool || other_dtype == kBool,
+      "Promotion of bool.add/sub_(others) in in-place ops are not possible due to element size change.");
+  if (!other.unsafeGetTensorImpl()->is_wrapped_number()) {
+    check_inplace_broadcast(self.sym_sizes(), other.sym_sizes());
+  }
+  return self;
+}
+
 } // namespace at::native
