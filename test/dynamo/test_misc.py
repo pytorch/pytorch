@@ -11333,6 +11333,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             set_guard_complete_hook(old_hook)
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_precompile_skip_survives_a_recompile_that_traces_no_graph(self):
         from torch._C._dynamo.eval_frame import (
             _load_precompile_skip,
