@@ -233,8 +233,7 @@ class FSDPParamGroup:
         ]
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
-        # Mesh of the current post-forward shards, which the next all-gather uses
-        # even if set_reshard_after_forward replaced post_forward_mesh_info
+        # Mesh of the current post-forward shards, for their next all-gather
         self._sharded_post_forward_mesh_info: FSDPMeshInfo | None = None
         self.device = device
         self.device_handle = _get_device_handle(device.type)
@@ -537,9 +536,8 @@ class FSDPParamGroup:
                         if not tensor.is_inference()
                         else contextlib.nullcontext()
                     ):
-                        # Like the world_size > 1 path, copy byte payloads
-                        # bytewise into cached outputs of other dtypes, and
-                        # smaller payloads into a prefix
+                        # Like the multi-rank path, copy byte payloads bytewise
+                        # and smaller payloads into a prefix
                         if all_gather_input.dtype == torch.uint8:
                             tensor = tensor.view(torch.uint8)
                         if tensor.numel() != all_gather_input.numel():
