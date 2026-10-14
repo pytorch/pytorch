@@ -21,3 +21,8 @@ struct SoftplusParams {
   float beta;
   float threshold;
 };
+
+struct HardtanhParams {
+  float min_val;
+  float max_val;
+};
