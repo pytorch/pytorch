@@ -568,35 +568,27 @@ class TestReportHelpers(TestCase):
             # The ROCm release, not HIP's version.
             self.assertEqual(environment._accelerator(), ("rocm", "10.1.0"))
 
+    @skipIfTorchDynamo("patches torch.__config__")
     @parametrize(
-        "config, expected",
+        "compiler, expected",
         [
-            # clang defines __GNUC__, so a clang build also prints a GCC line.
-            subtest(
-                (
-                    "  - GCC 4.2\n  - C++ Version: 201703\n  - clang 21.1.0\n",
-                    ("clang", "21"),
-                ),
-                name="clang",
-            ),
-            subtest(
-                ("  - GCC 11.4\n  - C++ Version: 201703\n", ("gcc", "11")), name="gcc"
-            ),
+            subtest((("clang", "21.1.0"), ("clang", "21.1.0")), name="clang"),
+            subtest((("gcc", "11.4"), ("gcc", "11.4")), name="gcc"),
             # _MSC_FULL_VER of MSVC 19.41.34120.
-            subtest(
-                ("  - C++ Version: 201703\n  - MSVC 194134120\n", ("msvc", "19")),
-                name="msvc",
-            ),
-            subtest(("  - C++ Version: 201703\n", ("", "")), name="unknown"),
+            subtest((("msvc", "194134120"), ("msvc", "194134120")), name="msvc"),
+            # A torch that predates torch.__config__._cxx_compiler.
+            subtest((None, ("", "")), name="missing"),
         ],
     )
-    def test_compiler(self, config, expected):
+    def test_compiler(self, compiler, expected):
         environment = importlib.import_module(
             "torch.testing._internal.torchci.environment"
         )
-        self.assertEqual(
-            environment._compiler(f"PyTorch built with:\n{config}"), expected
-        )
+        cxx_compiler = None if compiler is None else (lambda: compiler)
+        with unittest.mock.patch.object(
+            torch.__config__, "_cxx_compiler", cxx_compiler, create=True
+        ):
+            self.assertEqual(environment._compiler(), expected)
 
     def test_windows_os_version(self):
         environment = importlib.import_module(

@@ -25,10 +25,7 @@ class GuardDebugInfo:
     num_guards_executed: int
     user_stack: traceback.StackSummary | None
 
-class LocalState:
-    def apply_for_tensor(
-        self, dispatch_keys: torch._C.DispatchKeySet
-    ) -> torch._C.DispatchKeySet: ...
+class LocalState: ...
 
 class GuardManager:
     def check(self, value: Any) -> bool: ...

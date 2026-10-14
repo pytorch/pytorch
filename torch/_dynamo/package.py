@@ -536,23 +536,13 @@ def load_guard_manager(
     # globals serialized with the artifact, which only None selects.
     from .output_graph import OutputGraphCommon
 
-    try:
-        return torch._dynamo.guards.CheckFunctionManager(
-            target_code,
-            OutputGraphCommon(guards_state.output_graph),
-            shape_code_parts=guards_state.shape_code_parts,
-            runtime_global_scope=runtime_global_scope,
-            guard_build_local_state=getattr(guards_state, "local_state", None),
-        ).guard_manager
-    except KeyError as e:
-        # A global the guards read but the scope serialized with them lacks
-        # otherwise surfaces as a bare KeyError from deep inside the guard
-        # builder, naming neither the frame nor the artifact.
-        raise PackageError(
-            f"Cannot rebuild the serialized guards for {target_code.co_name} "
-            f"({target_code.co_filename}:{target_code.co_firstlineno}): "
-            f"{type(e).__name__}: {e}"
-        ) from e
+    return torch._dynamo.guards.CheckFunctionManager(
+        target_code,
+        OutputGraphCommon(guards_state.output_graph),
+        shape_code_parts=guards_state.shape_code_parts,
+        runtime_global_scope=runtime_global_scope,
+        guard_build_local_state=getattr(guards_state, "local_state", None),
+    ).guard_manager
 
 
 _BackendId = NewType("_BackendId", str)  # __compiled_fn
@@ -672,6 +662,11 @@ def _globals_module_name(namespace: dict[str, Any]) -> str | None:
     return None
 
 
+def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
+    name = _globals_module_name(namespace)
+    return sys.modules[name] if name is not None else None
+
+
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
     if len(entry.function_names) != 1:
         raise AssertionError(
@@ -761,7 +756,11 @@ def _get_code_source(code: types.CodeType, module: types.ModuleType) -> tuple[st
     """
 
     toplevel: Any = module
-    search_module_tree = sys.version_info < (3, 11)
+    # Code that is not its own module's (exec-generated, or reached through
+    # another alias) has a co_qualname that is no path from ``module``.
+    search_module_tree = (
+        sys.version_info < (3, 11) or inspect.getmodule(code) is not module
+    )
     if not search_module_tree:
         parts = code.co_qualname.split(".")
 
@@ -851,30 +850,32 @@ def _get_code_source(code: types.CodeType, module: types.ModuleType) -> tuple[st
                     if (res := _find_code_source(value)) is not None:
                         return res
 
-            if inspect.isclass(obj):
-                for name in itertools.chain(obj.__dict__.keys(), dir(obj)):
-                    try:
-                        value = getattr(obj, name)
-                    except AttributeError:
-                        continue
-                    # A descriptor is what getattr on the CLASS returns for
-                    # anything defined under @property or @cached_property, so
-                    # excluding it here hides every code object inside one.
-                    wrapped = _descriptor_functions(value)
-                    if not (
-                        inspect.isfunction(value)
-                        or inspect.isclass(value)
-                        or inspect.ismethod(value)
-                        or wrapped
-                    ):
-                        continue
-                    if (res := _find_code_source(value)) is not None:
-                        # A descriptor has no __name__; the functions it wraps
-                        # carry the attribute's name instead.
-                        actual = wrapped[0][1].__name__ if wrapped else value.__name__
-                        if actual != name:
-                            _raise_resolution_error(code, toplevel)
-                        return res
+        if inspect.isclass(obj):
+            for name in itertools.chain(obj.__dict__.keys(), dir(obj)):
+                try:
+                    value = getattr(obj, name)
+                except Exception:
+                    # Class-level descriptors and metaclass __getattr__ may
+                    # raise anything, and the module search visits every class.
+                    continue
+                # A descriptor is what getattr on the CLASS returns for
+                # anything defined under @property or @cached_property, so
+                # excluding it here hides every code object inside one.
+                wrapped = _descriptor_functions(value)
+                if not (
+                    inspect.isfunction(value)
+                    or inspect.isclass(value)
+                    or inspect.ismethod(value)
+                    or wrapped
+                ):
+                    continue
+                if (res := _find_code_source(value)) is not None:
+                    # A descriptor has no __name__; the functions it wraps
+                    # carry the attribute's name instead.
+                    actual = wrapped[0][1].__name__ if wrapped else value.__name__
+                    if actual != name:
+                        _raise_resolution_error(code, toplevel)
+                    return res
         return None
 
     code_source = _find_code_source(toplevel)
@@ -1165,7 +1166,6 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        self._installed_codes: set[types.CodeType] = set()
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
 
@@ -1181,12 +1181,6 @@ class CompilePackage:
 
     def is_initialized(self) -> bool:
         return self._initialized
-
-    def reset(self) -> None:
-        """Run uninstall() and return to the uninitialized state, so initialize() can run again."""
-        self.uninstall()
-        self.__dict__.pop("source_id", None)
-        CompilePackage.__init__(self, None, explicit=self.explicit)
 
     def initialize(
         self,
@@ -1304,20 +1298,30 @@ class CompilePackage:
         return CompilePackage.source_id_from_fn(self._innermost_fn)
 
     def _add_user_function(
-        self, code: types.CodeType, global_scope: dict[str, Any] | None = None
+        self,
+        code: types.CodeType,
+        global_scope: dict[str, object] | None = None,
     ) -> None:
-        # The frame's globals name its module exactly; inspect.getmodule only
-        # guesses from the file, which an aliased module shares.
-        module_name = (
-            _globals_module_name(global_scope) if global_scope is not None else None
+        code_module = inspect.getmodule(code)
+        globals_module = (
+            _globals_module(global_scope) if global_scope is not None else None
         )
-        module = sys.modules[module_name] if module_name else inspect.getmodule(code)
+        module = code_module or globals_module
         if module is None:
             raise PackageError(f"Cannot find module for code {code}")
-        function_name, code_source = _get_code_source(code, module)
+        try:
+            function_name, code_source = _get_code_source(code, module)
+        except PackageError:
+            # One file imported under two names is two modules, and
+            # inspect.getmodule can answer with the alias whose namespace the
+            # frame does not run with; fall back to the one it does.
+            if globals_module is None or globals_module is module:
+                raise
+            module = globals_module
+            function_name, code_source = _get_code_source(code, module)
         self._add_function(
             code,
-            module_name or module.__name__,
+            _globals_module_name(vars(module)) or module.__name__,
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
@@ -1329,7 +1333,9 @@ class CompilePackage:
 
     @contextlib.contextmanager
     def code_context(
-        self, code: types.CodeType, global_scope: dict[str, Any] | None = None
+        self,
+        code: types.CodeType,
+        global_scope: dict[str, object] | None = None,
     ) -> Generator[None, None, None]:
         if self._current_entry is not None:
             raise AssertionError("_current_entry is already set in code_context")
@@ -1469,12 +1475,6 @@ class CompilePackage:
             self._installed_globals.setdefault(module, []).append(name)
 
     def uninstall(self) -> None:
-        """
-        Drop the globals install() recorded and the precompile entries on the
-        innermost fn's code and on every code object install() loaded one onto.
-        install()'s other side effects (input_codes, skip_code, the builtins
-        dict global) are left in place.
-        """
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
         if self._innermost_fn is None:
@@ -1486,9 +1486,6 @@ class CompilePackage:
         self._installed_globals = {}
 
         _reset_precompile_entries(self._innermost_fn.__code__)
-        for code in self._installed_codes:
-            _reset_precompile_entries(code)
-        self._installed_codes = set()
 
     def install(self, backends: dict[_BackendId, Any]) -> None:
         """
@@ -1640,7 +1637,6 @@ class CompilePackage:
                         guard_manager = load_guard_manager(
                             guards_state, target_code, runtime_global_scope
                         )
-                    self._installed_codes.add(target_code)
                     _load_precompile_entry(
                         target_code,
                         guard_manager,
