@@ -479,6 +479,10 @@ bool has_relevant_cache_entries(
   if (extra_state == nullptr) {
     return false;
   }
+  // lookup() serves precompile entries in every region.
+  if (!extra_state->precompile_entries.empty()) {
+    return true;
+  }
   bool found = false;
   for_each_bucket(extra_state, isolate_recompiles_id, [&](int64_t, auto&) {
     found = true;
