@@ -544,10 +544,10 @@ def load_guard_manager(
             runtime_global_scope=runtime_global_scope,
             guard_build_local_state=getattr(guards_state, "local_state", None),
         ).guard_manager
-    except (AttributeError, IndexError, KeyError, TypeError) as e:
-        # A guard source that does not resolve against the scope serialized
-        # with it otherwise surfaces as a bare lookup error from deep inside
-        # the guard builder, naming neither the frame nor the artifact.
+    except KeyError as e:
+        # A global the guards read but the scope serialized with them lacks
+        # otherwise surfaces as a bare KeyError from deep inside the guard
+        # builder, naming neither the frame nor the artifact.
         raise PackageError(
             f"Cannot rebuild the serialized guards for {target_code.co_name} "
             f"({target_code.co_filename}:{target_code.co_firstlineno}): "
