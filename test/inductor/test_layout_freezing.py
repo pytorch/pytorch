@@ -9,10 +9,14 @@ from unittest.mock import Mock, patch
 
 import torch
 import torch._inductor.config as inductor_config
-from torch._inductor import ir
+from torch._inductor import ir, metrics
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -96,6 +100,25 @@ class TestLayoutFreezing(TestCase):
         self.assertIsNone(view.maybe_get_stride_hint())
         self.assertIsNone(ir.TensorBox(view).maybe_get_stride_hint())
 
+    @parametrize("strides", [[16, 1], [1, 8]])
+    def test_significant_strides_keep_layout_flexible(self, strides):
+        buf = ir.ComputedBuffer(
+            name="input",
+            layout=ir.FlexibleLayout(torch.device("cpu"), torch.float32, [8, 16]),
+            data=ir.Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                ranges=[8, 16],
+                inner_fn=lambda index: ir.ops.constant(0, torch.float32),
+            ),
+        )
+        with (
+            V.set_graph_handler(Mock(sizevars=SizeVarAllocator())),
+            patch.object(buf, "get_fill_order", return_value=None),
+        ):
+            self.assertIs(ir.try_match_insignificant_strides(buf, strides), buf)
+        self.assertIsInstance(buf.get_layout(), ir.FlexibleLayout)
+
     @parametrize("transposed", [False, True])
     @parametrize("aten_fallback", [False, True])
     @inductor_config.patch(
@@ -155,6 +178,114 @@ class TestLayoutFreezing(TestCase):
                 self.assertEqual(layout.stride, strides)
             else:
                 self.assertIsInstance(buf.get_layout(), ir.FixedLayout)
+
+
+class TestLayoutFreezingDevice(TestCase):
+    @onlyAccelerator
+    @parametrize("width", [342, 347])
+    def test_noncontiguous_reshape_of_padded_buffer(self, device, width):
+        # Regression test for #192575: View.create baked an unfrozen buffer's
+        # placeholder strides into a ReinterpretView; comprehensive padding
+        # then changed the real strides, silently corrupting gradients.
+
+        def fn(x, offset, weight):
+            query, key, value = (
+                part.view(2, 3, 1, width) + offset
+                for part in (x @ weight.T).chunk(3, -1)
+            )
+            query_sig = torch.sigmoid(query).transpose(1, 2)
+            query_tanh = torch.tanh(query).transpose(1, 2)
+            key_sig = torch.sigmoid(key).transpose(1, 2)
+            key_tanh = torch.tanh(key).transpose(1, 2)
+            scores = (
+                query_sig @ key_sig.transpose(-2, -1)
+                + query_tanh @ key_tanh.transpose(-2, -1)
+                - query_sig @ key_tanh.transpose(-2, -1)
+            )
+            return scores @ value.transpose(1, 2)
+
+        torch.manual_seed(0)
+        args = tuple(
+            torch.randn(*shape, device=device, requires_grad=True)
+            for shape in [(2, 3, 1), (2, 3, 1, width), (3 * width, 1)]
+        )
+        with inductor_config.patch(
+            comprehensive_padding=True, padding_stride_threshold=1024
+        ):
+            metrics.reset()
+            expected = fn(*args)
+            expected_grads = torch.autograd.grad(expected.sum(), args)
+            actual = torch.compile(fn)(*args)
+            actual_grads = torch.autograd.grad(actual.sum(), args)
+        self.assertTrue(metrics.num_comprehensive_padding > 0)
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
+        self.assertEqual(actual_grads, expected_grads, atol=2e-3, rtol=1e-4)
+
+    @onlyAccelerator
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_select_of_padded_buffer(self, device):
+        # select with an unbacked index persists the input's strides/offset
+        # into DynamicSelectStorageOffset; the layout must be frozen first.
+        def fn(x, idx_t):
+            idx = idx_t.item()
+            y = torch.sin(x)
+            return y.select(0, idx) + 1
+
+        x = torch.randn(16, 1030, device=device)
+        idx_t = torch.tensor(3, device=device)
+        with inductor_config.patch(
+            comprehensive_padding=True, padding_stride_threshold=0
+        ):
+            expected = fn(x, idx_t)
+            actual = torch.compile(fn)(x, idx_t)
+        self.assertEqual(actual, expected)
+
+    @onlyAccelerator
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_slice_of_padded_buffer(self, device):
+        def fn(x, start_t):
+            start = start_t.item()
+            y = torch.sin(x)
+            return y[start:, :] + 1
+
+        x = torch.randn(16, 1030, device=device)
+        start_t = torch.tensor(2, device=device)
+        with inductor_config.patch(
+            comprehensive_padding=True, padding_stride_threshold=0
+        ):
+            expected = fn(x, start_t)
+            actual = torch.compile(fn)(x, start_t)
+        self.assertEqual(actual, expected)
+
+    @onlyAccelerator
+    def test_sdpa_computed_bias_with_reuse(self, device):
+        # A realized-but-flexible bias (realized by a second consumer) must
+        # take the require_* path, which freezes it into the wanted order in
+        # place; the alignment check used to peek at its unfrozen strides and
+        # skip that path.
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        def fn(q, k, v, b):
+            bias = (b * 2.0).sin()
+            aux = bias * 3.0
+            with sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION]):
+                out = torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, attn_mask=bias
+                )
+            return out, aux
+
+        torch.manual_seed(0)
+        q, k, v = (torch.randn(2, 4, 128, 64, device=device) for _ in range(3))
+        b = torch.randn(2, 4, 128, 128, device=device)
+        expected = fn(q, k, v, b)
+        with inductor_config.patch(realize_opcount_threshold=1):
+            actual = torch.compile(fn)(q, k, v, b)
+        self.assertEqual(actual, expected, atol=2e-4, rtol=2e-4)
+
+
+instantiate_device_type_tests(
+    TestLayoutFreezingDevice, globals(), allow_xpu=True, allow_mps=True
+)
 
 
 if __name__ == "__main__":
