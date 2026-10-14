@@ -106,21 +106,26 @@ def load_package(
     run_single_threaded: bool = False,
     num_runners: int = 1,
     device_index: int = -1,
+    use_stream_affinity: bool = False,
 ) -> AOTICompiledModel:
-    try:
-        pt2_contents = load_pt2(
-            path,
-            run_single_threaded=run_single_threaded,
-            num_runners=num_runners,
-            device_index=device_index,
-        )
-        if model_name not in pt2_contents.aoti_runners:
-            raise RuntimeError(f"Model {model_name} not found in package")
-        return pt2_contents.aoti_runners[model_name]
-    except RuntimeError as e:
-        if AOTI_PACKAGE_DEVICE_ERROR in str(e):
-            raise
-        log.warning("Loading outdated pt2 file. Please regenerate your package.")
+    """Load an AOTI model from a PT2 package or an extracted package directory."""
+    is_directory = isinstance(path, (str, os.PathLike)) and os.path.isdir(path)
+    if not is_directory:
+        try:
+            pt2_contents = load_pt2(
+                path,
+                run_single_threaded=run_single_threaded,
+                num_runners=num_runners,
+                device_index=device_index,
+                use_stream_affinity=use_stream_affinity,
+            )
+            if model_name not in pt2_contents.aoti_runners:
+                raise RuntimeError(f"Model {model_name} not found in package")
+            return pt2_contents.aoti_runners[model_name]
+        except RuntimeError as e:
+            if AOTI_PACKAGE_DEVICE_ERROR in str(e):
+                raise
+            log.warning("Loading outdated pt2 file. Please regenerate your package.")
 
     if isinstance(path, (io.IOBase, IO)):
         with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
@@ -130,12 +135,22 @@ def load_package(
             f.write(path.read())
             log.debug("Writing buffer to tmp file located at %s.", f.name)
             loader = torch._C._aoti.AOTIModelPackageLoader(
-                f.name, model_name, run_single_threaded, num_runners, device_index
+                f.name,
+                model_name,
+                run_single_threaded,
+                num_runners,
+                device_index,
+                use_stream_affinity,
             )
             return AOTICompiledModel(loader)
 
     path = os.fspath(path)  # AOTIModelPackageLoader expects (str, str)
     loader = torch._C._aoti.AOTIModelPackageLoader(
-        path, model_name, run_single_threaded, num_runners, device_index
+        path,
+        model_name,
+        run_single_threaded,
+        num_runners,
+        device_index,
+        use_stream_affinity,
     )
     return AOTICompiledModel(loader)

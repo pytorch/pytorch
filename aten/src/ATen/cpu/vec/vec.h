@@ -7,6 +7,13 @@
 #include <ATen/cpu/vec/vec256/vec256.h>
 #endif
 
+#if (                                                                 \
+    defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || \
+    defined(__aarch64__)) &&                                          \
+    defined(AT_VEC_CUSTOM_MATH) && defined(FBCODE_CAFFE2)
+#include <ATen/cpu/vec/fb/single.h>
+#endif
+
 namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {

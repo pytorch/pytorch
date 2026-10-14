@@ -20,7 +20,11 @@ from torch.distributed.checkpoint._experimental.checkpoint_writer import (
     CheckpointWriterConfig,
 )
 from torch.distributed.checkpoint._experimental.types import RankInfo
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def subprocess_init_fn(name: str, parent_pid: int) -> None:
@@ -117,6 +121,8 @@ def shared_tensor_verifier_init_fn(**kwargs: Any) -> CheckpointWriter:
 class TestRequestTypes(TestCase):
     """Test the request/response data structures."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_request_type_enum(self) -> None:
         """Test RequestType enum values."""
         self.assertEqual(RequestType.PING.value, "ping")
@@ -146,6 +152,8 @@ class TestRequestTypes(TestCase):
 class TestCheckpointProcessConfig(TestCase):
     """Test CheckpointProcessConfig configuration."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_default_options(self) -> None:
         """Test default CheckpointProcessConfig."""
         options = CheckpointProcessConfig()
@@ -163,6 +171,8 @@ class TestCheckpointProcessConfig(TestCase):
 
 
 class TestCheckpointProcess(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         """Set up common test fixtures."""
@@ -263,16 +273,7 @@ class TestCheckpointProcess(TestCase):
         # Wait for initialization
         checkpoint_process.process_creation_future.result()
 
-        # Create a Future that resolves to the state dict
-        from concurrent.futures import ThreadPoolExecutor
-
-        executor = ThreadPoolExecutor(max_workers=1)
-
-        def get_state_dict():
-            time.sleep(0.1)  # Simulate some processing time
-            return self.test_state_dict
-
-        future_state_dict = executor.submit(get_state_dict)
+        future_state_dict = Future()
 
         # Create a temporary directory for the checkpoint
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -280,6 +281,7 @@ class TestCheckpointProcess(TestCase):
 
             # Write checkpoint with Future state dict
             write_future = checkpoint_process.write(future_state_dict, checkpoint_path)
+            future_state_dict.set_result(self.test_state_dict)
 
             # Wait for completion
             write_future.result()
@@ -290,7 +292,6 @@ class TestCheckpointProcess(TestCase):
             )
             self.assertTrue(os.path.exists(expected_file))
 
-        executor.shutdown(wait=True)
         checkpoint_process.close()
 
     def test_checkpoint_write_with_kwargs(self) -> None:

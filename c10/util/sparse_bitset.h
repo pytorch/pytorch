@@ -13,8 +13,9 @@
 
 #pragma once
 #include <c10/macros/Macros.h>
-#include <c10/util/llvmMathExtras.h>
+#include <c10/util/Exception.h>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <climits>
 #include <iterator>
@@ -112,7 +113,7 @@ struct SparseBitVectorElement {
   size_type count() const {
     unsigned NumBits = 0;
     for (unsigned i = 0; i < BITWORDS_PER_ELEMENT; ++i)
-      NumBits += llvm::countPopulation(Bits[i]);
+      NumBits += std::popcount(Bits[i]);
     return NumBits;
   }
 
@@ -120,8 +121,8 @@ struct SparseBitVectorElement {
   int find_first() const {
     for (unsigned i = 0; i < BITWORDS_PER_ELEMENT; ++i)
       if (Bits[i] != 0)
-        return i * BITWORD_SIZE + llvm::countTrailingZeros(Bits[i]);
-    throw std::runtime_error("Illegal empty element");
+        return i * BITWORD_SIZE + std::countr_zero(Bits[i]);
+    TORCH_CHECK(false, "Illegal empty element");
   }
 
   /// find_last - Returns the index of the last set bit.
@@ -129,10 +130,9 @@ struct SparseBitVectorElement {
     for (unsigned I = 0; I < BITWORDS_PER_ELEMENT; ++I) {
       unsigned Idx = BITWORDS_PER_ELEMENT - I - 1;
       if (Bits[Idx] != 0)
-        return Idx * BITWORD_SIZE + BITWORD_SIZE -
-            llvm::countLeadingZeros(Bits[Idx]);
+        return Idx * BITWORD_SIZE + std::bit_width(Bits[Idx]);
     }
-    throw std::runtime_error("Illegal empty element");
+    TORCH_CHECK(false, "Illegal empty element");
   }
 
   /// find_next - Returns the index of the next set bit starting from the
@@ -151,12 +151,12 @@ struct SparseBitVectorElement {
     Copy &= ~0UL << BitPos;
 
     if (Copy != 0)
-      return WordPos * BITWORD_SIZE + llvm::countTrailingZeros(Copy);
+      return WordPos * BITWORD_SIZE + std::countr_zero(Copy);
 
     // Check subsequent words.
     for (unsigned i = WordPos + 1; i < BITWORDS_PER_ELEMENT; ++i)
       if (Bits[i] != 0)
-        return i * BITWORD_SIZE + llvm::countTrailingZeros(Bits[i]);
+        return i * BITWORD_SIZE + std::countr_zero(Bits[i]);
     return -1;
   }
 

@@ -145,6 +145,20 @@ class DeterministicTest(TestCase):
             )
             size //= 2
 
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU + Triton")
+    def test_cumsum_deterministic(self):
+        from torch._inductor.utils import run_and_get_code
+
+        x = torch.randn(1_000_003, device=GPU_TYPE, dtype=torch.float32)
+        compiled = torch.compile(lambda v: torch.cumsum(v, dim=0))
+
+        torch.use_deterministic_algorithms(True, warn_only=False)
+        eager = torch.cumsum(x, dim=0)
+        result, (_,) = run_and_get_code(compiled, x)
+        for _ in range(5):
+            self.assertEqual(result.view(torch.int32), compiled(x).view(torch.int32))
+        self.assertEqual(result.view(torch.int32), eager.view(torch.int32))
+
     def test_reorder_for_locality_preserves_randint_order(self):
         with inductor_config.patch(fallback_random=True):
 
@@ -190,7 +204,7 @@ class DeterministicTest(TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             saved_pkl = os.path.join(tmpdir, "saved.pkl")
             cmd = (
-                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --backend inductor"
+                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --save-model-outputs-to={saved_pkl}"
             )
@@ -206,7 +220,7 @@ class DeterministicTest(TestCase):
             # self.assertTrue("pass" in out.stdout.decode())
 
             cmd = (
-                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --backend inductor"
+                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --compare-model-outputs-with={saved_pkl}"
             )

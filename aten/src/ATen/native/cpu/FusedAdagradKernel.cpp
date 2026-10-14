@@ -45,18 +45,18 @@ std::enable_if_t<
       grad_vec2 = grad_vec2 * fVec(opmath_t(-1.0));
     }
     if (weight_decay != 0.0){
-      grad_vec1 += param_vec1 * fVec(scalar_t(weight_decay));
-      grad_vec2 += param_vec2 * fVec(scalar_t(weight_decay));
+      grad_vec1 += param_vec1 * fVec(opmath_t(weight_decay));
+      grad_vec2 += param_vec2 * fVec(opmath_t(weight_decay));
     }
     auto [state_sum_vec1, state_sum_vec2] = vec::convert_to_float<scalar_t>(lpVec::loadu(state_sum_ptr + d));
     state_sum_vec1 += grad_vec1 * grad_vec1;
     state_sum_vec2 += grad_vec2 * grad_vec2;
     vec::convert_from_float<scalar_t>(state_sum_vec1, state_sum_vec2).store(state_sum_ptr + d);
 
-    fVec std_vec1 = state_sum_vec1.sqrt() + fVec(scalar_t(eps));
-    fVec std_vec2 = state_sum_vec2.sqrt() + fVec(scalar_t(eps));
-    param_vec1 = param_vec1 - fVec(scalar_t(clr)) * grad_vec1 / std_vec1;
-    param_vec2 = param_vec2 - fVec(scalar_t(clr)) * grad_vec2 / std_vec2;
+    fVec std_vec1 = state_sum_vec1.sqrt() + fVec(opmath_t(eps));
+    fVec std_vec2 = state_sum_vec2.sqrt() + fVec(opmath_t(eps));
+    param_vec1 = param_vec1 - fVec(opmath_t(clr)) * grad_vec1 / std_vec1;
+    param_vec2 = param_vec2 - fVec(opmath_t(clr)) * grad_vec2 / std_vec2;
     vec::convert_from_float<scalar_t>(param_vec1, param_vec2).store(param_ptr + d);
   }
   for (; d < size; d++) {

@@ -144,7 +144,7 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     weight1_range = channel_range(weight1, output_axis)
     weight2_range = channel_range(weight2, input_axis)
 
-    # producing scaling factors to applied
+    # producing scaling factors to be applied
     weight2_range += 1e-9
     scaling_factors = torch.sqrt(weight1_range / weight2_range)
     inverse_scaling_factors = torch.reciprocal(scaling_factors)
@@ -202,7 +202,7 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
     """Equalize modules until convergence is achieved.
 
     Given a list of adjacent modules within a model, equalization will
-    be applied between each pair, this will repeated until convergence is achieved
+    be applied between each pair, this will be repeated until convergence is achieved
 
     Keeps a copy of the changing modules from the previous iteration, if the copies
     are not that different than the current modules (determined by converged_test),
@@ -275,5 +275,5 @@ def converged(curr_modules, prev_modules, threshold=1e-4):
         prev_weight = get_module_weight(prev_modules[name])
 
         difference = curr_weight.sub(prev_weight)
-        summed_norms += torch.norm(difference)
+        summed_norms += torch.linalg.vector_norm(difference)
     return bool(summed_norms < threshold)

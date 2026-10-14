@@ -65,6 +65,7 @@ require_larger_multiplier_for_smaller_tensor:
   - inception_v3
   - mobilenetv3_large_100
   - vit_base_patch14_dinov2.lvd142m
+  - vit_base_patch16_siglip_256
 
 
 # Models that need torch._inductor.config.emulate_precision_casts=True to match
