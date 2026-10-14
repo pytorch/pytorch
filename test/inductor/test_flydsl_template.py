@@ -2445,6 +2445,49 @@ class TestFlyDSLTemplate(TestCase):
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    @parametrize("n,k", ((256, 384), (1408, 2048)))
+    def test_flydsl_mxfp8_wgrad_nan_stays_in_its_group(self, n, k):
+        """Blocks walk 256-aligned windows, so they also read neighbouring
+        groups' tokens and the padding past offs[-1]. A NaN there must not
+        reach any other group's output, as eager slicing guarantees."""
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
+        # Groups end at 512 and M is padded to 640, so offs[-1] < M.
+        group_sizes = [32, 96, 224, 160, 0]
+        a, b, a_scale, b_scale, offs, reference = self._make_mxfp8_wgrad_inputs(
+            group_sizes + [128], n, k
+        )
+        offs, reference = offs[:-1], reference[:-1]
+        bounds = [0, *offs.tolist()]
+        nan = 0x7F  # float8_e4m3fn NaN
+        a_u8, b_u8 = a.view(torch.uint8), b.t().view(torch.uint8)
+        a_u8[:, bounds[0] : bounds[1]] = nan  # group 0's tokens, in A
+        b_u8[:, bounds[3] : bounds[4]] = nan  # group 3's tokens, in B
+        a_u8[:, bounds[-1] :] = nan  # the padding past offs[-1], in both
+        b_u8[:, bounds[-1] :] = nan
+
+        def fn(a, b, a_scale, b_scale, offs):
+            return self._scaled_grouped_mm_mxfp8(a, b, a_scale, b_scale, offs)
+
+        torch._dynamo.reset()
+        result = torch.compile(fn, backend="inductor")(a, b, a_scale, b_scale, offs)
+        self.assertEqual(result.shape[0], len(group_sizes))
+        for group in (1, 2, 4):
+            self.assertTrue(torch.isfinite(result[group]).all(), f"group {group}")
+            self.assertEqual(
+                result[group].float(), reference[group], atol=6e-2, rtol=6e-2
+            )
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     def test_flydsl_mxfp8_wgrad_traps_on_invalid_offsets(self):
         """Group offsets live on the device, so the kernel validates them: a
         bound that splits a 32-element MX scale block, or one past M, aborts

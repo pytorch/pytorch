@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
-#
-# Vendored from ROCm/AMD-TorchTitan-Ops amd_titan/_ops/mxwgrad/_kernel_v1.py.
 """Ragged MXFP8 weight-gradient grouped GEMM for gfx950.
 
 The inputs are row-major ``A[N, M]`` and ``B[K, M]`` views produced by the
@@ -11,8 +9,11 @@ The inputs are row-major ``A[N, M]`` and ``B[K, M]`` views produced by the
 Each workgroup owns one output tile and walks the full contraction interval for
 one group. Group sizes and the operand row stride stay runtime values, so routed
 token counts do not become FlyDSL compile keys. The contraction window is
-rounded outward to 256 elements for cooperative scale loads; scale operands are
-masked on both sides outside the group, including empty groups.
+rounded outward to 256 elements for cooperative scale loads. Tokens in the
+window but outside the group (neighbouring groups, and padding past the last
+offset) are zero-filled as they are loaded and their scales are zeroed, so
+they contribute exactly nothing, NaN or Inf included; empty groups write
+zeros.
 
 The body uses four waves, an eight-buffer LDS pipeline, AGPR accumulators, and
 device-side group scheduling. Large grids use constant-index offset loads and
@@ -93,7 +94,7 @@ def _mfma_scale_agpr(a, b, sa, sb, acc):
     """fp8 16x16x128 scaled MFMA, accumulator pinned in AGPR (=a,...,0) so the
     f32x4 acc accumulates in place and the compiler does not shuffle it
     between AGPR slots. a/b are i32x8 (K=128 fp8); sa/sb are broadcast-i32
-    E8M0 scales. cbsz:0 blgp:0, no op_sel (fp8). Identical to v3.3's."""
+    E8M0 scales. cbsz:0 blgp:0, no op_sel (fp8)."""
     asm = "v_mfma_scale_f32_16x16x128_f8f6f4 $0, $1, $2, $0, $3, $4 cbsz:0 blgp:0"
     return _llvm.inline_asm(
         Vec.make_type(4, fx.Float32),
@@ -108,6 +109,63 @@ def _mfma_scale_agpr(a, b, sa, sb, acc):
         "=a,v,v,v,v,0",
         has_side_effects=True,
     )
+
+
+# Any voffset at or past the descriptor's num_records reads as zero. Operands
+# are bounded to int32 elements, so this is out of range for all of them.
+_OOB_VOFFSET = 0x7FFFFFFF
+
+
+class _WindowedG2S(G2SLoader):
+    """G2SLoader that zero-fills the 16-token chunks outside a group's tokens.
+
+    A block walks its group's contraction window rounded out to 256 tokens, so
+    the window's edges hold neighbouring groups' tokens (and, for the last
+    group, padding past offs[-1]). Their scales are zeroed, but e8m0 0x00 is
+    2**-127, not 0, so a NaN or Inf there would survive into this group's
+    output. Group bounds are multiples of 32, so each lane's 16-token chunk is
+    wholly inside or outside the group; an outside chunk's load is pointed out
+    of range, and the buffer range check writes zeros to LDS instead.
+    """
+
+    def __init__(self, gl_src, gl_offsets, gl_cols, head, span, *args):
+        super().__init__(gl_src, gl_offsets, *args)
+        self.gl_cols = gl_cols
+        self.head = head
+        self.span = span
+
+    def _src(self, step, k_col):
+        e = k_col + self.gl_cols[step]
+        inside = (e >= self.head) & (e < self.span)
+        off = arith.select(
+            inside, fx.Int32(self.gl_offsets[step]), fx.Int32(_OOB_VOFFSET)
+        )
+        return fx.slice(self.gl_src, (None, off))
+
+    def load(self, lds_dst, k_offset, k_col):
+        for step in range_constexpr(self.n_load_steps):
+            dst = self._lds_dst_at(lds_dst, step)
+            fx.copy(
+                self.g2lds_atom, self._src(step, k_col), dst, soffset=fx.Int32(k_offset)
+            )
+
+    def load_one(self, lds_dst, k_offset, step, k_col):
+        dst = self._lds_dst_at(lds_dst, step)
+        fx.copy(
+            self.g2lds_atom, self._src(step, k_col), dst, soffset=fx.Int32(k_offset)
+        )
+
+
+def _global_swizzle_cols(lane_id, wave_id, n_rounds):
+    """The window column of each lane's 16-token chunk, per load round: the
+    column part of compute_global_swizzle(..., preshuffled=False)."""
+    n_waves = fx.block_dim.x // 64
+    cols = []
+    for round in range_constexpr(n_rounds):
+        row = lane_id // 8 + wave_id * 8 + round * (n_waves * 8)
+        _, c = swizzle_128(row, (lane_id % 8) * 16)
+        cols.append(c)
+    return cols
 
 
 def _trap_if(bad):
@@ -301,8 +359,10 @@ def _compile(
         out_of_range = (m_end > ArithValue(m_row)) | (m_end < m_start)
         _trap_if(arith.select(misaligned | out_of_range, one_i32, zero_c))
 
-        # -- The window: base rounded DOWN to 256, length rounded UP to an
-        # even number of K-steps >= 4. See notes 1-3 in the file header. --
+        # The window: base rounded DOWN to 256, so it starts on an even scale
+        # dword for the paired scale loads; length rounded UP to an even number
+        # of K-steps (the loop body does two, matching the LDS ping-pong) and
+        # at least 4 (two prologue steps plus the two drained at the end).
         lo0 = (m_start // fx.Int32(WINDOW_ALIGN)) * fx.Int32(WINDOW_ALIGN)
         head = m_start - lo0  # 0..224, multiple of 32
         span = m_end - lo0  # real elements from the window base
@@ -367,8 +427,13 @@ def _compile(
             lane_id, wave_id, m_row, N_LDS_ROUNDS, preshuffled=False
         )
 
-        a_g2s = G2SLoader(a_div, gl_off_a, N_TILES_A, F8_IR_t, wave_id)
-        b_g2s = G2SLoader(b_div, gl_off_b, N_TILES_B, F8_IR_t, wave_id)
+        gl_cols = _global_swizzle_cols(lane_id, wave_id, N_LDS_ROUNDS)
+        a_g2s = _WindowedG2S(
+            a_div, gl_off_a, gl_cols, head, span, N_TILES_A, F8_IR_t, wave_id
+        )
+        b_g2s = _WindowedG2S(
+            b_div, gl_off_b, gl_cols, head, span, N_TILES_B, F8_IR_t, wave_id
+        )
         a_s2r = S2RLoader(wave_i, N_TILES_A)
         b_s2r = S2RLoader(wave_j, N_TILES_B)
 
@@ -465,15 +530,16 @@ def _compile(
 
         # Pre-fill both sides of the eight-buffer LDS pipeline.
         chunk = issue_chunk(fx.Int32(0))
-        a_g2s.load(a_cur0, A0_gl + 0 * BLOCK_M)
-        b_g2s.load(b_cur0, B0_gl + 0 * BLOCK_M)
-        b_g2s.load(b_cur1, B1_gl + 0 * BLOCK_M)
-        a_g2s.load(a_cur1, A1_gl + 0 * BLOCK_M)
+        k_col0, k_col1 = fx.Int32(0), fx.Int32(BLOCK_M)
+        a_g2s.load(a_cur0, A0_gl + 0 * BLOCK_M, k_col0)
+        b_g2s.load(b_cur0, B0_gl + 0 * BLOCK_M, k_col0)
+        b_g2s.load(b_cur1, B1_gl + 0 * BLOCK_M, k_col0)
+        a_g2s.load(a_cur1, A1_gl + 0 * BLOCK_M, k_col0)
 
-        a_g2s.load(a_next0, A0_gl + 1 * BLOCK_M)
-        b_g2s.load(b_next0, B0_gl + 1 * BLOCK_M)
-        b_g2s.load(b_next1, B1_gl + 1 * BLOCK_M)
-        a_g2s.load(a_next1, A1_gl + 1 * BLOCK_M)
+        a_g2s.load(a_next0, A0_gl + 1 * BLOCK_M, k_col1)
+        b_g2s.load(b_next0, B0_gl + 1 * BLOCK_M, k_col1)
+        b_g2s.load(b_next1, B1_gl + 1 * BLOCK_M, k_col1)
+        a_g2s.load(a_next1, A1_gl + 1 * BLOCK_M, k_col1)
 
         wait_barrier((3 * N_TILES_A) + (4 * N_TILES_B))
         a0 = a_s2r.load(a_cur0)
@@ -496,13 +562,13 @@ def _compile(
                 out.append(swz)
             return out
 
-        def _cluster_plain(lds_dst, g2s, k_off, s2r, lds_src, a, b, c, sa, sb):
-            g2s.load(lds_dst, k_off)
+        def _cluster_plain(lds_dst, g2s, k_off, k_col, s2r, lds_src, a, b, c, sa, sb):
+            g2s.load(lds_dst, k_off, k_col)
             rt = s2r.load(lds_src)
             c = mma(a, b, c, sa, sb)
             return c, rt
 
-        def _cluster_il(lds_dst, g2s, k_off, s2r, lds_src, a, b, c, sa, sb):
+        def _cluster_il(lds_dst, g2s, k_off, k_col, s2r, lds_src, a, b, c, sa, sb):
             # Interleave the 16 scaled MFMAs (4x4) with the g2s (4 steps) and
             # s2r (4 tiles x 2 halves) loads of the NEXT fragment, so the loads
             # co-issue in the MFMA execute shadow.
@@ -516,13 +582,13 @@ def _compile(
 
             M(0, 0)
             M(0, 1)
-            g2s.load_one(lds_dst, k_off, 0)
+            g2s.load_one(lds_dst, k_off, 0, k_col)
             d0 = s2r.load_one(lds_src, swz[0][0])
             M(0, 2)
             d1 = s2r.load_one(lds_src, swz[0][1])
             rt.append(pack_i32x4_i32x8(d0, d1))
             M(0, 3)
-            g2s.load_one(lds_dst, k_off, 1)
+            g2s.load_one(lds_dst, k_off, 1, k_col)
             d0 = s2r.load_one(lds_src, swz[1][0])
             M(1, 0)
             M(1, 1)
@@ -530,7 +596,7 @@ def _compile(
             rt.append(pack_i32x4_i32x8(d0, d1))
             M(1, 2)
             M(1, 3)
-            g2s.load_one(lds_dst, k_off, 2)
+            g2s.load_one(lds_dst, k_off, 2, k_col)
             d0 = s2r.load_one(lds_src, swz[2][0])
             M(2, 0)
             M(2, 1)
@@ -538,7 +604,7 @@ def _compile(
             rt.append(pack_i32x4_i32x8(d0, d1))
             M(2, 2)
             M(2, 3)
-            g2s.load_one(lds_dst, k_off, 3)
+            g2s.load_one(lds_dst, k_off, 3, k_col)
             d0 = s2r.load_one(lds_src, swz[3][0])
             M(3, 0)
             M(3, 1)
@@ -566,17 +632,17 @@ def _compile(
             ch_new = issue_chunk(issue_k) if p == 0 else None
             sa0, sa1, sb0, sb1 = use_chunk(chunk, p, kk_i)
             c00, b1 = _cluster(
-                ac0, a_g2s, A0_gl + k2, b_s2r, bc1, a0, b0, c00, sa0, sb0
+                ac0, a_g2s, A0_gl + k2, k2, b_s2r, bc1, a0, b0, c00, sa0, sb0
             )
             c01, a1 = _cluster(
-                bc0, b_g2s, B0_gl + k2, a_s2r, ac1, a0, b1, c01, sa0, sb1
+                bc0, b_g2s, B0_gl + k2, k2, a_s2r, ac1, a0, b1, c01, sa0, sb1
             )
             wait_barrier(W2A if p == 0 else W2B)
             c10, a0n = _cluster(
-                bc1, b_g2s, B1_gl + k2, a_s2r, an0, a1, b0, c10, sa1, sb0
+                bc1, b_g2s, B1_gl + k2, k2, a_s2r, an0, a1, b0, c10, sa1, sb0
             )
             c11, b0n = _cluster(
-                ac1, a_g2s, A1_gl + k2, b_s2r, bn0, a1, b1, c11, sa1, sb1
+                ac1, a_g2s, A1_gl + k2, k2, b_s2r, bn0, a1, b1, c11, sa1, sb1
             )
             new_bufs = (an0, an1, ac0, ac1, bn0, bn1, bc0, bc1)
             return a0n, b0n, (c00, c01, c10, c11), new_bufs, ch_new
