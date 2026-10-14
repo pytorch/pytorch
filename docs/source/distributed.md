@@ -212,6 +212,43 @@ You can tune NCCL communicators even further using `torch.distributed.ProcessGro
 and `torch.distributed.ProcessGroupNCCL.Options`. Learn more about them using `help`
 (e.g. `help(torch.distributed.ProcessGroupNCCL.NCCLConfig)`) in the interpreter.
 
+(nccl-collective-config)=
+
+### Per-collective NCCL configuration
+
+The `nccl2` backend accepts a keyword-only `config` on supported collective
+functions. This requires NCCL 2.31 or later and
+[nccl4py](https://pypi.org/project/nccl4py/) 0.5.0 or later:
+
+```python
+from nccl.core import NCCLCollConfig
+import torch.distributed as dist
+
+dist.init_process_group("nccl2")
+config = NCCLCollConfig(max_ctas=4, alg_selection="ring")
+dist.all_reduce(tensor, config=config)
+```
+
+Supported functions: `broadcast`, `all_reduce`, `all_reduce_coalesced`, `reduce`,
+`all_gather`, `all_gather_single`, `all_gather_into_tensor`,
+`all_gather_coalesced`, `gather_single`, `gather_into_tensor`, `reduce_scatter`,
+`reduce_scatter_single`, `reduce_scatter_tensor` and `all_to_all_single`.
+
+Unset fields inherit NCCL or communicator defaults; a config with no set fields
+is treated as `None`. Config presence and values must be identical on every
+participating rank; mismatches can hang. Configurations within an NCCL group must
+agree on `cga_cluster_size`. Passing `None` preserves existing behavior and does
+not require nccl4py.
+
+Backends receive `config` as its attribute dictionary (`vars(config)`); a plain
+`dict` with the same keys is equivalent. The legacy `nccl`, `gloo` and other
+built-in backends ignore it. NCCL2 rejects vendor options and unsupported
+operations. `all_to_all_single` with a config requires even splits on every
+rank. External NCCL group scopes are unsupported.
+
+Supported synchronous calls can use `torch.compile` and `torch.export`.
+Configuration values are graph constants; changing them recompiles.
+
 (distributed-basics)=
 
 ## Basics
@@ -897,133 +934,6 @@ the new backend.
 :::{warning}
 The support of third-party backend is experimental and subject to change.
 :::
-
-### Python backends
-
-A backend can also be written in Python by subclassing `dist._Backend`. Each
-overridden method is called from C++ in place of the corresponding
-`c10d::Backend` virtual, so the backend plugs into `torch.distributed`,
-`ProcessGroup` and `DeviceMesh` like a C++ backend.
-
-A minimal single-process backend:
-
-```{testcode}
-import torch
-import torch.distributed as dist
-
-
-class MyWork(dist._Work):
-    def __init__(self, result):
-        super().__init__()
-        self._future = torch.futures.Future()
-        self._future.set_result(result)
-
-    def wait(self, timeout):
-        return True
-
-    def get_future(self):
-        return self._future
-
-    def is_completed(self):
-        return True
-
-
-class MyBackend(dist._Backend):
-    def __init__(self, store, rank, world_size, timeout):
-        super().__init__(rank, world_size)
-        self.num_allreduces = 0
-
-    def getBackendName(self):
-        return "my_backend"
-
-    def allreduce(self, tensors, opts):
-        # A real backend communicates here; with one rank, SUM is a no-op.
-        self.num_allreduces += 1
-        return MyWork(tensors)
-
-
-dist.Backend.register_backend("my_backend", MyBackend, devices=["cpu"])
-dist.init_process_group("my_backend", store=dist.HashStore(), rank=0, world_size=1)
-t = torch.ones(2)
-dist.all_reduce(t)
-print(t)
-print(dist.get_backend_impl().num_allreduces)
-dist.destroy_process_group()
-```
-
-```{testoutput}
-tensor([1., 1.])
-1
-```
-
-The creator passed to {func}`~torch.distributed.Backend.register_backend` is
-called with `(store, group_rank, group_size, timeout)`, or with
-`(dist_backend_opts, pg_options)` when `extended_api=True`. It runs for every
-process group created with the backend, including subgroups from
-{func}`~torch.distributed.new_group`.
-
-**Entry points.** Instead of calling `register_backend` on import, a package
-can declare a `torch.distributed.backends` entry point naming a zero-argument
-function that calls `register_backend`. It is loaded the first time the backend
-name is used, for example by `init_process_group("my_backend")`. The entry
-point name must match the registered backend name.
-
-```toml
-[project.entry-points."torch.distributed.backends"]
-my_backend = "my_package:register_backend"
-```
-
-**Methods.** Override the collectives the backend supports; the rest raise an
-error naming the backend. Arguments match the C++ virtuals, with options
-objects such as `AllreduceOptions`:
-
-| Method | Called by |
-| --- | --- |
-| `broadcast(tensors, opts)` | {func}`~torch.distributed.broadcast` |
-| `allreduce(tensors, opts)` | {func}`~torch.distributed.all_reduce` |
-| `allreduce_sparse(tensors, opts)` | {func}`~torch.distributed.all_reduce` on sparse CUDA tensors |
-| `allreduce_coalesced(tensors, opts)` | {func}`~torch.distributed.all_reduce_coalesced` |
-| `reduce(tensors, opts)` | {func}`~torch.distributed.reduce` |
-| `allgather(output_lists, inputs, opts)` | {func}`~torch.distributed.all_gather` |
-| `all_gather_single(output, input, opts)` | {func}`~torch.distributed.all_gather_single` |
-| `allgather_coalesced(output_lists, inputs, opts)`, `all_gather_single_coalesced(outputs, inputs, opts)` | coalesced all-gathers |
-| `gather(output_lists, inputs, opts)` | {func}`~torch.distributed.gather` |
-| `gather_single(output, input, opts)` | {func}`~torch.distributed.gather_single` |
-| `scatter(outputs, input_lists, opts)` | {func}`~torch.distributed.scatter` |
-| `reduce_scatter(outputs, input_lists, opts)` | {func}`~torch.distributed.reduce_scatter` |
-| `reduce_scatter_single(output, input, opts)` | {func}`~torch.distributed.reduce_scatter_single` |
-| `reduce_scatter_single_coalesced(outputs, inputs, opts)` | coalesced reduce-scatter |
-| `all_to_all_single(output, input, output_splits, input_splits, opts)` | {func}`~torch.distributed.all_to_all_single` |
-| `alltoall(outputs, inputs, opts)` | {func}`~torch.distributed.all_to_all` |
-| `send(tensors, dst, tag)`, `recv(tensors, src, tag)`, `recv_anysource(tensors, tag)` | point-to-point ops |
-| `barrier(opts)`, `monitored_barrier(opts, wait_all_ranks)` | {func}`~torch.distributed.barrier`, {func}`~torch.distributed.monitored_barrier` |
-
-**Work.** Collectives return a `Work`, except `monitored_barrier`;
-`recv_anysource` and `end_coalescing` may return `None`. Subclass
-`dist._Work` and override `wait(timeout)` and `get_future()`, as with `MyWork`
-above. `is_completed()`, `synchronize()`, `source_rank()` (used by
-`recv(src=None)`), `result()` and `block_current_stream()` can also be
-overridden. Other `Work` methods can't be overridden from Python.
-
-**Capabilities.** Features are opted into with read-only properties, for
-example `supports_splitting`, `supports_coalescing` and `supports_shrinking`,
-paired with the corresponding methods (`split(store, ranks, opts)`,
-`start_coalescing()`/`end_coalescing()`,
-`shrink(ranks_to_exclude, shrink_flags, opts_override)`). `split` backs
-{func}`~torch.distributed.split_group` and returns the child backend, or `None`
-on ranks outside the new group. Define the `options` property if `split_group`
-is called without `pg_options`.
-
-**Name.** Override `getBackendName()`, not `name()`; C++ calls the former and
-`name()` returns it.
-
-**Custom methods.** Attributes and methods beyond the `Backend` interface are
-reached through {func}`~torch.distributed.get_backend_impl`, as with
-`num_allreduces` above.
-
-**Testing.** `test/distributed/c10d_backend_common.py` defines `python-gloo`, a
-Python backend that forwards to Gloo and runs the shared c10d suites. A new
-backend can be added to `C10D_BACKENDS` there to run the same tests.
 
 ## TorchComms backend
 
