@@ -640,6 +640,13 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         local_weight.fsdp_pre_all_gather = pre_fn.__get__(local_weight)
         local_weight.fsdp_post_all_gather = post_fn.__get__(local_weight)
 
+    def _init_hsdp_mesh(self, shard_world_size: int) -> DeviceMesh:
+        return init_device_mesh(
+            device_type.type,
+            (self.world_size // shard_world_size, shard_world_size),
+            mesh_dim_names=("replicate", "shard"),
+        )
+
     @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_single_rank_byte_payload(self):
         # A size-1 shard mesh skips the all-gather, so FSDP copies the payload
@@ -745,6 +752,54 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             if msg != all_gather_msg:
                 states = [fsdp_param.sharded_state for fsdp_param in fsdp_params]
                 self.assertEqual(states, [ShardedState.UNSHARDED] * 2)
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_smaller_payload(self):
+        self.run_subtests(
+            {"shard_world_size": [2, 1]},
+            self._test_all_gather_extension_smaller_payload,
+        )
+
+    def _test_all_gather_extension_smaller_payload(self, shard_world_size: int):
+        # Shard(0) Tensor payloads may shrink and fill a prefix of their output,
+        # also on a size-1 shard mesh. The bf16 tags make the group gather bytes.
+        mesh = self._init_hsdp_mesh(shard_world_size)
+        num_tags = 4
+
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            rank = mesh.get_local_rank()
+            tags = torch.arange(num_tags, device=local_tensor.device) + 10.0 * rank
+            return (local_tensor, tags.bfloat16()), (outer_size, num_tags)
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            outer_size, num_rank_tags = metadata
+            weight, tags = all_gather_outputs
+            expected_tags = [
+                torch.arange(num_rank_tags, device=tags.device) + 10.0 * rank
+                for rank in range(shard_world_size)
+            ]
+            self.assertEqual(
+                tags[: num_rank_tags * shard_world_size],
+                torch.cat(expected_tags).bfloat16(),
+            )
+            return _finish_post_all_gather(weight.view(outer_size), out)
+
+        model = nn.Linear(8, 16, bias=False, device=device_type)
+        # Seeding is per process, not per thread
+        dist.broadcast(model.weight.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, mesh=mesh)
+        self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+        inp = torch.randn((2, 8), device=device_type)
+        for num_tags in (4, 2):
+            output = model(inp)
+            self.assertEqual(output, ref_model(inp))
+            output.sum().backward()
 
 
 if __name__ == "__main__":
