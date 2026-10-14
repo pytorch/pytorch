@@ -63,8 +63,8 @@ ExtraState* get_or_init_extra_state(PyCodeObject* code) {
 // compilations from non-isolated torch.compile() calls (BC friendly). A strict
 // region, one that records into a package, does not: the package would not
 // contain an entry it reused, and could not serve that call once loaded.
-bool searches_default_bucket(int64_t isolate_recompiles_id) {
-  return isolate_recompiles_id >= 0 && !get_current_isolate_recompiles_strict();
+bool searches_default_bucket(int64_t isolate_recompiles_id, bool strict) {
+  return isolate_recompiles_id >= 0 && !strict;
 }
 
 // The region's own bucket, then the default bucket, matching lookup order.
@@ -72,9 +72,10 @@ template <typename Fn>
 void for_each_bucket(
     ExtraState* extra_state,
     int64_t isolate_recompiles_id,
+    bool strict,
     Fn&& fn) {
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
-  int num_ids = searches_default_bucket(isolate_recompiles_id) ? 2 : 1;
+  int num_ids = searches_default_bucket(isolate_recompiles_id, strict) ? 2 : 1;
   for (int i = 0; i < num_ids; i++) {
     auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
     if (it != extra_state->cache_entry_map.end()) {
@@ -115,7 +116,6 @@ void set_region_exec_strategy(
     FrameExecStrategy strategy) {
   if (isolate_recompiles_id < 0) {
     extra_state->strategy = strategy;
-    extra_state->precompile_skip = false;
   } else {
     extra_state->region_strategy_map[isolate_recompiles_id] = strategy;
   }
@@ -146,7 +146,9 @@ bool cache_entry_has_no_guards(
 }
 
 // Whether cache_entry serves this call. On a guard error the hook runs, the
-// error is restored, and *guard_error is set.
+// error is restored, and *guard_error is set. `index` and `list_size` are the
+// entry's position in its cache bucket, not in lookup's walk merged with the
+// precompile entries, so the hook's last-entry flag refers to the bucket.
 bool cache_entry_admits(
     CacheEntry& cache_entry,
     FrameLocalsMapping* f_locals,
@@ -315,13 +317,16 @@ bool get_frame_exec_strategy(
 }
 
 void set_code_exec_strategy(PyCodeObject* code, FrameExecStrategy strategy) {
-  set_region_exec_strategy(get_or_init_extra_state(code), -1, strategy);
+  ExtraState* extra_state = get_or_init_extra_state(code);
+  extra_state->strategy = strategy;
+  extra_state->precompile_skip = false;
 }
 
 bool try_lookup_without_guard_eval(
     PyCodeObject* code,
     PyObject* backend,
     int64_t isolate_recompiles_id,
+    bool isolate_recompiles_strict,
     bool is_skip_guard_eval_unsafe,
     CacheLookupResult* result) {
   ExtraState* extra_state = get_extra_state(code);
@@ -336,9 +341,16 @@ bool try_lookup_without_guard_eval(
     // may pass, and neither may one a newer cache entry outranks.
     const auto& entry = extra_state->precompile_entries.front();
     auto own = extra_state->cache_entry_map.find(isolate_recompiles_id);
-    if (own != extra_state->cache_entry_map.end() && !own->second.empty() &&
-        outranks(own->second.front().recency, entry.recency)) {
-      return false;
+    if (own != extra_state->cache_entry_map.end()) {
+      // Invalidated entries (null root_mgr) never admit a call, and
+      // move_to_back leaves their stamp out of order.
+      auto live = std::find_if(
+          own->second.begin(), own->second.end(), [](const CacheEntry& e) {
+            return e.root_mgr != nullptr;
+          });
+      if (live != own->second.end() && outranks(live->recency, entry.recency)) {
+        return false;
+      }
     }
     if (torch::dynamo::root_guard_manager_has_no_guards(entry.root_mgr)) {
       result->code = entry.code;
@@ -348,7 +360,10 @@ bool try_lookup_without_guard_eval(
   }
 
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
-  int num_ids = searches_default_bucket(isolate_recompiles_id) ? 2 : 1;
+  int num_ids =
+      searches_default_bucket(isolate_recompiles_id, isolate_recompiles_strict)
+      ? 2
+      : 1;
   std::list<CacheEntry>* found_list = nullptr;
   CacheEntry* found = nullptr;
 
@@ -383,6 +398,7 @@ void lookup(
     FrameLocalsMapping* f_locals,
     PyObject* backend,
     int64_t isolate_recompiles_id,
+    bool isolate_recompiles_strict,
     bool is_skip_guard_eval_unsafe,
     CacheLookupResult* result) {
   ExtraState* extra_state = get_extra_state(code);
@@ -445,7 +461,8 @@ void lookup(
 
   // Then the default bucket (see searches_default_bucket). New entries are
   // still written to the isolated bucket.
-  if (searches_default_bucket(isolate_recompiles_id)) {
+  if (searches_default_bucket(
+          isolate_recompiles_id, isolate_recompiles_strict)) {
     auto it = extra_state->cache_entry_map.find(-1);
     if (it != extra_state->cache_entry_map.end()) {
       CacheEntry* found = lookup_in_list(
@@ -473,7 +490,8 @@ void lookup(
 
 bool has_relevant_cache_entries(
     PyCodeObject* code,
-    int64_t isolate_recompiles_id) {
+    int64_t isolate_recompiles_id,
+    bool isolate_recompiles_strict) {
   ExtraState* extra_state = get_extra_state(code);
   if (extra_state == nullptr) {
     return false;
@@ -483,9 +501,11 @@ bool has_relevant_cache_entries(
     return true;
   }
   bool found = false;
-  for_each_bucket(extra_state, isolate_recompiles_id, [&](int64_t, auto&) {
-    found = true;
-  });
+  for_each_bucket(
+      extra_state,
+      isolate_recompiles_id,
+      isolate_recompiles_strict,
+      [&](int64_t, auto&) { found = true; });
   return found;
 }
 
@@ -496,15 +516,17 @@ bool is_precompile_skip(PyCodeObject* code) {
 
 CompileInputs get_compile_inputs(
     PyCodeObject* code,
-    int64_t isolate_recompiles_id) {
+    int64_t isolate_recompiles_id,
+    bool isolate_recompiles_strict) {
   ExtraState* extra_state = get_or_init_extra_state(code);
   CompileInputs inputs;
   inputs.frame_state = extra_state->frame_state;
-  // Search own bucket first, then fall back to default bucket (-1),
-  // matching lookup() behavior.
+  // The region's own bucket first, then the default bucket (-1) unless the
+  // region is strict, matching lookup() behavior.
   for_each_bucket(
       extra_state,
       isolate_recompiles_id,
+      isolate_recompiles_strict,
       [&](int64_t, std::list<CacheEntry>& entries) {
         if (inputs.cache_entry == nullptr && !entries.empty()) {
           inputs.cache_entry = &entries.front();
@@ -660,6 +682,9 @@ void _load_precompile_skip(const py::handle& code_obj) {
   extra->precompile_skip = true;
 }
 
+// Existing lists keep their order when the mode flips, but lookup's merged
+// walk assumes they are ordered for the current mode, so set the mode before a
+// frame holds both precompile and cache entries.
 bool _set_lru_cache(py::object boolean) {
   bool prior = use_lru;
   use_lru = py::cast<bool>(boolean);

@@ -507,6 +507,7 @@ PyObject* dynamo__custom_eval_frame(
   // (deliberate "do not trace" marks must apply across regions), but
   // does not inherit RUN_ONLY (recompile-limit hits are per-region).
   int64_t isolate_recompiles_id = get_current_isolate_recompiles_id();
+  bool isolate_recompiles_strict = get_current_isolate_recompiles_strict();
   FrameExecStrategy strategy{DEFAULT, DEFAULT};
   // In run-only mode a code object without a cache is never compiled, so do
   // not create one for it.
@@ -550,6 +551,7 @@ PyObject* dynamo__custom_eval_frame(
           code,
           backend,
           isolate_recompiles_id,
+          isolate_recompiles_strict,
           get_skip_guard_eval_unsafe(),
           &cache_hit)) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
@@ -560,6 +562,7 @@ PyObject* dynamo__custom_eval_frame(
         locals.get(),
         backend,
         isolate_recompiles_id,
+        isolate_recompiles_strict,
         get_skip_guard_eval_unsafe(),
         &cache_hit);
     _pytorch_record_function_exit(rf);
@@ -588,7 +591,8 @@ PyObject* dynamo__custom_eval_frame(
   // others wait in.
   if (guard_complete_hook != nullptr &&
       (precompile_skip ||
-       has_relevant_cache_entries(code, isolate_recompiles_id))) {
+       has_relevant_cache_entries(
+           code, isolate_recompiles_id, isolate_recompiles_strict))) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     GuardCollectiveState local_state = !cache_hit.code.is_none()
         ? GuardCollectiveState::Hit
@@ -637,7 +641,8 @@ PyObject* dynamo__custom_eval_frame(
   if (locals == nullptr) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
   }
-  CompileInputs inputs = get_compile_inputs(code, isolate_recompiles_id);
+  CompileInputs inputs = get_compile_inputs(
+      code, isolate_recompiles_id, isolate_recompiles_strict);
   py::object callback_result;
   FrameExecStrategy new_strategy;
   bool apply_to_code = false;
