@@ -32,6 +32,7 @@ from torch.utils._sympy.functions import (
     PythonMod,
     RShift,
     BitwiseFn_bitwise_and,
+    CeilDiv,
     simple_floordiv_gcd,
 )
 from torch.utils._sympy.interp import sympy_interp
@@ -1147,6 +1148,18 @@ class TestSympyFunctions(TestCase):
                 expected = (nv * nv + (-1 - q0v) // 2) % (nv * nv)
                 self.assertEqual(actual, expected)
                 self.assertTrue(0 <= actual < nv * nv)
+
+    def test_ceildiv_piecewise(self):
+        # See [gcd on non-polynomial expressions] in torch/utils/_sympy/functions.py.
+        # sympy.gcd raises PolynomialError for Piecewise expressions (e.g.
+        # coming from torch.sym_ite); CeilDiv must fall back to FloorDiv.
+        s = sympy.Symbol("s", integer=True, nonnegative=True)
+        piecewise = sympy.Piecewise((s, s < 10), (s + 1, True))
+        result = CeilDiv(piecewise, 2)
+        self.assertIsInstance(result, FloorDiv)
+        for sv in range(0, 20):
+            p = sv if sv < 10 else sv + 1
+            self.assertEqual(int(result.subs(s, sv)), (p + 1) // 2)
 
 
 class TestSingletonInt(TestCase):
