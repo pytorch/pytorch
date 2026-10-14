@@ -1147,7 +1147,10 @@ class CompilePackage:
         fn: Callable[..., Any] | None,
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
+        explicit: bool = True,
     ) -> None:
+        # False for the package caching_precompile creates for every compile.
+        self.explicit = explicit
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
