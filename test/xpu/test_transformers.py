@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import parametrize, run_tests
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 
 
-class TestSDPAXPU(NNTestCase):
+class TestSDPAXpuOnly(NNTestCase):
     @parametrize("dtype", [torch.half, torch.bfloat16, torch.float32])
     @parametrize("train", [False])
     def test_onednn_attention_unaligned_input(self, device, dtype, train):
@@ -278,7 +278,9 @@ class TestSDPAXPU(NNTestCase):
         self.assertEqual(actual, expected, atol=tol.atol, rtol=tol.rtol)
 
 
-instantiate_device_type_tests(TestSDPAXPU, globals(), only_for="xpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

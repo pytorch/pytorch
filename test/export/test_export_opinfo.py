@@ -140,7 +140,7 @@ def _test_export_helper(self, target_device, dtype, op):
                         )
 
 
-class TestExportOpInfoCPU(TestCase):
+class TestExportOpInfo(TestCase):
     hw_classification = HardwareClassification.CPU
 
     @ops(op_db, allowed_dtypes=(torch.float,))
@@ -156,6 +156,9 @@ class TestExportOpInfoCPU(TestCase):
     def test_fake_export_xpu(self, dtype, op):
         target_device = "xpu:0"
         _test_export_helper(self, target_device, dtype, op)
+
+
+instantiate_device_type_tests(TestExportOpInfo, globals(), only_for="cpu")
 
 
 selected_ops = {
@@ -328,7 +331,6 @@ accelerator_calls_behavior_unchanged()
         self.assertEqual(r, "")
 
 
-instantiate_device_type_tests(TestExportOpInfoCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(
     TestExportOnFakeDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )

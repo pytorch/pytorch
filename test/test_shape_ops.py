@@ -71,7 +71,7 @@ def _generate_input(shape, dtype, device, with_extremal):
     return x
 
 
-class TestShapeOpsDevice(TestCase):
+class TestShapeOps(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_unbind(self, device):
@@ -875,7 +875,7 @@ class TestShapeOpsDevice(TestCase):
             torch.ops.aten.unfold_backward(grad_in, input_sizes, 0, -1, 1)
 
 
-class TestShapeOpsCPU(TestCase):
+class TestShapeOpsCPUOnly(TestCase):
     hw_classification = HardwareClassification.CPU
 
     @unittest.expectedFailure
@@ -891,8 +891,8 @@ class TestShapeOpsCPU(TestCase):
         torch.flip(qt, dims=(0,))
 
 
-instantiate_device_type_tests(TestShapeOpsDevice, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestShapeOpsCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestShapeOps, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestShapeOpsCPUOnly, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()

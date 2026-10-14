@@ -6999,7 +6999,7 @@ class TestSDPAAccelerator(NNTestCase):
             }
         )
 
-class TestSDPAXPU(NNTestCase):
+class TestSDPAXpuOnly(NNTestCase):
     """ Used to test XPU only functionality of scaled_dot_product_attention
     Mostly migrate from TestSDPAAccelerator in test/test_transformers.py
     """
@@ -7694,7 +7694,7 @@ instantiate_device_type_tests(TestSDPAGeneric, globals(), only_for=device_types,
 instantiate_device_type_tests(TestSDPAAccelerator, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
 instantiate_device_type_tests(TestSDPACPU, globals(), only_for=("cpu"))
 instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types, allow_xpu=True)
-instantiate_device_type_tests(TestSDPAXPU, globals(), only_for="xpu", allow_xpu=True)
+instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()
