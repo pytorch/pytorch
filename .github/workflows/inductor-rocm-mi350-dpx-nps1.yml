@@ -39,7 +39,11 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "mt-"
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      # Main's .ci/docker tree (9db57817), published by docker-builds on
+      # 106626232c1e. Hashing this branch would ask for 4af25553, whose
+      # image is gone (ImagePullBackOff). The pull_request build checks
+      # out the merge with main, so this image matches the source.
+      ci-docker-hash: 9db57817b83b2c8c8c224e23680e2734f8d14d68
       build-environment: linux-noble-rocm-py3.11-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
       rocm-arch-list: gfx950
