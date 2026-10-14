@@ -541,65 +541,51 @@ class TestReportEnablement(TestCase):
             self.assertEqual(args("test_type_info", False, "/reports"), [])
 
 
+# gtest's JSON test list (--gtest_list_tests --gtest_output=json:<file>), with the
+# fields gtest_identities reads.
+_GTEST_LISTING = {
+    "testsuites": [
+        {"name": "ModulesTest", "testsuite": [{"name": "Linear"}]},
+        {"name": "TypedTest/0", "testsuite": [{"name": "Add", "type_param": "int"}]},
+        {
+            "name": "Inst/TypedPTest/1",
+            "testsuite": [{"name": "Add", "type_param": "float"}],
+        },
+        # gtest doesn't check a custom type name generator's names.
+        {
+            "name": "TypedTest/c10.Half",
+            "testsuite": [{"name": "Add", "type_param": "Half"}],
+        },
+        {
+            "name": "Inst/PrimeTest",
+            "testsuite": [
+                {"name": "Returns/0", "value_param": "2"},
+                {"name": "Returns/Small", "value_param": "3"},
+            ],
+        },
+    ]
+}
+
+
 class TestReportHelpers(TestCase):
-    @parametrize(
-        "binary, name, expected",
-        [
-            subtest(
-                (
-                    "build/bin/test_api",
-                    "ModulesTest.Linear",
-                    ("ModulesTest", "Linear", "Linear"),
-                ),
-                name="plain",
-            ),
-            subtest(
-                (
-                    "build/bin/test_api.exe",
-                    "ModulesTest.Linear",
-                    ("ModulesTest", "Linear", "Linear"),
-                ),
-                name="windows",
-            ),
-            subtest(
-                (
-                    "build/bin/test_api",
-                    "TypedTest/0.DoesBlah",
-                    ("TypedTest/0", "DoesBlah", "DoesBlah"),
-                ),
-                name="typed",
-            ),
-            subtest(
-                (
-                    "build/bin/test_api",
-                    "Inst/PrimeTest.Returns/1",
-                    ("Inst/PrimeTest", "Returns/1", "Returns"),
-                ),
-                name="value_parameterized",
-            ),
-            subtest(
-                (
-                    "build/bin/test_api",
-                    "Inst/PrimeTest.Returns/Small",
-                    ("Inst/PrimeTest", "Returns/Small", "Returns"),
-                ),
-                name="named_parameter",
-            ),
-            subtest(
-                (
-                    "build/bin/test_api",
-                    "Inst/TypedPTest/0.DoesBlah",
-                    ("Inst/TypedPTest/0", "DoesBlah", "DoesBlah"),
-                ),
-                name="typed_parameterized",
-            ),
-        ],
-    )
-    def test_gtest_identity(self, binary, name, expected) -> None:
-        suite, case_name, declared_case_name = expected
+    def test_gtest_identities(self) -> None:
+        def cpp(suite: str, case_name: str, declared_case_name: str) -> tuple:
+            return ("cpp/test_api", suite, case_name, "cpp", declared_case_name)
+
         self.assertEqual(
-            torchci_report.gtest_identity(binary, name),
-            ("cpp/test_api", suite, case_name, "cpp", declared_case_name),
+            torchci_report.gtest_identities("build/bin/test_api.exe", _GTEST_LISTING),
+            {
+                "ModulesTest.Linear": cpp("ModulesTest", "Linear", "Linear"),
+                "TypedTest/0.Add": cpp("TypedTest/0", "Add", "Add"),
+                "Inst/TypedPTest/1.Add": cpp("Inst/TypedPTest/1", "Add", "Add"),
+                "TypedTest/c10.Half.Add": cpp("TypedTest/c10.Half", "Add", "Add"),
+                "Inst/PrimeTest.Returns/0": cpp(
+                    "Inst/PrimeTest", "Returns/0", "Returns"
+                ),
+                "Inst/PrimeTest.Returns/Small": cpp(
+                    "Inst/PrimeTest", "Returns/Small", "Returns"
+                ),
+            },
         )
 
     @unittest.skipIf(
@@ -612,17 +598,30 @@ class TestReportHelpers(TestCase):
         from pytest_cpp.plugin import CppItem
 
         plugin = importlib.import_module("torch.testing._internal.torchci.plugin")
+
+        def list_tests(args: list[str], **kwargs: Any) -> None:
+            listing = Path(args[-1].removeprefix("--gtest_output=json:"))
+            listing.write_text(json.dumps(_GTEST_LISTING))
+
         # identity reads only the item's binary, name and framework.
         item = object.__new__(CppItem)
-        item.path, item.name = Path("build/bin/test_api"), "Suite.Test"
-        item.facade = GoogleTestFacade()
-        self.assertEqual(
-            plugin.identity(item), ("cpp/test_api", "Suite", "Test", "cpp", "Test")
-        )
-        # pytest-cpp's other frameworks don't name tests <suite>.<test>.
-        for facade in (BoostTestFacade(), Catch2Facade()):
-            item.facade = facade
+        item.path, item.facade = Path("build/bin/test_api"), GoogleTestFacade()
+        plugin._gtest_identities.cache_clear()
+        self.addCleanup(plugin._gtest_identities.cache_clear)
+        with unittest.mock.patch("subprocess.run", side_effect=list_tests) as run:
+            item.name = "TypedTest/c10.Half.Add"
+            self.assertEqual(
+                plugin.identity(item),
+                ("cpp/test_api", "TypedTest/c10.Half", "Add", "cpp", "Add"),
+            )
+            item.name = "Unlisted.Test"
             self.assertIsNone(plugin.identity(item))
+            # pytest-cpp's other frameworks don't have gtest's test list.
+            for facade in (BoostTestFacade(), Catch2Facade()):
+                item.facade = facade
+                self.assertIsNone(plugin.identity(item))
+        # Once per binary.
+        run.assert_called_once()
 
     def test_identity_survives_unwrap_errors(self):
         import pytest
