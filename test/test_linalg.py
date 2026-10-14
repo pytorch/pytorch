@@ -1102,8 +1102,11 @@ class TestLinalg(TestCase):
             with fwAD.dual_level():
                 A = fwAD.make_dual(A0, V)
                 out = f(A)
+                # autograd.grad needs a real scalar; complex det/solve outputs
+                # are not valid as implicit grad targets.
+                scalar = out.real.sum() if out.is_complex() else out.sum()
                 g, = torch.autograd.grad(
-                    out.sum(), A0, create_graph=create_graph
+                    scalar, A0, create_graph=create_graph
                 )
                 return fwAD.unpack_dual(g).tangent
 
