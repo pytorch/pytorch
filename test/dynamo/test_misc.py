@@ -10563,6 +10563,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             run(arch, idx)
             self.assertEqual(arch.msg, f"max_idx={n - 1}, bad=[-1]")
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_equal_sets_render_the_same_guard_text(self):
         from torch._dynamo.guards import _order_stable_repr
 
@@ -10940,6 +10944,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(compiled_fn(True), injected_bool(True))
         _reset_precompile_entries(fn.__code__)
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    @torch._dynamo.testing.lru_cache_reordering(True)
     def test_precompile_entry_yields_to_a_newer_cache_entry(self):
         from torch._C._dynamo.eval_frame import (
             _load_precompile_entry,
@@ -10969,6 +10978,52 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         wider = torch.randn(5)
         self.assertEqual(compiled_fn(wider), fn(wider))
         self.assertEqual(compiled_fn(x), fn(x))
+        _reset_precompile_entries(fn.__code__)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    @torch._dynamo.testing.lru_cache_reordering(False)
+    def test_precompile_entry_without_lru_follows_an_older_cache_entry(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        def fn(x):
+            return x + 1
+
+        def injected(x):
+            return x + 100
+
+        compiled_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(3)
+        self.assertEqual(compiled_fn(x), fn(x))
+        # Without LRU the oldest entry is tried first, so the cache entry
+        # outranks this newer guardless precompile entry, and the no-guard
+        # fast path must not serve the precompile entry.
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(
+                torch._dynamo.guards.RootGuardManager()
+            ),
+            injected.__code__,
+        )
+        self.assertEqual(compiled_fn(x), fn(x))
+        # An invalidated cache entry no longer outranks it, so the fast path
+        # serves the precompile entry without a guarded lookup.
+        (entry,) = _debug_get_cache_entry_list(fn)
+        manager = entry.guard_manager
+        manager.extra_state.invalidate(
+            manager.cache_entry, torch._dynamo.guards.DeletedGuardManagerWrapper("")
+        )
+        with torch.profiler.profile() as prof:
+            self.assertEqual(compiled_fn(x), injected(x))
+        self.assertFalse(
+            any("TorchDynamo Cache Lookup" in e.name for e in prof.events())
+        )
         _reset_precompile_entries(fn.__code__)
 
     def test_precompile_fail_on_recompile(self):
@@ -11035,6 +11090,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             _reset_precompile_entries(fn.__code__)
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_fail_on_recompile_names_the_failing_shape_clauses(self):
         from torch._C._dynamo.eval_frame import (
             _load_precompile_entry,
@@ -11150,6 +11209,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "  [1] <matched on re-check>",
         )
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_guard_complete_hook_can_reset_hit(self):
         from torch._C._dynamo.eval_frame import set_guard_complete_hook
 
@@ -11184,6 +11247,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(guard_results, [True])
         self.assertIn(expected_annotation, [e.name for e in prof.events()])
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_guard_complete_hook_can_reset_hit_and_force_recompile(self):
         from torch._C._dynamo.eval_frame import set_guard_complete_hook
 
@@ -11214,6 +11281,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             1,
         )
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_compile_past_precompiled_entries_records_why_they_missed(self):
         from torch._C._dynamo.eval_frame import (
             _load_precompile_entry,
