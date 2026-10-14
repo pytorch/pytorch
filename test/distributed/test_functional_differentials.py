@@ -585,6 +585,71 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         self.assertEqual(grad_input, expected_grad_input)
 
     @parametrize("device", devices)
+    @parametrize("reduce_op_name, reduce_op", reduce_ops[:4])
+    def test_reduce(self, device, reduce_op_name, reduce_op):
+        """Test reduce forward and that backward broadcasts the dst grad."""
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+        dst = 1
+        scale = 1 / self.world_size if reduce_op_name == "avg" else 1.0
+
+        input_tensor = torch.full(
+            (3, 3), float(rank + 1), requires_grad=True, device=device
+        )
+        output = fcols.reduce(input_tensor, dst, reduce_op, group=group_name)
+        total = sum(range(1, self.world_size + 1)) * scale
+        self.assertEqual(output, torch.full_like(output, total if rank == dst else 0.0))
+
+        output.backward(torch.full_like(output, float(rank + 1)))
+        self.assertEqual(
+            input_tensor.grad, torch.full_like(input_tensor, (dst + 1) * scale)
+        )
+
+    @parametrize("device", devices)
+    def test_gather(self, device):
+        """Test gather forward and that backward scatters the dst grad."""
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+        dst = 1
+
+        input_tensor = torch.full(
+            (2, 3), float(rank), requires_grad=True, device=device
+        )
+        output = fcols.gather(input_tensor, dst, group=group_name)
+        expected = torch.arange(self.world_size, device=device).repeat_interleave(2)
+        expected = expected[:, None].expand(-1, 3).float()
+        self.assertEqual(
+            output, expected if rank == dst else torch.zeros_like(expected)
+        )
+
+        grad_output = (
+            torch.arange(output.numel(), device=device).view_as(output).float()
+        )
+        output.backward(grad_output + 100 * rank)
+        self.assertEqual(
+            input_tensor.grad, grad_output.chunk(self.world_size)[rank] + 100 * dst
+        )
+
+    @parametrize("device", devices)
+    def test_scatter(self, device):
+        """Test scatter forward and that backward gathers the grads onto src."""
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+        src = 1
+
+        base = torch.arange(2 * self.world_size * 3, device=device).view(-1, 3).float()
+        input_tensor = (base + 100 * rank).requires_grad_()
+        output = fcols.scatter(input_tensor, src, group=group_name)
+        self.assertEqual(output, base.chunk(self.world_size)[rank] + 100 * src)
+
+        output.backward(torch.full_like(output, float(rank)))
+        expected = torch.arange(self.world_size, device=device).repeat_interleave(2)
+        expected = expected[:, None].expand(-1, 3).float()
+        self.assertEqual(
+            input_tensor.grad, expected if rank == src else torch.zeros_like(expected)
+        )
+
+    @parametrize("device", devices)
     @parametrize("reduce_op_name, reduce_op", reduce_ops)
     def test_all_reduce_coalesced_backward(self, device, reduce_op_name, reduce_op):
         """Test all_reduce_coalesced backward aggregates each per-rank gradient."""
@@ -836,6 +901,18 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         torch.library.opcheck(
             torch.ops._c10d_functional.reduce_scatter_tensor,
             (input_tensor, "sum", self.world_size, group_name),
+            test_utils=test_utils,
+        )
+
+    @parametrize("test_utils", test_utils)
+    @parametrize("op", ["reduce", "gather", "scatter"])
+    def test_rooted_opcheck(self, test_utils, op):
+        group_name = dist.group.WORLD.group_name
+        input_tensor = torch.ones(2 * self.world_size, 3, requires_grad=True)
+        args = (input_tensor, 0, "sum") if op == "reduce" else (input_tensor, 0)
+        torch.library.opcheck(
+            getattr(torch.ops._c10d_functional, op),
+            (*args, group_name),
             test_utils=test_utils,
         )
 
