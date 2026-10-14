@@ -393,19 +393,14 @@ class _FailOnRecompileCallback:
     ) -> ConvertFrameReturn:
         if trace_rules.check(frame.f_code, frame=frame):
             return ConvertFrameReturn()
+        # A frame the backend would not compile is no recompile.
+        if convert_frame.skips_tensor_free_frame(self._torchdynamo_orig_backend, frame):
+            return ConvertFrameReturn()
 
         from torch._C._dynamo.eval_frame import (
             _debug_get_cache_entry_list,
             _debug_get_precompile_entries,
         )
-
-        precompile_entries = _debug_get_precompile_entries(frame.f_code)
-        # A tensor-free frame is not compiled, so missing it is no recompile --
-        # unless a package installed variants for it: a package's tensor-free
-        # graph-break continuation still carries guards (e.g. on a scalar).
-        if not precompile_entries and not convert_frame.has_tensor_in_frame(frame):
-            return ConvertFrameReturn()
-
         from torch._dynamo.guards import get_and_maybe_log_recompilation_reasons
 
         message = (
@@ -429,6 +424,7 @@ class _FailOnRecompileCallback:
                     f"triggered by the following guard failure(s):\n{failures}"
                 )
                 message += f"\n{textwrap.indent(guard_failure_details, '    ')}"
+        precompile_entries = _debug_get_precompile_entries(frame.f_code)
         if precompile_entries:
             message += "\n" + _precompile_no_match_message(
                 precompile_entries, frame.f_locals
