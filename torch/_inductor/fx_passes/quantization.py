@@ -1,12 +1,14 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import copy
+import functools
 import itertools
 import math
 import operator
 
 import torch
 from torch._dynamo.utils import counters
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
 
 from .. import config
@@ -18,6 +20,7 @@ from ..pattern_matcher import (
     KeywordArg,
     ListOf,
     Match,
+    MULTIPLE,
     stable_topological_sort,
 )
 from ..utils import pad_listlike
@@ -241,6 +244,196 @@ def get_qconv2d_binary_pt2e_pattern(x_scale_zp_are_tensors=False, users=1):
         KeywordArg("unary_op_algorithm"),
         _users=users,
     )
+
+
+def _is_constant_prepack_arg(arg):
+    is_frozen = True
+
+    def check_node(node):
+        nonlocal is_frozen
+        is_frozen = is_frozen and node.op == "get_attr"
+        return node
+
+    map_arg(arg, check_node)
+    return is_frozen
+
+
+def _is_valid_qconv_pointwise_prepack_pattern(match: Match, is_binary: bool):
+    x = match.kwargs["x"]
+    preliminary_weight = match.kwargs["packed_weight"]
+
+    if not isinstance(x, torch.fx.Node) or not isinstance(
+        preliminary_weight, torch.fx.Node
+    ):
+        return False
+
+    x_val = x.meta.get("val")
+    output_dtype = match.kwargs["output_dtype"]
+    if (
+        preliminary_weight.op != "call_function"
+        or preliminary_weight.target
+        not in (
+            torch.ops.onednn.qconv_prepack,
+            torch.ops.onednn.qconv_prepack.default,
+        )
+        or not _is_constant_prepack_arg(preliminary_weight.args)
+    ):
+        return False
+
+    raw_weight = preliminary_weight.args[0]
+    raw_weight_val = (
+        raw_weight.meta.get("val") if isinstance(raw_weight, torch.fx.Node) else None
+    )
+    if (
+        x_val is None
+        or raw_weight_val is None
+        or x_val.device.type != "cpu"
+        or raw_weight_val.device.type != "cpu"
+        or x_val.dtype != torch.uint8
+        or raw_weight_val.dtype != torch.int8
+        or x_val.dim() not in (3, 4)
+        or (is_binary and x_val.dim() != 4)
+        or raw_weight_val.dim() != x_val.dim()
+        or has_free_symbols(x_val.shape)
+        or output_dtype not in (torch.uint8, torch.int8, torch.float32, torch.bfloat16)
+    ):
+        return False
+
+    if is_binary:
+        accum = match.kwargs["accum"]
+        accum_val = accum.meta.get("val") if isinstance(accum, torch.fx.Node) else None
+        floating_dtypes = (torch.float32, torch.bfloat16)
+        accum_dtype_matches = accum_val is not None and (
+            accum_val.dtype == output_dtype
+            or (accum_val.dtype in floating_dtypes and output_dtype in floating_dtypes)
+        )
+        if (
+            not accum_dtype_matches
+            or match.kwargs["binary_op_name"] != "sum"
+            or match.kwargs["unary_op_name"] not in ("none", "relu")
+        ):
+            return False
+
+    final_prepack_arg_names = [
+        "w_scale",
+        "b",
+        "x_scale",
+        "x_zp",
+        "stride",
+        "padding",
+        "dilation",
+        "groups",
+        "output_scale",
+        "output_zero_point",
+        "output_dtype",
+    ]
+    final_prepack_arg_names.extend(
+        (
+            "accum_scale",
+            "accum_zero_point",
+            "binary_op_name",
+            "alpha",
+            "unary_op_name",
+            "unary_op_args",
+            "unary_op_algorithm",
+        )
+        if is_binary
+        else ("postop_name", "postop_args", "postop_algorithm")
+    )
+    final_prepack_args = (match.kwargs[name] for name in final_prepack_arg_names)
+    return all(map(_is_constant_prepack_arg, final_prepack_args))
+
+
+def _register_qconv_pointwise_prepack_pass(pattern, prepack_op, is_binary):
+    @register_freezing_graph_pattern(
+        pattern,
+        extra_check=functools.partial(
+            _is_valid_qconv_pointwise_prepack_pattern, is_binary=is_binary
+        ),
+        pass_number=6,
+    )
+    def qconv_pointwise_prepack(match: Match, *args, **kwargs):
+        qconv = match.output_node()
+        x = kwargs["x"]
+        preliminary_weight = kwargs["packed_weight"]
+        raw_weight = preliminary_weight.args[0]
+
+        if is_binary:
+            # Binary qconv writes into the accumulator, so its dtype defines
+            # the actual oneDNN destination descriptor.  It may differ from
+            # output_dtype when both are floating-point types.
+            prepack_output_dtype = kwargs["accum"].meta["val"].dtype
+            unary_attr = kwargs["unary_op_name"]
+            unary_scalars = kwargs["unary_op_args"]
+            unary_algorithm = kwargs["unary_op_algorithm"]
+            binary_attr = kwargs["binary_op_name"]
+            binary_alpha = kwargs["alpha"]
+            accum_scale = kwargs["accum_scale"]
+            accum_zero_point = kwargs["accum_zero_point"]
+        else:
+            prepack_output_dtype = kwargs["output_dtype"]
+            unary_attr = kwargs["postop_name"]
+            unary_scalars = kwargs["postop_args"]
+            unary_algorithm = kwargs["postop_algorithm"]
+            binary_attr = None
+            binary_alpha = None
+            accum_scale = 0.0
+            accum_zero_point = 0
+
+        prepack_args = (
+            raw_weight,
+            kwargs["w_scale"],
+            kwargs["b"],
+            kwargs["x_scale"],
+            kwargs["x_zp"],
+            list(x.meta["val"].shape),
+            kwargs["stride"],
+            kwargs["padding"],
+            kwargs["dilation"],
+            kwargs["groups"],
+            kwargs["output_scale"],
+            kwargs["output_zero_point"],
+            prepack_output_dtype,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+            binary_attr,
+            binary_alpha,
+            accum_scale,
+            accum_zero_point,
+        )
+
+        with match.graph.inserting_before(qconv):
+            # All inputs were validated as constants, so freezing folds this
+            # prepack and materializes the final weight layout exactly once.
+            final_packed_weight = match.graph.call_function(
+                prepack_op,
+                args=prepack_args,
+            )
+
+        qconv_args = list(qconv.args)
+        qconv_args[3] = final_packed_weight
+        qconv.args = tuple(qconv_args)
+        if not preliminary_weight.users:
+            match.graph.erase_node(preliminary_weight)
+
+        counters["inductor"]["qconv_pointwise_prepack_matcher_count"] += 1
+        counters["inductor"]["qconv_pointwise_prepack_matcher_nodes"] += len(
+            match.nodes
+        )
+
+
+def _register_qconv_pointwise_prepack():
+    for is_binary in (False, True):
+        pattern_fn = (
+            get_qconv2d_binary_pt2e_pattern if is_binary else get_qconv_pt2e_pattern
+        )
+        pattern = pattern_fn(False, users=MULTIPLE)
+        _register_qconv_pointwise_prepack_pass(
+            pattern,
+            torch.ops.onednn.qconv_pointwise_prepack.default,
+            is_binary,
+        )
 
 
 def get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, users=1):

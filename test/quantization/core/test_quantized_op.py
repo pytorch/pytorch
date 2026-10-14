@@ -8036,6 +8036,163 @@ class TestQuantizedConv(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
+    def test_qconv_pointwise_prepack(self):
+        x_scale, x_zero_point = 0.05, 3
+        cases = (
+            (torch.float32, "swish", True, 1.0, 0),
+            (torch.bfloat16, "none", True, 1.0, 0),
+            (torch.uint8, "none", False, 0.1, 5),
+            (torch.int8, "none", False, 0.1, 0),
+        )
+        for dim, groups in ((1, 1), (2, 1), (2, 16)):
+            x = torch.randint(
+                0, 255, (1, 16, *((8,) * dim)), dtype=torch.uint8
+            )
+            weight = torch.randint(
+                -128,
+                127,
+                (32, 16 // groups, *((3,) * dim)),
+                dtype=torch.int8,
+            )
+            if dim == 2 and groups == 1:
+                weight = weight.transpose(-1, -2)
+            weight_scale = torch.rand(32, dtype=torch.float32) * 0.02 + 0.01
+            weight_zero_point = torch.zeros(32, dtype=torch.int64)
+            conv_param = [1] * dim
+            conv_args = (conv_param, conv_param, conv_param, groups)
+            preliminary_weight = torch.ops.onednn.qconv_prepack(
+                weight,
+                weight_scale,
+                x_scale,
+                x_zero_point,
+                *conv_args,
+                list(x.shape),
+            )
+
+            for (
+                output_dtype,
+                post_op,
+                with_bias,
+                output_scale,
+                output_zero_point,
+            ) in cases:
+                bias = torch.randn(32) if with_bias else None
+                effective_post_op = "none" if dim == 1 else post_op
+                with self.subTest(
+                    dim=dim,
+                    groups=groups,
+                    output_dtype=output_dtype,
+                    post_op=effective_post_op,
+                    bias=bias is not None,
+                ):
+                    qconv_args = (
+                        x,
+                        x_scale,
+                        x_zero_point,
+                        preliminary_weight,
+                        weight_scale,
+                        weight_zero_point,
+                        bias,
+                        *conv_args,
+                        output_scale,
+                        output_zero_point,
+                        output_dtype,
+                        effective_post_op,
+                        [],
+                        "",
+                    )
+                    expected = torch.ops.onednn.qconv_pointwise.default(*qconv_args)
+                    final_weight = (
+                        torch.ops.onednn.qconv_pointwise_prepack.default(
+                            weight,
+                            weight_scale,
+                            bias,
+                            x_scale,
+                            x_zero_point,
+                            list(x.shape),
+                            *conv_args,
+                            output_scale,
+                            output_zero_point,
+                            output_dtype,
+                            effective_post_op,
+                            [],
+                            "",
+                        )
+                    )
+                    packed_args = list(qconv_args)
+                    packed_args[3] = final_weight
+                    actual = torch.ops.onednn.qconv_pointwise.default(*packed_args)
+
+                    self.assertTrue(final_weight.is_mkldnn)
+                    torch.testing.assert_close(actual, expected)
+
+        # Cover the descriptor used by the binary sum + unary path as well.
+        x = torch.randint(0, 255, (1, 16, 8, 8), dtype=torch.uint8)
+        weight = torch.randint(-128, 127, (32, 16, 3, 3), dtype=torch.int8)
+        weight_scale = torch.rand(32, dtype=torch.float32) * 0.02 + 0.01
+        weight_zero_point = torch.zeros(32, dtype=torch.int64)
+        bias = torch.randn(32)
+        conv_args = ([1, 1], [1, 1], [1, 1], 1)
+        accum = torch.randn(1, 32, 8, 8).contiguous(
+            memory_format=torch.channels_last
+        )
+        preliminary_weight = torch.ops.onednn.qconv_prepack(
+            weight,
+            weight_scale,
+            x_scale,
+            x_zero_point,
+            *conv_args,
+            list(x.shape),
+        )
+        final_weight = torch.ops.onednn.qconv_pointwise_prepack.default(
+            weight,
+            weight_scale,
+            bias,
+            x_scale,
+            x_zero_point,
+            list(x.shape),
+            *conv_args,
+            1.0,
+            0,
+            torch.float32,
+            "relu",
+            [],
+            "",
+            "sum",
+            1.0,
+            1.0,
+            0,
+        )
+        qconv_args = (
+            x,
+            x_scale,
+            x_zero_point,
+            preliminary_weight,
+            weight_scale,
+            weight_zero_point,
+            accum.clone(memory_format=torch.preserve_format),
+            bias,
+            *conv_args,
+            1.0,
+            0,
+            torch.float32,
+            1.0,
+            0,
+            "sum",
+            1.0,
+            "relu",
+            [],
+            "",
+        )
+        expected = torch.ops.onednn.qconv2d_pointwise.binary(*qconv_args)
+        packed_args = list(qconv_args)
+        packed_args[3] = final_weight
+        packed_args[6] = accum.clone(memory_format=torch.preserve_format)
+        actual = torch.ops.onednn.qconv2d_pointwise.binary(*packed_args)
+        torch.testing.assert_close(actual, expected)
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
     def test_qconv2d_pt2e(self):
         groups_list = [1, 3]
         input_channels_per_group = 2
