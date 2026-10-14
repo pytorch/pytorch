@@ -31,9 +31,11 @@ def _get_mempool_by_index(index: int) -> torch.cuda.MemPool:
     return mempool
 
 
-def _current_cuda_device_source() -> CallFunctionNoArgsSource:
+def _current_accelerator_device_source() -> CallFunctionNoArgsSource:
     return CallFunctionNoArgsSource(
-        AttrSource(AttrSource(ImportSource("torch"), "cuda"), "current_device")
+        AttrSource(
+            AttrSource(ImportSource("torch"), "accelerator"), "current_device_index"
+        )
     )
 
 
@@ -147,9 +149,11 @@ class CUDAMemPoolContextVariable(ContextWrappingVariable):
             isinstance(device, ConstantVariable) and device.value is None
         ):
             install_guard(
-                _current_cuda_device_source().make_guard(GuardBuilder.EQUALS_MATCH)
+                _current_accelerator_device_source().make_guard(
+                    GuardBuilder.EQUALS_MATCH
+                )
             )
-            device_index = torch.cuda.current_device()
+            device_index = torch.accelerator.current_device_index()
         elif device.is_python_constant():
             device_index = torch.cuda._utils._get_device_index(
                 device.as_python_constant()
