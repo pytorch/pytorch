@@ -86,10 +86,10 @@ class CKGemmTemplate(CKTemplate):
             LDB,
             std::array<ck::index_t, {{ds_size}}>{ {{ds_strides}} },
             LDC,
-            M * K, // batch_stride_A
-            N * K, // batch_stride_B
+            BatchStrideA,
+            BatchStrideB,
             std::array<ck::index_t, {{ds_size}}>{ {{ds_batch_strides}} },
-            M * N, // batch_stride_C
+            BatchStrideC,
             {{a_elementwise_op}},
             {{b_elementwise_op}},
             {{epilogue}} // c_elementwise_op
@@ -159,6 +159,9 @@ class CKGemmTemplate(CKTemplate):
     int run_main(int argc, char** argv) {
         {% if is_batched %}
         const int32_t B = {{B}};
+        const int32_t BatchStrideA = {{BatchStrideA}};
+        const int32_t BatchStrideB = {{BatchStrideB}};
+        const int32_t BatchStrideC = {{BatchStrideC}};
         {% endif %}
         const int32_t M = {{M}};
         const int32_t N = {{N}};
@@ -207,11 +210,11 @@ class CKGemmTemplate(CKTemplate):
             return {batch_stride, 1, leading_dimension};
         };
         auto a_size = strides_t{B, M, K};
-        auto a_stride = get_strides(M * K, LDA, ALayout{});
+        auto a_stride = get_strides(BatchStrideA, LDA, ALayout{});
         auto b_size = strides_t{B, N, K};
-        auto b_stride = get_strides(N * K, LDB, BLayout{});
+        auto b_stride = get_strides(BatchStrideB, LDB, BLayout{});
         auto c_size = strides_t{B, M, N};
-        auto c_stride = get_strides(M * N, LDC, CLayout{});
+        auto c_stride = get_strides(BatchStrideC, LDC, CLayout{});
         {% else %}
         using strides_t = std::array<int32_t, 2>;
         auto get_strides = [](int32_t leading_dimension, auto layout) constexpr -> strides_t {
@@ -293,6 +296,11 @@ class CKGemmTemplate(CKTemplate):
             LDB,
             LDC,
             LDD,
+            {% if is_batched %}
+            BatchStrideA,
+            BatchStrideB,
+            BatchStrideC,
+            {% endif %}
             nullptr, // workspace_size
             nullptr, // workspace
             nullptr); // stream
@@ -745,6 +753,7 @@ class CKGemmTemplate(CKTemplate):
         size_arg_strs = ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
         if self.is_batched:
             size_arg_strs.insert(0, "B")
+            size_arg_strs.extend(["BatchStrideA", "BatchStrideB", "BatchStrideC"])
 
         res = self._template_from_string(self.gemm_template).render(
             inline_utils=self.inline_utils(),
@@ -1018,6 +1027,7 @@ class CKGemmTemplate(CKTemplate):
         )
         if self.is_batched:
             B = X.get_size()[0]
-            return B, M, N, K, LDA, LDB, LDC, LDD
+            batch_strides = (X.get_stride()[0], W.get_stride()[0], Y.get_stride()[0])
+            return B, M, N, K, LDA, LDB, LDC, LDD, *batch_strides
         else:
             return M, N, K, LDA, LDB, LDC, LDD
