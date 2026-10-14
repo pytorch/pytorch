@@ -272,7 +272,6 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
                 result = [result]
             self.assertEqual(expected_output, result)
 
-    @requires_ucc()
     def test_allgather_basics(self):
         self._test_allgather_basics(lambda t: t.clone())
 
@@ -373,6 +372,8 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         self._spawn_processes()
@@ -1014,7 +1015,7 @@ class DistributedDataParallelTest(
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def device(self):
@@ -1089,7 +1090,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 class UccProcessGroupWithDispatchedCollectivesTests(
     test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
 ):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
@@ -1109,7 +1110,7 @@ class UccProcessGroupWithDispatchedCollectivesTests(
             rank=self.rank,
             store=store,
         )
-        device = "cpu"
+        device = "cuda"
         tensor = torch.ones(10, 10, device=torch.device(device))
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
         dist.all_gather_single(output_tensor, tensor)
