@@ -492,7 +492,8 @@ def set_enable_guard_collectives(enabled: bool):
     it reports the skip, since another rank's artifact may have compiled that
     frame.  The frame runs eagerly only if every rank reports the same skip; a
     mixture of hits, misses and skips forces the miss path (recompilation) on
-    every rank.
+    every rank.  Entries and skips installed from a precompile artifact assume
+    every rank installed the same artifact.
 
     Returns the previous setting of enabled.
     """

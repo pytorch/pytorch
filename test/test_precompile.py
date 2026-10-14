@@ -5158,10 +5158,6 @@ class TestPrecompileDynamoCapture(TestCase):
         with open(self.artifact) as f:
             mode = "installed" if installed else "standalone"
             self.assertIn(f'SERVING_MODE = "{mode}"', f.read())
-        if installed:
-            # Not served: an installed artifact's refuse-recompile callback
-            # does not honor disable(recursive=False), so it refuses scale().
-            return
         script = (
             "import importlib, sys, torch\n"
             "sys.path.insert(0, sys.argv[1])\n"
@@ -5170,6 +5166,13 @@ class TestPrecompileDynamoCapture(TestCase):
             "x = torch.load(sys.argv[6])\n"
             "f = torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
             "key = reg.Key()\n"
+            "if f.installed:\n"
+            "    try:\n"
+            "        f(key, x)\n"
+            "    except torch.compiler.PrecompileError as e:\n"
+            "        assert 'refuses to recompile' in str(e), e\n"
+            "        print('refused', str(e).split('function name: ')[1])\n"
+            "        sys.exit()\n"
             "for scale in (3.0, 5.0, None):\n"
             "    if scale is None:\n"
             "        del reg.REGISTRY[key]\n"
@@ -5186,7 +5189,10 @@ class TestPrecompileDynamoCapture(TestCase):
         cmd = [sys.executable, "-c", script, *argv]
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("served", out.stdout)
+        # An installed artifact refuses scale() itself, as its refuse-recompile
+        # callback does not honor disable(recursive=False). Flip this to
+        # "served" once https://github.com/pytorch/pytorch/pull/198787 lands.
+        self.assertIn("refused 'scale'" if installed else "served", out.stdout)
 
     @skipIfCrossRef
     def test_only_graphless_callees_that_lose_a_guard_are_served_eagerly(self):
@@ -5241,6 +5247,33 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual((factor.guarded_codes, factor.bypassed), ([], False))
         self.assertTrue(mul.guarded_codes)
         self.assertTrue(rendered["factor"]["factor"].guarded_codes)
+
+    @skipIfCrossRef
+    def test_a_risky_drop_only_in_an_eager_frame_is_not_reported(self):
+        # Both frames drop G['op']. The graphless lookup() reads an aliased op,
+        # a risky drop, but is served eagerly; step() reads a def of that name
+        # from its own file, which the default filter drops harmlessly.
+        names = [f"{self.module_name}_{n}" for n in ("lookup", "step")]
+        sources = (
+            "import torch\n\n"
+            "def _double(n):\n    return 2 * n\n\nop = _double\n\n"
+            "def lookup(module, n):\n    return op(n)\n\n"
+            "@torch._dynamo.disable(recursive=False)\n"
+            "def scale(x):\n    return x * lookup(torch.nn.Module(), 3)\n",
+            f"import {names[0]}\n\n"
+            "def op(x):\n    return x + 1\n\n"
+            f"def step(x):\n    return {names[0]}.scale(op(x.sin()))\n",
+        )
+        for name, source in zip(names, sources):
+            with open(os.path.join(self.dir, name + ".py"), "w") as f:
+                f.write(source)
+            self.addCleanup(sys.modules.pop, name, None)
+        step = importlib.import_module(names[1]).step
+        with self._capture(step, backend="eager") as cap:
+            cap(torch.randn(4))
+            summary = cap.summary()
+        self.assertIn(("CLOSURE_MATCH", "G['op']"), summary.dropped_guards)
+        self.assertEqual(summary.risky_dropped_guards, ())
 
     def test_a_standalone_artifact_refuses_serve_time_compiles(self):
         with self._capture(self.mod.single, backend="eager") as cap:
