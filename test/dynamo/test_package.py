@@ -595,6 +595,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertTrue(any("config cannot pickle" in line for line in logs.output))
         self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], compiles + 1)
 
+    @torch._dynamo.testing.lru_cache_reordering(True)
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_a_compile_after_load_outranks_the_loaded_variant_it_covers(self):
         # torch.compile serves a frame's newest entry first. A variant compiled
