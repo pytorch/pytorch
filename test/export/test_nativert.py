@@ -18,7 +18,6 @@ from torch.nativert.backends._lower_utils import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipGPUIf,
-    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -275,13 +274,6 @@ def _pytree_model(device):
 class TestNativeRTDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    # nativert's placement layer accepts only CPU/CUDA/meta/MTIA
-    # (torch/nativert/executor/PlacementUtils.cpp), and registers an AOTI runner
-    # for CPU and CUDA only.
-    @skipXPUIf(
-        True,
-        "nativert has no XPU support: https://github.com/intel/torch-xpu-ops/issues/5364",
-    )
     @skipGPUIf(not HAS_TRITON, "AOTI on an accelerator requires triton")
     @parametrize(
         "make_model",
