@@ -1247,6 +1247,50 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
             self.assertEqual(comm_b.finalize_calls, 1)
             self.assertEqual(c10d._world.comms, [])
 
+    def _register_abortable_pg(self, calls, comm, name):
+        # _abort_process_group also looks up the backend of the current
+        # accelerator, so answer for any device.
+        backend = _FakeOtherBackend() if comm is None else _FakeBackendWrapper(comm)
+        pg = self._register_pg({"cuda": backend}, name=name)
+        pg._get_backend.side_effect = lambda dev: backend
+        calls.attach_mock(pg.abort, f"abort_{name}")
+        return pg
+
+    def test_abort_finalizes_comms_and_releases_nvshmem_teams(self):
+        # Releases what destroy_process_group does, but only after the abort,
+        # so that finalizing a comm skips its collective destroy.
+        calls = mock.Mock()
+        comm_a, comm_b = calls.comm_a, calls.comm_b
+        world = self._register_abortable_pg(calls, None, "world")
+        group_a = self._register_abortable_pg(calls, comm_a, "a")
+        self._register_abortable_pg(calls, comm_b, "b")
+        c10d._world.default_pg = world
+        c10d._world.comms.extend([comm_a, comm_b])
+        call = mock.call
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _release_nvshmem_team_pool=calls.release,
+            _unregister_process_group=lambda group_name: None,
+            _unregister_all_process_groups=lambda: None,
+            _update_default_pg=lambda pg: setattr(c10d._world, "default_pg", pg),
+            create=True,
+        ):
+            c10d._abort_process_group(group_a)
+            group_a_calls = [call.abort_a(), call.comm_a.finalize(), call.release("a")]
+            self.assertListEqual(calls.mock_calls, group_a_calls)
+            self.assertEqual(c10d._world.comms, [comm_b])
+
+            calls.reset_mock()
+            c10d._abort_process_group()
+            aborts = [call.abort_world(), call.abort_b()]
+            freed = [call.comm_b.finalize(), call.release("world"), call.release("b")]
+            self.assertCountEqual(calls.mock_calls[:2], aborts)
+            self.assertCountEqual(calls.mock_calls[2:], freed)
+            self.assertEqual(c10d._world.comms, [])
+
 
 class TestC10dTorchCommsBackendConfig(TestCase):
     def test_registered_device_qualified_torchcomms_backend_uses_custom_type(self):
