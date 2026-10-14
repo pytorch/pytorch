@@ -11,6 +11,7 @@ from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
 
@@ -1341,22 +1342,47 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         super().__init__(op, **kwargs)
         self.op = op
 
-    def match(self, node: torch.fx.Node):
-        input = get_arg_value(node, 0, "input")
-        if self._match_op(node) and is_node_meta_valid(node):
-            # check the input has the same shape and its users have the same target
-            # check all clamp operators have the same min and max values, and
-            # nan_to_num operators use the same default value.
-            child = next(iter(node.users.keys()))
-            group_key = (
-                str(input.meta["example_value"].shape)
-                + str(node.args[1:])
-                + str(node.kwargs)
-                + str(child.target)
+    def _get_non_input_kwargs(self, node: torch.fx.Node) -> dict[str, Any] | None:
+        """All arguments except `input` as kwargs, with defaults filled in."""
+        try:
+            normalized = normalize_function(
+                self.op,
+                node.args,
+                node.kwargs,
+                # otherwise clamp's Scalar and Tensor overloads are ambiguous
+                arg_types=(torch.Tensor,),
+                normalize_to_only_use_kwargs=True,
             )
-        else:
-            group_key = None
-        return group_key
+        except TypeError:
+            return None
+        if normalized is None:
+            return None
+        normalized.kwargs.pop("input")
+        return normalized.kwargs
+
+    def match(self, node: torch.fx.Node):
+        if not self._match_op(node) or not is_node_meta_valid(node):
+            return None
+
+        kwargs = self._get_non_input_kwargs(node)
+        # one batched call can't replay per-node mutation or tensor arguments
+        if (
+            kwargs is None
+            or kwargs.get("inplace")
+            or any(isinstance(v, torch.fx.Node) for v in kwargs.values())
+        ):
+            return None
+
+        input = get_arg_value(node, 0, "input")
+        # check the input has the same shape and its users have the same target
+        # check all clamp operators have the same min and max values, and
+        # nan_to_num operators use the same default value.
+        child = next(iter(node.users.keys()))
+        return (
+            str(input.meta["example_value"].shape),
+            str(kwargs),
+            str(child.target),
+        )
 
     def _match_op(self, node: torch.fx.Node) -> MatchResult:
         return CallFunctionVarArgs(self.op).match(node)
@@ -1365,8 +1391,9 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         batch_nodes = []
         batch_inputs = []
         batch_inputs_metadata = []
-        args = subset[0].args[1:]
-        kwargs = subset[0].kwargs
+        kwargs = self._get_non_input_kwargs(subset[0])
+        if kwargs is None:
+            raise AssertionError("matched node could not be normalized")
 
         for node in subset:
             batch_nodes.append(node)
@@ -1381,11 +1408,11 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             update_stack_example_value(stack_inputs, batch_inputs_metadata)
             batch_op = graph.call_function(  # type: ignore[operator]
                 self.op,
-                args=(stack_inputs, *args),
+                args=(stack_inputs,),
                 kwargs=kwargs,
             )
             batch_op.meta["example_value"] = self.op(
-                stack_inputs.meta["example_value"], *args, **kwargs
+                stack_inputs.meta["example_value"], **kwargs
             )
             unbind_op = graph.call_function(  # type: ignore[operator]
                 torch.unbind, args=(batch_op,), kwargs={"dim": 0}

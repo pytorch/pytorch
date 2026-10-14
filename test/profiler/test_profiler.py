@@ -54,9 +54,9 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    skipIf,
+    skipXPUIf,
 )
-from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
+from torch.testing._internal.common_profiler import initialize_kineto_with_accelerator
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -74,6 +74,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
+    TEST_XPU,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -93,7 +94,7 @@ def get_profiler_activities(device_type):
 
 
 def setUpModule():
-    initialize_kineto_with_cuda()
+    initialize_kineto_with_accelerator()
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -1050,6 +1051,21 @@ class TestProfiler(TestCase):
             with profile(activities=[ProfilerActivity.CPU], with_modules=True):
                 torch.ones(1)
 
+    @parametrize("api", ("load_nvprof", "parse_nvprof_trace"))
+    def test_nvprof_import_deprecated(self, api):
+        with patch("torch.autograd.profiler._parse_nvprof_trace", return_value=[]):
+            with self.assertWarnsRegex(
+                FutureWarning, rf"{api}.*deprecated.*PyTorch 2\.17"
+            ):
+                events = getattr(torch.autograd.profiler, api)("trace.prof")
+        self.assertEqual(events, [])
+
+    def test_enforce_unique_deprecated(self):
+        with self.assertWarnsRegex(
+            FutureWarning, r"EnforceUnique.*deprecated.*PyTorch 2\.17"
+        ):
+            torch.autograd.profiler.EnforceUnique()
+
     def test_profiler_metadata(self):
         t1, t2 = torch.ones(1), torch.ones(1)
         with profile() as prof:
@@ -1238,6 +1254,22 @@ class TestProfiler(TestCase):
                     ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits"
                 )
                 self.assertTrue(ts_to_name[s_ts_2] == "aten::add")
+
+    def test_profiler_left_running_at_exit(self):
+        # A profiler that is never stopped (e.g. an exception between start() and
+        # stop()) used to segfault during static destruction: ~ProfilerStateBase
+        # soft-asserted through libkineto after libkineto's singleton was gone.
+        script = """
+import torch
+from torch.profiler import profile, ProfilerActivity
+p = profile(activities=[ProfilerActivity.CPU])
+p.start()
+torch.ones(10) * 2
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
 
     def test_profiler_disable_fwd_bwd_link(self):
         try:
@@ -1726,6 +1758,98 @@ class TestProfiler(TestCase):
             self._schedule_helper(warmup=10, active=10, repeat=4, acc_events=False), 10
         )
 
+    def _run_trace_finalization_wait_counter(self, trace_ready_error=None):
+        clock_us = [0]
+        counter_start_us = [0]
+        durations_us = []
+        exit_exception_types = []
+        events = []
+        wait_counter = MagicMock()
+        guard = wait_counter.guard.return_value
+
+        def counter_enter():
+            counter_start_us[0] = clock_us[0]
+            events.append("counter_enter")
+
+        def counter_exit(exception_type, exception, traceback):
+            durations_us.append(clock_us[0] - counter_start_us[0])
+            exit_exception_types.append(exception_type)
+            events.append("counter_exit")
+
+        guard.__enter__.side_effect = counter_enter
+        guard.__exit__.side_effect = counter_exit
+
+        def on_trace_ready(profiler):
+            events.append("trace_ready")
+            clock_us[0] += 7
+            if trace_ready_error is not None:
+                raise trace_ready_error
+
+        profiler = profile(
+            activities=[ProfilerActivity.CPU],
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=1, repeat=1),
+            on_trace_ready=on_trace_ready,
+        )
+        original_stop_trace = profiler.stop_trace
+
+        def stop_trace():
+            original_stop_trace()
+            events.append("stop_trace")
+            clock_us[0] += 3
+
+        def run_profile():
+            with profiler:
+                for _ in range(3):
+                    profiler.step()
+
+        with (
+            patch.object(profiler, "stop_trace", side_effect=stop_trace),
+            patch(
+                "torch.profiler.profiler._WaitCounter", return_value=wait_counter
+            ) as wait_counter_type,
+        ):
+            if trace_ready_error is None:
+                run_profile()
+            else:
+                with self.assertRaisesRegex(
+                    type(trace_ready_error), str(trace_ready_error)
+                ):
+                    run_profile()
+
+        wait_counter_type.assert_called_once_with(
+            "pytorch.wait_counter.profiler.trace_finalization"
+        )
+        wait_counter.guard.assert_called_once_with()
+        guard.__enter__.assert_called_once_with()
+        guard.__exit__.assert_called_once()
+        return events, durations_us, exit_exception_types
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_trace_finalization_wait_counter_accounts_wall_time(self):
+        events, durations_us, exit_exception_types = (
+            self._run_trace_finalization_wait_counter()
+        )
+
+        self.assertEqual(
+            events, ["counter_enter", "stop_trace", "trace_ready", "counter_exit"]
+        )
+        self.assertEqual(durations_us, [10])
+        self.assertEqual(exit_exception_types, [None])
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_trace_finalization_wait_counter_accounts_wall_time_on_error(self):
+        events, durations_us, exit_exception_types = (
+            self._run_trace_finalization_wait_counter(
+                RuntimeError("trace export failed")
+            )
+        )
+
+        self.assertEqual(
+            events, ["counter_enter", "stop_trace", "trace_ready", "counter_exit"]
+        )
+        self.assertEqual(durations_us, [10])
+        self.assertEqual(exit_exception_types, [RuntimeError])
+
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_lazy_build_tree(self):
         with profile() as p:
@@ -2158,6 +2282,12 @@ with open(sys.argv[1], "w") as f:
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
+    # The child deadlocks once the parent has initialized Kineto's XPU profiler,
+    # which setUpModule does on any XPU build.
+    @unittest.skipIf(
+        TEST_XPU,
+        "os.fork() deadlocks after Kineto XPU init! Refer https://github.com/intel/torch-xpu-ops/issues/5287",
+    )
     def test_forked_process(self):
         def validate_forked_json(profiler):
             nonlocal cpu_op_found, parent_tid, child_pid
@@ -2358,7 +2488,7 @@ class TestProfilerDevice(TestCase):
                 found_gemm = True
             if "memcpy" in e.name.lower() or "__amd_rocclr_copyBuffer" in e.name:
                 found_memcpy = True
-        if device_type in ("cuda",):
+        if device_type in ("cuda", "xpu"):
             self.assertTrue(found_gemm)
             self.assertTrue(found_memcpy)
         else:
@@ -2462,6 +2592,8 @@ class TestProfilerDevice(TestCase):
 
     @parametrize("use_kineto", [False, True])
     def test_profiler_tracing(self, device, use_kineto):
+        if device.startswith("xpu") and not use_kineto:
+            self.skipTest("Legacy profiling is not supported on XPU")
         if use_kineto and not kineto_available():
             self.skipTest("Kineto is required")
         device_type = device.split(":")[0]
@@ -2899,11 +3031,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 
         event_list.table()
 
-    @skipIf(
-        True,
-        "XPU Trace event ends too late! Refer https://github.com/intel/torch-xpu-ops/issues/2263",
-        device_type="xpu",
-    )
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_chrome_trace(self, device):
@@ -3104,6 +3231,10 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
         self.assertEqual(len(p.events()), 0)
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180072")
+    @skipXPUIf(
+        True,
+        "XPU kernel args lack stream/grid/block! Refer https://github.com/intel/torch-xpu-ops/issues/5284",
+    )
     @onlyAccelerator
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto_kernel_metadata_in_trace(self, device):
@@ -3174,7 +3305,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             )
 
 
-instantiate_device_type_tests(TestProfilerDevice, globals())
+instantiate_device_type_tests(TestProfilerDevice, globals(), allow_xpu=True)
 
 
 @instantiate_parametrized_tests
@@ -3445,7 +3576,9 @@ class TestExperimentalUtils(TestCase):
         )
 
         self.assertEqual(event.metadata, typed_metadata)
-        self.assertEqual(event.event_metadata.grid, [1, 2, 3])
+        with self.assertWarnsRegex(FutureWarning, "event_metadata.*metadata"):
+            event_metadata = event.event_metadata
+        self.assertEqual(event_metadata.grid, [1, 2, 3])
 
 
 class TestExperimentalUtilsDevice(TestCase):
@@ -4953,7 +5086,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
     """Inline CUDA-graph annotations, driven through stub activities so the branches
     are covered without a capture or a live profiler."""
 
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
 
     def _export(self, activities, **kwargs):
         from torch.profiler._chrome_trace_export import export_chrome_trace
@@ -5151,7 +5284,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-class TestMetadataJsonFormat(TestCase):
+class TestMetadataJsonFormatCUDA(TestCase):
     """Guard the format of ITraceActivity.metadataJson() for kernel events.
 
     The Python-side chrome trace exporter splices metadataJson() verbatim
