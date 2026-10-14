@@ -56,7 +56,6 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    skipXPUIf,
 )
 from torch.testing._internal.common_profiler import initialize_kineto_with_accelerator
 from torch.testing._internal.common_utils import (
@@ -3268,10 +3267,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
         self.assertEqual(len(p.events()), 0)
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180072")
-    @skipXPUIf(
-        True,
-        "XPU kernel args lack stream/grid/block! Refer https://github.com/intel/torch-xpu-ops/issues/5284",
-    )
     @onlyAccelerator
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto_kernel_metadata_in_trace(self, device):
@@ -3304,10 +3299,18 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                     lambda msg: f"{msg}\nkernel '{name}' should provide grid and block together",
                 )
                 has_kernel_launch_metadata |= has_grid
-            self.assertTrue(
-                has_kernel_launch_metadata,
-                "Error: No kernel events in trace contained grid/block metadata",
-            )
+            if device_type == "xpu":
+                # PTI does not expose launch geometry yet: https://github.com/intel/torch-xpu-ops/issues/5284
+                # When this fails, PTI started reporting it and this branch should go.
+                self.assertFalse(
+                    has_kernel_launch_metadata,
+                    "XPU kernels now carry grid/block; drop this carve-out",
+                )
+            else:
+                self.assertTrue(
+                    has_kernel_launch_metadata,
+                    "Error: No kernel events in trace contained grid/block metadata",
+                )
 
     @onlyAccelerator
     @skipIfRocm(msg="ROCm does not emit OVERHEAD activity records")
