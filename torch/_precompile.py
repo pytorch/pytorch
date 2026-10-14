@@ -3048,6 +3048,15 @@ def no_compilation() -> contextlib.AbstractContextManager[None]:
 
     Only kernels already in the in-process kernel cache may run.
 
+    Some kernels have nothing on disk that marks them as built, so no artifact
+    covers them in a fresh process: Metal shaders, which every module load
+    compiles, and CuTe DSL, FlyDSL, Pallas and NVIDIA Universal GEMM kernels,
+    which JIT on their first ``run()`` in each process whatever their backend's
+    own cache holds. A multi-kernel's choice is read from the local Inductor
+    cache, which the artifact does not carry, so a fresh host must benchmark
+    it, which the policy refuses. A model with such kernels must run them once
+    before entering the policy, or be served without it.
+
     Unlike ``precompile.serving()``, which is thread-local, the policy is
     process-wide. Nested and overlapping uses are depth-counted, so it stays
     active until the last owner exits; callers must drain work they dispatched
