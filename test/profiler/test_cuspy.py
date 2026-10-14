@@ -18,7 +18,7 @@ import textwrap
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import torch
 from torch._C._profiler import _ExperimentalConfig
@@ -3606,6 +3606,16 @@ class TestWindowFinalizer(TestCase):
         self.assertIs(w._poll_thread, t)  # not restarted
         w._stop_observation_window()
         self.assertIsNone(w._poll_thread)
+
+
+class TestCuspyTraceExport(TestCase):
+    def test_cuspy_zstd_perfetto_rejected(self):
+        prof = profile(activities=[ProfilerActivity.CPU])
+        prof.profiler = MagicMock()
+        prof._use_cuspy = True
+        with self.assertRaisesRegex(ValueError, "only supported for Chrome JSON"):
+            prof.export_chrome_trace("trace.pftrace.zst")
+        prof.profiler.export_chrome_trace.assert_not_called()
 
 
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")

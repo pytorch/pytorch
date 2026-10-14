@@ -2488,6 +2488,7 @@ def merge_trace_window_into_chrome_trace(
         payload = _orjson.dumps(data)
     else:
         payload = json.dumps(data, separators=(",", ":")).encode()
+    # Compression level 1 favors throughput over file size.
     trace_file_opener = _get_trace_file_opener(output_path, compresslevel=1)
     with trace_file_opener(output_path, "wb") as f:
         f.write(payload)

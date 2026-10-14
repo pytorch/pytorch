@@ -648,15 +648,9 @@ class _KinetoProfile:
         last cycle in schedule is exported.
 
         Paths ending in ``.gz`` use gzip compression; paths ending in ``.zst``
-        use zstd compression at level 1 and require the optional ``zstandard``
-        or ``pyzstd`` package. Other paths are uncompressed (the ``cuspy`` backend
-        defaults to gzip). Zstd is supported for Chrome JSON, not Cuspy's Perfetto format.
-        Export and compression run synchronously on the calling thread unless
-        asynchronous export is enabled for the ``cuspy`` backend.
-
-        To periodically export zstd traces, pass a callback such as
-        ``on_trace_ready=lambda p: p.export_chrome_trace(f"trace.{p.step_num}.json.zst")``
-        to :class:`torch.profiler.profile`.
+        use zstd compression and require the optional ``zstandard`` or ``pyzstd``
+        package. Other paths are uncompressed (the ``cuspy`` backend defaults to
+        gzip). Zstd is supported for Chrome JSON, not Cuspy's Perfetto format.
 
         ``cuda_graph_annotations`` bakes CUDA-graph kernel annotations into the trace:
         matching graphed work carries its annotation's fields in ``args``. Pass

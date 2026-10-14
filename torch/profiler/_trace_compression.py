@@ -3,6 +3,8 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any, IO
 
+from torch._utils import try_import
+
 
 def _get_trace_file_opener(
     path: str, *, compresslevel: int | None = None
@@ -12,16 +14,14 @@ def _get_trace_file_opener(
         return partial(gzip.open, compresslevel=level)
     if path.endswith(".zst"):
         level = 1 if compresslevel is None else compresslevel
-        try:
-            import zstandard  # pyrefly: ignore[missing-import]
-        except ImportError:
-            try:
-                import pyzstd  # pyrefly: ignore[missing-import]
-            except ImportError as exc:
-                raise ImportError(
-                    "Zstd trace compression requires zstandard or pyzstd. "
-                    "Please install either with `pip install zstandard` or `pip install pyzstd`."
-                ) from exc
+        zstandard = try_import("zstandard")
+        if zstandard is not None:
+            return partial(zstandard.open, cctx=zstandard.ZstdCompressor(level=level))
+        pyzstd = try_import("pyzstd")
+        if pyzstd is not None:
             return partial(pyzstd.open, level_or_option=level)
-        return partial(zstandard.open, cctx=zstandard.ZstdCompressor(level=level))
+        raise ImportError(
+            "Zstd trace compression requires zstandard or pyzstd. "
+            "Please install either with `pip install zstandard` or `pip install pyzstd`."
+        )
     return open
