@@ -755,27 +755,24 @@ def _product_backward(grads, fwd_inputs, fwd_outputs, group_name, config):
     """Scale summed grads by the product of the other ranks' inputs.
 
     That product is output / input where input != 0. Where input == 0 it is
-    the product of the nonzero inputs if this is the only zero, else 0.
+    the product of the nonzero inputs if this is the only zero, else 0. Both
+    come from one product all_reduce by encoding the zero count as 2**count.
     """
     is_zero = [fwd_input == 0 for fwd_input in fwd_inputs]
-    zero_counts = wait_tensors(
+    reduced = wait_tensors(
         torch.ops._c10d_functional.all_reduce_coalesced(
-            [z.to(torch.float32) for z in is_zero], "sum", group_name, config=config
-        )
-    )
-    nonzero_products = wait_tensors(
-        torch.ops._c10d_functional.all_reduce_coalesced(
-            [torch.where(z, 1, x).contiguous() for z, x in zip(is_zero, fwd_inputs)],
+            [
+                torch.stack([torch.where(z, 1, x), torch.where(z, 2, 1).to(x.dtype)])
+                for z, x in zip(is_zero, fwd_inputs)
+            ],
             "product",
             group_name,
             config=config,
         )
     )
     return [
-        g * torch.where(z, torch.where(count == 1, nonzero, 0), y / x)
-        for g, z, count, nonzero, x, y in zip(
-            grads, is_zero, zero_counts, nonzero_products, fwd_inputs, fwd_outputs
-        )
+        g * torch.where(z, torch.where(r[1] == 2, r[0], 0), y / x)
+        for g, z, r, x, y in zip(grads, is_zero, reduced, fwd_inputs, fwd_outputs)
     ]
 
 
