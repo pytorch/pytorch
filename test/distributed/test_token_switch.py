@@ -103,7 +103,8 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         per_expert_counts = torch.zeros(
             num_local_experts, dtype=torch.int32, device=self.device
         )
-        ts.create_routing(topk_idx, per_expert_counts, layout="flat")
+        routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
+        self.assertEqual(routing.handle.get_num_recv_tokens(), NUM_TOKENS)
         self.assertEqual(per_expert_counts.dtype, torch.int32)
         self.assertEqual(per_expert_counts.numel(), num_local_experts)
         self.assertEqual(per_expert_counts.item(), NUM_TOKENS)
