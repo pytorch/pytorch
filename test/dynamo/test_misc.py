@@ -610,9 +610,11 @@ graph():
 
     def test_compile_wrapper_cleanup_is_lifo_and_exception_safe(self):
         # dynamic=False and the backend context are both enter/exit hooks of
-        # compile_wrapper and both set automatic_dynamic_shapes. Their cleanups
-        # must run in reverse order, and all of them must run even if a later
-        # hook fails to enter or exit.
+        # compile_wrapper (and of the context-manager path) and both set
+        # automatic_dynamic_shapes. Their cleanups must run in reverse order,
+        # and all of them must run even if a later hook fails to enter or exit.
+        from torch._C._dynamo.eval_frame import get_eval_frame_isolate_recompiles_id
+
         events = []
 
         class BackendCtx:
@@ -633,13 +635,25 @@ graph():
                 if self.fail_exit:
                     raise RuntimeError("exit failed")
 
+        def run_ctx_manager(opt):
+            with torch._dynamo.config.patch(raise_on_ctx_manager_usage=False):
+                with opt:
+                    pass
+
         x = torch.randn(3)
-        for fail_enter, fail_exit, expected_events in (
+        isolate_id = get_eval_frame_isolate_recompiles_id()
+        cases = (
             (False, False, ["enter", "exit"]),
             (False, True, ["enter", "exit"]),
             (True, False, ["enter"]),
-        ):
-            with self.subTest(fail_enter=fail_enter, fail_exit=fail_exit):
+        )
+        for use_ctx_manager, case in itertools.product((False, True), cases):
+            fail_enter, fail_exit, expected_events = case
+            with self.subTest(
+                use_ctx_manager=use_ctx_manager,
+                fail_enter=fail_enter,
+                fail_exit=fail_exit,
+            ):
                 torch._dynamo.reset()
                 events.clear()
 
@@ -649,14 +663,21 @@ graph():
                 backend.backend_ctx_ctor = functools.partial(
                     BackendCtx, fail_enter, fail_exit
                 )
-                fn = torch._dynamo.optimize(backend, dynamic=False)(lambda t: t + 1)
+                opt = torch._dynamo.optimize(
+                    backend, dynamic=False, isolate_recompiles=True
+                )
+                if use_ctx_manager:
+                    call = functools.partial(run_ctx_manager, opt)
+                else:
+                    call = functools.partial(opt(lambda t: t + 1), x)
                 if fail_enter or fail_exit:
                     with self.assertRaisesRegex(RuntimeError, "failed"):
-                        fn(x)
+                        call()
                 else:
-                    self.assertEqual(fn(x), x + 1)
+                    call()
                 self.assertEqual(events, expected_events)
                 self.assertTrue(torch._dynamo.config.automatic_dynamic_shapes)
+                self.assertEqual(get_eval_frame_isolate_recompiles_id(), isolate_id)
 
     def test_tracing_context_tls_defaults_present(self):
         # The _guards thread-local defaults tracing_context/compile_context to

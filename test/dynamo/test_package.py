@@ -1339,8 +1339,8 @@ def entry(x):
 
     def test_reset_keeps_nonrecursive_disable_wrapper_skipped(self):
         # A bound method's innermost fn is the shared non-recursive disable
-        # wrapper, so installing this package enrolls the wrapper's code in
-        # input_codes. reset() must not then strip its import-time skip.
+        # wrapper, so this package's top-level code is the wrapper's code.
+        # Installing it must not let reset() strip its import-time skip.
         class Mod(torch.nn.Module):
             @torch._dynamo.disable(recursive=False)
             def forward(self, x):
@@ -1360,6 +1360,10 @@ def entry(x):
 
         torch._dynamo.reset()
         package, backends = ctx.load_package(mod.forward, self.path())
+        self.assertIs(
+            next(iter(package._codes)),
+            torch._dynamo.decorators._nonrecursive_disable_wrapper_code,
+        )
         package.install(backends)
         torch._dynamo.reset()
 
