@@ -67,6 +67,17 @@ if(WIN32 AND BUILD_PYTHON)
     endif()
   endif()
 
+  # Flash Attention runtime (aotriton_v2.dll + its liblzma.dll dependency).
+  # aotriton's ExternalProject (cmake/External/aotriton.cmake) drops these into
+  # torch/lib/ with no install() rule, so scikit-build-core omits them from the
+  # wheel and torch_hip.dll fails to load (WinError 126). Install when present.
+  foreach(_fa_dll aotriton_v2.dll liblzma.dll)
+    set(_fa_dll_path "${TORCH_SRC_DIR}/lib/${_fa_dll}")
+    if(EXISTS "${_fa_dll_path}")
+      install(FILES "${_fa_dll_path}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+    endif()
+  endforeach()
+
   # libuv (uv.dll) - required by torch distributed (gloo transport).
   # libuv_DLL_PATH is an optional CI hint (forwarded via EnvVarForwarding.cmake);
   # fall back to libuv_ROOT/bin/uv.dll which Windows CI sets.
