@@ -300,7 +300,8 @@ class _FailOnRecompileCallback:
     ) -> ConvertFrameReturn:
         if trace_rules.check(frame.f_code, frame=frame):
             return ConvertFrameReturn()
-        if not convert_frame.has_tensor_in_frame(frame):
+        # A frame the backend would not compile is no recompile.
+        if convert_frame.skips_tensor_free_frame(self._torchdynamo_orig_backend, frame):
             return ConvertFrameReturn()
 
         from torch._C._dynamo.eval_frame import (

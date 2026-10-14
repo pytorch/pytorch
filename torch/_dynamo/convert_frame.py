@@ -409,6 +409,10 @@ def skips_tensor_free_frame(callback: Any, frame: DynamoFrameType) -> bool:
     guards must be recorded even when no tensor survives the graph break, or the
     artifact cannot tell which calls it covers.
     """
+    while not hasattr(callback, "_package") and hasattr(
+        callback, "_torchdynamo_orig_backend"
+    ):
+        callback = callback._torchdynamo_orig_backend
     package = getattr(callback, "_package", None)
     if (
         package is not None
@@ -2403,6 +2407,7 @@ class ConvertFrame:
         recompile_limit: int | None = None,
     ) -> None:
         self._torchdynamo_orig_backend = compiler_fn
+        self._package = package
         self._inner_convert = convert_frame_assert(
             compiler_fn,
             one_graph=False,
