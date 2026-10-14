@@ -137,7 +137,9 @@ bool cache_entry_has_no_guards(
 }
 
 // Whether cache_entry serves this call. On a guard error the hook runs, the
-// error is restored, and *guard_error is set.
+// error is restored, and *guard_error is set. `index` and `list_size` are the
+// entry's position in its cache bucket, not in lookup's walk merged with the
+// precompile entries, so the hook's last-entry flag refers to the bucket.
 bool cache_entry_admits(
     CacheEntry& cache_entry,
     FrameLocalsMapping* f_locals,
@@ -327,9 +329,16 @@ bool try_lookup_without_guard_eval(
     // may pass, and neither may one a newer cache entry outranks.
     const auto& entry = extra_state->precompile_entries.front();
     auto own = extra_state->cache_entry_map.find(isolate_recompiles_id);
-    if (own != extra_state->cache_entry_map.end() && !own->second.empty() &&
-        outranks(own->second.front().recency, entry.recency)) {
-      return false;
+    if (own != extra_state->cache_entry_map.end()) {
+      // Invalidated entries (null root_mgr) never admit a call, and
+      // move_to_back leaves their stamp out of order.
+      auto live = std::find_if(
+          own->second.begin(), own->second.end(), [](const CacheEntry& e) {
+            return e.root_mgr != nullptr;
+          });
+      if (live != own->second.end() && outranks(live->recency, entry.recency)) {
+        return false;
+      }
     }
     if (torch::dynamo::root_guard_manager_has_no_guards(entry.root_mgr)) {
       result->code = entry.code;
@@ -637,6 +646,9 @@ bool _get_lru_cache() {
   return use_lru;
 }
 
+// Existing lists keep their order when the mode flips, but lookup's merged
+// walk assumes they are ordered for the current mode, so set the mode before a
+// frame holds both precompile and cache entries.
 bool _set_lru_cache(py::object boolean) {
   bool prior = use_lru;
   use_lru = py::cast<bool>(boolean);
