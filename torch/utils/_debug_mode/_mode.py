@@ -221,7 +221,8 @@ class DebugMode(TorchDispatchMode):
         run_compile_with_interpreter=False,
     ) -> None:
         super().__init__()
-        import torch.distributed.tensor  # noqa: F401
+        if torch.distributed.is_available():
+            from torch.distributed.tensor import DTensor  # noqa: F401
 
         _ensure_annotate_decorated()
         self.supports_higher_order_operators = True
@@ -389,12 +390,18 @@ class DebugMode(TorchDispatchMode):
             self._handle_annotate(args[0])
             return
 
-        from torch.distributed._functional_collectives import AsyncCollectiveTensor
-        from torch.distributed._local_tensor import LocalTensor
+        is_dtensor = is_local_tensor = is_async_collective_tensor = False
+        if torch.distributed.is_available():
+            from torch.distributed._functional_collectives import AsyncCollectiveTensor
+            from torch.distributed._local_tensor import LocalTensor
+
+            is_dtensor = torch.distributed.tensor.DTensor in types
+            is_local_tensor = LocalTensor in types
+            is_async_collective_tensor = AsyncCollectiveTensor in types
 
         # Record the operation with its call depth
         call = None
-        if torch.distributed.tensor.DTensor in types:
+        if is_dtensor:
             call = _OpCall(
                 func, args, kwargs, self.call_depth, stack=self.record_stack_trace
             )
@@ -414,7 +421,7 @@ class DebugMode(TorchDispatchMode):
                     )
                     self._record_call(call)
         # TODO: check the context manager
-        elif LocalTensor in types:
+        elif is_local_tensor:
             if self.record_localtensor:
                 call = _OpCall(
                     func,
@@ -424,7 +431,7 @@ class DebugMode(TorchDispatchMode):
                     stack=self.record_stack_trace,
                 )
                 self._record_call(call)
-        elif AsyncCollectiveTensor in types:
+        elif is_async_collective_tensor:
             # Record AsyncCollectiveTensor operations so debugging/tracing tools can see them
             if self.record_realtensor:
                 call = _OpCall(
