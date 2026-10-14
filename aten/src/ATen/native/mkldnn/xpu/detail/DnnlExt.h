@@ -292,7 +292,7 @@ inline void get_strides<trans_type_t::nt>(
 using primitive_cache =
     at::native::onednn::lru_cache<memory::dims, primitive_ext>;
 
-template <trans_type_t Tt, joint_dtypes_t Ts, typename F>
+template <trans_type_t Tt, joint_dtypes_t Ts, at::ScalarType Sd, typename F>
 struct matmul_primitive_cache_t {
   static inline primitive_ext& get(
       const int m,
@@ -371,7 +371,7 @@ struct matmul_primitive_cache_t {
   }
 };
 
-template <joint_dtypes_t Ts, typename F>
+template <joint_dtypes_t Ts, at::ScalarType Sd, typename F>
 static inline primitive_ext& matmul_primitive_create_and_cache(
     const trans_type_t Tt,
     const bias_type_t b_dims,
@@ -387,7 +387,7 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
     const int64_t zp_group_size) {
   switch (Tt) {
     case trans_type_t::nt:
-      return matmul_primitive_cache_t<trans_type_t::nt, Ts, F>::get(
+      return matmul_primitive_cache_t<trans_type_t::nt, Ts, Sd, F>::get(
           m,
           n,
           k,
@@ -404,6 +404,70 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
   }
 }
 
+template <joint_dtypes_t Ts, typename F>
+static inline primitive_ext& matmul_primitive_create_and_cache(
+    const trans_type_t Tt,
+    const bias_type_t b_dims,
+    const int m,
+    const int n,
+    const int k,
+    const int64_t lda,
+    const int64_t ldb,
+    const int64_t ldc,
+    const int device_id,
+    F attr,
+    const at::ScalarType scale_dtype,
+    const int64_t scale_group_size,
+    const int64_t zp_group_size) {
+  switch (scale_dtype) {
+    case at::ScalarType::Float:
+      return matmul_primitive_create_and_cache<Ts, at::ScalarType::Float, F>(
+          Tt,
+          b_dims,
+          m,
+          n,
+          k,
+          lda,
+          ldb,
+          ldc,
+          device_id,
+          attr,
+          scale_group_size,
+          zp_group_size);
+    case at::ScalarType::Half:
+      return matmul_primitive_create_and_cache<Ts, at::ScalarType::Half, F>(
+          Tt,
+          b_dims,
+          m,
+          n,
+          k,
+          lda,
+          ldb,
+          ldc,
+          device_id,
+          attr,
+          scale_group_size,
+          zp_group_size);
+    case at::ScalarType::BFloat16:
+      return matmul_primitive_create_and_cache<Ts, at::ScalarType::BFloat16, F>(
+          Tt,
+          b_dims,
+          m,
+          n,
+          k,
+          lda,
+          ldb,
+          ldc,
+          device_id,
+          attr,
+          scale_group_size,
+          zp_group_size);
+    default:
+      TORCH_INTERNAL_ASSERT(
+          false, "Unsupported scale dtype for int4 matmul: ", scale_dtype);
+  }
+}
+
 template <typename F>
 static inline primitive_ext& matmul_primitive_create_and_cache(
     const joint_dtypes_t Ts,
@@ -417,6 +481,7 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
     const int64_t ldc,
     const int device_id,
     F attr,
+    const at::ScalarType scale_dtype,
     const int64_t scale_group_size = 0,
     const int64_t zp_group_size = 0) {
   switch (Ts) {
@@ -432,6 +497,7 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
           ldc,
           device_id,
           attr,
+          scale_dtype,
           scale_group_size,
           zp_group_size);
     case joint_dtypes_t::bf16_int4:
@@ -446,6 +512,7 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
           ldc,
           device_id,
           attr,
+          scale_dtype,
           scale_group_size,
           zp_group_size);
     default:
