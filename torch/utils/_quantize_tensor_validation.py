@@ -136,10 +136,6 @@ def _quantize_tensor_dual_validate_inputs(
             lambda: "dual mxfp8 quantization currently requires SWIZZLE_32_4_4",
         )
         torch._check_value(
-            not scaling_type_use_square_block_size,
-            lambda: "dual mxfp8 quantization does not yet support 32x32 MXFP8 scaling",
-        )
-        torch._check_value(
             qdata_rounding_mode
             in (RoundingMode.RTNE.value, RoundingMode.STOCHASTIC.value),
             lambda: "quantize_tensor_dual has an unsupported qdata_rounding_mode",

@@ -25,6 +25,7 @@ _KERNELS = {
     "mxfp8_dim_m_swizzle_sr": ("dim_m", False, True, True),
     "mxfp8_dim_km_swizzle": ("dim_km", False, True, False),
     "mxfp8_dim_km_swizzle_sr": ("dim_km", False, True, True),
+    "mxfp8_dim_km_32x32_swizzle": ("dim_km", True, True, False),
     "mxfp8_dim_k_32x32_swizzle": ("dim_k", True, True, False),
     "mxfp8_dim_k": ("dim_k", False, False, False),
 }
@@ -80,8 +81,8 @@ def _reference(input, orientation, square, swizzled, random_key):
             )
             return qdata_k, scales_k, qdata_m, scales_m
         return (
-            *_reference_dim_k(input, False, True, None),
-            *_reference_dim_k(input.t().contiguous(), False, True, None),
+            *_reference_dim_k(input, square, True, None),
+            *_reference_dim_k(input.t().contiguous(), square, True, None),
         )
     return _reference_dim_k(input, square, swizzled, random_key)
 
