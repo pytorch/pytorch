@@ -14,7 +14,6 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
-from unittest.mock import patch
 
 import sympy
 
@@ -4104,27 +4103,6 @@ def _realize_as_pinned(result):
     result.data.data.get_layout().is_pinned = True
 
 
-def clone_preserve_reinterpret_view(x):
-    reinterpret_view_layouts = []
-    if isinstance(x, TensorBox) and isinstance(x.data, ir.ReinterpretView):
-        x = x.data  # unwrap TensorBox
-        # pyrefly: ignore [bad-assignment]
-        while isinstance(x, ir.ReinterpretView):
-            reinterpret_view_layouts.append(x.get_layout())
-            x = x.data
-        x = TensorBox(x)
-
-    x = clone(x)
-
-    if reinterpret_view_layouts:
-        x = x.data  # unwrap TensorBox
-        for layout in reinterpret_view_layouts[::-1]:
-            x = ir.ReinterpretView(data=x, layout=layout)
-        x = TensorBox(x)
-
-    return x
-
-
 def lift_fresh_copy(x):
     result = clone(x)
     input_layout = x.maybe_get_layout()
@@ -7952,7 +7930,7 @@ def get_constant_value(x: ir.IRNode) -> ir.Constant | None:
     handler = torch._inductor.ops_handler.ExtractConstantsHandler(x.get_device())
     with (
         V.set_ops_handler(handler),
-        patch.object(ir.FlexibleLayout, "allow_indexing", True),
+        ir.allow_layout_analysis(),
     ):
         out = x.inner_fn(*x.inner_fn_args())
 
