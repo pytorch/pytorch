@@ -42,15 +42,13 @@ if TYPE_CHECKING:
 # Note [All-gather output fn]
 # fn(all_gather_output, outputs, split_sizes=..., outer_sizes=..., world_size=...)
 # runs under no_grad on the current stream and copies the flat rank-major
-# all_gather_output into outputs, flat buffers that FSDP allocates before the
-# call. Each rank's chunk has split_sizes[i] elements for outputs[i]:
-# viewed as (outer_sizes[i], -1), the ranks' chunks are concatenated along dim 1 of
-# outputs[i].view(outer_sizes[i], -1). Only outputs with outer_sizes[i] == 1 may
-# hold more than the gathered elements, which then fill their prefix. A uint8
-# all_gather_output, from payloads of mixed dtypes or byte views, has split_sizes
-# in bytes, while outputs keep their dtypes. fn may only write outputs, whose
-# version counters FSDP preserves, and must not keep its arguments. FSDP skips it
-# for a single rank and when nothing was gathered.
+# all_gather_output into outputs, flat buffers that FSDP allocates. Each rank's
+# chunk has split_sizes[i] elements for outputs[i], and the ranks' chunks, viewed
+# as (outer_sizes[i], -1), are concatenated along dim 1 of outputs[i] viewed the
+# same way. Outputs with outer_sizes[i] == 1 may be larger and then fill only a
+# prefix. A uint8 all_gather_output has split_sizes in bytes. fn may only write
+# outputs, whose version counters FSDP preserves; FSDP skips it for a single rank
+# or an empty all-gather.
 def _default_all_gather_output_fn(
     all_gather_output: torch.Tensor,
     outputs: list[torch.Tensor],
