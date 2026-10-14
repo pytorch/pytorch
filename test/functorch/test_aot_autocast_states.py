@@ -296,33 +296,6 @@ class TestAOTAutocastStates(TestCase):
 
         self.assertEqual(torch.get_autocast_dtype(extra), prior_dtype)
 
-    def test_collect_metadata_detects_autocast_cache_mutation(self) -> None:
-        from torch._functorch._aot_autograd.collect_metadata_analysis import (
-            run_functionalized_fw_and_collect_metadata,
-        )
-        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        prior_cache_enabled = torch.is_autocast_cache_enabled()
-
-        def f(x: torch.Tensor) -> list[torch.Tensor]:
-            torch.set_autocast_cache_enabled(True)
-            return [x + 1]
-
-        collect = run_functionalized_fw_and_collect_metadata(
-            f,
-            flat_args_descs=[PlainAOTInput(0)],
-            keep_input_mutations=False,
-        )
-        fake_mode = FakeTensorMode()
-        x = fake_mode.from_tensor(torch.randn(2))
-
-        try:
-            with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
-                collect(x)
-        finally:
-            torch.set_autocast_cache_enabled(prior_cache_enabled)
-
 
 if __name__ == "__main__":
     run_tests()

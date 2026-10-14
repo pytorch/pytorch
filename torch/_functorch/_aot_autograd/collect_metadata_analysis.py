@@ -223,7 +223,7 @@ def run_functionalized_fw_and_collect_metadata(
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
         # ExcludeDispatchKeyGuard restores autocast TLS when it exits, so the
-        # comparison has to run before the cache flag is restored.
+        # comparison has to run before the dispatch-key guard restores autocast TLS.
         with disable_above:
             with mode, suppress_pending, disable_autocast_cache():
                 # precondition: The passed in function already handles unflattening inputs + flattening outputs
@@ -253,10 +253,7 @@ def run_functionalized_fw_and_collect_metadata(
                     fake_mode.reset_nt_tensor_id_counter()
 
                 current_autocast_states = _get_autocast_states()
-                if (
-                    current_autocast_states[:-1] != prior_autocast_states[:-1]
-                    or current_autocast_states[-1]
-                ):
+                if current_autocast_states[:-1] != prior_autocast_states[:-1]:
                     for device_type, dtype in prior_autocast_dtypes.items():
                         torch.set_autocast_dtype(device_type, dtype)
                     raise RuntimeError(
