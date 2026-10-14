@@ -583,6 +583,15 @@ class _MakeFxCapture(Capture[_P, _R]):
         self._rendered: tuple[str, bytes] | None = None
         self._called = False
 
+    def _start(self) -> None:
+        from torch.compiler._runtime_cache import in_capture_runtime
+
+        if in_capture_runtime():
+            raise PrecompileError(
+                "precompile.capture_runtime supports only DynamoTracer captures: "
+                "a make_fx capture neither freezes nor seals runtime dependencies."
+            )
+
     def _finish(self, exc: tuple[object, ...]) -> None:
         # Write only on a clean exit that captured a call; a block that raised,
         # or one that never called the capture, leaves the files untouched. The
@@ -3275,7 +3284,8 @@ def capture_runtime() -> contextlib.AbstractContextManager[None]:
     the capture's final write succeeds: from then until the scope exits,
     compilation is forbidden as under :func:`no_compilation`, so any compile the
     written cache would not cover raises :class:`~torch.compiler.PrecompileError`
-    instead of passing silently. A sealed scope takes no second capture.
+    instead of passing silently. A sealed scope takes no second capture, and a
+    make_fx capture inside it raises.
 
     Raises :class:`~torch.compiler.PrecompileError` if entered while compilation
     is already forbidden, or while this process already has an active scope or
@@ -3291,7 +3301,7 @@ def prepare_runtime(
     *, artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
 ) -> None:
     """
-    Install a capture's runtime dependencies before the application starts.
+    Verify a capture's runtime dependencies before the application starts.
 
     :func:`load` installs them itself, so call this only when the serving worker
     compiles before it loads the pair: early, before the application imports

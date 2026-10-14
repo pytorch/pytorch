@@ -110,6 +110,11 @@ def capture_scope() -> Iterator[None]:
             _close(owner)
 
 
+def in_capture_runtime() -> bool:
+    owner = _active_capture()
+    return owner is not None and owner.explicit
+
+
 def seal_runtime_scope() -> None:
     """Seal an enclosing capture_runtime() scope whose cache is already written."""
     owner = _active_capture()
@@ -163,12 +168,13 @@ def freeze_runtime_cache(
         )
         if artifacts is None:
             raise RuntimeError("Cannot freeze an unreadable precompile cache")
+        seal = final and owner.explicit
         # Drain before sealing: compile result callbacks re-check
         # check_compilation_allowed, so draining under the seal rejects them.
-        AsyncCompile.drain_pending()
+        # Only a seal stops compiling, so only it shuts the compile workers down.
+        AsyncCompile.drain_pending(shutdown=seal)
         if torch.cuda.is_initialized():
             torch.cuda.synchronize()
-        seal = final and owner.explicit
         if seal:
             with _capture_lock:
                 owner.seal()
