@@ -2,6 +2,7 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ceil_div.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
@@ -92,32 +93,54 @@ bool is_rowwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
       scale.is_contiguous());
 }
 
-// Scale shape checks for blockwise scaling.
-// For a matrix t [rows, cols]:
-//   BlockWise1x128:   scale has shape [rows, ceil_div(cols, 128)]
-//   BlockWise128x128: scale has shape [ceil_div(rows, 128), ceil_div(cols,
-//   128)]
-// These shapes match CUDA's convention.
+// Shared scale shape check for blockwise scaling.
+// For a matrix t [rows, cols], scale must have shape
+// [ceil_div(rows, block_rows), ceil_div(cols, block_cols)], where cols is the
+// logical column count: packed FP4 stores two elements per byte, so its
+// logical width is size(1) * 2.
 // XPU accepts both row-major (contiguous) and column-major strides,
 // since it internally calls .contiguous() for oneDNN. CUDA requires
 // specific strides for cuBLAS swizzling; XPU is more permissive but
 // still validates that strides form a valid contiguous layout.
-bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
+bool is_blockwise_scaling(
+    const at::Tensor& t,
+    const at::Tensor& scale,
+    at::ScalarType scale_dtype,
+    int64_t block_rows,
+    int64_t block_cols) {
+  const int64_t cols = t.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2
+      ? t.size(1) * 2
+      : t.size(1);
   return (
-      at::isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat &&
-      scale.dim() == 2 && scale.size(0) == t.size(0) &&
-      scale.size(1) == ceil_div<int64_t>(t.size(1), 128) &&
+      scale.scalar_type() == scale_dtype && scale.dim() == 2 &&
+      scale.size(0) == ceil_div<int64_t>(t.size(0), block_rows) &&
+      scale.size(1) == ceil_div<int64_t>(cols, block_cols) &&
       (scale.is_contiguous() || scale.t().is_contiguous()));
+}
+
+bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  return at::isFloat8Type(t.scalar_type()) &&
+      is_blockwise_scaling(t, scale, at::kFloat, 1, 128);
 }
 
 bool is_blockwise_128x128_scaling(
     const at::Tensor& t,
     const at::Tensor& scale) {
-  return (
-      at::isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat &&
-      scale.dim() == 2 && scale.size(0) == ceil_div<int64_t>(t.size(0), 128) &&
-      scale.size(1) == ceil_div<int64_t>(t.size(1), 128) &&
-      (scale.is_contiguous() || scale.t().is_contiguous()));
+  return at::isFloat8Type(t.scalar_type()) &&
+      is_blockwise_scaling(t, scale, at::kFloat, 128, 128);
+}
+
+// 1x32 blocks for microscaled fp8 or packed fp4 data and fp8_e8m0fnu scales
+bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  return (at::isFloat8Type(t.scalar_type()) ||
+          t.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2) &&
+      is_blockwise_scaling(t, scale, at::kFloat8_e8m0fnu, 1, 32);
+}
+
+// 1x16 blocks for packed nvfp4 data and float8_e4m3fn scales
+bool is_blockwise_1x16_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  return t.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2 &&
+      is_blockwise_scaling(t, scale, at::kFloat8_e4m3fn, 1, 16);
 }
 
 bool is_desired_scaling(
@@ -133,6 +156,10 @@ bool is_desired_scaling(
       return is_blockwise_1x128_scaling(t, scale);
     case ScalingType::BlockWise128x128:
       return is_blockwise_128x128_scaling(t, scale);
+    case ScalingType::BlockWise1x32:
+      return is_blockwise_1x32_scaling(t, scale);
+    case ScalingType::BlockWise1x16:
+      return is_blockwise_1x16_scaling(t, scale);
     default:
       return false;
   }
@@ -181,6 +208,33 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       ceil_div<int64_t>(b.size(0), 128),
       ", ",
       ceil_div<int64_t>(b.size(1), 128),
+      ").\n"
+      "- For MXFP8 1x32 scaling, a and b should be float8, scales should be float8_e8m0fnu, scale_a should be (",
+      a.size(0),
+      ", ",
+      ceil_div<int64_t>(a.size(1), 32),
+      ") and scale_b should be (",
+      ceil_div<int64_t>(b.size(0), 32),
+      ", ",
+      b.size(1),
+      ").\n"
+      "- For MXFP4 1x32 scaling, a and b should be float4_e2m1fn_x2, scales should be float8_e8m0fnu, scale_a should be (",
+      a.size(0),
+      ", ",
+      ceil_div<int64_t>(a.size(1) * 2, 32),
+      ") and scale_b should be (",
+      ceil_div<int64_t>(b.size(0) * 2, 32),
+      ", ",
+      b.size(1),
+      ").\n"
+      "- For NVFP4 1x16 scaling, a and b should be float4_e2m1fn_x2, scales should be float8_e4m3fn, scale_a should be (",
+      a.size(0),
+      ", ",
+      ceil_div<int64_t>(a.size(1) * 2, 16),
+      ") and scale_b should be (",
+      ceil_div<int64_t>(b.size(0) * 2, 16),
+      ", ",
+      b.size(1),
       ").\n"
       "Got a.dtype()=",
       a.scalar_type(),
@@ -288,20 +342,7 @@ Tensor& _scaled_mm_out_xpu(
         "scaled_mm: fast_accum is not supported in XPU for now. It would silently set use_fast_accum to false.");
   }
 
-  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
-
-  TORCH_CHECK(
-      mat1.sizes()[1] == mat2.sizes()[0],
-      "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.sizes()[0],
-      "x",
-      mat1.sizes()[1],
-      " and ",
-      mat2.sizes()[0],
-      "x",
-      mat2.sizes()[1],
-      ")");
+  check_mm_shapes(mat1, mat2, "_scaled_mm");
 
   // Check what type of scaling we are doing based on inputs. This list is
   // sorted by decreasing priority.
@@ -318,6 +359,10 @@ Tensor& _scaled_mm_out_xpu(
               ScalingType::BlockWise1x128, ScalingType::BlockWise128x128),
           std::make_pair(
               ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
+          std::make_pair(
+              ScalingType::BlockWise1x32, ScalingType::BlockWise1x32),
+          std::make_pair(
+              ScalingType::BlockWise1x16, ScalingType::BlockWise1x16),
       },
       mat1,
       mat2,
@@ -353,12 +398,14 @@ Tensor& _scaled_mm_out_xpu(
       !out_dtype || *out_dtype == out.scalar_type(),
       "out_dtype must match output matrix type");
   TORCH_CHECK(
-      at::isFloat8Type(mat1.scalar_type()),
-      "Expected mat1 to be Float8 matrix got ",
+      at::isFloat8Type(mat1.scalar_type()) ||
+          mat1.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2,
+      "Expected mat1 to be Float8 or Float4_e2m1fn_x2 matrix got ",
       mat1.scalar_type());
   TORCH_CHECK(
-      at::isFloat8Type(mat2.scalar_type()),
-      "Expected mat2 to be Float8 matrix got ",
+      at::isFloat8Type(mat2.scalar_type()) ||
+          mat2.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2,
+      "Expected mat2 to be Float8 or Float4_e2m1fn_x2 matrix got ",
       mat2.scalar_type());
   // TODO: oneDNN Currently only supports e4m3 with group scales on BMG. Not
   // support 2D scales, only 1D. Needs to add more checks there.
@@ -408,21 +455,25 @@ Tensor& _scaled_mm_out_xpu(
 
   // TODO: Scale_result is not supported by now!!
   // API shapes match CUDA v1. oneDNN needs row-major contiguous.
-  // scale_a: [M, K//128] or [M//128, K//128]
-  // scale_b: [K//128, N] or [K//128, N//128]
+  // scale_a: [M, K//128] or [M//128, K//128] or [M, K//32] or [M, K//16]
+  // scale_b: [K//128, N] or [K//128, N//128] or [K//32, N] or [K//16, N]
   // Because the user might passed in the CUDA's stride (col-major because of
   // swizzling)
   // call a contiguous() to ensure row-major for oneDNN
   Tensor scale_a_internal = scale_a;
   Tensor scale_b_internal = scale_b;
   if (scaling_choice_a == ScalingType::BlockWise128x128 ||
-      scaling_choice_a == ScalingType::BlockWise1x128) {
+      scaling_choice_a == ScalingType::BlockWise1x128 ||
+      scaling_choice_a == ScalingType::BlockWise1x32 ||
+      scaling_choice_a == ScalingType::BlockWise1x16) {
     scale_a_internal = scale_a.is_contiguous() ? scale_a : scale_a.contiguous();
   }
   if (scaling_choice_b == ScalingType::BlockWise1x128 ||
-      scaling_choice_b == ScalingType::BlockWise128x128) {
-    // CUDA v1 shapes [K//128, N] and [K//128, N//128] already match oneDNN's
-    // expected row-major layout. Just ensure contiguous.
+      scaling_choice_b == ScalingType::BlockWise128x128 ||
+      scaling_choice_b == ScalingType::BlockWise1x32 ||
+      scaling_choice_b == ScalingType::BlockWise1x16) {
+    // CUDA v1 shapes [K//128, N], [K//128, N//128], [K//32, N], or [K//16, N]
+    // already match oneDNN's expected row-major layout. Just ensure contiguous.
     scale_b_internal = scale_b.is_contiguous() ? scale_b : scale_b.contiguous();
   }
   return _scaled_gemm(
@@ -460,8 +511,6 @@ Tensor _scaled_mm_xpu(
       out);
 }
 
-using namespace std::placeholders;
-
 namespace scaled_blas = at::native::scaled;
 using scaled_blas::convert_int_to_enum;
 using scaled_blas::ScaledGemmImplementation;
@@ -475,40 +524,22 @@ std::array<ScaleKernelDispatchEntry, 9> scale_kernel_dispatch = {{
      scaled_blas::check_rowwise_recipe,
      ScaledGemmImplementation::ROWWISE_ROWWISE},
     {"block_1x128_128x128",
-     std::bind(
+     std::bind_front(
          scaled_blas::check_deepseek_recipe,
          ScalingType::BlockWise1x128,
-         ScalingType::BlockWise128x128,
-         _1,
-         _2,
-         _3,
-         _4,
-         _5,
-         _6),
+         ScalingType::BlockWise128x128),
      ScaledGemmImplementation::BLOCK_1x128_128x128},
     {"block_128x128_1x128",
-     std::bind(
+     std::bind_front(
          scaled_blas::check_deepseek_recipe,
          ScalingType::BlockWise128x128,
-         ScalingType::BlockWise1x128,
-         _1,
-         _2,
-         _3,
-         _4,
-         _5,
-         _6),
+         ScalingType::BlockWise1x128),
      ScaledGemmImplementation::BLOCK_128x128_1x128},
     {"block_1x128_1x128",
-     std::bind(
+     std::bind_front(
          scaled_blas::check_deepseek_recipe,
          ScalingType::BlockWise1x128,
-         ScalingType::BlockWise1x128,
-         _1,
-         _2,
-         _3,
-         _4,
-         _5,
-         _6),
+         ScalingType::BlockWise1x128),
      ScaledGemmImplementation::BLOCK_1x128_1x128},
     {"mxfp8_mxfp8",
      scaled_blas::check_mxfp8_recipe,

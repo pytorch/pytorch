@@ -5,7 +5,7 @@ set -eux
 torch_version=$(unzip -p torch-* '**/METADATA' | grep '^Version: ' | cut -d' ' -f2)
 nightly=$(echo ${torch_version} | cut -d'.' -f4)
 
-# Copied from .ci/manywheel/build_common.sh
+# Copied from .ci/wheel/linux/build_common.sh
 make_wheel_record() {
   fpath=$1
   if echo $fpath | grep RECORD >/dev/null 2>&1; then

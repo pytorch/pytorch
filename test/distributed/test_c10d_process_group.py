@@ -14,17 +14,17 @@ if not dist.is_available():
 
 from c10d_backend_common import (
     C10D_BACKENDS,
-    C10dBackendTest,
+    C10dBackendTestContinuous,
     instantiate_backend_tests,
 )
 
-from torch.testing._internal.common_utils import run_tests
+from torch._C._distributed_c10d import WorkResult
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
+from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests
 
 
-class AbstractProcessGroupTest(C10dBackendTest):
+class AbstractProcessGroupTest(C10dBackendTestContinuous):
     def test_new_group_rank_normalization(self):
-        self._init_pg()
-
         ranks = torch.arange(self.world_size)
         group = dist.new_group(ranks=ranks)
         self.assertEqual(
@@ -44,7 +44,6 @@ class AbstractProcessGroupTest(C10dBackendTest):
     def test_sequence_numbers(self):
         if not self.supports_sequence_numbers:
             self.skipTest(f"{self.backend_name} does not support sequence numbers")
-        self._init_pg()
         default_pg = dist.distributed_c10d._get_default_group()
         self.assertEqual(default_pg._get_sequence_number_for_group(), 0)
         for sequence_number in range(1, 4):
@@ -62,7 +61,6 @@ class AbstractProcessGroupTest(C10dBackendTest):
     def test_work_sequence_number(self):
         if not self.supports_work_sequence_number:
             self.skipTest(f"{self.backend_name} does not report work seq numbers")
-        self._init_pg()
         default_pg = dist.distributed_c10d._get_default_group()
         for expected in range(1, 4):
             work = dist.all_reduce(torch.ones(1, device=self.device), async_op=True)
@@ -80,7 +78,6 @@ class AbstractProcessGroupTest(C10dBackendTest):
     def test_work_duration(self):
         if not self.supports_collectives_timing:
             self.skipTest(f"{self.backend_name} does not support collectives timing")
-        self._init_pg()
         default_pg = dist.distributed_c10d._get_default_group()
         tensor = torch.ones(1024, device=self.device)
 
@@ -100,7 +97,6 @@ class AbstractProcessGroupTest(C10dBackendTest):
         self.assertTrue(math.isfinite(duration))
 
     def test_different_group_initialization_order(self):
-        self._init_pg()
         if self.device_type == "cuda":
             torch.cuda.set_device(0)
         full_group = dist.new_group(list(range(self.world_size)))
@@ -112,7 +108,6 @@ class AbstractProcessGroupTest(C10dBackendTest):
         dist.barrier(group=full_group)
 
     def test_wait_unregisters_work(self):
-        self._init_pg()
         with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
             tensor = torch.ones(1, device=self.device)
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
@@ -122,7 +117,6 @@ class AbstractProcessGroupTest(C10dBackendTest):
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
     def test_async_work_lifetime(self):
-        self._init_pg()
         tensor = torch.full((4,), float(self.rank + 1), device=self.device)
         work = dist.all_reduce(tensor, async_op=True)
         del work
@@ -136,8 +130,30 @@ class AbstractProcessGroupTest(C10dBackendTest):
         del work
         dist.barrier()
 
+    def test_work_wait_is_stream_ordered(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+        torch.cuda._sleep(int(250 * get_cycles_per_ms()))
+        work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
+
+        work.wait()
+
+        self.assertFalse(torch.cuda.current_stream().query())
+        torch.cuda.synchronize()
+
+    def test_work_result_future(self):
+        if not self.supports_work_result:
+            self.skipTest(f"{self.backend_name} does not report work results")
+        work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
+
+        result = work.get_future_result().wait()
+
+        self.assertEqual(WorkResult(result), WorkResult.SUCCESS)
+        self.assertTrue(work.is_completed())
+
     def test_work_future(self):
-        self._init_pg()
         tensor = torch.full((4,), float(self.rank + 1), device=self.device)
         work = dist.all_reduce(tensor, async_op=True)
         future = work.get_future()
@@ -147,7 +163,11 @@ class AbstractProcessGroupTest(C10dBackendTest):
 
 
 instantiate_backend_tests(
-    globals(), "ProcessGroup", AbstractProcessGroupTest, C10D_BACKENDS
+    globals(),
+    "ProcessGroup",
+    AbstractProcessGroupTest,
+    C10D_BACKENDS,
+    harness=MultiProcContinuousTest,
 )
 
 

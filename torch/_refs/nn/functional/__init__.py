@@ -1050,16 +1050,12 @@ def _hardtanh(
     if inplace:
         raise NotImplementedError
     if utils.is_boolean_dtype(a.dtype):
-        raise RuntimeError("Bool inputs not supported for hardtanh")
+        raise NotImplementedError("Bool inputs not supported for hardtanh")
 
     # preserve legacy behavior of boundaries not causing type promotion
     if utils.is_integer_dtype(a.dtype):
         min_val = int(min_val)  # type: ignore[arg-type]
         max_val = int(max_val)  # type: ignore[arg-type]
-        if not (a.dtype != torch.uint8 or (min_val >= 0 and max_val >= 0)):
-            raise RuntimeError(
-                "Cannot do hardtanh on an unsigned type with negative limits"
-            )
 
     if check_bounds and min_val > max_val:  # type: ignore[operator]
         raise ValueError("min_val cannot be greater than max_val")
@@ -1291,6 +1287,21 @@ def pixel_shuffle(self: Tensor, upscale_factor: int):
         self.dim() >= 3,
         lambda: f"pixel_shuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
     )
+    # Matches the eager check; without it the division below raises
+    # ZeroDivisionError for upscale_factor=0.
+    torch._check(
+        upscale_factor > 0,
+        lambda: f"pixel_shuffle expects a positive upscale_factor, but got {upscale_factor}",
+    )
+    # Eager also rejects a factor whose square overflows int64 (TORCH_CHECK_VALUE ->
+    # ValueError). Without it `upscale_factor**2` below is an arbitrary-precision
+    # Python int, so the view() built from it fails with an internal shape error
+    # instead of this message.
+    torch._check_value(
+        upscale_factor <= torch.iinfo(torch.int64).max // upscale_factor,
+        lambda: f"upscale factor is too large, (upscale_factor)^2 overflowed: "
+        f"upscale_factor={upscale_factor}",
+    )
     batch = self.shape[:-3]
     C_out = self.shape[-3] // upscale_factor**2
     HW_out = (self.shape[-2] * upscale_factor, self.shape[-1] * upscale_factor)
@@ -1319,6 +1330,16 @@ def pixel_unshuffle(self: Tensor, downscale_factor: int):
         self.dim() >= 3,
         lambda: f"pixel_unshuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
     )
+    # Matches the eager check; without it the division below raises
+    # ZeroDivisionError for downscale_factor=0.
+    torch._check(
+        downscale_factor > 0,
+        lambda: f"pixel_unshuffle expects a positive downscale_factor, but got {downscale_factor}",
+    )
+    # Deliberately no int64-overflow check here. Unlike pixel_shuffle, eager never
+    # squares the factor before using it -- it only tests H and W for divisibility --
+    # so a huge downscale_factor raises the ordinary divisibility RuntimeError. Adding
+    # an overflow check would introduce a divergence rather than remove one.
     batch = self.shape[:-3]
     C_out = self.shape[-3] * downscale_factor**2
     HW_out = (self.shape[-2] // downscale_factor, self.shape[-1] // downscale_factor)
