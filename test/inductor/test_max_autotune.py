@@ -5737,7 +5737,8 @@ class TestPrologueFusion(TestCase):
     def test_prologue_per_row_load_unaligned_size(self, operand):
         # M (resp. N) is not a multiple of BLOCK_M (resp. BLOCK_N), so the last
         # tile's offsets wrap around. A prologue that loads a per-row (resp.
-        # per-col) tensor must not be vectorized as if they were contiguous.
+        # per-col) tensor must not be vectorized as if the offsets were
+        # BLOCK_M-aligned.
         torch.set_float32_matmul_precision("highest")
         size, K = 257, 64
 
