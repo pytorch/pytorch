@@ -11,7 +11,12 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 HAS_CUDA = torch.cuda.is_available()
@@ -440,6 +445,58 @@ class TestSymmemBackendCollectives(MultiProcessTestCase):
         self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
+    @parametrize("numel", [0, 4, 16384])
+    def test_send_recv_slot_reuse(self, numel):
+        self._init_pg()
+        store = dist.distributed_c10d._get_default_store()
+        store.set_timeout(timedelta(seconds=30))
+        tensors = [torch.full((numel,), i + 1.0, device=self.device) for i in range(4)]
+
+        if self.rank == 0:
+            works = [dist.isend(t, dst=1) for t in tensors]
+            store.set("sends_queued", "1")
+            for work in works:
+                work.wait()
+        else:
+            tensors = [torch.empty_like(t) for t in tensors]
+            store.wait(["sends_queued"])
+            for tensor in tensors:
+                dist.recv(tensor, src=0)
+
+        dist.barrier()
+        torch.cuda.synchronize(self.device)
+        if self.rank == 1:
+            for i, tensor in enumerate(tensors):
+                self.assertEqual(tensor, torch.full_like(tensor, float(i + 1)))
+        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
+    def test_send_recv_graph_replay(self):
+        self._init_pg()
+        peer = 1 - self.rank
+        send_t = torch.zeros(4, device=self.device)
+        recv_t = torch.empty_like(send_t)
+        stream = torch.cuda.Stream(device=self.device)
+        stream.wait_stream(torch.cuda.current_stream(self.device))
+        graph = torch.cuda.CUDAGraph()
+
+        with torch.cuda.graph(graph, stream=stream):
+            dist.isend(send_t, dst=peer)
+            dist.irecv(recv_t, src=peer)
+
+        for i in range(3):
+            send_t.fill_(self.rank * 10.0 + i)
+            stream.wait_stream(torch.cuda.current_stream(self.device))
+            with torch.cuda.stream(stream):
+                graph.replay()
+            stream.synchronize()
+            self.assertEqual(recv_t, torch.full_like(recv_t, peer * 10.0 + i))
+
+        dist.barrier()
+        torch.cuda.synchronize(self.device)
+        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
     def test_subgroup_single_rank(self):
         self._init_pg()
         subgroup = dist.new_group([0])
@@ -521,6 +578,9 @@ class TestSymmemBackendCollectives(MultiProcessTestCase):
             torch.cuda.synchronize(self.device)
             self.assertEqual(t, torch.full((4,), 3.0, device=self.device))
         self._destroy_pg()
+
+
+instantiate_parametrized_tests(TestSymmemBackendCollectives)
 
 
 if __name__ == "__main__":
