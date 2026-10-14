@@ -777,6 +777,7 @@
 # label: module: dsl-native-ops
 /torch/_native/ @slayton58 @drisspg
 /torch/_native/ops/linear_cross_entropy/ @slayton58 @pearu
+/torch/utils/_quantize_tensor_validation.py @vkuzo @slayton58
 # label: module: complex
 /torch/_subclasses/complex_tensor/ @hameerabbasi @amjames
 # label: oncall: pt2, module: fakeTensor

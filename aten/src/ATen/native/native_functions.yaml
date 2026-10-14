@@ -7132,6 +7132,18 @@
     XPU: _scaled_mm_out_xpu
   tags: needs_exact_strides
 
+- func: _quantize_tensor(Tensor input, *, int scaling_type, ScalarType qdata_dtype, int scaling_algorithm, int swizzle_type, bool scaling_type_use_square_block_size=False) -> Tensor[]
+  variants: function
+  dispatch:
+    CUDA: _quantize_tensor_cuda
+  tags: needs_exact_strides
+
+- func: _quantize_tensor_dual(Tensor input, *, int scaling_type, ScalarType qdata_dtype, int scaling_algorithm, int swizzle_type, bool scaling_type_use_square_block_size=False) -> Tensor[]
+  variants: function
+  dispatch:
+    CUDA: _quantize_tensor_dual_cuda
+  tags: needs_exact_strides
+
 - func: _scaled_mm_v2(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? bias, ScalarType? out_dtype, int[] contraction_dim=[], bool use_fast_accum=False) -> Tensor
   structured_delegate: _scaled_mm_v2.out
   variants: function

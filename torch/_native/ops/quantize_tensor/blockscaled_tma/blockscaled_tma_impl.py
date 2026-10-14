@@ -4,6 +4,7 @@ from typing import NamedTuple, TypeAlias
 
 import torch
 
+from ..utils import _device_capability
 from .blockscaled_tma_kernels import (
     _compile_blockscaled_tma,
     _QUANT_ORIENTATION_DIM_K,
@@ -354,7 +355,7 @@ def _blockscaled_tma_impl(
         raise ValueError("blockscaled TMA requires a CUDA input")
 
     device = input.get_device()
-    capability = torch.cuda.get_device_capability(device)
+    capability = _device_capability(device)
     if capability < (10, 0):
         raise RuntimeError(
             "blockscaled TMA requires CUDA capability 10.0 or newer; "
