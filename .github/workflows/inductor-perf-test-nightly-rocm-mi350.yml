@@ -136,6 +136,24 @@ jobs:
       monitor-data-collect-interval: 2
     secrets: inherit
 
+  test-periodically-dind:
+    name: linux-jammy-rocm-py3.11-mi350-dind
+    if: needs.test-periodically.outputs.image-mirrored == 'false'
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-jammy-rocm-py3_11-inductor-benchmark-build
+      - test-periodically
+    with:
+      build-environment: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.build-environment }}
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true
+      docker-image: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.test-periodically.outputs.dind-test-matrix }}
+      timeout-minutes: 720
+      disable-monitor: true
+      monitor-log-interval: 10
+      monitor-data-collect-interval: 2
+    secrets: inherit
+
   test-weekly:
     name: linux-jammy-rocm-py3.11-mi350
     uses: ./.github/workflows/_rocm-test-no-dind.yml
@@ -153,6 +171,24 @@ jobs:
       monitor-data-collect-interval: 2
     secrets: inherit
 
+  test-weekly-dind:
+    name: linux-jammy-rocm-py3.11-mi350-dind
+    if: needs.test-weekly.outputs.image-mirrored == 'false'
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-jammy-rocm-py3_11-inductor-benchmark-build
+      - test-weekly
+    with:
+      build-environment: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.build-environment }}
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true
+      docker-image: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.test-weekly.outputs.dind-test-matrix }}
+      timeout-minutes: 1440
+      disable-monitor: true
+      monitor-log-interval: 10
+      monitor-data-collect-interval: 2
+    secrets: inherit
+
   test:
     name: linux-jammy-rocm-py3.11-mi350
     uses: ./.github/workflows/_rocm-test-no-dind.yml
@@ -165,6 +201,24 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.test-matrix }}
       timeout-minutes: 720
       # Disable monitor in perf tests for more investigation
+      disable-monitor: true
+      monitor-log-interval: 10
+      monitor-data-collect-interval: 2
+    secrets: inherit
+
+  test-dind:
+    name: linux-jammy-rocm-py3.11-mi350-dind
+    if: needs.test.outputs.image-mirrored == 'false'
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-jammy-rocm-py3_11-inductor-benchmark-build
+      - test
+    with:
+      build-environment: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.build-environment }}
+      dashboard-tag: training-${{ github.event_name != 'workflow_dispatch' || inputs.training }}-inference-${{ github.event_name != 'workflow_dispatch' || inputs.inference }}-default-${{ github.event_name != 'workflow_dispatch' || inputs.default }}-dynamic-${{ github.event_name != 'workflow_dispatch' || inputs.dynamic }}-cudagraphs-${{ github.event_name != 'workflow_dispatch' || inputs.cudagraphs }}-cppwrapper-${{ github.event_name != 'workflow_dispatch' || inputs.cppwrapper }}-aotinductor-${{ github.event_name != 'workflow_dispatch' || inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ github.event_name != 'workflow_dispatch' || inputs.freezing_cudagraphs }}
+      docker-image: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.test.outputs.dind-test-matrix }}
+      timeout-minutes: 720
       disable-monitor: true
       monitor-log-interval: 10
       monitor-data-collect-interval: 2

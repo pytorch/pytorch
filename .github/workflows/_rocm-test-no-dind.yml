@@ -56,6 +56,13 @@ on:
       HUGGING_FACE_HUB_TOKEN:
         required: false
         description: HF Auth token to avoid rate limits when downloading datasets.
+    outputs:
+      image-mirrored:
+        description: true when the GHCR mirror of the CI image exists.
+        value: ${{ jobs.resolve-image.outputs.mirrored }}
+      dind-test-matrix:
+        description: test-matrix with linux.rocm.gpu.mi350.dind.N runners.
+        value: ${{ jobs.resolve-image.outputs.dind-test-matrix }}
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -72,22 +79,37 @@ jobs:
   # so the in-job ECR login _rocm-test.yml performs is too late here.
   # docker-builds copies each main image it pushes to ECR onto the public GHCR
   # mirror under the same tag, server-side, so the mirror carries the same
-  # digest. Resolve it on a CPU runner: a hash that was never mirrored fails
-  # here in seconds instead of holding a GPU until the hook's prepare_job
-  # timeout expires.
+  # digest. Resolve it on a CPU runner. A missing mirror sets mirrored=false
+  # so the caller can run _rocm-test.yml on the DinD runner instead of holding
+  # a GPU until the hook's prepare_job timeout expires.
   resolve-image:
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     runs-on: ubuntu-24.04
     outputs:
       docker-image: ${{ steps.mirror.outputs.docker-image }}
+      mirrored: ${{ steps.mirror.outputs.mirrored }}
+      dind-test-matrix: ${{ steps.mirror.outputs.dind-test-matrix }}
     steps:
       - name: Resolve GHCR mirror
         id: mirror
         shell: bash
         env:
           ECR_IMAGE: ${{ inputs.docker-image }}
+          TEST_MATRIX: ${{ inputs.test-matrix }}
         run: |
           set -euo pipefail
+
+          # mi350.dpx.N and mi350.N both become linux.rocm.gpu.mi350.dind.N.
+          dind_matrix="$(jq -c '
+            .include |= map(
+              if (.runner | test("linux\\.rocm\\.gpu\\.mi350\\.(dpx\\.)?[0-9]+$")) then
+                .runner = "linux.rocm.gpu.mi350.dind." + (.runner | capture("(?<n>[0-9]+)$").n)
+              else
+                .
+              end
+            )
+          ' <<<"${TEST_MATRIX}")"
+          echo "dind-test-matrix=${dind_matrix}" >> "${GITHUB_OUTPUT}"
 
           repository="pytorch/ci-image"
           tag="${ECR_IMAGE##*:}"
@@ -102,18 +124,20 @@ jobs:
               "https://ghcr.io/v2/${repository}/manifests/${tag}")"
             if [[ "${status}" == "200" ]]; then
               echo "Resolved ${image}"
+              echo "mirrored=true" >> "${GITHUB_OUTPUT}"
               exit 0
             fi
             echo "attempt ${attempt}: HTTP ${status}"
             sleep 30
           done
 
-          echo "::error::${image} is absent from the GHCR mirror. docker-builds only mirrors pushes to main/release, so a .ci/docker tree hash that has not landed yet lives only in ECR; run these shards on the DinD runner until the docker change merges."
-          exit 1
+          echo "mirrored=false" >> "${GITHUB_OUTPUT}"
+          echo "::notice::${image} is absent from the GHCR mirror. These shards run without DinD when the mirror exists, and on the DinD runner when it does not."
+          exit 0
 
   test:
     # Keep the production guard from _rocm-test.yml.
-    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]' && needs.resolve-image.outputs.mirrored == 'true'
     needs: resolve-image
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
@@ -152,7 +176,7 @@ jobs:
         run: |
           set -euo pipefail
           cat /etc/os-release || true
-          rocm-sdk version
+          rocm-sdk version || true
           whoami
           id
 
@@ -309,6 +333,8 @@ jobs:
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           USE_ARC: "1"
+          # Same IPC workaround _rocm-test.yml passes with -e (pytorch#198921).
+          HSA_ENABLE_IPC_MODE_LEGACY: "1"
         shell: bash
         run: |
           set -euo pipefail
@@ -344,9 +370,12 @@ jobs:
           if [[ "${TEST_CONFIG}" == *distributed* ]]; then
             timeout 180 python .ci/pytorch/rocm_preflight.py
           fi
-          # Match the old Docker test environment.
+          # Match the old Docker test environment, including
+          # --ulimit stack=10485760:83886080. bash ulimit -s is KiB.
           ulimit -S -c 0
           ulimit -H -c 0
+          ulimit -H -s 81920
+          ulimit -S -s 10240
           "${TEST_COMMAND}"
 
       - name: Print remaining test logs

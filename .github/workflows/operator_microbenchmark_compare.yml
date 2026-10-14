@@ -148,15 +148,30 @@ jobs:
       test-matrix: ${{ needs.build-rocm.outputs.test-matrix }}
     secrets: inherit
 
+  test-rocm-dind:
+    if: needs.test-rocm.outputs.image-mirrored == 'false'
+    name: test-rocm-dind
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - build-rocm
+      - test-rocm
+    with:
+      timeout-minutes: 120
+      build-environment: ${{ needs.build-rocm.outputs.build-environment }}
+      docker-image: ${{ needs.build-rocm.outputs.docker-image }}
+      test-matrix: ${{ needs.test-rocm.outputs.dind-test-matrix }}
+    secrets: inherit
+
   # ---- Compare PR wheel vs nightly baseline (both run in this workflow) and comment on PR ----
   compare-and-comment:
     if: >-
       always() && (
         needs.test-cuda.result == 'success' ||
         needs.test-b200.result == 'success' ||
-        needs.test-rocm.result == 'success'
+        needs.test-rocm-dind.result == 'success' ||
+        (needs.test-rocm.result == 'success' && needs.test-rocm.outputs.image-mirrored == 'true')
       )
-    needs: [test-cuda, test-b200, test-rocm]
+    needs: [test-cuda, test-b200, test-rocm, test-rocm-dind]
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -189,7 +204,13 @@ jobs:
             H100)   echo "runner=mt-l-x86iamx-22-225-h100" >> "$GITHUB_OUTPUT" ;;
             A100)   echo "runner=mt-l-x86iavx512-11-125-a100" >> "$GITHUB_OUTPUT" ;;
             B200)   echo "runner=linux.dgx.b200" >> "$GITHUB_OUTPUT" ;;
-            MI300X) echo "runner=linux.rocm.gpu.mi350.1" >> "$GITHUB_OUTPUT" ;;
+            MI300X)
+              if [[ "${{ needs.test-rocm.outputs.image-mirrored }}" == "false" ]]; then
+                echo "runner=linux.rocm.gpu.mi350.dind.1" >> "$GITHUB_OUTPUT"
+              else
+                echo "runner=linux.rocm.gpu.mi350.1" >> "$GITHUB_OUTPUT"
+              fi
+              ;;
           esac
 
       - name: Download PR and baseline results from S3
