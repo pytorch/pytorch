@@ -146,10 +146,17 @@ class TestAOTAutocastStates(TestCase):
             ),
         ):
             enabled.side_effect = lambda device: device == "renamed_backend"
-            dtype.side_effect = lambda device: {
+            dtypes = {
                 "cpu": torch.float32,
                 "renamed_backend": torch.float16,
-            }.get(device, original_get_autocast_dtype(device))
+            }
+
+            def get_autocast_dtype(device: str) -> torch.dtype:
+                if device in dtypes:
+                    return dtypes[device]
+                return original_get_autocast_dtype(device)
+
+            dtype.side_effect = get_autocast_dtype
 
             self.assertEqual(
                 _get_autocast_states(),
