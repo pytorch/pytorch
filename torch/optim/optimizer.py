@@ -221,7 +221,7 @@ def _view_as_real(
 def _get_scalar_dtype(
     is_fused: bool | None = None, device: torch.device | None = None
 ) -> torch.dtype:
-    if is_fused and (device is None or device.type != "cuda"):
+    if is_fused and (device is None or device.type not in ("cpu", "cuda")):
         return torch.float32
     return (
         torch.float64 if torch.get_default_dtype() == torch.float64 else torch.float32

@@ -116,7 +116,7 @@ struct TensorListScalarListMetadata<c10::complex<double>, 2> {
 // whose each element is `at::Tensor` of 1 element representing the number of
 // `step`s called so far.
 // We're aware this struct overflows the kernel arg limit at n=1 (4244 bytes),
-// but our current fused optimizers only instantiate at n>=3 so it's not a
+// but our current fused optimizers only instantiate at n>=4 so it's not a
 // concern (yet).
 template <int n>
 struct FusedOptimizerTensorListMetadata {

@@ -35,9 +35,7 @@ void _fused_adagrad_cuda_impl_(
       "fused_adagrad_kernel_cuda",
       [&]() {
         AT_DISPATCH_STEP_TYPES(
-            state_steps[0].scalar_type(),
-            "fused_adagrad_step_cuda",
-            [&]() {
+            state_steps[0].scalar_type(), "fused_adagrad_step_cuda", [&]() {
               multi_tensor_apply_for_fused_optimizer<3>(
                   tensor_lists,
                   state_steps,
@@ -82,9 +80,7 @@ void _fused_adagrad_cuda_impl_(
       "fused_adagrad_kernel_cuda",
       [&]() {
         AT_DISPATCH_STEP_TYPES(
-            state_steps[0].scalar_type(),
-            "fused_adagrad_step_cuda",
-            [&]() {
+            state_steps[0].scalar_type(), "fused_adagrad_step_cuda", [&]() {
               multi_tensor_apply_for_fused_optimizer<3>(
                   tensor_lists,
                   state_steps,

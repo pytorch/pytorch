@@ -620,9 +620,7 @@ void _fused_adam_cuda_impl_common(
         mp_name,
         AT_WRAP([&]() {
           AT_DISPATCH_STEP_TYPES(
-              state_steps[0].scalar_type(),
-              "fused_adam_step_cuda",
-              [&]() {
+              state_steps[0].scalar_type(), "fused_adam_step_cuda", [&]() {
                 multi_tensor_apply_for_fused_optimizer<depth>(
                     tensor_lists,
                     state_steps,
@@ -653,13 +651,16 @@ void _fused_adam_cuda_impl_common(
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf, kBFloat16, params[0].scalar_type(), kernel_name, [&]() {
           AT_DISPATCH_STEP_TYPES(
-              state_steps[0].scalar_type(),
-              "fused_adam_step_cuda",
-              [&]() {
+              state_steps[0].scalar_type(), "fused_adam_step_cuda", [&]() {
                 multi_tensor_apply_for_fused_optimizer<depth>(
                     tensor_lists,
                     state_steps,
-                    FusedAdamMathFunctor<scalar_t, depth, mode, amsgrad, step_t>(),
+                    FusedAdamMathFunctor<
+                        scalar_t,
+                        depth,
+                        mode,
+                        amsgrad,
+                        step_t>(),
                     lr_ptr,
                     lr,
                     beta1,
