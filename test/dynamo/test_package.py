@@ -656,9 +656,8 @@ print(eval(f"bbmod.{name}.{path}") is code)
             self.assertEqual(fn(x), compiled_fn(x))
 
             module_dict["PKG_DYN_ROWS"] = torch.randn(1, 3)
-            # The stance message dumps the whole tree, LAMBDA_GUARD line included;
-            # only the failed parts follow verbose_code_parts=.
-            failed_part = r"verbose_code_parts=\[\"2 <= G\['PKG_DYN_ROWS'\]"
+            # The stance message names the failed part of the precompiled entry.
+            failed_part = r"\[0\] 2 <= G\['PKG_DYN_ROWS'\]"
             with self.assertRaisesRegex(RuntimeError, failed_part):
                 compiled_fn(x)
 
