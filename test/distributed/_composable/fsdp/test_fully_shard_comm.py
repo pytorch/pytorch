@@ -8,6 +8,7 @@ import os
 import re
 import tempfile
 import unittest
+import warnings
 import weakref
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -572,6 +573,22 @@ instantiate_device_type_tests(
 
 
 class TestFullyShardDefaultAllGatherOutputFn(TestCase):
+    def test_smaller_payload_fills_prefix(self, device):
+        # Two ranks gather two elements each into an output sized for four each
+        output = torch.full((8,), -1.0, device=device)
+        with warnings.catch_warnings():
+            # e.g. the deprecated resize of a mismatched out=
+            warnings.simplefilter("error")
+            _default_all_gather_output_fn(
+                torch.arange(4.0, device=device),
+                [output],
+                split_sizes=[2],
+                outer_sizes=[1],
+                world_size=2,
+            )
+        expected = torch.tensor([0.0, 1, 2, 3, -1, -1, -1, -1], device=device)
+        self.assertEqual(output, expected)
+
     def test_byte_buffer_reassembles_typed_rows(self, device):
         # Mixed dtypes gather bytes: per rank, a (2, 2) chunk of a parameter
         # gathered along dim 1, then two bf16 tags

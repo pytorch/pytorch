@@ -605,9 +605,10 @@ def foreach_all_gather_copy_out(
 # copy_in = fn(unsharded_grads, shard_dims=..., world_size=...) runs before FSDP
 # allocates the reduce-scatter input and may replace entries of unsharded_grads.
 # copy_in(reduce_scatter_input) then fills that flat buffer so that, viewed as
-# (world_size, -1), row r holds each gradient's padded shard r, cast to the buffer's
-# dtype. Both run on the current stream; keep neither. The keywords make callbacks
-# with the 2.15 signature fail.
+# (world_size, -1), row r holds each gradient's padded shard r in order, cast to the
+# buffer's dtype. Both run on the current stream; FSDP frees copy_in and the
+# gradients afterward, so keep neither. The keywords make callbacks with the 2.15
+# signature fail.
 def _default_reduce_scatter_input_fn(
     unsharded_grads: list[torch.Tensor],
     *,
