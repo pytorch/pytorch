@@ -248,17 +248,7 @@ struct asin_functor {
       return T(M_PI_F / 2, 0);
     else if (x.x == -1 && x.y == 0)
       return T(M_PI_F / -2, 0);
-    auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
-    // calculate sqrt
-    // modulus
-    auto m = precise::sqrt(sqrt_val.x * sqrt_val.x + sqrt_val.y * sqrt_val.y);
-    // real part: sqrt((m + a)/2)
-    auto real_part = precise::sqrt((m + sqrt_val.x) * .5);
-    // imaginary part: sign(b) * sqrt((m - a)/2)
-    auto imag_part = copysign(
-        static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
-        sqrt_val.y);
-    auto atan_val = div(x, T(real_part, imag_part));
+    auto atan_val = div(x, c10::metal::sqrt(T(1, 0) - c10::metal::mul(x, x)));
     // calculate atan (see atan_functor)
     auto coef = div(T(1, 0), T(0, 2));
     auto log_arg =
@@ -292,17 +282,7 @@ struct acos_functor {
       return T(M_PI_F, 0);
     else if (x.x == -1 && x.y == 0)
       return T(-M_PI_F, 0);
-    auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
-    // calculate sqrt
-    // modulus
-    auto m = precise::sqrt(sqrt_val.x * sqrt_val.x + sqrt_val.y * sqrt_val.y);
-    // real part: sqrt((m + a)/2)
-    auto real_part = precise::sqrt((m + sqrt_val.x) * .5);
-    // imaginary part: sign(b) * sqrt((m - a)/2)
-    auto imag_part = copysign(
-        static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
-        sqrt_val.y);
-    auto atan_val = div(x, T(real_part, imag_part));
+    auto atan_val = div(x, c10::metal::sqrt(T(1, 0) - c10::metal::mul(x, x)));
     // calculate atan (see atan_functor)
     auto coef = div(T(1, 0), T(0, 2));
     auto log_arg =
@@ -535,14 +515,7 @@ struct sqrt_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // modulus
-    auto m = precise::sqrt(x.x * x.x + x.y * x.y);
-    // real part: sqrt((m + a)/2)
-    auto real_part = precise::sqrt((m + x.x) * .5);
-    // imaginary part: sign(b) * sqrt((m - a)/2)
-    auto imag_part = copysign(
-        static_cast<decltype(x.y)>(precise::sqrt((m - x.x) * .5)), x.y);
-    return T(real_part, imag_part);
+    return c10::metal::sqrt(x);
   }
 };
 
@@ -904,7 +877,7 @@ template <typename T>
 kernel void frexp_dense(
     device T* mantissa [[buffer(0)]],
     device int* exponent [[buffer(1)]],
-    constant T* input [[buffer(2)]],
+    device const T* input [[buffer(2)]],
     uint index [[thread_position_in_grid]]) {
   int exp = 0;
   mantissa[index] = frexp_(input[index], exp);
@@ -918,7 +891,7 @@ template <typename T>
 kernel void frexp_strided(
     device void* mantissa [[buffer(0)]],
     device void* exponent [[buffer(1)]],
-    constant void* input [[buffer(2)]],
+    device const char* input [[buffer(2)]],
     constant long* sizes [[buffer(3)]],
     constant long* mantissa_strides [[buffer(4)]],
     constant long* exponent_strides [[buffer(5)]],
@@ -937,11 +910,11 @@ kernel void frexp_strided(
 
 #define REGISTER_FREXP_OP(T)                                                \
   template [[host_name("frexp_dense_" #T)]] kernel void frexp_dense<T>(     \
-      device T*, device int*, constant T*, uint);                           \
+      device T*, device int*, device const T*, uint);                       \
   template [[host_name("frexp_strided_" #T)]] kernel void frexp_strided<T>( \
       device void*,                                                         \
       device void*,                                                         \
-      constant void*,                                                       \
+      device const char*,                                                   \
       constant long*,                                                       \
       constant long*,                                                       \
       constant long*,                                                       \

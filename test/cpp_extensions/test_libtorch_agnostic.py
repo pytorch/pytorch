@@ -433,6 +433,67 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(values, expected.values)
         self.assertEqual(indices, expected.indices)
 
+    @skipIfTorchVersionLessThan(2, 10)
+    @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
+    def test_my_masked_select(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t = torch.randn(3, 8, 5, device=device)
+        mask = t > 0
+        result = libtorch_agnostic.ops.my_masked_select(t, mask)
+        self.assertEqual(result, torch.masked_select(t, mask))
+
+        t_view = t.transpose(0, 2)[:, ::2, :]
+        mask_view = mask.transpose(0, 2)[:, ::2, :]
+        result = libtorch_agnostic.ops.my_masked_select(t_view, mask_view)
+        self.assertEqual(result, torch.masked_select(t_view, mask_view))
+
+        broadcast_mask = torch.tensor([True, False, True], device=device).view(3, 1, 1)
+        result = libtorch_agnostic.ops.my_masked_select(t, broadcast_mask)
+        self.assertEqual(result, torch.masked_select(t, broadcast_mask))
+
+        with self.assertRaisesRegex(RuntimeError, "expected BoolTensor for mask"):
+            libtorch_agnostic.ops.my_masked_select(t, mask.to(torch.int64))
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @dtypes(torch.float32, torch.float64)
+    @parametrize(
+        "torch_op,batch_shape",
+        [(torch.mm, ()), (torch.bmm, (4,))],
+        name_fn=lambda op, _: op.__name__,
+    )
+    def test_my_mm_out_ops(self, device, dtype, torch_op, batch_shape):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        stable_op = getattr(libtorch_agnostic.ops, f"my_{torch_op.__name__}_out")
+
+        a = torch.randn(*batch_shape, 3, 5, device=device, dtype=dtype)
+        b = torch.randn(*batch_shape, 5, 2, device=device, dtype=dtype)
+        out = torch.empty(*batch_shape, 3, 2, device=device, dtype=dtype)
+        result = stable_op(out, a, b)
+        self.assertEqual(out, torch_op(a, b))
+        self.assertEqual(id(result), id(out))
+
+    @onlyCUDA
+    @skipIfTorchVersionLessThan(2, 10)
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize(
+        "torch_op,batch_shape",
+        [(torch.mm, ()), (torch.bmm, (4,))],
+        name_fn=lambda op, _: op.__name__,
+    )
+    def test_my_mm_out_dtype_ops(self, device, dtype, torch_op, batch_shape):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        stable_op = getattr(libtorch_agnostic.ops, f"my_{torch_op.__name__}_out_dtype")
+
+        a = torch.randn(*batch_shape, 3, 5, device=device, dtype=dtype)
+        b = torch.randn(*batch_shape, 5, 2, device=device, dtype=dtype)
+        out = torch.empty(*batch_shape, 3, 2, device=device, dtype=torch.float32)
+        result = stable_op(out, a, b, torch.float32)
+        self.assertEqual(out, torch_op(a, b, out_dtype=torch.float32))
+        self.assertEqual(id(result), id(out))
+
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
     # extension's importable PyMethodDef module (_interop).
