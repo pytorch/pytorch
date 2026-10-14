@@ -1295,7 +1295,7 @@ std::string Unpickler::readString() {
   std::string ss;
   while (true) {
     auto* const bufferStart = buffer_.data() + buffer_pos_;
-    const auto bufferLeft = buffer_.size() - buffer_pos_;
+    const auto bufferLeft = buffer_remaining_;
     char* const newlinePtr =
         static_cast<char*>(memchr(bufferStart, '\n', bufferLeft));
     if (newlinePtr) {

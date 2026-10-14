@@ -17,6 +17,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/safe_numerics.h>
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
@@ -512,12 +513,48 @@ at::Tensor parseTensorFromMetadata(
   c10::Storage storage;
   storage = loader->getStorage(tensor_md->storage_location_index());
   impl->set_storage_keep_dtype(storage);
-  impl->set_storage_offset(tensor_md->storage_offset());
 
+  const int64_t storage_offset = tensor_md->storage_offset();
   std::vector<int64_t> size{
       tensor_md->sizes()->begin(), tensor_md->sizes()->end()};
   std::vector<int64_t> stride{
       tensor_md->strides()->begin(), tensor_md->strides()->end()};
+
+  TORCH_CHECK(
+      size.size() == stride.size(),
+      "Flatbuffer model: size and stride must have the same length");
+  TORCH_CHECK(
+      storage_offset >= 0,
+      "Flatbuffer model: invalid storage offset ", storage_offset);
+  for (const auto i : c10::irange(size.size())) {
+    TORCH_CHECK(
+        size[i] >= 0, "Flatbuffer model: negative size at dim ", i);
+    TORCH_CHECK(
+        stride[i] >= 0, "Flatbuffer model: negative stride at dim ", i);
+  }
+  const size_t itemsize = tensor.dtype().itemsize();
+  const size_t storage_nbytes = storage.nbytes();
+  size_t offset_nbytes = 0;
+  TORCH_CHECK(
+      !c10::mul_overflows(
+          static_cast<size_t>(storage_offset), itemsize, &offset_nbytes) &&
+          offset_nbytes <= storage_nbytes,
+      "Flatbuffer model: storage offset ",
+      storage_offset,
+      " is out of bounds for storage of size ",
+      storage_nbytes,
+      " bytes");
+  const size_t required_nbytes = at::detail::computeStorageNbytes(
+      size, stride, itemsize, static_cast<size_t>(storage_offset));
+  TORCH_CHECK(
+      required_nbytes == 0 || required_nbytes <= storage_nbytes,
+      "Flatbuffer model: tensor metadata requires ",
+      required_nbytes,
+      " bytes but storage only has ",
+      storage_nbytes,
+      " bytes");
+
+  impl->set_storage_offset(storage_offset);
   impl->set_sizes_and_strides(size, stride);
 #ifndef MIN_EDGE_RUNTIME
   tensor = autograd::make_variable(tensor, tensor_md->requires_grad());
