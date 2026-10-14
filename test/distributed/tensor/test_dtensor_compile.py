@@ -845,6 +845,25 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_functionalize_mutation_through_expand(self):
+        # Unlike torch.compile, which desugars subclasses first, functionalize runs the view
+        # inverses (here expand_inverse) on the DTensor itself.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            x.expand(3, *x.shape)[1].fill_(2)
+            return x + 1
+
+        t = torch.arange(6.0, device=self.device_type).view(2, 3)
+        # The transposed local tensor also covers a non-contiguous base.
+        for local, placements in [(t.t(), [Replicate()]), (t, [Shard(0)])]:
+            x = local.clone()
+            ref = fn(x)
+            dx = DTensor.from_local(local.clone(), mesh, placements, run_check=False)
+            res = torch.func.functionalize(fn)(dx)
+            self.assertEqual(res.to_local(), ref)
+            self.assertEqual(dx.to_local(), x)
+
     @unittest.skip("https://github.com/pytorch/pytorch/issues/171934")
     def test_dtensor_input_mutations(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
