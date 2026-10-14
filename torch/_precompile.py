@@ -3360,7 +3360,7 @@ def prepare_runtime(
     Frozen C++ kernels likewise, but a C++ kernel is keyed by its full build
     command, which includes absolute include and library paths: the serving host
     must install PyTorch and its toolchain at the producer's paths, or the kernel
-    misses and, under :func:`no_compilation`, raises.
+    misses and is compiled on the serving host.
 
     Raises :class:`~torch.compiler.PrecompileError` for a make_fx capture, a
     mismatched or unreadable pair, or a cache :func:`finalize_cache` did not
