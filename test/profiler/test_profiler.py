@@ -2597,6 +2597,8 @@ class TestProfilerDevice(TestCase):
         if use_kineto and not kineto_available():
             self.skipTest("Kineto is required")
         device_type = device.split(":")[0]
+        if not use_kineto and device_type == "xpu":
+            self.skipTest("Legacy (non-Kineto) profiling is not supported on XPU")
 
         with _profile(use_device=device_type, use_kineto=use_kineto) as prof:
             t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
