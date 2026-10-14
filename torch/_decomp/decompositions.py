@@ -1695,7 +1695,9 @@ def _addmm_activation(
 ):
     out = addmm(self, mat1, mat2, beta, alpha)
     if use_gelu:
-        return aten.gelu(out, approximate=_EAGER_GELU_APPROXIMATION.get(self.device.type, "none"))
+        return aten.gelu(
+            out, approximate=_EAGER_GELU_APPROXIMATION.get(self.device.type, "none")
+        )
     return aten.relu(out)
 
 
