@@ -3375,7 +3375,7 @@ def prepare_runtime(
     Frozen C++ kernels likewise, but a C++ kernel is keyed by its full build
     command, which includes absolute include and library paths: the serving host
     must install PyTorch and its toolchain at the producer's paths, or the kernel
-    misses and, under :func:`no_compilation`, raises.
+    misses and is compiled on the serving host.
 
     A cache that carries Triton's runtime cache has it imported here, into this
     process's ``TRITON_CACHE_DIR``; :func:`load` does not import it again. Enable
