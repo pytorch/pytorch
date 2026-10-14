@@ -1391,6 +1391,11 @@ if(NOT MSVC)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
   endif()
+  if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
+    # Suppress GCC's warning without changing the value of
+    # std::hardware_destructive_interference_size in public headers.
+    append_cxx_flag_if_supported("-Wno-interference-size" CMAKE_CXX_FLAGS)
+  endif()
   # needed for compat with newer versions of clang that use C++20 mangling rules
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18)
     append_cxx_flag_if_supported("-fclang-abi-compat=17" CMAKE_CXX_FLAGS)
