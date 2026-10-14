@@ -70,6 +70,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    CallFunctionNoArgsSource,
     CellContentsSource,
     ClosureSource,
     ConstantSource,
@@ -161,6 +162,10 @@ _TIME_FUNCTION_NAMES = (
     "time",
     "time_ns",
 )
+
+polyfill_constant_fold_functions_need_guards = {sys.getrecursionlimit}
+if hasattr(sys, "get_int_max_str_digits"):
+    polyfill_constant_fold_functions_need_guards.add(sys.get_int_max_str_digits)
 
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
@@ -3802,6 +3807,15 @@ class PolyfilledFunctionVariable(VariableTracker):
         ):
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            if (
+                self.source is not None
+                and self.fn in polyfill_constant_fold_functions_need_guards
+            ):
+                install_guard(
+                    CallFunctionNoArgsSource(self.source).make_guard(
+                        GuardBuilder.EQUALS_MATCH
+                    )
+                )
             try:
                 # use the original function which is faster than the polyfill
                 result = self.fn(*const_args, **const_kwargs)
