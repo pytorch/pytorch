@@ -2751,10 +2751,11 @@ class CachingAutotuner(KernelInterface):
                 return None
             # compile-on-one-rank kernels keep their loaded handles per device, so
             # kernel.function is None. Bind the current device's handle; the
-            # launcher below only takes the fast path on that device.
+            # launcher below only takes the fast path on that device, read
+            # through the same torch._C._cuda_getDevice() as _bind_to_device.
             device = None
             if getattr(kernel, "device_agnostic", False):
-                device = kernel._current_device()
+                device = torch._C._cuda_getDevice()
                 kernel.load_kernel(device)
                 cu_function = kernel.functions.get(device)
             else:

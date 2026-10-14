@@ -10555,6 +10555,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             _order_stable_repr(("a", frozenset(rebuilt), [rebuilt])),
             "('a', frozenset({1, 9}), [{1, 9}])",
         )
+        keys_xy, keys_yx = {"x": 1, "y": 2}.keys(), {"y": 2, "x": 1}.keys()
+        self.assertEqual(keys_xy, keys_yx)
+        self.assertNotEqual(repr(keys_xy), repr(keys_yx))
+        self.assertEqual(_order_stable_repr(keys_yx), "dict_keys(['x', 'y'])")
+        self.assertEqual(_order_stable_repr({}.keys()), repr({}.keys()))
         for value in (set(), frozenset(), (1,), (), "s", 1.5):
             self.assertEqual(_order_stable_repr(value), repr(value))
             self.assertEqual(eval(_order_stable_repr(value)), value)
