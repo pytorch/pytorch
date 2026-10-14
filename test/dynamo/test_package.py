@@ -260,7 +260,7 @@ import bbmod
 
 code = bbmod.f().g.__code__
 with mock.patch.object(package.sys, "version_info", (3, 10, 0)):
-    name, path = package._get_code_source(code)
+    name, path = package._get_code_source(code, bbmod)
 print(eval(f"bbmod.{name}.{path}") is code)
 """
         with tempfile.TemporaryDirectory() as d:
@@ -1218,7 +1218,9 @@ __name__ = "test_package_renamed_public"
 
 
 def entry(x):
-    return x.sin() * 2
+    x = x.sin()
+    torch._dynamo.graph_break()
+    return x * 2
 """
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -1231,7 +1233,9 @@ def entry(x):
         self.assertNotIn(module.entry.__module__, sys.modules)
 
         package = self._round_trip_under_fail_on_recompile(module.entry, torch.randn(4))
-        self.assertEqual(package.cache_entry().codes[0].python_module, name)
+        codes = package.cache_entry().codes
+        self.assertEqual(len(codes), 2)
+        self.assertEqual({entry.python_module for entry in codes}, {name})
 
     def test_import_source_unpickle_without_trace(self):
         # Deserializing an ImportSource happens at torch.compile() time with no
