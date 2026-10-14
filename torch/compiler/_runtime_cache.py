@@ -344,6 +344,11 @@ def capture_scope() -> Iterator[None]:
             _close(owner)
 
 
+def in_capture_runtime() -> bool:
+    owner = _active_capture()
+    return owner is not None and owner.explicit
+
+
 def seal_runtime_scope() -> None:
     """Seal an enclosing capture_runtime() scope whose cache is already written."""
     owner = _active_capture()
@@ -366,6 +371,19 @@ def _freeze_triton_kernels(
             static_kernels[key] = _freeze_triton_kernel(key, instances)
         except _UnresolvedTritonExport as exc:
             rejected_sources.extend(exc.sources)
+        except Exception as exc:
+            # Only a capture_runtime() scope refuses the write; a plain capture
+            # leaves any source it cannot freeze out.
+            if strict:
+                raise
+            rejected_sources.append(
+                {
+                    "source_key": key,
+                    "instance_count": len(instances),
+                    "reason": "freeze_failed",
+                    "error": repr(exc),
+                }
+            )
     if rejected_sources:
         error = _UnresolvedTritonExport(rejected_sources)
         torch._logging.trace_structured(
@@ -440,12 +458,13 @@ def freeze_runtime_cache(
             raise RuntimeError(
                 "The precompile cache already contains frozen runtime dependencies"
             )
+        seal = final and owner.explicit
         # Drain before sealing: compile result callbacks re-check
         # check_compilation_allowed, so draining under the seal rejects them.
-        AsyncCompile.drain_pending()
+        # Only a seal stops compiling, so only it shuts the compile workers down.
+        AsyncCompile.drain_pending(shutdown=seal)
         if torch.cuda.is_initialized():
             torch.cuda.synchronize()
-        seal = final and owner.explicit
         with _capture_lock:
             if seal:
                 owner.seal()
