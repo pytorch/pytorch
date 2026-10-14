@@ -286,51 +286,43 @@ class _RecompileRefusedError(RuntimeError):
 
 _PRECOMPILE_REASONS_REPORTED = 5
 _PRECOMPILE_PARTS_REPORTED = 5
-
-
-def _failing_guard_parts(
-    guard_manager: GuardManagerWrapper, f_locals: dict[str, Any], parts: list[str]
-) -> list[str]:
-    """
-    Symbolic shape guards are installed as a single lambda guard whose
-    verbose_code_parts is every clause, so a failure reports all of them.
-    Re-evaluate clause by clause to name the ones that rejected this call;
-    fall back to all parts.
-    """
-    from torch._dynamo.guards import failing_verbose_code_parts
-
-    global_scope = guard_manager.global_scope
-    closure_vars = guard_manager.closure_vars
-    if global_scope is None or closure_vars is None:
-        return parts
-    scope = {"L": f_locals, "G": global_scope.get("G"), **closure_vars}
-    failed = failing_verbose_code_parts(
-        global_scope, scope, parts, first_only=False, swallow_errors=True
-    )
-    return failed or parts
+_PRECOMPILE_ERROR_CHARS = 200
 
 
 def _precompile_rejection(entry: Any, f_locals: dict[str, Any]) -> str:
     """The guard that rejected this call, for one precompiled entry."""
-    from torch._dynamo.guards import strip_local_scope
+    from torch._dynamo.guards import failing_verbose_code_parts, strip_local_scope
 
     guard_manager: GuardManagerWrapper = entry.guard_manager
     # The report is built because the call already missed; a guard that raises
     # on re-evaluation must not replace it.
     try:
         reason = guard_manager.check_verbose(f_locals)
+        # A passing check has no failing parts to name: the call raced an
+        # install, or the guard is not deterministic.
+        if reason.result:
+            return "<matched on re-check>"
+        parts = reason.verbose_code_parts
+        # Symbolic shape guards are one lambda guard listing every clause: name
+        # the clauses that fail on re-evaluation, else all of them.
+        if (
+            len(parts) > 1
+            and guard_manager.global_scope is not None
+            and guard_manager.closure_vars is not None
+        ):
+            limit = _PRECOMPILE_PARTS_REPORTED + 1
+            parts = (
+                failing_verbose_code_parts(
+                    guard_manager, f_locals, parts, limit=limit, swallow_errors=True
+                )
+                or parts
+            )
     except Exception as e:
-        return f"<guard check raised {type(e).__name__}: {e}>"
-    # A passing check has no failing parts to name: the call raced an install,
-    # or the guard is not deterministic.
-    if reason.result:
-        return "<matched on re-check>"
-    parts = reason.verbose_code_parts
-    if len(parts) > 1:
-        parts = _failing_guard_parts(guard_manager, f_locals, parts)
+        text = str(e).partition("\n")[0][:_PRECOMPILE_ERROR_CHARS]
+        return f"<guard check raised {type(e).__name__}: {text}>"
     shown = "; ".join(parts[:_PRECOMPILE_PARTS_REPORTED])
     if len(parts) > _PRECOMPILE_PARTS_REPORTED:
-        shown += f"; ... ({len(parts) - _PRECOMPILE_PARTS_REPORTED} more clauses)"
+        shown += "; ... (more clauses)"
     return strip_local_scope(shown)
 
 
