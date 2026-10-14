@@ -1428,6 +1428,7 @@ def _value_fingerprint(entry: GuardFilterEntry) -> str:
                 convert_to_concrete_values(value.stride()),
                 type(value),
                 torch._C._dispatch_keys(value),
+                torch._C._dynamo.guards.LocalState(),
             )
         except Exception:
             # A subclass whose __torch_function__ refuses attribute reads got
