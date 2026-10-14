@@ -94,7 +94,7 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import ConstantVariable, FakeIdVariable
+from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
@@ -635,16 +635,16 @@ class BaseBuiltinVariable(VariableTracker):
                     return object_richcompare(obj, tx, rest[0], name)
                 if descriptor.__objclass__ is object and name == "__hash__":
                     # object.__hash__ is PyObject_GenericHash on every type, so
-                    # it is neither the receiver's tp_hash nor anything the
-                    # receiver's own dispatch can run.  Its value is the
-                    # receiver's identity, which tracing cannot know.
-                    unimplemented(
-                        gb_type="object.__hash__ on a builtin receiver",
-                        context=f"object.__hash__({obj})",
-                        explanation="object.__hash__ returns an identity based "
-                        "hash, which cannot be computed while tracing.",
-                        hints=[*graph_break_hints.DYNAMO_BUG],
-                    )
+                    # it never runs the receiver's tp_hash: on a list, whose type
+                    # leaves tp_hash NULL, hash(lst) raises where this answers.
+                    # Where the object has no address tracing can use, the value
+                    # is a fake one, marked so that it cannot reach the graph.
+                    # Realized first so that hashing one receiver repeatedly sees
+                    # one object, as id() does.
+                    obj = obj.realize()
+                    if not obj.is_hashable():
+                        return FakeIdVariable(id(obj), kind=FakeValueKind.HASH)
+                    return generic_hash(tx, obj)
                 # A builtin VT dispatches by name, which is this descriptor's
                 # slot only when the receiver's own type still resolves the name
                 # to it.  Where a subclass installs a comparison of its own

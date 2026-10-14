@@ -5636,18 +5636,53 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(result, x + 1)
 
     def test_unbound_object_hash_slot(self):
-        # object.__hash__(lst) is an id based hash in eager, not list's
-        # unhashable TypeError: the receiver's own dispatch is not what eager
-        # runs.  The hash value is the receiver's identity, so the only correct
-        # answer is not to trace it.
-        def fn(x, lst):
-            return x + object.__hash__(lst)
+        # object.__hash__ is PyObject_GenericHash on every type, so it is not
+        # the receiver's tp_hash: on a list, whose type leaves tp_hash NULL but
+        # does set __hash__ = None, hash(lst) raises where object.__hash__(lst)
+        # answers.
+        def list_hash_raises(x, lst):
+            try:
+                hash(lst)
+            except TypeError:
+                return x + 1
+            return x + 100
 
         x = torch.randn(4)
         t = torch.randn(3)
-        self.assertIsInstance(object.__hash__([t]), int)
+        correct = list_hash_raises(x, [t])
+        self.assertEqual(correct, x + 1)
+        result = torch.compile(list_hash_raises, fullgraph=True, backend="eager")(
+            x, [t]
+        )
+        self.assertEqual(result, correct)
+
+        def self_consistent(x, lst):
+            return x + float(object.__hash__(lst) == object.__hash__(lst))
+
+        correct = self_consistent(x, [t])
+        self.assertEqual(correct, x + 1)
+        result = torch.compile(self_consistent, fullgraph=True, backend="eager")(x, [t])
+        self.assertEqual(result, correct)
+
+        # a NaN is the one float whose tp_hash *is* the identity hash, so there
+        # hash and object.__hash__ agree, which is what the CPython test
+        # hash(value) == object.__hash__(value) asserts
+        def nan_matches(x, v):
+            return x + float(object.__hash__(v) == hash(v))
+
+        nan = float("nan")
+        correct = nan_matches(x, nan)
+        self.assertEqual(correct, x + 1)
+        result = torch.compile(nan_matches, fullgraph=True, backend="eager")(x, nan)
+        self.assertEqual(result, correct)
+
+        # the value is an address, so it cannot be baked into the graph as a
+        # constant the compiled code would then recompute differently
+        def escapes(x, lst):
+            return x + object.__hash__(lst)
+
         with self.assertRaises(torch._dynamo.exc.Unsupported):
-            torch.compile(fn, fullgraph=True, backend="eager")(x, [t])
+            torch.compile(escapes, fullgraph=True, backend="eager")(x, [t])
 
     def test_unbound_list_methods(self):
         # list.<method>(lst, ...) is the same call as lst.<method>(...): the
