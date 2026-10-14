@@ -274,6 +274,14 @@ class FlexKernelOptions(TypedDict, total=False):
     the control for callers that cannot reach this option, and it does not
     affect NVIDIA or Intel selection."""
 
+    FLYDSL_DQ_ACCUM_FP32: NotRequired[bool]
+    """Use FP32 for the private dQ accumulation workspace in FlyDSL backward.
+    Specify as ``bwd_FLYDSL_DQ_ACCUM_FP32`` with ``BACKEND="FLYDSL"``.
+    Default: True. False uses BF16 intermediate storage to reduce workspace
+    traffic, rounding after each KV owner and potentially increasing gradient
+    error for long sequences. Both modes use fixed-order, non-atomic accumulation
+    and return gradients in the input dtype. This option does not affect forward."""
+
     # ROCm-specific options
 
     kpack: NotRequired[int]
@@ -294,10 +302,13 @@ class FlexKernelOptions(TypedDict, total=False):
         - "TRITON": Standard Triton flex_attention kernel
         - "TRITON_DECODE": Triton flex_decoding kernel, only available for short sequence lengths with specific configurations
         - "FLASH": Experimental: Flash Attention kernel (cute-dsl), user needs to have flash installed
-        - "FLYDSL": Experimental FlyDSL FlexAttention forward kernel
+        - "FLYDSL": Experimental FlyDSL FlexAttention forward and backward kernels
+          for BF16 on ROCm gfx950, requiring the optional FlyDSL dependency.
+          Unsupported backward configurations fall back to Triton, including GQA,
+          decode, gradients through LSE, and shapes exceeding the dQ workspace limit.
 
     This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
-    Raises an error if the requested backend cannot be used. Default: "AUTO"
+    Raises an error if the requested forward backend cannot be used. Default: "AUTO"
     """
 
 
