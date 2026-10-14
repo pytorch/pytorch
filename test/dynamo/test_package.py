@@ -1126,6 +1126,40 @@ def add(x, y):
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
 
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_warm_load_that_fails_to_install_recompiles(self):
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return x.cos() + y
+
+        x = torch.randn(3)
+        torch.compile(fn)(x)  # noqa: UNSPECIFIED_BACKEND
+        self._save_and_reload(expected_backends=2, expected_dynamo=1)
+
+        load = DynamoCache.load
+
+        def load_without_resume_backend(fn):
+            # install() places fn's own entry before it reaches the resume
+            # frame whose backend is gone, so it fails part way through.
+            result = load(fn)
+            del result.backends[result.dynamo.codes[-1].backend_ids[0]]
+            return result
+
+        with (
+            patch.object(DynamoCache, "load", load_without_resume_backend),
+            self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs,
+        ):
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertIn("is not found in the given backends", "\n".join(logs.output))
+        self.assertEqual(compiled_fn(x), fn(x))
+        # The entry install() placed on fn before failing is gone, so fn was
+        # recompiled rather than run through half a loaded package, and the
+        # package now records that recompile alone.
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        self.assertEqual([len(c.guarded_codes) for c in entry.codes], [1, 1])
+
     def _tensor_free_resume_entry(self, package):
         (entry,) = (
             entry
@@ -1257,7 +1291,7 @@ def add(x, y):
         self.assertIsInstance(cm.exception.__cause__, KeyError)
 
     @torch._dynamo.config.patch(caching_precompile=True)
-    def test_unbuildable_guards_on_warm_load_name_the_frame(self):
+    def test_unbuildable_guards_on_warm_load_are_logged_then_recompiled(self):
         def fn(x):
             return x * PKG_SCALE
 
@@ -1270,22 +1304,18 @@ def add(x, y):
             del state.output_graph.global_scope["PKG_SCALE"]
             return state
 
-        # The RuntimeError fallback in _TorchDynamoContext.__call__ re-runs
-        # initialize() on the package install() was called on, which asserts.
         with (
             patch.object(
                 torch._dynamo.package, "load_guards_state", load_without_scale
             ),
             self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs,
-            self.assertRaisesRegex(
-                AssertionError, "CompilePackage is already initialized"
-            ) as cm,
         ):
-            torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
-        self.assertIsInstance(cm.exception.__context__, torch._dynamo.exc.PackageError)
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         self.assertIn(
-            "Cannot rebuild the serialized guards for fn", "\n".join(logs.output)
+            "PackageError: Cannot rebuild the serialized guards for fn",
+            "\n".join(logs.output),
         )
+        self.assertEqual(compiled_fn(x), fn(x))
 
     def _round_trip_under_fail_on_recompile(self, fn, x):
         ctx = DiskDynamoStore()
