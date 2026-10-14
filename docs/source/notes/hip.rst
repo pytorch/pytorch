@@ -213,11 +213,12 @@ Linux-only, so a Windows ROCm build never has GDS support.
 
 Each wrapper in ``torch.cuda.gds`` calls the hipFile counterpart of the
 cuFile function named in its docstring: ``hipFileRead``, ``hipFileWrite``,
-``hipFileBufRegister``, ``hipFileBufDeregister``, ``hipFileHandleRegister`` and
+``hipFileReadAsync``, ``hipFileWriteAsync``, ``hipFileBufRegister``,
+``hipFileBufDeregister``, ``hipFileHandleRegister`` and
 ``hipFileHandleDeregister``. Errors quote the hipFile name, so a failed read
-raises ``hipFileRead failed: ...``. hipFile is close to cuFile but not identical;
-the known divergences, including that numeric error codes are not guaranteed to
-match, are listed in `cuFile compatibility
+raises ``hipFileRead failed: ...``. hipFile is close to cuFile but not
+identical; the known divergences, including that numeric error codes are not
+guaranteed to match, are listed in `cuFile compatibility
 <https://rocm.docs.amd.com/projects/hipFile/en/latest/reference/hipFile-cuFile-compatibility.html>`_.
 
 Configuring a system for GDS on ROCm differs from CUDA, and the NVIDIA
