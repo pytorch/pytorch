@@ -14,6 +14,7 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/Activation.h>
+#include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/GridSamplerUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
@@ -5792,6 +5793,59 @@ Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad) {
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::negate<c10::SymInt>());
   return at::constant_pad_nd_symint(grad, negated_pad, 0);
+}
+
+Tensor embedding_bag_jvp(
+    const Tensor& weight_p,
+    const Tensor& weight_t,
+    bool weight_t_defined,
+    const Tensor& indices,
+    const Tensor& offsets,
+    bool scale_grad_by_freq,
+    int64_t mode,
+    bool sparse,
+    const Tensor& per_sample_weights_p,
+    const Tensor& per_sample_weights_t,
+    bool per_sample_weights_t_defined,
+    bool include_last_offset,
+    int64_t padding_idx,
+    const Tensor& bag_size,
+    const Tensor& maximum_indices) {
+  if (mode == at::native::EmbeddingBagMode::MAX) {
+    // Use the primal's selected rows, including its tie-breaking convention.
+    // Empty tables can only produce empty bags. Also avoid reading unused
+    // bag metadata when the embedding dimension is zero.
+    if (weight_t.sym_numel() == 0) {
+      return weight_t.sum(0).expand_symint(maximum_indices.sym_sizes());
+    }
+    // CUDA uses -1 for empty bags and retains the final offset in bag_size.
+    auto empty_bags = bag_size.narrow_symint(0, 0, maximum_indices.sym_size(0))
+                          .unsqueeze(1) == 0;
+    return weight_t.gather(0, maximum_indices.clamp_min(0).to(at::kLong))
+        .masked_fill(empty_bags, 0);
+  }
+  auto apply = [&](const Tensor& weight, const Tensor& sample_weights) {
+    return std::get<0>(at::_embedding_bag(
+        weight,
+        indices,
+        offsets,
+        scale_grad_by_freq,
+        mode,
+        sparse,
+        sample_weights,
+        include_last_offset,
+        padding_idx));
+  };
+  // Skip missing tangent terms instead of materializing their products with
+  // nonfinite primals in the native kernel.
+  if (!weight_t_defined) {
+    return apply(weight_p, per_sample_weights_t);
+  }
+  auto tangent = apply(weight_t, per_sample_weights_p);
+  if (per_sample_weights_t_defined) {
+    tangent = tangent + apply(weight_p, per_sample_weights_t);
+  }
+  return tangent;
 }
 
 Tensor embedding_dense_double_backward_symint(

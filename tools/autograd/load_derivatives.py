@@ -292,6 +292,13 @@ def postprocess_forward_derivatives(
         is_foreach = f.func.name.name.base.startswith("_foreach_")
         required_inputs = set()
         for arg in args_with_derivatives:
+            if re.search(IDENT_REGEX.format(arg.name + "_t_defined"), formula) and (
+                is_foreach
+                or arg.type in ("at::TensorList", "const at::ITensorListRef &")
+            ):
+                raise RuntimeError(
+                    "Tangent availability is only supported for Tensor and optional Tensor arguments"
+                )
             if (
                 arg.type in ("at::TensorList", "const at::ITensorListRef &")
                 and not is_foreach
@@ -309,7 +316,10 @@ def postprocess_forward_derivatives(
                 )
 
             found = re.search(IDENT_REGEX.format(arg_name + postfix), formula)
-            if found:
+            availability = postfix == "_t" and re.search(
+                IDENT_REGEX.format(arg_name + "_t_defined"), formula
+            )
+            if found or availability:
                 required_inputs.add(arg_name)
 
         return tuple(required_inputs)

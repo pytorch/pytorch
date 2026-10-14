@@ -146,6 +146,12 @@
 # This formula should compute a single Jacobian vector product using the (primal)
 # value of the argument "foo_p", its forward grad "foo_t" and the result of the
 # function as "result".
+# For Tensor and optional Tensor arguments, "foo_t_defined" is an opt-in boolean
+# recording whether the original input had a tangent, before any inplace update.
+# Unlike "foo_t" (which materializes missing tangents as zero), it distinguishes
+# missing tangents from explicitly supplied zero tangents. Use it to skip absent
+# terms when a native kernel would otherwise materialize zero times a nonfinite
+# primal. TensorList and foreach formulas do not support this boolean.
 # Note that the forward derivative can be automatically generated in two cases:
 #     - if your function is linear (NOT affine or multi-linear), then you can
 #       specify so by just using the string "auto_linear" for the formula.
@@ -2068,10 +2074,12 @@
   result: auto_linear
 
 - name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False, int padding_idx=-1) -> (Tensor, Tensor, Tensor, Tensor)
+  output_differentiability: [True, False, False, False]
   indices: non_differentiable
   offsets: non_differentiable
   weight: _embedding_bag_backward_symint(grad, indices, offsets, result1, result2, result3, weight.sym_size(0), scale_grad_by_freq, mode, sparse, per_sample_weights, padding_idx)
   per_sample_weights: _embedding_bag_per_sample_weights_backward(grad, weight, indices, offsets, result1, mode, padding_idx)
+  result0: embedding_bag_jvp(weight_p, weight_t, weight_t_defined, indices, offsets, scale_grad_by_freq, mode, sparse, per_sample_weights_p, per_sample_weights_t, per_sample_weights_t_defined, include_last_offset, padding_idx, result2, result3)
 
 - name: _embedding_bag_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, SymInt num_weights, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, int padding_idx=-1) -> Tensor
   grad: not_implemented("_embedding_bag_backward")
