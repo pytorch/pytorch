@@ -11179,6 +11179,75 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             1,
         )
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    def test_compile_past_precompiled_entries_records_why_they_missed(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+        from torch.testing._internal.logging_utils import (
+            kwargs_to_settings,
+            log_settings,
+        )
+
+        def fn(x):
+            return x + 1
+
+        root = torch._dynamo.guards.RootGuardManager()
+        root.add_lambda_guard(
+            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"], None
+        )
+
+        def injected(x):
+            return x + 102
+
+        # The precompiled entries are not this process's cache entries, so this
+        # compile is not a recompilation.
+        compiled_fn = torch.compile(fn, backend="eager")
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(root),
+            injected.__code__,
+        )
+        torch._dynamo.utils.clear_compilation_metrics()
+        x = torch.randn(3)
+        try:
+            with (
+                log_settings(kwargs_to_settings(recompiles=True)),
+                self.assertLogs("torch._dynamo.convert_frame", level="DEBUG") as logs,
+                patch(
+                    "torch._logging.trace_structured",
+                    wraps=torch._logging.trace_structured,
+                ) as trace,
+            ):
+                self.assertEqual(compiled_fn(x), fn(x))
+        finally:
+            _reset_precompile_entries(fn.__code__)
+        reason = torch._dynamo.utils._compilation_metrics[-1].recompile_reason
+        self.assertEqual(
+            reason,
+            "Failed on all 1 precompiled variant(s):\n  [0] isinstance(x, bool)",
+        )
+        self.assertIn(
+            reason,
+            [
+                c.kwargs["payload_fn"]()
+                for c in trace.call_args_list
+                if c.args == ("artifact",)
+                and c.kwargs["metadata_fn"]()["name"] == "recompile_reasons"
+            ],
+        )
+        self.assertTrue(
+            any(
+                "Compiling function fn" in m and "[0] isinstance(x, bool)" in m
+                for m in logs.output
+            ),
+            logs.output,
+        )
+
     def test_shape_and_tuple_equality(self):
         def fn(x, y, t):
             z = x * y

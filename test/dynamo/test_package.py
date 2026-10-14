@@ -661,6 +661,44 @@ print(eval(f"bbmod.{name}.{path}") is code)
             with self.assertRaisesRegex(RuntimeError, failed_part):
                 compiled_fn(x)
 
+    def test_compile_past_an_installed_package_records_why_its_entries_missed(self):
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x * 2
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        compiled_fn(torch.randn(3))
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        torch._dynamo.utils.clear_compilation_metrics()
+        with patch(
+            "torch._dynamo.convert_frame._log_size_mismatch_recompile"
+        ) as pgo_insight:
+            x = torch.randn(5)
+            self.assertEqual(compiled_fn(x), fn(x))
+            reason = torch._dynamo.utils._compilation_metrics[-1].recompile_reason
+            self.assertIn("Failed on all 1 precompiled variant(s)", reason)
+            self.assertIn("size mismatch at index 0. expected 3, actual 5", reason)
+            # A precompile miss is not a dynamic-shape recompilation.
+            pgo_insight.assert_not_called()
+
+            # The frame now has its own cache entry, so a call that misses both
+            # it and the precompiled entry is an ordinary recompilation.
+            x = torch.randn(7)
+            self.assertEqual(compiled_fn(x), fn(x))
+            reason = torch._dynamo.utils._compilation_metrics[-1].recompile_reason
+            self.assertNotIn("precompiled variant", reason)
+            self.assertIn("size mismatch at index 0. expected 5, actual 7", reason)
+            pgo_insight.assert_called_once()
+
     def test_install_survives_stale_cleanup_hooks(self):
         # The first compile installs its generated functions -- and, on every
         # compile, a builtins-dict global (see install_builtins_dict_in_fglobals)
