@@ -1330,16 +1330,16 @@ def _is_channels_last_contiguous_3d_or_false(
     sizes: Sequence[_int | SymInt],
     strides: Sequence[_int | SymInt],
 ) -> _bool: ...
-def _compute_contiguous(
+def _is_contiguous(
     sizes: Sequence[_int | SymInt],
     strides: Sequence[_int | SymInt],
     numel: _int | SymInt,
 ) -> _bool: ...
-def _compute_channels_last_contiguous_2d(
+def _is_channels_last_contiguous_2d(
     sizes: Sequence[_int | SymInt],
     strides: Sequence[_int | SymInt],
 ) -> _bool: ...
-def _compute_channels_last_contiguous_3d(
+def _is_channels_last_contiguous_3d(
     sizes: Sequence[_int | SymInt],
     strides: Sequence[_int | SymInt],
 ) -> _bool: ...
