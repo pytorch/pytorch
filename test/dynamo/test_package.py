@@ -97,6 +97,16 @@ def _tensor_free_resume_fn(x):
     return y.cos(), _tensor_free_continuation(y)
 
 
+@torch.compiler.disable
+def _tensor_or_int(y):
+    return y if _TENSOR_FREE_RESUME_STATE["value"] else 3
+
+
+def _resume_maybe_tensor_free_fn(x):
+    y = _tensor_or_int(x.sin())
+    return y + 1
+
+
 def _skip_closure_match(entries):
     # The torch.compiler.disable wrapper's CLOSURE_MATCH cannot be serialized.
     return [e.guard_type != "CLOSURE_MATCH" for e in entries]
@@ -1331,6 +1341,23 @@ def add(x, y):
                 _TENSOR_FREE_RESUME_STATE["value"] = 2
                 with torch.compiler.set_stance("fail_on_recompile"):
                     self.assertEqual(compiled(x), fn(x))
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    @patch.dict(_TENSOR_FREE_RESUME_STATE)
+    def test_warm_loaded_resume_entries_do_not_fail_a_tensor_free_call(self):
+        # The warm load installs entries on fn's resume function, but the
+        # caching_precompile package is not explicit: once that frame holds no
+        # tensor it is skipped and runs eagerly, so under fail_on_recompile it
+        # is no recompile either.
+        fn = _resume_maybe_tensor_free_fn
+        x = torch.randn(3)
+        options = {"guard_filter_fn": _skip_closure_match}
+        torch.compile(fn, options=options)(x)  # noqa: UNSPECIFIED_BACKEND
+        self._save_and_reload(expected_backends=2, expected_dynamo=1)
+        compiled = torch.compile(fn, options=options)  # noqa: UNSPECIFIED_BACKEND
+        _TENSOR_FREE_RESUME_STATE["value"] = 0
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled(x), fn(x))
 
     def test_unbuildable_guards_raise_a_package_error(self):
         # A guard source that does not resolve against the scope serialized
