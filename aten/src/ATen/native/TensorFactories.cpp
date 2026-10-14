@@ -2,6 +2,7 @@
 #include <ATen/native/TensorFactories.h>
 
 #include <ATen/CPUGeneratorImpl.h>
+#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/ExpandUtils.h>
