@@ -2445,9 +2445,13 @@ class triton:
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
     # Number of K splits to autotune for decompose_k. 0 disables it.
-    # On HIP, RDNA3 stays off.
+    # HIP defaults to off; set TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS to opt in.
+    # RDNA3 stays off.
     num_decompose_k_splits = int(
-        os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10")
+        os.environ.get(
+            "TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS",
+            "0" if torch.version.hip else "10",
+        )
     )
 
     # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables

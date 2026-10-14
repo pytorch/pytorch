@@ -980,7 +980,11 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             )
         )
 
-        self.run_model("mm", tensors)
+        self.run_model(
+            "mm",
+            tensors,
+            {"triton.num_decompose_k_splits": 10},
+        )
 
     @fresh_cache()
     def test_bias_addmm_lookup_table_entry(self):

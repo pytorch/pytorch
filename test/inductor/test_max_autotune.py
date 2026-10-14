@@ -1814,10 +1814,13 @@ class TestMaxAutotune(TestCase):
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize("sizes", ((32, 32, 32768), (64, 128, 200000), (64, 64, 177147)))
     @config.patch(
-        max_autotune=True,
-        max_autotune_gemm_backends="TRITON",
-        comprehensive_padding=False,
-        shape_padding=False,
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "comprehensive_padding": False,
+            "shape_padding": False,
+            "triton.num_decompose_k_splits": 10,
+        }
     )
     def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
         fp16_red_setting = (
@@ -1960,6 +1963,7 @@ class TestMaxAutotune(TestCase):
                     "max_autotune_gemm_search_space": search_space,
                     # keeps the exhaustive space from dominating test runtime
                     "test_configs.max_mm_configs": 1,
+                    "triton.num_decompose_k_splits": 10,
                 }
             ):
                 torch.compile(lambda x, y: x @ y)(a, b)
@@ -1982,8 +1986,11 @@ class TestMaxAutotune(TestCase):
         "ignore decompose_k when native matmul codegen",
     )
     @config.patch(
-        max_autotune=True,
-        max_autotune_gemm_backends="TRITON",
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.num_decompose_k_splits": 10,
+        }
     )
     def test_max_autotune_decompose_k_dynamic_input(self):
         def f(a, b):
@@ -2031,8 +2038,11 @@ class TestMaxAutotune(TestCase):
         "ignore decompose_k when native matmul codegen",
     )
     @config.patch(
-        max_autotune=True,
-        max_autotune_gemm_backends="TRITON",
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.num_decompose_k_splits": 10,
+        }
     )
     def test_max_autotune_decompose_k_dynamic_input_bwd(self):
         def f(a, b):
@@ -2093,8 +2103,11 @@ class TestMaxAutotune(TestCase):
         "ignore decompose_k when native matmul codegen",
     )
     @config.patch(
-        max_autotune=True,
-        max_autotune_gemm_backends="TRITON",
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.num_decompose_k_splits": 10,
+        }
     )
     def test_max_autotune_decompose_k_output_stride(self):
         def f(a, b):
