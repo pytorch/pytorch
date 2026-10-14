@@ -2025,7 +2025,9 @@ def _optimize(
     if config.caching_precompile and package is None:
         from .package import CompilePackage
 
-        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
+        package = CompilePackage(
+            fn=None, dynamo=None, ignore_inlined_sources=False, explicit=False
+        )
 
     return _optimize_catch_errors(
         convert_frame.convert_frame(
@@ -2968,7 +2970,9 @@ def _optimize_assert(
         # and OptimizeContext.
         from .package import CompilePackage
 
-        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
+        package = CompilePackage(
+            fn=None, dynamo=None, ignore_inlined_sources=False, explicit=False
+        )
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
