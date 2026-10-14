@@ -5022,12 +5022,14 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertNotIn("package bypass", out.stderr)
 
     @skipIfCrossRef
-    def test_graphless_frames_that_lose_guards_are_served_eagerly(self):
+    @parametrize("installed", [False, True])
+    def test_graphless_frames_that_lose_guards_are_served_eagerly(self, installed):
         # The disabled scale() leaves its callees compiled, so the registry
         # lookup compiles WeakKeyDictionary.__contains__ and __getitem__ as
         # frames of their own. They hold no graph, and their guards on the
         # registry's weakrefs cannot be serialized.
         registry = f"{self.module_name}_registry"
+        callee = "CHILD" if installed else f"{registry}.scale"
         entry = f"{self.module_name}_entry"
         sources = {
             registry: (
@@ -5043,9 +5045,13 @@ class TestPrecompileDynamoCapture(TestCase):
                 "    return x\n"
             ),
             entry: (
-                f"import {registry}\n\n"
+                f"import torch, {registry}\n\n"
+                "class Child(torch.nn.Module):\n"
+                "    def forward(self, key, x):\n"
+                f"        return {registry}.scale(key, x + 0)\n\n"
+                "CHILD = Child()\n\n"
                 "def step(key, x):\n"
-                f"    return {registry}.scale(key, x.sin()).cos()\n"
+                f"    return {callee}(key, x.sin()).cos()\n"
             ),
         }
         for name, source in sources.items():
@@ -5077,6 +5083,13 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(len(lookups), 2)
         for code in lookups:
             self.assertEqual((code.guarded_codes, code.bypassed), ([], False))
+        with open(self.artifact) as f:
+            mode = "installed" if installed else "standalone"
+            self.assertIn(f'SERVING_MODE = "{mode}"', f.read())
+        if installed:
+            # Not served: an installed artifact's refuse-recompile callback
+            # does not honor disable(recursive=False), so it refuses scale().
+            return
         script = (
             "import importlib, sys, torch\n"
             "sys.path.insert(0, sys.argv[1])\n"
@@ -5102,6 +5115,60 @@ class TestPrecompileDynamoCapture(TestCase):
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("served", out.stdout)
+
+    @skipIfCrossRef
+    def test_only_graphless_callees_that_lose_a_guard_are_served_eagerly(self):
+        # The filter drops every guard on FACTOR. factor() traces no ops and
+        # is not bypassed, so the drop alone empties it; mul() traces an op and
+        # the entry is what the artifact serves, so both keep their variants.
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+
+        def drop_factor(entries):
+            keep = default_guard_filter_fn(entries)
+            return [k and "FACTOR" not in e.name for k, e in zip(keep, entries)]
+
+        name = f"{self.module_name}_factor"
+        with open(os.path.join(self.dir, name + ".py"), "w") as f:
+            f.write(
+                "import torch\n\nFACTOR = 2\n\n"
+                "def factor(module, n):\n    return FACTOR * n\n\n"
+                "def mul(x):\n    return x * FACTOR\n\n"
+                "@torch._dynamo.disable(recursive=False)\n"
+                "def scale(x):\n    return mul(x) * factor(torch.nn.Module(), 3)\n\n"
+                "def step(x):\n    return scale(x.sin())\n"
+            )
+        self.addCleanup(sys.modules.pop, name, None)
+        mod = importlib.import_module(name)
+        tracer = DynamoTracer(
+            guard_filter_fn=drop_factor,
+            require_complete=False,
+            require_no_risky_drops=False,
+        )
+        build = mock.patch(
+            "torch._precompile._build_multigraph_artifact",
+            wraps=torch._precompile._build_multigraph_artifact,
+        )
+        rendered = {}
+        for fn, args in (
+            (mod.step, (torch.randn(4),)),
+            (mod.factor, (torch.nn.Module(), 3)),
+        ):
+            self.artifact = os.path.join(self.dir, f"{fn.__name__}.py")
+            with build as built:
+                with self._capture(fn, tracer=tracer, backend="eager") as cap:
+                    cap(*args)
+                    summary = cap.summary()
+            codes = built.call_args.args[0].codes
+            rendered[fn.__name__] = {c.python_code.co_name: c for c in codes}
+            self.assertIn(
+                ("CONSTANT_MATCH", "G['FACTOR']"), summary.risky_dropped_guards
+            )
+            kept_n = ("CONSTANT_MATCH", "n") in summary.kept_guards
+            self.assertEqual(kept_n, fn is mod.factor)
+        factor, mul = rendered["step"]["factor"], rendered["step"]["mul"]
+        self.assertEqual((factor.guarded_codes, factor.bypassed), ([], False))
+        self.assertTrue(mul.guarded_codes)
+        self.assertTrue(rendered["factor"]["factor"].guarded_codes)
 
     def test_a_standalone_artifact_refuses_serve_time_compiles(self):
         with self._capture(self.mod.single, backend="eager") as cap:
