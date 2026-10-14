@@ -511,6 +511,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.soft_margin_loss,
             aten.soft_margin_loss_backward,
             aten._softmax_backward_data,
+            aten._stack.default,
             aten.softplus,
             aten.softplus_backward,
             aten.softshrink,

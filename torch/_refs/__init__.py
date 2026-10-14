@@ -4391,7 +4391,7 @@ def _check_stack_inputs(tensors: TensorSequenceType) -> None:
         )
 
 
-@register_decomposition(aten.stack)
+@register_decomposition([aten.stack, aten._stack.default])
 @out_wrapper()
 def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     if len(tensors) == 0:
