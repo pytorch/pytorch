@@ -1216,7 +1216,7 @@ ldl_diagonal_panel_fused_kernel(
         thrust::swap(dLD[LinOff(i, swp, lda)], dLD[LinOff(i, piv, lda)]);
       }
       sync();
-      // Swap rows -- noncontiguous access -- paying penatly here
+      // Swap rows -- noncontiguous access -- paying penalty here
       for (int i = curr_step + gtid; i < n; i += nthreads) {
         thrust::swap(dLD[LinOff(swp, i, lda)], dLD[LinOff(piv, i, lda)]);
       }

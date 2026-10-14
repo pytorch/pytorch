@@ -30,7 +30,8 @@ standalone copy), `test/test_linalg.py`, the OpInfo samples in
 `ldl_factor_kernel` (`aten/src/ATen/native/cuda/linalg/BatchLinearAlgebra.cpp`)
 sends `hermitian=True` to the custom kernel under the **default** and the
 **cusolver** backends; the `magma` backend goes to MAGMA and `hermitian=False`
-(real symmetric or complex symmetric) to cuSOLVER (MAGMA when built without it):
+(real symmetric or complex symmetric) to cuSOLVER (MAGMA when built without it).
+Not on ROCm: there the dispatch is upstream's, unchanged (`#ifndef USE_ROCM`):
 
 ```python
 torch.linalg.ldl_factor_ex(A, hermitian=True)              # hermitian=True REQUIRED
@@ -778,16 +779,23 @@ Missing:
   n <= 5, where pivots and factors agree.
 - ROCm is not touched: the new tests skip it, and the old gates stay there.
 
+- **ROCm dispatch is untouched** (user's decision): both routes to the custom
+  kernel in `ldl_factor_kernel` sit under `#ifndef USE_ROCM`, and what is left for
+  ROCm is upstream's code verbatim. The guard is also required: on ROCm, CMake
+  compiles only `native/hip/linalg/*.cpp` (`native_hip_linalg_cpp`), not the
+  hipified `LURecBlas3Kernel.cu`, so an unguarded call would not link. The LU
+  custom kernel is called from the non-ROCm branch of `lu_factor` for the same
+  reason. (The kernel also assumes 32-lane warps: `tid / 32`,
+  `__shfl_down_sync(0xffffffff, ...)` in `warp_argmax`.)
+- Codespell: the misspelled "penalty" in a kernel comment is fixed (and in the standalone copy).
+- Readiness is judged without the session files (they also are what trips the
+  CODEOWNERS taxonomy lint). Performance numbers exist (user).
+
 **Remaining:**
-- ROCm: the default dispatch now sends `hermitian=True` to the custom kernel on
-  ROCm builds too, and nothing tests that. Decide whether to exclude ROCm there,
-  as the LU custom kernel is (`#ifdef USE_ROCM` in `lu_factor`).
 - Run the new upstream tests on GB200 (other panel widths; LAPACK there is ATLAS).
   Its 96- and 128-wide panels start at other n than H100's, so 8193 and 16385 do
   not reach them there.
-- Lint: only pre-existing findings in the touched files (`penatly` typo in a
-  kernel comment, E731 and the whole-file format in `test_ldl_custom.py`, the
-  CODEOWNERS taxonomy). Run `lintrunner -a` before committing.
+- Lint: run `lintrunner -a` before committing.
 - Optional, accuracy: remove the undo entirely (`?lasyf`-style row swaps of
   Lprev, section 5).
 - PR: draft until reviewed, with the AI-assistance disclosure (CLAUDE.md). The

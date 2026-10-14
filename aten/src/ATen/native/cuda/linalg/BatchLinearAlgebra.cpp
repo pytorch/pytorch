@@ -421,12 +421,13 @@ void ldl_factor_kernel(
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
        {
+#ifndef USE_ROCM
          if (hermitian) {
-           ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
-         } else {
+           return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
+         }
+#endif
          ldl_factor_cusolver(
           LD, pivots, info, upper, hermitian);
-         }
         return;
 }
     case at::LinalgBackend::Magma:
@@ -434,12 +435,22 @@ void ldl_factor_kernel(
         return;
 }
     default:
-    // By default the custom kernel takes hermitian=true,
-    // and the rest goes to cusolver if available and to magma otherwise.
+#ifndef USE_ROCM
+    // By default the custom kernel takes hermitian=true.
       if (hermitian) {
         return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
       }
+#endif
+    // Otherwise use cusolver if available and magma otherwise.
+    // If cusolver and magma 2.5.4+ are both available and hermitian=true (on ROCm),
+    // call magma for complex inputs
 #ifdef USE_LINALG_SOLVER
+#if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 20504)
+      if (LD.is_complex() && hermitian) {
+        return ldl_factor_magma(
+            LD, pivots, info, upper, hermitian);
+      }
+#endif
     { ldl_factor_cusolver(
       LD, pivots, info, upper, hermitian);
       return;
