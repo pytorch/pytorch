@@ -9441,6 +9441,7 @@ cpp_meta_supports_symint_ops = {
     aten.bitwise_and.Tensor,
     aten.le.Tensor,
     aten.le.Scalar,
+    aten.eq.Tensor,
 }
 
 
