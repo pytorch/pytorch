@@ -2099,6 +2099,35 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         ordered = sorted(facts, key=precompile_package._fact_order)
         self.assertEqual([f.value for f in ordered], sorted(rendered))
 
+    def test_value_fingerprint_matches_the_built_tensor_match(self):
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        def fn(x):
+            return x + 1
+
+        fingerprints = []
+
+        def keep_all(entries):
+            for e in entries:
+                if e.guard_type == "TENSOR_MATCH" and e.name == "x":
+                    fingerprints.append(precompile_package._value_fingerprint(e))
+            return [True] * len(entries)
+
+        x = TwoTensor(torch.zeros(2), torch.zeros(2))
+        self.assertIn("Python", repr(torch._C._dispatch_keys(x)))
+        opts = {"guard_filter_fn": keep_all}
+        torch.compile(fn, backend="eager", options=opts)(x)
+        (entry,) = _debug_get_cache_entry_list(fn.__code__)
+        built = [
+            part.replace("L['x']", "<value>")
+            for part in entry.guard_manager.code_parts
+            if part.startswith("check_tensor(L['x'], ")
+        ]
+        self.assertEqual(len(fingerprints), 1)
+        self.assertNotIn("Python", fingerprints[0])
+        self.assertEqual(built, fingerprints)
+
     def test_saved_hooks_fingerprint_mirrors_what_the_guard_stores(self):
         fingerprint = precompile_package._saved_hooks_fingerprint
         self.assertEqual(fingerprint(), "hooks=None")
