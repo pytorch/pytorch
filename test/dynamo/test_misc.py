@@ -10831,6 +10831,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             _reset_precompile_entries(fn.__code__)
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_guard_complete_hook_can_reset_hit(self):
         from torch._C._dynamo.eval_frame import set_guard_complete_hook
 
@@ -10865,6 +10869,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(guard_results, [True])
         self.assertIn(expected_annotation, [e.name for e in prof.events()])
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_guard_complete_hook_can_reset_hit_and_force_recompile(self):
         from torch._C._dynamo.eval_frame import set_guard_complete_hook
 
