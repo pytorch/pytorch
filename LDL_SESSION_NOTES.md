@@ -560,27 +560,35 @@ Missing:
     `i?amax` returns. That is fine: the result is NaN garbage either way.
   - `test_pivot_search_skips_nan` pins it. Mutation: an argmax that takes a NaN
     fails all 28 CUDA instances.
-- **NaN propagation contract.** If the CPU result has a non-finite entry, the
-  CUDA one must too; never finite garbage from non-finite input.
-- **Positions not covered yet:**
-  - Only in the trailing block S, so the value arrives through the deferred GEMM
-    or the out-of-panel replay.
-  - On the diagonal: a NaN `a_kk` fails the alpha test.
-  - On the last diagonal entry (the last-column path).
-  - In the imaginary part of an off-diagonal only (cabs1 = |re| + |im|).
-  - `-inf`.
-  - `+inf` and `-inf` in one column (`inf − inf` in the updates).
-  - Inf as the chosen pivot: 1x1 gives `L = x/inf = 0`; 2x2 gives `det` = inf or
-    NaN (overlaps 10.1.1).
-- **`info` for non-finite input.** Assert it equals CPU's (expected 0: NaN and
-  Inf are not zero pivots), and that `check_errors=True` does not raise.
-- **Batched isolation.** A NaN in one batch element leaves the others bitwise
-  equal to factoring them alone. The mirror step now runs on the whole batch at
-  once.
-- **Non-finite junk in the ignored upper triangle.** Extend
-  `test_only_lower_triangle_is_read`, whose junk is finite today.
-- `ldl_solve` on CUDA (real dtypes) with a non-finite `LD` from the kernel: no
-  crash. Minor.
+- **NaN propagation, positions, `info`, `ldl_solve`. Done:
+  `test_nonfinite_propagates`** (n = 5/65/300/2100, all dtypes, 11 placements:
+  NaN on the first, an interior and the last diagonal entry, off the diagonal,
+  only in the trailing block, only in the imaginary part; `-inf` in the trailing
+  block; `+inf` and `-inf` in one column; Inf as a 1x1 or 2x2 pivot; Inf on the
+  last diagonal).
+  - Propagation holds everywhere: the kernel's LD has a non-finite entry in every
+    case, as do CPU (MKL), cuSOLVER `sytrf` and MAGMA.
+  - **`info` contract (decided): 0 for non-finite input.** `info` flags an
+    exactly zero pivot only, and NaN/Inf is not zero. "Compare with CPU" was not
+    possible. The references set `info > 0` in most NaN cases and some Inf cases,
+    but disagree with one another on whether and where. For example, f64 n=65
+    with NaN at `[0,0]` gives MKL 65 and cuSOLVER 0. With `-inf` in the trailing
+    block at n=300, MKL gives 0 and cuSOLVER 300. Causes: unblocked `?sytf2` flags
+    a NaN diagonal (`DISNAN(ABSAKK)`) and blocked `?lasyf` does not. MAGMA uses a
+    different Bunch-Kaufman growth constant, so its pivots, and the positions it
+    reports, differ for that reason too. Do not use MAGMA as a pivot reference.
+    The test also checks that `check_errors=True` does not raise.
+  - Real dtypes: `ldl_solve` on CUDA accepts the non-finite LD without failing.
+- **Batched isolation. Done:** `test_batched_elements_are_independent` got
+  `poisoned`, which puts a NaN in batch element 0. The others must still match
+  factoring them alone.
+- **Non-finite junk in the upper triangle. Done:**
+  `test_only_lower_triangle_is_read` got `fill` = random/nan/inf. This variant
+  has teeth that the random one lacks. On the standalone harness, an upper
+  triangle that is not cleared (junk + mirror) turns `tril(LD)` into NaN garbage
+  at every n >= 33 (the kernel reads it, e.g. through the row swaps). So it must
+  be cleared by assignment, which `tril_out` does: a mask multiply would leave
+  `NaN·0 = NaN`.
 
 ### 10.3 Missing tests: other
 

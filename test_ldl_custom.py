@@ -26,6 +26,7 @@ gate is on hermitian only -- real dtypes reach it just as complex ones do.
 """
 
 import functools
+import math
 import os
 import re
 
@@ -796,19 +797,24 @@ class TestLDLCustomKernel(TestCase):
         A = STRUCTURES[structure](n, batch, dtype, device)
         self._check(A, hermitian=True)
 
+    @parametrize("poisoned", [False, True])
     @parametrize("batch", [(2,), (4,), (2, 3)])
     @parametrize("n", [5, 33, 64])
     @dtypes(torch.float64, torch.complex128)
-    def test_batched_elements_are_independent(self, device, dtype, n, batch):
+    def test_batched_elements_are_independent(self, device, dtype, n, batch, poisoned):
         """Each batch element must be factored from its own data.
 
         Factoring the batch must agree element-for-element with factoring each
         matrix on its own -- the failure mode when only element 0 is processed is
         that the rest come back as uninitialized memory, which this catches
-        directly rather than through a residual.
+        directly rather than through a residual. If poisoned, element 0 holds a
+        NaN, which must not reach the others: the upper triangle is mirrored for
+        the whole batch at once.
         """
         torch.manual_seed(n)
         A = STRUCTURES["indefinite"](n, batch, dtype, device)
+        if poisoned:
+            A.view(-1, n, n)[0, -1, 0] = math.nan
         LD, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
         flat = A.reshape(-1, n, n)
         for i in range(flat.shape[0]):
@@ -1000,21 +1006,26 @@ class TestLDLCustomKernel(TestCase):
         self.assertTrue(torch.equal(piv_v, piv_c))
         self.assertEqual(LD_v, LD_c)
 
+    @parametrize("fill", ["random", "nan", "inf"])
     @parametrize("hermitian", [True, False])
     @parametrize("batch", [(), (2,)])
     @parametrize("n", [2, 5, 33, 150, 300])
     @dtypes(*floating_and_complex_types())
-    def test_only_lower_triangle_is_read(self, device, dtype, n, batch, hermitian):
+    def test_only_lower_triangle_is_read(self, device, dtype, n, batch, hermitian, fill):
         """The strictly upper triangle is never read, and neither is the imaginary
         part of a Hermitian diagonal (LAPACK ignores it). The kernel mirrors the
         lower triangle into the upper one by adding to it, so junk there would leak
-        into the result unless it is cleared first."""
+        into the result unless it is cleared first, and cleared by assignment, as
+        NaN * 0 is NaN."""
         torch.manual_seed(n)
         A = symmetrize(indefinite(n, batch, dtype, device), hermitian)
-        junk = make_tensor((*batch, n, n), dtype=dtype, device=device)
+        if fill == "random":
+            junk = make_tensor((*batch, n, n), dtype=dtype, device=device)
+        else:
+            junk = torch.full((*batch, n, n), float(fill), dtype=dtype, device=device)
         dirty = A.tril() + junk.triu(1)
         if hermitian and dtype.is_complex:
-            dirty.diagonal(dim1=-2, dim2=-1).add_(1j * junk.diagonal(dim1=-2, dim2=-1).real)
+            dirty.diagonal(dim1=-2, dim2=-1).imag.copy_(junk.diagonal(dim1=-2, dim2=-1).real)
         clean_LD, clean_piv, clean_info = torch.linalg.ldl_factor_ex(A.tril(), hermitian=hermitian)
         LD, piv, info = torch.linalg.ldl_factor_ex(dirty, hermitian=hermitian)
         self.assertTrue(torch.equal(piv, clean_piv))
@@ -1088,6 +1099,50 @@ class TestLDLCustomKernel(TestCase):
         self.assertTrue((piv.abs() >= 1).all(), f"pivot with |p| < 1: {piv}")
         self.assertTrue((piv.abs() <= n).all(), f"pivot out of range: {piv}")
         self.assertTrue(0 <= info <= n)
+
+    # Non-finite entries of the lower triangle as (row, col, value), negative indices
+    # counting from the end: on the diagonal, where a NaN fails the alpha test; on the
+    # last one, which has a path of its own; only in the trailing block, reached
+    # through the GEMM; only in the imaginary part, which |re| + |im| propagates;
+    # inf - inf in the updates; and Inf as the chosen pivot.
+    _NONFINITE_ENTRIES = {
+        "nan_first_diag": [(0, 0, math.nan)],
+        "nan_diag": [(3, 3, math.nan)],
+        "nan_last_diag": [(-1, -1, math.nan)],
+        "nan_offdiag": [(3, 0, math.nan)],
+        "nan_trailing": [(-2, -3, math.nan)],
+        "nan_imag": [(-2, -3, complex(0, math.nan))],
+        "neg_inf_trailing": [(-2, -3, -math.inf)],
+        "inf_both_signs": [(2, 0, math.inf), (4, 0, -math.inf)],
+        "inf_diag_pivot": [(0, 0, math.inf)],
+        "inf_offdiag_pivot": [(3, 0, math.inf)],
+        "inf_last_diag": [(-1, -1, math.inf)],
+    }
+
+    @onlyCUDA
+    @parametrize("placement", list(_NONFINITE_ENTRIES))
+    @parametrize("n", [5, 65, 300, 2100])
+    @dtypes(*floating_and_complex_types())
+    def test_nonfinite_propagates(self, device, dtype, n, placement):
+        """Non-finite input gives a non-finite LD, never finite garbage, as it does on
+        CPU, cuSOLVER and MAGMA. info stays 0, since it flags an exactly zero pivot
+        and NaN/Inf is not zero. The other backends set info for some of these inputs,
+        but disagree with one another on when and where."""
+        entries = self._NONFINITE_ENTRIES[placement]
+        if any(isinstance(v, complex) for *_, v in entries) and not dtype.is_complex:
+            self.skipTest("no imaginary part in a real dtype")
+        torch.manual_seed(n)
+        A = indefinite(n, (), dtype, device)
+        for i, j, v in entries:
+            A[i, j] = v
+        LD, piv, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertFalse(LD.tril().isfinite().all())
+        self.assertEqual(info.item(), 0)
+        self.assertTrue(((piv.abs() >= 1) & (piv.abs() <= n)).all(), f"pivot out of range: {piv}")
+        torch.linalg.ldl_factor(A, hermitian=True)  # check_errors=True must not raise
+        if not dtype.is_complex:
+            # cuSOLVER's solve must take the non-finite factorization without failing
+            torch.linalg.ldl_solve(LD, piv, make_tensor((n, 3), dtype=dtype, device=device), hermitian=True).cpu()
 
     @onlyCUDA
     @parametrize("n", [33, 4100])
