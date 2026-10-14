@@ -152,13 +152,9 @@ jobs:
         run: |
           set -euo pipefail
           cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
+          rocm-sdk version
           whoami
           id
-          # Host amdgpu debs are not in this image. Do not fail when grep
-          # finds nothing (grep exits 1 on no match).
-          dpkg -l | grep -E " amdgpu" || true
 
       - name: Job pod amd-smi
         if: always()
