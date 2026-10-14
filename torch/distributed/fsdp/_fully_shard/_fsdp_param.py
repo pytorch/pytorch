@@ -178,7 +178,8 @@ class _AllGatherOutputLayout(NamedTuple):
     # View size of the output passed to fsdp_post_all_gather; may contain -1
     output_size: torch.Size
     # Rows of each rank's chunk that the copy-out concatenates: the product of the
-    # dims before the gather dim, or 1 if a flat copy suffices
+    # dims before the gather dim (the padded sharded parameter's for Tensor
+    # payloads), or 1 if a flat copy suffices
     outer_size: int
 
 
@@ -1024,7 +1025,9 @@ class FSDPParam:
                 f"{tuple(self._orig_size)} to be divisible by {world_size}"
             )
         if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
-            # The post-forward parameter views a chunk of the extension's output
+            # The post-forward parameter views a chunk of the extension's output. The
+            # largest post-forward shard is the same bound on every rank, so all
+            # ranks raise together.
             output = self.all_gather_outputs[0]
             rows = -(-self._orig_size[0] // world_size)
             shard_numel = rows * math.prod(self._orig_size[1:])
@@ -1572,7 +1575,8 @@ def _get_all_gather_output_layouts(
             f"but {len(all_gather_outputs)} on its first call"
         )
     # The copy-out reassembles the rows of Tensor inputs along a nonzero shard
-    # dim, reading them as the padded sharded parameter's rows
+    # dim, reading them as the padded sharded parameter's rows. A single rank
+    # copies them flat, so their shape only matters there for shrinking.
     leading_dims = padded_sharded_size[:shard_dim]
     shard_outer_size = math.prod(leading_dims)
     reassembled = shard_world_size > 1 and shard_outer_size > 1
