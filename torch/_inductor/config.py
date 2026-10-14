@@ -2444,13 +2444,11 @@ class triton:
     # Note: it may also need to be used with config.compile_threads = 1
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
-    # Number of K splits to autotune for decompose_k. 0 disables it.
-    # HIP defaults to off; set TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS to opt in.
-    # RDNA3 stays off.
+    # specify number of splits to autotune on for decompose_k. 0 disables decompose_k
+    # Disabled on ROCm by default pending performance validation.
     num_decompose_k_splits = int(
         os.environ.get(
-            "TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS",
-            "0" if torch.version.hip else "10",
+            "TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "0" if torch.version.hip else "10"
         )
     )
 
