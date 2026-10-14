@@ -9,10 +9,10 @@ _IS_FBCODE = os.environ.get("IS_FBCODE", "0") == "1"
 # The header location is src/rccl.h versus rccl/rccl.h, respectively.
 _RCCL_HEADER = "<rccl.h>" if _IS_FBCODE else "<rccl/rccl.h>"
 
-# List of math functions that should be replaced inside device code only.
+# std:: math functions rewritten to their global-namespace versions. The rewrite applies to
+# whole .cu/.cuh files, host code included, so std::max/std::min are deliberately absent:
+# on the host HIP only defines ::max(int, int)/::min(int, int), silently narrowing 64-bit arguments.
 MATH_TRANSPILATIONS = collections.OrderedDict([
-    ("std::max", ("::max")),
-    ("std::min", ("::min")),
     ("std::ceil", ("::ceil")),
     ("std::floor", ("::floor")),
     ("std::exp", ("::exp")),
@@ -324,6 +324,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("curand_poisson.h", "hiprand/hiprand_kernel.h"),
     ("curand_precalc.h", "hiprand/hiprand_kernel.h"),
     ("curand_uniform.h", "hiprand/hiprand_kernel.h"),
+    ("cusolverDn.h", "hipsolver/hipsolver.h"),
     ("cusparse.h", "hipsparse/hipsparse.h"),
     ("cusparseLt.h", "hipsparselt/hipsparselt.h"),
     ("cufft.h", "hipfft/hipfft.h"),

@@ -562,7 +562,11 @@ partial_fn = functools.partial(fn, scale=2)
     def test_itertools_islice_basic_ops(self):
         # Test cases taken from the CPython test TestBasicOps.test_islice. That test has a lot of
         # cases that we can't realistically support, whence we copy the sensible cases here.
+        # fn collects (actual, expected) pairs instead of asserting inline: tracing
+        # TestCase.assertEqual costs seconds and tests nothing about islice.
         def fn():
+            checks = []
+
             for args in [  # islice(args) should agree with range(args)
                 (10, 20, 3),
                 (10, 3, 20),
@@ -571,8 +575,8 @@ partial_fn = functools.partial(fn, scale=2)
                 (10, 3),
                 (20,),
             ]:
-                self.assertEqual(
-                    list(itertools.islice(range(100), *args)), list(range(*args))
+                checks.append(
+                    (list(itertools.islice(range(100), *args)), list(range(*args)))
                 )
 
             for args, tgtargs in [  # Stop when seqn is exhausted
@@ -580,41 +584,44 @@ partial_fn = functools.partial(fn, scale=2)
                 ((10, 110), ((10, 100))),
                 ((110,), (100,)),
             ]:
-                self.assertEqual(
-                    list(itertools.islice(range(100), *args)), list(range(*tgtargs))
+                checks.append(
+                    (list(itertools.islice(range(100), *args)), list(range(*tgtargs)))
                 )
 
             # Test stop=None
-            self.assertEqual(list(itertools.islice(range(10), None)), list(range(10)))
-            self.assertEqual(
-                list(itertools.islice(range(10), None, None)), list(range(10))
+            checks.append((list(itertools.islice(range(10), None)), list(range(10))))
+            checks.append(
+                (list(itertools.islice(range(10), None, None)), list(range(10)))
             )
-            self.assertEqual(
-                list(itertools.islice(range(10), None, None, None)), list(range(10))
+            checks.append(
+                (list(itertools.islice(range(10), None, None, None)), list(range(10)))
             )
-            self.assertEqual(
-                list(itertools.islice(range(10), 2, None)), list(range(2, 10))
+            checks.append(
+                (list(itertools.islice(range(10), 2, None)), list(range(2, 10)))
             )
-            self.assertEqual(
-                list(itertools.islice(range(10), 1, None, 2)), list(range(1, 10, 2))
+            checks.append(
+                (list(itertools.islice(range(10), 1, None, 2)), list(range(1, 10, 2)))
             )
 
             # Test number of items consumed     SF #1171417
             it = iter(range(10))
-            self.assertEqual(list(itertools.islice(it, 3)), list(range(3)))
-            self.assertEqual(list(it), list(range(3, 10)))
+            checks.append((list(itertools.islice(it, 3)), list(range(3))))
+            checks.append((list(it), list(range(3, 10))))
 
             it = iter(range(10))
-            self.assertEqual(list(itertools.islice(it, 3, 3)), [])
-            self.assertEqual(list(it), list(range(3, 10)))
+            checks.append((list(itertools.islice(it, 3, 3)), []))
+            checks.append((list(it), list(range(3, 10))))
 
             # Issue #10323:  Less islice in a predictable state
             c = itertools.count()
-            self.assertEqual(list(itertools.islice(c, 1, 3, 50)), [1])
-            self.assertEqual(next(c), 3)
+            checks.append((list(itertools.islice(c, 1, 3, 50)), [1]))
+            checks.append((next(c), 3))
+
+            return checks
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        opt_fn()
+        for actual, expected in opt_fn():
+            self.assertEqual(actual, expected)
 
     @unittest.expectedFailure
     def test_itertools_islice_intlike(self):
@@ -3407,6 +3414,118 @@ partial_fn = functools.partial(fn, scale=2)
         self.assertEqual(symbolic(torch.ones(7)).shape[0], 4)
         self.assertEqual(symbolic(torch.ones(9)).shape[0], 5)
 
+    @parametrize("name", ("atan2", "copysign", "remainder"))
+    def test_math_two_doubles_custom_object(self, name):
+        class FloatLike:
+            def __float__(self):
+                return 2.5
+
+        class IndexLike:
+            def __index__(self):
+                return 3
+
+        class FloatSubclass(float):
+            pass
+
+        fn = getattr(math, name)
+        sub_arg = FloatSubclass(1.5)
+
+        def func(x):
+            sub = fn(sub_arg, 2.0)
+            return x + 1, fn(FloatLike(), 1.0), fn(1.0, IndexLike()), sub
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("atan2", "copysign", "remainder"))
+    def test_math_two_doubles_conversion_order(self, name):
+        class FloatLike:
+            def __float__(self):
+                self.converted = True
+                return 2.5
+
+        fn = getattr(math, name)
+
+        def func(x, obj):
+            try:
+                fn("not a number", obj)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        eager_obj, opt_obj = FloatLike(), FloatLike()
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x, opt_obj), func(x, eager_obj))
+        self.assertFalse(hasattr(eager_obj, "converted"))
+        self.assertFalse(hasattr(opt_obj, "converted"))
+
+    @parametrize("name", ("atan2", "copysign", "remainder"))
+    @parametrize("call", ("non_numeric", "one_arg", "three_args", "keyword"))
+    def test_math_two_doubles_invalid_arguments(self, name, call):
+        class Bad:
+            pass
+
+        class C:
+            def __float__(self):
+                raise AssertionError("__float__ must not be called")
+
+        fn = getattr(math, name)
+
+        def func(x):
+            try:
+                if call == "non_numeric":
+                    fn(Bad(), C())
+                elif call == "one_arg":
+                    fn(C())
+                elif call == "three_args":
+                    fn(C(), 1.0, 2.0)
+                else:
+                    fn(C(), y=1.0)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("atan2", "copysign", "remainder"))
+    def test_math_two_doubles_symbolic(self, name):
+        class FloatLike:
+            def __init__(self, value):
+                self.value = value
+
+            def __float__(self):
+                return self.value / 2
+
+        fn = getattr(math, name)
+
+        def func(x):
+            return x + 1, fn(FloatLike(x.shape[0]), 2.0)
+
+        opt = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
+        for size in (7, 9, 11):
+            x = torch.rand(size)
+            self.assertEqual(opt(x), func(x))
+
+    def test_math_remainder_domain_error(self):
+        class FloatLike:
+            def __float__(self):
+                return 1.0
+
+        def func(x):
+            try:
+                math.remainder(FloatLike(), 0.0)
+            except ValueError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
     def test_math_radians(self):
         def func(x, a):
             return x + math.radians(a)
@@ -3422,6 +3541,132 @@ partial_fn = functools.partial(fn, scale=2)
         self.assertTrue(same(output, expected))
         if cnt.frame_count != 1:
             raise AssertionError(f"Expected frame_count 1, got {cnt.frame_count}")
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12), "math.sumprod introduced in python 3.12"
+    )
+    def test_math_sumprod_non_constant(self):
+        class Seq:
+            def __init__(self, n):
+                self.i = 0
+                self.n = n
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self.i == self.n:
+                    raise StopIteration
+                self.i += 1
+                return self.i
+
+        class Num:
+            def __init__(self, v):
+                self.v = v
+
+            def __mul__(self, other):
+                return Num(self.v * other.v)
+
+            def __add__(self, other):
+                return Num(self.v + other.v)
+
+            def __radd__(self, other):
+                return Num(other + self.v)
+
+            def __eq__(self, other):
+                return isinstance(other, Num) and self.v == other.v
+
+        def func(x):
+            nums = [Num(1), Num(2)]
+            return (
+                x + 1,
+                math.sumprod(nums, nums),
+                math.sumprod((i for i in range(4)), [1, 2, 3, 4]),
+                math.sumprod(Seq(3), Seq(3)),
+            )
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12), "math.sumprod introduced in python 3.12"
+    )
+    def test_math_sumprod_float_iterables(self):
+        # Plain float summation gives 0.0 here; CPython's sumprod gives 1.0.
+        vals = [1e20, 1.0, -1e20]
+
+        def func(x):
+            return (
+                x + 1,
+                math.sumprod((v for v in vals), [1.0, 1.0, 1.0]),
+                math.sumprod(iter(vals), (1, 1, 1)),
+                math.sumprod(map(float, vals), iter([1.0, 1.0, 1.0])),
+                math.sumprod([0.1] * 10, (v for v in [0.1] * 10)),
+            )
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        expected = func(x)
+        actual = opt(x)
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(actual[1:], expected[1:], atol=0, rtol=0)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12), "math.sumprod introduced in python 3.12"
+    )
+    def test_math_sumprod_tensor_elements(self):
+        def func(x):
+            return math.sumprod([x.sum(), x.mean()], (v for v in [2.0, 3.0]))
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(func, backend=cnt, fullgraph=True)
+        x = torch.rand(10)
+        self.assertEqual(opt(x), func(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12), "math.sumprod introduced in python 3.12"
+    )
+    def test_math_sumprod_mixed_constant_and_tensor(self):
+        # Documented divergence, same as the sum polyfill in polyfills/builtins.py:
+        # a list with any non-constant element is accumulated plainly, so the
+        # float constants lose CPython's extended precision (eager gives 1.0 for
+        # them, compiled gives 0.0).
+        def func(x):
+            return math.sumprod([1e20, 1.0, -1e20, x.sum()], [1, 1, 1, 1])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(func, backend=cnt, fullgraph=True)
+        x = torch.rand(10)
+        self.assertEqual(func(x), x.sum() + 1.0)
+        self.assertEqual(opt(x), x.sum())
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12), "math.sumprod introduced in python 3.12"
+    )
+    @parametrize("call", ("uneven", "raising_mul", "keyword"))
+    def test_math_sumprod_errors(self, call):
+        class BadMul:
+            def __mul__(self, other):
+                raise RuntimeError("bad mul")
+
+        def func(x):
+            try:
+                if call == "uneven":
+                    math.sumprod((i for i in range(3)), [1, 2])
+                elif call == "raising_mul":
+                    math.sumprod([BadMul()], [1])
+                else:
+                    math.sumprod(p=(i for i in range(3)), q=[1, 2, 3])
+            except (ValueError, RuntimeError, TypeError) as exc:
+                return x + 1, type(exc), str(exc)
+            return x - 1, None, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
 
     @unittest.skipIf(sys.version_info < (3, 13), "math.fma introduced in python 3.13")
     def test_math_fma(self):
@@ -4796,6 +5041,44 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(opt_fn([1, 2, 3], [4, 5, 6]), [1, 2, 3, 4, 5, 6])
 
+    def test_operator_concat_iconcat_reduce(self):
+        # Regression test for the functools.reduce pattern reported in #116396.
+        def fn_concat(seqs):
+            return functools.reduce(operator.concat, seqs, [])
+
+        def fn_iconcat(seqs):
+            return functools.reduce(operator.iconcat, seqs, [])
+
+        seqs = [[1, 2], [3], [4, 5, 6]]
+        for fn in (fn_concat, fn_iconcat):
+            with self.subTest(fn=fn.__name__):
+                opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+                self.assertEqual(opt_fn(seqs), fn(seqs))
+
+    def test_operator_iconcat_inplace_mutation(self):
+        # operator.iconcat mutates its first argument in place and returns it.
+        def fn(a, b):
+            return operator.iconcat(a, b)
+
+        opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        a = [1, 2, 3]
+        b = [4, 5]
+        self.assertEqual(opt_fn(a, b), [1, 2, 3, 4, 5])
+        self.assertEqual(a, [1, 2, 3, 4, 5])
+
+    def test_operator_concat_iconcat_empty(self):
+        def fn_concat(a, b):
+            return operator.concat(a, b)
+
+        def fn_iconcat(a, b):
+            return operator.iconcat(a, b)
+
+        for fn in (fn_concat, fn_iconcat):
+            with self.subTest(fn=fn.__name__):
+                opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+                self.assertEqual(opt_fn([], [1, 2]), [1, 2])
+                self.assertEqual(opt_fn([1, 2], []), [1, 2])
+
     def test_attrgetter(self):
         for attrs in (
             ("shape",),
@@ -5534,6 +5817,57 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_wrapper_user_method_not_a_wrapper_user_function(self):
+        """WrapperUserMethodVariable must not subclass WrapperUserFunctionVariable.
+
+        In CPython, MethodType is not a subclass of FunctionType; the VTs
+        should mirror that.
+        """
+        import types
+
+        from torch._dynamo.variables.functions import (
+            BaseUserFunctionVariable,
+            WrapperUserFunctionVariable,
+            WrapperUserMethodVariable,
+        )
+
+        self.assertFalse(
+            issubclass(WrapperUserMethodVariable, WrapperUserFunctionVariable)
+        )
+        self.assertTrue(
+            issubclass(WrapperUserFunctionVariable, BaseUserFunctionVariable)
+        )
+        self.assertTrue(issubclass(WrapperUserMethodVariable, BaseUserFunctionVariable))
+        self.assertIs(WrapperUserMethodVariable._cpython_type, types.MethodType)
+        self.assertIs(WrapperUserFunctionVariable._cpython_type, types.FunctionType)
+
+    def test_wrapper_user_method_torchdynamo_inline(self):
+        # Dynamo traces the _torchdynamo_inline target instead of meth, so the
+        # targets return different values to prove that path was taken.
+        def mod_inline(self, x):
+            return x + 1
+
+        def plain_inline(self, x):
+            return x + 2
+
+        class Mod(torch.nn.Module):
+            def meth(self, x):
+                return x + 100
+
+        class Plain:
+            def meth(self, x):
+                return x + 200
+
+        Mod.meth._torchdynamo_inline = mod_inline
+        Plain.meth._torchdynamo_inline = plain_inline
+
+        def fn(mod, plain, x):
+            return mod.meth(x) + plain.meth(x)
+
+        x = torch.randn(2, 2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(Mod(), Plain(), x), (x + 1) + (x + 2))
+
     def test_wraps_stacked_on_lru_cache(self):
         # Stacking two functools.wraps layers over an lru_cache-wrapped fn.
         @functools.lru_cache
@@ -5558,6 +5892,86 @@ class GraphModule(torch.nn.Module):
             return inner_decorator(outer_decorator(base_fn))(x)
 
         x = torch.tensor(5.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_builtin_dunder_attr_access(self):
+        # Introspection attributes on a builtin (BuiltinVariable) must resolve to
+        # real constants during tracing, and missing ones must raise
+        # AttributeError, mirroring CPython getattr semantics.
+        def fn(x):
+            if max.__name__ != "max":
+                raise AssertionError(max.__name__)
+            if max.__module__ != "builtins":
+                raise AssertionError(max.__module__)
+            if not max.__doc__.startswith("max("):
+                raise AssertionError(max.__doc__)
+            try:
+                max.__annotations__
+                missing = False
+            except AttributeError:
+                missing = True
+            if not missing:
+                raise AssertionError("expected AttributeError for max.__annotations__")
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_type_dunder_attr_access(self):
+        # A builtin type exposes constant introspection attributes (including
+        # __type_params__ as an empty tuple) that must resolve during tracing.
+        def fn(x):
+            if type.__name__ != "type":
+                raise AssertionError(type.__name__)
+            if not type.__doc__.startswith("type("):
+                raise AssertionError(type.__doc__)
+            if sys.version_info >= (3, 12):
+                if type.__type_params__ != ():
+                    raise AssertionError(type.__type_params__)
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_update_wrapper_from_builtin(self):
+        # functools.update_wrapper copying WRAPPER_ASSIGNMENTS from a builtin
+        # onto a locally defined wrapper: __name__/__doc__ come from the builtin,
+        # __annotations__ stays {} because the builtin lacks that attribute.
+        def fn(x):
+            def wrapper():
+                pass
+
+            functools.update_wrapper(wrapper, max)
+            if wrapper.__name__ != "max":
+                raise AssertionError(wrapper.__name__)
+            if not wrapper.__doc__.startswith("max("):
+                raise AssertionError(wrapper.__doc__)
+            if wrapper.__annotations__ != {}:
+                raise AssertionError(wrapper.__annotations__)
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_wraps_decorator_from_builtin(self):
+        # functools.wraps (which calls update_wrapper) applied with a builtin as
+        # the wrapped object.
+        def fn(x):
+            @functools.wraps(max)
+            def wrapper():
+                pass
+
+            if wrapper.__name__ != "max":
+                raise AssertionError(wrapper.__name__)
+            if not wrapper.__doc__.startswith("max("):
+                raise AssertionError(wrapper.__doc__)
+            return x + 1
+
+        x = torch.tensor(1.0)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
@@ -5780,6 +6194,24 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(fn())
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_dynamic_class_attribute_raw_descriptor(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            class C:
+                def foo(self):
+                    return 1
+
+                foo.__isabstractmethod__ = True
+                foo = types.DynamicClassAttribute(foo)
+
+            descriptor = C.__dict__["foo"]
+            return descriptor.__isabstractmethod__, x + 1
+
+        is_abstract, out = fn(torch.tensor(1))
+        self.assertTrue(is_abstract)
+        self.assertEqual(out, torch.tensor(2))
+
     def test_tuplegetter_on_instance(self):
         from collections import namedtuple
 
@@ -5888,6 +6320,42 @@ class GraphModule(torch.nn.Module):
         # the function VT carries the source, so the method needs no source_fn
         self.assertFalse(hasattr(method, "source_fn"))
         self.assertIs(method.get_source(), im_func.get_source())
+
+    def test_bound_builtin_method_qualname_renamed_in_frame(self):
+        class D(dict):
+            pass
+
+        inst_bound = D(t=torch.ones(1)).get
+        cls_bound = D.fromkeys
+
+        def fn(x):
+            D.__qualname__ = "Renamed"
+            return x + 1, inst_bound.__qualname__, cls_bound.__qualname__
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertEqual(expected[1:], ("Renamed.get", "Renamed.fromkeys"))
+        D.__qualname__ = "D"
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), expected)
+
+    def test_bound_builtin_method_getset(self):
+        class D(dict):
+            pass
+
+        d = D(a=torch.ones(1))
+        s = {1}
+        bounds = (d.get, s.add, (1,).count, dict.fromkeys, tuple.__new__)
+
+        def fn(x):
+            out = [x + 1, bounds[0].__self__ is d, bounds[1].__self__ is s]
+            for b in bounds:
+                out += [b.__name__, b.__qualname__, b.__doc__, b.__text_signature__]
+            return out
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
     # generate_pycode cannot reconstruct a TensorPropertySource, which is what
     # a symbolic size input is sourced by; the dynamic_shapes variant therefore
@@ -6064,6 +6532,21 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(Unsupported):
             torch.compile(m, backend="eager", fullgraph=True)(x)
 
+    def test_torch_function_metadata_attrs_constant(self):
+        def fn(x):
+            names = [
+                torch.mul.__name__,
+                torch.Tensor.add_.__name__,
+                torch.sin.__module__,
+            ]
+            if torch.Tensor.add_.__name__.endswith("_"):
+                x = x + 1
+            return x, names
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
 
 def udf_mul(x, y):
     return x * y
@@ -6121,6 +6604,12 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         compiled function
         """
 
+        f = global_func_with_default_tensor_args
+        defaults = tuple(t.clone() for t in f.__defaults__)
+        kwdefaults = {k: t.clone() for k, t in f.__kwdefaults__.items()}
+        self.addCleanup(setattr, f, "__defaults__", defaults)
+        self.addCleanup(setattr, f, "__kwdefaults__", kwdefaults)
+
         def func():
             return global_func_with_default_tensor_args()
 
@@ -6164,6 +6653,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         stored on the globally allocated function object, both from the orig and
         compiled function
         """
+        fwd = ModuleWithDefaultTensorArgsMethod.forward
+        defaults = tuple(t.clone() for t in fwd.__defaults__)
+        kwdefaults = {k: t.clone() for k, t in fwd.__kwdefaults__.items()}
+        self.addCleanup(setattr, fwd, "__defaults__", defaults)
+        self.addCleanup(setattr, fwd, "__kwdefaults__", kwdefaults)
         mod = WrapperModule()
         cnts = torch._dynamo.testing.CompileCounter()
         compiled_mod = torch.compile(mod, backend=cnts)

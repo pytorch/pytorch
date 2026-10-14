@@ -567,6 +567,17 @@ _efficient_attention_backward(
 
 #ifdef USE_ROCM
   // ROCM Implementation
+  // Empty grad_out means there is nothing to accumulate; skip the backends,
+  // which cannot launch on empty inputs (see _efficient_attention_forward).
+  if (grad_out.numel() == 0) {
+    grad_q.zero_();
+    grad_k.zero_();
+    grad_v.zero_();
+    if (grad_bias.defined()) {
+      grad_bias.zero_();
+    }
+    return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v), std::move(grad_bias));
+  }
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck)
   {
 #if defined(USE_ROCM_CK_SDPA)
@@ -905,8 +916,8 @@ _efficient_attention_backward(
     }
 
     // Heuristic for finding optimal number of splits
-    auto parallelism_without_split_key =
-        p.getBlocksGrid().x * p.getBlocksGrid().y * p.getBlocksGrid().z;
+    const int64_t parallelism_without_split_key =
+        int64_t(p.num_batches) * p.num_heads;
     p.num_splits_key = cutlass::ceil_div(p.num_keys, Kernel::kBlockSizeJ);
     if (num_splits_key.has_value()) {
       p.num_splits_key =
@@ -924,8 +935,8 @@ _efficient_attention_backward(
       // Increasing `split_keys` leads to using more gmem for temporary storage
       // when we need a staging area for gK/gV. let's avoid that
       if (Kernel::kNeedsAccumGradK || Kernel::kNeedsAccumGradV) {
-        p.num_splits_key = std::min(
-            int32_t(p.num_splits_key), 200 / ((int32_t)(p.num_batches * p.num_heads)));
+        p.num_splits_key = std::min<int64_t>(
+            p.num_splits_key, 200 / parallelism_without_split_key);
       }
     }
     if (!Kernel::kEnableSplitKeys || p.num_splits_key < 1) {
@@ -989,7 +1000,16 @@ _efficient_attention_backward(
         checkBinaryArchMatches(), "Something went wrong in the build process");
 #endif
 
-    kernel_fn<<<p.getBlocksGrid(), p.getThreadsGrid(), smem_bytes, stream>>>(p);
+    auto blocks = p.getBlocksGrid();
+    // Match forward's logical batch/head indices, including workspace and RNG.
+    for (p.batch_offset = 0; p.batch_offset < p.num_batches; p.batch_offset += blocks.z) {
+      blocks.z = std::min(65535, p.num_batches - p.batch_offset);
+      for (p.head_offset = 0; p.head_offset < p.num_heads; p.head_offset += blocks.y) {
+        blocks.y = std::min(65535, p.num_heads - p.head_offset);
+        kernel_fn<<<blocks, p.getThreadsGrid(), smem_bytes, stream>>>(p);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
+    }
   };
 
   DISPATCH_TYPES(query, ([&]() {
@@ -1084,6 +1104,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
+#ifdef USE_ROCM
   constexpr int64_t MAX_BATCH_SIZE = (1LL << 16) - 1;
   int64_t batch_size = query.size(0);
 
@@ -1092,6 +1113,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
                 "Efficient attention backward cannot handle dropout when "
                 "the batch size exceeds (", MAX_BATCH_SIZE, ").");
   }
+#endif
   auto grad_out_t = grad_out_.transpose(1, 2);
   auto query_t = query.transpose(1, 2);
   auto key_t = key.transpose(1, 2);
@@ -1145,6 +1167,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
       grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), std::move(grad_bias));
   };
 
+#ifdef USE_ROCM
   // process in chunks if batch size exceeds maximum
   if (batch_size > MAX_BATCH_SIZE) {
     Tensor final_grad_q, final_grad_k, final_grad_v, final_grad_bias;
@@ -1215,14 +1238,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
         std::move(final_grad_v),
         std::move(final_grad_bias));
   }
-  // when batch size is within allowed size, no chunking needed
-  else {
-    std::optional<Tensor> attn_bias_opt;
-    if (attn_bias.defined()) {
-      attn_bias_opt = attn_bias;
-    }
-    return process_chunk(grad_out_t, query_t, key_t, value_t, attn_bias_opt, out_t, logsumexp);
-  }
+#endif
+  return process_chunk(grad_out_t, query_t, key_t, value_t, attn_bias, out_t, logsumexp);
 }
 
 std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_cuda(
