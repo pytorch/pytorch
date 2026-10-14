@@ -208,6 +208,24 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    def test_addmm_zero_beta_nan_bias(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = torch.full((64,), float("nan"))
+                self.weight = torch.randn(128, 64)
+
+            def forward(self, x):
+                # alpha != 1 keeps freezing from packing this into an mkldnn linear.
+                return torch.addmm(self.bias, x, self.weight, beta=0, alpha=0.5)
+
+        counters.clear()
+        self.common(M().eval(), (torch.randn(32, 128),))
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
     @requires_mkl
     @parametrize("in_features", (1000,))
     @parametrize("out_features", (1024,))
