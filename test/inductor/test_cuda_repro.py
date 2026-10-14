@@ -368,13 +368,17 @@ class CudaReproTests(TestCase):
         # remain an FX input because its contents can change between calls.
         def runtime_mask_fn(query, key, value, attention_mask):
             output = aten._scaled_dot_product_efficient_attention.default(
-                query, key, value, attention_mask, False
+                query,
+                key,
+                value,
+                attention_mask.expand(batch_size, num_heads, seq_len, seq_len),
+                False,
             )[0]
             return output
 
         padding_mask = torch.zeros(
             batch_size,
-            num_heads,
+            1,
             seq_len,
             seq_len,
             device=device_type,
