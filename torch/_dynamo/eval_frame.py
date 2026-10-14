@@ -58,10 +58,12 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     get_eval_frame_isolate_recompiles_id,
+    get_eval_frame_isolate_recompiles_strict,
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
     set_eval_frame_isolate_recompiles_id,
+    set_eval_frame_isolate_recompiles_strict,
     set_fullgraph_compiled_frame_count,
     set_fullgraph_error_on_nested_compile,
     set_guard_complete_hook,
@@ -567,8 +569,8 @@ def _get_cache_entries_for_region(
 
     Returns only entries owned by the requested bucket. During an actual
     lookup, isolated regions also fall back read-only to the default
-    bucket for BC-friendly reuse — this helper does not include those
-    fallback entries.
+    bucket for BC-friendly reuse, except strict ones that record into a
+    package — this helper does not include those fallback entries.
     """
     if callable(code):
         code = code.__code__
@@ -1007,6 +1009,7 @@ def _restore_compile_wrapper_state(
     cleanups: list[Callable[[], Any]],
     prior_skip_guard_eval_unsafe: bool | None,
     prior_isolate_recompiles_id: int | None,
+    prior_isolate_recompiles_strict: bool | None,
     prior_error_on_graph_break: bool | None,
 ) -> None:
     """Undo compile_wrapper's state changes in reverse order of entry. Every
@@ -1017,21 +1020,27 @@ def _restore_compile_wrapper_state(
             _set_error_on_graph_break(prior_error_on_graph_break)
     finally:
         try:
-            if prior_isolate_recompiles_id is not None:
-                set_eval_frame_isolate_recompiles_id(prior_isolate_recompiles_id)
+            if prior_isolate_recompiles_strict is not None:
+                set_eval_frame_isolate_recompiles_strict(
+                    prior_isolate_recompiles_strict
+                )
         finally:
             try:
-                if prior_skip_guard_eval_unsafe is not None:
-                    set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
+                if prior_isolate_recompiles_id is not None:
+                    set_eval_frame_isolate_recompiles_id(prior_isolate_recompiles_id)
             finally:
                 try:
-                    if cleanups:
-                        _run_cleanups_lifo(cleanups)
+                    if prior_skip_guard_eval_unsafe is not None:
+                        set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
                 finally:
-                    if prior_error_on_nested_compile is not None:
-                        set_fullgraph_error_on_nested_compile(
-                            prior_error_on_nested_compile
-                        )
+                    try:
+                        if cleanups:
+                            _run_cleanups_lifo(cleanups)
+                    finally:
+                        if prior_error_on_nested_compile is not None:
+                            set_fullgraph_error_on_nested_compile(
+                                prior_error_on_nested_compile
+                            )
 
 
 class _TorchDynamoContext:
@@ -1080,6 +1089,9 @@ class _TorchDynamoContext:
         self._isolate_recompiles_id = (
             next(_next_isolate_recompiles_id) if isolate_recompiles else -1
         )
+        # A region that records into a package must not serve a call from the
+        # default region's cache: that entry would be missing from the package.
+        self._isolate_recompiles_strict = isolate_recompiles and package is not None
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -1349,6 +1361,7 @@ class _TorchDynamoContext:
             cleanups: list[Callable[[], Any]] = []
             prior_skip_guard_eval_unsafe: bool | None = None
             prior_isolate_recompiles_id: int | None = None
+            prior_isolate_recompiles_strict: bool | None = None
             prior_error_on_graph_break: bool | None = None
             state_restored = False
             # Fake propagation and AOT metadata collection execute user
@@ -1425,6 +1438,11 @@ class _TorchDynamoContext:
                 )
                 prior_isolate_recompiles_id = set_eval_frame_isolate_recompiles_id(
                     self._isolate_recompiles_id
+                )
+                prior_isolate_recompiles_strict = (
+                    set_eval_frame_isolate_recompiles_strict(
+                        self._isolate_recompiles_strict
+                    )
                 )
                 if not self.fullgraph and self.error_on_graph_break is not None:
                     current_error_on_graph_break = _get_error_on_graph_break()
@@ -1507,6 +1525,7 @@ class _TorchDynamoContext:
                                     cleanups,
                                     prior_skip_guard_eval_unsafe,
                                     prior_isolate_recompiles_id,
+                                    prior_isolate_recompiles_strict,
                                     prior_error_on_graph_break,
                                 )
                 finally:
@@ -1524,6 +1543,7 @@ class _TorchDynamoContext:
                             cleanups,
                             prior_skip_guard_eval_unsafe,
                             prior_isolate_recompiles_id,
+                            prior_isolate_recompiles_strict,
                             prior_error_on_graph_break,
                         )
                 finally:

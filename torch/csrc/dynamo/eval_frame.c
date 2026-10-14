@@ -28,6 +28,7 @@ static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 // The flags below all describe "the Dynamo region this thread is currently
 // inside".  Stored as per-thread tagged pointers.
 static Py_tss_t isolate_recompiles_key = Py_tss_NEEDS_INIT; // int64_t
+static Py_tss_t isolate_recompiles_strict_key = Py_tss_NEEDS_INIT; // bool
 static Py_tss_t skip_guard_eval_key = Py_tss_NEEDS_INIT; // bool
 static Py_tss_t fullgraph_count_key = Py_tss_NEEDS_INIT; // int64_t
 static Py_tss_t fullgraph_error_key = Py_tss_NEEDS_INIT; // bool
@@ -131,6 +132,29 @@ int64_t get_current_isolate_recompiles_id(void) {
 
 static void set_current_isolate_recompiles_id(int64_t id) {
   set_isolate_recompiles_id_raw(&isolate_recompiles_key, id);
+}
+
+bool get_current_isolate_recompiles_strict(void) {
+  void* p = PyThread_tss_get(&isolate_recompiles_strict_key);
+  return p == NULL ? false : untag_bool(p);
+}
+
+static PyObject* get_eval_frame_isolate_recompiles_strict_py(
+    PyObject* dummy,
+    PyObject* args) {
+  return PyBool_FromLong(get_current_isolate_recompiles_strict());
+}
+
+static PyObject* set_eval_frame_isolate_recompiles_strict_py(
+    PyObject* dummy,
+    PyObject* arg) {
+  int new_strict = PyObject_IsTrue(arg);
+  if (new_strict < 0) {
+    return NULL;
+  }
+  bool old_strict = get_current_isolate_recompiles_strict();
+  PyThread_tss_set(&isolate_recompiles_strict_key, tag_bool(new_strict != 0));
+  return PyBool_FromLong(old_strict);
 }
 
 static PyObject* get_eval_frame_isolate_recompiles_id_py(
@@ -906,6 +930,8 @@ static PyMethodDef _methods[] = {
      NULL},
     {"set_eval_frame_isolate_recompiles_id", set_eval_frame_isolate_recompiles_id_py, METH_O, NULL},
     {"get_eval_frame_isolate_recompiles_id", get_eval_frame_isolate_recompiles_id_py, METH_NOARGS, NULL},
+    {"set_eval_frame_isolate_recompiles_strict", set_eval_frame_isolate_recompiles_strict_py, METH_O, NULL},
+    {"get_eval_frame_isolate_recompiles_strict", get_eval_frame_isolate_recompiles_strict_py, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
@@ -941,6 +967,7 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
 
   Py_tss_t* keys[] = {
       &isolate_recompiles_key,
+      &isolate_recompiles_strict_key,
       &skip_guard_eval_key,
       &fullgraph_count_key,
       &fullgraph_error_key};
