@@ -4695,6 +4695,14 @@ def scalar_continuation(y):
 def tensor_free_resume(model, x):
     y = model(x)
     return y.sum(dim=0), scalar_continuation(y)
+
+
+def closure_resume(model, x):
+    # y is a cell, so the continuation after the break has a free variable.
+    y = model(x)
+    torch._dynamo.graph_break()
+    get = lambda: y  # noqa: E731
+    return get().sum(dim=0)
 """
 
 _GOLDEN_LOADER = """
@@ -4897,22 +4905,34 @@ class TestPrecompileDynamoCapture(TestCase):
             dynamic_variant = admitted[-1]
         self.assertIs(served_first_shape, dynamic_variant)
 
+    @parametrize("frame", ["entry", "closure"])
     @parametrize("lru", [True, False])
-    def test_standalone_artifact_orders_variants_like_torch_compile(self, lru):
+    def test_standalone_artifact_orders_variants_like_torch_compile(self, lru, frame):
         # Two static variants that admit disjoint shapes. Under LRU the newest
         # is tried first and a hit moves to the front; without it, capture
-        # order is kept.
+        # order is kept. "closure" checks the order of a continuation with a
+        # free variable, whose dispatcher is rebuilt on every call.
         from torch._dynamo.guards import GuardManagerWrapper
 
+        fn, local = {
+            "entry": (self.mod.single, "x"),
+            "closure": (self.mod.closure_resume, "y"),
+        }[frame]
         static = DynamoTracer(dynamic=False)
-        with self._capture(self.mod.single, backend="eager", tracer=static) as cap:
+        with self._capture(fn, backend="eager", tracer=static) as cap:
             cap(self.model, self.x2)
             cap(self.model, self.x3)
+        # The capture's live compile still binds the continuation's resume
+        # name, which a fresh process would not hold.
+        for name in [n for n in vars(self.mod) if n.startswith("__resume_at")]:
+            delattr(self.mod, name)
         tried_first, served = [], []
         real_check = GuardManagerWrapper.check
 
         def recording_check(manager, f_locals):
             ok = real_check(manager, f_locals)
+            if local not in f_locals:
+                return ok
             if len(tried_first) == len(served):
                 tried_first.append(manager)
             if ok:
