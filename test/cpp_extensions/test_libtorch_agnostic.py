@@ -494,6 +494,15 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(out, torch_op(a, b, out_dtype=torch.float32))
         self.assertEqual(id(result), id(out))
 
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_flip(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t = torch.arange(24, device=device).reshape(2, 3, 4)
+        dims = [-1, 0]
+        result = libtorch_agnostic.ops.my_flip(t, dims)
+        self.assertEqual(result, torch.flip(t, dims))
+
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
     # extension's importable PyMethodDef module (_interop).
