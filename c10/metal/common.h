@@ -44,6 +44,10 @@
   _(UInt32, 28, uint32_t)              \
   _(UInt64, 29, uint64_t)
 
+#define C10_METAL_SERIAL_SUFFIX_false ""
+#define C10_METAL_SERIAL_SUFFIX_true "_serial"
+#define C10_METAL_SERIAL_SUFFIX(SERIAL) C10_METAL_SERIAL_SUFFIX_##SERIAL
+
 namespace c10 {
 namespace metal {
 C10_METAL_CONSTEXPR unsigned max_ndim = 16;
