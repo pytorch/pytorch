@@ -1494,11 +1494,13 @@ if(CUPTI_STUBS_GENERATED)
     PROPERTIES COMPILE_OPTIONS -w)
 endif()
 
+# Kineto installs its own public headers to include/kineto.
 install(DIRECTORY
   "${TORCH_SRC_DIR}/csrc"
   "${TORCH_SRC_DIR}/headeronly"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
-  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+  REGEX "/csrc/profiler/kineto$" EXCLUDE)
 
 install(FILES
   "${TORCH_SRC_DIR}/script.h"
