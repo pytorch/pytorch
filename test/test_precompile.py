@@ -5996,7 +5996,7 @@ class TestPrecompileRuntimeCache(TestCase):
     def test_frozen_cpu_graph_serves_strict_load_from_empty_caches(
         self, precompile_headers, build_separate
     ):
-        from torch._inductor import codecache, config as inductor_config
+        from torch._inductor import codecache, config as inductor_config, cpp_builder
         from torch._inductor.utils import clear_caches
         from torch.compiler import _runtime_cache
 
@@ -6051,14 +6051,19 @@ class TestPrecompileRuntimeCache(TestCase):
                 with (
                     fresh_host(os.path.join(directory, "c")),
                     pc.no_compilation(),
+                    # no_compilation() does not gate C++ builds; compile in-process
+                    # so a build on the serving host hits the patched build().
+                    inductor_config.patch(compile_threads=1),
+                    mock.patch.object(
+                        cpp_builder.CppBuilder,
+                        "build",
+                        side_effect=AssertionError("built C++ on the serving host"),
+                    ),
                 ):
                     pc.prepare_runtime(artifact_path=source, cache_path=cache)
                     runnable = pc.load(source, cache)
                     with torch.no_grad():
                         self.assertEqual(runnable(x), fn(x))
-                walk = os.walk(os.path.join(directory, "c"))
-                objects = [f for _, _, fs in walk for f in fs if f.endswith(".o")]
-                self.assertEqual(objects, [])
             finally:
                 clear_caches()
 
