@@ -61,7 +61,7 @@ on:
         description: true when the GHCR mirror of the CI image exists.
         value: ${{ jobs.resolve-image.outputs.mirrored }}
       dind-test-matrix:
-        description: test-matrix with linux.rocm.gpu.mi350.dind.N runners.
+        description: test-matrix with linux.rocm.gpu.mi350.dpx.dind.N runners.
         value: ${{ jobs.resolve-image.outputs.dind-test-matrix }}
 
 env:
@@ -99,11 +99,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          # mi350.dpx.N and mi350.N both become linux.rocm.gpu.mi350.dind.N.
+          # mi350.dpx.N and mi350.N both become linux.rocm.gpu.mi350.dpx.dind.N.
           dind_matrix="$(jq -c '
             .include |= map(
               if (.runner | test("linux\\.rocm\\.gpu\\.mi350\\.(dpx\\.)?[0-9]+$")) then
-                .runner = "linux.rocm.gpu.mi350.dind." + (.runner | capture("(?<n>[0-9]+)$").n)
+                .runner = "linux.rocm.gpu.mi350.dpx.dind." + (.runner | capture("(?<n>[0-9]+)$").n)
               else
                 .
               end
@@ -132,7 +132,7 @@ jobs:
           done
 
           echo "mirrored=false" >> "${GITHUB_OUTPUT}"
-          echo "::notice::${image} is absent from the GHCR mirror. The caller runs the same shards on the DinD workflow with linux.rocm.gpu.mi350.dind.N."
+          echo "::notice::${image} is absent from the GHCR mirror. The caller runs the same shards on the DinD workflow with linux.rocm.gpu.mi350.dpx.dind.N."
           exit 0
 
   test:

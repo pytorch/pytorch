@@ -206,7 +206,7 @@ jobs:
             B200)   echo "runner=linux.dgx.b200" >> "$GITHUB_OUTPUT" ;;
             MI300X)
               if [[ "${{ needs.test-rocm.outputs.image-mirrored }}" == "false" ]]; then
-                echo "runner=linux.rocm.gpu.mi350.dind.1" >> "$GITHUB_OUTPUT"
+                echo "runner=linux.rocm.gpu.mi350.dpx.dind.1" >> "$GITHUB_OUTPUT"
               else
                 echo "runner=linux.rocm.gpu.mi350.1" >> "$GITHUB_OUTPUT"
               fi
