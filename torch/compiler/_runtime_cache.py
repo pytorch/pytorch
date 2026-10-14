@@ -241,14 +241,25 @@ def restore_cpp_kernel(key: str, binary_path: str) -> None:
             os.unlink(temporary)
 
 
-def _freeze_cpp_kernels(kernels: dict[str, str]) -> bytes:
+def _freeze_cpp_kernels(
+    kernels: dict[str, str], failed: dict[str, str], *, strict: bool
+) -> bytes:
     missing = sorted(key for key, path in kernels.items() if not os.path.exists(path))
-    if missing:
+    if missing and strict:
         raise RuntimeError(f"Cannot export C++ kernels with no binary: {missing}")
+    left_out = dict.fromkeys(missing, "no binary") | failed
+    if left_out:
+        log.warning(
+            "precompile left %d C++ kernel(s) out of the cache, which build again "
+            "on first use in the serving process: %s",
+            len(left_out),
+            left_out,
+        )
     binaries: dict[str, bytes] = {}
     for key, binary_path in kernels.items():
-        with open(binary_path, "rb") as binary:
-            binaries[key] = binary.read()
+        if key not in left_out:
+            with open(binary_path, "rb") as binary:
+                binaries[key] = binary.read()
     return pickle.dumps(binaries)
 
 
@@ -494,12 +505,9 @@ def _close(owner: _RuntimeCapture) -> None:
                 _capture = None
 
 
-def _triton_cache_root(*, strict: bool) -> str | None:
-    """The TRITON_CACHE_DIR a capture ships Triton's JIT cache from.
-
-    A capture_runtime() scope (``strict``) refuses a missing or invalid one once
-    it matters; a plain capture ships it only when it is set and valid, and
-    leaves Triton's JIT cache out with a warning otherwise.
+def _triton_cache_root() -> str | None:
+    """The TRITON_CACHE_DIR a capture_runtime() scope ships Triton's JIT cache
+    from, refusing a missing or invalid one once it matters.
     """
     if (cache := _triton_runtime_cache()) is None:
         return None
@@ -508,26 +516,11 @@ def _triton_cache_root(*, strict: bool) -> str | None:
     try:
         root = cache.runtime_cache_root(require_explicit=True)
     except Exception as exc:
-        if "TRITON_CACHE_DIR" not in os.environ and not (
-            strict and _gpu_runtime_started()
-        ):
+        if "TRITON_CACHE_DIR" not in os.environ and not _gpu_runtime_started():
             return None
-        if strict:
-            raise _precompile_error(_TRITON_SETTINGS_REQUIRED) from exc
-        log.warning(
-            "precompile leaves Triton's JIT cache out of the capture: "
-            "TRITON_CACHE_DIR is not usable (%s)",
-            exc,
-        )
-        return None
+        raise _precompile_error(_TRITON_SETTINGS_REQUIRED) from exc
     if not knobs.autotuning.cache:
-        if strict:
-            raise _precompile_error(_TRITON_SETTINGS_REQUIRED)
-        log.warning(
-            "precompile leaves Triton's JIT cache out of the capture: Triton's "
-            "autotuning cache is disabled (TRITON_CACHE_AUTOTUNING=1 enables it)"
-        )
-        return None
+        raise _precompile_error(_TRITON_SETTINGS_REQUIRED)
     root.mkdir(parents=True, exist_ok=True)
     return str(root)
 
@@ -548,7 +541,7 @@ def capture_runtime() -> Iterator[None]:
         raise _precompile_error(
             "precompile.capture_runtime cannot start while compilation is forbidden"
         )
-    owner = _RuntimeCapture(explicit=True, cache_root=_triton_cache_root(strict=True))
+    owner = _RuntimeCapture(explicit=True, cache_root=_triton_cache_root())
     with _capture_lock:
         if _active_capture() is not None:
             raise _precompile_error(
@@ -571,9 +564,7 @@ def capture_scope() -> Iterator[None]:
     with _capture_lock:
         owner = _active_capture()
         if owner is None:
-            owner = _capture = _RuntimeCapture(
-                explicit=False, cache_root=_triton_cache_root(strict=False)
-            )
+            owner = _capture = _RuntimeCapture(explicit=False, cache_root=None)
         owner.captures += 1
     try:
         yield
@@ -583,6 +574,11 @@ def capture_scope() -> Iterator[None]:
             last = not owner.explicit and owner.captures == 0
         if last:
             _close(owner)
+
+
+def in_capture_runtime() -> bool:
+    owner = _active_capture()
+    return owner is not None and owner.explicit
 
 
 def seal_runtime_scope() -> None:
@@ -607,6 +603,19 @@ def _freeze_triton_kernels(
             static_kernels[key] = _freeze_triton_kernel(key, instances)
         except _UnresolvedTritonExport as exc:
             rejected_sources.extend(exc.sources)
+        except Exception as exc:
+            # Only a capture_runtime() scope refuses the write; a plain capture
+            # leaves any source it cannot freeze out.
+            if strict:
+                raise
+            rejected_sources.append(
+                {
+                    "source_key": key,
+                    "instance_count": len(instances),
+                    "reason": "freeze_failed",
+                    "error": repr(exc),
+                }
+            )
     if rejected_sources:
         error = _UnresolvedTritonExport(rejected_sources)
         torch._logging.trace_structured(
@@ -644,9 +653,9 @@ def freeze_runtime_cache(
     final: bool,
     compiled: bool,
 ) -> None:
-    """Freeze the scope's static Triton kernels, C++ kernel binaries and, with a
-    dedicated TRITON_CACHE_DIR, Triton's JIT cache into the cache artifact and
-    pass it to ``write``.
+    """Freeze the scope's static Triton kernels, C++ kernel binaries and, in a
+    capture_runtime() scope with a dedicated TRITON_CACHE_DIR, Triton's JIT
+    cache into the cache artifact and pass it to ``write``.
 
     Pending async compiles are waited on and every recorded C++ kernel is built
     first. A ``final`` write inside a
@@ -654,7 +663,7 @@ def freeze_runtime_cache(
     kernels are frozen, and keeps it sealed unless freezing, serialization or
     ``write`` raises. A capture_runtime() scope also refuses a kernel that cannot
     be frozen or a Triton JIT cache it cannot ship, where a plain capture leaves
-    it out with a warning. A capture
+    the kernel out with a warning. A capture
     that did not run eagerly (``compiled``) but saved no artifact has no
     dependencies to carry; a capture_runtime() scope refuses it, since strict
     precompile.load could not serve it either. The caller must stop compiling
@@ -691,13 +700,7 @@ def freeze_runtime_cache(
                 )
             cache = None
         if cache is not None and _current_root(cache) != owner.cache_root:
-            if owner.explicit:
-                raise RuntimeError("The runtime-cache namespace changed during capture")
-            log.warning(
-                "precompile leaves Triton's JIT cache out of the capture: "
-                "TRITON_CACHE_DIR changed during capture"
-            )
-            cache = None
+            raise RuntimeError("The runtime-cache namespace changed during capture")
         artifacts = (
             CacheArtifactManager.deserialize(artifact) if artifact is not None else {}
         )
@@ -714,46 +717,49 @@ def freeze_runtime_cache(
             raise RuntimeError(
                 "The precompile cache already contains frozen runtime dependencies"
             )
+        seal = final and owner.explicit
         # Drain before sealing: compile result callbacks re-check
         # check_compilation_allowed, so draining under the seal rejects them.
-        AsyncCompile.drain_pending()
+        # Only a seal stops compiling, so only it shuts the compile workers down.
+        AsyncCompile.drain_pending(shutdown=seal)
         with _capture_lock:
-            cpp_loads = [load for _, load in owner.cpp_kernels.values()]
+            cpp_loads = {key: load for key, (_, load) in owner.cpp_kernels.items()}
         # Finishes pending C++ builds and builds loads that were never forced, so
         # no binary is missing or partially written when it is frozen.
-        for load in cpp_loads:
-            load()
+        failed_cpp: dict[str, str] = {}
+        for key, load in cpp_loads.items():
+            try:
+                load()
+            except Exception as exc:
+                if owner.explicit:
+                    raise
+                failed_cpp[key] = repr(exc)
         if torch.cuda.is_initialized():
             torch.cuda.synchronize()
-        seal = final and owner.explicit
         with _capture_lock:
             if seal:
                 owner.seal()
             kernels = {key: list(found) for key, found in owner.triton_kernels.items()}
-            cpp_kernels = {key: path for key, (path, _) in owner.cpp_kernels.items()}
+            cpp_kernels = {
+                key: path
+                for key, (path, _) in owner.cpp_kernels.items()
+                if key not in failed_cpp
+            }
             inductor_triton_keys = frozenset(owner.inductor_triton_keys)
         try:
             static_payload = _freeze_triton_kernels(kernels, strict=owner.explicit)
-            cpp_payload = _freeze_cpp_kernels(cpp_kernels)
+            cpp_payload = _freeze_cpp_kernels(
+                cpp_kernels, failed_cpp, strict=owner.explicit
+            )
             if cache is not None:
-                try:
-                    payload = cache.export_runtime_cache(
-                        context=_runtime_context(), exclude=inductor_triton_keys
+                payload = cache.export_runtime_cache(
+                    context=_runtime_context(), exclude=inductor_triton_keys
+                )
+                artifacts[TritonRuntimeCacheArtifact.type()] = [
+                    TritonRuntimeCacheArtifact(
+                        hashlib.sha256(payload).hexdigest(), payload
                     )
-                except Exception as exc:
-                    if owner.explicit:
-                        raise
-                    log.warning(
-                        "precompile leaves Triton's JIT cache out of the capture: "
-                        "could not export it (%s)",
-                        exc,
-                    )
-                else:
-                    artifacts[TritonRuntimeCacheArtifact.type()] = [
-                        TritonRuntimeCacheArtifact(
-                            hashlib.sha256(payload).hexdigest(), payload
-                        )
-                    ]
+                ]
             artifacts[InductorTritonCacheArtifact.type()] = [
                 InductorTritonCacheArtifact(
                     hashlib.sha256(static_payload).hexdigest(), static_payload
