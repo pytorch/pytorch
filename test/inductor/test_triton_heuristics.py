@@ -1769,6 +1769,37 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         self.assertIs(result, cfg_b)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_autotune_cache_round_trips_maxnreg(self):
+        """
+        Two configs that differ only in maxnreg must survive save + load as
+        themselves: the cached winner must come back capped, not as the
+        uncapped config with the same warps/stages.
+        """
+        from torch._inductor.runtime.autotune_cache import (
+            _load_cached_autotuning,
+            AutotuneCache,
+            AutotuneCacheBundler,
+        )
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        uncapped = triton.Config({"x": 1}, num_warps=4, num_stages=2)
+        capped = triton.Config({"x": 1}, num_warps=4, num_stages=2, maxnreg=64)
+        original_configs = [uncapped, capped]
+        configs_hash = hash_configs(original_configs)
+
+        cache = AutotuneCache(configs_hash)
+        local = MagicMock()
+        cache.local_cache = (local, "key")
+        with patch.object(AutotuneCacheBundler, "put"):
+            cache.save(capped, time_taken_ns=1_000_000)
+        saved = dict(local.put.call_args[0][1])
+        self.assertEqual(saved.get("maxnreg"), 64)
+
+        result = _load_cached_autotuning(saved, configs_hash, original_configs, {})
+        self.assertIs(result, capped)
+        self.assertNotIn("maxnreg", result.kwargs)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_rejects_hash_mismatch(self):
         """
         When configs_hash doesn't match, _load_cached_autotuning must

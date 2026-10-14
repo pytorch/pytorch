@@ -1160,9 +1160,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             if torch.cuda.is_available():
                 device = torch.cuda.current_device()
                 props = torch.cuda.get_device_properties(device)
-                if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+                if hasattr(props, "shared_memory_per_block_optin"):
                     sm_available = int(props.shared_memory_per_block_optin)
-                elif hasattr(props, "shared_memory_per_block"):  # for ROCm
+                elif hasattr(props, "shared_memory_per_block"):
                     sm_available = int(props.shared_memory_per_block)
                 else:
                     return None
@@ -2376,6 +2376,21 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 
 
 # Template-specific mixin classes
+def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
+    """Whether a Triton GEMM template should use TF32, matching eager matmul."""
+    if device_type == "xpu":
+        # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
+        return bool(torch.backends.mkldnn.allow_tf32)
+    if device_type == "cuda":
+        # allow_tf32 alignment heuristics based on reverse engineering
+        # H100 CUDA 12.8 behavior
+        size_threshold = V.graph.sizevars.statically_known_true(
+            sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
+        )
+        return torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
+    return False
+
+
 class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     """
     Mixin class that converts config lists to template kwargs.
@@ -2418,24 +2433,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         m, n, k = kernel_inputs.mnk_symbolic()
-        device_type = kernel_inputs.device_type
-        if device_type == "xpu":
-            # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
-            allow_tf32 = torch.backends.mkldnn.allow_tf32
-        elif device_type == "cuda":
-            # allow_tf32 alignment heuristics based on reverse engineering
-            # H100 CUDA 12.8 behavior
-            size_threshold = V.graph.sizevars.statically_known_true(
-                sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
-            )
-            allow_tf32 = (
-                torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
-            )
-        else:
-            allow_tf32 = False
-
         extra_kwargs = {
-            "ALLOW_TF32": allow_tf32,
+            "ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type),
         }
         # Scoped to XPU (self.ascending_k) and to the templates that reference
         # the key. The mm/addmm/... ops via mm_template are excluded because
@@ -3307,29 +3306,6 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
             return False
         return True
 
-    # pyrefly: ignore [bad-override]
-    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
-        """
-        Filter out bad configs for specific hardware.
-        On AMD MI350X (GFX 9.5+), skip configs with BLOCK_K<=64 due to lack of corresponding MFMA instructions.
-        """
-
-        def should_skip_mi350x_config(config: BaseConfig) -> bool:
-            """Skip config if BLOCK_K<=64 on MI350X (GFX 9.5+)"""
-            try:
-                return (
-                    config.block_k <= 64
-                    and IS_ROCM
-                    and torch.cuda.get_device_capability() >= (9, 5)
-                )
-            except RuntimeError:
-                # If no HIP GPUs are available, we can't check device capability
-                # so we don't skip any configs
-                return False
-
-        filtered_configs = [c for c in configs if not should_skip_mi350x_config(c)]
-        return super()._filter_configs(filtered_configs)
-
 
 # Scaled TMA-specific mixin for scaled MM templates with TMA
 class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
@@ -3382,6 +3358,7 @@ class ScaledBlackwellTMAConfigMixin(
     This inherits from ScaledMMConfigMixin, which inherits the scale_mm_epilogue, and adds TMA-specific options.
     """
 
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         Warp specialization-specific filtering (BlackwellTMATemplateConfigMixin)
@@ -3723,6 +3700,7 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
 
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [c for c in configs if c.block_k >= 32]
         return super()._filter_configs(configs)
@@ -3934,8 +3912,11 @@ class ROCmScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, ROCmConfigHeurist
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
 
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [c for c in configs if c.block_k >= 32]
+        if rocm_gfx_arch() in ("gfx950", "gfx1250"):
+            configs = [c for c in configs if c.block_k > 64]
         return super()._filter_configs(configs)
 
 

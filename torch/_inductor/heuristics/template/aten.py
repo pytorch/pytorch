@@ -11,6 +11,7 @@ from ...kernel.mm import (
     aten__fp8_mm_v2,
     aten__int_mm,
     aten_addmm,
+    aten_addmm_dtype,
     aten_bias_addmm,
     aten_mm,
     aten_mm_dtype,
@@ -59,6 +60,8 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
 # None here indicates that this is valid for all device types on that op
 # Note (None, op) takes precedence over (device_type, None)
 @register_template_heuristic(aten_addmm.uid, None, op_name="addmm")
+@register_template_heuristic(aten_addmm_dtype.uid, "cuda", op_name="addmm")
+@register_template_heuristic(aten_addmm_dtype.uid, "xpu", op_name="addmm")
 @register_template_heuristic(aten_baddbmm.uid, None, op_name="baddbmm")
 class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
     def get_extra_kwargs(
