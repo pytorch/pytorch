@@ -649,8 +649,8 @@ class _KinetoProfile:
 
         Paths ending in ``.gz`` use gzip compression; paths ending in ``.zst``
         use zstd compression at level 1 and require the optional ``zstandard``
-        package. Other paths are uncompressed (the ``cuspy`` backend defaults
-        to gzip). Zstd is supported for Chrome JSON, not Cuspy's Perfetto format.
+        or ``pyzstd`` package. Other paths are uncompressed (the ``cuspy`` backend
+        defaults to gzip). Zstd is supported for Chrome JSON, not Cuspy's Perfetto format.
         Export and compression run synchronously on the calling thread unless
         asynchronous export is enabled for the ``cuspy`` backend.
 

@@ -230,7 +230,7 @@ def export_chrome_trace(
     event onto one lane, so it raises instead.
 
     Writes plain JSON, gzip (``.gz``), or zstd (``.zst``) depending on the
-    file extension. Zstd requires the optional ``zstandard`` package.
+    file extension. Zstd requires the optional ``zstandard`` or ``pyzstd`` package.
     """
     if graph_lanes not in ("all", "none"):
         raise ValueError(f"graph_lanes must be 'all' or 'none', got {graph_lanes!r}")

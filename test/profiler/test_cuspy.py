@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 import torch
 from torch._C._profiler import _ExperimentalConfig
+from torch._utils import try_import
 from torch.profiler import profile, ProfilerActivity, record_function
 from torch.profiler._cuspy.observers.observation_window import WindowFinalizerMixin
 from torch.testing._internal.common_cuda import (
@@ -4026,10 +4027,9 @@ cuspy_core.enable_hes_early()
     def test_cuspy_zstd_export(self):
         import tempfile
 
-        try:
-            import zstandard
-        except ImportError:
-            self.skipTest("requires zstandard")
+        zstd = try_import("pyzstd") or try_import("zstandard")
+        if zstd is None:
+            self.skipTest("requires zstandard or pyzstd")
 
         cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cuspy"}')
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -4043,7 +4043,7 @@ cuspy_core.enable_hes_early()
                 torch.cuda.synchronize()
             prof.export_chrome_trace(path)
             self.assertFalse(os.path.exists(path + ".gz"))
-            with zstandard.open(path, "rt") as f:
+            with zstd.open(path, "rt", encoding="utf-8") as f:
                 trace = json.load(f)
             self.assertTrue(
                 any(e.get("cat") == "kernel" for e in trace["traceEvents"])
