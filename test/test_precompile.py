@@ -5411,12 +5411,12 @@ class TestPrecompileDynamoCapture(TestCase):
                 y = cap(self.model, self.x2)
                 y.sum().backward()
                 self.assertTrue(cap.summary().complete)
-        self.assertEqual(y, expected)
-        for p, ref in zip(self.model.parameters(), reference.parameters()):
-            self.assertEqual(p.grad, ref.grad)
-        self.model.zero_grad()
-        served = load(self.artifact, self.cache)(self.model, self.x2)
-        served.sum().backward()
+            self.assertEqual(y, expected)
+            for p, ref in zip(self.model.parameters(), reference.parameters()):
+                self.assertEqual(p.grad, ref.grad)
+            self.model.zero_grad()
+            served = load(self.artifact, self.cache)(self.model, self.x2)
+            served.sum().backward()
         self.assertEqual(served, expected)
         for p, ref in zip(self.model.parameters(), reference.parameters()):
             self.assertEqual(p.grad, ref.grad)
