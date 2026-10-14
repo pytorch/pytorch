@@ -1581,11 +1581,7 @@ def _get_all_gather_output_layouts(
         size = tensor.size()
         output = all_gather_outputs[i] if all_gather_outputs else None
         # Bytes of a typed output keep its size and are reassembled in its layout
-        byte_view = (
-            not is_record
-            and output is not None
-            and tensor.dtype == torch.uint8 != output.dtype
-        )
+        byte_view = output is not None and tensor.dtype == torch.uint8 != output.dtype
         if is_record:
             ndim = max(len(size), 1)
             dim = _record_dim(inp.dim)
@@ -1629,7 +1625,7 @@ def _get_all_gather_output_layouts(
         layouts.append(layout)
         if output is None:
             continue
-        if tensor.dtype != output.dtype and not byte_view:
+        if tensor.dtype != output.dtype and (is_record or not byte_view):
             raise ValueError(
                 f"All-gather input {i} of {param_name} must keep the dtype "
                 f"{output.dtype} of its first call, but has dtype {tensor.dtype}"
@@ -1643,8 +1639,8 @@ def _get_all_gather_output_layouts(
             raise ValueError(
                 f"All-gather input {i} of {param_name} must "
                 f"{'match' if exact else 'fit in'} the size of its first call, "
-                f"{output.numel() // shard_world_size} {output.dtype} per rank, but "
-                f"has {tensor.numel()} {tensor.dtype}"
+                f"{output.nbytes // shard_world_size} bytes per rank, but has "
+                f"{tensor.nbytes} bytes of {tensor.dtype}"
             )
         # fsdp_post_all_gather receives the whole output viewed as (-1, *size[1:])
         trailing_numel = math.prod(size[1:])
