@@ -6217,6 +6217,41 @@ def describe_backend(backend: Callable[..., object] | None) -> str:
     return f"{prefix}{name}{location} (id={id(backend):#x})"
 
 
+def failing_verbose_code_parts(
+    global_scope: dict[str, Any],
+    scope: dict[str, Any],
+    verbose_code_parts: Sequence[str],
+    *,
+    first_only: bool,
+    swallow_errors: bool,
+) -> list[str]:
+    """
+    Re-evaluate each code part of a failed guard and return the reasons of the
+    ones that fail. Symbolic shape guards are installed as one lambda guard
+    whose verbose_code_parts list every clause, so this names the clause.
+    """
+    reasons: list[str] = []
+    for part in verbose_code_parts:
+        part_global_scope = dict(global_scope)
+        part_global_scope["__compile_source__"] = part
+        with report_compile_source_on_error():
+            try:
+                fail_reason = eval(part, part_global_scope, scope)
+            except Exception:
+                if swallow_errors:
+                    continue
+                raise
+        # Only ___check_tensors knows how to return a fancy fail reason;
+        # for everything else we just report the code that failed
+        if isinstance(fail_reason, bool) and not fail_reason:
+            fail_reason = part
+        if isinstance(fail_reason, str):
+            reasons.append(fail_reason)
+            if first_only:
+                break
+    return reasons
+
+
 def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
@@ -6297,26 +6332,14 @@ def get_guard_fail_reason_helper(
             guard_manager, scope
         )
     else:
-        for part in verbose_code_parts:
-            global_scope = dict(guard_manager.global_scope)
-            global_scope["__compile_source__"] = part
-            with report_compile_source_on_error():
-                try:
-                    fail_reason = eval(part, global_scope, scope)
-                except Exception:
-                    if is_recompiles_verbose_enabled():
-                        continue
-                    else:
-                        raise
-            # Only ___check_tensors knows how to return a fancy fail reason;
-            # for everything else we just report the code that failed
-
-            if isinstance(fail_reason, bool) and not fail_reason:
-                fail_reason = part
-            if isinstance(fail_reason, str):
-                reasons.append(fail_reason)
-                if not is_recompiles_verbose_enabled():
-                    break
+        verbose = is_recompiles_verbose_enabled()
+        reasons += failing_verbose_code_parts(
+            guard_manager.global_scope,
+            scope,
+            verbose_code_parts,
+            first_only=not verbose,
+            swallow_errors=verbose,
+        )
 
     # Build reason string - simple format for normal logging
     # Use singular "reason" when there's only one, plural "reasons" for multiple
