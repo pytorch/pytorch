@@ -535,7 +535,6 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     return torch.where(torch.abs(a) <= lambd, 0, a)
 
 
-@aten.softshrink.default.py_impl(DispatchKey.Autograd)
 @register_decomposition(aten.softshrink)
 @out_wrapper()
 def softshrink(a: TensorLikeType, lambd: float = 0.5):
@@ -543,16 +542,21 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     # softshrink(x) = x - lambd if x > lambd
     #               = x + lambd if x < -lambd
     #               = 0 otherwise
-    torch._check(
-        0 <= lambd <= torch.finfo(a.dtype).max,
-        lambda: f"lambda must be in range [0, {torch.finfo(a.dtype).max}] for input dtype {a.dtype}, but found {lambd}",
+    limit = torch.finfo(a.dtype).max
+    message = lambda: (  # noqa: E731
+        f"lambda must be in range [0, {limit}] for input dtype {a.dtype}, but found {lambd}"
     )
+    # Two checks so that a symbolic lambd is not specialized by a chained comparison
+    torch._check(lambd >= 0, message)
+    torch._check(lambd <= limit, message)
     if a.dtype in (torch.bfloat16, torch.float16):
         lambd = torch.scalar_tensor(lambd, dtype=a.dtype, device=a.device)  # type: ignore[arg-type]
-    # We implement this in one torch.where to generate better code in the backward
-    # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
-    # We multiply by 0 for dealing with nans
-    return torch.where(torch.abs(a) > lambd, a - torch.sign(a) * lambd, a * 0)
+    # Match the ATen kernels: NaN propagates and the dead zone is +0.
+    # This decomposition is not registered for Autograd, so the backward is
+    # softshrink_backward rather than the derivative of these wheres, whose
+    # accumulation would turn a -0.0 gradient into +0.0.
+    result = torch.where(a > lambd, a - lambd, torch.where(a < -lambd, a + lambd, 0))
+    return torch.where(torch.isnan(a), a, result)
 
 
 # Losses
