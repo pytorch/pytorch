@@ -467,18 +467,15 @@ Tensor& do_metal_addmm(const Tensor& self,
                        const Scalar& beta,
                        const Tensor& bias) {
   // beta == 0 means bias is ignored, so nan/inf in it must not propagate. Lower to a plain
-  // mm (skipping the bias) and scale by alpha in place only for the uncommon alpha != 1.
-  if (beta.toComplexDouble() == 0.0) {
+  // mm when alpha == 1; otherwise hand the fused kernel a zero bias (it applies alpha before rounding).
+  if (beta.toComplexDouble() == 0.0 && alpha.toComplexDouble() == 1.0) {
     do_metal_mm(self, other, output);
-    if (alpha.toComplexDouble() != 1.0) {
-      output.mul_(alpha);
-    }
     return output;
   }
   // Handle conjugated inputs by creating resolved copies
   auto self_ = self.is_conj() ? self.resolve_conj() : self;
   auto other_ = other.is_conj() ? other.resolve_conj() : other;
-  auto bias_ = bias.is_conj() ? bias.resolve_conj() : bias;
+  auto bias_ = beta.toComplexDouble() == 0.0 ? at::zeros({}, bias.options()).expand_as(output) : bias.resolve_conj();
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
@@ -2599,17 +2596,6 @@ static void lstsq_kernel_mps(const Tensor& a,
 
   const bool sets_rank = (driver_name != "gels");
   const bool sets_singular_values = (driver_name == "gelsd" || driver_name == "gelss");
-
-  // Without singular values the minimum-norm solution is zero and the rank is 0.
-  // b keeps the right-hand sides, which are then all residual.
-  if (std::min(m, n) == 0) {
-    b.narrow(-2, 0, n).zero_();
-    if (sets_rank) {
-      rank.zero_();
-    }
-    infos.zero_();
-    return;
-  }
 
   const double rcond_value =
       rcond > 0 ? rcond : _get_epsilon(real_dtype) * static_cast<double>(std::max<int64_t>(m, n));
