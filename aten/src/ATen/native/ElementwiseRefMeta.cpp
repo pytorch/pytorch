@@ -770,15 +770,9 @@ Tensor binary_ref_meta_impl(
        _maybe_convert_to_dtype(
            meta_desc(other, fake_devices), compute_dtype, other_number ? other_number : symbolic_number(other))});
   if (alpha.has_value()) {
-    // utils.is_weakly_lesser_type
-    static constexpr std::array<const char*, 4> python_type_names = {
-        "<class 'bool'>", "<class 'int'>", "<class 'float'>", "<class 'complex'>"};
-    const auto rank = python_type_rank(compute_dtype);
-    const auto alpha_rank = python_type_rank(alpha->type());
-    TORCH_CHECK_VALUE(
-        rank == 0 || alpha_rank <= rank,
-        "alpha argument of type ", python_type_names[alpha_rank], " cannot be safely cast to type ",
-        python_type_names[rank], "!");
+    if (compute_dtype != kBool) {
+      check_alpha_type(*alpha, compute_dtype);
+    }
     auto& b = args[1];
     if (!b.is_number) {
       MetaDesc alpha_desc;
@@ -884,6 +878,16 @@ Tensor binary_ref_meta(
     bool fake_devices,
     const std::optional<Scalar>& alpha) {
   return binary_ref_meta_impl(self, other, std::nullopt, kind, fake_devices, alpha);
+}
+
+void check_alpha_type(const Scalar& alpha, ScalarType dtype) {
+  static constexpr std::array<const char*, 4> python_type_names = {
+      "<class 'bool'>", "<class 'int'>", "<class 'float'>", "<class 'complex'>"};
+  const auto rank = python_type_rank(dtype);
+  const auto alpha_rank = python_type_rank(alpha.type());
+  TORCH_CHECK_VALUE(
+      alpha_rank <= rank, "alpha argument of type ", python_type_names[alpha_rank], " cannot be safely cast to type ",
+      python_type_names[rank], "!");
 }
 
 Tensor elementwise_binary_ref_meta(
