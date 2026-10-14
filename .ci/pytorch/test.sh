@@ -497,12 +497,26 @@ test_python_smoke_b200() {
       local driver_version
       driver_version=$(cd test && python -c 'from torch.cuda.green_contexts import _get_driver_version; print(_get_driver_version())')
       if [[ "$driver_version" -lt 13040 ]]; then
-        local compat_dir compat_package compat_sha256
+        local compat_dir compat_package compat_repo_arch compat_sha256
         compat_dir=$(mktemp -d)
         trap 'rm -rf "$compat_dir"' EXIT
-        compat_package=cuda-compat-13-4_615.71.09-2ubuntu1_amd64.deb
-        compat_sha256=1b814aa705b4dfe955420c967bd545f39ef7b67f32bd0f285a005ea296b02831
-        curl -fL --retry 3 "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/$compat_package" -o "$compat_dir/$compat_package"
+        case "$(dpkg --print-architecture)" in
+          amd64)
+            compat_repo_arch=x86_64
+            compat_package=cuda-compat-13-4_615.71.09-2ubuntu1_amd64.deb
+            compat_sha256=1b814aa705b4dfe955420c967bd545f39ef7b67f32bd0f285a005ea296b02831
+            ;;
+          arm64)
+            compat_repo_arch=sbsa
+            compat_package=cuda-compat-13-4_615.71.09-2ubuntu1_arm64.deb
+            compat_sha256=83cdca90db73a36784a077693e3b48565d852158c63f604194c1f0d42c2e5458
+            ;;
+          *)
+            echo "Unsupported architecture for CUDA 13.4 compatibility package" >&2
+            return 1
+            ;;
+        esac
+        curl -fL --retry 3 "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/$compat_repo_arch/$compat_package" -o "$compat_dir/$compat_package"
         echo "$compat_sha256  $compat_dir/$compat_package" | sha256sum --check
         dpkg-deb --extract "$compat_dir/$compat_package" "$compat_dir"
         test_library_path="$compat_dir/usr/local/cuda-13.4/compat${test_library_path:+:$test_library_path}"
