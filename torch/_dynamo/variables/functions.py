@@ -5252,7 +5252,7 @@ class ClassMethodVariable(UserDefinedObjectVariable):
         **kwargs: Any,
     ) -> None:
         if value is None:
-            value = classmethod(None)
+            value = classmethod(cast(Any, None))
             value.__dict__.clear()
         super().__init__(value, **kwargs)
         self.descriptor = descriptor
