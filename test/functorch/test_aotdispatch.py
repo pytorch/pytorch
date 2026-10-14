@@ -10457,6 +10457,38 @@ def forward(self, primals_1, tangents_1):
             node = g.call_function(target, args=())
             self.assertEqual(_size_of(node), 0)
 
+    def test_estimate_runtime_device_argument(self):
+        import torch._functorch.config as functorch_config
+        from torch._functorch.partitioners import estimate_runtime
+
+        graph = torch.fx.Graph()
+        device = graph.placeholder("device")
+        device.meta["val"] = torch.device("cpu")
+        node = graph.call_function(
+            torch.ops.aten.ones.default, args=([2, 3],), kwargs={"device": device}
+        )
+        with functorch_config.patch(activation_memory_budget_runtime_estimator="flops"):
+            self.assertEqual(estimate_runtime(node), 1)
+
+        outputs = []
+
+        def benchmark(fn):
+            outputs.append(fn())
+            return 1.0
+
+        with (
+            functorch_config.patch(
+                activation_memory_budget_runtime_estimator="profile"
+            ),
+            patch(
+                "torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu",
+                side_effect=benchmark,
+            ) as timer,
+        ):
+            self.assertEqual(estimate_runtime(node), 1.0)
+        timer.assert_called_once()
+        self.assertEqual(outputs, [torch.ones(2, 3, device="cpu")])
+
     def test_size_of_fake_script_object(self):
         import torch._functorch.config as functorch_config
         from torch._functorch.partitioners import _size_of
