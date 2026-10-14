@@ -97,8 +97,7 @@ class XpuTritonKernelManager final : public TritonKernelManager {
 XpuTritonKernelManager::XpuTritonKernelManager(
     std::string kernel_name,
     std::string kernel_bin_path)
-    : TritonKernelManager(std::move(kernel_name), std::move(kernel_bin_path)) {
-}
+    : TritonKernelManager(std::move(kernel_name), std::move(kernel_bin_path)) {}
 
 std::unique_ptr<sycl::kernel>& XpuTritonKernelManager::load() {
   const auto idx = c10::xpu::current_device();
