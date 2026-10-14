@@ -371,7 +371,12 @@ inline common_dtype<T, U> div(const T x, const U y) {
   if (y.y == 0) {
     return T(x.x / y.x, x.y / y.x);
   }
-  return T(::metal::dot(x, y), x.y * y.x - x.x * y.y) / ::metal::dot(y, y);
+  if (::metal::abs(y.x) >= ::metal::abs(y.y)) {
+    const auto rat = y.y / y.x;
+    return T(x.x + x.y * rat, x.y - x.x * rat) / (y.x + y.y * rat);
+  }
+  const auto rat = y.x / y.y;
+  return T(x.x * rat + x.y, x.y * rat - x.x) / (y.y + y.x * rat);
 }
 
 template <
@@ -406,7 +411,11 @@ template <
 inline float remainder(const T x, const U y) {
   const auto x_f = static_cast<float>(x);
   const auto y_f = static_cast<float>(y);
-  return x_f - y_f * floor_divide(x_f, y_f);
+  auto mod = ::metal::fmod(x_f, y_f);
+  if (mod != 0 && (y_f < 0) != (mod < 0)) {
+    mod += y_f;
+  }
+  return mod;
 }
 
 template <
@@ -457,9 +466,9 @@ inline float2 pow(T a, U b) {
   // Use explicit computation instead of length() due to numerical issues
   const auto r = ::metal::precise::sqrt(a.x * a.x + a.y * a.y);
 
-  // Special case: if r is 0, return 0
+  // Special case: 0^b is 0 if Re(b) > 0, undefined otherwise
   if (r == 0.0) {
-    return float2(0.0, 0.0);
+    return b.x > 0 ? float2(0.0, 0.0) : float2(NAN, NAN);
   }
 
   const auto theta = ::metal::precise::atan2(a.y, a.x);
@@ -610,6 +619,23 @@ inline float hypot(float a_, float b_) {
   bool is_h2 = ((sqrt_1_plus_r == 1) && (r > 0));
 
   return ::metal::select(::metal::select(h3, h2, is_h2), h1, is_h1);
+}
+
+// Computes the larger component as sqrt((|re| + |z|) / 2) and derives the other
+// one by division, avoiding the cancellation in |z| - |re| when |im| << |re|
+template <typename T, ::metal::enable_if_t<is_complex_v<T>, bool> = true>
+inline T sqrt(const T x) {
+  const auto z = float2(x);
+  if (::metal::isinf(z.y)) {
+    return T(INFINITY, z.y);
+  }
+  const auto a = ::metal::abs(z);
+  const auto t = ::metal::precise::sqrt((a.x + hypot(a.x, a.y)) * .5);
+  if (t == 0) {
+    return T(0, z.y);
+  }
+  return z.x >= 0 ? T(t, z.y / (2 * t))
+                  : T(a.y / (2 * t), ::metal::copysign(t, z.y));
 }
 
 #define INSTANTIATE_FOR_ALL_TYPES(MACRO) \
