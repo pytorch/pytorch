@@ -684,6 +684,11 @@ class BaseUserFunctionVariable(VariableTracker):
             allow_nested_graph_breaks=True,
         )
 
+    def _hasattr_target(self) -> object:
+        # Must be the object get_source() denotes, since the HASATTR guard
+        # installed below checks that object.
+        return self.get_function()
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
@@ -697,7 +702,7 @@ class BaseUserFunctionVariable(VariableTracker):
             result = True
         else:
             try:
-                result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
+                result = hasattr(self._hasattr_target(), name)
             except NotImplementedError:
                 result = False
             source = self.get_source()
@@ -3066,6 +3071,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     def get_function(self):
         return getattr(self.wrapper_obj, self.attr_to_trace)
 
+    def _hasattr_target(self) -> object:
+        return self.wrapper_obj
+
     def lookup_instance_dict(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker | None":
@@ -3222,6 +3230,11 @@ class WrapperUserMethodVariable(BaseUserFunctionVariable):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker | None":
         return self.fn.lookup_instance_dict(tx, name)
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        return self.fn.call_obj_hasattr(tx, name)
 
     def call_function(
         self,
