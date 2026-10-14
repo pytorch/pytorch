@@ -1060,7 +1060,6 @@ class _TorchDynamoContext:
                         log.warning(
                             "Failed to load entry from dynamo cache", exc_info=True
                         )
-                        self._package.reset()
                         self._package.initialize(
                             fn_key, None, ignore_inlined_sources=False
                         )
