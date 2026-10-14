@@ -1473,55 +1473,6 @@ def round_decimals(x, decimals=0):
     return make_pointwise(fn)(x)
 
 
-@register_lowering(aten.softshrink.default, type_promotion_kind=None)
-def softshrink(x, lambd=0.5):
-    if not (is_strict_cuda_triton(x.get_device()) and x.get_dtype() == torch.float32):
-        return fallback_handler(aten.softshrink.default, add_to_fallback_set=False)(
-            x, lambd
-        )
-
-    def fn(value):
-        bound = (
-            ops.index_expr(lambd, torch.float32)
-            if isinstance(lambd, sympy.Basic)
-            else ops.constant(lambd, torch.float32)
-        )
-        zero = ops.constant(0.0, torch.float32)
-        result = ops.where(
-            ops.gt(value, bound),
-            ops.sub(value, bound),
-            ops.where(ops.lt(value, ops.neg(bound)), ops.add(value, bound), zero),
-        )
-        return ops.where(ops.isnan(value), value, result)
-
-    return make_pointwise(fn)(x)
-
-
-@register_lowering(
-    aten.softshrink_backward.default, broadcast=True, type_promotion_kind=None
-)
-def softshrink_backward(grad, x, lambd):
-    if not (
-        is_strict_cuda_triton(x.get_device())
-        and x.get_dtype() == torch.float32
-        and grad.get_dtype() == torch.float32
-    ):
-        return fallback_handler(
-            aten.softshrink_backward.default, add_to_fallback_set=False
-        )(grad, x, lambd)
-
-    def fn(gradient, value):
-        bound = (
-            ops.index_expr(lambd, torch.float32)
-            if isinstance(lambd, sympy.Basic)
-            else ops.constant(lambd, torch.float32)
-        )
-        inside = ops.logical_and(ops.ge(value, ops.neg(bound)), ops.le(value, bound))
-        return ops.where(inside, ops.constant(0.0, torch.float32), gradient)
-
-    return make_pointwise(fn)(grad, x)
-
-
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes, *, implicit=False, graph_fanout=False):
     # `implicit` is autograd-internal metadata (see aten::expand schema); it
@@ -8910,7 +8861,7 @@ register_op_dtype_propagation_rules(
 def remainder(a, b):
     a, b = promote_constants((a, b), round_scalar_constants=True)
     dtype = a.get_dtype()
-    if is_strict_cuda_triton(a.get_device()) and dtype in (
+    if any(is_strict_cuda_triton(arg.get_device()) for arg in (a, b)) and dtype in (
         torch.float16,
         torch.bfloat16,
         torch.float32,
@@ -8974,19 +8925,30 @@ _copysign_default_lowering = register_pointwise_numeric(aten.copysign)
 
 @register_lowering(
     [aten.copysign.Tensor, aten.copysign.Scalar],
-    broadcast=True,
+    broadcast=False,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def copysign(a, b):
     dtype = a.get_dtype()
     if not (
-        is_strict_cuda_triton(a.get_device())
+        any(
+            isinstance(arg, TensorBox) and is_strict_cuda_triton(arg.get_device())
+            for arg in (a, b)
+        )
         and dtype in (torch.float16, torch.bfloat16)
     ):
         return _copysign_default_lowering(a, b)
     a, b = promote_constants((a, b))
     a_bits = TensorBox(DtypeView.create(a, torch.int16))
     b_bits = TensorBox(DtypeView.create(b, torch.int16))
+    # Extract CPU scalars as integers to preserve their original NaN bits.
+    if a_bits.get_device() == torch.device("cpu"):
+        a_bits = clone(a_bits)
+        a_bits.realize()
+    if b_bits.get_device() == torch.device("cpu"):
+        b_bits = clone(b_bits)
+        b_bits.realize()
+    a_bits, b_bits = broadcast_tensors(a_bits, b_bits)
 
     def fn(magnitude, sign):
         return ops.bitwise_or(

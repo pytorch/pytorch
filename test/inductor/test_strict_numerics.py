@@ -394,66 +394,6 @@ class StrictNumericsCompileTest(TestCase):
         if dtype != torch.float64 and decimals != 0:
             self.assertIn("div_rn", code)
 
-    @parametrize("numerics", ("strict_pointwise", "strict"))
-    @parametrize("lambd", (0.0, 0.5, 0.12345))
-    def test_softshrink_strict(self, device, numerics, lambd):
-        from torch._inductor.compile_fx import compile_fx, compile_fx_inner
-
-        x = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device)
-        boundary = torch.tensor(
-            [0.0, -0.0, lambd, -lambd], device=device, dtype=torch.float32
-        )
-        x = torch.cat((x, boundary)).requires_grad_(True)
-        grad_output = _sampled_fp32(x.numel(), device, seed=1)[: x.numel()]
-        grad_output[::17] = -0.0
-        fn = partial(torch.nn.functional.softshrink, lambd=lambd)
-        expected = fn(x)
-        expected_grad = torch.autograd.grad(expected, x, grad_outputs=grad_output)[0]
-        graphs = {}
-
-        def inner_compile(gm, inputs, **kwargs):
-            graphs[kwargs.get("is_backward", False)] = {
-                n.target for n in gm.graph.nodes
-            }
-            return compile_fx_inner(gm, inputs, **kwargs)
-
-        with config.patch({"numerics": numerics, "force_disable_caches": True}):
-            metrics.reset()
-            result = torch.compile(
-                fn,
-                fullgraph=True,
-                backend=partial(compile_fx, inner_compile=inner_compile),
-            )(x)
-            result_grad = torch.autograd.grad(result, x, grad_outputs=grad_output)[0]
-        self.assertEqual(result.view(torch.int32), expected.view(torch.int32))
-        self.assertEqual(result_grad.view(torch.int32), expected_grad.view(torch.int32))
-        self.assertIn(torch.ops.aten.softshrink.default, graphs[False])
-        self.assertIn(torch.ops.aten.softshrink_backward.default, graphs[True])
-        self.assertGreaterEqual(metrics.generated_kernel_count, 2)
-
-    @parametrize("numerics", ("strict_pointwise", "strict"))
-    @parametrize(
-        "shapes",
-        (
-            ((2, 3), (1, 3)),
-            ((1, 3), (2, 3)),
-            ((2, 1), (3,)),
-            ((), (2, 3)),
-            ((2, 3), ()),
-        ),
-    )
-    def test_softshrink_strict_backward_broadcast(self, device, numerics, shapes):
-        grad = torch.full(shapes[0], -0.0, device=device, dtype=torch.float32)
-        x = torch.empty(shapes[1], device=device, dtype=torch.float32)
-        x.copy_(torch.arange(x.numel(), device=device).reshape(x.shape) - 0.5)
-        code = self._check_pointwise(
-            partial(torch.ops.aten.softshrink_backward.default, lambd=0.5),
-            (grad, x),
-            numerics,
-            False,
-        )
-        self.assertIn("tl.where", code)
-
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
@@ -1128,6 +1068,7 @@ POINTWISE_XFAIL = frozenset(
         ("nn_functional_softplus", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
         ("nn_functional_softshrink", "float16"),
+        ("nn_functional_softshrink", "float32"),
         ("rsub", "bfloat16"),
         ("rsub", "float16"),
         ("rsub", "float32"),
@@ -1229,6 +1170,7 @@ BACKWARD_XFAIL = frozenset(
         ("nn_functional_silu", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
         ("nn_functional_softshrink", "float16"),
+        ("nn_functional_softshrink", "float32"),
         ("nn_functional_tanhshrink", "bfloat16"),
         ("nn_functional_tanhshrink", "float16"),
         ("nn_functional_tanhshrink", "float32"),
@@ -1564,7 +1506,6 @@ class PointwiseStrictNumericsTest(TestCase):
             "__rmod__",
             "round_decimals_3",
             "round_decimals_neg_3",
-            "nn_functional_softshrink",
         ),
     )
     def test_pointwise_bitwise(self, device, dtype, op):
