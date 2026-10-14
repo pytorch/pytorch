@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 import itertools
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from enum import auto, Enum
@@ -967,6 +968,52 @@ class FSDPParam:
             self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED
 
+    def check_post_forward_reshard(self) -> None:
+        if self.is_dtensor:
+            raise NotImplementedError(
+                f"Resharding {self._display_name} to smaller mesh is not supported "
+                "for DTensor parameters yet"
+            )
+        if (num_outputs := len(self.all_gather_outputs)) != 1:
+            raise NotImplementedError(
+                f"Resharding {self._display_name} to smaller mesh is not supported "
+                f"for all-gather extensions with {num_outputs} inputs yet"
+            )
+        if self.post_forward_mesh_info is None:
+            raise AssertionError("Expected post_forward_mesh_info to not be None")
+        shard_dim, orig_size = self.fsdp_placement.dim, self._orig_size
+        world_size = self.post_forward_mesh_info.shard_mesh_size
+        if shard_dim > 0 and orig_size.numel() and orig_size[0] % world_size:
+            # Flat post-forward shards of unpadded Shard(i>0) parameters match dim-0
+            # chunks only if the world size divides dim 0
+            raise NotImplementedError(
+                f"Resharding the Shard({shard_dim}) parameter {self._display_name} to "
+                f"{world_size} ranks after forward requires dim 0 of its size "
+                f"{tuple(orig_size)} to be divisible by {world_size}"
+            )
+        if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
+            # The post-forward parameter views a chunk of the extension's output. The
+            # largest post-forward shard is the same bound on every rank, so all
+            # ranks raise together.
+            output = self.all_gather_outputs[0]
+            rows = -(-orig_size[0] // world_size)
+            shard_numel = rows * math.prod(orig_size[1:])
+            if output.numel() // world_size < shard_numel:
+                raise NotImplementedError(
+                    f"Resharding {self._display_name} to smaller mesh needs "
+                    f"post-forward shards of up to {shard_numel} elements, but its "
+                    f"all-gather extension output has {output.numel() // world_size} "
+                    "per rank"
+                )
+            if self.sharded_param.requires_grad and not (
+                output.is_floating_point() or output.is_complex()
+            ):
+                raise NotImplementedError(
+                    f"Resharding {self._display_name} to smaller mesh needs a "
+                    "floating or complex all-gather extension output to require "
+                    f"gradients, but its output has dtype {output.dtype}"
+                )
+
     def to_sharded_post_forward(self) -> None:
         if self.is_dtensor:
             raise NotImplementedError(
@@ -1147,13 +1194,21 @@ class FSDPParam:
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
-                raise NotImplementedError
+                raise NotImplementedError(
+                    f"All-gathering the post-forward shard of {self._display_name} is "
+                    "not supported for all-gather extensions yet"
+                )
             all_gather_input = _to_dtype_if_needed(
                 cast(torch.Tensor, self._sharded_post_forward_param_data),
                 self.param_dtype,
             )
             return [all_gather_input]
         return [torch.empty(0)]  # mypy
+
+    @property
+    def _display_name(self) -> str:
+        # The FQN is set in lazy init
+        return self._param_fqn or self._module_info.param_name
 
     @property
     def unsharded_param(self) -> nn.Parameter:  # ND
