@@ -1671,6 +1671,17 @@ def addmm_dtype(
     return out + beta * self.to(out_dtype).expand_as(out)
 
 
+# Backend-declared eager GELU approximation. Third-party backends register their
+# eager aten.gelu default via register_eager_gelu_approximation() at import time;
+# unregistered backends (and CPU) keep the exact GELU, so behavior is unchanged.
+_EAGER_GELU_APPROXIMATION: dict[str, str] = {"cuda": "tanh"}
+
+
+def register_eager_gelu_approximation(device_type: str, approximate: str) -> None:
+    """Declare the eager ``aten.gelu`` approximation used by ``device_type``."""
+    _EAGER_GELU_APPROXIMATION[device_type] = approximate
+
+
 @register_decomposition(aten._addmm_activation)
 @out_wrapper()
 @pw_cast_for_opmath
@@ -1684,10 +1695,7 @@ def _addmm_activation(
 ):
     out = addmm(self, mat1, mat2, beta, alpha)
     if use_gelu:
-        if self.is_cuda:
-            return aten.gelu(out, approximate="tanh")
-        else:
-            return aten.gelu(out)
+        return aten.gelu(out, approximate=_EAGER_GELU_APPROXIMATION.get(self.device.type, "none"))
     return aten.relu(out)
 
 
