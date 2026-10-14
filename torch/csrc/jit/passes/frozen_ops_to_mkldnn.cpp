@@ -501,8 +501,8 @@ Tensor mkldnn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
   ideep::eltwise_forward::compute(
       x,
       z,
-      ideep::algorithm::eltwise_linear,
-      ideep::prop_kind::forward_inference,
+      dnnl::algorithm::eltwise_linear,
+      dnnl::prop_kind::forward_inference,
       /*alpha*/ scalar);
   return out;
 }

@@ -126,8 +126,8 @@ Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) 
   // for zero_dim tensor
   if (other.ndimension() == 0) {
     ideep::eltwise_forward::compute(
-      x, z, ideep::algorithm::eltwise_linear,
-      ideep::prop_kind::forward_inference, /*alpha*/ other.item().to<float>());
+      x, z, dnnl::algorithm::eltwise_linear,
+      dnnl::prop_kind::forward_inference, /*alpha*/ other.item().to<float>());
 
     return result;
   } else {

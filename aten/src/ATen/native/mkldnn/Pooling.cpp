@@ -203,7 +203,7 @@ static Tensor _mkldnn_pooling(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode,
-    ideep::algorithm algo) {
+    dnnl::algorithm algo) {
   const int64_t dims = input.dim() - 2;
   auto kernel_size_vec = expand_param_if_needed(kernel_size, "kernel_size", dims);
   if (stride.empty()) stride = kernel_size;
@@ -259,13 +259,13 @@ static Tensor _mkldnn_pooling(
         false /*ceil_mode */);
   }
 
-  auto aprop_kind = ideep::prop_kind::forward;
+  auto aprop_kind = dnnl::prop_kind::forward;
   // for max_pool, prop_kind::forward will save indices as workspace for backward use,
   // for inference, don't need the indices, set aprop_kind to prop_kind::forward_inference
   // can reduce the memory use.
-  if (ideep::algorithm::pooling_max == algo
+  if (dnnl::algorithm::pooling_max == algo
       && !((input.requires_grad() && at::GradMode::is_enabled()) || input._fw_grad(/*level */ 0).defined())) {
-    aprop_kind = ideep::prop_kind::forward_inference;
+    aprop_kind = dnnl::prop_kind::forward_inference;
   }
 
   ideep::tensor y;
@@ -292,7 +292,7 @@ static Tensor _mkldnn_pooling_backward(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode,
-    ideep::algorithm algo) {
+    dnnl::algorithm algo) {
 
   const int64_t dims = input.dim() - 2;
   auto kernel_size_vec = expand_param_if_needed(kernel_size, "kernel_size", dims);
@@ -378,7 +378,7 @@ Tensor mkldnn_max_pool2d(
       padding,
       dilation,
       ceil_mode,
-      ideep::algorithm::pooling_max);
+      dnnl::algorithm::pooling_max);
 }
 
 Tensor mkldnn_max_pool3d(
@@ -402,7 +402,7 @@ Tensor mkldnn_max_pool3d(
       padding,
       dilation,
       ceil_mode,
-      ideep::algorithm::pooling_max);
+      dnnl::algorithm::pooling_max);
 }
 
 Tensor mkldnn_avg_pool2d(
@@ -427,8 +427,8 @@ Tensor mkldnn_avg_pool2d(
       padding,
       /*dilation*/ std::vector<int64_t>{1, 1},
       ceil_mode,
-      count_include_pad ? ideep::algorithm::pooling_avg_include_padding
-                        : ideep::algorithm::pooling_avg_exclude_padding);
+      count_include_pad ? dnnl::algorithm::pooling_avg_include_padding
+                        : dnnl::algorithm::pooling_avg_exclude_padding);
 }
 
 Tensor& mkldnn_avg_pool2d_out(const Tensor& input,
@@ -463,8 +463,8 @@ Tensor mkldnn_avg_pool3d(
       padding,
       /*dilation*/ std::vector<int64_t>{1, 1, 1},
       ceil_mode,
-      count_include_pad ? ideep::algorithm::pooling_avg_include_padding
-                        : ideep::algorithm::pooling_avg_exclude_padding);
+      count_include_pad ? dnnl::algorithm::pooling_avg_include_padding
+                        : dnnl::algorithm::pooling_avg_exclude_padding);
 }
 
 Tensor& mkldnn_avg_pool3d_out(const Tensor& input,
@@ -505,7 +505,7 @@ Tensor mkldnn_adaptive_avg_pool2d(
       /*padding*/ {0, 0},
       /*dilation*/ {1, 1},
       /*ceil_mode*/ false,
-      /*algo*/ ideep::algorithm::pooling_avg_exclude_padding);
+      /*algo*/ dnnl::algorithm::pooling_avg_exclude_padding);
 }
 
 Tensor& mkldnn_adaptive_avg_pool2d_out_stub(const Tensor& input,
@@ -541,7 +541,7 @@ Tensor mkldnn_max_pool2d_backward(
       padding,
       dilation,
       ceil_mode,
-      ideep::algorithm::pooling_max);
+      dnnl::algorithm::pooling_max);
 }
 
 Tensor mkldnn_max_pool3d_backward(
@@ -562,7 +562,7 @@ Tensor mkldnn_max_pool3d_backward(
       padding,
       dilation,
       ceil_mode,
-      ideep::algorithm::pooling_max);
+      dnnl::algorithm::pooling_max);
 }
 
 Tensor mkldnn_avg_pool2d_backward(
@@ -583,8 +583,8 @@ Tensor mkldnn_avg_pool2d_backward(
       padding,
       /*dilation*/ std::vector<int64_t>{1, 1},
       ceil_mode,
-      count_include_pad ? ideep::algorithm::pooling_avg_include_padding
-                        : ideep::algorithm::pooling_avg_exclude_padding);
+      count_include_pad ? dnnl::algorithm::pooling_avg_include_padding
+                        : dnnl::algorithm::pooling_avg_exclude_padding);
 }
 
 Tensor& mkldnn_avg_pool2d_backward_out(const Tensor & grad_output,
@@ -617,8 +617,8 @@ Tensor mkldnn_avg_pool3d_backward(
       padding,
       /*dilation*/ std::vector<int64_t>{1, 1, 1},
       ceil_mode,
-      count_include_pad ? ideep::algorithm::pooling_avg_include_padding
-                        : ideep::algorithm::pooling_avg_exclude_padding);
+      count_include_pad ? dnnl::algorithm::pooling_avg_include_padding
+                        : dnnl::algorithm::pooling_avg_exclude_padding);
 }
 
 Tensor& mkldnn_avg_pool3d_backward_out(const Tensor & grad_output,
@@ -658,7 +658,7 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
       /*padding*/ {0, 0},
       /*dilation*/{1, 1},
       false,
-      /*algo*/ ideep::algorithm::pooling_avg_exclude_padding);
+      /*algo*/ dnnl::algorithm::pooling_avg_exclude_padding);
 }
 
 } // namespace at

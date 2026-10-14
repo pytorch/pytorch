@@ -129,9 +129,9 @@ struct RNNParams {
   }
 
   // mkldnn memory descriptors
-  using format = ideep::format_tag;
+  using format = dnnl::memory::format_tag;
   using desc = ideep::tensor::desc;
-  using dtype = ideep::tensor::data_type;
+  using dtype = dnnl::memory::data_type;
   desc src_layer_desc(int64_t _input_size, dtype dtype) const {
     return {{seq_length, mini_batch, _input_size}, dtype, format::tnc};
   }
@@ -279,12 +279,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
     mkldnn_workspace.init(
         pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
     ideep::lstm_forward_training::compute(
-        pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
+        pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, dnnl::prop_kind::forward_training);
     return std::make_tuple(
         std::move(output), std::move(hy_), std::move(cy_), std::move(workspace));
   } else {
     ideep::lstm_forward_inference::compute(
-        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, ideep::prop_kind::forward_inference);
+        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, dnnl::prop_kind::forward_inference);
     return std::make_tuple(std::move(output), std::move(hy_), std::move(cy_), Tensor());
   }
 }
@@ -381,18 +381,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
       at::empty(bias.sizes(), bias.options().dtype(at::ScalarType::Float));
 
   auto diff_x = itensor_view_from_dense(
-      diff_x_, rnn.src_layer_desc(input_size, ideep::tensor::data_type::f32));
+      diff_x_, rnn.src_layer_desc(input_size, dnnl::memory::data_type::f32));
   auto diff_hx = itensor_view_from_dense(
-      diff_hx_, rnn.src_iter_desc(ideep::tensor::data_type::f32));
+      diff_hx_, rnn.src_iter_desc(dnnl::memory::data_type::f32));
   auto diff_cx = itensor_view_from_dense(
-      diff_cx_, rnn.src_iter_c_desc(ideep::tensor::data_type::f32));
+      diff_cx_, rnn.src_iter_c_desc(dnnl::memory::data_type::f32));
   auto diff_w1 = itensor_view_from_dense(
       diff_w1_,
-      rnn.weights_layer_desc(input_size, ideep::tensor::data_type::f32));
+      rnn.weights_layer_desc(input_size, dnnl::memory::data_type::f32));
   auto diff_w2 = itensor_view_from_dense(
-      diff_w2_, rnn.weights_iter_desc(ideep::tensor::data_type::f32));
+      diff_w2_, rnn.weights_iter_desc(dnnl::memory::data_type::f32));
   auto diff_b = itensor_view_from_dense(
-      diff_b_, rnn.bias_desc(ideep::tensor::data_type::f32));
+      diff_b_, rnn.bias_desc(dnnl::memory::data_type::f32));
 
   // Convert grad_y, grad_hy, grad_cy to fp32 in non-fp32 backward
   ideep::tensor diff_y, diff_hy, diff_cy;
@@ -417,11 +417,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
         grad_cy_, rnn.dst_iter_desc(get_mkldnn_dtype(grad_cy_.scalar_type())));
   } else {
     diff_y = itensor_view_from_dense(
-        grad_output, rnn.dst_layer_desc(ideep::tensor::data_type::f32));
+        grad_output, rnn.dst_layer_desc(dnnl::memory::data_type::f32));
     diff_hy = itensor_view_from_dense(
-        grad_hy, rnn.dst_iter_desc(ideep::tensor::data_type::f32));
+        grad_hy, rnn.dst_iter_desc(dnnl::memory::data_type::f32));
     diff_cy = itensor_view_from_dense(
-        grad_cy, rnn.dst_iter_desc(ideep::tensor::data_type::f32));
+        grad_cy, rnn.dst_iter_desc(dnnl::memory::data_type::f32));
   }
 
   auto forward_hint = ideep::lstm_forward_training::prepare(x, hx, cx, w1, w2, b, y, hy, cy, reverse);
