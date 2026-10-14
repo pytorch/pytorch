@@ -866,16 +866,16 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     if code_source is None:
         _raise_resolution_error(code, toplevel)
     function_name, code_source = toplevel.__qualname__, code_source.strip(".")
-    if search_module_tree:
-        # The search can land on a function whose __qualname__ is as stale as
-        # co_qualname, so replay the lookup the loader will do.
-        try:
-            found = _lookup_code_path(module.__name__, function_name, code_source)
-        except Exception:
-            found = None
-        if found is not code:
-            note = f". Its __qualname__ {function_name!r} does not resolve back to it"
-            _raise_resolution_error(code, toplevel, note)
+    # The recorded __qualname__ can be stale (a factory-made function, or a
+    # wrapper from a decorator without functools.wraps), so replay the lookup
+    # the loader will do.
+    try:
+        found = _lookup_code_path(module.__name__, function_name, code_source)
+    except Exception:
+        found = None
+    if found is not code:
+        note = f". Its __qualname__ {function_name!r} does not resolve back to it"
+        _raise_resolution_error(code, toplevel, note)
     return function_name, code_source
 
 
