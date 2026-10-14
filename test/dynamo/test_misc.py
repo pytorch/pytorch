@@ -10563,6 +10563,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             run(arch, idx)
             self.assertEqual(arch.msg, f"max_idx={n - 1}, bad=[-1]")
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_equal_sets_render_the_same_guard_text(self):
         from torch._dynamo.guards import _order_stable_repr
 
@@ -10984,6 +10988,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             _reset_precompile_entries(fn.__code__)
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_fail_on_recompile_names_the_failing_shape_clauses(self):
         from torch._C._dynamo.eval_frame import (
             _load_precompile_entry,
@@ -11099,6 +11107,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "  [1] <matched on re-check>",
         )
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_guard_complete_hook_can_reset_hit(self):
         from torch._C._dynamo.eval_frame import set_guard_complete_hook
 
@@ -11133,6 +11145,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(guard_results, [True])
         self.assertIn(expected_annotation, [e.name for e in prof.events()])
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_guard_complete_hook_can_reset_hit_and_force_recompile(self):
         from torch._C._dynamo.eval_frame import set_guard_complete_hook
 
@@ -11163,6 +11179,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             1,
         )
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_compile_past_precompiled_entries_records_why_they_missed(self):
         from torch._C._dynamo.eval_frame import (
             _load_precompile_entry,
