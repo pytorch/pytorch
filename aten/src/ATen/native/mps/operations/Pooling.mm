@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/PoolingChecks.h>
@@ -551,6 +552,13 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
   // across multiple threads. To make it deterministic, dispatch only one thread
   // per batch, so the accumulations are serialized.
   bool serial = at::globalContext().deterministicAlgorithms();
+  if (serial && input.scalar_type() != kFloat) {
+    Tensor grad_input_float = at::empty({0}, grad_input.options().dtype(kFloat));
+    max_pool_backward_out_mps_template(
+        grad_input_float, indices, input.to(kFloat), grad_output.to(kFloat), dims, pooling_dims, op_name);
+    grad_input.copy_(grad_input_float);
+    return;
+  }
   auto numThreads = pool_backward_num_threads(grad_output, dims, pooling_dims, serial);
   TORCH_CHECK_NOT_IMPLEMENTED(
       canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output) && canUse32BitIndexMath(indices),
@@ -872,6 +880,22 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
   // across multiple threads. To make it deterministic, dispatch only one thread
   // per batch, so the accumulations are serialized.
   bool serial = at::globalContext().deterministicAlgorithms();
+  if (serial && input.scalar_type() != kFloat) {
+    Tensor grad_input_float = at::empty({0}, grad_input.options().dtype(kFloat));
+    avg_pool_backward_out_mps_template(grad_input_float,
+                                       input.to(kFloat),
+                                       grad_output.to(kFloat),
+                                       _kernel_size,
+                                       _stride,
+                                       _padding,
+                                       ceil_mode,
+                                       count_include_pad,
+                                       divisor_override,
+                                       pooling_dims,
+                                       op_name);
+    grad_input.copy_(grad_input_float);
+    return;
+  }
   auto numThreads = pool_backward_num_threads(grad_output, dims, pooling_dims, serial);
   TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output),
                               op_name,

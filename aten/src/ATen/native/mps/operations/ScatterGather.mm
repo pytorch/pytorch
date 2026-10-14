@@ -1,5 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/metal/common.h>
@@ -205,6 +207,13 @@ static void scatter_reduce_metal(const Tensor& self,
   // per batch, so the accumulations are serialized.
   const bool serial = at::globalContext().deterministicAlgorithms() &&
       !c10::isIntegralType(self.scalar_type(), /*includeBool=*/true) && (op == "add" || op == "prod");
+  const auto opmath_type = toOpMathType(self.scalar_type());
+  if (serial && (self.scalar_type() != opmath_type || index.scalar_type() != ScalarType::Long)) {
+    auto self_opmath = self.to(opmath_type);
+    scatter_reduce_metal(self_opmath, dim, index.to(ScalarType::Long), src.to(opmath_type), op);
+    self.copy_(self_opmath);
+    return;
+  }
   const bool use_dense =
       !serial && can_use_dense_scatter(self, index, dim) && src.is_contiguous() && src.sizes() == index.sizes();
   const int64_t dispatch_total = serial ? total / index.size(dim) : total;
@@ -227,11 +236,8 @@ static void scatter_reduce_metal(const Tensor& self,
       if (use_dense) {
         const int64_t inner_size = dense_inner_size(self, dim);
         const int64_t index_dim_size = index.size(dim);
-        auto pso = lib.getPipelineStateForFunc(fmt::format("scatter_{}_dense_{}_{}{}",
-                                                           op,
-                                                           scalarToMetalTypeString(self),
-                                                           scalarToMetalTypeString(index),
-                                                           serial ? "_serial" : ""));
+        auto pso = lib.getPipelineStateForFunc(
+            fmt::format("scatter_{}_dense_{}_{}", op, scalarToMetalTypeString(self), scalarToMetalTypeString(index)));
         [encoder setComputePipelineState:pso];
         dispatch_chunked(encoder, pso, dispatch_total, [&](int64_t tid_offset) {
           mtl_setArgs(encoder,

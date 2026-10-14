@@ -1042,11 +1042,9 @@ kernel void upsample_backward(
       constant UpsampleParams<N>& params [[buffer(2)]],                  \
       uint thread_index [[thread_position_in_grid]])
 
-#define INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(NAME, FUNCTOR, DTYPE)             \
-  INSTANTIATE_UPSAMPLE_BACKWARD(                                              \
-      NAME, 4, (upsample_2d_aa_backward_impl<DTYPE, FUNCTOR>), DTYPE, false); \
-  INSTANTIATE_UPSAMPLE_BACKWARD(                                              \
-      NAME, 4, (upsample_2d_aa_backward_impl<DTYPE, FUNCTOR>), DTYPE, true)
+#define INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(NAME, FUNCTOR, DTYPE, SERIAL) \
+  INSTANTIATE_UPSAMPLE_BACKWARD(                                          \
+      NAME, 4, (upsample_2d_aa_backward_impl<DTYPE, FUNCTOR>), DTYPE, SERIAL)
 
 #define INSTANTIATE_UPSAMPLE_GATHER_BACKWARD_IDX(            \
     NAME, SOURCE, DTYPE, IDX, SUFFIX)                        \
@@ -1063,11 +1061,9 @@ kernel void upsample_backward(
   INSTANTIATE_UPSAMPLE_GATHER_BACKWARD_IDX(NAME, SOURCE, DTYPE, int, u32); \
   INSTANTIATE_UPSAMPLE_GATHER_BACKWARD_IDX(NAME, SOURCE, DTYPE, long, u64)
 
-#define INSTANTIATE_UPSAMPLE_2D_BACKWARD(NAME, DTYPE)                 \
-  INSTANTIATE_UPSAMPLE_BACKWARD(                                      \
-      NAME, 4, upsample_##NAME##_backward_impl<DTYPE>, DTYPE, false); \
-  INSTANTIATE_UPSAMPLE_BACKWARD(                                      \
-      NAME, 4, upsample_##NAME##_backward_impl<DTYPE>, DTYPE, true)
+#define INSTANTIATE_UPSAMPLE_2D_BACKWARD(NAME, DTYPE, SERIAL) \
+  INSTANTIATE_UPSAMPLE_BACKWARD(                              \
+      NAME, 4, upsample_##NAME##_backward_impl<DTYPE>, DTYPE, SERIAL)
 
 #define INSTANTIATE_UPSAMPLE_LINEAR(DTYPE)                        \
   template [[host_name("upsample_linear1d_" #DTYPE)]] kernel void \
@@ -1119,7 +1115,7 @@ kernel void upsample_backward(
       constant UpsampleParams<5>& params [[buffer(2)]],                   \
       uint thread_index [[thread_position_in_grid]])
 
-#define INSTANTIATE_UPSAMPLE_3D_BACKWARD_SERIAL(DTYPE, SERIAL)                 \
+#define INSTANTIATE_UPSAMPLE_3D_BACKWARD(DTYPE, SERIAL)                        \
   INSTANTIATE_UPSAMPLE_BACKWARD(                                               \
       nearest_3d, 5, upsample_nearest_3d_backward_impl<DTYPE>, DTYPE, SERIAL); \
   INSTANTIATE_UPSAMPLE_BACKWARD(                                               \
@@ -1129,27 +1125,25 @@ kernel void upsample_backward(
       DTYPE,                                                                   \
       SERIAL);                                                                 \
   INSTANTIATE_UPSAMPLE_BACKWARD(                                               \
-      trilinear, 5, upsample_trilinear_backward_impl<DTYPE>, DTYPE, SERIAL);
+      trilinear, 5, upsample_trilinear_backward_impl<DTYPE>, DTYPE, SERIAL)
 
-#define INSTANTIATE_UPSAMPLE_3D_BACKWARD(DTYPE)          \
-  INSTANTIATE_UPSAMPLE_3D_BACKWARD_SERIAL(DTYPE, false); \
-  INSTANTIATE_UPSAMPLE_3D_BACKWARD_SERIAL(DTYPE, true)
-
-#define INSTANTIATE_UPSAMPLE_ALL(DTYPE)                                       \
-  INSTANTIATE_UPSAMPLE_2D(bicubic2d, DTYPE);                                  \
-  INSTANTIATE_UPSAMPLE_2D_AA(bicubic2d_aa, BicubicFunctor, DTYPE);            \
-  INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(bicubic2d_aa, BicubicFunctor, DTYPE);   \
-  INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, DTYPE);                         \
-  INSTANTIATE_UPSAMPLE_2D(bilinear2d, DTYPE);                                 \
-  INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(bilinear2d, LinearSource, DTYPE);      \
-  INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(                                       \
-      nearest2d, NearestSource<false>, DTYPE);                                \
-  INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(                                       \
-      nearest_exact2d, NearestSource<true>, DTYPE);                           \
-  INSTANTIATE_UPSAMPLE_2D_AA(bilinear2d_aa, BilinearFunctor, DTYPE);          \
-  INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(bilinear2d_aa, BilinearFunctor, DTYPE); \
-  INSTANTIATE_UPSAMPLE_LINEAR(DTYPE);                                         \
-  INSTANTIATE_UPSAMPLE_3D_BACKWARD(DTYPE);                                    \
+#define INSTANTIATE_UPSAMPLE_ALL(DTYPE)                                  \
+  INSTANTIATE_UPSAMPLE_2D(bicubic2d, DTYPE);                             \
+  INSTANTIATE_UPSAMPLE_2D_AA(bicubic2d_aa, BicubicFunctor, DTYPE);       \
+  INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(                                   \
+      bicubic2d_aa, BicubicFunctor, DTYPE, false);                       \
+  INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, DTYPE, false);             \
+  INSTANTIATE_UPSAMPLE_2D(bilinear2d, DTYPE);                            \
+  INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(bilinear2d, LinearSource, DTYPE); \
+  INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(                                  \
+      nearest2d, NearestSource<false>, DTYPE);                           \
+  INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(                                  \
+      nearest_exact2d, NearestSource<true>, DTYPE);                      \
+  INSTANTIATE_UPSAMPLE_2D_AA(bilinear2d_aa, BilinearFunctor, DTYPE);     \
+  INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(                                   \
+      bilinear2d_aa, BilinearFunctor, DTYPE, false);                     \
+  INSTANTIATE_UPSAMPLE_LINEAR(DTYPE);                                    \
+  INSTANTIATE_UPSAMPLE_3D_BACKWARD(DTYPE, false);                        \
   INSTANTIATE_UPSAMPLE_3D(DTYPE)
 
 INSTANTIATE_UPSAMPLE_2D(bilinear2d, uchar);
@@ -1157,6 +1151,15 @@ INSTANTIATE_UPSAMPLE_3D(uchar);
 INSTANTIATE_UPSAMPLE_ALL(float);
 INSTANTIATE_UPSAMPLE_ALL(half);
 INSTANTIATE_UPSAMPLE_ALL(bfloat);
+
+INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(bicubic2d_aa, BicubicFunctor, float, true);
+INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, float, true);
+INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(
+    bilinear2d_aa,
+    BilinearFunctor,
+    float,
+    true);
+INSTANTIATE_UPSAMPLE_3D_BACKWARD(float, true);
 
 // Nearest 1d/2d forward is a pure gather, so cover every dtype the MPSGraph
 // path supported to avoid a coverage regression.

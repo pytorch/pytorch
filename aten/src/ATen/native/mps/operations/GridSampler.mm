@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/GridSamplerUtils.h>
@@ -244,6 +245,17 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
   TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
                               "grid_sampler_2d_backward is not supported for complex on MPS");
 
+  if (output_mask[0] && at::globalContext().deterministicAlgorithms() && input.scalar_type() != kFloat) {
+    auto [grad_input_float, grad_grid_float] = grid_sampler_2d_backward_mps(grad_output.to(kFloat),
+                                                                            input.to(kFloat),
+                                                                            grid.to(kFloat),
+                                                                            _interpolation_mode,
+                                                                            _padding_mode,
+                                                                            align_corners,
+                                                                            output_mask);
+    return std::make_tuple(grad_input_float.to(input.scalar_type()), grad_grid_float.to(grid.scalar_type()));
+  }
+
   auto input_requires_grad = output_mask[0];
   auto grad_input = input_requires_grad ? at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : Tensor();
   auto interpolation_mode = static_cast<GridSamplerInterpolation>(_interpolation_mode);
@@ -349,6 +361,17 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
               input.scalar_type(),
               " and ",
               grid.scalar_type());
+
+  if (output_mask[0] && at::globalContext().deterministicAlgorithms() && input.scalar_type() != kFloat) {
+    auto [grad_input_float, grad_grid_float] = grid_sampler_3d_backward_mps(grad_output.to(kFloat),
+                                                                            input.to(kFloat),
+                                                                            grid.to(kFloat),
+                                                                            interpolation_mode,
+                                                                            padding_mode,
+                                                                            align_corners,
+                                                                            output_mask);
+    return std::make_tuple(grad_input_float.to(input.scalar_type()), grad_grid_float.to(grid.scalar_type()));
+  }
 
   auto input_requires_grad = output_mask[0];
   auto interp_mode = static_cast<GridSamplerInterpolation>(interpolation_mode);

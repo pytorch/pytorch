@@ -869,10 +869,6 @@ kernel void avg_pool_backward(
       constant AvgPoolingParams<5>& params [[buffer(2)]],                  \
       uint tid [[thread_position_in_grid]]);
 
-#define REGISTER_POOL_BACKWARD_OP(DTYPE)          \
-  REGISTER_POOL_BACKWARD_OP_SERIAL(DTYPE, false); \
-  REGISTER_POOL_BACKWARD_OP_SERIAL(DTYPE, true);
-
 REGISTER_POOL_OP(float);
 REGISTER_POOL_OP(half);
 REGISTER_POOL_OP(bfloat);
@@ -883,6 +879,7 @@ REGISTER_POOL_OP(char);
 REGISTER_POOL_OP(uchar);
 REGISTER_POOL_OP(bool);
 
-REGISTER_POOL_BACKWARD_OP(float);
-REGISTER_POOL_BACKWARD_OP(half);
-REGISTER_POOL_BACKWARD_OP(bfloat);
+REGISTER_POOL_BACKWARD_OP_SERIAL(float, false);
+REGISTER_POOL_BACKWARD_OP_SERIAL(half, false);
+REGISTER_POOL_BACKWARD_OP_SERIAL(bfloat, false);
+REGISTER_POOL_BACKWARD_OP_SERIAL(float, true);

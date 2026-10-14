@@ -861,6 +861,18 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
 
   auto reduction_type = index_reduce_type(reduce);
 
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  bool serial = at::globalContext().deterministicAlgorithms() &&
+      !c10::isIntegralType(result.scalar_type(), /*includeBool=*/true) &&
+      (reduction_type == ReductionType::PROD || reduction_type == ReductionType::MEAN);
+  if (serial && (self.scalar_type() != kFloat || index.scalar_type() != kLong)) {
+    result.copy_(self.to(kFloat).index_reduce(dim, index.to(kLong), source.to(kFloat), reduce, include_self));
+    return;
+  }
+
   if (!result.is_same(self)) {
     result.copy_(self);
   }
@@ -890,13 +902,6 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
 
   MPSStream* stream = getCurrentMPSStream();
 
-  // See Note [Enabling Deterministic Operations]
-  // The operation is normally nondeterministic because of atomic accumulation
-  // across multiple threads. To make it deterministic, dispatch only one thread
-  // per batch, so the accumulations are serialized.
-  bool serial = at::globalContext().deterministicAlgorithms() &&
-      !c10::isIntegralType(result.scalar_type(), /*includeBool=*/true) &&
-      (reduction_type == ReductionType::PROD || reduction_type == ReductionType::MEAN);
   auto num_threads = source.numel();
   if (num_threads > 0 && serial) {
     num_threads /= source.size(dim);

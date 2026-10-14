@@ -1,5 +1,6 @@
 //  Copyright © 2023 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/ceil_div.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/UpSample.h>
@@ -121,6 +122,13 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
   // across multiple threads. To make it deterministic, dispatch only one thread
   // per batch, so the accumulations are serialized.
   bool serial = at::globalContext().deterministicAlgorithms();
+  if (serial && grad_input.scalar_type() != kFloat) {
+    auto grad_input_float = grad_input.to(kFloat);
+    upsample_kernel_backward_out_template<N>(
+        grad_input_float, grad_output.to(kFloat), output_size, align_corners, scales, name);
+    grad_input.copy_(grad_input_float);
+    return;
+  }
   auto njobs = serial ? grad_output.size(0) * grad_output.size(1) : c10::multiply_integers(output_size);
 
   dispatch_upsample(

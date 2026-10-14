@@ -1008,10 +1008,9 @@ kernel void grid_sampler_3d_backward(
       constant GridSamplerBackwardParams<5, IDX_T>& params [[buffer(5)]],   \
       uint3 thread_index [[thread_position_in_grid]]);
 
-#define REGISTER_GRID_SAMPLER_BACKWARD(DTYPE)                   \
-  REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, int, "i32", false)  \
-  REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, long, "i64", false) \
-  REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, long, "i64", true)
+#define REGISTER_GRID_SAMPLER_BACKWARD(DTYPE)                  \
+  REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, int, "i32", false) \
+  REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, long, "i64", false)
 
 #define REGISTER_GRID_SAMPLER_OPS(DTYPE)                         \
   REGISTER_GRID_SAMPLER_2D_INTERP(DTYPE, Bilinear2D, "bilinear") \
@@ -1024,6 +1023,7 @@ kernel void grid_sampler_3d_backward(
 REGISTER_GRID_SAMPLER_OPS(float);
 REGISTER_GRID_SAMPLER_OPS(half);
 REGISTER_GRID_SAMPLER_OPS(bfloat);
+REGISTER_GRID_SAMPLER_BACKWARD_IDX(float, long, "i64", true)
 
 // ========== 2D Backward kernels ==========
 
@@ -1504,10 +1504,9 @@ kernel void grid_sampler_2d_backward_bicubic_grid(
       (grid_sampler_2d_backward_##INTERP##_input_impl<DTYPE, IDX_T>),     \
       SERIAL)
 
-#define REGISTER_GRID_SAMPLER_2D_BACKWARD(DTYPE, INTERP)                   \
-  REGISTER_GRID_SAMPLER_2D_BACKWARD_IDX(DTYPE, INTERP, int, "i32", false)  \
-  REGISTER_GRID_SAMPLER_2D_BACKWARD_IDX(DTYPE, INTERP, long, "i64", false) \
-  REGISTER_GRID_SAMPLER_2D_BACKWARD_IDX(DTYPE, INTERP, long, "i64", true)
+#define REGISTER_GRID_SAMPLER_2D_BACKWARD(DTYPE, INTERP)                  \
+  REGISTER_GRID_SAMPLER_2D_BACKWARD_IDX(DTYPE, INTERP, int, "i32", false) \
+  REGISTER_GRID_SAMPLER_2D_BACKWARD_IDX(DTYPE, INTERP, long, "i64", false)
 
 #define REGISTER_GRID_SAMPLER_2D_BACKWARD_BICUBIC_INPUT(                \
     DTYPE, PAD, PNAME, IDX_T, INAME_IDX, SERIAL)                        \
@@ -1535,10 +1534,7 @@ kernel void grid_sampler_2d_backward_bicubic_grid(
 
 #define REGISTER_GRID_SAMPLER_2D_BACKWARD_BICUBIC(DTYPE, PAD, PNAME)           \
   REGISTER_GRID_SAMPLER_2D_BACKWARD_BICUBIC_IDX(DTYPE, PAD, PNAME, int, "i32") \
-  REGISTER_GRID_SAMPLER_2D_BACKWARD_BICUBIC_IDX(                               \
-      DTYPE, PAD, PNAME, long, "i64")                                          \
-  REGISTER_GRID_SAMPLER_2D_BACKWARD_BICUBIC_INPUT(                             \
-      DTYPE, PAD, PNAME, long, "i64", true)
+  REGISTER_GRID_SAMPLER_2D_BACKWARD_BICUBIC_IDX(DTYPE, PAD, PNAME, long, "i64")
 
 #define REGISTER_GRID_SAMPLER_2D_BACKWARD_BILINEAR_GRID_IDX(               \
     DTYPE, IDX_T, INAME_IDX)                                               \
@@ -1564,3 +1560,27 @@ kernel void grid_sampler_2d_backward_bicubic_grid(
 REGISTER_GRID_SAMPLER_2D_BACKWARD_OPS(float);
 REGISTER_GRID_SAMPLER_2D_BACKWARD_OPS(half);
 REGISTER_GRID_SAMPLER_2D_BACKWARD_OPS(bfloat);
+
+REGISTER_GRID_SAMPLER_2D_BACKWARD_IDX(float, bilinear, long, "i64", true)
+REGISTER_GRID_SAMPLER_2D_BACKWARD_IDX(float, nearest, long, "i64", true)
+REGISTER_GRID_SAMPLER_2D_BACKWARD_BICUBIC_INPUT(
+    float,
+    PadZeros,
+    "zeros",
+    long,
+    "i64",
+    true)
+REGISTER_GRID_SAMPLER_2D_BACKWARD_BICUBIC_INPUT(
+    float,
+    PadBorder,
+    "border",
+    long,
+    "i64",
+    true)
+REGISTER_GRID_SAMPLER_2D_BACKWARD_BICUBIC_INPUT(
+    float,
+    PadReflection,
+    "reflection",
+    long,
+    "i64",
+    true)

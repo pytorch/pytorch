@@ -374,12 +374,6 @@ kernel void index_reduce(
   REGISTER_INDEX_REDUCE_OP_ALL_REDUCE_TYPES(T, int); \
   REGISTER_INDEX_REDUCE_OP_ALL_REDUCE_TYPES(T, long);
 
-#define REGISTER_INDEX_REDUCE_OP_SERIAL(T)       \
-  REGISTER_INDEX_REDUCE_OP(mean, T, int, true);  \
-  REGISTER_INDEX_REDUCE_OP(prod, T, int, true);  \
-  REGISTER_INDEX_REDUCE_OP(mean, T, long, true); \
-  REGISTER_INDEX_REDUCE_OP(prod, T, long, true);
-
 REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(float);
 REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(half);
 REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(bfloat);
@@ -387,9 +381,8 @@ REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(int);
 REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(short);
 REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(char);
 REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(uchar);
-REGISTER_INDEX_REDUCE_OP_SERIAL(float);
-REGISTER_INDEX_REDUCE_OP_SERIAL(half);
-REGISTER_INDEX_REDUCE_OP_SERIAL(bfloat);
+REGISTER_INDEX_REDUCE_OP(mean, float, long, true);
+REGISTER_INDEX_REDUCE_OP(prod, float, long, true);
 
 // index_add is index_reduce with a sum reduction plus an alpha scale on the
 // source. Accumulation happens directly in the output dtype via atomic add,
