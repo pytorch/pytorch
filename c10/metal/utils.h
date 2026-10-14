@@ -616,6 +616,23 @@ inline float hypot(float a_, float b_) {
   return ::metal::select(::metal::select(h3, h2, is_h2), h1, is_h1);
 }
 
+// Computes the larger component as sqrt((|re| + |z|) / 2) and derives the other
+// one by division, avoiding the cancellation in |z| - |re| when |im| << |re|
+template <typename T, ::metal::enable_if_t<is_complex_v<T>, bool> = true>
+inline T sqrt(const T x) {
+  const auto z = float2(x);
+  if (::metal::isinf(z.y)) {
+    return T(INFINITY, z.y);
+  }
+  const auto a = ::metal::abs(z);
+  const auto t = ::metal::precise::sqrt((a.x + hypot(a.x, a.y)) * .5);
+  if (t == 0) {
+    return T(0, z.y);
+  }
+  return z.x >= 0 ? T(t, z.y / (2 * t))
+                  : T(a.y / (2 * t), ::metal::copysign(t, z.y));
+}
+
 #define INSTANTIATE_FOR_ALL_TYPES(MACRO) \
   MACRO(float);                          \
   MACRO(half);                           \
