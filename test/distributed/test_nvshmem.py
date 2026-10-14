@@ -259,6 +259,9 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         numel = 1024
         tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
         hdl = symm_mem.rendezvous(tensor, group=group_name)
+        # rank 0 writes into rank 1's buffer below, so rank 1's fill_ must land
+        # first.
+        hdl.barrier()
         signal_pad = hdl.get_signal_pad(self.rank)
         signal_val = 5
 
@@ -280,6 +283,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         numel = 1024
         tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
         hdl = symm_mem.rendezvous(tensor, group=group_name)
+        # rank 0 reads rank 1's buffer below, so rank 1's fill_ must land first.
+        hdl.barrier()
 
         if self.rank == 0:
             torch.ops.symm_mem.nvshmem_get(tensor, 1)
@@ -626,9 +631,10 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
 
         symm_mem.rendezvous(inp, group=group_name)
-        symm_mem.rendezvous(out, group=group_name)
+        out_hdl = symm_mem.rendezvous(out, group=group_name)
         # Peers write into `out`, so every rank's fill_(-1) must land first.
-        dist.barrier()
+        # dist.barrier() would run on gloo and not wait for the fill on the GPU.
+        out_hdl.barrier()
         torch.ops.symm_mem.nvshmem_all_to_all(inp, out, group_name)
 
         expected = torch.cat(
