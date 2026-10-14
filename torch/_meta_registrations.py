@@ -7535,6 +7535,8 @@ def meta_quantize_tensor(
     scaling_algorithm: int,
     swizzle_type: int,
     scaling_type_use_square_block_size: bool = False,
+    qdata_rounding_mode: int = 0,
+    random_key: torch.Tensor | None = None,
 ) -> list[torch.Tensor]:
     from torch.nn.functional import SwizzleType
 
@@ -7559,6 +7561,8 @@ def meta_quantize_tensor(
             scaling_algorithm,
             swizzle_type,
             scaling_type_use_square_block_size,
+            qdata_rounding_mode,
+            random_key,
         )
         rows, cols = input.shape
         is_scale_swizzled = swizzle_type == SwizzleType.SWIZZLE_32_4_4.value
@@ -7585,6 +7589,8 @@ def meta_quantize_tensor_dual(
     scaling_algorithm: int,
     swizzle_type: int,
     scaling_type_use_square_block_size: bool = False,
+    qdata_rounding_mode: int = 0,
+    random_key: torch.Tensor | None = None,
 ) -> list[torch.Tensor]:
     if input.device.type not in ("cuda", "meta") or (
         input.device.type == "cuda" and torch.version.hip is not None
@@ -7609,6 +7615,8 @@ def meta_quantize_tensor_dual(
             scaling_algorithm,
             swizzle_type,
             scaling_type_use_square_block_size,
+            qdata_rounding_mode,
+            random_key,
         )
         rows, cols = input.shape
         return [
