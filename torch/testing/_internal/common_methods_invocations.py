@@ -7480,7 +7480,9 @@ def sample_inputs_cutedsl_quantize_tensor(op_info, device, dtype, requires_grad,
         "swizzle_type": F.SwizzleType.NO_SWIZZLE,
     }
     yield SampleInput(input, kwargs=recipe)
+    yield SampleInput(input.t(), kwargs=recipe)
     yield SampleInput(input.t(), kwargs={**recipe, "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4})
+    yield SampleInput(input, kwargs={**recipe, "scaling_type_use_square_block_size": True})
     yield SampleInput(input, kwargs={**recipe, "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4,
                                      "scaling_type_use_square_block_size": True})
 
@@ -7497,6 +7499,9 @@ def sample_inputs_cutedsl_quantize_tensor_dual(op_info, device, dtype, requires_
     }
     yield SampleInput(input, kwargs=recipe)
     yield SampleInput(input, kwargs={**recipe, "scaling_type_use_square_block_size": True})
+    yield SampleInput(input, kwargs={**recipe, "swizzle_type": F.SwizzleType.NO_SWIZZLE})
+    yield SampleInput(input, kwargs={**recipe, "swizzle_type": F.SwizzleType.NO_SWIZZLE,
+                                     "scaling_type_use_square_block_size": True})
 
 
 def _cutedsl_linear_cross_entropy_eligible(sample):
