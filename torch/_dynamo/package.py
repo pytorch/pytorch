@@ -874,13 +874,21 @@ def _get_code_source(
     # The recorded __qualname__ can be stale (a factory-made function, or a
     # wrapper from a decorator without functools.wraps), so replay the lookup
     # the loader will do.
+    cause: Exception | None = None
     try:
         found = _lookup_code_path(module.__name__, function_name, code_source)
-    except Exception:
-        found = None
+    except Exception as e:
+        # A replay can fail in many ways (a missing attribute, a None
+        # __closure__, an index out of range); each means unreplayable.
+        found, cause = None, e
     if found is not code:
-        note = f". Its __qualname__ {function_name!r} does not resolve back to it"
-        _raise_resolution_error(code, toplevel, note)
+        outcome = f"fails with {cause!r}" if cause else "finds other code"
+        raise PackageError(
+            f"Cannot resolve a fully qualified name for {code}. Lookup scope: "
+            f"{toplevel}. Its __qualname__ {function_name!r} does not resolve back "
+            f"to it: replaying {module.__name__}:{function_name} ({code_source}) "
+            f"{outcome}"
+        ) from cause
     return function_name, code_source
 
 
