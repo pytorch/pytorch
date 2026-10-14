@@ -298,7 +298,7 @@ class _FailOnRecompileCallback:
     def __call__(
         self, frame: DynamoFrameType, *args: Any, **kwargs: Any
     ) -> ConvertFrameReturn:
-        if trace_rules.check(frame.f_code):
+        if trace_rules.check(frame.f_code, frame=frame):
             return ConvertFrameReturn()
         if not convert_frame.has_tensor_in_frame(frame):
             return ConvertFrameReturn()
