@@ -26,7 +26,6 @@ import platform
 import shutil
 import sys
 import types
-import weakref
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
 from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
@@ -53,23 +52,6 @@ if TYPE_CHECKING:
 
 
 _CODE_CACHE = WeakIdKeyDictionary()
-
-# The key Dynamo mints for the globals of an inlined frame that belong to no
-# module (install_global_by_id in get_globals_source_and_value).
-_UNNAMED_SCOPE_PREFIX = "___unnamed_scope_"
-
-
-@dataclasses.dataclass
-class _SeededGlobal:
-    """A minted global packages bound into a module, and the live ones reading it."""
-
-    value: object
-    owners: "weakref.WeakSet[CompilePackage]"
-
-
-# module -> name -> _SeededGlobal. Two packages loaded from one artifact seed the
-# same key, so the binding has to outlive every package but the last to leave.
-_SEEDED_GLOBALS: WeakIdKeyDictionary = WeakIdKeyDictionary()
 
 
 def _code_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -746,6 +728,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
 
     toplevel: Any = module
     search_module_tree = sys.version_info < (3, 11)
+    qualname_is_stale = False
     if not search_module_tree:
         parts = code.co_qualname.split(".")
 
@@ -755,9 +738,11 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                 # statement ran: a factory deleted afterwards, or one that
                 # exec'd it under a module's filename. The function can still
                 # be reachable from the module under a rewritten __qualname__,
-                # so search the module the way Python < 3.11 always does.
+                # so search the module the way Python < 3.11 always does; the
+                # result is checked below, since that only helps when
+                # __qualname__ names a live path.
                 toplevel = module
-                search_module_tree = True
+                search_module_tree = qualname_is_stale = True
                 break
             toplevel = getattr(toplevel, part)
             if (
@@ -864,6 +849,14 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     code_source = _find_code_source(toplevel)
     if code_source is None:
         _raise_resolution_error(code, toplevel)
+    if qualname_is_stale:
+        # The loader walks __qualname__ from the module, and a __qualname__
+        # nothing rewrote is the same stale co_qualname.
+        resolved: Any = module
+        for part in toplevel.__qualname__.split("."):
+            resolved = getattr(resolved, part, None)
+        if resolved != toplevel:
+            _raise_resolution_error(code, toplevel)
     return toplevel.__qualname__, code_source.strip(".")
 
 
@@ -1135,7 +1128,6 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        self._seeded_globals: list[tuple[types.ModuleType, str]] = []
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
 
@@ -1415,32 +1407,6 @@ class CompilePackage:
         if record:
             self._installed_globals.setdefault(module, []).append(name)
 
-    def _seed_unnamed_scopes(
-        self, module: types.ModuleType, global_scope: dict[str, Any]
-    ) -> None:
-        # The key embeds id() of a dict in the tracing process, so no module in
-        # a fresh process binds it, and every guard rooted at it fails with a
-        # KeyError. The artifact carries the dict itself; bind that.
-        by_name = _SEEDED_GLOBALS.setdefault(module, {})
-        for name, value in global_scope.items():
-            if not name.startswith(_UNNAMED_SCOPE_PREFIX):
-                continue
-            # A compile in this process that bound the key owns it through a
-            # CleanupHook, which would delete it from under these guards once
-            # its code object is collected.
-            CleanupHook.disown(module.__dict__, name)
-            seeded = by_name.get(name)
-            if name not in module.__dict__:
-                seeded = _SeededGlobal(value, weakref.WeakSet())
-                by_name[name] = seeded
-                module.__dict__[name] = value
-            elif seeded is None or module.__dict__[name] is not seeded.value:
-                # Not a package's binding: whoever wrote it owns it.
-                continue
-            if self not in seeded.owners:
-                seeded.owners.add(self)
-                self._seeded_globals.append((module, name))
-
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
@@ -1451,18 +1417,6 @@ class CompilePackage:
                 module.__dict__.pop(name, None)
 
         self._installed_globals = {}
-
-        for module, name in self._seeded_globals:
-            by_name = _SEEDED_GLOBALS.get(module, {})
-            seeded = by_name.get(name)
-            if seeded is None:
-                continue
-            seeded.owners.discard(self)
-            if not seeded.owners:
-                del by_name[name]
-                if module.__dict__.get(name) is seeded.value:
-                    del module.__dict__[name]
-        self._seeded_globals = []
 
         _reset_precompile_entries(self._innermost_fn.__code__)
 
@@ -1477,6 +1431,7 @@ class CompilePackage:
 
         from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
+        from .symbolic_convert import UNNAMED_SCOPE_PREFIX
 
         self.uninstall()
         for code, entry in self._codes.items():
@@ -1492,8 +1447,8 @@ class CompilePackage:
                 # AOTCompiledFunction._seed_guard_scope seeds those aliases into
                 # a live module scope and nothing re-seeds them -- so uninstall()
                 # must leave a binding this package did not create alone. The
-                # aliases are the only names install() records that are ever
-                # seeded that way.
+                # aliases and the ___unnamed_scope keys below are the only names
+                # install() records that are ever seeded that way.
                 for alias, module_name in entry.import_sources.items():
                     self._install_global(
                         module,
@@ -1560,9 +1515,20 @@ class CompilePackage:
                     with dynamo_timed("precompile_load_guards"):
                         guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
-                    self._seed_unnamed_scopes(
-                        module, guards_state.output_graph.global_scope
-                    )
+                    # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict
+                    # in the tracing process, so a fresh process has no binding
+                    # for it; the artifact carries the dict. A binding already
+                    # here (a live compile's, or anyone else's) is kept and not
+                    # recorded, so uninstall() leaves it alone, and the guards
+                    # check whatever it holds.
+                    for name, value in guards_state.output_graph.global_scope.items():
+                        if name.startswith(UNNAMED_SCOPE_PREFIX):
+                            self._install_global(
+                                module,
+                                name,
+                                module.__dict__.get(name, value),
+                                record_only_if_new=True,
+                            )
                     # The installed builtins dict might be absent from the runtime
                     # while loading guards. Populate it if it's missing.
                     if (
