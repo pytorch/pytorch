@@ -88,23 +88,23 @@ mode.
 For convolution, TF32 runs through MIOpen and is controlled by the same
 ``torch.backends.cudnn.conv.fp32_precision`` and
 ``torch.backends.cudnn.allow_tf32`` controls used for cuDNN on NVIDIA
-hardware. MIOpen TF32 convolution requires MIOpen >= 3.5.2 (ROCm >= 7.14); on
-older builds the controls have no effect and convolutions always run in full
-fp32.
+hardware. ``allow_tf32`` sets both the convolution and RNN precisions.
+PyTorch requests MIOpen TF32 convolution only when MIOpen is at least 3.6.2,
+the release that added hipconv TF32 kernels for gfx950 and gfx1250. gfx942 is
+not that path. On older builds the controls have no effect and convolutions
+always run in full fp32.
 
 Unlike cuDNN on NVIDIA hardware, where convolution and RNN default to TF32,
 TF32 is opt-in on ROCm. Until they are set explicitly,
-``torch.backends.cudnn.allow_tf32`` is ``False`` and
-``torch.backends.cudnn.conv.fp32_precision`` is ``"none"``, so convolutions
-run in full fp32 by default.
+``torch.backends.cudnn.allow_tf32`` is ``False`` and both
+``torch.backends.cudnn.conv.fp32_precision`` and
+``torch.backends.cudnn.rnn.fp32_precision`` are ``"none"``, so convolutions
+run in full fp32 by default. ``torch.backends.cudnn.flags()`` with
+``allow_tf32`` omitted leaves the ROCm setting unchanged. On NVIDIA, the same
+call still defaults ``allow_tf32`` to True.
 
-Deterministic convolution interacts with TF32. MIOpen < 3.6.1 can hang while
-auto-tuning the grouped xdlops solvers in deterministic mode once TF32 narrows
-the candidate list, so setting ``torch.backends.cudnn.deterministic = True``
-there forces convolutions back to full fp32 and ``allow_tf32`` has no effect.
-MIOpen >= 3.6.1 fixes that hang (ROCm/rocm-libraries#10240) and TF32 is
-permitted alongside deterministic, but MIOpen may still pick a non-TF32 solver
-because its deterministic filter excludes some TF32 kernels.
+Deterministic mode does not turn the TF32 request off. MIOpen can still select
+a non-TF32 solver for a given shape.
 
 The TF32 path on MI300 has hardware-level numerical differences from the
 NVIDIA implementation; see :ref:`tf32_on_mi300` for details.

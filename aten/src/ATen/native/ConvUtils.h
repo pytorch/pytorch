@@ -50,10 +50,10 @@ using cudnn_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor
 // MIOpen backward (3-output, carries benchmark/deterministic).
 using miopen_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
+    at::IntArrayRef, int64_t, bool, bool, bool, std::array<bool,3>);
 using miopen_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
+    at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool, bool, std::array<bool,3>);
 
 // MKLDNN forward transpose (not a backward).
 using mkldnn_convolution_transpose_fn = Tensor(*)(const Tensor&, const Tensor&, const std::optional<Tensor>&,

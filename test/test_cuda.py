@@ -1865,9 +1865,23 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
             torch.backends.cudnn.conv.fp32_precision = precision
             torch.backends.cudnn.rnn.fp32_precision = precision
             self.assertEqual(torch.backends.cudnn.allow_tf32, expected)
-            # cudnn.flags() snapshots allow_tf32 on entry.
+            # On CUDA, omitting allow_tf32 forces it on. On ROCm it must not.
             with torch.backends.cudnn.flags(enabled=True):
-                pass
+                if torch.version.hip:
+                    self.assertEqual(torch.backends.cudnn.allow_tf32, expected)
+                else:
+                    self.assertTrue(torch.backends.cudnn.allow_tf32)
+            self.assertEqual(torch.backends.cudnn.allow_tf32, expected)
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm TF32 defaults")
+    def test_rocm_cudnn_tf32_defaults_off(self):
+        script = (
+            "import torch\n"
+            "assert torch.backends.cudnn.allow_tf32 is False\n"
+            "assert torch.backends.cudnn.conv.fp32_precision == 'none'\n"
+            "assert torch.backends.cudnn.rnn.fp32_precision == 'none'\n"
+        )
+        subprocess.check_call([sys.executable, "-c", script])
 
     @recover_orig_fp32_precision
     @serialTest()

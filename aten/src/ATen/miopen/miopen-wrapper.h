@@ -10,17 +10,14 @@
 #include <miopen/miopen.h>
 #include <miopen/version.h>
 
-// MIOpen 3.5.2 (ROCm 7.14) introduced miopenMathType_t and the conv math-type
-// attribute; TF32 conv cannot be requested at all before that.
-#define MIOPEN_HAS_TF32_MATH_TYPE \
+// miopenMathType_t exists in ROCm 7.12 (MIOpen 3.5.1) and is absent from
+// ROCm 7.11, which reports the same MIOpen version. Do not test for 3.5.1.
+// Requesting TF32 before MIOpen 3.6.2 misses the tuned fp32 database and
+// can fall through to the naive kernel. hipconv TF32 kernels landed in 3.6.2
+// for gfx950 and gfx1250. gfx942 is not that path.
+#define MIOPEN_HAS_TF32_CONV \
   (MIOPEN_VERSION_MAJOR > 3 || (MIOPEN_VERSION_MAJOR == 3 && \
-   (MIOPEN_VERSION_MINOR > 5 || (MIOPEN_VERSION_MINOR == 5 && MIOPEN_VERSION_PATCH >= 2))))
-
-// MIOpen 3.6.1 (ROCm 10.1) fixed deterministic perf-config enumeration for the
-// grouped xdlops solvers; see ROCm/rocm-libraries#10240 (ALMIOPEN-2359).
-#define MIOPEN_HAS_DETERMINISTIC_TF32 \
-  (MIOPEN_VERSION_MAJOR > 3 || (MIOPEN_VERSION_MAJOR == 3 && \
-   (MIOPEN_VERSION_MINOR > 6 || (MIOPEN_VERSION_MINOR == 6 && MIOPEN_VERSION_PATCH >= 1))))
+   (MIOPEN_VERSION_MINOR > 6 || (MIOPEN_VERSION_MINOR == 6 && MIOPEN_VERSION_PATCH >= 2))))
 
 #if MIOPEN_VERSION_MAJOR > 3 || (MIOPEN_VERSION_MAJOR == 3 && MIOPEN_VERSION_MINOR >= 4)
 // miopen 3.4 moved find mode from private header to public header
