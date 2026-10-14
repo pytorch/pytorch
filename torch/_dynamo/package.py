@@ -28,7 +28,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, IO, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import torch
@@ -738,7 +738,6 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
 
     toplevel: Any = module
     search_module_tree = sys.version_info < (3, 11)
-    qualname_is_stale = False
     if not search_module_tree:
         parts = code.co_qualname.split(".")
 
@@ -748,11 +747,9 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                 # statement ran: a factory deleted afterwards, or one that
                 # exec'd it under a module's filename. The function can still
                 # be reachable from the module under a rewritten __qualname__,
-                # so search the module the way Python < 3.11 always does; the
-                # result is checked below, since that only helps when
-                # __qualname__ names a live path.
+                # so search the module the way Python < 3.11 always does.
                 toplevel = module
-                search_module_tree = qualname_is_stale = True
+                search_module_tree = True
                 break
             toplevel = getattr(toplevel, part)
             if (
@@ -859,15 +856,22 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     code_source = _find_code_source(toplevel)
     if code_source is None:
         _raise_resolution_error(code, toplevel)
-    if qualname_is_stale:
-        # The loader walks __qualname__ from the module, and a __qualname__
-        # nothing rewrote is the same stale co_qualname.
-        resolved: Any = module
-        for part in toplevel.__qualname__.split("."):
-            resolved = getattr(resolved, part, None)
-        if resolved != toplevel:
+    function_name, code_source = toplevel.__qualname__, code_source.strip(".")
+    if search_module_tree:
+        # The search can land on a function whose __qualname__ is as stale as
+        # co_qualname, so replay the lookup the loader will do.
+        entry = types.SimpleNamespace(
+            python_module=module.__name__,
+            function_names=[function_name],
+            code_source=code_source,
+        )
+        try:
+            round_trips = _lookup_code(cast(_DynamoCodeCacheEntry, entry)) is code
+        except Exception:
+            round_trips = False
+        if not round_trips:
             _raise_resolution_error(code, toplevel)
-    return toplevel.__qualname__, code_source.strip(".")
+    return function_name, code_source
 
 
 @dataclasses.dataclass(frozen=True)
