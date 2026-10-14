@@ -7304,10 +7304,10 @@ def quantize_tensor(
 ) -> tuple[Tensor, Tensor]:
     r"""quantize_tensor(input, *, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False, qdata_rounding_mode=RoundingMode.RTNE, random_key=None) -> tuple[Tensor, Tensor]
 
-    Quantize a 2D tensor. Returns ``(qdata, scale)`` for use with
-    :func:`scaled_mm`.  Currently supported formats: ``mxfp8``.
-    See the code samples at the bottom of this docblock
-    for how to configure supported formats.
+    Quantize a 2D tensor of shape :math:`(M, K)` along the ``K`` dimension.
+    Returns ``(qdata, scale)`` for use with :func:`scaled_mm`.
+    Currently supported formats: ``mxfp8``. See the code samples at the bottom
+    of this docblock for how to configure supported formats.
 
     A contiguous input is quantized along its last dimension (dim-k). Pass a
     transposed view of a contiguous tensor to quantize along its last dimension
@@ -7423,8 +7423,9 @@ def quantize_tensor_dual(
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     r"""quantize_tensor_dual(input, *, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False, qdata_rounding_mode=RoundingMode.RTNE, random_key=None) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
-    Quantize a contiguous 2D tensor along both dim-k and dim-m dimensions in one
-    pass. See :func:`quantize_tensor` to quantize along one dimension.
+    Quantize a contiguous 2D tensor of shape :math:`(M, K)` along both
+    ``K`` and ``M`` dimensions. See :func:`quantize_tensor` to
+    quantize along one dimension.
 
     Automatic autograd is not supported for this op, users are encouraged to define
     their own derivative.
