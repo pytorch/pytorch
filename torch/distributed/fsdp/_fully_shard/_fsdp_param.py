@@ -175,18 +175,14 @@ class ParamModuleInfo:
 
 
 class _AllGatherOutputLayout(NamedTuple):
-    # View size of the output passed to fsdp_post_all_gather, which may contain -1
-    # and spans the whole output if the payload shrank. Only extensions use it.
+    # View size of the output passed to fsdp_post_all_gather; may contain -1
     output_size: torch.Size
-    # Number of rows in each rank's chunk, which the copy-out concatenates row by
-    # row: the product of the dims before the gather dim (the padded sharded
-    # parameter's for Tensor payloads), or 1 if a flat copy suffices, as for a
-    # single rank, an empty payload or a post-forward shard
+    # Rows of each rank's chunk that the copy-out concatenates: the product of the
+    # dims before the gather dim, or 1 if a flat copy suffices
     outer_size: int
 
 
-# Post-forward shards are flat chunks of the unsharded data, so their all-gather
-# copies out flat instead of reassembling along the Shard(i) dim.
+# Post-forward shards are flat chunks of the unsharded data
 _POST_FORWARD_ALL_GATHER_OUTPUT_LAYOUTS = (
     _AllGatherOutputLayout(torch.Size((-1,)), 1),
 )
@@ -226,8 +222,7 @@ class FSDPParam:
     _all_gather_metadata: Any | None
     _extension_all_gather_output_layouts: tuple[_AllGatherOutputLayout, ...] | None
     # Layouts checked against the allocated outputs, which never change, keyed by
-    # each input's size, dtype and, for records, integer dim, so that payloads that
-    # alternate shapes, e.g. between forward and backward, keep reusing them
+    # each input's size, dtype and, for records, integer dim
     _extension_layouts_by_key: dict[Any, tuple[_AllGatherOutputLayout, ...]]
     _unsharded_inner_tensors: list[torch.Tensor]
     _release_all_gather_outputs_after_post_all_gather: bool
@@ -988,7 +983,7 @@ class FSDPParam:
 
     @property
     def all_gather_output_layouts(self) -> tuple[_AllGatherOutputLayout, ...]:
-        """Output layouts of the inputs that the latest ``all_gather_inputs`` returned."""
+        """Output layouts of the inputs that ``all_gather_inputs`` last returned."""
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             return _POST_FORWARD_ALL_GATHER_OUTPUT_LAYOUTS
         if (layouts := self._extension_all_gather_output_layouts) is not None:
@@ -1021,17 +1016,15 @@ class FSDPParam:
             and self._orig_size.numel()
             and self._orig_size[0] % world_size
         ):
-            # Shard(i>0) parameters have no padding, so their post-forward shards,
-            # flat chunks of the unsharded data, match dim-0 chunks only if the
-            # world size divides dim 0
+            # Flat post-forward shards of unpadded Shard(i>0) parameters match dim-0
+            # chunks only if the world size divides dim 0
             raise NotImplementedError(
                 f"Resharding the Shard({shard_dim}) parameter {self._display_name} to "
                 f"{world_size} ranks after forward requires dim 0 of its size "
                 f"{tuple(self._orig_size)} to be divisible by {world_size}"
             )
         if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
-            # The post-forward parameter views a rank chunk of the extension's
-            # output, so the largest post-forward shard must fit in a chunk
+            # The post-forward parameter views a chunk of the extension's output
             output = self.all_gather_outputs[0]
             rows = -(-self._orig_size[0] // world_size)
             shard_numel = rows * math.prod(self._orig_size[1:])
@@ -1204,8 +1197,7 @@ class FSDPParam:
                         self.mp_policy,
                     )
                 # Only the 5-argument hook gets outer_size to pad with (#137005), so
-                # FSDP checks only its Tensor inputs of unevenly sharded parameters
-                # for the padded sharded size
+                # only its Tensor inputs are checked for the padded sharded size
                 return self._get_extension_all_gather_inputs(
                     all_gather_inputs, check_padding=num_fn_params == 5
                 )
@@ -1231,8 +1223,7 @@ class FSDPParam:
     def _get_extension_all_gather_inputs(
         self, inputs: Sequence[torch.Tensor | AllGatherInput], check_padding: bool
     ) -> list[torch.Tensor]:
-        # Records and plain tensors get keys of different lengths. Invalid record
-        # dims are keyed as None, which the layouts check rejects before caching.
+        # Invalid record dims key as None, which the layouts check rejects
         key = tuple(
             [
                 (
@@ -1538,8 +1529,7 @@ def _get_dtensor_spec_with_dtype(spec: DTensorSpec, dtype: torch.dtype) -> DTens
 
 
 def _record_dim(dim: Any) -> int | None:
-    # Tensor dims count as invalid, since converting them would sync in every
-    # lookup of the cached layouts
+    # Tensor dims are invalid, since converting them would sync in every lookup
     if isinstance(dim, torch.Tensor):
         return None
     try:
@@ -1582,8 +1572,7 @@ def _get_all_gather_output_layouts(
             f"but {len(all_gather_outputs)} on its first call"
         )
     # The copy-out reassembles the rows of Tensor inputs along a nonzero shard
-    # dim, reading them as the padded sharded parameter's rows. The rules for
-    # those rows also hold where a single rank copies them flat.
+    # dim, reading them as the padded sharded parameter's rows
     leading_dims = padded_sharded_size[:shard_dim]
     shard_outer_size = math.prod(leading_dims)
     reassembled = shard_world_size > 1 and shard_outer_size > 1
@@ -1618,7 +1607,7 @@ def _get_all_gather_output_layouts(
                 and output.dtype != torch.uint8
             )
             if (
-                shard_outer_size > 1
+                reassembled
                 and size.numel()
                 and not typed_bytes
                 and size.numel() != padded_sharded_size.numel()
@@ -1642,10 +1631,8 @@ def _get_all_gather_output_layouts(
         layouts.append(layout)
         if output is None:
             continue
-        # Records keep their element count and dtype. Tensor inputs may become
-        # byte views of their outputs, and shrink to fill a prefix of them unless
-        # they have rows to reassemble or a zero trailing dim fixes their output
-        # size.
+        # Tensor inputs may become byte views of their outputs, and shrink unless
+        # they have rows or a zero trailing dim fixes their output size
         byte_view = not is_record and tensor.dtype == torch.uint8
         if tensor.dtype != output.dtype and not byte_view:
             raise ValueError(
