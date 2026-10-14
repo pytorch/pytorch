@@ -10,6 +10,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 
+#include <c10/util/FunctionRef.h>
 #include <c10/util/irange.h>
 
 #include <utility>
@@ -709,12 +710,11 @@ TORCH_META_FUNC(linalg_cholesky_ex)(const Tensor& A,
   set_output_contiguous(1, A_shape.slice(0, ndim - 2), A.options().dtype(ScalarType::Int));
 }
 
-TORCH_META_FUNC(linalg_qr)(const Tensor& A,
-                           std::string_view mode) {
-  at::native::checkIsMatrix(A, "linalg.qr");
-  at::native::checkFloatingOrComplex(A, "linalg.qr");
-  auto [compute_q, reduced_mode] = at::native::_parse_qr_mode(mode);
-
+// Sets the Q (output 0) and R (output 1) of linalg_qr and linalg_qr_piv
+static void linalg_qr_set_outputs(impl::MetaBase& meta,
+                                  const Tensor& A,
+                                  bool compute_q,
+                                  bool reduced_mode) {
   auto A_shape = A.sizes().vec();
   const auto m = A_shape.cend()[-2];
   const auto n = A_shape.cend()[-1];
@@ -724,16 +724,24 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
     auto Q_shape = A_shape;
     Q_shape.end()[-1] = reduced_mode ? k : m;
     auto Q_strides = at::native::batched_matrix_contiguous_strides(Q_shape, /*f-contig*=*/true);
-    set_output_strided(0, Q_shape, Q_strides, A.options());
+    meta.set_output_strided(0, Q_shape, Q_strides, A.options());
   } else {
-    set_output_raw_strided(0, {0}, {}, A.options());
+    meta.set_output_raw_strided(0, {0}, {}, A.options());
   }
 
   // For readability
   auto R_shape = std::move(A_shape);
   R_shape.end()[-2] = (reduced_mode || !compute_q) ? k : m;
   auto R_strides = at::native::batched_matrix_contiguous_strides(R_shape, /*f-contig*=*/true);
-  set_output_strided(1, R_shape, R_strides, A.options());
+  meta.set_output_strided(1, R_shape, R_strides, A.options());
+}
+
+TORCH_META_FUNC(linalg_qr)(const Tensor& A,
+                           std::string_view mode) {
+  at::native::checkIsMatrix(A, "linalg.qr");
+  at::native::checkFloatingOrComplex(A, "linalg.qr");
+  auto [compute_q, reduced_mode] = at::native::_parse_qr_mode(mode);
+  linalg_qr_set_outputs(*this, A, compute_q, reduced_mode);
 }
 
 TORCH_META_FUNC(linalg_qr_piv)(
@@ -744,32 +752,11 @@ TORCH_META_FUNC(linalg_qr_piv)(
   at::native::checkFloatingOrComplex(A, "linalg.qr_piv");
 
   auto [compute_q, reduced_mode] = at::native::_parse_qr_piv_mode(mode);
+  linalg_qr_set_outputs(*this, A, compute_q, reduced_mode);
 
-  auto A_shape = A.sizes().vec();
-  const auto m = A_shape.cend()[-2];
-  const auto n = A_shape.cend()[-1];
-  const auto k = std::min(m, n);
-
-  // -------- Q output --------
-  if (compute_q) {
-    auto Q_shape = A_shape;
-    Q_shape.end()[-1] = reduced_mode ? k : m;
-    auto Q_strides = at::native::batched_matrix_contiguous_strides(Q_shape, /*f-contig=*/true);
-    set_output_strided(0, Q_shape, Q_strides, A.options());
-  } else {
-    set_output_raw_strided(0, {0}, {}, A.options());
-  }
-
-  // -------- R output --------
-  auto R_shape = A_shape;
-  R_shape.end()[-2] = (reduced_mode || !compute_q) ? k : m;
-  auto R_strides = at::native::batched_matrix_contiguous_strides(R_shape, /*f-contig=*/true);
-  set_output_strided(1, R_shape, R_strides, A.options());
-
-  // -------- P output --------
-  // Format: P is a vector of length n for each batch element.
+  // P is a vector of length n for each batch element.
   auto P_shape = DimVector(A.sizes().slice(0, A.dim() - 1));
-  P_shape.back() = n;
+  P_shape.back() = A.size(-1);
 
   // P is always real integer type, contiguous, C (row major) ordered
   auto P_strides = at::native::batched_matrix_contiguous_strides(P_shape, /*f-contig=*/false);
@@ -2476,36 +2463,25 @@ std::tuple<Tensor, Tensor> geqrf(const Tensor& input) {
   return std::make_tuple(std::move(QR), std::move(tau));
 }
 
-/*
-  Computes the QR decomposition using GEQRF and ORGQR operations.
-  This is an in-place function and Q, R tensors must have correct shape and be Fortran contiguous.
-
-  Args:
-  * `input` - [in] Input tensor for QR decomposition
-  * `Q` - [out] Tensor containing the Q matrices of QR decomposition
-  * `R` - [out] Tensor containing the R matrices of QR decomposition
-  * `compute_q` - controls whether the Q tensor is computed
-  * `reduced_mode` - controls the size of Q and R tensors
-
-  For further details, please see the LAPACK documentation for GEQRF and ORGQR.
-*/
-TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
-                               std::string_view mode,
-                               const Tensor & Q,
-                               const Tensor & R) {
+// Shared by linalg_qr and linalg_qr_piv. `factorize` computes the Householder
+// factorization of QR in place (GEQRF or GEQP3) and fills tau; the result is then
+// split into Q (unless compute_q == false) and R.
+static void linalg_qr_out_helper(
+    const Tensor& A,
+    bool compute_q,
+    const Tensor& Q,
+    const Tensor& R,
+    c10::function_ref<void(const Tensor& QR, const Tensor& tau)> factorize) {
   auto m = A.size(-2);
   auto n = A.size(-1);
   auto k = std::min(m, n);
-  auto [compute_q, reduced_mode] = at::native::_parse_qr_mode(mode);
 
-
-  // We need an auxiliary tensor to call geqrf
-  auto tau_shape = A.sizes().vec();
-  tau_shape.pop_back();
+  // We need an auxiliary tensor to call geqrf/geqp3
+  auto tau_shape = DimVector(A.sizes().slice(0, A.dim() - 1));
   tau_shape.back() = k;
   auto tau = A.new_empty(tau_shape);
 
-  // geqrf requires m x n workspace input that is modified in-place
+  // geqrf/geqp3 require m x n workspace input that is modified in-place
   // We try to use Q. If it doesn't fit, we try to use R
   // If m > n and compute_q==false, it won't fit into Q or R, so we need to create an auxiliary tensor
   Tensor QR;
@@ -2519,7 +2495,7 @@ TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
     QR = cloneBatchedColumnMajor(A);
   }
 
-  geqrf_stub(A.device().type(), QR, tau);
+  factorize(QR, tau);
 
   // Split QR into Q (unless compute_q == false) and R
   if (QR.is_alias_of(R)) {
@@ -2540,9 +2516,32 @@ TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
   }
 
   if (compute_q) {
-    // Next perform ORGQR for Q using the result from GEQRF
+    // Next perform ORGQR for Q using the result from GEQRF/GEQP3
     orgqr_stub(A.device().type(), const_cast<Tensor&>(Q), tau);
   }
+}
+
+/*
+  Computes the QR decomposition using GEQRF and ORGQR operations.
+  This is an in-place function and Q, R tensors must have correct shape and be Fortran contiguous.
+
+  Args:
+  * `input` - [in] Input tensor for QR decomposition
+  * `Q` - [out] Tensor containing the Q matrices of QR decomposition
+  * `R` - [out] Tensor containing the R matrices of QR decomposition
+  * `compute_q` - controls whether the Q tensor is computed
+  * `reduced_mode` - controls the size of Q and R tensors
+
+  For further details, please see the LAPACK documentation for GEQRF and ORGQR.
+*/
+TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
+                               std::string_view mode,
+                               const Tensor & Q,
+                               const Tensor & R) {
+  auto compute_q = std::get<0>(at::native::_parse_qr_mode(mode));
+  linalg_qr_out_helper(A, compute_q, Q, R, [&](const Tensor& QR, const Tensor& tau) {
+    geqrf_stub(A.device().type(), QR, tau);
+  });
 }
 
 TORCH_IMPL_FUNC(linalg_polar_out)(const Tensor& A,
@@ -2867,69 +2866,26 @@ TORCH_IMPL_FUNC(linalg_qr_piv_out)(
     const Tensor& R,
     const Tensor& P)
 {
-    const auto m = A.size(-2);
+  auto compute_q = std::get<0>(at::native::_parse_qr_piv_mode(mode));
+  linalg_qr_out_helper(A, compute_q, Q, R, [&](const Tensor& QR, const Tensor& tau) {
     const auto n = A.size(-1);
-    const auto k = std::min(m, n);
-
-    auto [compute_q, reduced_mode] = at::native::_parse_qr_piv_mode(mode);
-
-    // tau
-    auto tau_shape = DimVector(A.sizes().slice(0, A.dim() - 1));
-    tau_shape.back() = k;
-    auto tau = A.new_empty(tau_shape);
-
-    // Buffer = Q or R or auxiliary
-    Tensor QR;
-    if (compute_q && Q.size(-1) == n) { // reduced
-        QR = Q;
-        QR.copy_(A);
-    } else if (R.size(-2) == m) { // complete
-        QR = R;
-        QR.copy_(A);
-    } else {
-        QR = at::native::cloneBatchedColumnMajor(A);
-    }
-
     auto jpvt_shape = DimVector(A.sizes().slice(0, A.dim() - 1));
     jpvt_shape.back() = n;
     // geqp3 treats a nonzero jpvt[j] on input as "column j is fixed and goes first",
     // so jpvt must be zero-initialized for all columns to be free to pivot.
     Tensor jpvt = at::zeros(jpvt_shape, A.options().dtype(at::kInt));
 
-    // ----- GEQP3 (pivoted QR) -----
     geqp3_stub(A.device().type(), QR, tau, jpvt);
 
-    // ----- Extract P -----
     // jpvt is 1-indexed. LAPACK's geqp3 quick-return path for m == 0 does not
     // populate jpvt, so fall back to the identity permutation in that case.
-    if (m == 0) {
-        P.copy_(at::arange(n, P.options()));
+    if (A.size(-2) == 0) {
+      P.copy_(at::arange(n, P.options()));
     } else {
-        P.copy_(jpvt);
-        P.sub_(1);
+      P.copy_(jpvt);
+      P.sub_(1);
     }
-
-    // ----- Extract R -----
-    if (QR.is_alias_of(R)) {
-        if (compute_q) {
-          // If the result didn't fit in Q and compute_q == true is because Q is not of size m x n (i.e. it's of size m x m)
-          TORCH_INTERNAL_ASSERT(Q.size(-1) == m);
-          if (m < n) {
-            Q.copy_(QR.slice(-1, 0, m));
-          } else {
-            Q.slice(-1, 0, n).copy_(QR);
-          }
-        }
-
-        R.triu_();
-    } else {
-        at::triu_out(const_cast<Tensor&>(R), QR.slice(-2, 0, n));
-    }
-
-    // ----- Build Q -----
-    if (compute_q) {
-        orgqr_stub(A.device().type(), const_cast<Tensor&>(Q), tau);
-    }
+  });
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eigh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
