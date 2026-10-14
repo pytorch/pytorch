@@ -4,6 +4,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/Exception.h>
 #include <c10/util/strides.h>
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>

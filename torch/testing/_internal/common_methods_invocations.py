@@ -9792,31 +9792,42 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
             torch.bfloat16,  # out_dtype
         )
     )
-    # two e4m3 rowwise
-    mat1 = make_mat_e4m3((M, K))
-    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
-    scale1 = make_scale((M, 1))
-    scale2 = make_scale((1, N))
-    samples.append(
-        SampleInput(
-            mat1,
-            mat2,
-            [scale1, ],
-            [ScalingType.RowWise, ],
-            [SwizzleType.NO_SWIZZLE, ],
-            [scale2, ],
-            [ScalingType.RowWise, ],
-            [SwizzleType.NO_SWIZZLE, ],
-            None,  # bias
-            torch.bfloat16,  # out_dtype
+    rowwise_supported = True
+    if torch.device(device).type == "cuda" and not torch.version.hip:
+        dmajor, dminor = torch.cuda.get_device_capability(torch.device(device))
+        cuda_version = _get_torch_cuda_version()
+        # Gate samples as the CUTLASS kernel in RowwiseScaledMM.cu isn't built on Windows
+        # (BUILD_ROWWISE_FP8_KERNEL is gated on !defined(_WIN32)). Mirrors the CUTLASS vs cuBLAS
+        # dispatch in _scaled_rowwise_rowwise() (aten/src/ATen/native/cuda/ScaledBlas.cpp); the
+        # scales below are 2-D so the !sizes().empty() check is omitted here.
+        is_cutlass_path = dmajor < 9 or cuda_version < (12, 9) or dmajor >= 10
+        rowwise_supported = not (is_cutlass_path and IS_WINDOWS)
+    if rowwise_supported:
+        # two e4m3 rowwise
+        mat1 = make_mat_e4m3((M, K))
+        mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
+        scale1 = make_scale((M, 1))
+        scale2 = make_scale((1, N))
+        samples.append(
+            SampleInput(
+                mat1,
+                mat2,
+                [scale1, ],
+                [ScalingType.RowWise, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                [scale2, ],
+                [ScalingType.RowWise, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                None,  # bias
+                torch.bfloat16,  # out_dtype
+            )
         )
-    )
     M, K, N = 256, 512, 768
     mat1 = make_mat_e4m3((M, K))
     mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
 
     if torch.device(device).type == "cuda":
-        dmajor, dminor = torch.cuda.get_device_capability()
+        dmajor, dminor = torch.cuda.get_device_capability(torch.device(device))
 
         # Blockwise scaling requires cublasLt >= 12.9 (CUDA 12.9+)
         # See: https://github.com/pytorch/pytorch/issues/172227
@@ -12295,6 +12306,15 @@ op_db: list[OpInfo] = [
                # torch-xpu-ops/issues/4321
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
                             dtypes=(torch.int64,)),
+               # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_strided_layout',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestTorchFunctionRedispatchOpsDevice', 'test_redispatch',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
 
                # MPS arange does not support complex dtypes yet
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
@@ -23748,6 +23768,11 @@ python_ref_db = [
         "_refs.arange",
         torch_opinfo_name="arange",
         skips=(
+            # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='xpu',
+                         dtypes=(torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='xpu',
+                         dtypes=(torch.complex64, torch.complex128)),
             # Tests that assume input is a tensor or sequence of tensors
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
