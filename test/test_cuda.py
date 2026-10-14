@@ -102,7 +102,6 @@ from torch.testing._internal.common_utils import (
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
     skipIfRocmArch,
-    skipIfRocmVersionAtLeast,
     skipIfRocmVersionInRange,
     skipIfRocmVersionLessThan,
     slowTest,
@@ -151,6 +150,27 @@ if TEST_CUDA:
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
     TEST_BF16 = torch.cuda.is_bf16_supported()
+
+
+def skipIfNonPrimaryRocmPartition(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if TEST_WITH_ROCM and TEST_PYNVML:
+            import amdsmi
+
+            handle = torch.cuda._get_amdsmi_handler()
+            try:
+                kfd_info = amdsmi.amdsmi_get_gpu_kfd_info(handle)
+            except (AttributeError, amdsmi.AmdSmiException):
+                kfd_info = {}
+            partition = kfd_info.get("current_partition_id", 0)
+            if isinstance(partition, int) and partition != 0:
+                msg = f"no full-GPU amdsmi metrics on partition {partition}"
+                raise unittest.SkipTest(msg)
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
 
 _cycles_per_ms = None
 
@@ -208,6 +228,10 @@ def _check_allocator_settings_on_tear_down(test_case):
     # Regression check: no test in `test_case` should leave the runtime
     # expandable_segments knob mismatched against the suite's env-derived
     # baseline. This should be called in the class's `tearDown` method.
+    if TEST_CUDAMALLOCASYNC:
+        # _snapshot() intentionally raises on the cudaMallocAsync backend, and
+        # expandable_segments does not apply to it.
+        return
     md = torch.cuda.memory._snapshot()["allocator_settings"]
     test_case.assertEqual(md["expandable_segments"], EXPANDABLE_SEGMENTS)
 
@@ -8713,7 +8737,7 @@ print(value, end="")
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
-    @skipIfRocmArch(MI350_ARCH)
+    @skipIfNonPrimaryRocmPartition
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
@@ -8772,9 +8796,8 @@ print(value, end="")
                 amdsmi.amdsmi_get_power_info.return_value = power_info
                 self.assertEqual(torch.cuda.power_draw(), expected)
 
-    @skipIfRocmVersionAtLeast([10, 1])  # ROCM-30651
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
-    @skipIfRocmArch(MI350_ARCH)
+    @skipIfNonPrimaryRocmPartition
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
@@ -9706,6 +9729,90 @@ for args in ((a, b), (a, b, False)):
         cmd = [sys.executable, "-c", script]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+
+    @unittest.skipUnless(TEST_CUDAMALLOCASYNC, "requires cudaMallocAsync")
+    def test_mempool_cudamallocasync(self):
+        pool = torch.cuda.MemPool(use_on_oom=False, no_split=True)
+        self.assertEqual(pool.use_count(), 1)
+        for _ in range(2):
+            with torch.cuda.use_mem_pool(pool):
+                self.assertEqual(pool.use_count(), 2)
+                x = torch.ones(4, device="cuda")
+            self.assertEqual(pool.use_count(), 1)
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, pool=pool):
+            y = x + 1
+        self.assertEqual(pool.use_count(), 1)
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertTrue(torch.equal(y, torch.full((4,), 2.0, device="cuda")))
+        g.reset()
+        self.assertEqual(pool.use_count(), 1)
+
+    @serialTest()
+    @unittest.skipUnless(TEST_CUDAMALLOCASYNC, "requires cudaMallocAsync")
+    def test_mempool_cudamallocasync_custom_allocator(self):
+        allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
+        called_dummy_alloc.value = 0
+        called_dummy_free.value = 0
+        pool = None
+        x = None
+        try:
+            pool = torch.cuda.MemPool(
+                allocator.allocator(), use_on_oom=False, no_split=True
+            )
+            self.assertEqual(pool.use_count(), 1)
+            with torch.cuda.use_mem_pool(pool):
+                self.assertEqual(pool.use_count(), 2)
+                x = torch.ones(4, device="cuda")
+            self.assertEqual(pool.use_count(), 1)
+            self.assertEqual(x.numel(), 4)
+            self.assertEqual(called_dummy_alloc.value, 0)
+        finally:
+            x = None
+            pool = None
+            torch.cuda.synchronize()
+            final_dummy_alloc = called_dummy_alloc.value
+            final_dummy_free = called_dummy_free.value
+            called_dummy_alloc.value = 0
+            called_dummy_free.value = 0
+        self.assertEqual(final_dummy_alloc, 0)
+        self.assertEqual(final_dummy_free, 0)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "already running under cudaMallocAsync")
+    @unittest.skipIf(TEST_WITH_ROCM, "hipMallocAsync path not validated")
+    def test_mempool_cudamallocasync_subprocess(self):
+        env = os.environ.copy()
+        env["PYTORCH_ALLOC_CONF"] = "backend:cudaMallocAsync"
+        env.pop("PYTORCH_CUDA_ALLOC_CONF", None)
+        torch_parent = os.path.dirname(os.path.dirname(torch.__file__))
+        env["PYTHONPATH"] = os.pathsep.join(
+            dict.fromkeys(filter(None, [torch_parent, *sys.path]))
+        )
+        module = os.path.splitext(os.path.basename(__file__))[0]
+        tests = [
+            f"{module}.TestMemPool.test_mempool_cudamallocasync",
+            f"{module}.TestMemPool.test_mempool_cudamallocasync_custom_allocator",
+        ]
+        child_code = (
+            "import sys, unittest; "
+            "sys.modules['torchvision'] = None; "
+            "import torch; "
+            "assert torch.cuda.get_allocator_backend() == 'cudaMallocAsync'; "
+            f"suite = unittest.defaultTestLoader.loadTestsFromNames({tests!r}); "
+            "result = unittest.TextTestRunner(verbosity=2).run(suite); "
+            "raise SystemExit(0 if result.wasSuccessful() else 1)"
+        )
+        subprocess.check_call(
+            [sys.executable, "-S", "-c", child_code],
+            env=env,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            timeout=600,
+        )
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
@@ -12204,6 +12311,42 @@ print(json.dumps([
         torch.manual_seed(42)
         a_reg = torch.randn(128, 128, device="cuda")
         self.assertEqual(a_uvm, a_reg)
+
+    @requires_cuda_python_bindings
+    def test_use_uvm_oom_uses_caching_allocator_recovery(self):
+        from cuda.bindings import runtime
+
+        oom = (runtime.cudaError_t.cudaErrorMemoryAllocation, 0)
+        with patch.object(runtime, "cudaMallocManaged", return_value=oom):
+            with torch.cuda._use_uvm():
+                with self.assertRaises(torch.OutOfMemoryError):
+                    torch.empty(1, dtype=torch.uint8, device="cuda")
+
+    @requires_cuda_python_bindings
+    def test_use_uvm_advice_error_frees_allocation(self):
+        from cuda.bindings import runtime
+
+        success = runtime.cudaError_t.cudaSuccess
+        ptr = 0x1234
+        with (
+            patch.object(runtime, "cudaMallocManaged", return_value=(success, ptr)),
+            patch.object(runtime, "cudaDeviceGetAttribute", return_value=(success, 1)),
+            patch.object(
+                runtime,
+                "cudaMemAdvise",
+                return_value=(runtime.cudaError_t.cudaErrorInvalidValue,),
+            ),
+            patch.object(runtime, "cudaFree", return_value=(success,)) as cuda_free,
+        ):
+            with torch.cuda._use_uvm():
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"cudaMemAdvise\(SetPreferredLocation\).*"
+                    r"(cudaErrorInvalidValue|invalid argument)",
+                ):
+                    torch.empty(1, dtype=torch.uint8, device="cuda")
+
+        cuda_free.assert_called_once_with(ptr)
 
     @requires_cuda_python_bindings
     def test_use_uvm_backward(self):
