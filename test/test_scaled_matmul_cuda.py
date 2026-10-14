@@ -39,7 +39,6 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCUDA,
     onlyOn,
     e4m3_type,
     e5m2_type,
@@ -65,6 +64,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_CUDA,
+    HardwareClassification,
     TestCase,
 )
 from torch.testing._internal.common_quantized import (
@@ -725,6 +725,25 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
 
 
 class TestFP8Matmul(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_pack_uint4(self):
+        """
+        Verify that given a tensor with high precision values [val0, val1],
+        the x2 packed representation is val1:val0 (from MSB to LSB), and
+        not val0:val1.
+
+        Note that the packing function is private to this file, but it's still
+        good to test that we are packing in the expected way.
+        """
+        hp_data = torch.tensor([0b00000010, 0b00001011], dtype=torch.uint8)
+        lp_data_actual = pack_uint4(hp_data)
+        lp_data_expected = torch.tensor([0b10110010], dtype=torch.uint8)
+        torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
+
+
+class TestFP8MatmulDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
@@ -1668,21 +1687,6 @@ class TestFP8Matmul(TestCase):
         out_fp8 = f(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
-
-    @skipXPU
-    def test_pack_uint4(self):
-        """
-        Verify that given a tensor with high precision values [val0, val1],
-        the x2 packed representation is val1:val0 (from MSB to LSB), and
-        not val0:val1.
-
-        Note that the packing function is private to this file, but it's still
-        good to test that we are packing in the expected way.
-        """
-        hp_data = torch.tensor([0b00000010, 0b00001011], dtype=torch.uint8)
-        lp_data_actual = pack_uint4(hp_data)
-        lp_data_expected = torch.tensor([0b10110010], dtype=torch.uint8)
-        torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
 
     @skipIfRocm
     @onlyOn(["cuda", "xpu"])
@@ -2713,6 +2717,7 @@ class TestFP8Matmul(TestCase):
 
 
 class TestFP8MatmulCudaOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
 
     def assert_scaled_addmm_inplace(self, input, expected, args, **kwargs):
         """Check the identity, storage, version, and value contract."""
@@ -2743,7 +2748,6 @@ class TestFP8MatmulCudaOnly(TestCase):
         self.assertEqual(captured_input.data_ptr(), data_ptr)
         self.assertEqual(captured_input, expected, atol=5e-2, rtol=5e-2)
 
-    @onlyCUDA
     @unittest.skipIf(PLATFORM_SUPPORTS_FP8 or not torch.cuda.is_available(), f8_msg)
     def test_error_message_fp8_pre_sm89(self, device) -> None:
         (k, l, m) = (16, 48, 32)
@@ -2757,7 +2761,6 @@ class TestFP8MatmulCudaOnly(TestCase):
             lambda: scaled_mm_wrap(x, y, scale_a, scale_b, out_dtype=torch.float32),
         )
 
-    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_cudagraph(self, device):
@@ -2767,7 +2770,6 @@ class TestFP8MatmulCudaOnly(TestCase):
         args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
         self.assert_scaled_addmm_cudagraph(input, scaled_addmm(input, *args), args)
 
-    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not IS_SM90, "cuBLASLt accumulation requires SM90")
     @unittest.skipIf(
@@ -2816,7 +2818,6 @@ class TestFP8MatmulCudaOnly(TestCase):
         )
         self.assertEqual(actual, expected, atol=5e-2, rtol=5e-2)
 
-    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
@@ -2854,7 +2855,6 @@ class TestFP8MatmulCudaOnly(TestCase):
 
         self.assert_scaled_addmm_inplace(input.clone(), actual, args, **kwargs)
 
-    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("two_level", [False, True])
@@ -2919,7 +2919,6 @@ class TestFP8MatmulCudaOnly(TestCase):
             self.assertIs(compiled, compiled_input)
             self.assertEqual(compiled, actual, atol=5e-2, rtol=5e-2)
 
-    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("wrap_v2", [True, False])
@@ -2952,7 +2951,6 @@ class TestFP8MatmulCudaOnly(TestCase):
                 wrap_v2=wrap_v2,
             )
 
-    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(IS_SM90, "DeepSeek style (1x128, 128x128) blockwise scaling works on SM90 (Hopper)")
     @unittest.skipIf(
@@ -3011,7 +3009,6 @@ class TestFP8MatmulCudaOnly(TestCase):
                 out_dtype=output_dtype,
             )
 
-    @onlyCUDA
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
@@ -3086,7 +3083,6 @@ class TestFP8MatmulCudaOnly(TestCase):
                     self.assertNotEqual(no_carveout, carveout_66)
                     self.assertNotEqual(carveout_66, carveout_0)
     
-    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [2048, 2049])
@@ -3165,7 +3161,6 @@ class TestFP8MatmulCudaOnly(TestCase):
         # Assert outputs are close
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
-    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [16640])
@@ -3320,7 +3315,6 @@ class TestFP8MatmulCudaOnly(TestCase):
         # Assert outputs are close.
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
     
-    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_scale_result(self, device) -> None:
         torch.manual_seed(0)
@@ -3358,7 +3352,6 @@ class TestFP8MatmulCudaOnly(TestCase):
         )
         self.assertEqual(high_precision, unscaled)
 
-    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
@@ -3383,7 +3376,6 @@ class TestFP8MatmulCudaOnly(TestCase):
 
         self.assert_scaled_addmm_inplace(input.clone(), actual, args, **kwargs)
 
-    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_inplace_tunableop(self, device):
@@ -3413,7 +3405,6 @@ class TestFP8MatmulCudaOnly(TestCase):
             torch.cuda.tunable.tuning_enable(prev_tuning)
             torch.cuda.tunable.enable(prev_enabled)
 
-    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_wgrad_accumulation(self, device):
@@ -3433,7 +3424,6 @@ class TestFP8MatmulCudaOnly(TestCase):
         )
         self.assert_scaled_addmm_inplace(grad, reference.to(grad.dtype), args_b)
 
-    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("inplace", [False, True])
@@ -3459,7 +3449,6 @@ class TestFP8MatmulCudaOnly(TestCase):
             (mat1.float() @ mat2.float()).to(input.dtype),
         )
 
-    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("inplace", [False, True])
@@ -3475,7 +3464,6 @@ class TestFP8MatmulCudaOnly(TestCase):
 
         self.assertEqual(op(input.clone(), *args, beta=2), input * 2)
 
-    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("fake", [False, True])
@@ -3509,7 +3497,6 @@ class TestFP8MatmulCudaOnly(TestCase):
                         result, scaled_addmm(input, *args), atol=5e-2, rtol=5e-2
                     )
 
-    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_validation(self, device):
@@ -3582,7 +3569,6 @@ class TestFP8MatmulCudaOnly(TestCase):
                     ScalingType.RowWise,
                 )
 
-    @onlyCUDA
     @skipIfRocm
     def test_scaled_addmm_fake_tensor(self, device):
         with FakeTensorMode():
@@ -3599,7 +3585,6 @@ class TestFP8MatmulCudaOnly(TestCase):
 
             self.assertIs(scaled_addmm_(input, *args), input)
 
-    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_fullgraph(self, device):
@@ -3642,7 +3627,6 @@ class TestFP8MatmulCudaOnly(TestCase):
         self.assertIn("_scaled_addmm_", source)
         self.assertNotIn("triton_poi_fused_copy", source)
 
-    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipCUDAIfNotRocm
     @skipIfTorchDynamo("error message checks rely on eager exception types")
@@ -3679,7 +3663,6 @@ class TestFP8MatmulCudaOnly(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @skipCUDAIfNotRocm
     @skipIfTorchDynamo("error message checks rely on eager exception types")
@@ -3716,7 +3699,7 @@ class TestFP8MatmulCudaOnly(TestCase):
             )
 
 
-instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(TestFP8MatmulDevice, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestFP8MatmulCudaOnly, globals(), only_for=("cuda",))
 
 if __name__ == '__main__':
