@@ -29,7 +29,6 @@ except ImportError:
 if TYPE_CHECKING:
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
     from torch.cuda import _POOL_HANDLE, MemPool
-    from torch.distributed._collective_annotations import CollectiveAnnotationHandle
     from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
     from torch.utils.hooks import RemovableHandle
 
@@ -1311,7 +1310,6 @@ class graph:
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
         self._enable_annotations = enable_annotations
-        self._collective_hooks: CollectiveAnnotationHandle | None = None
         self.check_input_liveness = check_input_liveness
 
     def __enter__(self) -> None:
@@ -1454,10 +1452,14 @@ class graph:
                     register_graph_capture_annotation_hooks,
                 )
 
-                self._collective_hooks = register_graph_capture_annotation_hooks()
+                register_graph_capture_annotation_hooks(self)
         except BaseException:
-            if self._collective_hooks is not None:
-                self._collective_hooks.remove()
+            if self._enable_annotations and torch.distributed.is_available():
+                from torch.distributed._collective_annotations import (
+                    unregister_collective_annotation_hooks,
+                )
+
+                unregister_collective_annotation_hooks(self)
             _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
             try:
@@ -1505,8 +1507,12 @@ class graph:
             # Annotation recording is capture-scoped; clear it unconditionally. disarm() is
             # idempotent, so repeating it here just covers a capture that raised before the
             # call above (it must not stay armed past this context either way).
-            if self._collective_hooks is not None:
-                self._collective_hooks.remove()
+            if self._enable_annotations and torch.distributed.is_available():
+                from torch.distributed._collective_annotations import (
+                    unregister_collective_annotation_hooks,
+                )
+
+                unregister_collective_annotation_hooks(self)
             _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
