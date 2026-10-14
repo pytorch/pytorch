@@ -1674,13 +1674,21 @@ class GemmSm100(GemmTmaBase):
                     # Split-K (serial/parallel): only the finalizing split runs the
                     # epilogue, so only its tiles consume C — skip the loads (and the
                     # pipeline slots) for non-finalizing splits, symmetric with the
-                    # epilogue warps' skip in epilogue_split_k. The const_expr prefix
-                    # folds at trace time (quack.dsl.mixed_constexpr_if), so
-                    # split_k == 1 codegen has no dynamic if at all.
-                    if (
-                        const_expr(self.split_k == 1 or self.split_k_mode == SplitKMode.SEPARATE)
-                        or split_idx == self.split_k - 1
+                    # epilogue warps' skip in epilogue_split_k. split_k == 1 codegen
+                    # has no dynamic if at all.
+                    if const_expr(
+                        self.split_k == 1 or self.split_k_mode == SplitKMode.SEPARATE
                     ):
+                        for epi_idx in cutlass.range(epi_tile_num, unroll=1):
+                            epi_pipeline.producer_acquire(epi_producer_state)
+                            copy_epi_load(
+                                src_idx=epi_load_layout.get_hier_coord(epi_idx),
+                                producer_state=epi_producer_state,
+                            )
+                            # Epi pipeline's producer commit is a NOP
+                            epi_pipeline.producer_commit(epi_producer_state)
+                            epi_producer_state.advance()
+                    elif split_idx == self.split_k - 1:
                         for epi_idx in cutlass.range(epi_tile_num, unroll=1):
                             epi_pipeline.producer_acquire(epi_producer_state)
                             copy_epi_load(
