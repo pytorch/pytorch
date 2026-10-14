@@ -1,0 +1,62 @@
+{{def_kernel("A", "B")}}
+    M = {{size("A", 0)}}
+    N = {{size("B", 1)}}
+    K = {{size("A", 1)}}
+    if M * N == 0:
+        return
+    stride_am = {{stride("A", 0)}}
+    stride_ak = {{stride("A", 1)}}
+    stride_bk = {{stride("B", 0)}}
+    stride_bn = {{stride("B", 1)}}
+
+    # BMG persistent GEMM: GROUP_M-swizzled persistent tile loop, 2D block IO via
+    # tensor descriptors. The inner stride is the literal 1 so the backend can
+    # prove contiguity; a non-constexpr unit stride falls back to SLM staging.
+    a_desc = tl.make_tensor_descriptor(
+        base=A,
+        shape=[M, K] if A_ROW_MAJOR else [K, M],
+        strides=[stride_am, 1] if A_ROW_MAJOR else [stride_ak, 1],
+        block_shape=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
+    )
+    b_desc = tl.make_tensor_descriptor(
+        base=B,
+        shape=[K, N] if B_ROW_MAJOR else [N, K],
+        strides=[stride_bk, 1] if B_ROW_MAJOR else [stride_bn, 1],
+        block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
+    )
+
+    start_pid = tl.program_id(0).to(INDEX_DTYPE)
+    grid_m = tl.cdiv(M, BLOCK_M)
+    grid_n = tl.cdiv(N, BLOCK_N)
+    num_tiles = grid_m * grid_n
+    width = GROUP_M * grid_n
+
+    for tile_id in tl.range(start_pid, num_tiles, NUM_SMS):
+        group_id = tile_id // width
+        group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
+        pid_m = group_id * GROUP_M + (tile_id % group_size)
+        pid_n = (tile_id % width) // (group_size)
+        tl.assume(pid_m >= 0)
+        tl.assume(pid_n >= 0)
+
+        rm_desc = (pid_m * BLOCK_M).to(tl.int32)
+        rn_desc = (pid_n * BLOCK_N).to(tl.int32)
+
+        acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+        for k_idx in range(0, tl.cdiv(K, BLOCK_K)):
+            rk_desc = (k_idx * BLOCK_K).to(tl.int32)
+            a = a_desc.load([rm_desc, rk_desc] if A_ROW_MAJOR else [rk_desc, rm_desc])
+            b = b_desc.load([rk_desc, rn_desc] if B_ROW_MAJOR else [rn_desc, rk_desc])
+            acc = tl.dot(
+                a if A_ROW_MAJOR else a.T,
+                b if B_ROW_MAJOR else b.T,
+                acc,
+                out_dtype=ACC_TYPE,
+            )
+
+        rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M).to(INDEX_DTYPE)
+        rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N).to(INDEX_DTYPE)
+        idx_m = rm[:, None]
+        idx_n = rn[None, :]
+        mask = (idx_m < M) & (idx_n < N)
+        {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=8, val_shape=("BLOCK_M", "BLOCK_N"))}}
