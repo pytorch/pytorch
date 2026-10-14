@@ -1101,7 +1101,14 @@ void launch_vectorized_layer_norm_kernel(
     //constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     const int warp_size = at::cuda::warp_size();
-    const dim3 threads(warp_size, num_threads() / warp_size, 1);
+    // Only N / vec_size threads have a vector to read. For narrow rows (e.g. per-head
+    // q/k norms) launch just enough warps to cover them, instead of idle warps that
+    // still take part in the cross-warp reduction.
+    int threads_y = num_threads() / warp_size;
+    while (threads_y > 1 && (threads_y / 2) * warp_size >= N / vec_size) {
+      threads_y /= 2;
+    }
+    const dim3 threads(warp_size, threads_y, 1);
     dim3 blocks(M);
 
 #ifdef USE_ROCM
@@ -1130,10 +1137,10 @@ void launch_vectorized_layer_norm_kernel(
     T* Y_data2 = Y_data;
 
     while (remaining > 0) {
-      X_data2 += N * blocks.x;
+      X_data2 += static_cast<int64_t>(N) * blocks.x;
       mean_data2 += blocks.x;
       rstd_data2 += blocks.x;
-      Y_data2 += N * blocks.x;
+      Y_data2 += static_cast<int64_t>(N) * blocks.x;
 
       blocks.x = (remaining > blocks.x) ? blocks.x : remaining;
 
