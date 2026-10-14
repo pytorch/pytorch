@@ -1010,7 +1010,6 @@ class TestInductorConfigOverrideIntegration(TestCase):
 instantiate_device_type_tests(
     TestInductorConfigOverrideIntegration,
     globals(),
-    except_for="hpu",
     allow_xpu=True,
 )
 
