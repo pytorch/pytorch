@@ -17409,7 +17409,7 @@ if __name__ == '__main__':
     def test_batchnorm_cudnn_half(self):
         # THNN
         input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device="cuda", requires_grad=True)
-        m = nn.BatchNorm2d(3).half().to("cuda")
+        m = nn.BatchNorm2d(3).half().cuda()
         thnn_output = m(input)
         thnn_output.sum().backward()
         thnn_input_grad = input.grad.data.clone()
