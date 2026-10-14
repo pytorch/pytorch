@@ -2,6 +2,7 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 

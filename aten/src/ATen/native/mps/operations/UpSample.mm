@@ -1,5 +1,6 @@
 //  Copyright © 2023 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/ceil_div.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/UpSample.h>
