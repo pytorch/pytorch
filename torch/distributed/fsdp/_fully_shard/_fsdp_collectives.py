@@ -460,9 +460,10 @@ def _get_param_all_gather_inputs(
 # chunk has split_sizes[i] elements for outputs[i], and the ranks' chunks, viewed
 # as (outer_sizes[i], -1), are concatenated along dim 1 of outputs[i] viewed the
 # same way. Outputs with outer_sizes[i] == 1 may be larger and then fill only a
-# prefix. A uint8 all_gather_output has split_sizes in bytes. fn may only write
-# outputs, whose version counters FSDP preserves; FSDP skips it for a single rank
-# or an empty all-gather.
+# prefix. A uint8 all_gather_output has split_sizes in bytes, while outputs keep
+# their dtypes. fn may only write outputs, whose version counters FSDP preserves,
+# and must not keep its arguments. FSDP skips it for a single rank or an empty
+# all-gather.
 def _default_all_gather_output_fn(
     all_gather_output: torch.Tensor,
     outputs: list[torch.Tensor],
@@ -556,9 +557,10 @@ def foreach_all_gather_copy_out(
 # copy_in = fn(unsharded_grads, shard_dims=..., world_size=...) runs before FSDP
 # allocates the reduce-scatter input and may replace entries of unsharded_grads.
 # copy_in(reduce_scatter_input) then fills that flat buffer so that, viewed as
-# (world_size, -1), row r holds each gradient's padded shard r, cast to the buffer's
-# dtype. Both run on the current stream; keep neither. The keywords make callbacks
-# with the 2.15 signature fail.
+# (world_size, -1), row r holds each gradient's padded shard r in order, cast to the
+# buffer's dtype. Both run on the current stream; FSDP frees copy_in and the
+# gradients afterward, so keep neither. The keywords make callbacks with the 2.15
+# signature fail.
 def _default_reduce_scatter_input_fn(
     unsharded_grads: list[torch.Tensor],
     *,
