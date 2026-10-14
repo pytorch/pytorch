@@ -424,7 +424,16 @@ def _str_intern(inp, *, tensor_contents=None):
     # This is used to extract the primal value and thus disable the forward AD
     # within this function.
     # TODO(albanD) This needs to be updated when more than one level is supported
-    self, tangent = torch.autograd.forward_ad.unpack_dual(inp)
+    if torch._C._dispatch_tls_is_dispatch_key_excluded(
+        torch._C.DispatchKey.ADInplaceOrView
+    ):
+        # Below ADInplaceOrView (e.g. a __torch_dispatch__ handler running inside an
+        # autograd kernel, where repr can be called implicitly to format an error)
+        # forward AD is not tracked and _fw_primal would reach its inference-mode-only
+        # backend stub.
+        self, tangent = inp, None
+    else:
+        self, tangent = torch.autograd.forward_ad.unpack_dual(inp)
 
     # Note [Print tensor device]:
     # A general logic here is we only print device when it doesn't match
