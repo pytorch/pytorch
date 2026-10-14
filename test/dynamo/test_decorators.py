@@ -1188,6 +1188,32 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager")(inp), inp - 1)
 
+    def test_export_keeps_nonrecursive_disable_wrapper_skipped(self):
+        # export(mod) calls remove_from_cache(mod), which resolves
+        # mod.forward.__code__ to the code every disable(recursive=False)
+        # wrapper shares.
+        class Mod(torch.nn.Module):
+            @torch._dynamo.disable(recursive=False)
+            def forward(self, x):
+                return self.inner(x) * 2
+
+            def inner(self, x):
+                return x.cos() + 1
+
+        mod = Mod()
+        x = torch.randn(4)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Non-recursive torch.compiler.disable is not supported with torch.export",
+        ):
+            torch._dynamo.export(mod)(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(mod, backend=cnts)(x), mod(x))
+        # Only inner() is compiled; forward() itself stays eager.
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
     def test_fullgraph_eval_frame_override(self):
         # NOTE it is NOT enough to just call a torch.compile'd function in a compiled
         # function returned by the backend - this is because we apply disable(recursive=True)
