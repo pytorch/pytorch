@@ -3513,6 +3513,9 @@ class GuardManager {
         _source(std::move(source)),
         _is_dict(py::isinstance<py::dict>(example_value)),
         _is_immutable(is_immutable_object(example_value)) {
+    if (_is_dict) {
+      _dict_tag = get_dict_version_unchecked(example_value.ptr());
+    }
     py::object typ = py::type::of(example_value);
     py::object weakref_mod = py::module_::import("weakref");
     _weak_type = weakref_mod.attr("ref")(typ);
@@ -4350,9 +4353,6 @@ class GuardManager {
 
   bool _is_dict = false;
   bool _is_immutable = false;
-  // The example value a manager is built from need not satisfy its guards
-  // (e.g. when guards are reconstructed from a serialized artifact), so only a
-  // successful guard traversal may warm this cache.
   uint64_t _dict_tag{0};
   uint64_t _max_saved_pointers_for_recursive_dict_tags_check = 0;
 
