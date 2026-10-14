@@ -1033,7 +1033,13 @@ class _TorchDynamoContext:
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.prior = set_eval_frame(None)
-        self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
+        self.cleanup_fns = []
+        try:
+            for enter in self.enter_exit_hooks:
+                self.cleanup_fns.append(enter())
+        except BaseException:
+            self._restore_ctx_state(None)
+            raise
         self.prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
             _is_skip_guard_eval_unsafe_stance()
         )
@@ -1048,13 +1054,20 @@ class _TorchDynamoContext:
         if self.prior is unset:
             raise AssertionError("__exit__ called without matching __enter__")
         set_eval_frame(None)
-        set_skip_guard_eval_unsafe(self.prior_skip_guard_eval_unsafe)
-        for cleanup in self.cleanup_fns:
-            cleanup()
-        self.cleanup_fns.clear()
-        _maybe_set_eval_frame(_callback_from_stance(self.prior))
-        self.prior = unset
+        self._restore_ctx_state(self.prior_skip_guard_eval_unsafe)
         return None
+
+    def _restore_ctx_state(self, prior_skip_guard_eval_unsafe: bool | None) -> None:
+        try:
+            if prior_skip_guard_eval_unsafe is not None:
+                set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
+        finally:
+            try:
+                _run_cleanups_lifo(self.cleanup_fns)
+            finally:
+                self.cleanup_fns.clear()
+                _maybe_set_eval_frame(_callback_from_stance(self.prior))
+                self.prior = unset
 
     def __call__(self, fn: Any) -> Any:
         if isinstance(fn, staticmethod):
