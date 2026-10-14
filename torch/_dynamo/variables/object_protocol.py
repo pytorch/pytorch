@@ -47,7 +47,12 @@ from ..source import (
     TypeMROSource,
     TypeSource,
 )
-from ..utils import specialize_symnode
+from ..utils import (
+    get_type_mro_no_user_code,
+    iter_mro_static_attrs,
+    iter_mro_static_dicts,
+    specialize_symnode,
+)
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
@@ -97,7 +102,7 @@ def vt_identity_compare(
     # A bound method is materialized afresh by every attribute access, so it
     # behaves the same way: `obj.m is obj.m` is False in CPython. So is a device
     # read off a tensor: `x.device is x.device` is False there too.
-    from .dicts import ConstDictVariable
+    from .dicts import ConstDictVariable, MappingProxyVariable
     from .exception import ExceptionVariable, TracebackVariable
     from .functions import UserMethodVariable
     from .lists import ListVariable
@@ -108,6 +113,14 @@ def vt_identity_compare(
         SetVariable,
     )
     from .tensor import CurrentDeviceVariable
+
+    if (
+        isinstance(left, MappingProxyVariable)
+        and isinstance(right, MappingProxyVariable)
+        and left.source is None
+        and right.source is None
+    ):
+        return ConstantVariable.create(False)
 
     if isinstance(
         left,
@@ -2207,9 +2220,8 @@ def mro_lookup(py_type: type, name: str) -> object:
     chain.  Returns the raw descriptor/value from the class __dict__,
     or NO_SUCH_SUBOBJ if not found.
     """
-    for base in py_type.__mro__:
-        if name in base.__dict__:
-            return base.__dict__[name]
+    for value in iter_mro_static_attrs(py_type, name):
+        return value
     return NO_SUCH_SUBOBJ
 
 
@@ -2220,7 +2232,7 @@ def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
     every MRO CPython computes. A metaclass overriding ``mro()`` can put
     something else there, so check rather than assume.
     """
-    if not idx and klass.__mro__[0] is klass:
+    if not idx and get_type_mro_no_user_code(klass)[0] is klass:
         return klass_source
     return GetItemSource(TypeMROSource(klass_source), idx)
 
@@ -2241,16 +2253,16 @@ def mro_attr_source(
     Returns None if *name* is absent from the whole MRO; callers decide whether
     that is an error.
     """
-    mro = klass.__mro__
-    for idx, base in enumerate(mro):
-        if name not in base.__dict__:
+    entries = tuple(iter_mro_static_dicts(klass))
+    for idx, (base, namespace) in enumerate(entries):
+        if name not in namespace:
             continue
 
         # Guard the classes we walked past, so the owner stays the owner if one
         # of them later gains *name*. Deduplicated by (id(klass), name): the
         # caller's TYPE_MATCH pins the MRO, so an id always means the same class.
         for absent_idx in range(idx):
-            absent_key = (id(mro[absent_idx]), name)
+            absent_key = (id(entries[absent_idx][0]), name)
             if absent_key in tx.output.guarded_mro_absent_keys:
                 continue
             tx.output.guarded_mro_absent_keys.add(absent_key)
