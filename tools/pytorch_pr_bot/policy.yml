@@ -1,0 +1,166 @@
+version: 2
+
+pr:
+  # Special case: automated dependency "bump" PRs.
+  #
+  # WHY: These bots open routine, high-volume dependency-bump PRs (e.g.
+  # "Bumps ROCm/rocm-systems from a0952b2 to 971dc69") that don't follow the
+  # human title/description conventions and don't need the full policy
+  # gate. Auto-approving them keeps the bot from blocking trusted automation and
+  # spamming "Not ready to Review" on every bump.
+  #
+  # If the PR author is one of these bot accounts, ALL policy checks are
+  # auto-approved (every row in the results table is marked Pass). The '[bot]'
+  # suffix on the GitHub login is matched automatically.
+  #
+  bump_bot_authors:
+    - assistant-librarian
+    - systems-assistant
+    - dependabot
+
+  # Require a meaningful description
+  description:
+    min_length: 30
+    # A PR must reference a JIRA ID or ISSUE ID (a key, number, or link).
+    # The separator is OPTIONAL and may be ':' or '-'. Either field accepts:
+    # a JIRA key (PREFIX-<number>), a number (with or without '#'), or a link.
+    # Any JIRA project key is accepted — not just one project.
+    # Valid examples:
+    #   JIRA ID : AITESTAUTO-6039
+    #   JIRA ID - #330
+    #   JIRA ID #330
+    #   ISSUE ID : AITESTUTO-3334
+    #   ISSUE ID - AITESTAUTO-3433
+    #   ISSUE ID : https://github.com/ROCm/TheRock-Infra/issues/1234
+    #
+    # ALTERNATIVELY, a GitHub closing keyword + issue reference is accepted.
+    # Keywords (case-insensitive, optional trailing colon):
+    #   close / closes / closed / fix / fixes / fixed / resolve / resolves / resolved
+    # The reference may be '#<number>' or '<org>/<repo>#<number>'.
+    # Valid examples:
+    #   Closes #10
+    #   Fixes octo-org/octo-repo#100
+    #   Resolves #10
+    #   resolves #123
+    #   resolves octo-org/octo-repo#100
+    #   Closes: #10
+    #   CLOSES #10
+    #   CLOSES: #10
+    #
+    # ALSO accepted (plain GitHub issue references, no keyword needed):
+    #   #123
+    #   https://github.com/<org>/<repo>/issues/123
+    issue_reference_patterns:
+      - '(?im)^\s*JIRA\s*ID\s*[:\-]?\s*(#?\d+|[A-Z][A-Z0-9]+-\d+|https?:\/\/\S+)'
+      - '(?im)^\s*ISSUE\s*ID\s*[:\-]?\s*(#?\d+|[A-Z][A-Z0-9]+-\d+|https?:\/\/\S+)'
+      # JIRA ID on a separate line — allows trailing spaces/tabs after the
+      # label and any number of blank lines before the key
+      # (e.g. "JIRA ID  \n\nAIRUNTIME-2352").
+      - '(?im)^[ \t]*JIRA[ \t]+ID[ \t]*\r?\n[ \t\r\n]*([A-Z][A-Z0-9]+-\d+)'
+      # ISSUE ID on a separate line — same flexibility as above.
+      - '(?im)^[ \t]*ISSUE[ \t]+ID[ \t]*\r?\n[ \t\r\n]*([A-Z][A-Z0-9]+-\d+|\d+)'
+      - '(?im)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*(?:[A-Za-z0-9._\-]+\/[A-Za-z0-9._\-]+)?#\d+'
+      # Bare GitHub issue reference, e.g. #123
+      - '(?m)(?:^|\s)#\d+\b'
+      # GitHub issue URL, e.g. https://github.com/org/repo/issues/123
+      - '(?i)https?:\/\/github\.com\/[^\/\s]+\/[^\/\s]+\/issues\/\d+'
+
+  # Unit test requirement:
+  #   - Doc/config-only PRs (e.g. .md, .txt, .yml, .ini) never need a unit test
+  #     and PASS automatically.
+  #   - PRs that change real source code (.py, .cpp, .js, ...) must include at
+  #     least one accompanying test file (e.g. test_xxx.py, test_xxx.cpp).
+  unit_tests:
+    # Source/code file extensions that REQUIRE an accompanying unit test.
+    code_extensions:
+      - .py
+      - .cpp
+      - .cc
+      - .cxx
+      - .c
+      - .h
+      - .hpp
+      - .js
+      - .ts
+      - .jsx
+      - .tsx
+      - .go
+      - .java
+      - .rb
+      - .rs
+    # A changed file is treated as a unit test if its basename matches one of
+    # these glob patterns (e.g. test_parser.py, parser_test.cpp, testing_x.py).
+    #
+    # TWO matching modes are supported:
+    #   1. BASENAME patterns (no '/' in the pattern): matched against the
+    #      filename only, regardless of where it lives in the repo.
+    #      e.g. 'test_*' matches 'tests/unit/test_foo.cpp'
+    #
+    #   2. PATH patterns (pattern contains '/'): matched against the full
+    #      file path from the repo root. Use these when tests live in a
+    #      dedicated directory but don't follow a special naming convention.
+    #      e.g. 'projects/hip-tests/**' matches any file under that directory,
+    #      including files named after the API they test (atomicAdd.cc, etc.).
+    #
+    # Downstream repos should add path patterns for their own test directories.
+    # Examples:
+    #   - '**/test/gtest/**'    — any file under a test/gtest/ subdirectory
+    #   - 'projects/hip-tests/**' — all of hip-tests (add in rocm-systems)
+    test_file_patterns:
+      - 'test_*'
+      - 'testing_*'
+      - '*_test.*'
+      - '*_tests.*'
+      - 'Test*'
+      # Path-based: any file under a 'test/gtest/' directory is a unit test
+      # (e.g. projects/miopen/test/gtest/unit_conv_solver_ConvWinoRageRxS.cpp).
+      - '**/test/gtest/**'
+      - '*_gtest.*'
+    # Unit tests are required for source code ANYWHERE in the repository — there
+    # are NO folder-based exemptions. A test file may also live in any folder;
+    # it is recognised by its name or path pattern, not its location alone.
+    # Doc/config files are still skipped by EXTENSION (they are simply not in
+    # `code_extensions`), not by path.
+    exempt_paths: []
+
+diff:
+  # Block risky / unwanted files
+  forbidden_paths:
+    - '**/*.pem'
+    - '**/*.key'
+    - '**/.env'
+    - '**/*.exe'
+    # Certificates / signing requests
+    - '**/*.crt'
+    - '**/*.cer'
+    - '**/*.p12'
+    - '**/*.pfx'
+    - '**/*.der'
+    - '**/*.csr'
+    # SSH private keys
+    - '**/id_rsa'
+    - '**/id_dsa'
+    - '**/id_ecdsa'
+    - '**/id_ed25519'
+    # GPG keys / signatures
+    - '**/*.gpg'
+    - '**/*.asc'
+
+checks:
+  # External checks that must be GREEN before PR is "ready for review"
+  # (Do NOT include therock-pr-bot here to avoid circular dependency.)
+  required_check_runs:
+    - pre-commit
+
+  failure_comments:
+    pre-commit:
+      title: "Pre-commit check failed"
+      body: |
+        ⛔ **pre-commit failed**
+
+        Please run locally:
+        - `python -m pip install pre-commit`
+        - `pre-commit install`
+        - `pre-commit run --all-files --show-diff-on-failure`
+
+        This repo uses `.pre-commit-config.yaml`.
