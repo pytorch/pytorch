@@ -8711,8 +8711,16 @@ class TMADescriptorStable(TMADescriptor):
     See also TMADescriptorExperimental for the old API.
     """
 
-    def __init__(self, tensor: IRNode, block_shape: list[int | torch.SymInt]):
+    def __init__(
+        self,
+        tensor: IRNode,
+        block_shape: list[int | torch.SymInt],
+        descriptor_module: str,
+        descriptor_class: str,
+    ):
         self.block_shape = block_shape
+        self.descriptor_module = descriptor_module
+        self.descriptor_class = descriptor_class
 
         super().__init__(
             tensor=tensor,
@@ -12390,6 +12398,16 @@ class _CollectiveKernel(FallbackKernel):
             return packed
 
 
+def _drop_shim_config(args: Sequence[Any]) -> Sequence[Any]:
+    # The all_reduce C shims predate the optional config argument.
+    if not V.graph.cpp_wrapper:
+        return args
+    *args, config = args
+    if config is not None:
+        raise NotImplementedError("cpp_wrapper does not support collective configs")
+    return args
+
+
 class _AllReduce_Kernel(_CollectiveKernel):
     def __init__(
         self,
@@ -12412,6 +12430,11 @@ class _AllReduce_Kernel(_CollectiveKernel):
             unbacked_bindings=unbacked_bindings,
         )
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce_")
+
+    def fill_non_provided_args(
+        self, args: Sequence[Any], kwargs: dict[str, Any]
+    ) -> Sequence[Any]:
+        return _drop_shim_config(super().fill_non_provided_args(args, kwargs))
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
