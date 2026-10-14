@@ -403,6 +403,26 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     return _fn
 
 
+def skips_tensor_free_frame(callback: Any, frame: DynamoFrameType) -> bool:
+    """Whether the ConvertFrameAssert under callback skips frame for holding no
+    tensor. An explicit package's resume functions are compiled anyway: their
+    guards must be recorded even when no tensor survives the graph break, or the
+    artifact cannot tell which calls it covers.
+    """
+    while not hasattr(callback, "_package") and hasattr(
+        callback, "_torchdynamo_orig_backend"
+    ):
+        callback = callback._torchdynamo_orig_backend
+    package = getattr(callback, "_package", None)
+    if (
+        package is not None
+        and package.explicit
+        and package.is_resume_code(frame.f_code)
+    ):
+        return False
+    return not has_tensor_in_frame(frame)
+
+
 @TorchPatcher.suppress_torch_distributed_warnings
 def has_tensor_in_frame(frame: DynamoFrameType) -> bool:
     """Check if the frame has torch.* related bits"""
@@ -718,14 +738,7 @@ class ConvertFrameAssert:
                 ],
             )
 
-        # An explicit package's resume functions need their guards recorded even
-        # when no tensor survives the graph break, or the artifact cannot tell
-        # which calls it covers.
-        if not has_tensor_in_frame(frame) and not (
-            self._package is not None
-            and self._package.explicit
-            and self._package.is_resume_code(code)
-        ):
+        if skips_tensor_free_frame(self, frame):
             return ConvertFrameReturn(
                 skip_reason="no tensor-related objects found in frame"
             )
@@ -2394,6 +2407,7 @@ class ConvertFrame:
         recompile_limit: int | None = None,
     ) -> None:
         self._torchdynamo_orig_backend = compiler_fn
+        self._package = package
         self._inner_convert = convert_frame_assert(
             compiler_fn,
             one_graph=False,
