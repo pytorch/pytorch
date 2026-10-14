@@ -97,6 +97,16 @@ def _tensor_free_resume_fn(x):
     return y.cos(), _tensor_free_continuation(y)
 
 
+def _empty_graph_continuation(y):
+    step = _tensor_free_resume_value()
+    return step + 1
+
+
+def _empty_graph_resume_fn(x):
+    y = x.sin()
+    return y.cos(), _empty_graph_continuation(y)
+
+
 @torch.compiler.disable
 def _tensor_or_int(y):
     return y if _TENSOR_FREE_RESUME_STATE["value"] else 3
@@ -1222,19 +1232,18 @@ def add(x, y):
         package.initialize(g, None)
         self.assertEqual(package.source_id, CompilePackage.source_id_from_fn(g))
 
-    def _tensor_free_resume_entry(self, package):
+    def _tensor_free_resume_entry(self, package, name="_tensor_free_continuation"):
         (entry,) = (
             entry
             for code, entry in package._codes.items()
-            if code.co_name.startswith(
-                "torch_dynamo_resume_in__tensor_free_continuation_at_"
-            )
+            if code.co_name.startswith(f"torch_dynamo_resume_in_{name}_at_")
         )
         return entry
 
-    def _capture_tensor_free_resume(self, values):
+    def _capture_tensor_free_resume(
+        self, values, fn=_tensor_free_resume_fn, name="_tensor_free_continuation"
+    ):
         ctx = DiskDynamoStore()
-        fn = _tensor_free_resume_fn
         x = torch.randn(4)
         package = CompilePackage(fn)
         compiled = torch._dynamo.optimize(
@@ -1247,7 +1256,8 @@ def add(x, y):
             _TENSOR_FREE_RESUME_STATE["value"] = value
             self.assertEqual(compiled(x), fn(x))
         self.assertEqual(
-            len(self._tensor_free_resume_entry(package).guarded_codes), len(values)
+            len(self._tensor_free_resume_entry(package, name).guarded_codes),
+            len(values),
         )
         for backend_id, bknd in package.cached_backends.items():
             ctx.record_eager_backend(backend_id, bknd)
@@ -1295,6 +1305,23 @@ def add(x, y):
             for value in (1, 2):
                 _TENSOR_FREE_RESUME_STATE["value"] = value
                 self.assertEqual(compiled(x), fn(x))
+
+    # Precompile capture keeps empty graphs as compiled frames.
+    @torch._dynamo.config.patch(nested_graph_breaks=False, allow_empty_graphs=True)
+    @patch.dict(_TENSOR_FREE_RESUME_STATE)
+    def test_tensor_free_resume_with_an_empty_graph_is_refused_on_a_new_value(self):
+        # The continuation only computes step + 1, yet it is still guarded:
+        # a call no captured variant covers is refused, even without tensor work.
+        fn = _empty_graph_resume_fn
+        name = "_empty_graph_continuation"
+        _, compiled, x = self._capture_tensor_free_resume((1,), fn, name)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled(x), fn(x))
+            _TENSOR_FREE_RESUME_STATE["value"] = 2
+            with self.assertRaisesRegex(
+                RuntimeError, f"function name: 'torch_dynamo_resume_in_{name}_at_"
+            ):
+                compiled(x)
 
     def test_reset_keeps_a_package_implicit(self):
         # The caching_precompile warm-load fallback reset()s the implicit

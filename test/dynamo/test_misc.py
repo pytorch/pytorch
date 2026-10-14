@@ -11020,6 +11020,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             _reset_precompile_entries(fn.__code__)
 
+        from torch._dynamo.eval_frame import _precompile_no_match_message
+
+        def report(G):
+            root = torch._dynamo.guards.RootGuardManager()
+            parts = [f"G['check']({i})" for i in range(7)]
+            root.add_lambda_guard(lambda L: False, parts, None)
+            manager = torch._dynamo.guards.GuardManagerWrapper(root)
+            manager.global_scope = {"G": G}
+            manager.closure_vars = {}
+            entry = types.SimpleNamespace(guard_manager=manager)
+            return _precompile_no_match_message([entry], {})
+
+        capped = (
+            "Failed on all 1 precompiled variant(s):\n  [0] G['check'](0); "
+            "G['check'](1); G['check'](2); G['check'](3); G['check'](4); "
+            "... (more clauses)"
+        )
+        # Re-evaluation stops one failing clause past the ones shown.
+        checked = []
+        self.assertEqual(
+            report({"check": lambda i: checked.append(i) or False}), capped
+        )
+        self.assertEqual(checked, [0, 1, 2, 3, 4, 5])
+        # Every clause raises on re-evaluation: all parts are named, capped.
+        self.assertEqual(report({}), capped)
+
     def test_fail_on_recompile_groups_precompiled_entries_by_reason(self):
         from torch._dynamo.eval_frame import _precompile_no_match_message
 
@@ -11037,7 +11063,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # fails on something else.
         entries = [entry("KeyError on L['self']._modules['pma']")] * 5 + [
             entry("L['self'].n_heads == 4"),
-            entry(raises=ValueError("boom")),
+            entry(raises=ValueError("boom\ncontext")),
             entry("KeyError on L['self']._modules['pma']"),
         ]
         message = _precompile_no_match_message(entries, {})
@@ -11048,6 +11074,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "  [5] self.n_heads == 4\n"
             "  [6] <guard check raised ValueError: boom>",
         )
+        message = _precompile_no_match_message(
+            [entry(raises=ValueError("x" * 300))], {}
+        )
+        self.assertIn(f"ValueError: {'x' * 200}>", message)
 
         many = [entry(f"L['x'] == {i}") for i in range(7)]
         message = _precompile_no_match_message(many, {})
@@ -11065,7 +11095,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             message,
             "Failed on all 2 precompiled variant(s):\n"
             "  [0] x.size(0) == 1; x.size(1) == 1; x.size(2) == 1; "
-            "x.size(3) == 1; x.size(4) == 1; ... (2 more clauses)\n"
+            "x.size(3) == 1; x.size(4) == 1; ... (more clauses)\n"
             "  [1] <matched on re-check>",
         )
 

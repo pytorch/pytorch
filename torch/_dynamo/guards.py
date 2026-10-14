@@ -6217,18 +6217,22 @@ def describe_backend(backend: Callable[..., object] | None) -> str:
 
 
 def failing_verbose_code_parts(
-    global_scope: dict[str, Any],
-    scope: dict[str, Any],
+    guard_manager: GuardManagerWrapper,
+    f_locals: dict[str, object],
     verbose_code_parts: Sequence[str],
     *,
-    first_only: bool,
+    limit: int | None,
     swallow_errors: bool,
 ) -> list[str]:
     """
     Re-evaluate each code part of a failed guard and return the reasons of the
-    ones that fail. Symbolic shape guards are installed as one lambda guard
-    whose verbose_code_parts list every clause, so this names the clause.
+    first ``limit`` that fail. Symbolic shape guards are installed as one lambda
+    guard whose verbose_code_parts list every clause, so this names the clause.
     """
+    global_scope, closure_vars = guard_manager.global_scope, guard_manager.closure_vars
+    if global_scope is None or closure_vars is None:
+        raise AssertionError("guard_manager has no global_scope or closure_vars")
+    scope = {"L": f_locals, "G": global_scope["G"], **closure_vars}
     reasons: list[str] = []
     for part in verbose_code_parts:
         part_global_scope = dict(global_scope)
@@ -6246,7 +6250,7 @@ def failing_verbose_code_parts(
             fail_reason = part
         if isinstance(fail_reason, str):
             reasons.append(fail_reason)
-            if first_only:
+            if limit is not None and len(reasons) >= limit:
                 break
     return reasons
 
@@ -6333,10 +6337,10 @@ def get_guard_fail_reason_helper(
     else:
         verbose = is_recompiles_verbose_enabled()
         reasons += failing_verbose_code_parts(
-            guard_manager.global_scope,
-            scope,
+            guard_manager,
+            f_locals,
             verbose_code_parts,
-            first_only=not verbose,
+            limit=None if verbose else 1,
             swallow_errors=verbose,
         )
 
