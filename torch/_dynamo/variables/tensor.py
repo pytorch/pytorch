@@ -955,11 +955,16 @@ class TensorVariable(VariableTracker):
                 hasattr(fn, "overloads")
                 and hasattr(fn, fn.overloads()[0])
                 and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
-                and (input_source := self.graph_input_source(tx)) is not None
+                and self.graph_input_source(tx) is not None
             ):
                 # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
+                # A source-less alias may share the input's fake tensor yet be another
+                # tensor in eager (e.g. after as_subclass): rebuild the call on it.
+                src = None if self.source is None else AttrSource(self.source, name)
+                method = variables.GetAttrVariable(self, name) if src is None else None
                 return variables.misc.DelayGraphBreakVariable(
-                    source=AttrSource(input_source, name),
+                    source=src,
+                    callable_var=method,
                     msg="Getting an inplace view on a graph input is not supported",
                     hints=[
                         "Avoid mutating a graph input's tensor metadata with in-place view ops. "

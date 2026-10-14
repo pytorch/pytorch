@@ -3705,6 +3705,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.arange(24).reshape(4, 6)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
+    def test_inplace_view_on_subclass_alias_of_input(self):
+        class Subclass(torch.Tensor):
+            pass
+
+        def fn(x):
+            v = x.contiguous().as_subclass(Subclass)
+            v.unsqueeze_(0)
+            return x, v
+
+        ref_x, ref_v = fn(torch.ones(2, 3))
+        x, v = torch.compile(fn, backend="eager")(torch.ones(2, 3))
+        self.assertEqual(x.shape, ref_x.shape)
+        self.assertEqual(v.shape, ref_v.shape)
+        self.assertIsInstance(v, Subclass)
+
     def test_inplace_unsqueeze_input(self):
         def backend(gm, example_inputs):
             tensor_inputs = [x for x in example_inputs if isinstance(x, torch.Tensor)]
