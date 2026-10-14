@@ -904,47 +904,6 @@ def guard_collectives_hook(guard_eval_result: bool) -> bool:
 _not_set = object()
 
 
-def _run_cleanups_lifo(cleanups: list[Callable[[], Any]]) -> None:
-    for i in range(len(cleanups) - 1, -1, -1):
-        try:
-            cleanups[i]()
-        except BaseException:
-            _run_cleanups_lifo(cleanups[:i])
-            raise
-
-
-def _restore_compile_wrapper_state(
-    prior_error_on_nested_compile: bool | None,
-    cleanups: list[Callable[[], Any]],
-    prior_skip_guard_eval_unsafe: bool | None,
-    prior_isolate_recompiles_id: int | None,
-    prior_error_on_graph_break: bool | None,
-) -> None:
-    """Undo compile_wrapper's state changes in reverse order of entry. Every
-    restore runs even if an earlier one raises; ``None`` marks state that was
-    never changed."""
-    try:
-        if prior_error_on_graph_break is not None:
-            _set_error_on_graph_break(prior_error_on_graph_break)
-    finally:
-        try:
-            if prior_isolate_recompiles_id is not None:
-                set_eval_frame_isolate_recompiles_id(prior_isolate_recompiles_id)
-        finally:
-            try:
-                if prior_skip_guard_eval_unsafe is not None:
-                    set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
-            finally:
-                try:
-                    if cleanups:
-                        _run_cleanups_lifo(cleanups)
-                finally:
-                    if prior_error_on_nested_compile is not None:
-                        set_fullgraph_error_on_nested_compile(
-                            prior_error_on_nested_compile
-                        )
-
-
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -1036,13 +995,7 @@ class _TorchDynamoContext:
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.prior = set_eval_frame(None)
-        self.cleanup_fns = []
-        try:
-            for enter in self.enter_exit_hooks:
-                self.cleanup_fns.append(enter())
-        except BaseException:
-            self._restore_ctx_state(None)
-            raise
+        self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
         self.prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
             _is_skip_guard_eval_unsafe_stance()
         )
@@ -1057,20 +1010,13 @@ class _TorchDynamoContext:
         if self.prior is unset:
             raise AssertionError("__exit__ called without matching __enter__")
         set_eval_frame(None)
-        self._restore_ctx_state(self.prior_skip_guard_eval_unsafe)
+        set_skip_guard_eval_unsafe(self.prior_skip_guard_eval_unsafe)
+        for cleanup in self.cleanup_fns:
+            cleanup()
+        self.cleanup_fns.clear()
+        _maybe_set_eval_frame(_callback_from_stance(self.prior))
+        self.prior = unset
         return None
-
-    def _restore_ctx_state(self, prior_skip_guard_eval_unsafe: bool | None) -> None:
-        try:
-            if prior_skip_guard_eval_unsafe is not None:
-                set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
-        finally:
-            try:
-                _run_cleanups_lifo(self.cleanup_fns)
-            finally:
-                self.cleanup_fns.clear()
-                _maybe_set_eval_frame(_callback_from_stance(self.prior))
-                self.prior = unset
 
     def __call__(self, fn: Any) -> Any:
         if isinstance(fn, staticmethod):
@@ -1115,7 +1061,6 @@ class _TorchDynamoContext:
                         log.warning(
                             "Failed to load entry from dynamo cache", exc_info=True
                         )
-                        self._package.reset()
                         self._package.initialize(
                             fn_key, None, ignore_inlined_sources=False
                         )
@@ -1257,11 +1202,6 @@ class _TorchDynamoContext:
             prior = set_eval_frame(None)
             prior_error_on_nested_compile: bool | None = None
             fullgraph_count_enabled = False
-            cleanups: list[Callable[[], Any]] = []
-            prior_skip_guard_eval_unsafe: bool | None = None
-            prior_isolate_recompiles_id: int | None = None
-            prior_error_on_graph_break: bool | None = None
-            state_restored = False
             # Fake propagation and AOT metadata collection execute user
             # subclass code under active fake/functional modes. Nested compile
             # must run the original function in those regions.  Still honor
@@ -1281,17 +1221,15 @@ class _TorchDynamoContext:
                     finally:
                         _maybe_set_eval_frame(prior)
 
+            if self.fullgraph:
+                prior_error_on_nested_compile = set_fullgraph_error_on_nested_compile(
+                    torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code
+                )
+                if not self.export:
+                    fullgraph_count_enabled = set_fullgraph_compiled_frame_count(0) < 0
+                    if fullgraph_count_enabled:
+                        reset_skip_reasons()
             try:
-                if self.fullgraph:
-                    prior_error_on_nested_compile = set_fullgraph_error_on_nested_compile(
-                        torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code
-                    )
-                    if not self.export:
-                        fullgraph_count_enabled = (
-                            set_fullgraph_compiled_frame_count(0) < 0
-                        )
-                        if fullgraph_count_enabled:
-                            reset_skip_reasons()
                 # We shouldn't compile inside kernel invocation.
                 if tracing_context := torch._guards.TracingContext.try_get():
                     if (
@@ -1329,14 +1267,14 @@ class _TorchDynamoContext:
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
 
-                for enter in self.enter_exit_hooks:
-                    cleanups.append(enter())
+                cleanups = [enter() for enter in self.enter_exit_hooks]
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
                 prior_isolate_recompiles_id = set_eval_frame_isolate_recompiles_id(
                     self._isolate_recompiles_id
                 )
+                prior_error_on_graph_break = None
                 if not self.fullgraph and self.error_on_graph_break is not None:
                     current_error_on_graph_break = _get_error_on_graph_break()
                     if current_error_on_graph_break != self.error_on_graph_break:
@@ -1387,39 +1325,40 @@ class _TorchDynamoContext:
                         # data in the TorchDynamo frames, so we strip them out.
                         raise e.remove_dynamo_frames() from None
                     finally:
-                        try:
-                            set_eval_frame(None)
-                            if fullgraph_count_enabled and call_succeeded:
-                                count = set_fullgraph_compiled_frame_count(-1)
-                                if count == 0 and _stance.stance == "default":
-                                    skip_reasons = get_skip_reasons()
-                                    msg = "torch.compile with fullgraph=True found no compiled frames."
-                                    if skip_reasons:
-                                        reasons_str = "\n".join(
-                                            f"  - {r}" for r in skip_reasons
-                                        )
-                                        msg += f" Skipped frames:\n{reasons_str}"
-                                    else:
-                                        msg += (
-                                            " Compilation was not attempted and no cached compiled"
-                                            " code was found."
-                                        )
-                                    raise RuntimeError(msg)
-                        finally:
-                            state_restored = True
-                            try:
-                                # Restore the dynamic layer stack depth if necessary.
-                                torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
-                                    saved_dynamic_layer_stack_depth
-                                )
-                            finally:
-                                _restore_compile_wrapper_state(
-                                    prior_error_on_nested_compile,
-                                    cleanups,
-                                    prior_skip_guard_eval_unsafe,
-                                    prior_isolate_recompiles_id,
-                                    prior_error_on_graph_break,
-                                )
+                        # Restore the dynamic layer stack depth if necessary.
+                        set_eval_frame(None)
+                        if fullgraph_count_enabled and call_succeeded:
+                            count = set_fullgraph_compiled_frame_count(-1)
+                            if count == 0 and _stance.stance == "default":
+                                skip_reasons = get_skip_reasons()
+                                msg = "torch.compile with fullgraph=True found no compiled frames."
+                                if skip_reasons:
+                                    reasons_str = "\n".join(
+                                        f"  - {r}" for r in skip_reasons
+                                    )
+                                    msg += f" Skipped frames:\n{reasons_str}"
+                                else:
+                                    msg += (
+                                        " Compilation was not attempted and no cached compiled"
+                                        " code was found."
+                                    )
+                                raise RuntimeError(msg)
+                        if prior_error_on_graph_break is not None:
+                            _set_error_on_graph_break(prior_error_on_graph_break)
+                        if prior_error_on_nested_compile is not None:
+                            set_fullgraph_error_on_nested_compile(
+                                prior_error_on_nested_compile
+                            )
+                        torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
+                            saved_dynamic_layer_stack_depth
+                        )
+
+                        set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
+                        set_eval_frame_isolate_recompiles_id(
+                            prior_isolate_recompiles_id
+                        )
+                        for cleanup in cleanups:
+                            cleanup()
                 finally:
                     # Restore the local dispatch key set snapshotted above. In an
                     # outer finally so it runs even if the inner finally raised,
@@ -1427,23 +1366,10 @@ class _TorchDynamoContext:
                     torch._C._dynamo_restore_local_dispatch_key_set()
                 return result
             finally:
-                try:
-                    if not state_restored:
-                        state_restored = True
-                        _restore_compile_wrapper_state(
-                            prior_error_on_nested_compile,
-                            cleanups,
-                            prior_skip_guard_eval_unsafe,
-                            prior_isolate_recompiles_id,
-                            prior_error_on_graph_break,
-                        )
-                finally:
-                    try:
-                        if fullgraph_count_enabled:
-                            set_fullgraph_compiled_frame_count(-1)
-                            dynamo_tls.skip_reasons = None
-                    finally:
-                        _maybe_set_eval_frame(prior)
+                if fullgraph_count_enabled:
+                    set_fullgraph_compiled_frame_count(-1)
+                    dynamo_tls.skip_reasons = None
+                _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
         if self.error_on_graph_break is not None:
