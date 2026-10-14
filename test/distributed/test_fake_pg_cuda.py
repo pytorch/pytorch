@@ -5,7 +5,10 @@ from datetime import timedelta
 
 import torch
 from torch._C._distributed_c10d import FakeProcessGroup
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -40,7 +43,20 @@ class TestFakeWorkStreams(TestCase):
             tensors.append(sparse)
             parts.extend((sparse._indices(), sparse._values()))
             initial.extend((indices, values))
+        if result_kind == "csr":
+            dense_initial = torch.tensor([[0.0, 1.0], [2.0, 0.0]])
+            csr = dense_initial.to(device).to_sparse_csr()
+            tensors.append(csr)
+            parts.append(csr.values())
+            initial.append(dense_initial.to_sparse_csr().values())
         return tensors, parts, initial
+
+    def _make_pg(self):
+        if os.environ.get("CUDA_LAUNCH_BLOCKING", "0") != "0":
+            self.skipTest("CUDA_LAUNCH_BLOCKING removes the cross-stream window")
+        options = FakeProcessGroup.Options()
+        options.simulate_uniform_ranks = True
+        return FakeProcessGroup._create_internal(0, 2, options)
 
     def _wait(self, work, future, wait_method):
         if wait_method == "future_wait":
@@ -53,16 +69,9 @@ class TestFakeWorkStreams(TestCase):
         return work.result()
 
     @parametrize("wait_method", ["work_wait", "future_wait", "block_current_stream"])
-    @parametrize("result_kind", ["dense", "coo", "mixed"])
+    @parametrize("result_kind", ["dense", "coo", "mixed", "csr"])
     def test_result_work_orders_current_stream(self, device, wait_method, result_kind):
-        self.assertEqual(
-            os.environ.get("CUDA_LAUNCH_BLOCKING", "0"),
-            "0",
-            "CUDA_LAUNCH_BLOCKING invalidates the cross-stream control",
-        )
-        options = FakeProcessGroup.Options()
-        options.simulate_uniform_ranks = True
-        pg = FakeProcessGroup._create_internal(0, 2, options)
+        pg = self._make_pg()
         producer = torch.cuda.Stream(device=device)
         consumer = torch.cuda.Stream(device=device)
         windows = []
@@ -143,6 +152,46 @@ class TestFakeWorkStreams(TestCase):
             "INCONCLUSIVE: no stale-data window after three bounded delays; "
             "(cycles, delay_pending, negative_is_initial)=" + repr(windows)
         )
+
+    @deviceCountAtLeast(2)
+    def test_result_work_orders_current_stream_per_device(self, devices):
+        pg = self._make_pg()
+        devices = [torch.device(d) for d in devices[:2]]
+        producers = [torch.cuda.Stream(device=d) for d in devices]
+        consumers = [torch.cuda.Stream(device=d) for d in devices]
+        initial = torch.arange(1, 5, dtype=torch.float32)
+        results = [initial.to(d) for d in devices]
+        for d, result in zip(devices, results):
+            # Load the kernels first so lazy module loading cannot close the window.
+            with torch.cuda.device(d):
+                torch.cuda._sleep(1)
+                result.mul_(1).clone()
+            torch.cuda.synchronize(d)
+        ready = []
+        with torch.cuda.stream(producers[0]), torch.cuda.stream(producers[1]):
+            for d, result in zip(devices, results):
+                with torch.cuda.device(d):
+                    ready.append(torch.cuda.Event())
+                    ready[-1].record()
+                    torch.cuda._sleep(500_000_000)
+                    result.mul_(2)
+            work = pg.broadcast(results)
+
+        with torch.cuda.stream(consumers[0]), torch.cuda.stream(consumers[1]):
+            negative = []
+            for consumer, event, result in zip(consumers, ready, results):
+                consumer.wait_event(event)
+                negative.append(result.clone())
+            self.assertTrue(work.wait())
+            snapshots = [result.clone() for result in results]
+        for d in devices:
+            torch.cuda.synchronize(d)
+
+        self.assertTrue(
+            all(torch.equal(n.cpu(), initial) for n in negative),
+            "INCONCLUSIVE: no stale-data window",
+        )
+        self.assertEqual([s.cpu() for s in snapshots], [initial * 2] * 2)
 
 
 instantiate_device_type_tests(TestFakeWorkStreams, globals(), only_for="cuda")
