@@ -807,14 +807,11 @@ class AsyncCompile:
             CuteDSLKernelWrapper,
             MAIN_SUFFIX,
         )
-        from torch.compiler._no_compile import is_compilation_forbidden
 
         kernel_code_log.info("CuteDSL Kernel:\n%s", source_code)
         _compile_start()
 
-        # The pool worker compiles eagerly; loading in-process defers any JIT
-        # to the wrapper's first run(), which the policy checks.
-        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
+        is_parallel = self.use_process_pool()
 
         if is_parallel:
             extra_env = _pycodecache_kernel_compile_env()
@@ -873,12 +870,10 @@ class AsyncCompile:
         if not flydsl_utils.runtime_available():
             raise RuntimeError("FlyDSL runtime is unavailable")
 
-        from torch.compiler._no_compile import is_compilation_forbidden
-
         kernel_code_log.info("FlyDSL Kernel:\n%s", source_code)
         _compile_start()
 
-        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
+        is_parallel = self.use_process_pool()
 
         if is_parallel:
             extra_env = _pycodecache_kernel_compile_env()
@@ -982,12 +977,11 @@ class AsyncCompile:
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
             MAIN_SUFFIX,
         )
-        from torch.compiler._no_compile import is_compilation_forbidden
 
         kernel_code_log.info("NVIDIA Universal GEMM Kernel:\n%s", source_code)
         _compile_start()
 
-        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
+        is_parallel = self.use_process_pool()
 
         if is_parallel:
             extra_env = _pycodecache_kernel_compile_env()
@@ -1100,9 +1094,6 @@ class AsyncCompile:
 
         if self._metal_sources:
             from torch._inductor.runtime.runtime_utils import compile_mps_shaders
-            from torch.compiler._no_compile import check_compilation_allowed
-
-            check_compilation_allowed("Metal shader compilation")
 
             scope.update(compile_mps_shaders(self._metal_sources))
             self._metal_sources.clear()
