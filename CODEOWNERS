@@ -359,6 +359,8 @@
 # /torch/csrc/Exceptions.cpp
 # /torch/csrc/Exceptions.h
 # /torch/csrc/Export.h
+# /torch/csrc/FakeTensorMode.cpp
+# /torch/csrc/FakeTensorMode.h
 # /torch/csrc/Generator.cpp
 # /torch/csrc/Generator.h
 # /torch/csrc/Layout.cpp
@@ -1138,7 +1140,6 @@
 # /test/scripts/
 # /test/spincli/
 # /test/strobelight/
-# /test/torchci/
 /test/test_public_bindings.py @albanD
 # /test/test_reuse_old_whl.py
 # /test/test_testing.py
