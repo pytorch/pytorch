@@ -23,6 +23,11 @@ struct SoftplusParams {
   float threshold;
 };
 
+struct HardtanhParams {
+  float min_val;
+  float max_val;
+};
+
 template <typename T>
 struct ThresholdParams {
   c10::metal::opmath_t<T> threshold;
