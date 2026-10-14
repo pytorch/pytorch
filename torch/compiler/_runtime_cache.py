@@ -23,17 +23,17 @@ def _precompile_error(message: str) -> Exception:
 
 
 class _RuntimeCapture:
-    def __init__(self) -> None:
+    def __init__(self, *, explicit: bool) -> None:
         self.pid = os.getpid()
+        # Opened by capture_runtime(), else by the first open precompile.capture
+        # and closed by the last one to exit.
+        self.explicit = explicit
+        self.captures = 0
         self.sealed = False
         self.policy = contextlib.ExitStack()
-        self.finalize_lock = threading.Lock()
+        self.freeze_lock = threading.Lock()
 
     def seal(self) -> None:
-        if self.sealed:
-            raise RuntimeError(
-                "The precompile runtime cache has already been finalized"
-            )
         self.policy.enter_context(no_compilation())
         self.sealed = True
 
@@ -53,84 +53,138 @@ def _active_capture() -> _RuntimeCapture | None:
     return owner if owner is not None and owner.pid == os.getpid() else None
 
 
+def _close(owner: _RuntimeCapture) -> None:
+    global _capture
+    try:
+        owner.policy.close()
+    finally:
+        with _capture_lock:
+            if _capture is owner:
+                _capture = None
+
+
 @contextlib.contextmanager
 def capture_runtime() -> Iterator[None]:
     """Own one producer lifetime, including strict validation and cleanup.
 
-    Finalizing the cache seals this scope against further compiler work until the
-    outer application cleanup has returned.
+    The capture inside it seals the scope against further compiler work until
+    the outer application cleanup has returned.
     """
     global _capture
     if is_compilation_forbidden():
         raise _precompile_error(
             "precompile.capture_runtime cannot start while compilation is forbidden"
         )
-    owner = _RuntimeCapture()
+    owner = _RuntimeCapture(explicit=True)
     with _capture_lock:
         if _active_capture() is not None:
             raise _precompile_error(
-                "Another precompile runtime capture is already active"
+                "Another precompile runtime capture or an open precompile.capture "
+                "is already active"
             )
         _capture = owner
     try:
         yield
     finally:
-        try:
-            owner.policy.close()
-        finally:
-            with _capture_lock:
-                if _capture is owner:
-                    _capture = None
+        _close(owner)
 
 
-def finalize_runtime_cache(
-    artifact: bytes | None, write: Callable[[bytes | None], None]
+@contextlib.contextmanager
+def capture_scope() -> Iterator[None]:
+    """The scope a precompile.capture block records into: the enclosing
+    capture_runtime() scope, else one shared by the captures open in this process.
+    """
+    global _capture
+    with _capture_lock:
+        owner = _active_capture()
+        if owner is None:
+            owner = _capture = _RuntimeCapture(explicit=False)
+        owner.captures += 1
+    try:
+        yield
+    finally:
+        with _capture_lock:
+            owner.captures -= 1
+            last = not owner.explicit and owner.captures == 0
+        if last:
+            _close(owner)
+
+
+def seal_runtime_scope() -> None:
+    """Seal an enclosing capture_runtime() scope whose cache is already written."""
+    owner = _active_capture()
+    if owner is None or not owner.explicit:
+        return
+    with owner.freeze_lock, _capture_lock:
+        if not owner.sealed:
+            owner.seal()
+
+
+def freeze_runtime_cache(
+    artifact: bytes | None,
+    write: Callable[[bytes | None], None],
+    *,
+    final: bool,
+    compiled: bool,
 ) -> None:
-    """Pass the finalized cache artifact to ``write``, then keep the scope sealed.
+    """Pass the cache artifact, with the scope's runtime dependencies, to ``write``.
 
-    Pending async compiles are waited on first, then the scope is sealed so any
-    later compile raises, and it is unsealed again if serialization or ``write``
-    raises so the caller can retry. The caller must stop compiling before
-    calling this: a compile submitted on another thread after the wait but
-    before the seal is neither waited on nor rejected.
+    Pending async compiles are waited on first. A ``final`` write inside a
+    capture_runtime() scope then seals it so any later compile raises, and keeps
+    it sealed unless serialization or ``write`` raises. A capture that did not
+    run eagerly (``compiled``) but saved no artifact has no dependencies to
+    carry; a capture_runtime() scope refuses it, since strict precompile.load
+    could not serve it either. The caller must stop compiling before calling
+    this: a compile submitted on another thread after the wait but before the
+    seal is neither waited on nor rejected.
     """
     import torch
     from torch._inductor.async_compile import AsyncCompile
 
     owner = _active_capture()
     if owner is None:
-        raise RuntimeError(
-            "precompile.finalize_cache requires the worker's capture_runtime scope"
-        )
-    with owner.finalize_lock:
+        raise RuntimeError("precompile.capture has no runtime capture scope")
+    if compiled and artifact is None:
+        if owner.explicit:
+            raise RuntimeError(
+                "precompile.capture_runtime requires the compiled cache artifact of "
+                "a compiled capture, and this capture saved none"
+            )
+        write(None)
+        return
+    with owner.freeze_lock:
         if owner.sealed:
             raise RuntimeError(
-                "The precompile runtime cache has already been finalized"
+                "The precompile.capture_runtime scope was already sealed by an "
+                "earlier capture"
             )
         artifacts = (
             CacheArtifactManager.deserialize(artifact) if artifact is not None else {}
         )
         if artifacts is None:
-            raise RuntimeError("Cannot finalize an unreadable precompile cache")
+            raise RuntimeError("Cannot freeze an unreadable precompile cache")
         # Drain before sealing: compile result callbacks re-check
         # check_compilation_allowed, so draining under the seal rejects them.
         AsyncCompile.drain_pending()
         if torch.cuda.is_initialized():
             torch.cuda.synchronize()
-        with _capture_lock:
-            owner.seal()
+        seal = final and owner.explicit
+        if seal:
+            with _capture_lock:
+                owner.seal()
         try:
-            finalized = None
+            frozen = None
             if artifacts:
                 serializer = AppendingByteSerializer(
                     serialize_fn=_serialize_single_cache
                 )
                 serializer.extend(artifacts.items())
-                finalized = serializer.to_bytes()
-            write(finalized)
+                frozen = serializer.to_bytes()
+            write(frozen)
         except BaseException:
-            with _capture_lock:
-                owner.unseal()
+            if seal:
+                with _capture_lock:
+                    owner.unseal()
             raise
 
 
