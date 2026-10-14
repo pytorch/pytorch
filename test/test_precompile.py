@@ -5197,9 +5197,17 @@ class TestPrecompileDynamoCapture(TestCase):
                 f.write(source)
             self.addCleanup(sys.modules.pop, name, None)
         step = importlib.import_module(names[1]).step
-        with self._capture(step, backend="eager") as cap:
+        tracer = DynamoTracer(require_no_risky_drops=True)
+        build = mock.patch(
+            "torch._precompile._build_multigraph_artifact",
+            wraps=torch._precompile._build_multigraph_artifact,
+        )
+        with build as built, self._capture(step, tracer=tracer, backend="eager") as cap:
             cap(torch.randn(4))
             summary = cap.summary()
+        codes = {c.python_code.co_name: c for c in built.call_args.args[0].codes}
+        lookup = codes["lookup"]
+        self.assertEqual((lookup.guarded_codes, lookup.bypassed), ([], False))
         self.assertIn(("CLOSURE_MATCH", "G['op']"), summary.dropped_guards)
         self.assertEqual(summary.risky_dropped_guards, ())
 
