@@ -345,7 +345,9 @@ print(eval(f"bbmod.{name}.{path}") is code)
         # stale as co_qualname, so recording it would only fail at load.
         code = _StaleMethodOwner.method.__code__
         package = CompilePackage(None)
-        with self.assertRaisesRegex(PackageError, "Cannot resolve"):
+        with self.assertRaisesRegex(
+            PackageError, r"__qualname__ '_make_stale_method\.<locals>\.method'"
+        ):
             with package.code_context(code):
                 pass
 
