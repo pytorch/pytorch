@@ -186,8 +186,17 @@ def _make_generated_method():
     return method
 
 
+def _make_generated_property():
+    def prop(self):
+        return 1
+
+    prop.__qualname__ = "_GeneratedMethodOwner.prop"
+    return property(prop)
+
+
 class _GeneratedMethodOwner:
     method = _make_generated_method()
+    prop = _make_generated_property()
 
 
 def _make_stale_method():
@@ -201,9 +210,9 @@ class _StaleMethodOwner:
     method = _make_stale_method()
 
 
-# The methods' co_qualnames, _make_*.<locals>.method, now name nothing in this
-# module; only _GeneratedMethodOwner.method's rewritten __qualname__ does.
-del _make_generated_method, _make_stale_method
+# The co_qualnames, _make_*.<locals>.*, now name nothing in this module; only
+# the rewritten __qualname__s on _GeneratedMethodOwner do.
+del _make_generated_method, _make_generated_property, _make_stale_method
 
 
 # A dynamic dim on a module-level tensor is what makes a SHAPE_ENV guard read a
@@ -320,15 +329,17 @@ print(eval(f"bbmod.{name}.{path}") is code)
     def test_code_source_searches_the_module_when_the_qualname_is_stale(self):
         # Python >= 3.11 walks co_qualname from the module and used to refuse
         # the code at the first missing part, while < 3.11 searches the module.
-        code = _GeneratedMethodOwner.method.__code__
-        package = CompilePackage(None)
-        with package.code_context(code):
-            pass
-        entry = package._codes[code]
-        self.assertEqual(entry.function_names, ["_GeneratedMethodOwner.method"])
-        self.assertIs(_lookup_code(entry), code)
+        for name, code in [
+            ("method", _GeneratedMethodOwner.method.__code__),
+            ("prop", _GeneratedMethodOwner.prop.fget.__code__),
+        ]:
+            package = CompilePackage(None)
+            with package.code_context(code):
+                pass
+            entry = package._codes[code]
+            self.assertEqual(entry.function_names, [f"_GeneratedMethodOwner.{name}"])
+            self.assertIs(_lookup_code(entry), code)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "co_qualname is 3.11+")
     def test_code_source_refuses_a_stale_qualname_the_search_cannot_fix(self):
         # The search finds _StaleMethodOwner.method, but its __qualname__ is as
         # stale as co_qualname, so recording it would only fail at load.
