@@ -30,6 +30,12 @@ def mm_grid(m, n, meta, *, cdiv):
 
 
 @SymbolicGridFn
+def mm_grid_2d(m, n, meta, *, cdiv):
+    """2D grid for templates that read program_id(0) as M tile and program_id(1) as N tile."""
+    return (cdiv(m, meta["BLOCK_M"]), cdiv(n, meta["BLOCK_N"]), 1)
+
+
+@SymbolicGridFn
 def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
     """Defines the grid for persistent kernels."""
     return (
