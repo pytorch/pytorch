@@ -8403,6 +8403,25 @@ class TestMPS(TestCaseMPS):
             ref = torch.view_as_real(op(x.cfloat()).to(dtype))
             self.assertEqual(rc, ref)
 
+    def test_signed_zero_max_min(self):
+        # Like std::max/min (and CPU), max/min-based ops return the first argument on ties,
+        # so the sign of zero is preserved. TODO: remove once test_unary_ufuncs (which
+        # covers this in test_relu_signed_zero/test_clamp_signed_zero) runs on MPS.
+        x = torch.tensor([-0.0, 0.0, -0.0, 0.0])
+        y = torch.tensor([0.0, -0.0, -0.0, 0.0])
+        for dtype in (torch.float32, torch.float16, torch.bfloat16):
+            xc, yc = x.to(dtype), y.to(dtype)
+            xm, ym = xc.to('mps'), yc.to('mps')
+            for name, cpu, mps in (
+                ("relu", torch.relu(xc), torch.relu(xm)),
+                ("clamp_min", torch.clamp_min(xc, 0), torch.clamp_min(xm, 0)),
+                ("clamp_max", torch.clamp_max(xc, 0), torch.clamp_max(xm, 0)),
+                ("clamp", torch.clamp(xc, min=0, max=1), torch.clamp(xm, min=0, max=1)),
+                ("maximum", torch.maximum(xc, yc), torch.maximum(xm, ym)),
+                ("minimum", torch.minimum(xc, yc), torch.minimum(xm, ym)),
+            ):
+                self.assertEqual(torch.signbit(mps).cpu(), torch.signbit(cpu), msg=f"{name} {dtype}")
+
     def test_complex_inverse_trig(self):
         # Exact +-1, near-real, huge and infinite inputs, where the textbook formulas lose
         # precision, overflow or return NaN. Compare against numpy, as CPU libc++ overflows
