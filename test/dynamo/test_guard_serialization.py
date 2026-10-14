@@ -1,17 +1,22 @@
 # Owner(s): ["module: dynamo"]
 
 import builtins
+import cmath
 import collections
 import dataclasses
 import enum
 import functools
 import io
 import itertools
+import math
+import os
 import pickle
+import random
 import sys
 import tempfile
 import threading
 import types
+import typing
 import unittest
 import weakref
 from collections.abc import Iterator
@@ -33,6 +38,7 @@ from torch._dynamo.guards import (
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
+    is_portable_identity_guard,
     pickle_guards_state,
 )
 from torch._dynamo.package import (
@@ -48,7 +54,13 @@ from torch._dynamo.symbolic_convert import (
     InstructionTranslator,
     SpeculationLog,
 )
-from torch._dynamo.utils import CleanupHook, dynamo_timed, get_metrics_context
+from torch._dynamo.utils import (
+    CleanupHook,
+    dynamo_timed,
+    get_metrics_context,
+    get_type_dict_no_user_code,
+    get_type_mro_no_user_code,
+)
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_utils import (
@@ -230,6 +242,67 @@ def keep_annotations(func):
         return func(self, x)
 
     return wrapper
+
+
+class _Mode(enum.Enum):
+    FAST = 1
+    SLOW = 2
+
+
+class _NameClash(enum.Enum):
+    name = 1
+
+
+_MODE = _Mode.FAST
+_torch_add = torch.add
+
+
+class _TupleOwner:
+    class Point(NamedTuple):
+        x: int
+
+
+class _MetaOwner:
+    class Meta(type):
+        pass
+
+
+class _WithNestedMeta(metaclass=_MetaOwner.Meta):
+    pass
+
+
+class _EnumOwner:
+    class Level(enum.Enum):
+        LOW = 1
+        HIGH = 2
+
+
+class _Token:
+    def __init__(self, name):
+        self.name = name
+
+
+class _ByObject(enum.Enum):
+    A = _Token("a")
+    B = _Token("b")
+
+
+class _Perm(enum.Flag):
+    R = 1
+    W = 2
+
+
+_LEVEL = _EnumOwner.Level.LOW
+_BY_OBJECT = _ByObject.A
+
+
+def _wrapped_target(x):
+    return x
+
+
+@functools.wraps(_wrapped_target)
+def _wraps_wrapper(x):
+    return _wrapped_target(x)
 
 
 class UnpicklableDefault:
@@ -741,6 +814,87 @@ class MyClassNotSerializable:
         return x + 1
 
 
+class LockHolder:
+    def __init__(self, scale):
+        self.scale = scale
+        self.lock = threading.Lock()
+
+
+class LockDict(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.lock = threading.Lock()
+
+
+class ReducedHolder:
+    def __init__(self, scale, cfg):
+        self.scale = scale
+        self.cfg = dict(cfg)
+
+    def __reduce__(self):
+        return (ReducedHolder, (self.scale, self.cfg))
+
+
+@dataclasses.dataclass(frozen=True)
+class _Phase:
+    lr: float
+
+
+class _Schedule(enum.Enum):
+    WARMUP = _Phase(0.1)
+    STEADY = _Phase(1.0)
+
+
+@dataclasses.dataclass(frozen=True)
+class _Plan:
+    phase: _Phase
+
+
+pytree.register_constant(_Plan)
+
+
+class _Stage:
+    def __init__(self, lr, steps):
+        self.lr = lr
+        self.steps = steps
+
+    def __eq__(self, other):
+        return isinstance(other, _Stage) and (self.lr, self.steps) == (
+            other.lr,
+            other.steps,
+        )
+
+    def __hash__(self):
+        return hash(self.lr)
+
+
+@dataclasses.dataclass(frozen=True)
+class _StagedPlan:
+    stage: _Stage
+
+
+pytree.register_constant(_StagedPlan)
+
+
+class _Layout:
+    def __init__(self, scale, blocks):
+        self.scale = scale
+        self.blocks = blocks
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, _Layout)
+            and self.scale == other.scale
+            and self.blocks == other.blocks
+        )
+
+
+class _LayoutHolder:
+    def __init__(self, scale, layout):
+        self.scale = scale
+        self.layout = layout
+
+
 class Inputs:
     def __init__(self, x, unused):
         self.x = x
@@ -1095,9 +1249,12 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 if key in kwargs and isinstance(kwargs[key], Iterator):
                     self._frame_state.f_locals[key] = kwargs[key]
 
+        guard_types = (guard_type,) if isinstance(guard_type, str) else guard_type
+
         def guard_filter_fn(guards):
             ret = [
-                g.guard_type == guard_type or guard_type in g.derived_guard_types
+                g.guard_type in guard_types
+                or any(t in g.derived_guard_types for t in guard_types)
                 for g in guards
             ]
             self.assertTrue(any(ret))
@@ -1239,10 +1396,57 @@ class _ModuleWithDtypeAttr(torch.nn.Module):
         self.empty = ()
 
 
+_RAW_DESCRIPTORS = [
+    os.DirEntry.is_file,
+    list.count,
+    dict.__dict__["fromkeys"],
+]
+_generic_class_getitem = typing.Generic.__dict__["__class_getitem__"]
+if isinstance(_generic_class_getitem, types.ClassMethodDescriptorType):
+    _RAW_DESCRIPTORS.append(_generic_class_getitem)
+
+
+@instantiate_parametrized_tests
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
     # directly rather than through a capture, so none of
     # TestGuardSerialization's setup applies.
+
+    @parametrize("descriptor", _RAW_DESCRIPTORS)
+    def test_raw_descriptors_require_an_immutable_owner(self, descriptor):
+        owner = descriptor.__objclass__
+        flags = type.__dict__["__flags__"].__get__(owner, type(owner))
+        if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+            with self.assertRaisesRegex(PackageError, "mutable owner"):
+                GuardsStatePickler(
+                    {id(descriptor): descriptor}, {}, {}, {}, io.BytesIO()
+                ).dump(descriptor)
+            return
+        buf = io.BytesIO()
+        GuardsStatePickler({id(descriptor): descriptor}, {}, {}, {}, buf).dump(
+            descriptor
+        )
+        self.assertIs(load_guards_state(buf.getvalue()), descriptor)
+
+    def test_type_dict_helpers_bypass_metaclass_hooks(self):
+        calls = []
+        marker = object()
+
+        class Meta(type):
+            def __getattribute__(cls, name):
+                calls.append(name)
+                raise AssertionError(f"unexpected metaclass lookup: {name}")
+
+        class D(metaclass=Meta):
+            value = marker
+
+        self.assertIs(get_type_dict_no_user_code(D)["value"], marker)
+        mro = get_type_mro_no_user_code(D)
+        self.assertEqual(len(mro), 2)
+        self.assertIs(mro[0], D)
+        self.assertIs(mro[1], object)
+        self.assertIs(GuardsStatePickler._unpickle_type_dict_item(D, "value"), marker)
+        self.assertEqual(calls, [])
 
     def test_module_bookkeeping_containers_are_never_registered_as_pruned(self):
         # nn.Module.__getattr__ indexes _parameters/_buffers/_modules for every
@@ -1355,6 +1559,27 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = load_guards_state(buf.getvalue())
         self.assertIsNotNone(out.grad)
         self.assertEqual(out.grad.shape, grad.shape)
+
+    def test_a_composite_flag_member_without_a_name(self):
+        # On Python 3.10 a composite Flag member's name is None.
+        member = _Perm.R | _Perm.W
+        buf = io.BytesIO()
+        with mock.patch.object(member, "_name_", None):
+            self.assertFalse(is_portable_identity_guard("ID_MATCH", (), member))
+            GuardsStatePickler({}, {}, {}, {}, buf).dump({"perms": member})
+        self.assertIs(load_guards_state(buf.getvalue())["perms"], member)
+
+    def test_a_main_class_resolves_against_the_loading_main(self):
+        main = sys.modules["__main__"]
+        cls = type("_MainOnly", (), {"__module__": "__main__"})
+        buf = io.BytesIO()
+        with mock.patch.object(main, "_MainOnly", cls, create=True):
+            self.assertTrue(is_portable_identity_guard("CLASS_MATCH", (), cls))
+            GuardsStatePickler({}, {}, {}, {}, buf).dump({"cls": cls})
+            self.assertIs(load_guards_state(buf.getvalue())["cls"], cls)
+        # A loading process whose __main__ does not define it fails the load.
+        with self.assertRaisesRegex(AttributeError, "_MainOnly"):
+            load_guards_state(buf.getvalue())
 
     def test_an_unguarded_grad_loads_as_none(self):
         # The .grad of a guarded leaf is a tensor the guard tree may not reach;
@@ -1654,6 +1879,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"cell": empty[0]})
         self.assertTrue(_cell_is_empty(load_guards_state(buf.getvalue())["cell"]))
+
+    def test_reduce_dict_keys_type(self):
+        dict_keys = type({}.keys())
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"t": dict_keys})
+        self.assertIs(load_guards_state(buf.getvalue())["t"], dict_keys)
 
     def test_rebuilt_function_keeps_an_empty_closure_cell(self):
         # A by-value rebuild of an fqn-mismatched wrapper carries its cells
@@ -3267,6 +3498,18 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # for precompile under FSDP+TP.
         self._test_check_fn(ref, loaded, {"w": base}, True)
 
+    def test_dict_keys_type_local(self):
+        def fn(x, t):
+            if t.__name__ == "dict_keys":
+                return x + 1
+            return x - 1
+
+        dict_keys = type({}.keys())
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x, dict_keys)
+        self._test_check_fn(ref, loaded, {"x": x, "t": dict_keys}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "t": type({}.values())}, False)
+
     def test_equals_match(self):
         def fn(x, y):
             # CustomConstantType is registered as a pytree constant so this should
@@ -3378,12 +3621,337 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         x = torch.randn(3)
 
-        # we don't support FUNCTION_MATCH because it adds an ID_MATCH guard, and we don't
-        # support that in serialization
+        ref, loaded = self._test_serialization("CLASS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.object(torch, "no_grad", torch.enable_grad):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_class_match_on_a_local_class(self):
+        class Local:
+            pass
+
+        def fn(x):
+            if isinstance(x, Local):
+                return x
+            return x + 1
+
+        # A <locals> class does not unpickle to the loading process's class.
         with self.assertRaisesRegex(
             PackageError, "CLASS_MATCH guard cannot be serialized."
         ):
-            self._test_serialization("CLASS_MATCH", fn, x)
+            self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
+
+    def test_module_match(self):
+        def fn(x):
+            return x + math.sqrt(2)
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("MODULE_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"math": cmath}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_id_match_on_an_enum_member(self):
+        def fn(x):
+            if _MODE is _Mode.FAST:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_MODE": _Mode.SLOW}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_id_match_on_a_member_of_a_nested_enum(self):
+        def fn(x):
+            if _LEVEL is _EnumOwner.Level.LOW:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_LEVEL": _EnumOwner.Level.HIGH}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_id_match_on_an_enum_member_whose_value_does_not_round_trip(self):
+        def fn(x):
+            if _BY_OBJECT is _ByObject.A:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_BY_OBJECT": _ByObject.B}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_id_match_on_a_builtin_function(self):
+        def fn(x):
+            return _torch_add(x, 1)
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_torch_add": torch.sub}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_portable_identity_guard_values(self):
+        class Local:
+            pass
+
+        cases = [
+            (math, True),
+            (math.sqrt, True),
+            (_wrapped_target, True),
+            (_Mode.SLOW, True),
+            (_EnumOwner.Level.LOW, True),
+            (_Perm.R | _Perm.W, False),
+            (_NameClash["name"], True),
+            (types.ModuleType("_unregistered"), False),
+            (Local, False),
+            # Its __qualname__ leads to _wrapped_target instead.
+            (_wraps_wrapper, False),
+            (_TupleOwner.Point, False),
+            # The guard-state pickler refuses a class with a nested metaclass.
+            (_WithNestedMeta, False),
+            # Bound to the module's Random instance, with no __module__.
+            (random.random, False),
+            # pybind11: bound to an instance, so its __qualname__ names the
+            # instance's type and leads to a different object.
+            (torch._C._get_tracing_state, False),
+        ]
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    is_portable_identity_guard("ID_MATCH", (), value), expected
+                )
+                if expected and not isinstance(value, types.ModuleType):
+                    self.assertIs(pickle.loads(pickle.dumps(value)), value)
+
+    def test_class_match_on_a_named_tuple_nested_in_a_class(self):
+        def fn(x):
+            if isinstance(x, _TupleOwner.Point):
+                return x
+            return x + 1
+
+        # The guard-state pickler rebuilds a nested NamedTuple as a fresh class.
+        with self.assertRaisesRegex(
+            PackageError, "CLASS_MATCH guard cannot be serialized."
+        ):
+            self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
+
+    def test_guarded_user_object_prunes_unguarded_attributes(self):
+        def fn(x, holder):
+            return x * holder.scale
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, LockHolder(2))
+        self._test_check_fn(ref, loaded, {"x": x, "holder": LockHolder(2)}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "holder": LockHolder(3)}, False)
+
+    def test_guarded_user_object_with_a_reducer_is_pickled_whole(self):
+        def fn(x, holder):
+            return x * holder.scale
+
+        x = torch.randn(3)
+        holder = ReducedHolder(2, {"mode": "eval"})
+
+        # __reduce__ passes the unguarded cfg to __init__, which would fail on
+        # the pruning sentinel at load.
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, holder)
+        self._test_check_fn(ref, loaded, {"x": x, "holder": holder}, True)
+        self._test_check_fn(
+            ref, loaded, {"x": x, "holder": ReducedHolder(3, {})}, False
+        )
+
+    def test_guarded_enum_member_keeps_its_value(self):
+        def fn(x, mode):
+            if mode is _Schedule.WARMUP:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x, _Schedule.WARMUP)
+        self._test_check_fn(ref, loaded, {"x": x, "mode": _Schedule.WARMUP}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "mode": _Schedule.STEADY}, False)
+
+    def test_constant_class_is_kept_whole_for_its_equals_match(self):
+        def fn(x, plan):
+            if isinstance(plan, _Plan):
+                return x * 2
+            return x
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization(
+            "EQUALS_MATCH", fn, x, _Plan(_Phase(0.1))
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "plan": _Plan(_Phase(0.1))}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "plan": _Plan(_Phase(1.0))}, False)
+
+    def test_object_inside_a_constant_class_is_kept_whole(self):
+        def fn(x, plan, stage):
+            if isinstance(plan, _StagedPlan):
+                return x * stage.lr
+            return x
+
+        def inputs(steps):
+            stage = _Stage(2.0, steps)
+            return {"x": torch.ones(3), "plan": _StagedPlan(stage), "stage": stage}
+
+        # A guard reads stage.lr, but plan's EQUALS_MATCH compares stage whole,
+        # steps included.
+        ref, loaded = self._test_serialization(
+            ("EQUALS_MATCH", "CONSTANT_MATCH"), fn, *inputs([4, 4]).values()
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
+
+    def test_tensor_subclass_ctx_object_is_kept_whole(self):
+        def fn(x):
+            return x * x.extra.scale
+
+        def sub(blocks):
+            return SubclassWithMeta(torch.randn(3), extra=_Layout(2, blocks))
+
+        # blocks is read by no guard, but TENSOR_SUBCLASS_METADATA_MATCH
+        # compares the whole __tensor_flatten__ ctx that holds the layout.
+        ref, loaded = self._test_serialization(
+            ("TENSOR_SUBCLASS_METADATA_MATCH", "CONSTANT_MATCH"), fn, sub([4, 4])
+        )
+        self._test_check_fn(ref, loaded, {"x": sub([4, 4])}, True)
+        self._test_check_fn(ref, loaded, {"x": sub([8, 8])}, False)
+
+    def test_tensor_subclass_ctx_object_is_kept_when_another_object_holds_it(self):
+        def fn(holder, x):
+            return x * holder.scale
+
+        def inputs(blocks):
+            layout = _Layout(2, blocks)
+            x = SubclassWithMeta(torch.randn(3), extra=layout)
+            return {"holder": _LayoutHolder(3, layout), "x": x}
+
+        # holder is pickled first, and no guard reads its layout, the very
+        # object the subclass's ctx holds.
+        ref, loaded = self._test_serialization(
+            ("TENSOR_SUBCLASS_METADATA_MATCH", "CONSTANT_MATCH"),
+            fn,
+            *inputs([4, 4]).values(),
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
+
+    def test_object_inside_an_opaque_constant_is_kept_whole(self):
+        def fn(x, const, stage):
+            if isinstance(const, CustomConstantType):
+                return x * stage.lr
+            return x
+
+        def inputs(steps):
+            stage = _Stage(2.0, steps)
+            const = CustomConstantType(stage, 0)
+            return {"x": torch.ones(3), "const": const, "stage": stage}
+
+        # A guard reads stage.lr, but const's EQUALS_MATCH compares const.a,
+        # which is stage, whole.
+        ref, loaded = self._test_serialization(
+            ("EQUALS_MATCH", "CONSTANT_MATCH"), fn, *inputs([4, 4]).values()
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
+
+    def test_tensor_subclass_ctx_dict_key_is_kept_whole(self):
+        def fn(x, stage):
+            return x * stage.lr
+
+        def inputs(steps):
+            stage = _Stage(2.0, steps)
+            x = SubclassWithMeta(torch.randn(3), extra={stage: "warmup"})
+            return {"x": x, "stage": stage}
+
+        # stage is only a key of the ctx dict, which the guard compares whole.
+        ref, loaded = self._test_serialization(
+            ("TENSOR_SUBCLASS_METADATA_MATCH", "CONSTANT_MATCH"),
+            fn,
+            *inputs([4, 4]).values(),
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
+
+    def test_nested_guarded_user_objects_are_pruned_in_turn(self):
+        def fn(x, holder):
+            return x * holder.scale.scale
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization(
+            "CONSTANT_MATCH", fn, x, LockHolder(LockHolder(2))
+        )
+        self._test_check_fn(
+            ref, loaded, {"x": x, "holder": LockHolder(LockHolder(2))}, True
+        )
+        self._test_check_fn(
+            ref, loaded, {"x": x, "holder": LockHolder(LockHolder(3))}, False
+        )
+
+    def test_attribute_guarded_through_another_object_is_kept(self):
+        def fn(x, a, b):
+            return x * a.scale + b.scale.scale
+
+        def inputs(inner):
+            shared = LockHolder(inner)
+            a = LockHolder(2)
+            a.shared = shared
+            return {"x": x, "a": a, "b": LockHolder(shared)}
+
+        x = torch.randn(3)
+        args = inputs(3)
+
+        # a.shared is unguarded through a but guarded through b.
+        ref, loaded = self._test_serialization(
+            "CONSTANT_MATCH", fn, x, args["a"], args["b"]
+        )
+        self._test_check_fn(ref, loaded, inputs(3), True)
+        self._test_check_fn(ref, loaded, inputs(4), False)
+
+    def test_attribute_shared_with_an_object_pickled_whole_is_kept(self):
+        def fn(x, holder, wrapper):
+            return x * holder.scale + wrapper.scale
+
+        def inputs(scale):
+            wrapper = ReducedHolder(scale, {"mode": "eval"})
+            holder = LockHolder(2)
+            holder.cfg = wrapper.cfg
+            return {"x": x, "holder": holder, "wrapper": wrapper}
+
+        x = torch.randn(3)
+
+        # holder is pickled first and no guard reads holder.cfg, the very dict
+        # wrapper's __reduce__ passes to __init__ at load.
+        ref, loaded = self._test_serialization(
+            "CONSTANT_MATCH", fn, *inputs(3).values()
+        )
+        self._test_check_fn(ref, loaded, inputs(3), True)
+        self._test_check_fn(ref, loaded, inputs(4), False)
+
+    def test_a_dict_subclass_keeps_its_items_when_pruned(self):
+        def fn(x, cfg):
+            return x * cfg["lr"]
+
+        x = torch.randn(3)
+        # The lock is an unguarded attribute; the items live outside __dict__.
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, LockDict(lr=2))
+        self._test_check_fn(ref, loaded, {"x": x, "cfg": LockDict(lr=2)}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "cfg": LockDict(lr=3)}, False)
 
     def test_closure_match(self):
         def fn(x):
@@ -3391,13 +3959,34 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return global_func(x)
 
         x = torch.randn(3)
+        ref, loaded = self._test_serialization("CLOSURE_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        # The saved guard compares code by value rather than identity, so it
+        # matches the loading process's own copy of the function.
+        copy = types.FunctionType(global_func.__code__.replace(), globals())
+        self.assertIsNot(copy.__code__, global_func.__code__)
+        with mock.patch.dict(globals(), {"global_func": copy}):
+            self.assertFalse(ref.check({"x": x}))
+            self.assertTrue(loaded.check({"x": x}))
+        with mock.patch.dict(globals(), {"global_func": lambda x: x + 2}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
 
-        # we don't support CLOSURE_MATCH because it adds a FUNCTION_MATCH guard, and we don't
-        # support that in serialization
-        with self.assertRaisesRegex(
-            PackageError, "CLOSURE_MATCH guard cannot be serialized."
+    def test_closure_match_without_module_globals(self):
+        namespace = {}
+        exec("def global_func(x):\n    return x + 1\n", namespace)
+
+        def fn(x):
+            return global_func(x)
+
+        # No importable module owns these globals, so a loading process has no
+        # way to find the function's globals again.
+        with (
+            mock.patch.dict(globals(), {"global_func": namespace["global_func"]}),
+            self.assertRaisesRegex(
+                PackageError, "CLOSURE_MATCH guard cannot be serialized."
+            ),
         ):
-            self._test_serialization("CLOSURE_MATCH", fn, x)
+            self._test_serialization("CLOSURE_MATCH", fn, torch.randn(3))
 
     def test_sequence_length(self):
         # tuple input installs a SEQUENCE_LENGTH guard
