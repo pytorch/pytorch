@@ -247,16 +247,19 @@ struct tanh_functor {
   }
 };
 
-// Complex inverse sine/cosine family, ported from FreeBSD's catrigf.c, which
-// implements Hull, Fairgrieve and Tang, "Implementing the complex arcsine and
-// arccosine functions using exception handling" (1997). thrust (and therefore
-// CUDA) uses the same algorithm. casin/cacosh are derived from casinh/cacos.
+// Complex inverse trigonometric/hyperbolic functions, ported from FreeBSD's
+// catrigf.c, which implements Hull, Fairgrieve and Tang, "Implementing the
+// complex arcsine and arccosine functions using exception handling" (1997).
+// thrust (and therefore CUDA) uses the same algorithm. casin/cacosh/catan are
+// derived from casinh/cacos/catanh.
 namespace catrig {
 constant constexpr float RECIP_EPSILON = 1 / FLT_EPSILON;
 constant constexpr float A_CROSSOVER = 10;
 constant constexpr float B_CROSSOVER = 0.6417;
 constant constexpr float FOUR_SQRT_MIN = 0x1p-61;
 constant constexpr float SQRT_6_EPSILON = 8.4572793338e-4;
+constant constexpr float SQRT_3_EPSILON = 5.9801995673e-4;
+constant constexpr float SQRT_MIN = 0x1p-63;
 
 // (hypot(a, b) - b) / 2 computed without cancellation
 inline float f(float a, float b, float hypot_a_b) {
@@ -413,6 +416,59 @@ inline float2 cacosh(float2 z) {
   }
   return float2(::metal::fabs(w.y), ::metal::copysign(w.x, z.y));
 }
+// x * x + y * y for x, y >= 0, avoiding underflow when y is small
+inline float sum_squares(float x, float y) {
+  return y < SQRT_MIN ? x * x : x * x + y * y;
+}
+
+// Re(1 / (x + iy)) = x / (x^2 + y^2), without overflow
+inline float real_part_reciprocal(float x, float y) {
+  const float h = c10::metal::hypot(x, y);
+  return ::metal::isinf(h) ? ::metal::copysign(0.0f, x) : x / h / h;
+}
+
+inline float2 catanh(float2 z) {
+  const float x = z.x, y = z.y;
+  const float ax = ::metal::fabs(x), ay = ::metal::fabs(y);
+  if (y == 0 && ax <= 1) {
+    return float2(precise::atanh(x), y);
+  }
+  if (x == 0) {
+    return float2(x, precise::atan(y));
+  }
+  if (::metal::isnan(x) || ::metal::isnan(y)) {
+    if (::metal::isinf(x)) {
+      return float2(::metal::copysign(0.0f, x), y + y);
+    }
+    if (::metal::isinf(y)) {
+      return float2(::metal::copysign(0.0f, x), ::metal::copysign(M_PI_2_F, y));
+    }
+    return float2(NAN, NAN);
+  }
+  if (ax > RECIP_EPSILON || ay > RECIP_EPSILON) {
+    return float2(real_part_reciprocal(x, y), ::metal::copysign(M_PI_2_F, y));
+  }
+  if (ax < SQRT_3_EPSILON / 2 && ay < SQRT_3_EPSILON / 2) {
+    return z;
+  }
+  const float rx = ax == 1 && ay < FLT_EPSILON
+      ? (M_LN2_F - precise::log(ay)) / 2
+      : c10::metal::log1p(4 * ax / sum_squares(ax - 1, ay)) / 4;
+  float ry;
+  if (ax == 1) {
+    ry = precise::atan2(2.0f, -ay) / 2;
+  } else if (ay < FLT_EPSILON) {
+    ry = precise::atan2(2 * ay, (1 - ax) * (1 + ax)) / 2;
+  } else {
+    ry = precise::atan2(2 * ay, (1 - ax) * (1 + ax) - ay * ay) / 2;
+  }
+  return float2(::metal::copysign(rx, x), ::metal::copysign(ry, y));
+}
+
+inline float2 catan(float2 z) {
+  const auto w = catanh(float2(z.y, z.x));
+  return float2(w.y, w.x);
+}
 } // namespace catrig
 
 #define DEFINE_INVERSE_TRIG_FUNCTOR(NAME)                                      \
@@ -436,32 +492,8 @@ DEFINE_INVERSE_TRIG_FUNCTOR(asin);
 DEFINE_INVERSE_TRIG_FUNCTOR(acos);
 DEFINE_INVERSE_TRIG_FUNCTOR(asinh);
 DEFINE_INVERSE_TRIG_FUNCTOR(acosh);
-
-struct atan_functor {
-  template <typename T>
-  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
-    return T(precise::atan(x));
-  }
-  template <typename T>
-  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
-    return precise::atan(static_cast<float>(x));
-  }
-  template <typename T>
-  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // atan(z) = (1/2i)ln((i-z)/(i+z))
-    auto coef = div(T(1, 0), T(0, 2));
-    auto log_arg = div(T(-1 * x.x, 1 - x.y), T(x.x, 1 + x.y));
-    // Calculate log using method from log_functor
-    auto magnitude =
-        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (log_arg.x == 0 && log_arg.y == 0)
-        ? 0
-        : ::precise::atan2(log_arg.y, log_arg.x);
-    // return coefficient * log value
-    return c10::metal::mul(coef, T(real, imag));
-  }
-};
+DEFINE_INVERSE_TRIG_FUNCTOR(atan);
+DEFINE_INVERSE_TRIG_FUNCTOR(atanh);
 
 // Bool specialization is need to workaround compiler crashes on MacOS-13
 // Otherwise attempts to invoke will fail to create state object with error
@@ -865,7 +897,8 @@ REGISTER_UNARY_OP(sgn, half2, half2);
   REGISTER_UNARY_OP(acos, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(asinh, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(acosh, DTYPE1, DTYPE0);        \
-  REGISTER_UNARY_OP(atan, DTYPE1, DTYPE0)
+  REGISTER_UNARY_OP(atan, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(atanh, DTYPE1, DTYPE0)
 
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
 REGISTER_UNARY_OP(neg, bfloat, bfloat);
@@ -907,7 +940,8 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(acos, DTYPE##2, DTYPE##2);       \
   REGISTER_UNARY_OP(asinh, DTYPE##2, DTYPE##2);      \
   REGISTER_UNARY_OP(acosh, DTYPE##2, DTYPE##2);      \
-  REGISTER_UNARY_OP(atan, DTYPE##2, DTYPE##2)
+  REGISTER_UNARY_OP(atan, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(atanh, DTYPE##2, DTYPE##2)
 
 INSTANTIATE_UNARY_KERNELS_VEC2(half);
 INSTANTIATE_UNARY_KERNELS_VEC2(float);
