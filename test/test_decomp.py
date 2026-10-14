@@ -428,7 +428,6 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "meshgrid"),
     # Decomposition registered as Autograd
     (None, None, "nn.functional.hardshrink"),
-    (None, None, "nn.functional.softshrink"),
     # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
     (None, None, "diag"),
     # _softmax_backward_data's CPU kernel for bfloat16 always return the grad_input as float32
@@ -525,7 +524,6 @@ core_backward_failures = {
     skip("native_dropout_backward"),  # slow: fails with --timeout=360 secs
     skip("nn.functional.glu"),  # slow: fails with --timeout=360 secs
     xfail("nn.functional.hardshrink"),
-    xfail("nn.functional.softshrink"),
     skip("nn.functional.unfold"),  # slow: fails with --timeout=360 secs
     xfail("norm"),
     xfail("norm", "fro"),
@@ -1198,6 +1196,28 @@ class DecompOneOffTests(TestCase):
         self.assertNotIn(torch.ops.aten.polar.default, targets)
         self.assertEqual([t for t in targets if t._schema.is_mutable], [])
         self.assertEqual(gm(dist, angle), torch.polar(dist, angle))
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_softshrink_backward_lambd_range(self, device):
+        # Like the kernel, reject finite lambd outside the computation dtype's
+        # range, but accept inf and nan.
+        from torch._decomp.decompositions import softshrink_backward
+
+        for dtype in (torch.float16, torch.bfloat16, torch.float32):
+            grad = torch.ones(3, device=device, dtype=dtype)
+            x = torch.tensor([0.0, 1.0, float("nan")], device=device, dtype=dtype)
+            limit = torch.finfo(dtype).max
+            for lambd in (limit, -limit, float("inf"), float("nan")):
+                self.assertEqual(
+                    softshrink_backward(grad, x, lambd),
+                    torch.ops.aten.softshrink_backward(grad, x, lambd),
+                )
+            for lambd in (1e40, -1e40, limit * (1 + 2**-20)):
+                with self.assertRaisesRegex(RuntimeError, "overflow"):
+                    torch.ops.aten.softshrink_backward(grad, x, lambd)
+                with self.assertRaisesRegex(RuntimeError, "overflow"):
+                    softshrink_backward(grad, x, lambd)
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef

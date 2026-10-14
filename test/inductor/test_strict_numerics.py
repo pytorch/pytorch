@@ -334,6 +334,96 @@ class StrictNumericsCompileTest(TestCase):
         self.assertEqual(negative, expected_negative)
         self.assertIn("tl.where", "\n".join(codes))
 
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("lambd", (0.0, 0.5, 0.12345))
+    def test_softshrink_strict(self, device, dtype, numerics, lambd):
+        from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+
+        x = (
+            _exhaustive_16bit(dtype, device)
+            if dtype in (torch.float16, torch.bfloat16)
+            else _sampled_fp32(NUM_BITPATTERN_SAMPLES, device)
+        )
+        boundary = torch.tensor([0.0, -0.0, lambd, -lambd], device=device, dtype=dtype)
+        x = torch.cat((x, boundary)).requires_grad_(True)
+        grad_output = _sampled_fp32(x.numel(), device, seed=1)[: x.numel()].to(dtype)
+        grad_output[::17] = -0.0
+
+        def fn(x):
+            return torch.nn.functional.softshrink(x, lambd)
+
+        expected = fn(x)
+        expected_grad = torch.autograd.grad(expected, x, grad_outputs=grad_output)[0]
+        graphs = {}
+
+        def inner_compile(gm, inputs, **kwargs):
+            graphs[kwargs.get("is_backward", False)] = {
+                str(n.meta.get("original_aten"))
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+            }
+            return compile_fx_inner(gm, inputs, **kwargs)
+
+        with config.patch({"numerics": numerics, "force_disable_caches": True}):
+            result = torch.compile(
+                fn,
+                fullgraph=True,
+                backend=lambda gm, inputs: compile_fx(
+                    gm, inputs, inner_compile=inner_compile
+                ),
+            )(x)
+            result_grad = torch.autograd.grad(result, x, grad_outputs=grad_output)[0]
+        bits = _BIT_VIEW[dtype]
+        self.assertEqual(result.view(bits), expected.view(bits))
+        self.assertEqual(result_grad.view(bits), expected_grad.view(bits))
+        # The backward must come from softshrink_backward, not from autograd
+        # differentiating the forward decomposition.
+        self.assertIn("aten.softshrink.default", graphs[False])
+        self.assertIn("aten.softshrink_backward.default", graphs[True])
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_softshrink_strict_symbolic_lambd(self, device, dtype, numerics):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        bits = _BIT_VIEW[dtype]
+
+        def fn(x, lambd):
+            return torch.nn.functional.softshrink(x, lambd)
+
+        counter = CompileCounterWithBackend("inductor")
+        with config.patch({"numerics": numerics, "force_disable_caches": True}):
+            compiled = torch.compile(fn, fullgraph=True, backend=counter)
+            # The first value is specialized; later values reuse one graph (f32).
+            for lambd in (0.5, 0.1, 0.3):
+                # lambd is not representable, so its rounding is observable.
+                bound = torch.tensor([lambd, -lambd], dtype=dtype, device=device)
+                x = torch.cat(
+                    (
+                        bound,
+                        torch.nextafter(bound, bound * 2),
+                        torch.nextafter(bound, bound * 0),
+                        torch.tensor(
+                            [0.0, -0.0, 0.05, -0.05, float("nan")],
+                            dtype=dtype,
+                            device=device,
+                        ),
+                    )
+                ).requires_grad_(True)
+                grad_output = torch.full_like(x, -0.0)
+                grad_output[::2] = 1.5
+                expected = fn(x, lambd)
+                expected_grad = torch.autograd.grad(expected, x, grad_output)[0]
+                result = compiled(x, lambd)
+                result_grad = torch.autograd.grad(result, x, grad_output)[0]
+                self.assertEqual(result.view(bits), expected.view(bits))
+                self.assertEqual(result_grad.view(bits), expected_grad.view(bits))
+        if dtype == torch.float32:
+            # Half-precision inputs round lambd with scalar_tensor, which
+            # tensorify cannot handle, so lambd is specialized there.
+            self.assertEqual(counter.frame_count, 2)
+
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):
         x = torch.full((1024,), 11.0, device=device)
@@ -968,9 +1058,6 @@ POINTWISE_XFAIL = frozenset(
         ("nn_functional_relu6", "float16"),
         ("nn_functional_relu6", "float32"),
         ("nn_functional_softplus", "float32"),
-        ("nn_functional_softshrink", "bfloat16"),
-        ("nn_functional_softshrink", "float16"),
-        ("nn_functional_softshrink", "float32"),
         ("remainder", "bfloat16"),
         ("remainder", "float16"),
         ("remainder", "float32"),
@@ -1082,9 +1169,6 @@ BACKWARD_XFAIL = frozenset(
         ("nn_functional_mish", "float32"),
         ("nn_functional_silu", "float16"),
         ("nn_functional_silu", "float32"),
-        ("nn_functional_softshrink", "bfloat16"),
-        ("nn_functional_softshrink", "float16"),
-        ("nn_functional_softshrink", "float32"),
         ("nn_functional_tanhshrink", "bfloat16"),
         ("nn_functional_tanhshrink", "float16"),
         ("nn_functional_tanhshrink", "float32"),
