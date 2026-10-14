@@ -598,24 +598,19 @@ print(eval(f"bbmod.{name}.{path}") is code)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(expected, compiled_fn(*args))
 
-    def test_install_seeds_unnamed_scope_globals_shared_by_packages(self):
+    def _save_record_package(self, ctx):
         # Inlining PkgRecord.__new__ roots guards at the ___unnamed_scope_<id>_c<n>
         # key Dynamo mints for its globals. The key embeds an id() from the
         # compiling process, so a loading process has no binding for it and every
-        # call misses on a KeyError unless install() seeds it. Two packages
-        # loaded from one artifact seed the same key, and the first to uninstall
-        # must leave it to the other.
-        ctx = DiskDynamoStore()
-
+        # call misses on a KeyError unless install() seeds it.
         def fn(x):
             record = PkgRecord(x.sin(), 2)
             return record.value * record.weight
 
-        x = torch.randn(4)
         package = CompilePackage(fn)
         torch._dynamo.optimize(
             backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
-        )(fn)(x)
+        )(fn)(torch.randn(4))
         names = {
             name
             for entry in package.cache_entry().codes
@@ -629,28 +624,66 @@ print(eval(f"bbmod.{name}.{path}") is code)
         for backend_id, backend in package.cached_backends.items():
             ctx.record_eager_backend(backend_id, backend)
         ctx.save_package(package, self.path())
+        return fn, names
 
+    def test_install_seeds_unnamed_scope_globals(self):
+        ctx = DiskDynamoStore()
+        fn, names = self._save_record_package(ctx)
         torch._dynamo.reset()
         scope = fn.__globals__
         # What a fresh process sees.
         for name in names:
             scope.pop(name, None)
 
-        first, backends = ctx.load_package(fn, self.path())
-        first.install(backends)
-        seeded = {name: scope[name] for name in names}
-        second, backends = ctx.load_package(fn, self.path())
-        compiled_fn = torch._dynamo.optimize(package=second)(fn)
-        second.install(backends)
-        self.assertEqual({name: scope[name] for name in names}, seeded)
+        x = torch.randn(4)
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        self.assertLessEqual(names, scope.keys())
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(x), fn(x))
-
-        first.uninstall()
-        for name in names:
-            self.assertIs(scope[name], seeded[name])
-        second.uninstall()
+        package.uninstall()
         self.assertFalse(names & scope.keys())
+
+        # A binding someone else wrote is neither replaced nor removed.
+        foreign = {name: {} for name in names}
+        scope.update(foreign)
+        package.install(backends)
+        package.uninstall()
+        for name in names:
+            self.assertIs(scope.pop(name), foreign[name])
+
+    def test_install_keeps_unnamed_scope_globals_of_a_live_compile(self):
+        # The live compile bound the key behind a CleanupHook keyed on its
+        # generated code. install() keeps that binding, and the hook firing
+        # afterwards must not delete it from under the installed guards.
+        ctx = DiskDynamoStore()
+        before = set(CleanupManager.instance.refs)
+        fn, names = self._save_record_package(ctx)
+        # Pin the live compile's code objects so its hooks fire after install().
+        pinned = [
+            ref()
+            for idx, ref in list(CleanupManager.instance.refs.items())
+            if idx not in before
+        ]
+        pinned_ids = {id(p) for p in pinned if p is not None}
+        self.assertTrue(pinned_ids)
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        del pinned
+        gc.collect()
+
+        self.assertTrue(pinned_ids - set(CleanupManager.instance.refs))
+        self.assertLessEqual(names, fn.__globals__.keys())
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), fn(x))
+        package.uninstall()
+        for name in names:
+            fn.__globals__.pop(name, None)
 
     def test_uninstall_keeps_a_global_it_did_not_bind(self):
         # An aot_compile load seeds the __import_* aliases its kept guards are
