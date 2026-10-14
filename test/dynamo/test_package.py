@@ -1209,6 +1209,37 @@ def add(x, y):
             load_guard_manager(guards_state, fn.__code__, fn.__globals__)
         self.assertIsInstance(cm.exception.__cause__, KeyError)
 
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_unbuildable_guards_on_warm_load_name_the_frame(self):
+        def fn(x):
+            return x * PKG_SCALE
+
+        x = torch.randn(3)
+        torch.compile(fn)(x)  # noqa: UNSPECIFIED_BACKEND
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        def load_without_scale(guards_state):
+            state = load_guards_state(guards_state)
+            del state.output_graph.global_scope["PKG_SCALE"]
+            return state
+
+        # The RuntimeError fallback in _TorchDynamoContext.__call__ re-runs
+        # initialize() on the package install() was called on, which asserts.
+        with (
+            patch.object(
+                torch._dynamo.package, "load_guards_state", load_without_scale
+            ),
+            self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs,
+            self.assertRaisesRegex(
+                AssertionError, "CompilePackage is already initialized"
+            ) as cm,
+        ):
+            torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertIsInstance(cm.exception.__context__, torch._dynamo.exc.PackageError)
+        self.assertIn(
+            "Cannot rebuild the serialized guards for fn", "\n".join(logs.output)
+        )
+
     def _round_trip_under_fail_on_recompile(self, fn, x):
         ctx = DiskDynamoStore()
         package = CompilePackage(fn)
