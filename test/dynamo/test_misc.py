@@ -14003,6 +14003,49 @@ def ___make_guard_fn():
         self.assertEqual(opt_fn(x), x - 1)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_lru_cache_fn_hasattr(self):
+        @functools.lru_cache
+        def g(x):
+            return x
+
+        class M:
+            @functools.lru_cache
+            def m(self, x):
+                return x
+
+        obj = M()
+
+        def fn(x):
+            if hasattr(g, "cache_info") and hasattr(obj.m, "cache_info"):
+                return x + 1
+            return x - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(3)
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_fn_hasattr_known_dunder_unguarded(self):
+        def bar(x):
+            return x
+
+        def fn(x):
+            if hasattr(bar, "__name__"):
+                return x + 1
+            return x - 1
+
+        guards = []
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, guard_export_fn=guards.extend)(fn)
+        x = torch.zeros(3)
+        self.assertEqual(opt_fn(x), x + 1)
+        bar.__name__ = "renamed"
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertFalse(any(g.create_fn_name() == "HASATTR" for g in guards))
+
     def test_constant_hasattr_returns_bool(self):
         """Test that hasattr on constant values properly returns boolean ConstantVariable."""
 
