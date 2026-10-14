@@ -48,6 +48,13 @@ struct orEvent;
 typedef struct orStream* orStream_t;
 typedef struct orEvent* orEvent_t;
 
+// Fixed-size opaque handle used to share an event across processes, analogous
+// to cudaIpcEventHandle_t.
+#define OR_IPC_HANDLE_SIZE 64
+typedef struct orIpcEventHandle_st {
+  char reserved[OR_IPC_HANDLE_SIZE];
+} orIpcEventHandle_t;
+
 // Memory
 OPENREG_EXPORT orError_t orMalloc(void** devPtr, size_t size);
 OPENREG_EXPORT orError_t orFree(void* devPtr);
@@ -97,6 +104,17 @@ OPENREG_EXPORT orError_t orEventSynchronize(orEvent_t event);
 OPENREG_EXPORT orError_t orEventQuery(orEvent_t event);
 OPENREG_EXPORT orError_t
 orEventElapsedTime(float* ms, orEvent_t start, orEvent_t end);
+
+// Shares `event`'s completion state across processes. On first call, this
+// lazily backs the event with a named POSIX shared-memory segment so that
+// another process can observe when it completes.
+OPENREG_EXPORT orError_t
+orEventIpcGetHandle(orIpcEventHandle_t* handle, orEvent_t event);
+// Opens a handle produced by orEventIpcGetHandle in another process,
+// returning a new event whose completion state is backed by the same shared
+// memory segment as the exporting event.
+OPENREG_EXPORT orError_t
+orEventIpcOpenHandle(orEvent_t* event, orIpcEventHandle_t handle);
 
 // Activity tracing
 OPENREG_EXPORT orError_t orActivityEnableTracing(void);

@@ -15,6 +15,12 @@ add_library(${LIBRARY_NAME} SHARED ${SOURCE_FILES})
 
 target_include_directories(${LIBRARY_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
+if(UNIX AND NOT APPLE)
+    # shm_open/shm_unlink (used for IPC event support) live in librt on
+    # glibc < 2.34; harmless to link on newer glibc where it's a no-op stub.
+    target_link_libraries(${LIBRARY_NAME} PUBLIC rt)
+endif()
+
 install(TARGETS ${LIBRARY_NAME}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

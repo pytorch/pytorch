@@ -4,6 +4,9 @@
 #include <c10/core/DeviceCapability.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
+#include <cstring>
+#include <string>
+
 #include <include/openreg.h>
 
 #include "OpenRegEvent.h"
@@ -271,6 +274,55 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     set_device(orig_device);
 
     return static_cast<double>(time_ms);
+  }
+
+  /**
+   * Gets a handle that can be used to share `event` with another process.
+   * Lazily creates the event if it has never been recorded.
+   */
+  std::string getEventIPCHandle(void** event, const DeviceIndex device_index, const EventFlag flag) const override {
+    TORCH_CHECK(
+        !(flag & EventFlag::TIMING),
+        "Cannot get an IPC handle for an event created with enable_timing=True.");
+
+    orEvent_t or_event = static_cast<orEvent_t>(*event);
+    const auto orig_device = current_device();
+    set_device(device_index);
+
+    if (!or_event) {
+      OPENREG_CHECK(orEventCreateWithFlags(&or_event, orEventDisableTiming));
+    }
+
+    orIpcEventHandle_t handle{};
+    OPENREG_CHECK(orEventIpcGetHandle(&handle, or_event));
+    *event = or_event;
+
+    set_device(orig_device);
+
+    return std::string(handle.reserved, OR_IPC_HANDLE_SIZE);
+  }
+
+  /**
+   * Reconstructs an event from a handle obtained from getEventIPCHandle
+   * in another process.
+   */
+  void reconstructEventFromIPCHandle(void** event, const DeviceIndex device_index, const std::string& handle_string) const override {
+    TORCH_CHECK(
+        handle_string.size() == OR_IPC_HANDLE_SIZE,
+        "Invalid OpenReg IPC event handle size: ",
+        handle_string.size());
+
+    orIpcEventHandle_t handle{};
+    std::memcpy(handle.reserved, handle_string.data(), OR_IPC_HANDLE_SIZE);
+
+    const auto orig_device = current_device();
+    set_device(device_index);
+
+    orEvent_t or_event = nullptr;
+    OPENREG_CHECK(orEventIpcOpenHandle(&or_event, handle));
+    *event = or_event;
+
+    set_device(orig_device);
   }
   // LITERALINCLUDE END: OPENREG ALL EVENT GUARD IMPL
 };
