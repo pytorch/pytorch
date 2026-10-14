@@ -1176,6 +1176,11 @@ class CompilePackage:
     def is_initialized(self) -> bool:
         return self._initialized
 
+    def reset(self) -> None:
+        """Uninstall whatever install() placed and return to the uninitialized state."""
+        self.uninstall()
+        CompilePackage.__init__(self, None)
+
     def initialize(
         self,
         fn: Any,
