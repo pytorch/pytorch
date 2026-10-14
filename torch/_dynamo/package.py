@@ -648,12 +648,21 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
         raise AssertionError(
             f"Expected exactly one function name, got {len(entry.function_names)}"
         )
-    fn: Any = sys.modules[entry.python_module]
-    parts = entry.function_names[0].split(".")
+    return _lookup_code_path(
+        entry.python_module, entry.function_names[0], entry.code_source
+    )
+
+
+def _lookup_code_path(
+    python_module: str, function_name: str, code_source: str
+) -> types.CodeType:
+    entry = (python_module, function_name, code_source)
+    fn: Any = sys.modules[python_module]
+    parts = function_name.split(".")
     for part in parts:
         fn = getattr(fn, part)
-    if entry.code_source:
-        parts = entry.code_source.split(".")
+    if code_source:
+        parts = code_source.split(".")
         for part in parts:
             if part.endswith("]"):
                 index_begin = part.rfind("[")
@@ -704,9 +713,9 @@ def _descriptor_functions(obj: Any) -> list[tuple[str, Any]]:
     return []
 
 
-def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
+def _raise_resolution_error(code: types.CodeType, scope: Any, note: str = "") -> Never:
     raise PackageError(
-        f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}"
+        f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}{note}"
     )
 
 
@@ -727,12 +736,20 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
         raise PackageError(f"Cannot find module for code {code}")
 
     toplevel: Any = module
-    if sys.version_info >= (3, 11):
+    search_module_tree = sys.version_info < (3, 11)
+    if not search_module_tree:
         parts = code.co_qualname.split(".")
 
         for part in parts:
             if not hasattr(toplevel, part):
-                _raise_resolution_error(code, toplevel)
+                # co_qualname is fixed at compile time and names where the def
+                # statement ran: a factory deleted afterwards, or one that
+                # exec'd it under a module's filename. The function can still
+                # be reachable from the module under a rewritten __qualname__,
+                # so search the module the way Python < 3.11 always does.
+                toplevel = module
+                search_module_tree = True
+                break
             toplevel = getattr(toplevel, part)
             if (
                 inspect.isfunction(toplevel)
@@ -797,7 +814,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                         toplevel = obj
                         return f".__closure__[{i}].cell_contents{res}"
 
-        if sys.version_info < (3, 11):
+        if search_module_tree:
             if inspect.ismodule(obj):
                 for value in obj.__dict__.values():
                     if not (
@@ -838,7 +855,18 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     code_source = _find_code_source(toplevel)
     if code_source is None:
         _raise_resolution_error(code, toplevel)
-    return toplevel.__qualname__, code_source.strip(".")
+    function_name, code_source = toplevel.__qualname__, code_source.strip(".")
+    # The recorded __qualname__ can be stale (a factory-made function, or a
+    # wrapper from a decorator without functools.wraps), so replay the lookup
+    # the loader will do.
+    try:
+        found = _lookup_code_path(module.__name__, function_name, code_source)
+    except Exception:
+        found = None
+    if found is not code:
+        note = f". Its __qualname__ {function_name!r} does not resolve back to it"
+        _raise_resolution_error(code, toplevel, note)
+    return function_name, code_source
 
 
 @dataclasses.dataclass(frozen=True)

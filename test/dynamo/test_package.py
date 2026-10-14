@@ -22,7 +22,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
@@ -150,6 +150,55 @@ class _DescriptorCodeOwner:
         return 2
 
 
+def _make_generated_method():
+    def method(self):
+        return 1
+
+    method.__qualname__ = "_GeneratedMethodOwner.method"
+    return method
+
+
+def _make_generated_property():
+    def prop(self):
+        return 1
+
+    prop.__qualname__ = "_GeneratedMethodOwner.prop"
+    return property(prop)
+
+
+class _GeneratedMethodOwner:
+    method = _make_generated_method()
+    prop = _make_generated_property()
+
+
+def _make_stale_method():
+    def method(self):
+        return 1
+
+    return method
+
+
+class _StaleMethodOwner:
+    method = _make_stale_method()
+
+
+def _unwrapped_decorator(f):
+    def wrapper(*args):
+        return f(*args)
+
+    return wrapper
+
+
+@_unwrapped_decorator
+def _decorated_without_wraps(x):
+    return x
+
+
+# The co_qualnames, _make_*.<locals>.*, now name nothing in this module; only
+# the rewritten __qualname__s on _GeneratedMethodOwner do.
+del _make_generated_method, _make_generated_property, _make_stale_method
+
+
 # A dynamic dim on a module-level tensor is what makes a SHAPE_ENV guard read a
 # global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
 PKG_DYN_ROWS = torch.randn(4, 3)
@@ -258,6 +307,43 @@ print(eval(f"bbmod.{name}.{path}") is code)
             with package.code_context(code):
                 pass
             self.assertIs(_lookup_code(package._codes[code]), code)
+
+    def test_code_source_searches_the_module_when_the_qualname_is_stale(self):
+        # Python >= 3.11 walks co_qualname from the module and used to refuse
+        # the code at the first missing part, while < 3.11 searches the module.
+        for name, code in [
+            ("method", _GeneratedMethodOwner.method.__code__),
+            ("prop", _GeneratedMethodOwner.prop.fget.__code__),
+        ]:
+            package = CompilePackage(None)
+            with package.code_context(code):
+                pass
+            entry = package._codes[code]
+            self.assertEqual(entry.function_names, [f"_GeneratedMethodOwner.{name}"])
+            self.assertIs(_lookup_code(entry), code)
+
+    def test_code_source_refuses_a_stale_qualname_the_search_cannot_fix(self):
+        # The search finds _StaleMethodOwner.method, but its __qualname__ is as
+        # stale as co_qualname, so recording it would only fail at load.
+        code = _StaleMethodOwner.method.__code__
+        package = CompilePackage(None)
+        with self.assertRaisesRegex(
+            PackageError, r"__qualname__ '_make_stale_method\.<locals>\.method'"
+        ):
+            with package.code_context(code):
+                pass
+
+    def test_code_source_refuses_a_decorator_wrapper_without_wraps(self):
+        # On Python >= 3.11 the co_qualname walk reaches the wrapper and finds
+        # the code in its closure, recording the wrapper's stale __qualname__.
+        code = _decorated_without_wraps.__closure__[0].cell_contents.__code__
+        package = CompilePackage(None)
+        with self.assertRaisesRegex(
+            PackageError,
+            r"__qualname__ '_unwrapped_decorator\.<locals>\.wrapper'",
+        ):
+            with package.code_context(code):
+                pass
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
