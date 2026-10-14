@@ -5,22 +5,23 @@ Handoff notes for `torch.linalg.ldl_factor(x, hermitian=True)` on the
 
 **Next session: start with the TODO list in section 10.**
 
-Last updated after the second round of work (batching moved into the kernel
-file, `n = 0/1`, the last-column fix, the cooperative-panel tests, the standalone
-kernel harness, and the LAPACK-style accuracy tests). Recent history:
+Last updated at the end of the H100 session of 2026-10-14: the 10.1-10.3 TODOs,
+the default dispatch, the accuracy finding on the in-place undo (section 5), and
+upstream tests in `test/test_linalg.py` plus OpInfo samples (section 10.4).
+Recent history:
 
 ```
-f683b820c84 more tests
-8409d0b5806 more tests
-69b16d89951 more tests and bug fix with the last diagonal entry
-698910054a2 more tests
-b8c6f4a1dd7 add more tests
-21672c07138 skip -> more enabled tests
-2b8210c2b3f add support for n = 0/1, move batche support into the kernel
+08159bac95d more tests
+c15de04fcc3 tests for nan propagation
+9a57b5fcfbc test for NaNs in the pivot search
+8263c000e1f fix for numerical issues with inv(D) and pivoting decisions
+353ffe06545 proper zero imag fix
+e27fc3b261e add TODOs plus the fix
 ```
 
-`test_ldl_custom.py` may carry uncommitted edits on top of this (the switch to
-the LAPACK residual, section 7).
+Uncommitted at the end of that session: the NOTE on the undo in the kernel (and its
+standalone copy), `test/test_linalg.py`, the OpInfo samples in
+`torch/testing/_internal/opinfo/definitions/linalg.py`, and these notes.
 
 ---
 
@@ -217,6 +218,31 @@ the active column, and would report an index that is not LAPACK's). A comment
 at the `info` update in the kernel records this; there is deliberately **no
 test** that requires it. `test_zero_row_col_completes` requires only completion
 and an in-range `info`.
+
+**Accuracy vs LAPACK: the in-place undo (2026-10-14). Known, not fixed; NOTE in the
+kernel at the undo.** Pivots equal CPU LAPACK's in every case checked (17k random
+Hermitian matrices, n = 1..300), but the factors are less accurate. To test a pivot
+candidate, the panel updates column `ilambda` in place, and when it is not consumed
+(or a swap moves an updated column there) adds the update back (`undo=true`) and
+subtracts it again later: `((a - S) + S) - S`, two extra roundings of
+`eps * |S|`. LAPACK's `?lasyf`/`?lahef` update a copy in `W` and never undo.
+Measured as mean log2(CUDA residual / CPU residual), same pivots, solve on CPU:
+- no candidate search (diagonally dominant indefinite): -0.05 (CUDA slightly better);
+- random Hermitian, n = 9..129: +0.26..+0.33 (f64), +0.13..+0.22 (c128); n = 257..300:
+  +0.11 / +0.03 (the trailing GEMMs dominate there);
+- graded PD (diagonal 1..1e6, almost all 1x1 pivots in place): +0.54 / +0.50.
+- Outliers: CUDA residual up to ~900x CPU's (still ~1e-2 in n*eps units, i.e.
+  normwise backward stable; CPU is at ~1e-5 there). Example: graded PD n = 13 with
+  a swap at step 11: D[12] = 1.1, left after cancellation from ~1e5, has a relative
+  error of 2e5 eps on CUDA, 0.7 eps on CPU; all other D entries within 2 eps.
+Prototype (applied, tested, then reverted as too ugly): save the stale candidate
+column in an `n`-element scratch and restore it exactly when nothing was swapped.
+Graded PD went to +0.13 / 0.00, random Hermitian only to +0.25 / +0.16, and the
+outliers stayed, as they come from the swap case. Closing the gap fully needs
+`?lasyf`'s scheme: swap the rows of Lprev with the data during the panel and back
+after the trailing GEMM. With the sample noise of small n on top of this bias,
+per-matrix CUDA/CPU residual ratios reach 2-3x there (batch 4, n < 130), which any
+test bounded relative to CPU has to allow for.
 
 **Dispatch. Done (2026-10-14).** `hermitian=True` goes to the custom kernel under
 both the default and the `cusolver` backends, `magma` still goes to MAGMA, and
@@ -495,8 +521,11 @@ State at the end of the GB200 session:
 - **Committed later still:** `e27fc3b`, `353ffe0` (`at::imag` instead of `.imag()`,
   10.1.2/10.1.3). The working tree was clean on the H100 box after that.
 - **H100 session, 2026-10-14:** `8263c00` (10.1.1), `9a57b5f` and `c15de04` (10.2),
-  then 10.3: default dispatch, the kernel NOTE on subnormal and near-overflow 2x2
-  pivots, `test_cabs1_overflow`, `test_peak_memory`, `test_dispatch`.
+  `08159ba` (10.3: default dispatch, the kernel NOTE on subnormal and near-overflow
+  2x2 pivots, `test_cabs1_overflow`, `test_peak_memory`, `test_dispatch`, and the
+  coverage gaps: pivot encoding, lazy views, expanded batches, the upper triangle).
+  Then, uncommitted: the accuracy finding and its NOTE (section 5) and the upstream
+  tests (10.4). Full custom suite: 12092 tests, ~8.6 min on H100.
 - `unittest -k` with a `*` matches the full test id, so a pattern needs a leading
   `*`: `-k "*test_n1_*cuda*"`. Several `-k` flags are OR-ed.
 
@@ -689,3 +718,78 @@ Missing:
 - **Upstream, separate from this branch:** `check_errors=True` on singular input
   hits an INTERNAL ASSERT (section 5). Already reported (#83624, draft fix
   #197234), nothing posted.
+
+### 10.4 Upstreaming
+
+**Done (2026-10-14, uncommitted):**
+- **`test/test_linalg.py`**, next to the existing LDL tests:
+  - `_ldl_scaled_residuals(A, B, norms)`: factors on A's device, solves on the CPU,
+    and returns `||AX - B|| / (||A|| * ||X|| * n * eps)` per norm, with the residual
+    computed once as `(A @ X).sub_(B)`.
+  - `test_linalg_ldl_factor_stability_large_inputs` (`@slowTest`): batch 2 (the
+    kernel loops over the batch, so batch regimes add nothing), n = 259, 513, 1027,
+    2048, 2049, 4100, a well-conditioned (QR, eigenvalues of both signs) and an
+    ill-conditioned (`t + t.mH`) generator, 1-norm and Frobenius, and
+    `scaled_residual < K = 1` as in `test_linalg_batched_lu_stability_large_inputs`.
+    Plus `info`: zero first row/col -> 1, zero last row/col -> n, zero matrix -> 1,
+    at n = 300 and 2049.
+  - `test_linalg_ldl_factor_edge_cases` (`@slowTest`, `@largeTensorTest("16GB")`
+    for complex128 at n = 16385, which peaks at 16.0 GiB):
+    - empty inputs `(0, 0)`, `(2, 0, 0)`, `(0, 5, 5)`, `(0, 2, 5, 5)`,
+      `(2, 0, 5, 5)`, `(0, 0, 0)`, `(2, 0, 0, 0)`: shapes, and `info == 0`;
+    - `compare_with_cpu` at n = 1 (the shortcut; values 2, 0, and for complex 3j,
+      -2+1j) and at n = 2..5 (random, zero diagonal, zero first / last row/col,
+      zero matrix): the lower triangle of LD, pivots and info equal LAPACK's (no
+      mismatch over 300 seeds);
+    - single matrices at n = 1, 2, 3, nb - 1..nb + 1 and 1.5 nb - 1..1.5 nb + 1 for
+      nb in (16, 24, 32, 48, 64, 96, 128), and 4097, 8193, 16385 (the first n with
+      nb = 64, 96, 128 on H100): the residual check, and with a zero last row/col
+      `info == n` and `pivots[-1] == n` (the last pivot is checked, not factored).
+  - All carry `@skipIfRocm`, `@skipIfNoLapack` (the solve runs on the CPU),
+    `@onlyCUDA` and `@skipCUDAIfNoCusolver` (QR). `-k ldl` with slow tests: 40
+    tests, ~33 s on H100.
+  - `test_ldl_factor`: `hermitian=True` for every dtype on CPU and CUDA; on ROCm
+    the old gate (complex with MAGMA 2.5.4+) stays. `test_ldl_solve` is unchanged:
+    `ldl_solve` has no complex Hermitian support on CUDA.
+- **OpInfo**, `sample_inputs_linalg_ldl_factor`: Hermitian samples for every dtype
+  on CPU and CUDA, ROCm gated as before. `sample_inputs_linalg_ldl_solve` is
+  unchanged. `test_compare_cpu` is already skipped for LDL on CUDA upstream.
+  `test_ops.py -k ldl`: 123 tests pass.
+- **Panel widths.** `ldl::aligned_panel_width` ends a panel on a multiple of
+  `min(256 / sizeof(scalar_t), nb)` and keeps it at least nb / 2 wide, so a panel
+  takes nb / 2 to nb + nb / 2 - 1 columns, one more if its last pivot is 2x2. nb
+  itself depends on the dtype, the GPU and n (`ldl::panel_width`).
+
+**The criterion, checked against the sources.** In our units,
+`||AX - B|| / (||A|| ||X|| n finfo.eps)`:
+- MAGMA `testing_zhetrf.cpp` (solve check):
+  `||Ax - b||_F / (n ||A||_F ||x||_F) < 30 * dlamch('E')` (`tolerance = 30.` in
+  `magma_util.cpp`), i.e. < 15. Ours, K = 1, is 15x stricter.
+- LAPACK `dchksy` test 3 (`DPOT02`):
+  `||B - AX||_1 / (||A||_1 ||X||_1 dlamch('E')) < 30`, without n, i.e. < 15 / n.
+  Stricter than ours for n > 15, but LAPACK runs it at small n only; past
+  n ~ 2000 every backward-stable solver exceeds it (section 7).
+- Measured values are ~1e-2.
+
+**Decisions along the way:**
+- No comparison with the CPU residual. A first version bounded the worst residual
+  of a batch by 2x CPU's, but at small n the per-matrix ratio reaches 3.7x, from
+  sample noise plus the undo bias of section 5. CPU is compared directly only at
+  n <= 5, where pivots and factors agree.
+- ROCm is not touched: the new tests skip it, and the old gates stay there.
+
+**Remaining:**
+- ROCm: the default dispatch now sends `hermitian=True` to the custom kernel on
+  ROCm builds too, and nothing tests that. Decide whether to exclude ROCm there,
+  as the LU custom kernel is (`#ifdef USE_ROCM` in `lu_factor`).
+- Run the new upstream tests on GB200 (other panel widths; LAPACK there is ATLAS).
+  Its 96- and 128-wide panels start at other n than H100's, so 8193 and 16385 do
+  not reach them there.
+- Lint: only pre-existing findings in the touched files (`penatly` typo in a
+  kernel comment, E731 and the whole-file format in `test_ldl_custom.py`, the
+  CODEOWNERS taxonomy). Run `lintrunner -a` before committing.
+- Optional, accuracy: remove the undo entirely (`?lasyf`-style row swaps of
+  Lprev, section 5).
+- PR: draft until reviewed, with the AI-assistance disclosure (CLAUDE.md). The
+  session files (`LDL_SESSION_NOTES.md`, `test_ldl_custom.py`,
+  `ldl_panel_standalone.cu`, `run_ldl_*.sh`, `test.py`) stay out of it.

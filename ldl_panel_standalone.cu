@@ -303,6 +303,16 @@ ldl_diagonal_panel_fused_kernel(
     // Unless it is part of the pivot, row/col ilambda now holds current data,
     // yet it gets updated later either here (in-panel) or by the GEMM.
     // Make it stale again.
+    // NOTE: this costs accuracy. Adding the update back and subtracting it again
+    // later each round by about eps * |update|, which is large next to a column that
+    // cancels down to much less than its update. LAPACK's ?lasyf/?lahef never undo:
+    // they update a copy of the candidate column in their workspace W. So, with the
+    // same pivots as LAPACK, the solve residual averages about 1.2x LAPACK's on
+    // random indefinite matrices, and a pivot that results from heavy cancellation,
+    // e.g. in a graded matrix, can lose several digits (normwise backward stability
+    // holds). Avoiding the undo takes a saved copy of the stale candidate and, after
+    // an interchange, swapping the rows of Lprev along with the data (and back after
+    // the trailing GEMM), as ?lasyf does.
     if (ilambda_updated && ilambda >= curr_step + pivot_rank) {
       update_rowcol(ilambda, /*first=*/curr_step + pivot_rank, /*skip=*/-1, /*undo=*/true);
       sync();
