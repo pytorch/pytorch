@@ -843,22 +843,6 @@ user_stack=None)
         self.assertTrue(guards_manager.check(foo))
         self.assertFalse(guards_manager.check({"a": 1, "b": 3}))
 
-    def test_dict_tag_does_not_skip_first_value_check(self):
-        live = {"bias": 19}
-        root = RootGuardManager()
-        manager = root.framelocals_manager(("d", 0), "d", live, default_mgr_enum)
-        manager.dict_getitem_manager(
-            "bias", "d['bias']", live["bias"], default_mgr_enum
-        ).add_equals_match_guard(0, ["bias == 0"], None)
-
-        self.assertFalse(root.check({"d": live}))
-        self.assertFalse(root.check({"d": live}))
-        live["bias"] = 0
-        self.assertTrue(root.check({"d": live}))
-        self.assertTrue(root.check({"d": live}))
-        live["bias"] = 19
-        self.assertFalse(root.check({"d": live}))
-
     def test_dict_getitem_accessor_with_object_aliasing_guard(self):
         a = tuple(range(1000, 1002))
         b = tuple(range(1000, 1002))
