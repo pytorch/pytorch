@@ -90,8 +90,8 @@ def _failure_summary(test_report: TestReport) -> str:
 
 @dataclass
 class _Run:
-    started: float
-    test: report.TestId | None
+    started: float = 0.0
+    test: report.TestId | None = None
     ended: float = 0.0
     failed_phase: str = ""
     skipped: bool = False
@@ -144,18 +144,24 @@ class ReportWriter:
             self._logreport(report)
 
     def _logreport(self, test_report: TestReport) -> None:
+        if test_report.when not in ("setup", "call", "teardown"):
+            return
         nodeid = test_report.nodeid
         key = (nodeid, getattr(test_report, "node", None))
+        # As in junitxml, a test's first report creates its run. That's usually
+        # setup, but pytest-rerunfailures sends an attempt's setup, call and teardown
+        # reports only once the attempt ends, while pytest-subtests sends a
+        # subtest's report during the call, so it can come first.
+        run = self.runs.setdefault(key, _Run())
         if test_report.when == "setup":
             test_id = getattr(test_report, _TEST_ID, None)
-            test = report.TestId(**test_id) if test_id else self.tests.get(nodeid)
-            self.runs[key] = _Run(test_report.start, test)
-        run = self.runs.get(key)
-        if run is None or test_report.when not in ("setup", "call", "teardown"):
-            return
-        run.ended = test_report.stop
-        # A failing pytest-subtests subtest fails the run.
+            run.started = test_report.start
+            run.test = report.TestId(**test_id) if test_id else self.tests.get(nodeid)
+        # A failing subtest fails the run. Both pytest-subtests' SubTestReport and
+        # pytest 9's built-in pytest.SubtestReport carry a context; only the latter
+        # is public.
         subtest = getattr(test_report, "context", None) is not None
+        run.ended = test_report.stop
         if test_report.failed or test_report.outcome == "rerun":
             if not run.failed_phase:
                 run.failed_phase = test_report.when
@@ -175,8 +181,9 @@ class ReportWriter:
     def _finish(self, key: tuple[str, Any], run: _Run) -> None:
         del self.runs[key]
         nodeid = key[0]
-        # No identity: the item isn't a Python test function, or, under xdist, the
-        # worker's writer turned itself off and its setup report came without one.
+        # No identity: the item isn't a Python test function, its setup report never
+        # arrived (the attempt was interrupted), or, under xdist, the worker's writer
+        # turned itself off and its setup report came without one.
         if self.file is not None and run.test is not None:
             record = report.run_record(
                 run.test,
