@@ -127,6 +127,7 @@ class TestAOTAutocastStates(TestCase):
             )
 
     def test_get_autocast_states_includes_renamed_privateuse1_backend(self) -> None:
+        original_get_autocast_dtype = torch.get_autocast_dtype
         with (
             patch.object(
                 aot_utils.torch._C,
@@ -148,7 +149,7 @@ class TestAOTAutocastStates(TestCase):
             dtype.side_effect = lambda device: {
                 "cpu": torch.float32,
                 "renamed_backend": torch.float16,
-            }[device]
+            }.get(device, original_get_autocast_dtype(device))
 
             self.assertEqual(
                 _get_autocast_states(),
