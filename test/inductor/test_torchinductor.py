@@ -3549,6 +3549,41 @@ class CommonTemplate:
         a = torch.rand(())
         self.common(fn, (a,))
 
+    @parametrize("dtype", (torch.uint8, torch.int32, torch.int64, torch.bool))
+    @parametrize("shape", ((), (4,)))
+    @parametrize("dynamic", (False, True))
+    def test_logcumsumexp_unsupported_dtype(self, dtype, shape, dynamic):
+        # https://github.com/pytorch/pytorch/issues/197807
+        # logcumsumexp only supports floating point and complex dtypes. Eager
+        # raises NotImplementedError; under torch.compile the meta kernel must
+        # reject the input while tracing (TorchRuntimeError) rather than letting
+        # inductor compile it or graph breaking to eager.
+        msg = "input dtype should be either floating point or complex"
+
+        def fn(x):
+            return x.logcumsumexp(0)
+
+        def fn_out(x, out):
+            return torch.logcumsumexp(x, 0, out=out)
+
+        x = torch.zeros(shape, dtype=dtype, device=self.device)
+
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            fn(x)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(torch._dynamo.exc.TorchRuntimeError, msg):
+            torch.compile(fn, dynamic=dynamic, fullgraph=True)(x)
+
+        # out= is validated against the input dtype, so a floating point out
+        # must not make an integer input acceptable.
+        for out_dtype in (dtype, torch.float32):
+            out = torch.empty(shape, dtype=out_dtype, device=self.device)
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                fn_out(x, out)
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(torch._dynamo.exc.TorchRuntimeError, msg):
+                torch.compile(fn_out, dynamic=dynamic, fullgraph=True)(x, out)
+
     def test_clamp(self):
         def fn(a, b):
             return (a.clamp(-0.1, 0.1), b.clamp(0), torch.clamp(a + b, max=0))
@@ -4741,7 +4776,6 @@ for dtype in (torch.int32, torch.int64):
         actual = compiled_fn(t[2**30 :])
         self.assertTrue((actual == 4).all())
 
-    @skipIfRocmArch(NAVI3_ARCH)  # gfx1100 Triton hsaco LLD target emulation unknown
     @skip_if_halide  # only 32-bit indexing
     @largeTensorTest("2GB", inductor=True)
     def test_large_strided_reduction(self):
@@ -14386,7 +14420,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1[:, 100] = float("nan")
         self.common(fn, (t1,))
 
-    @skipIfRocmArch(NAVI3_ARCH)  # gfx1100 Triton hsaco LLD target emulation unknown
     @requires_cuda
     def test_max_min_bool(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
@@ -19912,6 +19945,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch.compile(foo, fullgraph=True)(torch.ones(3, 3))
             self.assertTrue(len(log2), 1)
 
+    @tf32_on_and_off(0.05)
     def test_weight_norm_conv2d(self):
         """
         Verify fix for https://github.com/pytorch/pytorch/issues/165749
@@ -19929,7 +19963,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         act = compiled_conv(x)
         act_grad = torch.autograd.grad(act, list(compiled_conv.parameters()), grad_out)
 
-        self.assertTrue(same((ref, ref_grad), (act, act_grad), tol=1e-3))
+        self.assertEqual(
+            (act, act_grad), (ref, ref_grad), atol=1e-3, rtol=1e-3, equal_nan=False
+        )
 
     @xfail_if_mps  # MPS codegen does not emit ReductionHint.OUTER
     def test_inner_reduction_detection(self):
@@ -20333,6 +20369,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             .check("gdc_wait")
             .check("gdc_launch")
             .check("store")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_store_only_kernel_waits(self):
+        def fn(x):
+            y = x
+            for _ in range(64):
+                y = torch.sin(y) * 1.5
+            y = y.sum(-1)
+            idx = torch.arange(32, device=x.device)
+            return x.new_zeros(37).index_put_((idx,), y[:32] * 3.0)
+
+        x = torch.randn(64, 256, device=GPU_TYPE)
+        self.common(fn, (x,), check_lowp=False)
+
+        code = run_and_get_triton_code(torch.compile(fn), x)
+        # gdc_wait only waits for the direct predecessor, so the zero fill must
+        # wait before exiting or index_put can read y before the sum writes it
+        (
+            FileCheck()
+            .check("def triton_poi_fused_new_zeros")
+            .check("store")
+            .check_not("def triton_")
+            .check("gdc_wait")
         ).run(code)
 
     @requires_cuda_and_triton

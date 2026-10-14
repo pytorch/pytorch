@@ -2,6 +2,7 @@
 import copy
 import math
 import types
+import unittest
 from dataclasses import dataclass
 from unittest import mock
 
@@ -395,6 +396,88 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         with torch._dynamo.config.patch(error_on_recompile=True):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.RecompileError, "setup_context"
+            ):
+                opt_fn(x)
+
+    def test_apply_override_not_routed_to_autograd_function(self):
+        class Function(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x + 1
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def replacement(cls, x):
+            return x + 10
+
+        Function.apply = classmethod(replacement)
+        target = Function.apply
+
+        def fn(target, x):
+            return target(x)
+
+        x = torch.randn(2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(target, x), x + 10
+        )
+
+    def test_classmethod_descriptor_binds_autograd_function(self):
+        class Double(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        raw = torch._C._FunctionBase.__dict__["apply"]
+
+        def fn(x):
+            return raw.__get__(None, Double)(x)
+
+        x = torch.randn(3, requires_grad=True)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_bound_builtin_apply_stored_alias_guarded(self):
+        class Function(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x + 1
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        class Holder:
+            pass
+
+        holder = Holder()
+        holder.target = Function.apply
+
+        def fn(x):
+            return holder.target(x)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), x + 1)
+
+        replacement = Function.__subclasshook__
+        self.assertIs(replacement.__self__, Function)
+        holder.target = replacement
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.RecompileError, "holder.*target"
             ):
                 opt_fn(x)
 
@@ -1965,6 +2048,7 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(ref2.requires_grad)
         self.assertFalse(res2.requires_grad)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_set_output_grad_dtype(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
@@ -2004,6 +2088,7 @@ class GraphModule(torch.nn.Module):
     aten::detach(t: f32[4])  ->  t: f32[4]""",
         )
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_set_output_grad_dtype_non_tensor_output(self):
         # The traced autograd.Function drops the non-tensor output, so the
         # declarations must be remapped to its remaining outputs.

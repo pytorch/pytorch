@@ -520,6 +520,7 @@
   - rtimpe
   - trichmo
   - hameerabbasi
+  - riccardofelluga
   mandatory_checks_name:
   - EasyCLA
   - Lint
