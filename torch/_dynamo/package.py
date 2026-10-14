@@ -28,7 +28,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, cast, IO, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import torch
@@ -648,12 +648,21 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
         raise AssertionError(
             f"Expected exactly one function name, got {len(entry.function_names)}"
         )
-    fn: Any = sys.modules[entry.python_module]
-    parts = entry.function_names[0].split(".")
+    return _lookup_code_path(
+        entry.python_module, entry.function_names[0], entry.code_source
+    )
+
+
+def _lookup_code_path(
+    python_module: str, function_name: str, code_source: str
+) -> types.CodeType:
+    entry = (python_module, function_name, code_source)
+    fn: Any = sys.modules[python_module]
+    parts = function_name.split(".")
     for part in parts:
         fn = getattr(fn, part)
-    if entry.code_source:
-        parts = entry.code_source.split(".")
+    if code_source:
+        parts = code_source.split(".")
         for part in parts:
             if part.endswith("]"):
                 index_begin = part.rfind("[")
@@ -704,9 +713,9 @@ def _descriptor_functions(obj: Any) -> list[tuple[str, Any]]:
     return []
 
 
-def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
+def _raise_resolution_error(code: types.CodeType, scope: Any, note: str = "") -> Never:
     raise PackageError(
-        f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}"
+        f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}{note}"
     )
 
 
@@ -850,17 +859,13 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     if search_module_tree:
         # The search can land on a function whose __qualname__ is as stale as
         # co_qualname, so replay the lookup the loader will do.
-        entry = types.SimpleNamespace(
-            python_module=module.__name__,
-            function_names=[function_name],
-            code_source=code_source,
-        )
         try:
-            round_trips = _lookup_code(cast(_DynamoCodeCacheEntry, entry)) is code
+            found = _lookup_code_path(module.__name__, function_name, code_source)
         except Exception:
-            round_trips = False
-        if not round_trips:
-            _raise_resolution_error(code, toplevel)
+            found = None
+        if found is not code:
+            note = f". Its __qualname__ {function_name!r} does not resolve back to it"
+            _raise_resolution_error(code, toplevel, note)
     return function_name, code_source
 
 
