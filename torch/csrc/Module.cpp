@@ -2997,7 +2997,7 @@ Call this whenever a new thread is created in order to propagate values from
         return c10::_is_channels_last_contiguous_3d_or_false(sizes, strides);
       });
   py_module.def(
-      "_compute_contiguous",
+      "_is_contiguous",
       [](c10::SymIntArrayRef sizes,
          c10::SymIntArrayRef strides,
          const c10::SymInt& numel) {
@@ -3007,7 +3007,7 @@ Call this whenever a new thread is created in order to propagate values from
         return c10::_compute_contiguous<c10::SymInt>(sizes, strides, numel);
       });
   py_module.def(
-      "_compute_channels_last_contiguous_2d",
+      "_is_channels_last_contiguous_2d",
       [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
         TORCH_CHECK(
             sizes.size() == strides.size(),
@@ -3016,7 +3016,7 @@ Call this whenever a new thread is created in order to propagate values from
             sizes, strides);
       });
   py_module.def(
-      "_compute_channels_last_contiguous_3d",
+      "_is_channels_last_contiguous_3d",
       [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
         TORCH_CHECK(
             sizes.size() == strides.size(),

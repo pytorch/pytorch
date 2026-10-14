@@ -276,7 +276,7 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
     one element, or when they have "nested" strides.
     """
     if not false_if_dde:
-        return torch._C._compute_contiguous(a.shape, a.stride(), a.numel())
+        return torch._C._is_contiguous(a.shape, a.stride(), a.numel())
 
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
@@ -290,13 +290,13 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
 def is_channels_last_contiguous_2d(a: Tensor, false_if_dde=False) -> bool:
     if false_if_dde:
         return torch._C._is_channels_last_contiguous_2d_or_false(a.shape, a.stride())
-    return torch._C._compute_channels_last_contiguous_2d(a.shape, a.stride())
+    return torch._C._is_channels_last_contiguous_2d(a.shape, a.stride())
 
 
 def is_channels_last_contiguous_3d(a: Tensor, false_if_dde=False) -> bool:
     if false_if_dde:
         return torch._C._is_channels_last_contiguous_3d_or_false(a.shape, a.stride())
-    return torch._C._compute_channels_last_contiguous_3d(a.shape, a.stride())
+    return torch._C._is_channels_last_contiguous_3d(a.shape, a.stride())
 
 
 _memory_formats = {
