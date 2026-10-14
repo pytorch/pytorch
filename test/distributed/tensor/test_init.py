@@ -18,9 +18,15 @@ from torch.distributed.tensor import (
     Shard,
     zeros,
 )
+from torch.distributed.tensor._random import manual_seed
 from torch.distributed.tensor.experimental import use_symmetric_memory
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import PLATFORM_SUPPORTS_SYMM_MEM
-from torch.testing._internal.common_utils import requires_cuda_p2p_access, run_tests
+from torch.testing._internal.common_utils import (
+    parametrize,
+    requires_cuda_p2p_access,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
@@ -463,33 +469,61 @@ class DTensorSymmetricMemoryTest(DTensorContinuousTestBase):
             dist_config.dtensor_use_symmetric_memory = old_value
 
     @with_comms
-    def test_symmetric_memory_factory_values(self):
+    @parametrize(
+        "init_op",
+        [
+            dtensor.empty,
+            dtensor.zeros,
+            dtensor.ones,
+            dtensor.full,
+            dtensor.rand,
+            dtensor.randn,
+            dtensor.linspace,
+            dtensor.logspace,
+        ],
+    )
+    @parametrize("requires_grad", [False, True])
+    @parametrize("placement", [Shard(0), Replicate()])
+    def test_symmetric_memory_factory_values(
+        self, device, init_op, requires_grad, placement
+    ):
         mesh = self.build_device_mesh()
-        tests = [
-            (dtensor.empty, (), None),
-            (dtensor.zeros, (), torch.zeros),
-            (dtensor.ones, (), torch.ones),
-            (
-                dtensor.full,
-                (2.5,),
-                lambda size, **kwargs: torch.full(size, 2.5, **kwargs),
-            ),
-            (dtensor.rand, (), None),
-            (dtensor.randn, (), None),
-        ]
-
+        if init_op in (dtensor.linspace, dtensor.logspace):
+            args = (1.0, 2.0, 7)
+        elif init_op is dtensor.full:
+            args = ((5, 7), 2.5)
+        else:
+            args = ((5, 7),)
+        kwargs = dict(
+            device_mesh=mesh, placements=[placement], requires_grad=requires_grad
+        )
+        manual_seed(1234, mesh)
+        expected = init_op(*args, **kwargs)
+        manual_seed(1234, mesh)
         with use_symmetric_memory():
-            for init_op, args, expected_op in tests:
-                dist_tensor = init_op(
-                    (5, 7),
-                    *args,
-                    device_mesh=mesh,
-                    placements=[Shard(1)],
-                )
-                self._assert_is_symmetric_dtensor(dist_tensor)
-                if expected_op is not None:
-                    expected = expected_op((5, 7), device=self.device_type)
-                    torch.testing.assert_close(dist_tensor.full_tensor(), expected)
+            actual = init_op(*args, **kwargs)
+        self._assert_is_symmetric_dtensor(actual)
+        self.assertTrue(actual._local_tensor.is_leaf)
+        self.assertIsNone(actual._local_tensor.grad_fn)
+        self.assertEqual(actual._local_tensor.requires_grad, requires_grad)
+        self.assertEqual(actual.device.type, torch.device(device).type)
+        if init_op is not dtensor.empty:
+            self.assertEqual(actual.to_local(), expected.to_local())
+        if requires_grad:
+            actual.sum().backward()
+            expected.sum().backward()
+            self.assertEqual(actual.grad, expected.grad)
+
+    @with_comms
+    @parametrize("fill_value", [True, 2, 2.5, 1 + 2j])
+    def test_symmetric_memory_inferred_dtype(self, device, fill_value):
+        mesh = self.build_device_mesh()
+        expected = dtensor.full((5, 7), fill_value, device_mesh=mesh)
+        with use_symmetric_memory():
+            actual = dtensor.full((5, 7), fill_value, device_mesh=mesh)
+        self._assert_is_symmetric_dtensor(actual)
+        self.assertEqual(actual.to_local(), expected.to_local())
+        self.assertEqual(actual.dtype, expected.dtype)
 
     @with_comms
     def test_distribute_tensor_copies_to_symmetric_memory(self):
@@ -536,6 +570,8 @@ DTensorConstructorTestWithLocalTensor = create_local_tensor_test_class(
         "test_zeros_submesh",
     ],
 )
+
+instantiate_device_type_tests(DTensorSymmetricMemoryTest, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()

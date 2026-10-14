@@ -1434,78 +1434,6 @@ def _logspace_local_tensor(
     return init_op(local_start, local_end, steps=local_steps, base=base, **kwargs)
 
 
-def _init_symmetric_memory_local_tensor(  # type: ignore[no-untyped-def]
-    local_tensor: torch.Tensor,
-    init_op,
-    local_shape,
-    size: torch.Size,
-    torch_stride: tuple[int, ...],
-    global_offset,
-    device_mesh: DeviceMesh,
-    placements: Sequence[Placement],
-    kwargs: dict[str, Any],
-) -> None:
-    # local_tensor is already allocated, so initialize in place if possible.
-    # Otherwise, run init as normal and copy into local_tensor.
-    if init_op is torch.empty:
-        pass
-    elif init_op is torch.full:
-        local_tensor.fill_(kwargs.pop("fill_value"))
-    elif init_op is torch.ones:
-        local_tensor.fill_(1)
-    elif init_op is torch.zeros:
-        local_tensor.zero_()
-    elif init_op is torch.linspace:
-        start = kwargs.pop("start")
-        end = kwargs.pop("end")
-        local_tensor.copy_(
-            _linspace_local_tensor(
-                init_op,
-                start,
-                end,
-                size[0],
-                local_shape[0],
-                global_offset[0],
-                **kwargs,
-            )
-        )
-    elif init_op is torch.logspace:
-        start = kwargs.pop("start")
-        end = kwargs.pop("end")
-        base = kwargs.pop("base")
-        local_tensor.copy_(
-            _logspace_local_tensor(
-                init_op,
-                start,
-                end,
-                base,
-                size[0],
-                local_shape[0],
-                global_offset[0],
-                **kwargs,
-            )
-        )
-    elif init_op is torch.rand or init_op is torch.randn:
-        # this tensor meta is not used except `shape`
-        dtype = kwargs.get("dtype", torch.get_default_dtype())
-
-        tensor_meta = TensorMeta(size, torch_stride, dtype)
-        spec = DTensorSpec(device_mesh, tuple(placements), tensor_meta=tensor_meta)
-
-        if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
-            random._rng_tracker = random.OffsetBasedRNGTracker(device_mesh)
-
-        if random._rng_tracker is None:
-            raise AssertionError
-        with random._rng_tracker._distribute_region(spec):
-            if init_op is torch.rand:
-                local_tensor.uniform_()
-            else:
-                local_tensor.normal_()
-    else:
-        local_tensor.copy_(init_op(local_shape, **kwargs))
-
-
 def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     init_op,
     size: torch.Size,
@@ -1536,21 +1464,24 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         skip_offset=init_op not in (torch.linspace, torch.logspace),
     )
 
-    # Attempt to allocate local tensor using SymmetricMemory;
-    # returns None if SymmetricMemory not available.
-    local_tensor = empty_symmetric_memory_local_tensor(
-        size,
-        torch.Size(local_shape),
-        device_mesh,
-        placements,
-        dtype=kwargs["dtype"],
-        device=torch.device(kwargs["device"]),
-    )
+    local_tensor = None
+    if init_op in (torch.empty, torch.zeros, torch.ones):
+        local_tensor = empty_symmetric_memory_local_tensor(
+            size,
+            torch.Size(local_shape),
+            device_mesh,
+            placements,
+            dtype=kwargs["dtype"],
+            device=torch.device(kwargs["device"]),
+        )
 
-    # Initialize the local tensor.
-    if local_tensor is None:
-        # Not using SymmetricMemory-backed tensors: keep the original factory
-        # behavior, where the init op both allocates and initializes.
+    if local_tensor is not None:
+        if init_op is torch.zeros:
+            local_tensor.zero_()
+        elif init_op is torch.ones:
+            local_tensor.fill_(1)
+    else:
+        # initialize the local tensor
         if init_op is torch.full:
             fill_value = kwargs.pop("fill_value")
             local_tensor = init_op(local_shape, fill_value, **kwargs)
@@ -1596,21 +1527,10 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
                 local_tensor = init_op(local_shape, **kwargs)
         else:
             local_tensor = init_op(local_shape, **kwargs)
-    else:
-        # Using SymmetricMemory-backed tensors: helper inits tensor.
-        _init_symmetric_memory_local_tensor(
-            local_tensor,
-            init_op,
-            local_shape,
-            size,
-            torch_stride,
-            global_offset,
-            device_mesh,
-            placements,
-            kwargs,
+        local_tensor = copy_to_symmetric_memory(
+            local_tensor, size, device_mesh, placements
         )
-        if kwargs["requires_grad"]:
-            local_tensor.requires_grad_(True)
+    local_tensor.requires_grad_(kwargs["requires_grad"])
 
     spec = DTensorSpec(
         device_mesh,
