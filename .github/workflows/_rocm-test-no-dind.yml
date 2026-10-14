@@ -132,7 +132,7 @@ jobs:
           done
 
           echo "mirrored=false" >> "${GITHUB_OUTPUT}"
-          echo "::notice::${image} is absent from the GHCR mirror. These shards run without DinD when the mirror exists, and on the DinD runner when it does not."
+          echo "::notice::${image} is absent from the GHCR mirror. The caller runs the same shards on the DinD workflow with linux.rocm.gpu.mi350.dind.N."
           exit 0
 
   test:
