@@ -142,6 +142,7 @@ if TYPE_CHECKING:
     from torch.export._trace import _DynamicShapesInput
     from torch.fx.node import Argument, Node, Target
 
+    from .guards import GuardManagerWrapper
     from .types import (
         CacheEntry,
         DynamoCallback,
@@ -284,51 +285,53 @@ class _RecompileRefusedError(RuntimeError):
 
 
 _PRECOMPILE_REASONS_REPORTED = 5
+_PRECOMPILE_PARTS_REPORTED = 5
 
 
 def _failing_guard_parts(
-    guard_manager: Any, f_locals: dict[str, Any], parts: Sequence[Any]
-) -> Sequence[Any]:
+    guard_manager: GuardManagerWrapper, f_locals: dict[str, Any], parts: list[str]
+) -> list[str]:
     """
     Symbolic shape guards are installed as a single lambda guard whose
     verbose_code_parts is every clause, so a failure reports all of them.
-    Re-evaluate clause by clause, as get_guard_fail_reason_helper does, to
-    name the ones that rejected this call; fall back to all parts.
+    Re-evaluate clause by clause to name the ones that rejected this call;
+    fall back to all parts.
     """
-    global_scope = getattr(guard_manager, "global_scope", None)
-    closure_vars = getattr(guard_manager, "closure_vars", None)
+    from torch._dynamo.guards import failing_verbose_code_parts
+
+    global_scope = guard_manager.global_scope
+    closure_vars = guard_manager.closure_vars
     if global_scope is None or closure_vars is None:
         return parts
     scope = {"L": f_locals, "G": global_scope.get("G"), **closure_vars}
-    failed: list[Any] = []
-    for part in parts:
-        try:
-            ok = eval(str(part), dict(global_scope), scope)
-        except Exception:
-            continue
-        if ok is False:
-            failed.append(part)
-        elif isinstance(ok, str):
-            failed.append(ok)
+    failed = failing_verbose_code_parts(
+        global_scope, scope, parts, first_only=False, swallow_errors=True
+    )
     return failed or parts
 
 
 def _precompile_rejection(entry: Any, f_locals: dict[str, Any]) -> str:
     """The guard that rejected this call, for one precompiled entry."""
+    from torch._dynamo.guards import strip_local_scope
+
+    guard_manager: GuardManagerWrapper = entry.guard_manager
     # The report is built because the call already missed; a guard that raises
     # on re-evaluation must not replace it.
     try:
-        reason = entry.guard_manager.check_verbose(f_locals)
+        reason = guard_manager.check_verbose(f_locals)
     except Exception as e:
         return f"<guard check raised {type(e).__name__}: {e}>"
     # A passing check has no failing parts to name: the call raced an install,
     # or the guard is not deterministic.
-    if getattr(reason, "result", False):
+    if reason.result:
         return "<matched on re-check>"
-    parts = getattr(reason, "verbose_code_parts", None) or [str(reason)]
+    parts = reason.verbose_code_parts
     if len(parts) > 1:
-        parts = _failing_guard_parts(entry.guard_manager, f_locals, parts)
-    return "; ".join(str(p) for p in parts)
+        parts = _failing_guard_parts(guard_manager, f_locals, parts)
+    shown = "; ".join(parts[:_PRECOMPILE_PARTS_REPORTED])
+    if len(parts) > _PRECOMPILE_PARTS_REPORTED:
+        shown += f"; ... ({len(parts) - _PRECOMPILE_PARTS_REPORTED} more clauses)"
+    return strip_local_scope(shown)
 
 
 def _index_ranges(indices: Sequence[int]) -> str:
@@ -824,17 +827,24 @@ def remove_from_cache(f: Any) -> None:
     """
     Make sure f.__code__ is not cached to force a recompile
     """
+    from .decorators import _nonrecursive_disable_wrapper_code
+
     if isinstance(f, types.CodeType):
-        reset_code(f)
+        code = f
     elif hasattr(f, "__code__"):
-        reset_code(f.__code__)
+        code = f.__code__
     elif hasattr(getattr(f, "forward", None), "__code__"):
-        reset_code(f.forward.__code__)
+        code = f.forward.__code__
     else:
         from . import reset  # type: ignore[attr-defined]
 
         reset()
         log.warning("could not determine __code__ for %s", f)
+        return
+    # Every disable(recursive=False) wrapper shares this code; resetting it
+    # would drop its import-time skip for all of them.
+    if code is not _nonrecursive_disable_wrapper_code:
+        reset_code(code)
 
 
 def nothing() -> None:
