@@ -3825,7 +3825,7 @@ class TestScaledSoftmax(TestCase):
             counters["inductor"]["pattern_matcher_count"], expected_matches
         )
 
-    @inductor_config.patch(fx_graph_cache=False)
+    @inductor_config.patch(fx_graph_cache=False, online_softmax=False)
     @parametrize(
         "input_dtype",
         (
@@ -3860,7 +3860,7 @@ class TestScaledSoftmax(TestCase):
         scale = torch.tensor([[2.0], [-2.0]], dtype=scale_dtype, device=device)
         self.check_scaled(fn, (x, scale), int(input_dtype.is_floating_point))
 
-    @inductor_config.patch(fx_graph_cache=False)
+    @inductor_config.patch(fx_graph_cache=False, online_softmax=False)
     @parametrize(
         "input_dtype,result_dtype",
         (
