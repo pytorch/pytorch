@@ -5637,6 +5637,11 @@ def arange(
     if dtype is None:
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
 
+    torch._check_not_implemented(
+        not utils.is_boolean_dtype(dtype),
+        lambda: "\"arange\" not implemented for 'Bool'",
+    )
+
     is_integer = utils.is_integer_dtype(dtype)
     if is_integer or integer_args:
         xstart = sym_int(start)
