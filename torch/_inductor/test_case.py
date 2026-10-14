@@ -16,6 +16,10 @@ from torch._inductor.utils import fresh_cache
 # added as the code they exercise is fixed, until it can be on everywhere.
 STRICT_FLEXIBLE_LAYOUT_STRIDES_FILES = {
     "test_layout_freezing",
+    "test_lookup_table",
+    "test_max_autotune",
+    "test_select_algorithm",
+    "test_subgraph_choice",
 }
 
 
