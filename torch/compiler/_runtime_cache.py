@@ -129,14 +129,25 @@ def restore_cpp_kernel(key: str, binary_path: str) -> None:
             os.unlink(temporary)
 
 
-def _freeze_cpp_kernels(kernels: dict[str, str]) -> bytes:
+def _freeze_cpp_kernels(
+    kernels: dict[str, str], failed: dict[str, str], *, strict: bool
+) -> bytes:
     missing = sorted(key for key, path in kernels.items() if not os.path.exists(path))
-    if missing:
+    if missing and strict:
         raise RuntimeError(f"Cannot export C++ kernels with no binary: {missing}")
+    left_out = dict.fromkeys(missing, "no binary") | failed
+    if left_out:
+        log.warning(
+            "precompile left %d C++ kernel(s) out of the cache, which build again "
+            "on first use in the serving process: %s",
+            len(left_out),
+            left_out,
+        )
     binaries: dict[str, bytes] = {}
     for key, binary_path in kernels.items():
-        with open(binary_path, "rb") as binary:
-            binaries[key] = binary.read()
+        if key not in left_out:
+            with open(binary_path, "rb") as binary:
+                binaries[key] = binary.read()
     return pickle.dumps(binaries)
 
 
@@ -415,6 +426,11 @@ def capture_scope() -> Iterator[None]:
             _close(owner)
 
 
+def in_capture_runtime() -> bool:
+    owner = _active_capture()
+    return owner is not None and owner.explicit
+
+
 def seal_runtime_scope() -> None:
     """Seal an enclosing capture_runtime() scope whose cache is already written."""
     owner = _active_capture()
@@ -437,6 +453,19 @@ def _freeze_triton_kernels(
             static_kernels[key] = _freeze_triton_kernel(key, instances)
         except _UnresolvedTritonExport as exc:
             rejected_sources.extend(exc.sources)
+        except Exception as exc:
+            # Only a capture_runtime() scope refuses the write; a plain capture
+            # leaves any source it cannot freeze out.
+            if strict:
+                raise
+            rejected_sources.append(
+                {
+                    "source_key": key,
+                    "instance_count": len(instances),
+                    "reason": "freeze_failed",
+                    "error": repr(exc),
+                }
+            )
     if rejected_sources:
         error = _UnresolvedTritonExport(rejected_sources)
         torch._logging.trace_structured(
@@ -518,26 +547,39 @@ def freeze_runtime_cache(
             raise RuntimeError(
                 "The precompile cache already contains frozen runtime dependencies"
             )
+        seal = final and owner.explicit
         # Drain before sealing: compile result callbacks re-check
         # check_compilation_allowed, so draining under the seal rejects them.
-        AsyncCompile.drain_pending()
+        # Only a seal stops compiling, so only it shuts the compile workers down.
+        AsyncCompile.drain_pending(shutdown=seal)
         with _capture_lock:
-            cpp_loads = [load for _, load in owner.cpp_kernels.values()]
+            cpp_loads = {key: load for key, (_, load) in owner.cpp_kernels.items()}
         # Finishes pending C++ builds and builds loads that were never forced, so
         # no binary is missing or partially written when it is frozen.
-        for load in cpp_loads:
-            load()
+        failed_cpp: dict[str, str] = {}
+        for key, load in cpp_loads.items():
+            try:
+                load()
+            except Exception as exc:
+                if owner.explicit:
+                    raise
+                failed_cpp[key] = repr(exc)
         if torch.cuda.is_initialized():
             torch.cuda.synchronize()
-        seal = final and owner.explicit
         with _capture_lock:
             if seal:
                 owner.seal()
             kernels = {key: list(found) for key, found in owner.triton_kernels.items()}
-            cpp_kernels = {key: path for key, (path, _) in owner.cpp_kernels.items()}
+            cpp_kernels = {
+                key: path
+                for key, (path, _) in owner.cpp_kernels.items()
+                if key not in failed_cpp
+            }
         try:
             static_payload = _freeze_triton_kernels(kernels, strict=owner.explicit)
-            cpp_payload = _freeze_cpp_kernels(cpp_kernels)
+            cpp_payload = _freeze_cpp_kernels(
+                cpp_kernels, failed_cpp, strict=owner.explicit
+            )
             artifacts[InductorTritonCacheArtifact.type()] = [
                 InductorTritonCacheArtifact(
                     hashlib.sha256(static_payload).hexdigest(), static_payload
