@@ -1,14 +1,17 @@
-"""Tests scripted across processes through a state directory: test_b crashes the
-first process that runs it and passes in the next, test_c always crashes
-(TestReportCrashes.test_retry_sequence)."""
+"""Tests scripted across processes through a state directory, for run_test.py's
+retry loop (TestReportCrashes.test_retry_sequence): test_b fails its first
+attempt, kills the process on its in-process rerun and passes in the next
+process; test_c always kills the process."""
 
 import os
 import signal
 from pathlib import Path
 
+import pytest
+
 
 def _attempt(name):
-    """How many processes have run name so far, this one included."""
+    """How many times name has started so far, across processes."""
     state = Path(os.environ["CRASH_SEQUENCE_STATE"]) / name
     count = int(state.read_text()) + 1 if state.exists() else 1
     state.write_text(str(count))
@@ -19,9 +22,14 @@ def test_a():
     pass
 
 
-def test_b():
-    if _attempt("test_b") == 1:
-        os.kill(os.getpid(), signal.SIGKILL)
+class TestB:
+    @pytest.mark.parametrize("value", [1], ids=["one"])
+    def test_b(self, value):
+        attempt = _attempt("test_b")
+        if attempt == 1:
+            raise AssertionError("first attempt fails")
+        if attempt == 2:
+            os.kill(os.getpid(), signal.SIGKILL)
 
 
 def test_c():
