@@ -477,6 +477,7 @@ test_python_smoke() {
   # Smoke tests for H100/B200
   install_nvmath
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_triton_kernels -k test_tma_descriptor_subclass_codegen $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_cuda -k test_graph_capture_cublas_workspace $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -1952,6 +1953,7 @@ test_distributed_single_gpu() {
   # `default` config's Python tests.
   install_torchcomms
   install_spmd_types
+  install_nccl4py
   test_distributed not-multigpu
 }
 
@@ -2626,6 +2628,7 @@ elif [[ "$TEST_CONFIG" == distributed_4gpu ]]; then
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchcomms
   install_spmd_types
+  install_nccl4py
   # On CUDA and ROCm the single-process (single-GPU) distributed tests are hived
   # off to the `default` config's 1-GPU runner (see below), so this multi-GPU box
   # only runs the process-spawning ones. Elsewhere (e.g. CPU pull) there is no
@@ -2850,6 +2853,7 @@ elif [[ "${TEST_CONFIG}" == dtensor ]]; then
   test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   install_torchcomms
+  install_nccl4py
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
   test_h100_symm_mem
