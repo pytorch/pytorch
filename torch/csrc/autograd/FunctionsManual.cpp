@@ -4521,11 +4521,9 @@ Tensor linalg_qr_piv_backward(
       "The pivoted QR decomposition is not differentiable when "
       "mode='complete' and nrows > ncols.");
 
-  auto P_dense = P.contiguous();
   auto gA = linalg_qr_backward(gQ, gR, Q, R, mode);
-  auto P_expanded = P_dense.toType(at::kLong).unsqueeze(-2).expand_as(gA);
-
-  return at::empty_like(gA).scatter(-1, P_expanded, gA);
+  // P is a permutation, so the scatter overwrites every entry of gA
+  return gA.scatter(-1, P.unsqueeze(-2).expand_as(gA), gA);
 }
 
 std::tuple<Tensor, Tensor> linalg_qr_piv_jvp(
@@ -4551,9 +4549,7 @@ std::tuple<Tensor, Tensor> linalg_qr_piv_jvp(
       "The pivoted QR decomposition is not differentiable when "
       "mode='complete' and nrows > ncols.");
 
-  auto P_expanded =
-      P.contiguous().toType(at::kLong).unsqueeze(-2).expand_as(dA);
-  auto dAP = dA.gather(-1, P_expanded);
+  auto dAP = dA.gather(-1, P.unsqueeze(-2).expand_as(dA));
   return linalg_qr_jvp(dAP, Q, R, mode);
 }
 

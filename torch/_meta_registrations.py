@@ -1765,14 +1765,10 @@ def _parse_qr_piv_mode(mode: str) -> tuple[bool, bool]:
     return compute_q, reduced  # type: ignore[possibly-undefined]
 
 
-@register_meta([aten.linalg_qr.default, aten.linalg_qr.out])
-@out_wrapper("Q", "R")
-def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
-    checkIsMatrix(A, "linalg.qr")
-    checkFloatingOrComplex(A, "linalg.qr")
-
-    compute_q, reduced_mode = _parse_qr_mode(mode)
-
+def _linalg_qr_outputs(
+    A: Tensor, compute_q: bool, reduced_mode: bool
+) -> tuple[Tensor, Tensor]:
+    # Q and R outputs shared by linalg_qr and linalg_qr_piv
     m = A.shape[-2]
     n = A.shape[-1]
     k = sym_min(m, n)
@@ -1793,43 +1789,29 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
     return Q, R
 
 
+@register_meta([aten.linalg_qr.default, aten.linalg_qr.out])
+@out_wrapper("Q", "R")
+def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
+    checkIsMatrix(A, "linalg.qr")
+    checkFloatingOrComplex(A, "linalg.qr")
+
+    compute_q, reduced_mode = _parse_qr_mode(mode)
+    return _linalg_qr_outputs(A, compute_q, reduced_mode)
+
+
 @register_meta([aten.linalg_qr_piv.default, aten.linalg_qr_piv.out])
 @out_wrapper("Q", "R", "P")
 def linalg_qr_piv_meta(
     A: Tensor, mode: str = "reduced"
 ) -> tuple[Tensor, Tensor, Tensor]:
-    # --- Validations ---
     checkIsMatrix(A, "linalg.qr_piv")
     checkFloatingOrComplex(A, "linalg.qr_piv")
 
     compute_q, reduced_mode = _parse_qr_piv_mode(mode)
+    Q, R = _linalg_qr_outputs(A, compute_q, reduced_mode)
 
-    m = A.shape[-2]
-    n = A.shape[-1]
-    k = sym_min(m, n)
-
-    # --- Allocate Q ---
-    if compute_q:
-        Q_shape = list(A.shape)
-        # pyrefly: ignore [unsupported-operation]
-        Q_shape[-1] = k if reduced_mode else m
-        Q = A.new_empty(Q_shape)
-        Q.as_strided_(Q_shape, make_contiguous_strides_for(Q_shape, row_major=False))
-    else:
-        Q = A.new_empty([0])
-
-    # --- Allocate R ---
-    R_shape = list(A.shape)
-    # Same logic as linalg_qr_meta
-    # pyrefly: ignore [unsupported-operation]
-    R_shape[-2] = k if reduced_mode or not compute_q else m
-    R = A.new_empty(R_shape)
-    R.as_strided_(R_shape, make_contiguous_strides_for(R_shape, row_major=False))
-
-    # --- Allocate pivots (length = n) ---
-    P_shape = list(A.shape[:-2]) + [n]
-    P = A.new_empty(P_shape, dtype=torch.int64)
-
+    # P is a vector of length n for each batch element
+    P = A.new_empty([*A.shape[:-2], A.shape[-1]], dtype=torch.int64)
     return Q, R, P
 
 
