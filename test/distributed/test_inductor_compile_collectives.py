@@ -12,6 +12,7 @@ from torch._inductor._functionalize_collectives import (
     _functionalize_inplace_collectives,
     _unbox_process_group_torchbinds,
 )
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 from torch.fx.passes.regional_inductor import regional_inductor
@@ -202,10 +203,14 @@ def forward(self, arg0_1, arg1_1):
                     "inductor_configs": {}
                 }
         fake_mode = next(
-            n.meta["val"].fake_mode
+            maybe_get_fake_mode(n.meta["val"])
             for n in gm.graph.nodes
             if n.op == "placeholder" and isinstance(n.meta.get("val"), torch.Tensor)
         )
+        if fake_mode is None:
+            raise AssertionError(
+                "Expected placeholder metadata to contain a fake tensor"
+            )
 
         with tracing(TracingContext(fake_mode)):
             compiled_gm = regional_inductor(gm)
