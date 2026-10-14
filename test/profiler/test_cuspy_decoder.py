@@ -5,7 +5,11 @@ import unittest
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_3
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 # The decode tests drive the real libcupti (pylibcupti); guard its import on TEST_CUPTI
@@ -15,7 +19,9 @@ if TEST_CUPTI:
     from torch.profiler._cuspy.cupti_python import pylibcupti
 
 
-class TestCuspyDecoder(TestCase):
+class TestCuspyDecoderCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires a loaded libcupti >= 13.3")
     @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
     def test_decoder_groups_distinct_layouts(self):
