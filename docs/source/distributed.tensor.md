@@ -228,6 +228,23 @@ should be selected as normal through the
 the user-provided local tensor and does not implicitly copy it into
 SymmetricMemory.
 
+This option applies only to construction. Subsequent operations and
+redistribution do not guarantee SymmetricMemory-backed outputs. Some factories
+temporarily hold both an ordinary local tensor and its symmetric copy, so
+initialization can require additional memory.
+
+SymmetricMemory-backed construction runs eagerly. `FakeTensorMode` and
+`torch.compile(fullgraph=True)` raise an error for these construction calls.
+With graph breaks allowed, `torch.compile` can execute construction eagerly;
+the resulting tensors still use SymmetricMemory. Allocate and rendezvous
+tensors before CUDA graph capture, then reuse them during capture and replay.
+
+With the NVSHMEM backend, the mesh must contain every rank in the default
+process group. Allocation is collective: all ranks must allocate in the same
+order with matching allocation sizes and dtypes. NVSHMEM submeshes are rejected
+before allocation. NVSHMEM also has a configured symmetric heap capacity; enabling
+this option process-wide can exhaust that capacity during model initialization.
+
 ### Random Operations
 
 DTensor provides distributed RNG functionality to ensure that random operations on sharded tensors get unique values, and random operations on replicated tensors get the same values. This system requires that all participating

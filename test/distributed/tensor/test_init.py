@@ -2,11 +2,16 @@
 # Owner(s): ["oncall: distributed"]
 
 import unittest
+from itertools import product
+from math import prod
+from unittest.mock import patch
 
 import torch
 import torch.distributed._symmetric_memory as symm_mem
 import torch.distributed.config as dist_config
 import torch.distributed.tensor as dtensor
+from torch._guards import detect_fake_mode
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -19,7 +24,13 @@ from torch.distributed.tensor import (
     zeros,
 )
 from torch.distributed.tensor._random import manual_seed
+from torch.distributed.tensor._symmetric_memory import (
+    _compute_max_local_numel,
+    copy_to_symmetric_memory,
+)
+from torch.distributed.tensor._utils import _compute_local_shape_and_global_offset
 from torch.distributed.tensor.experimental import use_symmetric_memory
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import PLATFORM_SUPPORTS_SYMM_MEM
 from torch.testing._internal.common_utils import (
@@ -561,6 +572,196 @@ class DTensorSymmetricMemoryTest(DTensorContinuousTestBase):
         self.assertEqual(dist_tensor.to_local().data_ptr(), local_tensor.data_ptr())
         self.assertFalse(symm_mem.is_symm_mem_tensor(dist_tensor.to_local()))
 
+    @with_comms
+    @parametrize("factory", [True, False])
+    def test_symmetric_memory_rejects_nvshmem_submesh(self, factory):
+        mesh = DeviceMesh(self.device_type, [0])
+        tensor = torch.ones(5, device=self.device_type)
+        with (
+            use_symmetric_memory(),
+            patch.object(symm_mem, "get_backend", return_value="NVSHMEM"),
+            patch.object(symm_mem, "empty") as allocate,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "NVSHMEM requires a mesh containing every rank"
+            ):
+                if factory:
+                    dtensor.zeros(5, device_mesh=mesh)
+                else:
+                    distribute_tensor(tensor, mesh, [Replicate()])
+            allocate.assert_not_called()
+
+    @with_comms
+    @parametrize("factory", [True, False])
+    def test_symmetric_memory_rejects_fake_mode(self, factory):
+        mesh = self.build_device_mesh()
+        with (
+            use_symmetric_memory(),
+            FakeTensorMode(allow_non_fake_inputs=True),
+            patch.object(symm_mem, "empty") as allocate,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "not supported under torch.compile or FakeTensorMode"
+            ):
+                if factory:
+                    dtensor.zeros(5, device_mesh=mesh)
+                else:
+                    tensor = torch.ones(5, device=self.device_type)
+                    distribute_tensor(tensor, mesh, [Replicate()])
+            allocate.assert_not_called()
+
+    @with_comms
+    def test_symmetric_memory_rejects_fake_input(self):
+        mesh = self.build_device_mesh()
+        with FakeTensorMode():
+            tensor = torch.ones(5, device=self.device_type)
+        with use_symmetric_memory(), patch.object(symm_mem, "empty") as allocate:
+            with self.assertRaisesRegex(
+                RuntimeError, "not supported under torch.compile or FakeTensorMode"
+            ):
+                copy_to_symmetric_memory(tensor, tensor.shape, mesh, [Replicate()])
+            allocate.assert_not_called()
+
+    @with_comms
+    @parametrize("factory", [True, False])
+    @parametrize("fullgraph", [False, True])
+    def test_symmetric_memory_compile(self, device, factory, fullgraph):
+        torch._dynamo.reset()
+        mesh = self.build_device_mesh()
+
+        def fn(tensor):
+            if factory:
+                return dtensor.zeros(5, device_mesh=mesh)
+            return distribute_tensor(tensor, mesh, [Replicate()], src_data_rank=None)
+
+        tensor = torch.ones(5, device=self.device_type)
+        expected = fn(tensor)
+        empty = symm_mem.empty
+
+        def allocate_eagerly(*args, **kwargs):
+            self.assertFalse(torch.compiler.is_compiling())
+            self.assertIsNone(detect_fake_mode())
+            return empty(*args, **kwargs)
+
+        with (
+            use_symmetric_memory(),
+            patch.object(symm_mem, "empty", side_effect=allocate_eagerly) as allocate,
+        ):
+            compiled = torch.compile(fn, backend="eager", fullgraph=fullgraph)
+            if fullgraph:
+                with self.assertRaisesRegex(
+                    RuntimeError, "not supported under torch.compile or FakeTensorMode"
+                ):
+                    compiled(tensor)
+                allocate.assert_not_called()
+            else:
+                actual = compiled(tensor)
+                self._assert_is_symmetric_dtensor(actual)
+                self.assertEqual(actual.to_local(), expected.to_local())
+                again = compiled(tensor)
+                self._assert_is_symmetric_dtensor(again)
+                self.assertEqual(again.to_local(), expected.to_local())
+                self.assertNotEqual(
+                    actual.to_local().data_ptr(), again.to_local().data_ptr()
+                )
+                self.assertEqual(allocate.call_count, 2)
+        torch._dynamo.reset()
+
+    @with_comms
+    def test_symmetric_memory_submesh(self, device):
+        mesh = DeviceMesh(self.device_type, [0])
+        with use_symmetric_memory():
+            if symm_mem.get_backend(self.device_type) == "NVSHMEM":
+                with self.assertRaisesRegex(
+                    RuntimeError, "submeshes are not supported"
+                ):
+                    dtensor.ones(5, device_mesh=mesh)
+                return
+            tensor = dtensor.ones(5, device_mesh=mesh)
+        if self.rank == 0:
+            self._assert_is_symmetric_dtensor(tensor)
+            self.assertEqual(tensor.to_local(), torch.ones(5, device=self.device_type))
+        else:
+            self.assertEqual(tensor.to_local().numel(), 0)
+
+    @with_comms
+    @parametrize("placement", [Shard(0), Replicate()])
+    def test_symmetric_memory_noncontiguous_input(self, device, placement):
+        mesh = self.build_device_mesh()
+        tensor = torch.arange(35, device=self.device_type).view(5, 7).t()
+        self.assertFalse(tensor.is_contiguous())
+        with use_symmetric_memory():
+            actual = distribute_tensor(tensor, mesh, [placement])
+        self._assert_is_symmetric_dtensor(actual)
+        self.assertEqual(actual.full_tensor(), tensor)
+
+    @with_comms
+    def test_symmetric_memory_cuda_graph_reuse(self, device):
+        mesh = self.build_device_mesh()
+        with use_symmetric_memory():
+            tensor = dtensor.zeros(5, device_mesh=mesh, placements=[Shard(0)])
+        local = tensor.to_local()
+        handle = symm_mem.rendezvous(local, mesh.get_group())
+        self.assertIsNotNone(handle)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            local.add_(1)
+        for _ in range(3):
+            graph.replay()
+        self.assertEqual(local, torch.full_like(local, 3))
+
+
+@unittest.skipIf(
+    not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this platform"
+)
+@requires_cuda_p2p_access()
+class DTensorSymmetricMemoryMeshTest(DTensorContinuousTestBase):
+    world_size = 4
+    device_mesh: DeviceMesh
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        super()._init_pg(rank, world_size, rdvz_file)
+        ranks = torch.arange(world_size).view(2, 2)
+        cls.device_mesh = DeviceMesh(cls.device_type, ranks)
+
+    @with_comms
+    @parametrize("init_op", [dtensor.ones, dtensor.full])
+    @parametrize("size", [0, 1, 5, 7, 19])
+    @parametrize(
+        "placements",
+        [
+            [Shard(0), Shard(0)],
+            [_StridedShard(0, split_factor=2), Shard(0)],
+            [Shard(0), Shard(1)],
+        ],
+    )
+    def test_symmetric_memory_multidimensional_mesh(
+        self, device, init_op, size, placements
+    ):
+        mesh = self.device_mesh
+        shape = torch.Size((size, 7))
+        local_sizes = [
+            prod(
+                _compute_local_shape_and_global_offset(
+                    shape, mesh.shape, coord, placements, skip_offset=True
+                )[0]
+            )
+            for coord in product(range(2), repeat=2)
+        ]
+        max_numel = _compute_max_local_numel(shape, mesh, placements)
+        self.assertGreaterEqual(max_numel, max(local_sizes))
+        args = (shape, 1.0) if init_op is dtensor.full else (shape,)
+        expected = init_op(*args, device_mesh=mesh, placements=placements)
+        with use_symmetric_memory():
+            actual = init_op(*args, device_mesh=mesh, placements=placements)
+        local = actual.to_local()
+        self.assertTrue(symm_mem.is_symm_mem_tensor(local))
+        self.assertEqual(local, expected.to_local())
+        handle = symm_mem.rendezvous(local, torch.distributed.group.WORLD)
+        self.assertIsNotNone(handle)
+        self.assertEqual(handle.buffer_size, max(1, max_numel) * local.element_size())
+
 
 DTensorConstructorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorConstructorTest,
@@ -572,6 +773,9 @@ DTensorConstructorTestWithLocalTensor = create_local_tensor_test_class(
 )
 
 instantiate_device_type_tests(DTensorSymmetricMemoryTest, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    DTensorSymmetricMemoryMeshTest, globals(), only_for="cuda"
+)
 
 if __name__ == "__main__":
     run_tests()

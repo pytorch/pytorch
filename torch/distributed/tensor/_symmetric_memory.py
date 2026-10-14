@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import torch
 import torch.distributed._symmetric_memory as symm_mem
 import torch.distributed.config as dist_config
+from torch._guards import detect_fake_mode
 from torch.distributed.tensor.placement_types import _StridedShard, Placement, Shard
 
 
@@ -50,7 +51,7 @@ def _compute_max_local_numel(
             shard_dim += len(max_shape)
         if shard_dim < 0 or shard_dim >= len(max_shape):
             raise AssertionError(
-                f"Sharding dim {placement.dim} greater than tensor ndim {len(max_shape)}"
+                f"Sharding dim {placement.dim} out of range for tensor ndim {len(max_shape)}"
             )
         max_shape[shard_dim] = _max_shard_dim_size(
             max_shape[shard_dim],
@@ -60,8 +61,21 @@ def _compute_max_local_numel(
     return prod(max_shape)
 
 
-def _narrow_and_view(base: torch.Tensor, shape: torch.Size) -> torch.Tensor:
-    return base.narrow(0, 0, prod(shape)).view(shape).detach()
+@torch._disable_dynamo
+def _allocate_symmetric_memory(
+    global_shape: torch.Size,
+    local_shape: torch.Size,
+    device_mesh: DeviceMesh,
+    placements: Sequence[Placement],
+    dtype: torch.dtype | None,
+    device: torch.device,
+) -> torch.Tensor:
+    if device.index is None:
+        device = torch.device(device.type, torch.cuda.current_device())
+    # Rendezvous needs a nonempty backing allocation, even for empty tensors.
+    max_numel = max(1, _compute_max_local_numel(global_shape, device_mesh, placements))
+    base = symm_mem.empty(max_numel, dtype=dtype, device=device)
+    return base.narrow(0, 0, prod(local_shape)).view(local_shape).detach()
 
 
 def _is_eligible_device(device: torch.device) -> bool:
@@ -71,12 +85,25 @@ def _is_eligible_device(device: torch.device) -> bool:
 def _should_allocate_symmetric(
     device: torch.device,
     device_mesh: DeviceMesh,
+    local_tensor: torch.Tensor | None = None,
 ) -> bool:
-    return (
-        is_symmetric_memory_enabled()
-        and _is_eligible_device(device)
-        and device_mesh._is_current_rank_part_of_mesh()
-    )
+    if not is_symmetric_memory_enabled() or not _is_eligible_device(device):
+        return False
+    if torch.compiler.is_compiling() or detect_fake_mode(local_tensor) is not None:
+        raise RuntimeError(
+            "SymmetricMemory-backed DTensor construction is not supported under "
+            "torch.compile or FakeTensorMode. Construct DTensors eagerly before tracing."
+        )
+    if (
+        symm_mem.get_backend(device) == "NVSHMEM"
+        and device_mesh.size() != torch.distributed.get_world_size()
+    ):
+        raise RuntimeError(
+            "SymmetricMemory-backed DTensor construction with NVSHMEM requires a "
+            "mesh containing every rank in the default process group; submeshes "
+            "are not supported because NVSHMEM allocation is collective."
+        )
+    return device_mesh._is_current_rank_part_of_mesh()
 
 
 def empty_symmetric_memory_local_tensor(
@@ -92,9 +119,9 @@ def empty_symmetric_memory_local_tensor(
     if not _should_allocate_symmetric(device, device_mesh):
         return None
 
-    max_numel = _compute_max_local_numel(global_shape, device_mesh, placements)
-    base = symm_mem.empty(max_numel, dtype=dtype, device=device)
-    return _narrow_and_view(base, local_shape)
+    return _allocate_symmetric_memory(
+        global_shape, local_shape, device_mesh, placements, dtype, device
+    )
 
 
 def copy_to_symmetric_memory(
@@ -103,16 +130,19 @@ def copy_to_symmetric_memory(
     device_mesh: DeviceMesh,
     placements: Sequence[Placement],
 ) -> torch.Tensor:
-    if not _should_allocate_symmetric(local_tensor.device, device_mesh):
+    if not _should_allocate_symmetric(local_tensor.device, device_mesh, local_tensor):
         return local_tensor
     if not local_tensor.is_contiguous():
         return local_tensor
 
-    max_numel = _compute_max_local_numel(global_shape, device_mesh, placements)
-    base = symm_mem.empty(
-        max_numel, dtype=local_tensor.dtype, device=local_tensor.device
+    out = _allocate_symmetric_memory(
+        global_shape,
+        local_tensor.shape,
+        device_mesh,
+        placements,
+        local_tensor.dtype,
+        local_tensor.device,
     )
-    out = _narrow_and_view(base, local_tensor.shape)
     with torch.no_grad():
         out.copy_(local_tensor)
     return out
