@@ -2014,6 +2014,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"cell": empty[0]})
         self.assertTrue(_cell_is_empty(load_guards_state(buf.getvalue())["cell"]))
 
+    def test_reduce_dict_keys_type(self):
+        dict_keys = type({}.keys())
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"t": dict_keys})
+        self.assertIs(load_guards_state(buf.getvalue())["t"], dict_keys)
+
     def test_rebuilt_function_keeps_an_empty_closure_cell(self):
         # A by-value rebuild of an fqn-mismatched wrapper carries its cells
         # through FunctionPicklerBase._reduce_cell, so an EMPTY cell has to come
@@ -3625,6 +3631,18 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # ACT->Tensor reuse this relaxation enables, and the case that matters
         # for precompile under FSDP+TP.
         self._test_check_fn(ref, loaded, {"w": base}, True)
+
+    def test_dict_keys_type_local(self):
+        def fn(x, t):
+            if t.__name__ == "dict_keys":
+                return x + 1
+            return x - 1
+
+        dict_keys = type({}.keys())
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x, dict_keys)
+        self._test_check_fn(ref, loaded, {"x": x, "t": dict_keys}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "t": type({}.values())}, False)
 
     def test_equals_match(self):
         def fn(x, y):
