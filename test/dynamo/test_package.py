@@ -182,6 +182,18 @@ class _StaleMethodOwner:
     method = _make_stale_method()
 
 
+def _unwrapped_decorator(f):
+    def wrapper(*args):
+        return f(*args)
+
+    return wrapper
+
+
+@_unwrapped_decorator
+def _decorated_without_wraps(x):
+    return x
+
+
 # The co_qualnames, _make_*.<locals>.*, now name nothing in this module; only
 # the rewritten __qualname__s on _GeneratedMethodOwner do.
 del _make_generated_method, _make_generated_property, _make_stale_method
@@ -317,6 +329,18 @@ print(eval(f"bbmod.{name}.{path}") is code)
         package = CompilePackage(None)
         with self.assertRaisesRegex(
             PackageError, r"__qualname__ '_make_stale_method\.<locals>\.method'"
+        ):
+            with package.code_context(code):
+                pass
+
+    def test_code_source_refuses_a_decorator_wrapper_without_wraps(self):
+        # On Python >= 3.11 the co_qualname walk reaches the wrapper and finds
+        # the code in its closure, recording the wrapper's stale __qualname__.
+        code = _decorated_without_wraps.__closure__[0].cell_contents.__code__
+        package = CompilePackage(None)
+        with self.assertRaisesRegex(
+            PackageError,
+            r"__qualname__ '_unwrapped_decorator\.<locals>\.wrapper'",
         ):
             with package.code_context(code):
                 pass
