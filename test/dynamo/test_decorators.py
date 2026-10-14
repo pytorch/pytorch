@@ -1188,6 +1188,10 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager")(inp), inp - 1)
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_export_keeps_nonrecursive_disable_wrapper_skipped(self):
         # export(mod) calls remove_from_cache(mod), which resolves
         # mod.forward.__code__ to the code every disable(recursive=False)
