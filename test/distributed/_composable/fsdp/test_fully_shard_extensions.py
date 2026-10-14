@@ -839,6 +839,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             "two": lambda t: (t, torch.ones_like(t)),
             "half": lambda t: (t.view(-1)[:4],),
             "bytes": lambda t: (t.view(torch.uint8),),
+            "int8": lambda t: (t.to(torch.int8),),
             # A (7, 8) weight has post-forward shards of 4 and 3 rows
             "uneven": lambda t: (AllGatherInput(t.new_ones(6), dim=0),),
         }
@@ -866,6 +867,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             "two": "Resharding 1.weight to smaller mesh is not supported for all-gather extensions with 2 inputs yet",
             "half": "Resharding 1.weight to smaller mesh needs post-forward shards of up to 32 elements, but its all-gather extension output has 16 per rank",
             "bytes": "Resharding 1.weight to smaller mesh needs a floating or complex all-gather extension output to require gradients, but its output has dtype torch.uint8",
+            "int8": "but its output has dtype torch.int8",
             "uneven": "Resharding 1.weight to smaller mesh needs post-forward shards of up to 32 elements, but its all-gather extension output has 24 per rank",
         }
         for payload, msg in msgs.items():
@@ -1127,7 +1129,8 @@ class TestAllGatherInputValidation(TestCase):
         with self.assertRaisesRegex(ValueError, "must keep the dtype torch.float32"):
             self._get_layouts([torch.ones(4, 4, dtype=torch.bfloat16)], [output])
         # Only empty outputs can be viewed with a zero trailing dim
-        self._get_layouts([torch.ones(4, 0)], [torch.empty(0)])
+        layouts = self._get_layouts([torch.ones(4, 0)], [torch.empty(0)])
+        self.assertEqual(layouts[0].output_size, (8, 0))
         with self.assertRaisesRegex(ValueError, "must match the size of its first"):
             self._get_layouts([torch.ones(4, 0)], [output])
         # fsdp_post_all_gather receives each output viewed as (-1, *size[1:])
@@ -1153,6 +1156,8 @@ class TestAllGatherInputValidation(TestCase):
         with self.assertRaisesRegex(ValueError, re.escape(msg)):
             self._get_layouts(inputs, shard_dim=1)
         self._get_layouts(inputs, shard_dim=1, shard_world_size=1)
+        # A single row, as for Shard(1) of a (1, 32) parameter, copies flat too
+        self._get_layouts(inputs, shard_dim=1, padded_sharded_size=torch.Size((1, 16)))
         # Bytes of a typed output are reassembled in the output's layout
         output = torch.empty(32)
         byte_view = torch.ones(4, 4).view(torch.uint8)
