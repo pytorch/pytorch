@@ -9841,6 +9841,7 @@ class TestLinalgSVD(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @skipCUDAIfRocm(msg="ROCm SVD loses accuracy on inputs scaled by 1e-12/1e12")
     @dtypes(torch.float32, torch.complex64)
     @parametrize("scale", [1e-12, 1e12])
     def test_svd_scaled_entries(self, device, dtype, scale):
