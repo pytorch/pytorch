@@ -32,10 +32,12 @@ Usage 1: Launching two trainers as a function
      name="trainer",
      entrypoint=trainer,
      args={0: (1, 2, 3), 1: (4, 5, 6)},
-     envs={0: {"LOCAL_RANK": 0}, 1: {"LOCAL_RANK": 1}},
-     log_dir="/tmp/foobar",
-     redirects=Std.ALL,  # write all worker stdout/stderr to a log file
-     tee={0: Std.ERR},  # tee only local rank 0's stderr to console
+     envs={0: {"LOCAL_RANK": "0"}, 1: {"LOCAL_RANK": "1"}},
+     logs_specs=DefaultLogsSpecs(
+         log_dir="/tmp/foobar",
+         redirects=Std.ALL,  # write all worker stdout/stderr to a log file
+         tee={0: Std.ERR},  # tee only local rank 0's stderr to console
+     ),
  )
 
  # waits for all copies of trainer to finish
@@ -49,11 +51,14 @@ Usage 2: Launching 2 echo workers as a binary
  # echo hello
  # echo world > stdout.log
  ctx = start_processes(
-         name="echo"
+         name="echo",
          entrypoint="echo",
-         log_dir="/tmp/foobar",
-         args={0: "hello", 1: "world"},
-         redirects={1: Std.OUT},
+         args={0: ("hello",), 1: ("world",)},
+         envs={0: {}, 1: {}},
+         logs_specs=DefaultLogsSpecs(
+             log_dir="/tmp/foobar",
+             redirects={1: Std.OUT},
+         ),
         )
 
 Just like ``torch.multiprocessing``, the return value of the function
@@ -119,7 +124,7 @@ def start_processes(
     The number of copies is determined by the number of entries for ``args`` and
     ``envs`` arguments, which need to have the same key set.
 
-    ``args`` and ``env`` parameters are the arguments and environment variables
+    ``args`` and ``envs`` parameters are the arguments and environment variables
     to pass down to the entrypoint mapped by the replica index (local rank).
     All local ranks must be accounted for.
     That is, the keyset should be ``{0,1,...,(nprocs-1)}``.
@@ -146,7 +151,9 @@ def start_processes(
     ``tee`` acts like the unix "tee" command in that it redirects + prints to console.
     To avoid worker stdout/stderr from printing to console, use the ``redirects`` parameter.
 
-    For each process, the ``log_dir`` will contain:
+    Log files land under per-run attempt subdirectories of ``log_dir``
+    (``<log_dir>/<run_id>/attempt_<attempt>/``), which ``DefaultLogsSpecs``
+    creates as needed. For each process it will contain:
 
     #. ``{local_rank}/error.json``: if the process failed, a file with the error info
     #. ``{local_rank}/stdout.log``: if ``redirect & STDOUT == STDOUT``
@@ -154,7 +161,7 @@ def start_processes(
     #. ``filtered_stdout.log``: if ``duplicate_stdout_filters`` is non-empty
     #. ``filtered_stderr.log``: if ``duplicate_stderr_filters`` is non-empty
 
-    .. note:: It is expected that the ``log_dir`` exists, is empty, and is a directory.
+    .. note:: ``log_dir`` is created if it does not exist.
 
     Example:
     ::
@@ -165,27 +172,27 @@ def start_processes(
      start_processes(
         name="trainer",
         entrypoint=foo,
-        args:{0:("bar0",), 1:("bar1",),
-        envs:{0:{}, 1:{}},
-        log_dir=log_dir
+        args={0:("bar0",), 1:("bar1",)},
+        envs={0:{}, 1:{}},
+        logs_specs=DefaultLogsSpecs(log_dir=log_dir)
      )
 
      # invalid; envs missing for local rank 1
      start_processes(
         name="trainer",
         entrypoint=foo,
-        args:{0:("bar0",), 1:("bar1",),
-        envs:{0:{}},
-        log_dir=log_dir
+        args={0:("bar0",), 1:("bar1",)},
+        envs={0:{}},
+        logs_specs=DefaultLogsSpecs(log_dir=log_dir)
      )
 
      # ok; two copies of /usr/bin/touch: touch file1, touch file2
      start_processes(
         name="trainer",
         entrypoint="/usr/bin/touch",
-        args:{0:("file1",), 1:("file2",),
-        envs:{0:{}, 1:{}},
-        log_dir=log_dir
+        args={0:("file1",), 1:("file2",)},
+        envs={0:{}, 1:{}},
+        logs_specs=DefaultLogsSpecs(log_dir=log_dir)
       )
 
      # caution; arguments casted to string, runs:
@@ -193,9 +200,9 @@ def start_processes(
      start_processes(
         name="trainer",
         entrypoint="/usr/bin/echo",
-        args:{0:(1,2,3), 1:([1,2,3],),
-        envs:{0:{}, 1:{}},
-        log_dir=log_dir
+        args={0:(1,2,3), 1:([1,2,3],)},
+        envs={0:{}, 1:{}},
+        logs_specs=DefaultLogsSpecs(log_dir=log_dir)
       )
 
     Args:
@@ -204,14 +211,17 @@ def start_processes(
         entrypoint: either a ``Callable`` (function) or ``cmd`` (binary)
         args: arguments to each replica
         envs: env vars to each replica
-        log_dir: directory used to write log files
+        log_line_prefixes: prefixes prepended to each log line, keyed by local rank
         start_method: multiprocessing start method (spawn, fork, forkserver)
                       ignored for binaries
-        logs_specs: defines ``log_dir``, ``redirects``, and ``tee``.
+        numa_options: NUMA binding options (see torch.numa.binding.NumaOptions)
+        logs_specs: defines ``log_dir``, ``redirects``, ``tee`` and
+                    ``local_ranks_filter``.
                     inside ``logs_specs``:
+                    - log_dir: base directory for log files (created if needed)
                     - redirects: which std streams to redirect to a log file
                     - tee: which std streams to redirect + print to console
-        local_ranks_filter: which ranks' logs to print to console
+                    - local_ranks_filter: which ranks' logs to print to console
         duplicate_stdout_filters: filters for the duplicated stdout logs
         duplicate_stderr_filters: filters for the duplicated stderr logs
 
