@@ -1677,11 +1677,11 @@ class PrecompileSession(Generic[_P, _R]):
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
-        self._risky_dropped_guards: set[tuple[str, str]] = set()
         self._dropped_guard_code: dict[tuple[str, str], str] = {}
-        # slot -> the frames whose compiles kept / dropped it
+        # slot -> the frames whose compiles kept / dropped / riskily dropped it
         self._keep_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
         self._drop_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
+        self._risky_drop_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
         # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
         self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
         self._capture_errors: list[str] = []
@@ -1742,7 +1742,7 @@ class PrecompileSession(Generic[_P, _R]):
                     if rendered:
                         self._dropped_guard_code.setdefault(slot, rendered)
                     if by_default or _is_risky_drop(entry, namespaces):
-                        self._risky_dropped_guards.add(slot)
+                        self._risky_drop_frames.setdefault(slot, set()).add(key)
                 if entry.guard_type in _UNMODELLED_GUARD_TYPES:
                     # Never compared, so never claimed to hold or to vary.
                     continue
@@ -1905,7 +1905,9 @@ class PrecompileSession(Generic[_P, _R]):
         # Only variants some kept guard split apart can be compared, so a
         # dropped slot that is the sole difference between two calls never
         # recompiles and is never reported here.
-        risky = self._risky_dropped_guards & dropped
+        risky = {
+            s for s, frames in self._risky_drop_frames.items() if not frames <= eager
+        }
         for variants in guard_sets.values():
             values: dict[tuple[str, str], set[str]] = {}
             for facts in variants:
