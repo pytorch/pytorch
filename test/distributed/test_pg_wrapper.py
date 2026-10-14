@@ -409,9 +409,9 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["DETAIL"])
         def test_reduce_scatter_tensor_coalesced_debug_mode(self):
-            torch.cuda.set_device(self.rank)
+            torch.accelerator.set_device_index(self.rank)
             pg = self._create_wrapper_pg(with_new_group=True)
-            dev = torch.cuda.current_device()
+            dev = torch.accelerator.current_device_index()
 
             out_shapes = [(2, 2), (3, 3)]
             in_shapes = [(s[0] * self.world_size,) + s[1:] for s in out_shapes]
@@ -438,9 +438,9 @@ if not TEST_WITH_DEV_DBG_ASAN:
             only collective missing the check.
             Regression test for https://github.com/pytorch/pytorch/pull/185123
             """
-            torch.cuda.set_device(self.rank)
+            torch.accelerator.set_device_index(self.rank)
             pg = self._create_wrapper_pg(with_new_group=True)
-            dev = torch.cuda.current_device()
+            dev = torch.accelerator.current_device_index()
 
             in_shapes = [(2, 2), (3, 3)]
             out_shapes = [(s[0] * self.world_size,) + s[1:] for s in in_shapes]
@@ -469,7 +469,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             coalesced allgather path.
             Regression test for https://github.com/pytorch/pytorch/pull/185123
             """
-            torch.cuda.set_device(self.rank)
+            torch.accelerator.set_device_index(self.rank)
             pg = self._create_wrapper_pg(with_new_group=True)
             self._test_allgather_into_tensor_coalesced_op_mismatch(pg, use_accel=True)
 
