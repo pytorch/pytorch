@@ -1147,6 +1147,7 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
+        self._installed_codes: set[types.CodeType] = set()
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
 
@@ -1164,8 +1165,9 @@ class CompilePackage:
         return self._initialized
 
     def reset(self) -> None:
-        """Uninstall whatever install() placed and return to the uninitialized state."""
+        """Run uninstall() and return to the uninitialized state, so initialize() can run again."""
         self.uninstall()
+        self.__dict__.pop("source_id", None)
         CompilePackage.__init__(self, None)
 
     def initialize(
@@ -1432,6 +1434,12 @@ class CompilePackage:
             self._installed_globals.setdefault(module, []).append(name)
 
     def uninstall(self) -> None:
+        """
+        Drop the globals install() recorded and the precompile entries on the
+        innermost fn's code and on every code object install() loaded one onto.
+        install()'s other side effects (input_codes, skip_code, the builtins
+        dict global) are left in place.
+        """
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
         if self._innermost_fn is None:
@@ -1443,6 +1451,9 @@ class CompilePackage:
         self._installed_globals = {}
 
         _reset_precompile_entries(self._innermost_fn.__code__)
+        for code in self._installed_codes:
+            _reset_precompile_entries(code)
+        self._installed_codes = set()
 
     def install(self, backends: dict[_BackendId, Any]) -> None:
         """
@@ -1583,6 +1594,7 @@ class CompilePackage:
                         guard_manager = load_guard_manager(
                             guards_state, target_code, runtime_global_scope
                         )
+                    self._installed_codes.add(target_code)
                     _load_precompile_entry(
                         target_code,
                         guard_manager,
