@@ -1573,9 +1573,7 @@ class TestUnaryUfuncs(TestCase):
         t = ref.to(dtype)
 
         self.assertEqual(t.isinf(), ref.isinf())
-        if dtype is not torch.float8_e8m0fnu:
-            # isfinite reports every Float8_e8m0fnu value as finite, NaN included
-            self.assertEqual(t.isfinite(), ref.isfinite())
+        self.assertEqual(t.isfinite(), ref.isfinite())
 
     def test_nonzero_empty(self, device):
         def assert_tuple_empty(tup, dim):
