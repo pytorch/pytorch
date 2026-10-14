@@ -5260,6 +5260,7 @@ class TestPrecompileDynamoCapture(TestCase):
             "    f(model, x)\n"
             "except torch.compiler.PrecompileError as e:\n"
             "    assert 'no captured variant' in str(e), e\n"
+            "    assert 'torch_dynamo_resume_in_scalar_continuation' in str(e), e\n"
             "else:\n"
             "    raise AssertionError('an uncovered call was served')\n"
             "mod.RESUME_VALUE[0] = 0\n"
