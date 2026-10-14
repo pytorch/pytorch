@@ -1827,20 +1827,21 @@ def tuned_scaled_mm_v2(
                     + "in both epilogue scaling and main loop scaling"
                 )
 
-        if (
-            use_triton_blackwell_tma_template(
-                mat_a, mat_b, output_layout=layout, add_guards=True
-            )
-            and not bias
-        ):
-            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = dict(
-                overriders
-            )
-
         if use_triton_scaling_template(
             scale_option_a, scale_option_b, epilogue_scaling_types
         ):
+            # Like mm_template, the Blackwell template only scales in its
+            # epilogue, so blockwise recipes would silently produce wrong results.
+            if (
+                use_triton_blackwell_tma_template(
+                    mat_a, mat_b, output_layout=layout, add_guards=True
+                )
+                and not bias
+            ):
+                templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
+                kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = dict(
+                    overriders
+                )
             templates_to_use.append(mm_template)
             kwarg_overrides[mm_template.uid] = dict(overriders)
 
@@ -2015,20 +2016,21 @@ def tuned_scaled_mm(
                     + "in both epilogue scaling and main loop scaling"
                 )
 
-        if (
-            use_triton_blackwell_tma_template(
-                mat_a, mat_b, output_layout=layout, add_guards=True
-            )
-            and not bias
-        ):
-            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = dict(
-                overriders
-            )
-
         if use_triton_scaling_template(
             scale_option_a, scale_option_b, epilogue_scaling_types
         ):
+            # Like mm_template, the Blackwell template only scales in its
+            # epilogue, so blockwise recipes would silently produce wrong results.
+            if (
+                use_triton_blackwell_tma_template(
+                    mat_a, mat_b, output_layout=layout, add_guards=True
+                )
+                and not bias
+            ):
+                templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
+                kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = dict(
+                    overriders
+                )
             templates_to_use.append(mm_template)
             kwarg_overrides[mm_template.uid] = dict(overriders)
 
