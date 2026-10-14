@@ -14,7 +14,6 @@ import os
 import pickle
 import sys
 import time
-import traceback
 import types
 import warnings
 from collections.abc import Callable, Sequence
@@ -321,16 +320,14 @@ _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
 # Object collectives can serialize via torch.save/torch.load(weights_only=True)
-# by passing weights_only=True. Exceptions and stack summaries are commonly
-# transmitted for error propagation (e.g. torch.distributed.checkpoint), so
-# allowlist them.
+# by passing weights_only=True. Exceptions are commonly transmitted for error
+# propagation, so allowlist them.
 torch.serialization.add_safe_globals(
     [
         t
         for t in vars(builtins).values()
         if isinstance(t, type) and issubclass(t, BaseException)
     ]
-    + [traceback.StackSummary, traceback.FrameSummary]
 )
 
 GroupName = NewType("GroupName", str)
@@ -4083,12 +4080,12 @@ def broadcast(
     opts.rootTensor = 0
     opts.asyncOp = async_op
     opts.config = config
-    sm90_or_more = not (
+    sm90_or_more = (
         tensor.is_cuda and torch.cuda.get_device_capability(tensor.device)[0] >= 9
     )
     if tensor.is_complex():
         tensor = torch.view_as_real(tensor)
-    elif _is_fp8(tensor) and not sm90_or_more:
+    elif _is_fp8(tensor) and not sm90_or_more and tensor.device.type != "hpu":
         # FP8 is supported by NCCL on sm90+, use workaround for older GPUs
         tensor = tensor.view(torch.uint8)
     work = group.broadcast([tensor], opts)
