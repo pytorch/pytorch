@@ -238,6 +238,11 @@ TritonKernel::TritonKernel(
     TORCH_CHECK(
         loader_ != nullptr,
         "couldn't find MTIA loader -- is this a mtia build?");
+  } else if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".spv")) {
+    loader_ = TritonKernelManagerRegistry()->Create(
+        at::kXPU, symbol_name, tmp_dir + kernel_name + ".spv", "");
+    TORCH_CHECK(
+        loader_ != nullptr, "couldn't find XPU loader -- is this a xpu build?");
   }
 
   TORCH_CHECK(

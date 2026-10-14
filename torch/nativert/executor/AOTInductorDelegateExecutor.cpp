@@ -116,6 +116,11 @@ AOTIDelegateExecutor::AOTIDelegateExecutor(
       device.str(),
       /*cubin_dir=*/tmp_dir,
       /*run_single_threaded=*/false);
+  TORCH_CHECK(
+      aoti_model_container_runner_ != nullptr,
+      "No AOTI model container runner registered for device type ",
+      device.type(),
+      "; this build may be missing the runner for this backend.");
 
   for (const auto& [name, original_fqn] :
        aoti_model_container_runner_->getConstantNamesToOriginalFQNs()) {
