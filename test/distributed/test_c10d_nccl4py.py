@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import importlib.util
 import os
 import unittest
 from datetime import timedelta
@@ -15,7 +16,7 @@ from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, Test
 
 
 try:
-    import nccl.core  # noqa: F401
+    import nccl.core
 
     from torch.distributed._nccl4py import _create_nccl4py_backend, NCCL4PyBackend
 
@@ -24,27 +25,25 @@ except ImportError:
     HAS_NCCL4PY = False
 
 
-def _rocm_nccl4py_ready() -> bool:
-    """True unless this is ROCm with RCCL older than 2.31.2.
-
-    On ROCm, torch.cuda.nccl.version() is RCCL. NVIDIA nccl4py dlopens
-    libnccl.so.2; RCCL's package dlopens librccl.so. These host collectives
-    pass on RCCL 2.31.2. A missing nccl package still skips via HAS_NCCL4PY.
-    """
-    if not TEST_WITH_ROCM:
-        return True
-    if not dist.is_nccl_available():
-        return False
-    return torch.cuda.nccl.version() >= (2, 31, 2)
+def _rocm_nccl4py_skip_reason() -> str | None:
+    # NVIDIA's nccl4py (the PyPI package) imports fine on ROCm but dlopens
+    # libnccl.so.2. Only RCCL's package ships the HIP shim and loads librccl.
+    if importlib.util.find_spec("nccl._hip_compat") is None:
+        return "nccl4py on ROCm requires RCCL's nccl4py package"
+    try:
+        rccl_version = nccl.get_version().nccl.version
+    except Exception as e:
+        return f"nccl4py could not load librccl: {e}"
+    if rccl_version.release < (2, 31, 2):
+        return f"nccl4py requires RCCL 2.31.2 or later, found {rccl_version}"
+    return None
 
 
 def skip_unless_nccl4py(func):
     if not HAS_NCCL4PY or not torch.cuda.is_available():
-        return unittest.skipUnless(False, "nccl4py and CUDA required")(func)
-    if not _rocm_nccl4py_ready():
-        return unittest.skipUnless(False, "nccl4py requires RCCL 2.31.2 or later")(
-            func
-        )
+        return unittest.skip("nccl4py and CUDA required")(func)
+    if TEST_WITH_ROCM and (reason := _rocm_nccl4py_skip_reason()):
+        return unittest.skip(reason)(func)
     return func
 
 

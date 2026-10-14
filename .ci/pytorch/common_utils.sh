@@ -337,6 +337,11 @@ function install_torchcomms() {
 }
 
 function install_nccl4py() {
+  # PyPI nccl4py is NVIDIA's build (dlopens libnccl.so.2). On ROCm it would
+  # replace RCCL's nccl4py, which has the same pip name.
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    return
+  fi
   pip_install nccl4py==0.5.0
 }
 
