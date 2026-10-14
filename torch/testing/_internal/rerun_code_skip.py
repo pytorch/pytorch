@@ -20,6 +20,10 @@ RERUN_SKIP_DEVICE_ATTR = "__pt_rerun_skip_device__"
 # The value is the id of the function that was actually stamped, so a
 # copy on onlyCUDA or instantiated_test does not look owned.
 RERUN_STAMP_OWNER_ATTR = "__pt_rerun_stamp_owner__"
+# Device name is copied the same way. rerun_code_skip then takes the
+# code-skip owner id for itself, so this id is what still says which
+# wrapper called stamp_rerun_device_skip.
+RERUN_DEVICE_STAMP_OWNER_ATTR = "__pt_rerun_device_stamp_owner__"
 
 # Messages that mean "this ROCm/CUDA API is not there", not "this test is
 # a known failure". Checked before the known-bug phrases.
@@ -60,6 +64,7 @@ def stamp_rerun_device_skip(fn, device_type: str):
     try:
         setattr(fn, RERUN_CODE_SKIP_ATTR, True)
         setattr(fn, RERUN_SKIP_DEVICE_ATTR, device_type)
+        setattr(fn, RERUN_DEVICE_STAMP_OWNER_ATTR, id(fn))
     except (AttributeError, TypeError):
         return fn
     return _own_rerun_stamp(fn)

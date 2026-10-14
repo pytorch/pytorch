@@ -32,9 +32,10 @@ _UNCONDITIONAL_SKIP_ATTR = "__pt_unconditional_skip__"
 _RERUN_CODE_SKIP_ATTR = "__pt_rerun_code_skip__"
 _RERUN_SKIP_DEVICE_ATTR = "__pt_rerun_skip_device__"
 _RERUN_STAMP_OWNER_ATTR = "__pt_rerun_stamp_owner__"
+_RERUN_DEVICE_STAMP_OWNER_ATTR = "__pt_rerun_device_stamp_owner__"
 
 
-def _load_rerun_code_skip_attrs() -> tuple[str, str, str, str]:
+def _load_rerun_code_skip_attrs() -> tuple[str, str, str, str, str]:
     # Prefer the source file so this plugin loads when torch is not built.
     import importlib.util
     from pathlib import Path
@@ -56,9 +57,11 @@ def _load_rerun_code_skip_attrs() -> tuple[str, str, str, str]:
                 mod.RERUN_CODE_SKIP_ATTR,
                 mod.RERUN_SKIP_DEVICE_ATTR,
                 mod.RERUN_STAMP_OWNER_ATTR,
+                mod.RERUN_DEVICE_STAMP_OWNER_ATTR,
             )
     from torch.testing._internal.rerun_code_skip import (
         RERUN_CODE_SKIP_ATTR,
+        RERUN_DEVICE_STAMP_OWNER_ATTR,
         RERUN_SKIP_DEVICE_ATTR,
         RERUN_STAMP_OWNER_ATTR,
         UNCONDITIONAL_SKIP_ATTR,
@@ -69,6 +72,7 @@ def _load_rerun_code_skip_attrs() -> tuple[str, str, str, str]:
         RERUN_CODE_SKIP_ATTR,
         RERUN_SKIP_DEVICE_ATTR,
         RERUN_STAMP_OWNER_ATTR,
+        RERUN_DEVICE_STAMP_OWNER_ATTR,
     )
 
 
@@ -77,6 +81,7 @@ def _load_rerun_code_skip_attrs() -> tuple[str, str, str, str]:
     _RERUN_CODE_SKIP_ATTR,
     _RERUN_SKIP_DEVICE_ATTR,
     _RERUN_STAMP_OWNER_ATTR,
+    _RERUN_DEVICE_STAMP_OWNER_ATTR,
 ) = _load_rerun_code_skip_attrs()
 
 _ORIG_UNITTEST_SKIP = _unittest_case.skip
@@ -443,7 +448,17 @@ def _copy_rerun_stamps(src: Any, dst: Any) -> None:
                 pass
 
 
+def _owns_device_stamp(fn: Any) -> bool:
+    # functools.wraps copies the device name. The owner id is the wrapper
+    # stamp_rerun_device_skip marked, same rule as _owns_rerun_stamp.
+    return getattr(fn, _RERUN_DEVICE_STAMP_OWNER_ATTR, None) == id(fn)
+
+
 def _device_allows_rerun(item: Any, target: Any) -> bool:
+    # A copied device name is not this wrapper's stamp. An outer known-bug
+    # skip stays removable on CUDA when an inner MPS skip's name was copied.
+    if not _owns_device_stamp(target):
+        return True
     expected = getattr(target, _RERUN_SKIP_DEVICE_ATTR, None)
     if expected is None:
         return True
@@ -613,7 +628,7 @@ def _owns_rerun_stamp(fn: Any) -> bool:
 def _is_removable_code_skip(item: Any, fn: Any) -> bool:
     if not _is_skiptest_wrapper(fn) or not _owns_rerun_stamp(fn):
         return False
-    # A device stamp runs only on that device. Another device's stamp stays.
+    # Owned device stamps run only on that device. A copied name does not.
     return _device_allows_rerun(item, fn)
 
 
@@ -660,18 +675,35 @@ def _pytest_skip_reason(markers: list[Any]) -> str:
     return "\n".join(parts)
 
 
+def _clear_installed_unittest_skip(
+    item: Any, installed: Any, *, kept_outer: bool
+) -> None:
+    # TestCase.run never calls a method with __unittest_skip__ set. wraps
+    # copies that flag onto the next function, so clear it on the method
+    # that is actually installed. A capability or device skip we kept must
+    # stay a skip: its own flag is what suppresses the call.
+    if _is_skiptest_wrapper(installed):
+        return
+    if getattr(installed, "__unittest_skip__", False):
+        _remember_code_skip_reason(item, _wrapper_skip_reason(installed))
+        _clear_unittest_skip(installed)
+    elif kept_outer:
+        _remember_code_skip_reason(item, _wrapper_skip_reason(installed))
+
+
 def _enable_unconditional_unittest_skip(item: Any) -> bool:
     target = _skip_func(getattr(item, "obj", None))
-    if _has_rerun_stamp(target) and _device_allows_rerun(item, target):
+    # Device allowance is per wrapper. The name on the outermost function
+    # is often a copy and must not decide the rest of the chain.
+    removable = any(
+        _is_removable_code_skip(item, node) for node in _wrapper_chain(target)
+    )
+    if removable:
         peeled = _peel_rerun_skip_wrappers(item, target)
         if peeled is not target:
             _copy_rerun_stamps(target, peeled)
             _replace_item_obj(item, peeled)
-        elif getattr(target, "__unittest_skip__", False):
-            _remember_code_skip_reason(item, _wrapper_skip_reason(target))
-            _clear_unittest_skip(target)
-        else:
-            _remember_code_skip_reason(item, _wrapper_skip_reason(target))
+        _clear_installed_unittest_skip(item, peeled, kept_outer=peeled is target)
         return True
     cls = getattr(item, "cls", None)
     class_stamped = cls is not None and _has_rerun_stamp(cls)
