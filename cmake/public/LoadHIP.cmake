@@ -2,8 +2,8 @@ set(PYTORCH_FOUND_HIP FALSE)
 
 # If ROCM_PATH is set, assume intention is to compile with
 # ROCm support and error out if the ROCM_PATH does not exist.
-# Else ROCM_PATH does not exist, try to get the root and CMake package
-# directories from rocm-sdk, or assume a default of /opt/rocm.
+# Else ROCM_PATH does not exist, try to get it from rocm-sdk,
+# or assume a default of /opt/rocm
 # In the latter case, if /opt/rocm does not exist emit status
 # message and return.
 if(DEFINED ENV{ROCM_PATH})
@@ -14,12 +14,11 @@ if(DEFINED ENV{ROCM_PATH})
       "Set a valid ROCM_PATH or unset ROCM_PATH environment variable to fix.")
   endif()
 else()
-  # Ask the pip-distributed SDK for its canonical root and CMake package paths
-  # instead of inferring its package layout from the root.
+  # Try to get ROCM_PATH from rocm-sdk if available
   find_program(ROCM_SDK_EXECUTABLE rocm-sdk)
   if(ROCM_SDK_EXECUTABLE)
     execute_process(
-      COMMAND "${ROCM_SDK_EXECUTABLE}" path --root
+      COMMAND ${ROCM_SDK_EXECUTABLE} path --root
       OUTPUT_VARIABLE ROCM_SDK_PATH
       OUTPUT_STRIP_TRAILING_WHITESPACE
       RESULT_VARIABLE ROCM_SDK_RESULT
@@ -28,18 +27,6 @@ else()
     if(ROCM_SDK_RESULT EQUAL 0 AND EXISTS "${ROCM_SDK_PATH}")
       set(ROCM_PATH "${ROCM_SDK_PATH}")
       message(STATUS "Found ROCm installation via rocm-sdk at: ${ROCM_PATH}")
-      execute_process(
-        COMMAND "${ROCM_SDK_EXECUTABLE}" path --cmake
-        OUTPUT_VARIABLE ROCM_SDK_CMAKE_PATH
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE ROCM_SDK_CMAKE_RESULT
-        ERROR_QUIET
-      )
-      if(ROCM_SDK_CMAKE_RESULT EQUAL 0 AND EXISTS "${ROCM_SDK_CMAKE_PATH}")
-        list(PREPEND CMAKE_PREFIX_PATH "${ROCM_SDK_CMAKE_PATH}")
-        message(STATUS
-          "Added ROCm SDK CMake packages to CMAKE_PREFIX_PATH: ${ROCM_SDK_CMAKE_PATH}")
-      endif()
     endif()
   endif()
 
