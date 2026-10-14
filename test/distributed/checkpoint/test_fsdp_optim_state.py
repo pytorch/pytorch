@@ -16,13 +16,17 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    _get_device_type,
+    DTensorContinuousTestBase,
+    NUM_DEVICES,
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
-class FsdpOptimStateCheckpoint(DTensorTestBase):
+class FsdpOptimStateCheckpoint(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     def _create_model(self):
         # make weight tensor dim_0 as large as the world size for scaling test
         layer1_weight_dim = self.world_size
@@ -50,10 +54,13 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
         model = TestDummyModel(self.device_type).to(self.device_type)
         return model
 
-    @property
-    def backend(self):
-        curr_backend = dist.get_default_backend_for_device(self.device_type)
-        return f"cpu:gloo,{self.device_type}:{curr_backend}"
+    @classmethod
+    def backend_str(cls):
+        device_type = _get_device_type(cls.world_size)
+        if device_type == "cpu":
+            return "gloo"
+        curr_backend = dist.get_default_backend_for_device(device_type)
+        return f"cpu:gloo,{device_type}:{curr_backend}"
 
     @skip_if_lt_x_gpu(2)
     @with_comms

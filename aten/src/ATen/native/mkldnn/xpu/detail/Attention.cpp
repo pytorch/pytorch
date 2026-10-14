@@ -1094,8 +1094,8 @@ void sdpa(
       enable_dropout);
   auto& partition =
       sdpa_forward::find_or_create_graph_partition(logical_params);
-  l_inputs = std::move(logical_params.get_input());
-  l_outputs = std::move(logical_params.get_output());
+  l_inputs = logical_params.get_input();
+  l_outputs = logical_params.get_output();
   compiled_partition = partition.compile(l_inputs, l_outputs, eng);
 
   std::vector<dnnl::graph::tensor> outputs = {
@@ -1221,8 +1221,8 @@ void sdpa_backward(
       enable_dropout);
   auto& partition =
       sdpa_backward::find_or_create_backward_graph_partition(logical_params);
-  l_inputs = std::move(logical_params.get_input());
-  l_outputs = std::move(logical_params.get_output());
+  l_inputs = logical_params.get_input();
+  l_outputs = logical_params.get_output();
   compiled_partition = partition.compile(l_inputs, l_outputs, eng);
 
   std::vector<dnnl::graph::tensor> outputs = {

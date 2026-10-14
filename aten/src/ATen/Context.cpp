@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <string>
 #include <string_view>
@@ -34,6 +35,21 @@ C10_DIAGNOSTIC_POP()
 #include <cpuinfo.h>
 #endif
 namespace at {
+
+namespace {
+
+std::atomic<bool> xnnpack_backend_available{false};
+
+} // namespace
+
+namespace native::xnnpack::internal {
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+TORCH_API void register_backend() {
+  xnnpack_backend_available.store(true, std::memory_order_relaxed);
+}
+
+} // namespace native::xnnpack::internal
 
 /*
   These const variables defined the fp32 precisions for different backend
@@ -734,7 +750,7 @@ CuBLASReductionOption Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
 
-CuBLASReductionOption inline get_reduction_option(bool allow_reduced_precision, bool allow_splitk) {
+static CuBLASReductionOption inline get_reduction_option(bool allow_reduced_precision, bool allow_splitk) {
   TORCH_CHECK(
       !(allow_reduced_precision && !allow_splitk),
       "allow_splitk=False is not supported when reduced precision reductions are enabled");
@@ -888,11 +904,7 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 }
 
 bool Context::isXNNPACKAvailable() {
-#ifdef USE_XNNPACK
-  return true;
-#else
-  return false;
-#endif
+  return xnnpack_backend_available.load(std::memory_order_acquire);
 }
 
 void Context::setCheckSparseTensorInvariants(std::optional<bool> e = std::nullopt) {

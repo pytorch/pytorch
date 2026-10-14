@@ -142,6 +142,18 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::matmul
 ```
 
+```{doxygenfunction} torch::stable::mm_out(torch::stable::Tensor &out, const torch::stable::Tensor &self, const torch::stable::Tensor &mat2)
+```
+
+```{doxygenfunction} torch::stable::mm_out(torch::stable::Tensor &out, const torch::stable::Tensor &self, const torch::stable::Tensor &mat2, torch::headeronly::ScalarType out_dtype)
+```
+
+```{doxygenfunction} torch::stable::bmm_out(torch::stable::Tensor &out, const torch::stable::Tensor &self, const torch::stable::Tensor &mat2)
+```
+
+```{doxygenfunction} torch::stable::bmm_out(torch::stable::Tensor &out, const torch::stable::Tensor &self, const torch::stable::Tensor &mat2, torch::headeronly::ScalarType out_dtype)
+```
+
 ```{doxygenfunction} torch::stable::amax(const torch::stable::Tensor &self, int64_t dim, bool keepdim)
 ```
 
@@ -170,4 +182,13 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::floor_divide
+```
+
+```{doxygenfunction} torch::stable::sort(const torch::stable::Tensor &self, int64_t dim, bool descending)
+```
+
+```{doxygenfunction} torch::stable::sort(const torch::stable::Tensor &self, std::optional<bool> stable, int64_t dim, bool descending)
+```
+
+```{doxygenfunction} torch::stable::masked_select
 ```
