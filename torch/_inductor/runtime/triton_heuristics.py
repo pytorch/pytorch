@@ -5357,7 +5357,12 @@ def template(
         )
 
     if torch.version.hip:
-        for k in tlx_only_hip_options():
+        for k in (
+            "matrix_instr_nonkdim",
+            "waves_per_eu",
+            "kpack",
+            *tlx_only_hip_options(),
+        ):
             if k in triton_meta:
                 config_kwargs[k] = triton_meta[k]
 
