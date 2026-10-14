@@ -4218,6 +4218,57 @@ class TestGuardSerialization(TestGuardSerializationBase):
             dist.destroy_process_group()
             tmpfile.close()
 
+    def test_ddp_module_non_default_process_group(self):
+        import torch.distributed as dist
+
+        if not dist.is_available():
+            self.skipTest("Torch distributed is not available")
+        from torch.nn.parallel import DistributedDataParallel as DDP
+
+        tmpfile = tempfile.NamedTemporaryFile()  # noqa: SIM115
+        dist.init_process_group(
+            backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
+        )
+        try:
+            ddp_model = DDP(
+                GlobalNestedModule(), process_group=dist.new_group(ranks=[0])
+            )
+
+            def foo(ddp, x):
+                return ddp(x)
+
+            unsupported = frozenset(
+                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            )
+            x = torch.randn(10)
+            package = CompilePackage(foo)
+            torch._dynamo.optimize(
+                package=package,
+                guard_filter_fn=lambda gs: [
+                    x.guard_type not in unsupported for x in gs
+                ],
+            )(foo)(ddp_model, x)
+            self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)
+            guards_state = load_guards_state(
+                package._codes[foo.__code__].guarded_codes[0].guards_state
+            )
+            loaded_ddp = guards_state.output_graph.local_scope["ddp"]
+            self.assertIsInstance(loaded_ddp, DDP)
+
+            # The loaded shell has no process group, reducer or logger; it must
+            # still pickle.
+            buf = io.BytesIO()
+            GuardsStatePickler({id(loaded_ddp): loaded_ddp}, {}, {}, {}, buf).dump(
+                loaded_ddp
+            )
+            reloaded_ddp = load_guards_state(buf.getvalue())
+            self.assertIsInstance(reloaded_ddp, DDP)
+            for name in ("process_group", "reducer", "logger", "broadcast_buffers"):
+                self.assertNotIn(name, reloaded_ddp.__dict__)
+        finally:
+            dist.destroy_process_group()
+            tmpfile.close()
+
     def test_dict_keys_serialization(self):
         d = {1: 2, 3: 4}
 
