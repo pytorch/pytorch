@@ -56,6 +56,7 @@ import contextlib
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     TEST_WITH_SLOW,
+    set_warn_always_context,
 )
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
@@ -3135,13 +3136,21 @@ class TestLinalg(TestCase):
                 with self.assertRaisesRegex(RuntimeError, msg):
                     call()
 
+    def _call_without_rocm_driver_warning(self, call):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with set_warn_always_context(True):
+                result = call()
+        self.assertFalse([w.message for w in caught if "ignored on ROCm" in str(w.message)])
+        return result
+
     @onlyNativeDeviceTypes
-    @parametrize("mode", ("real", "fake", "meta"))
+    @parametrize("mode", ("real", "fake"))
     @parametrize("op", ("svd", "svd_out", "svdvals", "svdvals_out"))
     def test_svd_driver_validation(self, device, mode, op):
         with FakeTensorMode() if mode == "fake" else contextlib.nullcontext():
             for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
-                A = torch.empty(shape, device="meta" if mode == "meta" else device)
+                A = torch.empty(shape, device=device)
                 for driver in ("invalid", ""):
                     with self.subTest(shape=shape, driver=driver):
                         with self.assertRaisesRegex(RuntimeError, "torch.linalg.svd: unknown svd driver"):
@@ -3154,6 +3163,11 @@ class TestLinalg(TestCase):
         with FakeTensorMode() if mode == "fake" else contextlib.nullcontext():
             for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
                 A = torch.empty(shape, device="meta" if mode == "meta" else device, dtype=dtype)
+                if mode == "meta":
+                    # Meta ignores the device; test_svd_driver_validation covers the other modes.
+                    for driver in ("invalid", ""):
+                        with self.subTest(driver=driver):
+                            self._assert_svd_driver_error(A, driver, "torch.linalg.svd: unknown svd driver")
                 expected = [call() for _, call in self._svd_driver_calls(A, None)]
                 for driver in ("gesvd", "gesvdj", "gesvda"):
                     for (op, call), result in zip(self._svd_driver_calls(A, driver), expected):
@@ -3201,7 +3215,8 @@ class TestLinalg(TestCase):
             k = min(shape[-2:])
             self.assertEqual((U[..., :k] * S.unsqueeze(-2)) @ Vh[..., :k, :], A)
             for op, call in self._svd_driver_calls(A, None):
-                self.assertNotWarn(lambda: self.assertEqual(call(), S if "svdvals" in op else (U, S, Vh)))
+                actual = self._call_without_rocm_driver_warning(call)
+                self.assertEqual(actual, S if "svdvals" in op else (U, S, Vh))
 
     @onlyCUDA
     @skipCUDAIfNoCusolver
@@ -3212,12 +3227,8 @@ class TestLinalg(TestCase):
         for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
             A = (torch.diag(torch.tensor([2.0, 1.0], device=device, dtype=dtype))
                  if shape == (2, 2) else torch.empty(shape, device=device, dtype=dtype))
-            expected = []
-            for _, call in self._svd_driver_calls(A, None):
-                with warnings.catch_warnings(record=True) as caught:
-                    warnings.simplefilter("always")
-                    expected.append(call())
-                self.assertEqual(caught, [])
+            expected = [self._call_without_rocm_driver_warning(call)
+                        for _, call in self._svd_driver_calls(A, None)]
             for driver in ("gesvd", "gesvdj", "gesvda"):
                 for (op, call), result in zip(self._svd_driver_calls(A, driver), expected):
                     with self.subTest(shape=shape, driver=driver, op=op):
