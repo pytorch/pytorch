@@ -7,3 +7,4 @@
 0006-generic-multi-plane-state.patch
 0007-nested-fragment-tensorssa-composition.patch
 0009-sm100-m64-configs.patch
+0010-explicit-constexpr-if.patch
