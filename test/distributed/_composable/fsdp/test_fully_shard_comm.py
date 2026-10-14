@@ -575,8 +575,8 @@ instantiate_device_type_tests(
 class TestFullyShardDefaultAllGatherOutputFn(TestCase):
     @parametrize("byte_buffer", [False, True])
     def test_smaller_payload_fills_prefix(self, device, byte_buffer: bool):
-        # Two ranks gather two elements each into an output sized for four each
-        output = torch.full((8,), -1.0, device=device)
+        # Two ranks gather two elements each into an output sized for eight each
+        output = torch.full((16,), -1.0, device=device)
         all_gather_output = torch.arange(4.0, device=device)
         if byte_buffer:
             all_gather_output = all_gather_output.view(torch.uint8)
@@ -590,7 +590,7 @@ class TestFullyShardDefaultAllGatherOutputFn(TestCase):
                 outer_sizes=[1],
                 world_size=2,
             )
-        expected = torch.tensor([0.0, 1, 2, 3, -1, -1, -1, -1], device=device)
+        expected = torch.tensor([0.0, 1, 2, 3] + [-1] * 12, device=device)
         self.assertEqual(output, expected)
 
     def test_byte_buffer_reassembles_typed_rows(self, device):
