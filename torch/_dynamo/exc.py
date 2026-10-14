@@ -598,6 +598,35 @@ def raise_observed_exception(
     tx.do_raise(exception_vt, None)
 
 
+def raise_observed_exception_instance(
+    tx: InstructionTranslatorBase, exc: BaseException
+) -> NoReturn:
+    """Raise a real exception instance as an observed exception.
+
+    For exceptions produced by running real Python at trace time (e.g. a class
+    body under __build_class__). Unlike raise_observed_exception, the instance
+    is kept as-is rather than rebuilt from ``args``, so exception classes with
+    custom __init__ signatures, instance attributes and chaining survive.
+    """
+    from .source import ConstantSource
+    from .variables.base import VariableTracker
+    from .variables.user_defined import UserDefinedExceptionObjectVariable
+
+    # Drop the trace-time traceback so the tracer's frames are not kept alive
+    # by the compiled code's globals; raising at runtime attaches a fresh one.
+    exc.__traceback__ = None
+    # The instance is owned by this trace, so reference it as a constant
+    # global: no guards, and reconstruction loads the very same object.
+    name = tx.output.install_global_by_id("__observed_exc", exc)
+    tx.output.update_co_names(name)
+    exc_vt = UserDefinedExceptionObjectVariable(
+        exc,
+        source=ConstantSource(name),
+        init_args=[VariableTracker.build(tx, a) for a in exc.args],
+    )
+    tx.do_raise(exc_vt, None)
+
+
 def raise_attribute_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
     """Raise an AttributeError as an observed exception during tracing."""
     raise_observed_exception(AttributeError, tx, args=[msg])
