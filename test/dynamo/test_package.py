@@ -1200,6 +1200,42 @@ def add(x, y):
                 _TENSOR_FREE_RESUME_STATE["value"] = value
                 self.assertEqual(compiled(x), fn(x))
 
+    # Nested graph breaks would resume inside a tensor-bearing parent frame.
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    @patch.dict(_TENSOR_FREE_RESUME_STATE)
+    def test_tensor_free_resume_is_skipped_without_an_explicit_package(self):
+        # Without a package, or with only the one caching_precompile creates,
+        # the tensor-free continuation stays skipped: it gets no cache entry
+        # and a new value under fail_on_recompile is no recompile.
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            reset_code,
+        )
+        from torch._dynamo.resume_execution import ContinueExecutionCache
+
+        fn = _tensor_free_resume_fn
+        x = torch.randn(4)
+        for caching_precompile in (False, True):
+            with (
+                self.subTest(caching_precompile=caching_precompile),
+                torch._dynamo.config.patch(caching_precompile=caching_precompile),
+            ):
+                torch._dynamo.reset()
+                DynamoCache.clear()
+                _TENSOR_FREE_RESUME_STATE["value"] = 1
+                compiled = torch._dynamo.optimize("eager", dynamic=False)(fn)
+                self.assertEqual(compiled(x), fn(x))
+                (resume,) = ContinueExecutionCache.cache[
+                    _tensor_free_continuation.__code__
+                ].values()
+                self.assertEqual(len(_debug_get_cache_entry_list(resume)), 0)
+                # Drop the cached skip so the next run reaches the
+                # fail_on_recompile callback.
+                reset_code(resume)
+                _TENSOR_FREE_RESUME_STATE["value"] = 2
+                with torch.compiler.set_stance("fail_on_recompile"):
+                    self.assertEqual(compiled(x), fn(x))
+
     def test_unbuildable_guards_raise_a_package_error(self):
         # A guard source that does not resolve against the scope serialized
         # with it raised a bare KeyError from inside the guard builder, naming
