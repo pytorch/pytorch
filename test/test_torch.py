@@ -3272,7 +3272,7 @@ class TestTorchDeviceType(TestCase):
     # Exercises the tiled CUDA kernel for dense 2D transpose copies. The
     # shapes are deliberately larger than the 4 MB dispatch threshold, and
     # cover 1/2/4/8-byte elements plus non-multiple-of-32 extents.
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.uint8, torch.float16, torch.bfloat16,
             torch.float32, torch.float64, torch.complex64)
     def test_copy_transpose_tiled(self, device, dtype):
@@ -3297,7 +3297,7 @@ class TestTorchDeviceType(TestCase):
             out = view.t().contiguous()
             self.assertEqual(out.cpu(), view.cpu().t().contiguous(), atol=0, rtol=0)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.uint8, torch.float16, torch.bfloat16, torch.float32)
     @parametrize("layout", ("aligned", "word_aligned", "src_offset", "dst_offset", "src_pitch", "dst_pitch", "grid_z"))
     def test_copy_transpose_tiled_vectorized(self, device, dtype, layout):
@@ -3435,7 +3435,7 @@ class TestTorchDeviceType(TestCase):
         self.assertTrue(tiled(src))
 
     # Shapes that must NOT take the tiled path, to guard the dispatch check.
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32)
     def test_copy_transpose_tiled_rejects(self, device, dtype):
         big = make_tensor((4096, 4096), dtype=dtype, device=device)
@@ -3449,7 +3449,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(casted.cpu(), big.cpu().t().to(torch.float64), atol=0, rtol=0)
 
     # Pins the FP32 dispatch threshold and the element-size switch.
-    @onlyCUDA
+    @onlyAccelerator
     def test_copy_transpose_tiled_boundary(self, device):
         # 1024x1024 fp32 is exactly 4 MB, the first size that takes the tiled
         # path; 1024x1023 is the last that does not. Both must be correct.
@@ -4457,8 +4457,8 @@ class TestTorchDeviceType(TestCase):
     # The last batch is checked against the same batch computed on its own, which stays
     # within int32. With p=1 and integer grads the reductions are exact, so both agree
     # bitwise regardless of summation order. See #128791.
-    @onlyCUDA
-    @largeTensorTest('32GB', device='cuda')
+    @onlyAccelerator
+    @largeTensorTest('32GB')
     @parametrize("b, r, m", [(2, 1024, 2048), (32, 8192, 1)])
     def test_cdist_backward_large_index(self, device, b, r, m):
         x1 = torch.randn(b, r, m, device=device, requires_grad=True)
@@ -4555,24 +4555,19 @@ class TestTorchDeviceType(TestCase):
             self.skipTest("Failing on cpu")
 
         ops = [
-            ("addcmul", True, True, 'cpu'),
-            ("addcmul", True, True, 'cuda'),
-            ("addcdiv", True, True, 'cpu'),
-            ("addcdiv", True, True, 'cuda'),
-            ("lerp", True, True, 'cpu'),
-            ("lerp", True, True, 'cuda')
+            ("addcmul", True, True),
+            ("addcdiv", True, True),
+            ("lerp", True, True),
         ]
 
         for (fn, has_input_output_mem_overlap_check,
-             has_internal_mem_overlap_check, dev) in ops:
-            if dev != device:
-                continue
+             has_internal_mem_overlap_check) in ops:
             out_op = getattr(torch, fn)
             inplace_op = getattr(torch.Tensor, fn + '_')
             self.check_internal_mem_overlap(
                 inplace_op, 3, dtype, device,
                 expected_failure=not has_internal_mem_overlap_check)
-            self.ternary_check_input_output_mem_overlap(out_op, dev,
+            self.ternary_check_input_output_mem_overlap(out_op, device,
                                                         expected_failure=not has_input_output_mem_overlap_check)
 
     @expectedFailureMeta  # RuntimeError not raised
@@ -6481,7 +6476,7 @@ class TestTorchDeviceType(TestCase):
 
                 check_equal(condition, x, y)
                 check_equal(condition, y, x)
-                if self.device_type == "cuda":
+                if self.device_type != "cpu":
                     check_equal(condition, torch.tensor(x), y)
                     check_equal(condition, y, torch.tensor(x))
                     if not isinstance(y, torch.Tensor):
@@ -7021,6 +7016,54 @@ class TestTorchDeviceType(TestCase):
         self.assertIs(pinned, pinned.pin_memory())
         self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
+    @onlyAccelerator
+    def test_bmm_matmul_mixed_dtype_error(self, device):
+        a = torch.randn(2, 8, 8, device=device, dtype=torch.float16)
+        b = torch.randn(2, 8, 64, device=device, dtype=torch.float32)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.bmm(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.compile(lambda x, y: torch.bmm(x, y), fullgraph=True)(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.matmul(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.compile(lambda x, y: torch.matmul(x, y), fullgraph=True)(a, b)
+
+    def test_split_with_sizes_copy_out(self, device):
+        shape = (30, 40, 50)
+        x = torch.rand(*shape, device=device)
+        cases = [
+            (0, [3, 7, 8, 12]),
+            (1, [3, 7, 10, 20]),
+            (-2, [3, 7, 10, 20]),
+            (2, [3, 7, 10, 12, 18]),
+            (-1, [3, 7, 10, 12, 18]),
+            (2, [3, 7, 10, 0, 30]),
+        ]
+        for dim, split_sizes in cases:
+            views = x.split_with_sizes(split_sizes, dim=dim)
+            expects = [v.clone() for v in views]
+            out = [torch.zeros_like(v) for v in views]
+            for expect, t in zip(expects, out):
+                if expect.numel() != 0:
+                    self.assertFalse(expect.eq(t).all().item())
+
+            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+            for expect, t in zip(expects, out):
+                self.assertTrue(expect.eq(t).all().item())
+
+        # Empty inputs, including all-empty splits, copy nothing
+        for shape, dim, split_sizes in (((30, 0, 50), 1, [0, 0]), ((0, 40), 1, [10, 30])):
+            x = torch.rand(*shape, device=device)
+            views = x.split_with_sizes(split_sizes, dim=dim)
+            out = [torch.empty_like(v) for v in views]
+            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+            self.assertEqual([t.shape for t in out], [v.shape for v in views])
+
 
 class TestTorchCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -7144,11 +7187,16 @@ class TestTorchCUDA(TestCase):
             else:
                 return 2 * x
 
+        def _set_real_imag(tensor, real, imag):
+            tensor.real = real
+            tensor.imag = imag
+
         # prepare inputs for subsequent ops
         size = 4
         x = torch.rand(size, device=device)
         y = torch.rand((), device=device)
         y_cpu = y.cpu()
+        z = torch.randn(size, device=device, dtype=torch.complex64)
         ind = torch.randint(size, (3,), device=device)
         ind_2d = torch.randint(size, (2, 3), device=device)
         ind_cpu = ind.cpu()
@@ -7167,6 +7215,7 @@ class TestTorchCUDA(TestCase):
                           lambda: _ind_put_fn(x, slice(0, 1), 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
                           lambda: _ind_get_fn(x, ind),
+                          lambda: _set_real_imag(z, 3., 5.),
                           lambda: torch.nn.functional.one_hot(ind, num_classes=size),
                           lambda: torch.randperm(20000, device=device),
                           lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
@@ -7319,6 +7368,34 @@ class TestTorchCUDA(TestCase):
         with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
             s1.copy_(s0)
 
+    def test_split_with_sizes_copy_out(self, device):
+        shape = (30, 40, 50)
+        x = torch.rand(*shape, device=device)
+        cases = [
+            (0, [3, 7, 8, 12]),
+            (1, [3, 7, 10, 20]),
+            (-2, [3, 7, 10, 20]),
+            (2, [3, 7, 10, 12, 18]),
+            (-1, [3, 7, 10, 12, 18]),
+            (2, [3, 7, 10, 0, 30]),
+        ]
+        for dim, split_sizes in cases:
+            views = x.split_with_sizes(split_sizes, dim=dim)
+            expects = [v.clone() for v in views]
+
+            # Test with cuda graph
+            out = [torch.zeros_like(v) for v in views]
+            for expect, t in zip(expects, out):
+                if expect.numel() != 0:
+                    self.assertFalse(expect.eq(t).all().item())
+
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+
+            g.replay()
+            for expect, t in zip(expects, out):
+                self.assertTrue(expect.eq(t).all().item())
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -9438,6 +9515,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_cxx_flags(self):
         torch.__config__._cxx_flags()
 
+    def test_cxx_compiler(self):
+        name, version = torch.__config__._cxx_compiler()
+        label = {"gcc": "GCC", "clang": "clang", "msvc": "MSVC"}[name]
+        self.assertRegex(version, r"^\d+(\.\d+)*$")
+        # The line show() prints for the same compiler; for clang it also prints
+        # a GCC line, from clang's own __GNUC__.
+        self.assertIn(f"  - {label} {version}\n", torch.__config__.show())
+
     def test_parallel_info(self):
         torch.__config__.parallel_info()
 
@@ -10327,55 +10412,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(x[:-3].tolist(), [[0, 1, 2, 3]])
         self.assertEqual(x[:, -2:3].tolist(), [[2], [6], [10], [14]])
         self.assertEqual(x[0:-1:2].tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
-
-    def test_split_with_sizes_copy_out(self):
-        device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-        shape = (30, 40, 50)
-        x = torch.rand(*shape, device=device)
-        cases = [
-            (0, [3, 7, 8, 12]),
-            (1, [3, 7, 10, 20]),
-            (-2, [3, 7, 10, 20]),
-            (2, [3, 7, 10, 12, 18]),
-            (-1, [3, 7, 10, 12, 18]),
-            (2, [3, 7, 10, 0, 30]),
-        ]
-        for dim, split_sizes in cases:
-            views = x.split_with_sizes(split_sizes, dim=dim)
-            expects = [v.clone() for v in views]
-            out = [torch.zeros_like(v) for v in views]
-            for expect, t in zip(expects, out):
-                if expect.numel() != 0:
-                    self.assertFalse(expect.eq(t).all().item())
-
-            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
-            for expect, t in zip(expects, out):
-                self.assertTrue(expect.eq(t).all().item())
-
-            if not torch.cuda.is_available():
-                continue
-
-            # Test with cuda graph
-            out = [torch.zeros_like(v) for v in views]
-            for expect, t in zip(expects, out):
-                if expect.numel() != 0:
-                    self.assertFalse(expect.eq(t).all().item())
-
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g):
-                torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
-
-            g.replay()
-            for expect, t in zip(expects, out):
-                self.assertTrue(expect.eq(t).all().item())
-
-        # Empty inputs, including all-empty splits, copy nothing
-        for shape, dim, split_sizes in (((30, 0, 50), 1, [0, 0]), ((0, 40), 1, [10, 30])):
-            x = torch.rand(*shape, device=device)
-            views = x.split_with_sizes(split_sizes, dim=dim)
-            out = [torch.empty_like(v) for v in views]
-            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
-            self.assertEqual([t.shape for t in out], [v.shape for v in views])
 
     def test_type(self):
         x = torch.randn(3, 3).double()
@@ -11446,23 +11482,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         finally:
             torch.set_num_threads(num_threads)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_bmm_matmul_mixed_dtype_error(self):
-        a = torch.randn(2, 8, 8, device="cuda", dtype=torch.float16)
-        b = torch.randn(2, 8, 64, device="cuda", dtype=torch.float32)
-
-        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
-            torch.bmm(a, b)
-
-        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
-            torch.compile(lambda x, y: torch.bmm(x, y), fullgraph=True)(a, b)
-
-        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
-            torch.matmul(a, b)
-
-        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
-            torch.compile(lambda x, y: torch.matmul(x, y), fullgraph=True)(a, b)
-
     def test_conj_neg_tolist(self):
         x = torch.randn(2, dtype=torch.cfloat)
         y1 = x.conj()
@@ -11652,10 +11671,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         t7.d = "dog"
         self._checked_swap(t6, t7)
 
-    @unittest.skipIf(torch.cuda.is_available(), "Test specific for CPU")
-    def test_bf16_supported_on_cpu(self):
-        self.assertFalse(torch.cuda.is_bf16_supported())
-
     def test_tensor_with_grad_to_scalar_warning(self) -> None:
         with (warnings.catch_warnings(record=True) as w,
                 set_warn_always_context(True)):
@@ -11757,6 +11772,10 @@ class TestTorchCPU(TestCase):
         src_bf16 = src.bfloat16()
         self.assertEqual(src.neg().bfloat16(), src_bf16.neg())
         self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
+
+    @unittest.skipIf(torch.cuda.is_available(), "Test specific for CPU")
+    def test_bf16_supported_on_cpu(self):
+        self.assertFalse(torch.cuda.is_bf16_supported())
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
