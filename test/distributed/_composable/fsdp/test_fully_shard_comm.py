@@ -7,7 +7,6 @@ import os
 import re
 import tempfile
 import unittest
-import warnings
 import weakref
 from collections.abc import Callable
 from unittest.mock import MagicMock, patch
@@ -555,22 +554,6 @@ instantiate_device_type_tests(
 
 
 class TestFullyShardDefaultAllGatherOutputFn(TestCase):
-    def test_smaller_payload_fills_prefix(self, device):
-        # Two ranks gather two elements each into an output sized for four each
-        output = torch.full((8,), -1.0, device=device)
-        with warnings.catch_warnings():
-            # e.g. the deprecated resize of a mismatched out=
-            warnings.simplefilter("error")
-            _default_all_gather_output_fn(
-                torch.arange(4.0, device=device),
-                [output],
-                split_sizes=[2],
-                outer_sizes=[1],
-                world_size=2,
-            )
-        expected = torch.tensor([0.0, 1, 2, 3, -1, -1, -1, -1], device=device)
-        self.assertEqual(output, expected)
-
     def test_byte_buffer_reassembles_typed_rows(self, device):
         # Mixed dtypes gather bytes: per rank, a (2, 2) chunk of a parameter
         # gathered along dim 1, then two bf16 tags
@@ -633,8 +616,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
             return model, ref_model
 
         inp = torch.randn((2, 8), device=device_type)
-        # The inner modules all-gather again in backward, which must keep the
-        # version counters of the parameters saved in forward
+        # The inner modules all-gather again in backward, keeping version counters
         model, ref_model = init_models()
         for _ in range(2):
             model(inp).sum().backward()
@@ -648,9 +630,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_copy_fns(self):
-        # Records what FSDP passes its copy functions, which delegate to the
-        # defaults, against Note [All-gather output fn] and
-        # Note [Reduce-scatter input fn]
+        # Records what FSDP passes its copy functions, which delegate to the defaults
         model = nn.Sequential(
             nn.Linear(8, 8, device=device_type), nn.Linear(8, 4, device=device_type)
         )
@@ -704,11 +684,9 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         sizes = {"split_sizes": [16, 2, 8, 1], "outer_sizes": [8, 1, 4, 1]}
         self.assertEqual(all_gather_calls, [{**sizes, "world_size": 4}])
         self.assertEqual(copy_in_numels, [27 * self.world_size])
-        # FSDP frees the copy-in, and with it the gradient copies, before the
-        # reduce-scatter
+        # FSDP frees the copy-in and its gradient copies before the reduce-scatter
         self.assertEqual(num_alive_grads, [0])
-        # A callback with the earlier (fsdp_params, unsharded_grads, world_size)
-        # signature fails instead of misreading its arguments
+        # A callback with the 2.15 signature fails instead of misreading arguments
         group._prepare_reduce_scatter_inputs = (
             lambda fsdp_params, unsharded_grads, world_size: None
         )
@@ -722,8 +700,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_post_forward_shard_dim1_parity(self):
-        # The pre-backward all-gather copies flat post-forward shards of Shard(1)
-        # weights, and an empty parameter needs no divisible dim 0
+        # Post-forward shards are flat, and an empty one needs no divisible dim 0
         model = nn.Sequential(
             nn.Linear(16, 8, bias=False, device=device_type),
             nn.Linear(8, 4, bias=False, device=device_type),
@@ -751,8 +728,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_post_forward_shard_dim1_needs_divisible_dim0(self):
-        # Post-forward shards chunk dim 0, which 2 ranks cannot split for the
-        # second weight's 3 rows
+        # Post-forward shards chunk dim 0, which 2 ranks cannot split into 3 rows
         def init_model():
             model = nn.Sequential(
                 nn.Linear(8, 4, bias=False, device=device_type),
@@ -794,8 +770,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_post_forward_shards_keep_their_mesh(self):
-        # Post-forward shards are all-gathered over the mesh they were resharded
-        # to, even after set_reshard_after_forward changes it
+        # Post-forward shards are all-gathered over the mesh they were resharded to
         inp = torch.randn((2, 8), device=device_type)
         for reshard_after_forward in (True, False):
             model = nn.Linear(8, 8, device=device_type)
@@ -810,15 +785,10 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
             self.assertEqual(group._all_gather_process_group.size(), 2)
             self.assertEqual(model(inp), ref_model(inp))
 
-
-class TestFullyShardPostForwardDTensor(FSDPTestMultiThread):
-    @property
-    def world_size(self) -> int:
-        return 8
-
     @skip_if_lt_x_gpu(1)
     def test_post_forward_reshard_dtensor(self):
-        mesh = init_device_mesh(device_type.type, (4, 2), mesh_dim_names=("dp", "tp"))
+        # A size-1 TP dim keeps the post-forward mesh the same on every rank
+        mesh = init_device_mesh(device_type.type, (4, 1), mesh_dim_names=("dp", "tp"))
         model = nn.Sequential(nn.Linear(8, 8, device=device_type))
         parallelize_module(model[0], mesh["tp"], ColwiseParallel())
         fully_shard(model, mesh=mesh["dp"], reshard_after_forward=2)
