@@ -699,6 +699,37 @@ class TestLDLCustomKernel(TestCase):
         for LD, ipiv, info in self._grid_variants(A, 32, hermitian=True):
             self.assertEqual(ipiv[:2].tolist(), [want, want])
 
+    # Rows of a NaN relative to the maximum at row 2000: first in the column (where
+    # LAPACK's i?amax would return it), earlier in the maximum's own thread with 256
+    # or 1024 threads, in its block, after it, and everywhere else.
+    _NAN_ROWS = {
+        "first": [1],
+        "same_thread_256": [2000 - 7 * 256],
+        "same_thread_1024": [2000 - 1024],
+        "same_block": [1990],
+        "after": [3500],
+        "last_row": [4099],
+        "all_others": [i for i in range(1, 4100) if i != 2000],
+    }
+
+    @onlyCUDA
+    @parametrize("placement", list(_NAN_ROWS))
+    @dtypes(*floating_and_complex_types())
+    def test_pivot_search_skips_nan(self, device, dtype, placement):
+        """A NaN fails every comparison, so once the argmax held one it would keep it,
+        and whether it won would depend on the reduction order, i.e. on the grid.
+        It must never be taken. For complex the NaN is in the imaginary part only,
+        which |re| + |im| propagates all the same."""
+        n, r = 4100, 2000
+        torch.manual_seed(0)
+        A = symmetrize(1e-3 * torch.randn(n, n, dtype=dtype, device=device), hermitian=True)
+        A.diagonal().zero_()
+        A[r, 0] = A[0, r] = 1.0
+        rows = torch.tensor(self._NAN_ROWS[placement])
+        A[rows, 0] = A[0, rows] = complex(0, float("nan")) if dtype.is_complex else float("nan")
+        for LD, ipiv, info in self._grid_variants(A, 32, hermitian=True, panels=1):
+            self.assertEqual(ipiv[:2].tolist(), [-(r + 1)] * 2)
+
     @onlyCUDA
     @parametrize("bad", [float("nan"), float("inf")])
     @dtypes(*floating_and_complex_types())

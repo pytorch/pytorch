@@ -544,16 +544,22 @@ State at the end of the GB200 session:
 `test_panel_nonfinite_column` only checks grid invariance for a full NaN/Inf column.
 Missing:
 
-- **Single NaN among finite candidates: grid dependence.** `AGGREGATE_ARGMAX`
-  never replaces a NaN once it holds one (`other > NaN` and `other == NaN` are
-  both false), so whether the NaN or the true maximum wins depends on the
-  reduction order. That would make the first pivot depend on the grid and break
-  the "bit-identical for every grid" invariant.
-  - LAPACK's `i?amax` skips NaN unless it is the first element.
-  - `agent_space/nan_argmax.py` checks this on the standalone copy (NaN at rows
-    1/300/2000/4099 of column 0, n=4100) but was **not run yet**.
-  - If confirmed, decide the semantics (match `i?amax`?) and make the reduction
-    order-independent.
+- **Single NaN among finite candidates: grid dependence. Not a bug; test added.**
+  The worry was that `AGGREGATE_ARGMAX` never replaces a NaN once it holds one, so
+  the winner would depend on the reduction order. But a NaN never gets in: every
+  argmax starts from the sentinel `-1`, and `NaN > -1` and `NaN == -1` are both
+  false. The reduction runs over NaN-free values with a total order, so it does
+  not depend on the order. NaNs are skipped, and `ilambda == -1` only when every
+  candidate is NaN (already guarded).
+  - Measured on the standalone copy, n=4100, all dtypes, every grid. The NaN was
+    first in the column, in the maximum's own thread (256 and 1024 threads), in
+    its block, after it, in the last row, or everywhere but the maximum, and in
+    column 0 or the candidate's column, real or imaginary part. The planted
+    maximum won every time.
+  - This differs from LAPACK only when the NaN is the first candidate, which
+    `i?amax` returns. That is fine: the result is NaN garbage either way.
+  - `test_pivot_search_skips_nan` pins it. Mutation: an argmax that takes a NaN
+    fails all 28 CUDA instances.
 - **NaN propagation contract.** If the CPU result has a non-finite entry, the
   CUDA one must too; never finite garbage from non-finite input.
 - **Positions not covered yet:**
