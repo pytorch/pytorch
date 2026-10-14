@@ -4942,9 +4942,16 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @dtypes(torch.float32)
     def test_linalg_inv_large_batch(self, device, dtype):
-        a = torch.eye(3, device=device, dtype=dtype).repeat(65536, 1, 1)
-        res = torch.linalg.inv(a)
-        self.assertEqual(res.sum().item(), 3.0 * 65536)
+        # The batched hipBLAS and rocSOLVER kernels launch nothing above 65536
+        # matrices (https://github.com/pytorch/pytorch/issues/196745), so the
+        # batch must exceed that to exercise the 65535-element chunking. Distinct
+        # unitriangular matrices keep the results exact and expose a skipped chunk.
+        batch = 2 * 65535 + 1
+        a = torch.eye(3, device=device, dtype=dtype).repeat(batch, 1, 1)
+        a[:, 0, 1] = torch.linspace(-1, 1, batch, device=device, dtype=dtype)
+        b = torch.ones(batch, 3, 1, device=device, dtype=dtype)
+        self.assertEqual(torch.linalg.inv(a), torch.linalg.inv(a.cpu()))
+        self.assertEqual(torch.linalg.solve(a, b), torch.linalg.solve(a.cpu(), b.cpu()))
 
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
