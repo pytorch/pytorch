@@ -3372,8 +3372,7 @@ def load(
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the
     refusal: a call no captured variant covers compiles with the artifact's
     backend, as ``torch.compile`` would, under the process-wide stance like any
-    other compile, and the compile records which guard each captured variant
-    failed as its recompile reason (``TORCH_LOGS="recompiles"``). The captured
+    other compile. The captured
     variants are still served first, and they count toward
     ``torch._dynamo.config.recompile_limit`` for their frame, so a frame that
     already holds that many runs a missed call eagerly instead of compiling it.
