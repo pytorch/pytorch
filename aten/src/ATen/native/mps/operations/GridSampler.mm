@@ -278,14 +278,14 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      auto set_args = [&](id<MTLComputeCommandEncoder> enc, auto&&... args) {
+      auto set_args = [&](id<MTLComputeCommandEncoder> enc, bool use_i32, auto&&... args) {
         auto with_idx = [&](auto idx_tag) {
           using IDX_T = decltype(idx_tag);
           GridSamplerBackwardParams<4, IDX_T> params(
               grad_output, input, grid, grad_input, grad_grid, align_corners, padding_mode, interpolation_mode);
           mtl_setArgs(enc, std::forward<decltype(args)>(args)..., params);
         };
-        if (i32) {
+        if (use_i32) {
           with_idx(int32_t{});
         } else {
           with_idx(int64_t{});
@@ -293,20 +293,21 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
       };
 
       if (input_requires_grad) {
-        auto input_name = interpolation_mode == GridSamplerInterpolation::Bicubic
-            ? fmt::format("grid_sampler_2d_backward_bicubic_input_{}_{}_{}", pad_str, idx_str, type_str)
-            : fmt::format("grid_sampler_2d_backward_{}_input_{}_{}", interp_str, idx_str, type_str);
         // See Note [Enabling Deterministic Operations]
         // The operation is normally nondeterministic because of atomic
         // accumulation across multiple threads. To make it deterministic,
         // dispatch only one thread per batch, so the accumulations are
         // serialized.
         bool serial = at::globalContext().deterministicAlgorithms();
+        auto input_idx_str = serial ? "i64" : idx_str;
+        auto input_name = interpolation_mode == GridSamplerInterpolation::Bicubic
+            ? fmt::format("grid_sampler_2d_backward_bicubic_input_{}_{}_{}", pad_str, input_idx_str, type_str)
+            : fmt::format("grid_sampler_2d_backward_{}_input_{}_{}", interp_str, input_idx_str, type_str);
         auto input_pso = lib.getPipelineStateForFunc(input_name + (serial ? "_serial" : ""));
         getMPSProfiler().beginProfileKernel(
             input_pso, "grid_sampler_2d_backward_input", {grad_output, grid}, mpsStream);
         [computeEncoder setComputePipelineState:input_pso];
-        set_args(computeEncoder, grad_input, grad_output, grid);
+        set_args(computeEncoder, i32 && !serial, grad_input, grad_output, grid);
         auto numThreadsInput = serial ? N : num_threads;
         mtl_dispatch1DJob(computeEncoder, input_pso, numThreadsInput);
         getMPSProfiler().endProfileKernel(input_pso, mpsStream);
@@ -320,7 +321,7 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
         getMPSProfiler().beginProfileKernel(
             grid_pso, "grid_sampler_2d_backward_grid", {grad_output, input, grid}, mpsStream);
         [computeEncoder setComputePipelineState:grid_pso];
-        set_args(computeEncoder, grad_grid, grad_output, input, grid);
+        set_args(computeEncoder, i32, grad_grid, grad_output, input, grid);
         mtl_dispatch1DJob(computeEncoder, grid_pso, num_threads);
         getMPSProfiler().endProfileKernel(grid_pso, mpsStream);
       }
@@ -384,17 +385,17 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
   // queries below remain in range.
   auto grad_input_buf = run_grad_input ? grad_input : at::zeros({1, 1, 1, 1, 1}, input.options());
 
-  const bool i32 = at::native::canUse32BitIndexMath(grad_output_contiguous) &&
-      at::native::canUse32BitIndexMath(input_contiguous) && at::native::canUse32BitIndexMath(grid_contiguous) &&
-      at::native::canUse32BitIndexMath(grad_input_buf) && at::native::canUse32BitIndexMath(grad_grid);
-  const auto idx_str = i32 ? "i32" : "i64";
-
-  MPSStream* mpsStream = getCurrentMPSStream();
   // See Note [Enabling Deterministic Operations]
   // The operation is normally nondeterministic because of atomic accumulation
   // across multiple threads. To make it deterministic, dispatch only one thread
   // per batch, so the accumulations are serialized.
   const bool serial = run_grad_input && at::globalContext().deterministicAlgorithms();
+  const bool i32 = !serial && at::native::canUse32BitIndexMath(grad_output_contiguous) &&
+      at::native::canUse32BitIndexMath(input_contiguous) && at::native::canUse32BitIndexMath(grid_contiguous) &&
+      at::native::canUse32BitIndexMath(grad_input_buf) && at::native::canUse32BitIndexMath(grad_grid);
+  const auto idx_str = i32 ? "i32" : "i64";
+
+  MPSStream* mpsStream = getCurrentMPSStream();
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {

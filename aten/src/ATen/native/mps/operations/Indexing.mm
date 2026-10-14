@@ -894,7 +894,9 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   // The operation is normally nondeterministic because of atomic accumulation
   // across multiple threads. To make it deterministic, dispatch only one thread
   // per batch, so the accumulations are serialized.
-  bool serial = at::globalContext().deterministicAlgorithms();
+  bool serial = at::globalContext().deterministicAlgorithms() &&
+      !c10::isIntegralType(result.scalar_type(), /*includeBool=*/true) &&
+      (reduction_type == ReductionType::PROD || reduction_type == ReductionType::MEAN);
   auto num_threads = source.numel();
   if (num_threads > 0 && serial) {
     num_threads /= source.size(dim);

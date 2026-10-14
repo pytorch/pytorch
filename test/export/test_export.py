@@ -55,6 +55,7 @@ from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
 from torch._library.opaque_object import _OPAQUE_TYPES_BY_NAME
 from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
 from torch.export import default_decompositions, Dim, export, unflatten
 from torch.export._patches import register_lstm_while_loop_decomposition
 from torch.export._trace import (
@@ -1332,7 +1333,9 @@ def forward(self, x):
     _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
     _remove_batch_dim_1 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim, 3, 128, 0);  _remove_batch_dim = None
     _vmap_decrement_nesting_1 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
-    _remove_batch_dim_2 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_1, 2, 1, 0);  _remove_batch_dim_1 = None
+    _remove_batch_dim_2 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_1, 2, 1, 0)
+    unsqueeze_default = torch.ops.aten.unsqueeze.default(_remove_batch_dim_1, 0);  _remove_batch_dim_1 = None
+    expand_default = torch.ops.aten.expand.default(unsqueeze_default, [1, 128, 128]);  unsqueeze_default = expand_default = None
     _vmap_decrement_nesting_2 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_2 = None
     _remove_batch_dim_3 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_2, 1, 2, 0);  _remove_batch_dim_2 = None
     _vmap_decrement_nesting_3 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_3 = None
@@ -1376,11 +1379,11 @@ def forward(self, x):
     arange_default_1 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
     new_zeros_default = torch.ops.aten.new_zeros.default(_add_batch_dim_7, [1, 2], dtype = torch.int32, pin_memory = False)
     new_ones_default = torch.ops.aten.new_ones.default(new_zeros_default, [], pin_memory = False)
-    unsqueeze_default = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
-    lt_tensor = torch.ops.aten.lt.Tensor(arange_default_1, unsqueeze_default);  arange_default_1 = unsqueeze_default = None
-    unsqueeze_default_1 = torch.ops.aten.unsqueeze.default(arange_default, -1);  arange_default = None
+    unsqueeze_default_1 = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
+    lt_tensor = torch.ops.aten.lt.Tensor(arange_default_1, unsqueeze_default_1);  arange_default_1 = unsqueeze_default_1 = None
+    unsqueeze_default_2 = torch.ops.aten.unsqueeze.default(arange_default, -1);  arange_default = None
     where_scalar_other = torch.ops.aten.where.ScalarOther(lt_tensor, _add_batch_dim_7, 1);  lt_tensor = _add_batch_dim_7 = None
-    index_put__default = torch.ops.aten.index_put_.default(new_zeros_default, [unsqueeze_default_1, where_scalar_other], new_ones_default);  new_zeros_default = unsqueeze_default_1 = where_scalar_other = new_ones_default = None
+    index_put__default = torch.ops.aten.index_put_.default(new_zeros_default, [unsqueeze_default_2, where_scalar_other], new_ones_default);  new_zeros_default = unsqueeze_default_2 = where_scalar_other = new_ones_default = None
     slice_tensor = torch.ops.aten.slice.Tensor(index_put__default, 1, 0, 1);  index_put__default = None
     _remove_batch_dim_4 = torch._functorch.predispatch._remove_batch_dim(slice_tensor, 2, 1, 0);  slice_tensor = None
     _vmap_decrement_nesting_4 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_4 = None
@@ -1407,11 +1410,11 @@ def forward(self, x):
     arange_default_3 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
     new_zeros_default_1 = torch.ops.aten.new_zeros.default(_add_batch_dim_11, [1, 2], dtype = torch.int32, pin_memory = False)
     new_ones_default_1 = torch.ops.aten.new_ones.default(new_zeros_default_1, [], pin_memory = False)
-    unsqueeze_default_2 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
-    lt_tensor_1 = torch.ops.aten.lt.Tensor(arange_default_3, unsqueeze_default_2);  arange_default_3 = unsqueeze_default_2 = None
-    unsqueeze_default_3 = torch.ops.aten.unsqueeze.default(arange_default_2, -1);  arange_default_2 = None
+    unsqueeze_default_3 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
+    lt_tensor_1 = torch.ops.aten.lt.Tensor(arange_default_3, unsqueeze_default_3);  arange_default_3 = unsqueeze_default_3 = None
+    unsqueeze_default_4 = torch.ops.aten.unsqueeze.default(arange_default_2, -1);  arange_default_2 = None
     where_scalar_other_1 = torch.ops.aten.where.ScalarOther(lt_tensor_1, _add_batch_dim_11, 1);  lt_tensor_1 = _add_batch_dim_11 = None
-    index_put__default_1 = torch.ops.aten.index_put_.default(new_zeros_default_1, [unsqueeze_default_3, where_scalar_other_1], new_ones_default_1);  new_zeros_default_1 = unsqueeze_default_3 = where_scalar_other_1 = new_ones_default_1 = None
+    index_put__default_1 = torch.ops.aten.index_put_.default(new_zeros_default_1, [unsqueeze_default_4, where_scalar_other_1], new_ones_default_1);  new_zeros_default_1 = unsqueeze_default_4 = where_scalar_other_1 = new_ones_default_1 = None
     slice_tensor_1 = torch.ops.aten.slice.Tensor(index_put__default_1, 1, 0, 1);  index_put__default_1 = None
     _remove_batch_dim_6 = torch._functorch.predispatch._remove_batch_dim(slice_tensor_1, 2, 1, 0);  slice_tensor_1 = None
     _vmap_decrement_nesting_6 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_6 = None
@@ -2647,6 +2650,25 @@ graph():
             "Raw Triton kernel calls are not supported by non-strict torch.export",
         ):
             export(M(), args, strict=False)
+
+    def test_boolean_mask_setitem_unbacked(self):
+        class M(torch.nn.Module):
+            def forward(self, labels, mask):
+                labels = labels[mask]
+                labels[labels.ne(-1)] = 0
+                return labels
+
+        labels = torch.tensor([[-1, 1, 2], [3, -1, 4], [5, 6, -1]])
+        mask = torch.tensor([True, False, True])
+        m = M()
+        ep = export(m, (labels, mask))
+        for mask in (
+            mask,
+            torch.tensor([False, False, False]),
+            torch.tensor([False, True, False]),
+        ):
+            with self.subTest(mask=mask):
+                self.assertEqual(ep.module()(labels, mask), m(labels, mask))
 
     def test_masked_select_dynamic(self):
         class M(torch.nn.Module):
@@ -5651,7 +5673,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             )
         except torch._dynamo.exc.UserError as exc:
             expected_error_msg = (
-                "Specializations unexpectedly required \(dy\)!(.*\n)*.*"
+                "Specializations unexpectedly required \\(dy\\)!(.*\n)*.*"
                 ".*solving the guards generated for dy - 6.*resulted in a specialized value of 6(.*\n)*.*"
                 "Suggested fixes(.*\n)*.*"
                 ".*dy = 12(.*\n)*.*"
@@ -6030,7 +6052,7 @@ def forward(self, x):
             )
         except torch._dynamo.exc.UserError as exc:
             expected_error_msg = (
-                "Constraints violated \(dimz\)!(.*\n)*.*"
+                "Constraints violated \\(dimz\\)!(.*\n)*.*"
                 "The values of dimz.*must always be related to the values of _dimz - 2.*by.*(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
                 "dimz = _dimz"
@@ -6277,9 +6299,7 @@ def forward(self, x):
         foo = Foo()
         ref = ReferenceControl(foo)
         ref(torch.randn(4, 4), torch.randn(4, 4))
-        self.assertTrue(
-            isinstance(ref.bank[0], torch._subclasses.fake_tensor.FakeTensor)
-        )
+        self.assertTrue(is_fake_tensor(ref.bank[0]))
 
         with (
             torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True),
@@ -6346,9 +6366,7 @@ def forward(self, x):
 
         foo = Foo()
         ep = export(foo, (torch.randn(4, 4), torch.randn(4, 4)), strict=False)
-        self.assertTrue(
-            isinstance(global_list[0], torch._subclasses.fake_tensor.FakeTensor)
-        )
+        self.assertTrue(is_fake_tensor(global_list[0]))
 
         with torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True):
             warn_re = re.compile(
@@ -8974,10 +8992,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (
                 "Constraints violated.*!(.*\n)*.*"
                 "Suggested fixes(.*\n)*.*"
-                "_dx = Dim\(\\'_dx\\', max=12\)(.*\n)*.*"
-                "dx = 3\*_dx - 1(.*\n)*.*"
-                "dy = 3\*_dx(.*\n)*.*"
-                "dz = 3\*_dx \+ 2"
+                "_dx = Dim\\('_dx', max=12\\)(.*\n)*.*"
+                "dx = 3\\*_dx - 1(.*\n)*.*"
+                "dy = 3\\*_dx(.*\n)*.*"
+                "dz = 3\\*_dx \\+ 2"
             ),
         ):
             export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
@@ -12154,7 +12172,10 @@ graph():
             self.assertTrue(export_res.size() == exp_res.size())
             self.assertTrue(all(val.device == x.device for val in all_meta_val))
             self.assertTrue(
-                all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val)
+                all(
+                    maybe_get_fake_mode(val) is maybe_get_fake_mode(all_meta_val[0])
+                    for val in all_meta_val
+                )
             )
             decomposed_ep = exported_program.run_decompositions()
             export_res = decomposed_ep.module()(x)
@@ -12201,7 +12222,10 @@ graph():
             self.assertTrue(export_res.size() == exp_res.size())
             self.assertTrue(all(val.device == x.device for val in all_meta_val))
             self.assertTrue(
-                all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val)
+                all(
+                    maybe_get_fake_mode(val) is maybe_get_fake_mode(all_meta_val[0])
+                    for val in all_meta_val
+                )
             )
 
         check_device_and_fake_mode()
@@ -19334,7 +19358,7 @@ def forward(self, x):
             self.assertWarnsRegex(
                 UserWarning,
                 "While exporting, we found certain side effects happened in the model.forward. "
-                "Here are the list of potential sources you can double check: \[\"L\['jt'\]\"\]",
+                "Here are the list of potential sources you can double check: \\[\"L\\['jt'\\]\"\\]",
             ),
             torch._export.config.patch(use_new_tracer_experimental=False),
         ):

@@ -199,12 +199,14 @@ static void scatter_reduce_metal(const Tensor& self,
       ndim <= c10::metal::max_ndim, "scatter: tensor rank ", ndim, " exceeds Metal max of ", c10::metal::max_ndim);
   const int64_t output_dim_size = self.size(dim);
   const int64_t total = index.numel();
-  const bool use_dense = can_use_dense_scatter(self, index, dim) && src.is_contiguous() && src.sizes() == index.sizes();
   // See Note [Enabling Deterministic Operations]
   // The operation is normally nondeterministic because of atomic accumulation
   // across multiple threads. To make it deterministic, dispatch only one thread
   // per batch, so the accumulations are serialized.
-  const bool serial = at::globalContext().deterministicAlgorithms();
+  const bool serial = at::globalContext().deterministicAlgorithms() &&
+      !c10::isIntegralType(self.scalar_type(), /*includeBool=*/true) && (op == "add" || op == "prod");
+  const bool use_dense =
+      !serial && can_use_dense_scatter(self, index, dim) && src.is_contiguous() && src.sizes() == index.sizes();
   const int64_t dispatch_total = serial ? total / index.size(dim) : total;
   // Signed int64 amin/amax needs an encode/decode bracket so signed ordering
   // maps onto the unsigned atomic_min/max Metal exposes. Requires contiguous
