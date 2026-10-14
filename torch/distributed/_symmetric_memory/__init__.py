@@ -1000,6 +1000,11 @@ def _fused_all_gather_matmul(
         )
 
 
+# Each 256-row M tile of the ROCm _async_input_mm waits on one chunk's signal,
+# so each rank's chunk must be a whole number of tiles.
+_ROCM_ASYNC_MM_TILE_M = 256
+
+
 def _should_use_fused_all_gather_matmul_native(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
@@ -1022,6 +1027,7 @@ def _should_use_fused_all_gather_matmul_native(
         and 2048 < local_M * group.size() <= 4096
         # _async_input_mm only supports a single B.
         and len(Bs) == 1
+        and (torch.version.hip is None or local_M % _ROCM_ASYNC_MM_TILE_M == 0)
     )
 
 
@@ -1030,6 +1036,9 @@ def _fused_all_gather_matmul_native(
     B: torch.Tensor,
     group_name: c10d.GroupName,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    if torch.version.hip is not None:
+        return _fused_all_gather_matmul_native_rocm(A_shard, B, group_name)
+
     symm_mem = rendezvous(A_shard, group_name)
     if symm_mem is None:
         symm_mem = get_symm_mem_workspace(
@@ -1071,6 +1080,82 @@ def _fused_all_gather_matmul_native(
                 _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
             else:
                 _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
+
+    current_stream.wait_stream(backend_stream)
+    backend_stream.wait_stream(current_stream)
+
+    symm_mem.barrier()
+    return A, out
+
+
+# HIP runs peer copies of more than 1 MiB on a DMA engine and smaller ones as
+# kernels. Copying peer shards in pieces of at most 1 MiB makes the native path
+# 2-3x faster per call on MI300X and MI355X.
+_ROCM_ASYNC_MM_MAX_PEER_COPY_BYTES = 1 << 20
+
+
+def _rocm_copy_in_pieces(dst: torch.Tensor, src: torch.Tensor) -> None:
+    rows = max(
+        1, _ROCM_ASYNC_MM_MAX_PEER_COPY_BYTES // (dst.stride(0) * dst.element_size())
+    )
+    for d, s in zip(dst.split(rows), src.split(rows)):
+        d.copy_(s)
+
+
+def _fused_all_gather_matmul_native_rocm(
+    A_shard: torch.Tensor,
+    B: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    symm_mem = rendezvous(A_shard, group_name)
+    if symm_mem is None:
+        symm_mem = get_symm_mem_workspace(
+            group_name, A_shard.numel() * A_shard.element_size()
+        )
+        symm_mem.barrier()
+        buf = symm_mem.get_buffer(symm_mem.rank, A_shard.shape, A_shard.dtype)
+        buf.copy_(A_shard)
+        A_shard = buf
+
+    rank = symm_mem.rank
+    world_size = symm_mem.world_size
+
+    current_stream = torch.cuda.current_stream()
+    backend_stream = _get_backend_stream(priority=-1)
+
+    # A_signals is zeroed on current_stream and set on backend_stream, so it is
+    # allocated before backend_stream is ordered after current_stream. In a
+    # captured graph, zeroing it later would put the zeroing on the GEMM's
+    # branch, which HIP can replay after the peer signals.
+    A = A_shard.new_empty(A_shard.shape[0] * world_size, A_shard.shape[1])
+    A_signals = torch.zeros(world_size, dtype=torch.uint32, device=A_shard.device)
+    A_shards = A.chunk(world_size)
+
+    symm_mem.barrier()
+    backend_stream.wait_stream(current_stream)
+    current_stream.wait_stream(backend_stream)
+
+    # The GEMM spins on the signals the peer copies set, so the peer copies are
+    # issued first. HIP can put current_stream and backend_stream on one
+    # in-order hardware queue, and it can replay the branches of a small
+    # captured graph one after another, in capture order.
+    for step in range(1, world_size):
+        src_rank = (rank + step) % world_size
+        src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
+        with backend_stream:
+            _rocm_copy_in_pieces(A_shards[src_rank], src_buf)
+            if not torch.cuda.is_current_stream_capturing():
+                _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
+            else:
+                _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
+
+    A_shards[rank].copy_(A_shard)
+    if not torch.cuda.is_current_stream_capturing():
+        _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
+    else:
+        _SymmetricMemory.memset32(A_signals, offset=rank, val=1, count=1)
+
+    out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
 
     current_stream.wait_stream(backend_stream)
     backend_stream.wait_stream(current_stream)
@@ -2202,7 +2287,9 @@ def empty(  # type: ignore[misc]
         This is a host-synchronous allocation. Together with
         :func:`rendezvous`, it is intended as an initialization-time
         operation: allocate a symmetric memory tensor once and reuse it,
-        rather than allocating in hot code paths.
+        rather than allocating in hot code paths. It cannot be captured in a
+        CUDA graph; the CUDA backend raises an error if it is called while
+        the current stream is capturing. Allocate before capture instead.
 
     Args:
         size (int...): a sequence of integers defining the shape of the output tensor.
@@ -2264,9 +2351,15 @@ def rendezvous(
         This is a host-blocking initialization operation: the first rendezvous
         of a tensor performs handle exchange and mapping across processes, and
         synchronizes the host with the device. It cannot be ordered onto a
-        CUDA stream or captured in a CUDA graph. Rendezvous a buffer once and
-        reuse the returned handle rather than calling this in hot code paths;
-        subsequent calls on the same tensor return the cached handle.
+        CUDA stream or captured in a CUDA graph; the CUDA backend raises an
+        error if the first rendezvous of a tensor happens while the current
+        stream is capturing. Rendezvous a buffer once and reuse the returned
+        handle rather than calling this in hot code paths; subsequent calls on
+        the same tensor return the cached handle and are safe to capture.
+        Symmetric memory collectives on a rendezvoused buffer can be captured
+        after they have run once eagerly. Every rank must then replay the
+        captured graph the same number of times, because each replay performs
+        the peer synchronization for that rank.
 
     Args:
         tensor (:class:`torch.Tensor`): the local tensor used to establish the symmetric memory tensor.

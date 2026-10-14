@@ -7,6 +7,7 @@ import enum
 import functools
 import importlib.machinery
 import importlib.util
+import io
 import itertools
 import math
 import os
@@ -68,6 +69,18 @@ def _act(x):
 
 
 _sigmoid = _act
+
+
+_RAW_DESCRIPTOR_TARGET = list.count
+_RAW_DESCRIPTOR_VALUES = [0, 0, 0, 1, 1, 1, 1, 1]
+
+
+def _call_raw_method_descriptor(x):
+    return x + _RAW_DESCRIPTOR_TARGET(_RAW_DESCRIPTOR_VALUES, 1)
+
+
+def _call_raw_classmethod_descriptor(x):
+    return x + len(_RAW_DESCRIPTOR_TARGET(dict, ("a", "b")))
 
 
 def _through_act(x):
@@ -233,6 +246,34 @@ _RISKY_DROP_CASES = {
 
 
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
+    @parametrize("caching_precompile", (False, True))
+    @parametrize("descriptor_kind", ("method", "classmethod"))
+    def test_raw_descriptor_guard_survives_serialization(
+        self, caching_precompile, descriptor_kind
+    ):
+        if descriptor_kind == "method":
+            initial = list.count
+            replacement = list.index
+            fn = _call_raw_method_descriptor
+        else:
+            initial = dict.__dict__["fromkeys"]
+            replacement = int.__dict__["from_bytes"]
+            fn = _call_raw_classmethod_descriptor
+
+        module = sys.modules[__name__]
+        x = torch.tensor(0)
+        with mock.patch.object(module, "_RAW_DESCRIPTOR_TARGET", initial):
+            with torch._dynamo.config.patch(caching_precompile=caching_precompile):
+                compiled = _aot_compile(fn, x)
+                _, kept = _kept_types(compiled)
+                self.assertIn("BUILTIN_MATCH", kept)
+                data = AOTCompiledFunction.serialize(compiled).serialized_data
+            loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+            self.assertTrue(loaded.guard_check(x))
+            self.assertEqual(loaded(x), fn(x))
+            with mock.patch.object(module, "_RAW_DESCRIPTOR_TARGET", replacement):
+                self.assertFalse(loaded.guard_check(x))
+
     def test_default_guard_filter_drops_the_unserializable_types(self):
         filter_fn = precompile_package.default_guard_filter_fn
         unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
@@ -2449,6 +2490,81 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertGreaterEqual(same.guarded_codes, 2)
         self.assertNotIn(slot, same.risky_dropped_guards)
         self.assertIn(slot, capture([_relu, _sigmoid]).risky_dropped_guards)
+
+    @parametrize("backend", ["eager", "inductor"])
+    def test_precompile_session_renders_behind_the_gates(self, backend):
+        # Under inductor every backend graph is a bundled entry the session takes
+        # out of PrecompileContext, so the second render still finds the
+        # variants the first one collected.
+        from torch._precompile import _parse_artifact_metadata
+
+        def step(model, x):
+            y = model(x)
+            torch._dynamo.graph_break()
+            return y.sum(dim=0) + y.shape[0]
+
+        model = torch.nn.Linear(4, 4)
+        session = precompile_package.precompile_capture(step, backend=backend)
+        with session as call:
+            call(model, torch.ones(2, 4))
+            # Rendering mid-block leaves the session able to capture more.
+            python_code, _ = session.snapshot_artifact()
+            self.assertEqual(len(_parse_artifact_metadata(python_code)["FRAMES"]), 2)
+            call(model, torch.ones(3, 4))
+        summary = session.summary()
+        python_code, cache = session.snapshot_artifact()
+        meta = _parse_artifact_metadata(python_code)
+        self.assertEqual(meta["TRACER"], "dynamo")
+        self.assertEqual(meta["FN_NAME"], step.__qualname__)
+        self.assertEqual(sum(n for _, n in meta["FRAMES"]), summary.guarded_codes)
+        # The default policy renders a capture that dropped harmless guards.
+        self.assertTrue(summary.dropped_guards)
+        self.assertFalse(summary.risky_dropped_guards)
+        self.assertEqual(
+            meta["DROPPED_GUARDS"], [list(s) for s in summary.dropped_guards]
+        )
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        self.assertEqual((blob["backend"], blob["tracer"]), (backend, "dynamo"))
+
+    def test_precompile_session_snapshot_refuses_behind_the_gates(self):
+        from torch._precompile import _parse_artifact_metadata
+
+        def step(model, x):
+            y = model(x)
+            torch._dynamo.graph_break()
+            return y.sum(dim=0) + y.shape[0]
+
+        model = torch.nn.Linear(4, 4)
+        # A session that never ran its callable has nothing to render, and one
+        # whose call raised is refused as incomplete unless the caller accepts it.
+        empty = precompile_package.precompile_capture(step, backend="eager")
+        with empty:
+            pass
+        with self.assertRaisesRegex(PackageError, "no compiled code"):
+            empty.snapshot_artifact()
+        failed = precompile_package.precompile_capture(step, backend="eager")
+        with failed as call:
+            call(model, torch.ones(2, 4))
+            with self.assertRaises(RuntimeError):
+                call(model, torch.ones(2, 5))
+        with self.assertRaisesRegex(PackageError, "captured call raised"):
+            failed.snapshot_artifact()
+        python_code, _ = failed.snapshot_artifact(require_complete=False)
+        self.assertEqual(_parse_artifact_metadata(python_code)["TRACER"], "dynamo")
+        # The risky-drop gate is on by default; a custom filter's drop is risky.
+        default = precompile_package.default_guard_filter_fn
+        custom = precompile_package.precompile_capture(
+            step,
+            backend="eager",
+            guard_filter_fn=lambda es: [
+                keep and e.name != "x" for keep, e in zip(default(es), es)
+            ],
+        )
+        with custom as call:
+            call(model, torch.ones(2, 4))
+        with self.assertRaisesRegex(PackageError, "can affect dispatch"):
+            custom.snapshot_artifact()
+        custom.snapshot_artifact(require_no_risky_drops=False)
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config

@@ -7,11 +7,13 @@ import enum
 import functools
 import io
 import itertools
+import os
 import pickle
 import sys
 import tempfile
 import threading
 import types
+import typing
 import unittest
 import weakref
 from collections.abc import Iterator
@@ -48,7 +50,13 @@ from torch._dynamo.symbolic_convert import (
     InstructionTranslator,
     SpeculationLog,
 )
-from torch._dynamo.utils import CleanupHook, dynamo_timed, get_metrics_context
+from torch._dynamo.utils import (
+    CleanupHook,
+    dynamo_timed,
+    get_metrics_context,
+    get_type_dict_no_user_code,
+    get_type_mro_no_user_code,
+)
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_utils import (
@@ -1239,10 +1247,57 @@ class _ModuleWithDtypeAttr(torch.nn.Module):
         self.empty = ()
 
 
+_RAW_DESCRIPTORS = [
+    os.DirEntry.is_file,
+    list.count,
+    dict.__dict__["fromkeys"],
+]
+_generic_class_getitem = typing.Generic.__dict__["__class_getitem__"]
+if isinstance(_generic_class_getitem, types.ClassMethodDescriptorType):
+    _RAW_DESCRIPTORS.append(_generic_class_getitem)
+
+
+@instantiate_parametrized_tests
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
     # directly rather than through a capture, so none of
     # TestGuardSerialization's setup applies.
+
+    @parametrize("descriptor", _RAW_DESCRIPTORS)
+    def test_raw_descriptors_require_an_immutable_owner(self, descriptor):
+        owner = descriptor.__objclass__
+        flags = type.__dict__["__flags__"].__get__(owner, type(owner))
+        if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+            with self.assertRaisesRegex(PackageError, "mutable owner"):
+                GuardsStatePickler(
+                    {id(descriptor): descriptor}, {}, {}, {}, io.BytesIO()
+                ).dump(descriptor)
+            return
+        buf = io.BytesIO()
+        GuardsStatePickler({id(descriptor): descriptor}, {}, {}, {}, buf).dump(
+            descriptor
+        )
+        self.assertIs(load_guards_state(buf.getvalue()), descriptor)
+
+    def test_type_dict_helpers_bypass_metaclass_hooks(self):
+        calls = []
+        marker = object()
+
+        class Meta(type):
+            def __getattribute__(cls, name):
+                calls.append(name)
+                raise AssertionError(f"unexpected metaclass lookup: {name}")
+
+        class D(metaclass=Meta):
+            value = marker
+
+        self.assertIs(get_type_dict_no_user_code(D)["value"], marker)
+        mro = get_type_mro_no_user_code(D)
+        self.assertEqual(len(mro), 2)
+        self.assertIs(mro[0], D)
+        self.assertIs(mro[1], object)
+        self.assertIs(GuardsStatePickler._unpickle_type_dict_item(D, "value"), marker)
+        self.assertEqual(calls, [])
 
     def test_module_bookkeeping_containers_are_never_registered_as_pruned(self):
         # nn.Module.__getattr__ indexes _parameters/_buffers/_modules for every
@@ -1274,7 +1329,11 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # recorded that tensor's dispatch keys, whereas _dispatch_keys(fake)
         # reports the Python keys of the fake itself, and empty_like(fake)
         # returns another fake (mode active or not) that drags the mode along.
-        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+            is_fake_tensor,
+            maybe_get_fake_dispatch_keys,
+        )
 
         real = torch.randn(2)
         mode = FakeTensorMode()
@@ -1289,7 +1348,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             torch._C._dispatch_keys(real),
         )
         without_keys = mode.from_tensor(real)
-        self.assertIsNone(without_keys.dispatch_keys)
+        self.assertIsNone(maybe_get_fake_dispatch_keys(without_keys))
         for fake in (with_keys, without_keys):
             buf = io.BytesIO()
             pickler = GuardsStatePickler({id(fake): fake}, {}, {}, {}, buf)
@@ -1298,18 +1357,42 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             # mode and its converters pickled along).
             _, args = pickler.reducer_override(fake)
             self.assertIs(type(args[0]), torch.Tensor)
+            self.assertFalse(is_fake_tensor(args[0]))
             pickler.dump({"t": fake})
             self.assertNotIn(b"FakeTensorMode", buf.getvalue())
             out = load_guards_state(buf.getvalue())["t"]
-            self.assertIsInstance(out, FakeTensor)
+            self.assertTrue(is_fake_tensor(out))
             self.assertEqual(out.shape, real.shape)
         buf = io.BytesIO()
         GuardsStatePickler({id(with_keys): with_keys}, {}, {}, {}, buf).dump(
             {"t": with_keys}
         )
-        self.assertEqual(
-            load_guards_state(buf.getvalue())["t"].dispatch_keys.raw_repr(), real_keys
+        out = load_guards_state(buf.getvalue())["t"]
+        self.assertEqual(maybe_get_fake_dispatch_keys(out).raw_repr(), real_keys)
+
+    def test_fake_tensor_round_trip_keeps_the_real_tensors_dispatch_keys(self):
+        # The conj/neg bits are dispatch keys that the meta template does not
+        # carry, so a loaded fake only keeps them through the recorded keys.
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+            maybe_get_fake_dispatch_keys,
         )
+
+        # The keys of the fake itself, masked at guard check time.
+        fake_keys = (
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
+            .add(torch._C.DispatchKey.Python)
+            .add(torch._C.DispatchKey.PythonTLSSnapshot)
+        )
+        conj = torch.randn(2, dtype=torch.cfloat).conj()
+        for real in (conj, conj.imag):
+            fake = FakeTensorMode().from_tensor(real)
+            buf = io.BytesIO()
+            GuardsStatePickler({id(fake): fake}, {}, {}, {}, buf).dump({"t": fake})
+            out = load_guards_state(buf.getvalue())["t"]
+            keys = maybe_get_fake_dispatch_keys(out)
+            self.assertIsNotNone(keys)
+            self.assertEqual(keys - fake_keys, torch._C._dispatch_keys(real))
 
     def test_retained_grad_non_leaf_survives_pickle(self):
         # A plain non-leaf's .grad is None (and reading it warns), but a

@@ -78,6 +78,7 @@ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import (
     disable_gc,
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -1496,6 +1497,15 @@ class BottomlessReduce:
         return (BottomlessReduce, (BottomlessReduce(),))
 
 
+# On fbcode's Python 3.14 an unbounded recursion through the C pickler can run
+# past the interpreter's stack-address recursion guard and segfault the whole
+# test process instead of raising RecursionError.
+skipIfCPicklerOverflowCrashes = unittest.skipIf(
+    IS_FBCODE and sys.version_info >= (3, 14),
+    "C pickler stack overflow segfaults instead of raising RecursionError",
+)
+
+
 class WritesBackOnReduce:
     # Reducing it writes onto the function it is stashed on, while that
     # function's __dict__ is being walked.
@@ -1868,6 +1878,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertIn("Linear", msg)
         self.assertIn("external_data", msg)
 
+    @skipIfCPicklerOverflowCrashes
     def test_save_guidance_when_a_default_overflows_the_pickler(self):
         # A value in an unpruned slot that recurses without bound in the C
         # pickler raises RecursionError; it gets the same guidance and the
@@ -5076,14 +5087,13 @@ from user code:
         self.assertEqual(len(logs.output), 2, warned)
 
     def test_aot_compile_module_restores_torch_function_after_a_throw(self):
-        # A tree that THROWS out of C++ returns through
-        # RootGuardManager::check_nopybind_template's non-RAII restore and leaves
-        # TorchFunction disabled on this thread. TENSOR_MATCH on a strided nested
-        # tensor is one such tree: reading its strides fires a TORCH_CHECK.
-        # GuardManagerWrapper.check puts the state back before dispatch reads the
-        # throw as no answer, so the report is about the raise and not about what
-        # the raise left behind -- with the wrapper's restore removed, [0]'s line
-        # reads "GLOBAL_STATE changed: torch_function" and the advice is to add a
+        # RootGuardManager disables TorchFunction while its accessors run and
+        # restores it on scope exit, so a tree that THROWS out of C++ leaves the
+        # state as it found it. TENSOR_MATCH on a strided nested tensor is one
+        # such tree: reading its strides fires a TORCH_CHECK. Dispatch reads the
+        # throw as no answer, so the report is about the raise and not about
+        # what the raise left behind: were the state leaked, [0]'s line would
+        # read "GLOBAL_STATE changed: torch_function" and advise adding a
         # ModelInput, both of them artifacts of our own leak.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
@@ -5117,7 +5127,7 @@ from user code:
     def test_aot_compile_module_restores_torch_function_after_the_report_throws(self):
         # The test above throws out of check() in both passes, so the report
         # quotes the dispatch record and never calls check_verbose, the module
-        # path's only direct call of it, which has the same non-RAII exit. Here
+        # path's only direct call of it and the other scope-exit restore. Here
         # check() refuses cleanly and the tree throws only when the report
         # describes it: TENSOR_MATCH's verbose failure branch calls is_parameter,
         # which runs the Parameter metaclass's __instancecheck__, patched to
@@ -5151,8 +5161,8 @@ from user code:
 
     def test_aot_compile_function_restores_torch_function_after_a_throw(self):
         # load_compiled_function returns an AOTCompiledFunction, whose guard
-        # check evaluates the same kind of tree through the same wrapper, so a
-        # C++ throw would otherwise leave TorchFunction disabled on this thread
+        # check evaluates the same kind of tree, so a C++ throw without the
+        # scope-exit restore would leave TorchFunction disabled on this thread
         # and silently stop a __torch_function__ subclass from dispatching
         # afterwards. The throw propagates; only the state it leaves is pinned.
         self._hide_leaked_dynamo_globals()
@@ -11566,6 +11576,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.b.c(), "c!")
         self.assertFalse(hasattr(out.b.c, "a"))
 
+    @skipIfCPicklerOverflowCrashes
     def test_pickler_prunes_an_entry_that_overflows_the_probe(self):
         # A recursion overflow inside the probe counts as unpicklable: the entry
         # is dropped with a warning and the save succeeds. The guard pickler

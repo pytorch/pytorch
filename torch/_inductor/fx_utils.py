@@ -22,6 +22,7 @@ import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._inductor.fx_passes.control_dependencies import control_deps
+from torch._library.utils import zip_schema
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
@@ -180,6 +181,9 @@ def _is_fake_tensor_same(
         return False
 
     def any_user_may_alias(node):
+        # imported here because reinplace imports this module at load time
+        from .fx_passes.reinplace import _generalized_scatter
+
         if not isinstance(node.meta["val"], torch.Tensor):
             # analysis too complicated on lists, can support in the future
             return True
@@ -187,8 +191,7 @@ def _is_fake_tensor_same(
         for user in node.users:
             if not (
                 isinstance(user.target, torch._ops.OperatorBase)
-                or user.target
-                is torch._inductor.fx_passes.reinplace._generalized_scatter
+                or user.target is _generalized_scatter
             ):
                 return True
 
@@ -826,6 +829,106 @@ def get_node_storage(node: torch.fx.Node) -> int | None:
     if not torch._C._has_storage(node.meta["val"]):
         return None
     return get_storage(node.meta["val"])
+
+
+def get_mutated_input_nodes(node: torch.fx.Node) -> list[torch.fx.Node]:
+    """Tensor input nodes that node writes in place."""
+    target: object = node.target
+    args = node.args
+    if target is torch.ops.higher_order.with_effects:
+        target, args = args[1], args[2:]
+    if target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+        written = [node.kwargs["kwargs"]]
+    elif isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
+        written = [
+            arg
+            for schema_arg, arg in zip_schema(target._schema, args, node.kwargs)
+            if schema_arg.alias_info is not None and schema_arg.alias_info.is_write
+        ]
+    else:
+        return []
+    return [x for x in pytree.tree_leaves(written) if isinstance(x, torch.fx.Node)]
+
+
+def get_mutated_storages(gm: torch.fx.GraphModule) -> OrderedSet[int]:
+    """
+    Fake storages written in place by any node of gm. control_deps subgraphs
+    are included since their placeholders carry the outer nodes' fake values.
+    """
+    storages: OrderedSet[int] = OrderedSet()
+    for node in gm.graph.nodes:
+        subgraph_attr = node.args[1] if node.target is control_deps else None
+        if isinstance(subgraph_attr, torch.fx.Node) and subgraph_attr.op == "get_attr":
+            subgraph = getattr(gm, cast(str, subgraph_attr.target))
+            storages |= get_mutated_storages(subgraph)
+        for written in get_mutated_input_nodes(node):
+            storage = get_node_storage(written)
+            if storage is not None:
+                storages.add(storage)
+    return storages
+
+
+def _same_size_stride_and_storage_offset(
+    lhs: torch.Tensor,
+    rhs: torch.Tensor,
+    *,
+    skip_strides: bool = False,
+    skip_storage_offset: bool = False,
+) -> bool:
+    """Check size and requested layout metadata without adding guards."""
+
+    return (
+        statically_known_true(sym_eq(lhs.size(), rhs.size()))
+        and (skip_strides or statically_known_true(sym_eq(lhs.stride(), rhs.stride())))
+        and (
+            skip_storage_offset
+            or statically_known_true(sym_eq(lhs.storage_offset(), rhs.storage_offset()))
+        )
+    )
+
+
+def same_tensor_meta(
+    lhs: torch.Tensor | torch.fx.Node,
+    rhs: torch.Tensor | torch.fx.Node,
+    *,
+    skip_strides: bool = False,
+    skip_storage_offset: bool = False,
+) -> bool:
+    """Check equal tensor metadata without comparing storage identity.
+
+    FX nodes are compared through their ``meta["val"]`` values and do not match
+    unless both values are tensors. For strided tensors this compares size,
+    requested stride and storage-offset properties, dtype, device, layout, and
+    conjugate and negative view bits. For other layouts, only size and the common
+    dtype, device, layout, and view-bit properties are compared.
+    """
+    lhs_val: object = lhs.meta.get("val") if isinstance(lhs, torch.fx.Node) else lhs
+    rhs_val: object = rhs.meta.get("val") if isinstance(rhs, torch.fx.Node) else rhs
+    if not isinstance(lhs_val, torch.Tensor) or not isinstance(rhs_val, torch.Tensor):
+        return False
+
+    return (
+        lhs_val.dtype == rhs_val.dtype
+        and lhs_val.device == rhs_val.device
+        and lhs_val.layout == rhs_val.layout
+        and (
+            (
+                lhs_val.layout == torch.strided
+                and _same_size_stride_and_storage_offset(
+                    lhs_val,
+                    rhs_val,
+                    skip_strides=skip_strides,
+                    skip_storage_offset=skip_storage_offset,
+                )
+            )
+            or (
+                lhs_val.layout != torch.strided
+                and statically_known_true(sym_eq(lhs_val.size(), rhs_val.size()))
+            )
+        )
+        and lhs_val.is_conj() == rhs_val.is_conj()
+        and lhs_val.is_neg() == rhs_val.is_neg()
+    )
 
 
 def get_fake(x: Any, gm: torch.fx.GraphModule | None) -> Any:

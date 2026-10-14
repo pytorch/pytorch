@@ -117,6 +117,7 @@ from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
+    is_fake,
     TensorMetadata,
 )
 from torch._utils_internal import log_cache_bypass
@@ -751,7 +752,7 @@ class FxGraphCachePickler(pickle.Pickler):
         self.dispatch_table = copyreg.dispatch_table.copy()
         self.dispatch_table.update(
             {
-                FakeTensor: functools.partial(self._reduce_fake_tensor),
+                FakeTensor: functools.partial(self._reduce_tensor),
                 torch.Tensor: functools.partial(self._reduce_tensor),
                 torch.nn.parameter.Parameter: functools.partial(self._reduce_tensor),
                 torch.SymInt: functools.partial(self._reduce_symint),
@@ -837,9 +838,18 @@ class FxGraphCachePickler(pickle.Pickler):
         self, t: Tensor
     ) -> tuple[Callable[[T], T], tuple[TensorMetadata | TensorMetadataAndValues]]:
         """
-        Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
-        stored as attributes on the GraphModule.
+        Route fake tensors to metadata-only serialization and real tensors to
+        constant serialization.
         """
+        if is_fake(t):
+            return self._reduce_fake_tensor(t)
+
+        return self._reduce_constant_tensor(t)
+
+    def _reduce_constant_tensor(
+        self, t: Tensor
+    ) -> tuple[Callable[[T], T], tuple[TensorMetadata | TensorMetadataAndValues]]:
+        """Serialize a real tensor constant stored on the GraphModule."""
         from .graph import GraphLowering
 
         if t.is_mkldnn:
@@ -1119,13 +1129,26 @@ class CacheabilityValidator:
             if not isinstance(module, torch.fx.GraphModule):
                 continue
             for node in module.graph.nodes:
+                target = node.target
                 if (
-                    isinstance(node.target, torch._ops.HigherOrderOperator)
-                    and not node.target.cacheable()
+                    isinstance(target, torch._ops.HigherOrderOperator)
+                    and not target.cacheable()
                 ):
-                    self.bypass(
-                        f"Can't cache HigherOrderOperator: {node.target.name()}"
+                    # with_effects(token, op, *args) is as cacheable as the op it
+                    # wraps: always for an OpOverload, per cacheable() for a HOP.
+                    inner = (
+                        node.args[1]
+                        if target is torch.ops.higher_order.with_effects
+                        else None
                     )
+                    if not (
+                        isinstance(inner, torch._ops.OpOverload)
+                        or (
+                            isinstance(inner, torch._ops.HigherOrderOperator)
+                            and inner.cacheable()
+                        )
+                    ):
+                        self.bypass(f"Can't cache HigherOrderOperator: {target.name()}")
                 # TODO: this check is broken in two ways:
                 # 1. FX uses "get_attr" (with underscore), not "getattr"
                 # 2. It only checks for ScriptObject, not FakeScriptObject

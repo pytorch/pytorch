@@ -406,7 +406,11 @@ template <
 inline float remainder(const T x, const U y) {
   const auto x_f = static_cast<float>(x);
   const auto y_f = static_cast<float>(y);
-  return x_f - y_f * floor_divide(x_f, y_f);
+  auto mod = ::metal::fmod(x_f, y_f);
+  if (mod != 0 && (y_f < 0) != (mod < 0)) {
+    mod += y_f;
+  }
+  return mod;
 }
 
 template <
@@ -457,9 +461,9 @@ inline float2 pow(T a, U b) {
   // Use explicit computation instead of length() due to numerical issues
   const auto r = ::metal::precise::sqrt(a.x * a.x + a.y * a.y);
 
-  // Special case: if r is 0, return 0
+  // Special case: 0^b is 0 if Re(b) > 0, undefined otherwise
   if (r == 0.0) {
-    return float2(0.0, 0.0);
+    return b.x > 0 ? float2(0.0, 0.0) : float2(NAN, NAN);
   }
 
   const auto theta = ::metal::precise::atan2(a.y, a.x);
@@ -612,6 +616,23 @@ inline float hypot(float a_, float b_) {
   return ::metal::select(::metal::select(h3, h2, is_h2), h1, is_h1);
 }
 
+// Computes the larger component as sqrt((|re| + |z|) / 2) and derives the other
+// one by division, avoiding the cancellation in |z| - |re| when |im| << |re|
+template <typename T, ::metal::enable_if_t<is_complex_v<T>, bool> = true>
+inline T sqrt(const T x) {
+  const auto z = float2(x);
+  if (::metal::isinf(z.y)) {
+    return T(INFINITY, z.y);
+  }
+  const auto a = ::metal::abs(z);
+  const auto t = ::metal::precise::sqrt((a.x + hypot(a.x, a.y)) * .5);
+  if (t == 0) {
+    return T(0, z.y);
+  }
+  return z.x >= 0 ? T(t, z.y / (2 * t))
+                  : T(a.y / (2 * t), ::metal::copysign(t, z.y));
+}
+
 #define INSTANTIATE_FOR_ALL_TYPES(MACRO) \
   MACRO(float);                          \
   MACRO(half);                           \
@@ -630,29 +651,32 @@ inline float hypot(float a_, float b_) {
 
 // Copy n bytes from src to dst using the widest vector their combined alignment
 // allows (uint4 -> uint2 -> uint -> ushort -> byte), with a scalar tail.
-inline void copy_bytes_aligned(device uchar* dst, constant uchar* src, uint n) {
+inline void copy_bytes_aligned(
+    device uchar* dst,
+    device const uchar* src,
+    uint n) {
   const uint align =
       (reinterpret_cast<ulong>(dst) | reinterpret_cast<ulong>(src)) & 15;
   uint i = 0;
   if (align == 0) {
     for (; i + 16 <= n; i += 16) {
       *reinterpret_cast<device uint4*>(dst + i) =
-          *reinterpret_cast<constant uint4*>(src + i);
+          *reinterpret_cast<device const uint4*>(src + i);
     }
   } else if ((align & 7) == 0) {
     for (; i + 8 <= n; i += 8) {
       *reinterpret_cast<device uint2*>(dst + i) =
-          *reinterpret_cast<constant uint2*>(src + i);
+          *reinterpret_cast<device const uint2*>(src + i);
     }
   } else if ((align & 3) == 0) {
     for (; i + 4 <= n; i += 4) {
       *reinterpret_cast<device uint*>(dst + i) =
-          *reinterpret_cast<constant uint*>(src + i);
+          *reinterpret_cast<device const uint*>(src + i);
     }
   } else if ((align & 1) == 0) {
     for (; i + 2 <= n; i += 2) {
       *reinterpret_cast<device ushort*>(dst + i) =
-          *reinterpret_cast<constant ushort*>(src + i);
+          *reinterpret_cast<device const ushort*>(src + i);
     }
   }
   for (; i < n; ++i) {
