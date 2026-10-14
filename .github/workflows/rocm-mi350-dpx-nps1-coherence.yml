@@ -5,12 +5,11 @@ name: rocm-mi350-dpx-nps1-coherence
 
 on:
   workflow_dispatch:
-  # This push trigger runs in the fork that owns the self-hosted runner.
-  # pull_request is omitted on purpose: that event runs in pytorch/pytorch,
-  # which does not have this repo-level runner.
-  push:
+  # This event runs in pytorch/pytorch, where the runner is registered.
+  # The label is unique to one machine, so other jobs are not scheduled there.
+  pull_request:
     branches:
-      - amdfaa/dpx-nps1-coherence
+      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
