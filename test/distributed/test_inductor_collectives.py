@@ -2324,7 +2324,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             message,
         )
         self.assertIn("set async_op=False", message)
-        self.assertIn("torch.distributed._functional_collectives", message)
+        self.assertIn("torch.distributed.functional_collectives", message)
         self.assertIn("https://github.com/pytorch/pytorch/issues/119890", message)
 
         compiled = torch.compile(func, backend=counter)

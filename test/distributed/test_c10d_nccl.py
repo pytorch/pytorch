@@ -1113,6 +1113,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         if self.rank == 0:
             # Ideally we want to sleep for a very long time, but this is not
             # feasible in unit test. So this is only a very tiny case.
+            # Hold the first allreduce until rank 1 has issued both allreduces:
+            # w1 completing earlier releases its extension before w2 exists.
+            store.wait(["extend_timeout_issued"])
             time.sleep(5)
             pg.allreduce(torch.rand(10).cuda(self.rank))
             time.sleep(5)
@@ -1126,6 +1129,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             )
             w1 = pg.allreduce(torch.rand(10).cuda(self.rank))
             w2 = pg.allreduce(torch.rand(5).cuda(self.rank))
+            store.set("extend_timeout_issued", "1")
             self.assertEqual(w1.timeout, timedelta(seconds=13))
             self.assertEqual(w2.timeout, timedelta(seconds=13))
             w1.wait()
@@ -5032,6 +5036,33 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(pg_opts.config.host_cft_mode, 3)
         # Tests functionality when passing nccl config
         self._test_pass_nccl_options(pg_opts)
+
+    @requires_nccl()
+    @requires_nccl_version(
+        (2, 32, 3), "Need NCCL 2.32.3+ for testing nvls_host_mode in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("nvls_host_mode", [0, 1, 2, 3, 2147483647])
+    def test_pass_nccl_options_config_nvls_host_mode(self, nvls_host_mode):
+        if c10d.ProcessGroupNCCL.get_build_nccl_version() < (2, 32, 3):
+            raise SkipTest("nvls_host_mode requires building with NCCL 2.32.3+")
+
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        self.assertEqual(nccl_cfg.nvls_host_mode, -2147483648)
+        self.assertEqual(pg_opts.config.nvls_host_mode, -2147483648)
+
+        nccl_cfg.nvls_host_mode = nvls_host_mode
+        self.assertEqual(nccl_cfg.nvls_host_mode, nvls_host_mode)
+        self.assertEqual(copy.copy(nccl_cfg).nvls_host_mode, nvls_host_mode)
+        self.assertEqual(copy.deepcopy(nccl_cfg).nvls_host_mode, nvls_host_mode)
+        pg_opts.config = nccl_cfg
+        self.assertEqual(pg_opts.config.nvls_host_mode, nvls_host_mode)
+
+        copied_opts = copy.deepcopy(pg_opts)
+        pg_opts.config.nvls_host_mode = -2147483648
+        self.assertEqual(copied_opts.config.nvls_host_mode, nvls_host_mode)
+        self._test_pass_nccl_options(copied_opts)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
