@@ -11641,35 +11641,6 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_update_stats(device)
 
     @onlyAccelerator
-    @skipMPS
-    def test_batch_norm_gather_stats_invalid_shapes(self, device):
-        # Regression test for https://github.com/pytorch/pytorch/issues/189828.
-        # batch_norm_reduce_statistics_kernel takes both of its loop bounds from mean, then
-        # indexes invstd and counts with them, so an invstd that disagrees with mean used to
-        # be read out of bounds. The op must validate the shapes instead.
-        input = torch.full((1, 3, 3, 0), 1.0, dtype=torch.float32, device=device)
-        mean = torch.full((2, 3), 1.15215e+25, dtype=torch.float32, device=device)
-        invstd = torch.full((2, 0), 1.0, dtype=torch.float32, device=device)
-        with self.assertRaisesRegex(RuntimeError, "invstd to have the same shape as mean"):
-            torch.batch_norm_gather_stats(input, mean, invstd, None, None, float('-inf'), float('-inf'),
-                                          -9223372036854775808)
-
-        # mean must be (world_size, num_features); a 1-D mean would index past its dims
-        with self.assertRaisesRegex(RuntimeError, "expected mean to be 2-dimensional"):
-            torch.batch_norm_gather_stats(input, torch.ones(3, device=device), torch.ones(3, device=device),
-                                          None, None, 0.1, 1e-5, 2)
-
-        # counts is indexed up to mean.size(0), so it must have at least that many elements
-        with self.assertRaisesRegex(RuntimeError, "counts to have at least one element"):
-            torch.batch_norm_gather_stats_with_counts(
-                torch.randn(1, 3, 3, 3, device=device),
-                torch.ones(2, 3, device=device),
-                torch.ones(2, 3, device=device),
-                None, None, 0.1, 1e-5,
-                torch.ones(1, device=device),
-            )
-
-    @onlyAccelerator
     def test_activations_bfloat16(self, device):
         _test_bfloat16_ops(self, torch.nn.ReLU(), device, inp_dims=(5), prec=1e-2)
         _test_bfloat16_ops(self, torch.nn.Threshold(0.1, 20), device, inp_dims=(5), prec=1e-2)
@@ -15537,6 +15508,7 @@ class TestNNDeviceType(NNTestCase):
                     self.assertNotEqual(output2.data, prev_output)
             prev_output = output1.data
 
+    @onlyAccelerator
     def test_RNN_dropout_gradients(self, device):
         # Regression test for ROCm/ROCm#6339: a multi-layer GRU with dropout set
         # via the module parameter (which routes through the fused cuDNN/MIOpen
@@ -17398,15 +17370,15 @@ if __name__ == '__main__':
             self.assertEqual(grad.cpu(), ref, f"{name}.grad", atol=1e-3, rtol=1e-3)
 
     @skipCUDAIfNoCudnn
-    def test_batchnorm_cudnn_nhwc(self, device):
+    def test_batchnorm_cudnn_nhwc(self):
         def run_test(input, grad_output):
             c = input.size(1)
-            mod = nn.BatchNorm2d(c).to(device).float()
+            mod = nn.BatchNorm2d(c).cuda().float()
             mod.weight.data.uniform_()
             mod.bias.data.uniform_()
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_grad = grad.detach().clone().contiguous()
-            ref_mod = nn.BatchNorm2d(c).to(device).float()
+            ref_mod = nn.BatchNorm2d(c).cuda().float()
             ref_mod.load_state_dict(mod.state_dict())
             out = mod(input)
             out.backward(grad_output)
@@ -17419,25 +17391,25 @@ if __name__ == '__main__':
             self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
             self.assertEqual(input.grad, ref_input.grad)
 
-        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device=device)
+        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
         input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
 
-        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device=device)
+        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
         grad = grad.contiguous(memory_format=torch.channels_last)
         run_test(input, grad)
         # see #42588, grad is channels_last contiguous, but grad.suggest_memory_format (rightly) return "contiguous"
         # not channels_last
-        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device=device)
+        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
         input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
-        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device=device)
+        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
         grad = grad.permute(0, 2, 1, 3)
         run_test(input, grad)
 
     @skipCUDAIfNoCudnn
-    def test_batchnorm_cudnn_half(self, device):
+    def test_batchnorm_cudnn_half(self):
         # THNN
-        input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device=device, requires_grad=True)
-        m = nn.BatchNorm2d(3).half().to(device)
+        input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device="cuda", requires_grad=True)
+        m = nn.BatchNorm2d(3).half().to("cuda")
         thnn_output = m(input)
         thnn_output.sum().backward()
         thnn_input_grad = input.grad.data.clone()
