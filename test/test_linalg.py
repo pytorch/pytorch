@@ -5119,10 +5119,15 @@ class TestLinalg(TestCase):
 
     @onlyAccelerator
     @dtypes(torch.float)
-    def test_triangular_solve_large(self, device, dtype):
+    @parametrize("bs", [1, 2])
+    @parametrize("k", [524280, 524281, 524282])
+    def test_triangular_solve_large(self, device, dtype, bs, k):
         # Repro for https://github.com/pytorch/pytorch/issues/79191
-        A = torch.randn(1, 2, 2, device=device, dtype=dtype).tril_()
-        B = torch.randn(1, 2, 524281, device=device, dtype=dtype)
+        # k > 524280 triggers the cuBLAS large-input workaround on CUDA < 12.1,
+        # which returned silently wrong results for bs >= 2. See
+        # https://github.com/pytorch/pytorch/pull/187717
+        A = torch.randn(bs, 2, 2, device=device, dtype=dtype).tril_()
+        B = torch.randn(bs, 2, k, device=device, dtype=dtype)
         X = torch.linalg.solve_triangular(A, B, upper=False)
         self.assertEqual(A @ X, B)
 
@@ -9785,6 +9790,24 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 class TestLinalgSVD(TestCase):
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @dtypes(torch.float32, torch.complex64)
+    @parametrize("shape", [(8, 4), (4, 8)])
+    def test_svd_small_scale(self, device, dtype, shape):
+        scale = 1e-8
+        A = torch.eye(*shape, dtype=dtype)
+        Am = (A * scale).to(device)
+        U, S, Vh = torch.linalg.svd(Am, full_matrices=False)
+        eye = torch.eye(min(shape), dtype=dtype, device=device)
+        self.assertEqual(U.mH @ U, eye, atol=1e-5, rtol=1e-5)
+        self.assertEqual(Vh @ Vh.mH, eye, atol=1e-5, rtol=1e-5)
+        self.assertEqual(((U * (S / scale).unsqueeze(-2)) @ Vh).cpu(), A, atol=1e-5, rtol=1e-5)
+        pinv = torch.linalg.pinv(A)
+        self.assertEqual(torch.linalg.pinv(Am).cpu() * scale, pinv, atol=1e-5, rtol=1e-5)
+        B = torch.eye(shape[0], dtype=dtype, device=device)
+        self.assertEqual(torch.linalg.lstsq(Am, B).solution.cpu() * scale, pinv, atol=1e-5, rtol=1e-5)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_svd_ill_conditioned(self, device, dtype):
         # Small columns must still undergo Jacobi rotations: skipping them at
@@ -11982,6 +12005,14 @@ class TestGroupedMM(TestCase):
         b = self._make_grouped_mm_matrix((17, 16), True, device, dtype)
         offs = torch.tensor([17], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    def test_grouped_mm_mismatched_dtypes(self, device):
+        a = torch.ones(8, 16, device=device, dtype=torch.float16)
+        b = torch.ones(4, 16, 16, device=device, dtype=torch.bfloat16)
+        offs = torch.tensor([2, 4, 6, 8], device=device, dtype=torch.int32)
+        with self.assertRaisesRegex(RuntimeError, "same dtype"):
+            F.grouped_mm(a, b, offs=offs)
 
     @onlyOn(["cuda", "mps"])
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
