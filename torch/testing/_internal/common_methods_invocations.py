@@ -12927,10 +12927,8 @@ op_db: list[OpInfo] = [
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4),
-                                                       torch.float16: tol(atol=1e-4, rtol=1e-4),
-                                                       torch.bfloat16: tol(atol=1e-4, rtol=1e-4),
-                                                       torch.complex64: tol(atol=1e-4, rtol=1e-4)}),
+                       # CPU (libc++) complex64 asinh is off by up to ~4e-4 relative; MPS is within a few ulp
+                       DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1e-4)}),
                                     "TestConsistency", "test_output_match", device_type="mps"),
                    )),
     UnaryUfuncInfo('atan',
@@ -19112,8 +19110,6 @@ op_db: list[OpInfo] = [
                                     active_if=IS_MACOS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                       DecorateInfo(toleranceOverride({torch.complex64: tol(atol=2e-5, rtol=3e-6)}),
-                                    "TestConsistency", "test_output_match", device_type="mps"),
                    )),
     UnaryUfuncInfo('square',
                    ref=np.square,
@@ -24523,15 +24519,6 @@ python_ref_db = [
                          'test_reference_numerics_extremal',
                          dtypes=[torch.bfloat16, torch.float16, torch.float32,
                                  torch.float64]),
-            # TypeError: Trying to convert ComplexDouble to the MPS backend but it does not have support for that dtype.
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.complex32,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex32,)
-            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -24809,14 +24796,6 @@ python_ref_db = [
         "_refs.nn.functional.threshold",
         torch_opinfo_name="nn.functional.threshold",
         supports_out=True,
-        skips=(
-            # MPS threshold maps NaN to `value` (uses x > threshold), but the
-            # reference keeps NaN; mismatch only on float dtypes.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)),
-        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.dropout",
@@ -24961,17 +24940,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.prelu",
         torch_opinfo_name="nn.functional.prelu",
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.hardsigmoid",
