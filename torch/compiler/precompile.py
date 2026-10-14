@@ -18,7 +18,6 @@ from torch._precompile import (
     capture,
     capture_runtime,
     DynamoTracer,
-    finalize_cache,
     load,
     MakeFxTracer,
     no_compilation,
@@ -43,7 +42,6 @@ __all__ = [
     "PrecompiledRunnable",
     "PrecompileSummary",
     "capture_runtime",
-    "finalize_cache",
     "prepare_runtime",
 ]
 
