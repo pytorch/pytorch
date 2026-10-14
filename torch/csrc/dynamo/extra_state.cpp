@@ -643,6 +643,10 @@ void _load_precompile_entry(
   }
 }
 
+bool _get_lru_cache() {
+  return use_lru;
+}
+
 void _load_precompile_skip(const py::handle& code_obj) {
   ExtraState* extra = get_or_init_extra_state(code_from_handle(code_obj));
   extra->strategy = FrameExecStrategy{FrameAction::SKIP, FrameAction::DEFAULT};
