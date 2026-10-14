@@ -186,7 +186,7 @@ class LoggingTests(LoggingTestCase):
             len(records), 8 * (1 + torch._inductor.config.loop_ordering_after_fusion)
         )
 
-    @requires_cuda_and_triton
+    @requires_gpu
     @make_logging_test(cudagraphs=True)
     def test_cudagraphs(self, records):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
@@ -226,13 +226,13 @@ class LoggingTests(LoggingTestCase):
         self.assertIn(
             """\
     - User stack trace:
-    -   File [file_path], line 200, in outmost_fn
+    -   File [file_path], line 199, in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 203, in outer_fn
+    -   File [file_path], line 202, in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 206, in fn
+    -   File [file_path], line 205, in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 209, in inner
+    -   File [file_path], line 208, in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )
@@ -1368,7 +1368,9 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 
     @make_logging_test(autotuning=True)
     @requires_gpu
-    @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
+    @unittest.skipIf(
+        device_type == "cuda" and not SM90OrLater, "requires H100+ GPU for CUDA"
+    )
     def test_autotuning(self, records):
         with torch._inductor.utils.fresh_cache():
 
