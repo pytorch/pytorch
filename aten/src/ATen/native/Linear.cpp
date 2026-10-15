@@ -4,6 +4,7 @@
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/TensorOperators.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/SymInt.h>
