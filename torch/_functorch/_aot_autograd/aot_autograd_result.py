@@ -48,7 +48,6 @@ from .runtime_wrappers import (
     FunctionalizedRngRuntimeWrapper,
     post_compile,
     RuntimeWrapper,
-    SerializableCompiledFunction,
     SubclassMeta,
 )
 from .schemas import AOTAutogradCacheInfo, AOTConfig  # noqa: F401
@@ -760,22 +759,22 @@ def deserialize_bundled_cache_entry(
     # The build re-enters the loader's compile context, so its timing and trace
     # artifacts are attributed to the frame that loaded the graph.
     compile_context = torch._guards.CompileContext.try_get()
-    compiled_fn: SerializableCompiledFunction | None = None
+    compiled_fn: Callable[..., Any] | None = None
     lock = threading.Lock()
 
-    def build() -> SerializableCompiledFunction:
+    def build() -> Callable[..., Any]:
         nonlocal compiled_fn, context, compile_context
         with lock:
             if compiled_fn is None:
                 with (
                     torch._guards.compile_context(compile_context),
                     torch._guards.tracing(context),
-                    dynamo_timed("AOTAutogradCache.apply_runtime_wrappers"),
+                    dynamo_timed(
+                        "AOTAutogradCache.apply_runtime_wrappers",
+                        phase_name="backend_compile",
+                    ),
                 ):
-                    # Ensure the deserialized cache entry is still serializable
-                    compiled_fn = SerializableCompiledFunction(
-                        apply_runtime_wrappers(), lambda: serializable_copy
-                    )
+                    compiled_fn = apply_runtime_wrappers()
                 context = compile_context = None
             return compiled_fn
 
@@ -785,6 +784,7 @@ def deserialize_bundled_cache_entry(
         fn = compiled_fn if compiled_fn is not None else build()
         return fn(list(runtime_args))
 
+    # Ensure the deserialized cache entry is still serializable
     forward.serialize = lambda: serializable_copy  # type: ignore[attr-defined]
 
     return forward
