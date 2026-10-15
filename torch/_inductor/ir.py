@@ -6586,6 +6586,10 @@ class ChoiceCaller:
     def output_node(self) -> TensorBox:
         raise NotImplementedError
 
+    def is_layout_compatible(self) -> bool:
+        """Whether this choice can still use the current input layouts."""
+        return True
+
     def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {}
@@ -6754,7 +6758,12 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self, hint_override: int | None = None
     ) -> tuple[ChoiceCaller, float]:
         timings = self.choice_timings(hint_override=hint_override)
-        min_choice = min(timings, key=timings.get)  # type: ignore[arg-type]
+        choices = [choice for choice in timings if choice.is_layout_compatible()]
+        if not choices:
+            raise torch._inductor.select_algorithm.NoValidChoicesError(
+                "No choices remain compatible with the input layouts"
+            )
+        min_choice = min(choices, key=timings.get)  # type: ignore[arg-type]
         return (min_choice, timings[min_choice])
 
     def finalize_as_triton_callers(
@@ -8734,6 +8743,10 @@ class TMADescriptor(ExternKernel):
     def __init__(
         self, tensor: IRNode, inputs: Sequence[Any], constant_args: Sequence[Any]
     ) -> None:
+        # Freeze so the ownership ReinterpretView below does not capture a
+        # still-flexible layout (reachable when
+        # triton_kernel_default_layout_constraint is "flexible_layout").
+        as_storage_and_layout(tensor)
         super().__init__(
             None,
             # link back to the underlying tensor in terms of ownership
