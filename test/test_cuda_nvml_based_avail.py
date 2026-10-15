@@ -85,7 +85,11 @@ class TestExtendedCUDAIsAvail(TestCase):
             if nvml_avail:
                 _ = torch.cuda.is_available()
             else:
-                with patch.object(torch.cuda, "_device_count_nvml", return_value=-1):
+                # ROCm counts devices with amdsmi; CUDA uses NVML.
+                with (
+                    patch.object(torch.cuda, "_device_count_nvml", return_value=-1),
+                    patch.object(torch.cuda, "_device_count_amdsmi", return_value=-1),
+                ):
                     _ = torch.cuda.is_available()
             with multiprocessing.get_context("fork").Pool(1) as pool:
                 in_bad_fork = pool.apply(TestExtendedCUDAIsAvail.in_bad_fork_test)
@@ -139,6 +143,10 @@ class TestVisibleDeviceParses(TestCase):
             "GPU-e56257c4-947f-6a5b-7ec9-0f45567ccf4e",
             "GPU-1c20e77d-1c1a-d9ed-fe37-18b8466a78ad",
         ]
+        # amdsmi asic serials have no NVML "GPU-" prefix. Candidates below stay
+        # GPU-prefixed; the matcher strips that prefix on ROCm.
+        if torch.version.hip is not None:
+            uuids = [uuid.removeprefix("GPU-") for uuid in uuids]
         self.assertEqual(_transform_uuid_to_ordinals(["GPU-9e8d35e3"], uuids), [1])
         self.assertEqual(
             _transform_uuid_to_ordinals(["GPU-e4", "GPU-9e8d35e3"], uuids), [2, 1]
