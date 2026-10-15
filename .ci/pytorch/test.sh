@@ -484,6 +484,7 @@ test_python_smoke() {
   assert_git_not_dirty
 }
 
+# Call from a subshell so the compat path and cleanup trap stay scoped to this test.
 setup_cuda_smoke_compat() {
   CUDA_COMPAT_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
   [[ "$BUILD_ENVIRONMENT" == *cuda13.4* ]] || return 0
@@ -494,7 +495,7 @@ setup_cuda_smoke_compat() {
   if [[ "$driver_version" -lt 13040 ]]; then
     local compat_package compat_repo_arch compat_sha256
     CUDA_COMPAT_DIR=$(mktemp -d)
-    trap 'rm -rf "$CUDA_COMPAT_DIR"' EXIT
+    trap_add 'rm -rf "$CUDA_COMPAT_DIR"' EXIT
     case "$(dpkg --print-architecture)" in
       amd64)
         compat_repo_arch=x86_64
@@ -524,7 +525,7 @@ torch.cuda.init()
 print(f"CUDA driver API version: {green_contexts._get_driver_version()}")
 green_contexts._ensure_locality_supported()
 if not green_contexts.is_localization_supported():
-    raise RuntimeError("B200 CUDA 13.4 smoke tests require locality-domain support")
+    raise RuntimeError("Blackwell CUDA 13.4 smoke tests require locality-domain support")
 PY
   )
 }
@@ -532,7 +533,7 @@ PY
 # PYTHON_TEST_EXTRA_OPTION intentionally expands into multiple arguments.
 # shellcheck disable=SC2086
 test_python_smoke_b200() {
-  # Targeted smoke tests for B200 including FlashAttention CuTe coverage
+  # Targeted Blackwell smoke tests including FlashAttention CuTe coverage
   install_flash_attn_cute
   install_cutlass_operators
   (
