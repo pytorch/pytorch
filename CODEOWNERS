@@ -340,6 +340,7 @@
 # label: module: autograd
 /torch/autograd/ @albanD @soulitzer
 /torch/csrc/autograd/ @albanD @soulitzer
+# /attn_lab/
 #
 # [core_csrc_misc]
 # /torch/csrc/CudaIPCTypes.cpp
