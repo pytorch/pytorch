@@ -117,23 +117,8 @@ struct abs_functor {
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
-    return T(c10::metal::hypot(x.x, x.y), 0);
-  }
-};
-
-struct sign_functor {
-  template <typename T>
-  inline T operator()(const T x) {
-    return T((T(0) < x) - (x < T(0)));
-  }
-};
-
-struct sgn_functor {
-  template <typename T>
-  inline T operator()(const T x) {
-    const auto z = float2(x);
-    const auto m = c10::metal::hypot(z.x, z.y);
-    return m == 0 ? T(0, 0) : T(z / m);
+    const auto abs_2 = ::precise::abs(float2(x));
+    return T(c10::metal::hypot(abs_2.x, abs_2.y));
   }
 };
 
@@ -356,7 +341,7 @@ struct log_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // log(x+yi) = ln(sqrt(x^2 + y^2)) + iarctan(y/x)
-    auto magnitude = c10::metal::hypot(x.x, x.y);
+    auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
     return T(real, imag);
@@ -378,7 +363,7 @@ struct log10_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // Base 10 complex log = ln(x+yi)/ln(10)
-    auto magnitude = c10::metal::hypot(x.x, x.y);
+    auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
     auto real = ::precise::log10(magnitude);
     auto imag =
         (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG10E_F;
@@ -401,7 +386,7 @@ struct log1p_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // TODO: Implement proper log1p algorithm
-    auto magnitude = c10::metal::hypot(1.0f + x.x, x.y);
+    auto magnitude = ::precise::sqrt((1.0f + x.x) * (1.0f + x.x) + x.y * x.y);
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == -1 && x.y == 0) ? 0 : ::precise::atan2(x.y, 1.0 + x.x);
     return T(real, imag);
@@ -423,7 +408,7 @@ struct log2_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // Base 2 complex log = ln(x+yi)/ln(2)
-    auto magnitude = c10::metal::hypot(x.x, x.y);
+    auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
     auto real = ::precise::log2(magnitude);
     auto imag =
         (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG2E_F;
@@ -567,10 +552,15 @@ struct rsqrt_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // rsqrt(z) = conj(sqrt(z)) / |z|, as |sqrt(z)|^2 = |z|
-    const auto s = c10::metal::sqrt(float2(x));
-    const auto m = c10::metal::hypot(x.x, x.y);
-    return T(s.x / m, -s.y / m);
+    // modulus
+    auto m = precise::sqrt(x.x * x.x + x.y * x.y);
+    // real part: sqrt((m + a)/2)
+    auto real_part = precise::sqrt((m + x.x) * .5);
+    // imaginary part: sign(b) * sqrt((m - a)/2)
+    auto imag_part = copysign(
+        static_cast<decltype(x.y)>(precise::sqrt((m - x.x) * .5)), x.y);
+    auto denominator = (real_part * real_part) + (imag_part * imag_part);
+    return T(real_part / denominator, -1 * imag_part / denominator);
   }
 };
 
@@ -697,19 +687,6 @@ REGISTER_UNARY_OP(abs, char, char);
 REGISTER_UNARY_OP(abs, uchar, uchar);
 REGISTER_UNARY_OP(abs, float, float);
 REGISTER_UNARY_OP(abs, half, half);
-
-#define REGISTER_SIGN_OP(DTYPE) REGISTER_UNARY_OP(sign, DTYPE, DTYPE)
-REGISTER_SIGN_OP(bool);
-REGISTER_SIGN_OP(uchar);
-REGISTER_SIGN_OP(char);
-REGISTER_SIGN_OP(short);
-REGISTER_SIGN_OP(int);
-REGISTER_SIGN_OP(long);
-REGISTER_SIGN_OP(half);
-REGISTER_SIGN_OP(bfloat);
-REGISTER_SIGN_OP(float);
-REGISTER_UNARY_OP(sgn, float2, float2);
-REGISTER_UNARY_OP(sgn, half2, half2);
 
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
   REGISTER_UNARY_OP(angle, DTYPE1, DTYPE0);        \

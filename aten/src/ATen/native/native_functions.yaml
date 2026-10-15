@@ -435,7 +435,8 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS, XPU: sgn_out
+    CPU, CUDA, XPU: sgn_out
+    MPS: sgn_out_mps
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: sgn_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: sgn_sparse_csr_out
   tags: pointwise
@@ -9711,7 +9712,8 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS, XPU: sign_out
+    CPU, CUDA, XPU: sign_out
+    MPS: sign_out_mps
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: sign_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: sign_sparse_csr_out
   tags: pointwise
