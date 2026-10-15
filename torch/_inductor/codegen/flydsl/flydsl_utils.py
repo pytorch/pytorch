@@ -47,14 +47,12 @@ def _flydsl_runtime_unavailable_reason() -> str | None:
 
 @functools.cache
 def _check_runtime_available() -> bool:
-    import torch
-
     if not _cuda.is_built():
         return False
 
-    if torch.version.hip is None:
-        return False
-
+    # This shared gate only checks for a CUDA/HIP-capable build and a usable
+    # FlyDSL runtime. Vendor and architecture checks belong in each template's
+    # own gate, e.g. the HIP and gfx950 checks in use_flydsl_gemm_template().
     reason = _flydsl_runtime_unavailable_reason()
     if reason is not None:
         log.debug("FlyDSL Inductor templates are unavailable: %s", reason)
