@@ -121,7 +121,8 @@ class _UnresolvedTritonExport(RuntimeError):
         self.sources = sources
         self.report = {"sources": sources}
         super().__init__(
-            "Cannot export Triton sources: no fully resolved static launcher\n"
+            "Cannot export Triton sources: no fully resolved static launcher. Run "
+            "every Triton kernel the serving process needs inside the capture block.\n"
             + json.dumps(self.report, sort_keys=True)
         )
 
@@ -209,8 +210,16 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
                 key, saved.inductor_meta.get("kernel_name", "unknown_kernel"), saved
             )
         )
+    kernel_name = instances[0].inductor_meta.get("kernel_name")
     raise _UnresolvedTritonExport(
-        [{"source_key": key, "instance_count": len(instances), "instances": rejected}]
+        [
+            {
+                "source_key": key,
+                "kernel_name": kernel_name,
+                "instance_count": len(instances),
+                "instances": rejected,
+            }
+        ]
     )
 
 
