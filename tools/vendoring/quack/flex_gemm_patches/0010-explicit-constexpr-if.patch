@@ -1,0 +1,164 @@
+diff --git a/quack/copy_utils.py b/quack/copy_utils.py
+index 78fe74e..2aa3fd9 100644
+--- a/quack/copy_utils.py
++++ b/quack/copy_utils.py
+@@ -1514,10 +1514,12 @@ def gather_m_get_copy_fn(
+             mA_row = cute.tiled_divide(
+                 cute.append_ones(mA_cur[m_idx[m], None], up_to_rank=2), (elems_per_load, 1)
+             )[None, None, 0]
+-            if const_expr(is_even_m_smem) or tApA_m[m]:
+-                # There's only 1 load per row
+-                assert cute.size(tAcA.shape, mode=[2]) == 1
+-                ki = tAcA[0, 0, 0][1] // elems_per_load
++            # There's only 1 load per row
++            assert cute.size(tAcA.shape, mode=[2]) == 1
++            ki = tAcA[0, 0, 0][1] // elems_per_load
++            if const_expr(is_even_m_smem):
++                cute.copy(thr_copy_A, mA_row[None, ki], tAsA[(None, m), dst_idx], pred=tApA_k)
++            elif tApA_m[m]:
+                 cute.copy(thr_copy_A, mA_row[None, ki], tAsA[(None, m), dst_idx], pred=tApA_k)
+ 
+     return copy_fn
+diff --git a/quack/dsl/__init__.py b/quack/dsl/__init__.py
+index 5dab653..9e3066c 100644
+--- a/quack/dsl/__init__.py
++++ b/quack/dsl/__init__.py
+@@ -4,7 +4,6 @@
+ 
+ import quack.dsl.cute_tensor_indexing  # noqa: F401
+ import quack.dsl.cute_tensor  # noqa: F401
+-import quack.dsl.mixed_constexpr_if  # noqa: F401
+ from quack.dsl.torch_library_op import cute_op
+ 
+ __all__ = ["cute_op"]
+diff --git a/quack/gemm_base.py b/quack/gemm_base.py
+index cb87afc..8b0accc 100644
+--- a/quack/gemm_base.py
++++ b/quack/gemm_base.py
+@@ -221,7 +221,7 @@ class GemmBase:
+                     rotated[name] = layout_utils.select(v, [1, 2, 0])
+                 elif append_batch_if_2d and cute.rank(v) == 2:
+                     rotated[name] = layout_utils.expand(v, 2, 1)
+-                if const_expr(self.cd_transposed) and name in rotated:
++                if const_expr(self.cd_transposed and name in rotated):
+                     rotated[name] = layout_utils.select(rotated[name], [1, 0, 2])
+             elif name in reduce_fields and append_batch_if_2d and cute.rank(v) == 2:
+                 rotated[name] = layout_utils.expand(v, 0, 1)
+@@ -710,14 +710,12 @@ class GemmBase:
+             finalizer_load_acc = load_acc_and_fold
+         else:
+             split_k_sem, ws_ptr = None, None
+-        # Mixed static/dynamic test (quack.dsl.mixed_constexpr_if): the const_expr
+-        # prefix folds at trace time, so split_k == 1 / SEPARATE codegen is a bare
+-        # epilogue call with no dynamic if, while SERIAL/PARALLEL non-finalizing
+-        # splits commit raw partials and only the last split runs the epilogue.
+-        if (
+-            const_expr(self.split_k > 1 and self.split_k_mode != SplitKMode.SEPARATE)
+-            and split_idx < self.split_k - 1
+-        ):
++        # split_k == 1 / SEPARATE codegen is a bare epilogue call with no dynamic if,
++        # while SERIAL/PARALLEL non-finalizing splits commit raw partials and only
++        # the last split runs the epilogue.
++        if const_expr(not (self.split_k > 1 and self.split_k_mode != SplitKMode.SEPARATE)):
++            epi_read_state, epi_producer_state = epi_fn(finalizer_load_acc)
++        elif split_idx < self.split_k - 1:
+             self.split_k_partial_commit(
+                 load_acc_subtile, tRS_rD, epi_tile, ws_ptr, split_k_sem, split_idx, tidx
+             )
+diff --git a/quack/gemm_sm100.py b/quack/gemm_sm100.py
+index 5dd8bf1..178d909 100644
+--- a/quack/gemm_sm100.py
++++ b/quack/gemm_sm100.py
+@@ -1674,12 +1674,10 @@ class GemmSm100(GemmTmaBase):
+                     # Split-K (serial/parallel): only the finalizing split runs the
+                     # epilogue, so only its tiles consume C — skip the loads (and the
+                     # pipeline slots) for non-finalizing splits, symmetric with the
+-                    # epilogue warps' skip in epilogue_split_k. The const_expr prefix
+-                    # folds at trace time (quack.dsl.mixed_constexpr_if), so
+-                    # split_k == 1 codegen has no dynamic if at all.
+-                    if (
+-                        const_expr(self.split_k == 1 or self.split_k_mode == SplitKMode.SEPARATE)
+-                        or split_idx == self.split_k - 1
++                    # epilogue warps' skip in epilogue_split_k. split_k == 1 codegen
++                    # has no dynamic if at all.
++                    if const_expr(
++                        self.split_k == 1 or self.split_k_mode == SplitKMode.SEPARATE
+                     ):
+                         for epi_idx in cutlass.range(epi_tile_num, unroll=1):
+                             epi_pipeline.producer_acquire(epi_producer_state)
+@@ -1690,6 +1688,16 @@ class GemmSm100(GemmTmaBase):
+                             # Epi pipeline's producer commit is a NOP
+                             epi_pipeline.producer_commit(epi_producer_state)
+                             epi_producer_state.advance()
++                    elif split_idx == self.split_k - 1:
++                        for epi_idx in cutlass.range(epi_tile_num, unroll=1):
++                            epi_pipeline.producer_acquire(epi_producer_state)
++                            copy_epi_load(
++                                src_idx=epi_load_layout.get_hier_coord(epi_idx),
++                                producer_state=epi_producer_state,
++                            )
++                            # Epi pipeline's producer commit is a NOP
++                            epi_pipeline.producer_commit(epi_producer_state)
++                            epi_producer_state.advance()
+                     # Advance to next tile
+                     tile_scheduler.advance_to_next_work()
+                     work_tile = tile_scheduler.get_current_work()
+diff --git a/quack/gemm_sm120.py b/quack/gemm_sm120.py
+index 90707c2..85205e3 100644
+--- a/quack/gemm_sm120.py
++++ b/quack/gemm_sm120.py
+@@ -1354,13 +1354,11 @@ class GemmSm120(GemmSm90):
+                     # Splits not covering the last k-tile see a full tile.
+                     k_valid = len_k - (k_tile_total - 1) * self.cta_tile_shape_mnk[2]
+                     sf_valid_insts_last_tile = cute.ceil_div(k_valid, self.mma_inst_mnk[2])
+-                    if (
+-                        const_expr(self.split_k > 1)
+-                        and k_tile_start_mma + k_tile_cnt != k_tile_total
+-                    ):
+-                        sf_valid_insts_last_tile = Int32(
+-                            self.cta_tile_shape_mnk[2] // self.mma_inst_mnk[2]
+-                        )
++                    if const_expr(self.split_k > 1):
++                        if k_tile_start_mma + k_tile_cnt != k_tile_total:
++                            sf_valid_insts_last_tile = Int32(
++                                self.cta_tile_shape_mnk[2] // self.mma_inst_mnk[2]
++                            )
+                 if const_expr(self.pingpong):
+                     self.pingpong_barrier_sync(warp_group_idx, stage="mma")
+                 iket.range_push("mma")
+@@ -1757,7 +1755,15 @@ class GemmSm120(GemmSm90):
+                     # zero-filled value tail — its SF pad bytes may be
+                     # arbitrary (0xFF is e8m0 NaN, and NaN * 0 would poison
+                     # the accumulator)
+-                    if const_expr(sf_valid_insts_last_tile is None) or k < sf_valid_insts_last_tile:
++                    if const_expr(sf_valid_insts_last_tile is None):
++                        cute.gemm(
++                            tiled_mma,
++                            acc,
++                            [tCrA[None, None, k], tCrSFA[None, None, k]],
++                            [tCrB[None, None, k], tCrSFB[None, None, k]],
++                            acc,
++                        )
++                    elif k < sf_valid_insts_last_tile:
+                         cute.gemm(
+                             tiled_mma,
+                             acc,
+diff --git a/quack/sync/barrier.py b/quack/sync/barrier.py
+index 2fabae5..28a24f3 100644
+--- a/quack/sync/barrier.py
++++ b/quack/sync/barrier.py
+@@ -56,7 +56,13 @@ def wait_eq(
+     ``if val != 0`` for protocols where 0 means "no predecessor" — note the
+     acquire load is skipped too, so there is no ordering edge in that case.
+     """
+-    if const_expr(not skip_zero) or val != 0:
++    if const_expr(not skip_zero):
++        _wait_eq_spin(lock_ptr + flag_offset, thread_idx, val)
++        if const_expr(sync == "warp"):
++            cute.arch.sync_warp()
++        elif const_expr(sync == "cta"):
++            cute.arch.sync_threads()
++    elif val != 0:
+         _wait_eq_spin(lock_ptr + flag_offset, thread_idx, val)
+         if const_expr(sync == "warp"):
+             cute.arch.sync_warp()
