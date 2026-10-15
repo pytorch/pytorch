@@ -13,6 +13,7 @@ import copy
 import errno
 import functools
 import inspect
+import itertools
 import logging
 import os
 import re
@@ -186,6 +187,98 @@ def _check_tolerances(dtype: torch.dtype) -> tuple[float, float, float | None]:
     return rtol, atol, atol_frac
 
 
+_RngState = tuple[torch.Tensor, list[torch.Tensor] | None]
+
+
+def _rng_state() -> _RngState:
+    """The CPU generator's state, and every CUDA generator's once CUDA is initialized."""
+    cuda = torch.cuda.get_rng_state_all() if torch.cuda.is_initialized() else None
+    return torch.random.get_rng_state(), cuda
+
+
+def _set_rng_state(state: _RngState) -> None:
+    cpu, cuda = state
+    torch.random.set_rng_state(cpu)
+    if cuda is not None:
+        torch.cuda.set_rng_state_all(cuda)
+
+
+def _compared(
+    result: Any, args: tuple[Any, ...], path: str
+) -> list[tuple[str, torch.Tensor]]:
+    """The tensors the eager check compares: fn's result, then each input it can mutate.
+
+    pytree treats an nn.Module as one opaque leaf, so a module argument contributes its
+    parameters and buffers instead; a train-mode BatchNorm writes its running stats.
+    """
+    leaves = [t for t in pytree.tree_leaves(result) if isinstance(t, torch.Tensor)]
+    found = [(f"output {i} of the artifact at {path}", t) for i, t in enumerate(leaves)]
+    left = f"as the artifact at {path} left it"
+    for j, leaf in enumerate(pytree.tree_leaves(args)):
+        if isinstance(leaf, torch.nn.Module):
+            state = itertools.chain(leaf.named_parameters(), leaf.named_buffers())
+            found += [(f"input {j}.{n} {left}", t) for n, t in state]
+        elif isinstance(leaf, torch.Tensor):
+            found.append((f"input {j} {left}", leaf))
+    return found
+
+
+def _magnitude(t: torch.Tensor) -> float:
+    """Largest finite |t|, widened so a complex tensor keeps its imaginary part."""
+    finite = _finite_mask(t)
+    values = t[finite] if finite is not None else t.flatten()
+    wide = torch.complex128 if t.is_complex() else torch.float64
+    return values.to(wide).abs().max().item() if values.numel() else 0.0
+
+
+def _tolerances_for(reference: torch.Tensor) -> tuple[float, float]:
+    """``(rtol, atol)`` against reference, with atol capped at its magnitude."""
+    rtol, atol, atol_frac = _check_tolerances(reference.dtype)
+    magnitude = _magnitude(reference)
+    if atol_frac is not None and magnitude > 0:
+        atol = min(atol, atol_frac * magnitude)
+    return rtol, atol
+
+
+def _eager_draws(
+    fn: Callable[..., Any],
+    args: tuple[Any, ...],
+    rng: _RngState,
+    path: str,
+) -> set[int]:
+    """Positions in ``_compared``'s list whose value depends on the generator.
+
+    Only consulted after a mismatch, to tell "the edit broke it" apart from "this
+    function draws". Drawing has to be detected by running from two DIFFERENT generator
+    states -- running twice from the same state proves nothing, because eager is
+    perfectly reproducible at a fixed seed. What makes the comparison meaningless is that
+    inductor lowers random ops to its own philox and differs from eager at the same seed
+    by design.
+    """
+    saved = _rng_state()
+    try:
+        _set_rng_state(rng)
+        first_args = copy.deepcopy(args)
+        first = _compared(fn(*first_args), first_args, path)
+        seed = int(torch.random.initial_seed()) + 1
+        torch.random.default_generator.manual_seed(seed)
+        if torch.cuda.is_initialized():
+            torch.cuda.manual_seed_all(seed)
+        second_args = copy.deepcopy(args)
+        second = _compared(fn(*second_args), second_args, path)
+    except Exception:
+        return set()
+    finally:
+        # This runs only to answer a question; the caller's streams must not move.
+        _set_rng_state(saved)
+    return {
+        k
+        for k, ((_, a), (_, b)) in enumerate(zip(first, second))
+        if (a.shape, a.dtype) != (b.shape, b.dtype)
+        or not _allclose(a, b, *_tolerances_for(a))
+    }
+
+
 def _allclose(a: torch.Tensor, b: torch.Tensor, rtol: float, atol: float) -> bool:
     """torch.allclose, but tolerant of dtypes that have no comparison kernel.
 
@@ -217,9 +310,11 @@ def _finite_mask(t: torch.Tensor) -> torch.Tensor | None:
 
 def _verify_against_eager(
     fn: Callable[..., Any],
+    args: tuple[Any, ...],
     reference_args: tuple[Any, ...],
     produced: Any,
     path: str,
+    rng: _RngState,
 ) -> None:
     """Re-run fn eagerly on a pre-call copy of the inputs and compare the results.
 
@@ -248,13 +343,38 @@ def _verify_against_eager(
                 f"returns {want!r}. If you have hand-edited the artifact, the edit changed "
                 f"its result; otherwise delete {path} to recapture."
             )
-    got_leaves = [t for t in got_flat if isinstance(t, torch.Tensor)]
-    want_leaves = [t for t in want_flat if isinstance(t, torch.Tensor)]
-    for i, (got, want) in enumerate(zip(got_leaves, want_leaves)):
-        rtol, atol, atol_frac = _check_tolerances(got.dtype)
+    # Outputs AND inputs: a graph is free to mutate what it was handed, and a fn whose
+    # whole job is an in-place write returns nothing else to compare.
+    compared = [
+        (label, got, want)
+        for (label, got), (_, want) in zip(
+            _compared(produced, args, path), _compared(expected, reference_args, path)
+        )
+    ]
+    draws: set[int] | None = None
+
+    def drawn(k: int) -> bool:
+        # Asked only once a check fails: a draw explains any of the three mismatches.
+        nonlocal draws
+        if draws is None:
+            draws = _eager_draws(fn, reference_args, rng, path)
+            if draws:
+                log.warning(
+                    "%s: %s draws from the generator, and inductor lowers random ops "
+                    "to its own philox, which differs from eager at the same seed by "
+                    "design -- so comparing the two says nothing. Skipping the check "
+                    "for the %d tensor(s) of %s that depend on it.",
+                    _CHECK_ENV,
+                    name,
+                    len(draws),
+                    path,
+                )
+        return k in draws
+
+    for k, (label, got, want) in enumerate(compared):
         if (got.shape, got.dtype, got.device) != (want.shape, want.dtype, want.device):
             raise _precompile_error(
-                f"{_CHECK_ENV}: output {i} of the artifact at {path} is "
+                f"{_CHECK_ENV}: {label} is "
                 f"{tuple(got.shape)}/{got.dtype}/{got.device} but eager gives "
                 f"{tuple(want.shape)}/{want.dtype}/{want.device}."
             )
@@ -266,9 +386,11 @@ def _verify_against_eager(
             and finite_got is not None
             and not torch.equal(finite_got, finite_want)
         ):
+            if drawn(k):
+                continue
             bad = int((finite_got != finite_want).sum())
             raise _precompile_error(
-                f"{_CHECK_ENV}: output {i} of the artifact at {path} disagrees with "
+                f"{_CHECK_ENV}: {label} disagrees with "
                 f"{name} about where the result is finite "
                 f"({bad} of {got.numel()} elements). A kernel that leaves part of its "
                 "output unwritten reads back uninitialized memory, which looks like "
@@ -281,22 +403,21 @@ def _verify_against_eager(
             g, w = got[~finite_want].to(wide), want[~finite_want].to(wide)
             same_nan = torch.equal(g.isnan(), w.isnan())
             if not same_nan or not torch.equal(g.nan_to_num(), w.nan_to_num()):
+                if drawn(k):
+                    continue
                 raise _precompile_error(
-                    f"{_CHECK_ENV}: output {i} of the artifact at {path} disagrees with "
-                    f"{name} about which non-finite value (inf, -inf or nan) it holds. "
+                    f"{_CHECK_ENV}: {label} disagrees with {name} about which "
+                    "non-finite value (inf, -inf or nan) it holds. "
                     "If you have hand-edited the artifact, the edit changed its result; "
                     f"otherwise delete {path} to recapture."
                 )
-        # Cap the absolute tolerance at a fraction of how big the reference actually is,
-        # so a tensor whose every element is smaller than atol is still checked.
+        rtol, atol = _tolerances_for(want)
+        if _allclose(got, want, rtol, atol):
+            continue
         flat_got = got[finite_want] if finite_want is not None else got.flatten()
         flat_want = want[finite_want] if finite_want is not None else want.flatten()
         values = flat_want.to(wide)
-        magnitude = values.abs().max().item() if values.numel() else 0.0
-        if atol_frac is not None and magnitude > 0:
-            atol = min(atol, atol_frac * magnitude)
-        if _allclose(got, want, rtol, atol):
-            continue
+        magnitude = _magnitude(want)
         # Finite positions only: inf/nan positions already agreed, and inf - inf is nan.
         diff = (flat_got.to(wide) - values).abs()
         max_abs = diff.max().item() if diff.numel() else 0.0
@@ -309,8 +430,10 @@ def _verify_against_eager(
             rel = f"{(diff[significant] / reference[significant]).max().item():.3e}"
         else:
             rel = "n/a (reference is all near-zero)"
+        if drawn(k):
+            continue
         raise _precompile_error(
-            f"{_CHECK_ENV}: output {i} of the artifact at {path} does not match "
+            f"{_CHECK_ENV}: {label} does not match "
             f"{name} run eagerly on the same inputs "
             f"(max abs diff {max_abs:.3e}, max rel diff {rel}, reference "
             f"magnitude {magnitude:.3e}, tolerances rtol={rtol} atol={atol:.3e}). "
@@ -1269,8 +1392,22 @@ class ExportedPythonArtifact:
                 self._path,
             )
             return loaded(*args)
+        # Three states matter here. `before` is what the artifact saw (CPU and, once
+        # initialized, CUDA generators); the reference run is rewound to it so a draw is
+        # not mistaken for a bad edit. `after` is what the caller must be left with --
+        # restoring `before` instead would discard whatever the artifact consumed and
+        # freeze the caller's stream, so a random function would return the same numbers
+        # on every checked call.
+        before = _rng_state()
         produced = loaded(*args)
-        _verify_against_eager(self._fn, reference, produced, self._path)
+        after = _rng_state()
+        try:
+            _set_rng_state(before)
+            _verify_against_eager(
+                self._fn, args, reference, produced, self._path, before
+            )
+        finally:
+            _set_rng_state(after)
         return produced
 
 
