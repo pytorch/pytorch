@@ -52,41 +52,6 @@ struct vectypes<long> {
   using type2 = long2;
 };
 
-template <typename T>
-struct OpMathType {
-  using type = T;
-};
-
-template <>
-struct OpMathType<half> {
-  using type = float;
-};
-
-template <>
-struct OpMathType<short> {
-  using type = int;
-};
-
-template <>
-struct OpMathType<char> {
-  using type = int;
-};
-
-template <>
-struct OpMathType<uchar> {
-  using type = int;
-};
-
-template <>
-struct OpMathType<bfloat> {
-  using type = float;
-};
-
-template <>
-struct OpMathType<half2> {
-  using type = float2;
-};
-
 // Type promotion structure for higher precision accumulation
 template <typename T>
 struct AccumulationType {
@@ -107,9 +72,12 @@ struct AccumulationType<bfloat> {
 
 } // namespace detail
 
+// NaN-propagating max/min that, like std::max/std::min (and thus CPU), return
+// `a` on ties. ::metal::max/min return their second argument on ties, hence the
+// swapped order, which preserves the sign of e.g. max(-0.0, 0.0)
 template <typename T>
 ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> max(T a, T b) {
-  return ::metal::isunordered(a, b) ? NAN : ::metal::max(a, b);
+  return ::metal::isunordered(a, b) ? NAN : ::metal::max(b, a);
 }
 
 template <typename T, typename U>
@@ -120,7 +88,7 @@ max(T a, U b) {
 
 template <typename T>
 ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> min(T a, T b) {
-  return ::metal::isunordered(a, b) ? NAN : ::metal::min(a, b);
+  return ::metal::isunordered(a, b) ? NAN : ::metal::min(b, a);
 }
 
 template <typename T, typename U>
@@ -132,13 +100,13 @@ min(T a, U b) {
 template <>
 inline bfloat min(bfloat a, bfloat b) {
   return bfloat(
-      ::metal::isunordered(a, b) ? NAN : ::metal::min(float(a), float(b)));
+      ::metal::isunordered(a, b) ? NAN : ::metal::min(float(b), float(a)));
 }
 
 template <>
 inline bfloat max(bfloat a, bfloat b) {
   return bfloat(
-      ::metal::isunordered(a, b) ? NAN : ::metal::max(float(a), float(b)));
+      ::metal::isunordered(a, b) ? NAN : ::metal::max(float(b), float(a)));
 }
 
 // Less-than that sorts NaNs last. Uses a != a instead of metal::isnan,
@@ -166,9 +134,6 @@ using vec2type_t = typename detail::vectypes<T>::type2;
 
 template <typename T>
 using vec4type_t = typename detail::vectypes<T>::type4;
-
-template <typename T>
-using opmath_t = typename detail::OpMathType<T>::type;
 
 template <typename T>
 using accum_t = typename detail::AccumulationType<T>::type;

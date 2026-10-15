@@ -45,6 +45,7 @@ std::string demangle(const char* name) {
   }
   std::string res(demangled);
   // The returned buffer must be freed!
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(demangled);
   return res;
 #else
