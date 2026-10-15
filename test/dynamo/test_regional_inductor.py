@@ -24,6 +24,7 @@ from torch.fx.passes.regional_inductor_invoke_subgraph import (
     regional_inductor_invoke_subgraph,
 )
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -2003,6 +2004,39 @@ class RegionalInductorPartitionTests(torch._inductor.test_case.TestCase):
         g.output(tagged_c)
         gm = torch.fx.GraphModule(torch.nn.Module(), g)
         self.assertEqual(self._scoop_and_count(gm), 1)
+
+
+@skipIfTorchDynamo("Not a suitable dynamo wrapped test")
+class RegionalInductorSymbolInputsTests(torch._inductor.test_case.TestCase):
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_symbol_sum_size_input(self, device):
+        # The region input is sized u0 + u1, so the region also needs the
+        # SymInts u0 and u1 as inputs even though it doesn't use them.
+        def fn(x, counts):
+            a, b = counts.tolist()
+            for n in (a, b):
+                torch._check(n >= 0)
+                torch._check(n <= x.size(0))
+            y = torch.cat([x[:a], x[:b]])
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                return y.sin() * 2
+
+        x = torch.randn(4, 3, device=device, requires_grad=True)
+        counts = torch.tensor([2, 3], device=device)
+        opt_fn = torch.compile(
+            fn, backend=aot_eager_regional_inductor(serialize=False), fullgraph=True
+        )
+
+        result, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, counts))
+        ref_x = x.detach().clone().requires_grad_()
+        expected = fn(ref_x, counts)
+        expected.sum().backward()
+        self.assertEqual(len(codes), 2)
+        self.assertEqual(result, expected)
+        self.assertEqual(x.grad, ref_x.grad)
+
+
+instantiate_device_type_tests(RegionalInductorSymbolInputsTests, globals())
 
 
 if __name__ == "__main__":
