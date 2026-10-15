@@ -439,6 +439,7 @@ if __name__ == '__main__':
             self.assertIn('errors=1', stderr)
 
 
+    @onlyCUDA
     @slowTest
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
         # test to ensure common_distributed.py override should not early terminate CUDA.
