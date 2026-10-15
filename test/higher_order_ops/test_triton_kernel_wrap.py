@@ -52,7 +52,9 @@ class TestTritonKernelWrapperAutocast(TestCase):
         # Exercise the real HOP dispatcher with CPU tensors and the PrivateUse1
         # autocast key. Only replace the final launch, so no accelerator is needed.
         with (
-            mock.patch.dict(op.py_kernels, {DispatchKey.CompositeExplicitAutograd: launch}),
+            mock.patch.dict(
+                op.py_kernels, {DispatchKey.CompositeExplicitAutograd: launch}
+            ),
             mock.patch.object(op, "_dispatch_cache", {}),
             torch._C._ForceDispatchKeyGuard(include, exclude),
         ):

@@ -1965,7 +1965,7 @@ triton_kernel_wrapper_mutation.fallthrough(DispatchKey.ADInplaceOrView)
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.BackendSelect)
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastPrivateUse1)
+triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastPrivateUse1)  # type: ignore[attr-defined]
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutogradCPU)
 
@@ -1975,7 +1975,7 @@ triton_kernel_wrapper_functional.fallthrough(DispatchKey.ADInplaceOrView)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.BackendSelect)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastPrivateUse1)
+triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastPrivateUse1)  # type: ignore[attr-defined]
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
