@@ -12,8 +12,9 @@ from torch.utils._config_module import Config, install_config_module
 
 __all__ = [
     "compile_on_one_rank",
-    "use_torchcomms",
+    "dtensor_use_symmetric_memory",
     "pipeline_per_edge_p2p",
+    "use_torchcomms",
 ]
 
 # Deprecated alias. The canonical flag now lives in torch.compiler.config -- it is read
@@ -30,6 +31,14 @@ compile_on_one_rank: bool = Config(
 use_torchcomms: bool = Config(
     default=False,
     env_name_default="TORCH_DISTRIBUTED_USE_TORCHCOMMS",
+)
+
+# When enabled, DTensor construction APIs allocate eligible CUDA local tensors
+# from SymmetricMemory. This is intended for one-sided communication algorithms
+# that need DTensor local shards to be remotely addressable.
+dtensor_use_symmetric_memory: bool = Config(
+    default=False,
+    env_name_default="TORCH_DTENSOR_USE_SYMMETRIC_MEMORY",
 )
 
 # When enabled, each adjacent directed physical-rank edge uses a separate
