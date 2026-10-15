@@ -91,7 +91,7 @@ int ceildiv(int a, int b) {
   return (a + b - 1) / b;
 }
 
-int round_up_to_nearest_multiple(int a, int b) {
+[[maybe_unused]] int round_up_to_nearest_multiple(int a, int b) {
   return ceildiv(a, b) * b;
 }
 
@@ -952,24 +952,38 @@ void dispatch_fp8_rowwise_kernel_on_sm(
         false, "Rowwise scaling is not currently supported on your device");
   }
 
+  // Only instantiate a path if some targeted arch gives its kernels a body
+  // (see the enable_*_kernel_for_* wrappers and CUTLASS's per-arch guards).
+  using at::cuda::detail::cuda_arch_list_has;
+  using at::cuda::detail::cuda_arch_list_has_major;
   if (sm9x) {
-    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
-      /*ArchTag=*/cutlass::arch::Sm90,
-      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    if constexpr (cuda_arch_list_has_major(9)) {
+      return dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+        /*ArchTag=*/cutlass::arch::Sm90,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    }
   } else if (sm10x || sm11x) {
-    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
-      /*ArchTag=*/cutlass::arch::Sm100,
-      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    if constexpr (cuda_arch_list_has_major(10) || cuda_arch_list_has_major(11)) {
+      return dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+        /*ArchTag=*/cutlass::arch::Sm100,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    }
   } else if (sm12x) {
-    // sm12x doesn't have multicast feature
-    handle_transposition<
-      /*ClusterShape=*/cute::Shape<cute::_1, cute::_1, cute::_1>,
-      /*Transposed=*/std::false_type,
-      /*ArchTag=*/cutlass::arch::Sm120,
-      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    if constexpr (cuda_arch_list_has_major(12)) {
+      // sm12x doesn't have multicast feature
+      return handle_transposition<
+        /*ClusterShape=*/cute::Shape<cute::_1, cute::_1, cute::_1>,
+        /*Transposed=*/std::false_type,
+        /*ArchTag=*/cutlass::arch::Sm120,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    }
   } else {
-    dispatch_fp8_rowwise_kernel_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    if constexpr (cuda_arch_list_has(890, 900)) {
+      return dispatch_fp8_rowwise_kernel_sm89<Types...>(
+          XQ, WQ, x_scale, w_scale, bias, out);
+    }
   }
+  at::cuda::detail::cutlass_arch_not_built("Rowwise scaling");
 }
 
 template <typename... Types>
