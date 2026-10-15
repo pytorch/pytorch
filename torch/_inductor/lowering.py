@@ -3913,7 +3913,6 @@ make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 
 # 4) Backwards (try py_impl'ing them) when fwd is written as a decomp
 make_fallback(aten.max_pool3d_with_indices_backward)
-make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(
@@ -6539,6 +6538,107 @@ def _adaptive_avg_pool2d(x, output_size):
     )
     # TODO: should we force these to be realized?
     return rv
+
+
+fallback_adaptive_avg_pool2d_backward = fallback_handler(
+    aten._adaptive_avg_pool2d_backward.default, add_to_fallback_set=False
+)
+
+
+@register_lowering(aten._adaptive_avg_pool2d_backward, type_promotion_kind=None)
+def _adaptive_avg_pool2d_backward(grad_output, x):
+    if not isinstance(grad_output, TensorBox):
+        raise AssertionError("expected: isinstance(grad_output, TensorBox)")
+    if not isinstance(x, TensorBox):
+        raise AssertionError("expected: isinstance(x, TensorBox)")
+    if len(x.get_size()) not in (3, 4):
+        raise AssertionError("expected: len(x.get_size()) in (3, 4)")
+
+    grad_output.realize_hint()
+
+    *_, height, width = x.get_size()
+    *_, pooled_height, pooled_width = grad_output.get_size()
+    new_size = list(x.get_size())
+    dtype = x.get_dtype()
+
+    if x.get_numel() == 0:
+        return empty(new_size, dtype=dtype, device=grad_output.get_device())
+
+    h_window_size = ceildiv(pooled_height + height - 1, height)
+    w_window_size = ceildiv(pooled_width + width - 1, width)
+
+    window_size = h_window_size * w_window_size
+    if V.graph.sizevars.guard_or_true(sympy.Gt(window_size, 25)):
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        return fallback_adaptive_avg_pool2d_backward(grad_output, x)
+
+    # Only the unrolled overlap bounds need to be specialized.
+    h_window_size = V.graph.sizevars.guard_int(h_window_size)
+    w_window_size = V.graph.sizevars.guard_int(w_window_size)
+    grad_loader = grad_output.make_loader()
+
+    def fn(idx):
+        *prefix, h, w = idx
+        # Invert the forward bounds to find pooled indices covering this pixel.
+        phstart = FloorDiv(h * pooled_height, height)
+        pwstart = FloorDiv(w * pooled_width, width)
+        phend = ops.index_expr(
+            FloorDiv((h + 1) * pooled_height + height - 1, height),
+            torch.int64,
+        )
+        pwend = ops.index_expr(
+            FloorDiv((w + 1) * pooled_width + width - 1, width),
+            torch.int64,
+        )
+        gradient = None
+
+        for ph_ in range(h_window_size):
+            for pw_ in range(w_window_size):
+                ph_expr = phstart + ph_
+                pw_expr = pwstart + pw_
+                ph = ops.index_expr(ph_expr, torch.int64)
+                pw = ops.index_expr(pw_expr, torch.int64)
+                mask = ops.and_(ops.lt(ph, phend), ops.lt(pw, pwend))
+                grad_part = ops.masked(
+                    mask,
+                    lambda: grad_loader([*prefix, ph_expr, pw_expr]),
+                    0.0,
+                )
+
+                kh = ops.maximum(
+                    ops.index_expr(
+                        FloorDiv(
+                            (ph_expr + 1) * height + pooled_height - 1, pooled_height
+                        )
+                        - FloorDiv(ph_expr * height, pooled_height),
+                        torch.int64,
+                    ),
+                    ops.constant(1, torch.int64),
+                )
+                kw = ops.maximum(
+                    ops.index_expr(
+                        FloorDiv((pw_expr + 1) * width + pooled_width - 1, pooled_width)
+                        - FloorDiv(pw_expr * width, pooled_width),
+                        torch.int64,
+                    ),
+                    ops.constant(1, torch.int64),
+                )
+                part = ops.truediv(ops.truediv(grad_part, kh), kw)
+                if gradient is None:
+                    gradient = part
+                else:
+                    gradient = ops.add(gradient, part)
+
+        if gradient is None:
+            raise AssertionError("expected: gradient is not None")
+        return gradient
+
+    return Pointwise.create(
+        device=grad_output.get_device(),
+        dtype=dtype,
+        inner_fn=fn,
+        ranges=new_size,
+    )
 
 
 fallback_adaptive_max_pool2d = fallback_handler(
