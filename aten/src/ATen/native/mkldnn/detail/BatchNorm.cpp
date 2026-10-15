@@ -5,13 +5,6 @@
 
 namespace at::native::mkldnn {
 
-namespace {
-
-const auto kScaleShift = dnnl::normalization_flags::use_scale |
-    dnnl::normalization_flags::use_shift;
-
-} // namespace
-
 void batch_normalization_forward_inference(
     const ideep::tensor& src,
     const ideep::tensor& mean,
@@ -21,8 +14,9 @@ void batch_normalization_forward_inference(
     ideep::tensor& dst,
     float epsilon) {
   const auto& engine = ideep::engine::cpu_engine();
-  const auto pd_flags =
-      kScaleShift | dnnl::normalization_flags::use_global_stats;
+  const auto pd_flags = dnnl::normalization_flags::use_scale |
+      dnnl::normalization_flags::use_shift |
+      dnnl::normalization_flags::use_global_stats;
 
   // Workaround for oneDNN issue intel/mkl-dnn#588 (kept from ideep).
   auto src_desc = src._get_unblocked_desc_if_4c_blocked();
@@ -65,6 +59,8 @@ void batch_normalization_forward_training(
     ideep::tensor& variance,
     float epsilon) {
   const auto& engine = ideep::engine::cpu_engine();
+  const auto pd_flags = dnnl::normalization_flags::use_scale |
+      dnnl::normalization_flags::use_shift;
 
   // Workaround for oneDNN issue intel/mkl-dnn#588 (kept from ideep).
   auto src_desc = src._get_unblocked_desc_if_4c_blocked();
@@ -78,7 +74,7 @@ void batch_normalization_forward_training(
       src_desc,
       src_desc,
       epsilon,
-      kScaleShift,
+      pd_flags,
       op_attr);
 
   auto expected_src = src.reorder_if_differ_in(pd.src_desc());
@@ -118,6 +114,8 @@ void batch_normalization_backward(
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
   const auto& engine = ideep::engine::cpu_engine();
+  const auto pd_flags = dnnl::normalization_flags::use_scale |
+      dnnl::normalization_flags::use_shift;
   // Workaround for oneDNN issue intel/mkl-dnn#588 (kept from ideep).
   auto src_desc = src._get_unblocked_desc_if_4c_blocked();
   auto forward_hints = dnnl::batch_normalization_forward::primitive_desc(
@@ -126,7 +124,7 @@ void batch_normalization_backward(
       src_desc,
       src_desc,
       epsilon,
-      kScaleShift);
+      pd_flags);
 
   dnnl::primitive_attr op_attr;
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
@@ -138,7 +136,7 @@ void batch_normalization_backward(
       forward_hints.dst_desc(),
       src_desc,
       epsilon,
-      kScaleShift,
+      pd_flags,
       forward_hints,
       op_attr);
 
