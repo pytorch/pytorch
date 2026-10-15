@@ -9,7 +9,6 @@
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/Histogram.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAMathCompat.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/util/irange.h>
 
@@ -31,6 +30,7 @@ namespace {
 
 constexpr int histogram_threads = 256;
 constexpr int histogram_blocks_per_sm = 4;
+constexpr int histogram_shared_bins_per_sample = 8;
 
 template <typename scalar_t, typename index_t, bool linear_bins>
 __device__ index_t histogram_bin(
@@ -66,7 +66,7 @@ __device__ index_t histogram_bin(
   index_t first = 0;
   index_t last = num_edges;
   while (first < last) {
-    const index_t mid = c10::cuda::compat::midpoint(first, last);
+    const index_t mid = first + (last - first) / 2;
     if (value < edges[mid]) {
       last = mid;
     } else {
@@ -169,7 +169,9 @@ __global__ C10_LAUNCH_BOUNDS_1(histogram_threads) void histogramdd_cuda_kernel(
       for (int replica = 0; replica < replicas; ++replica) {
         total += shared_hist[replica * num_bins + bin];
       }
-      gpuAtomicAddNoReturn(histogram + bin, total);
+      if (total != 0) {
+        gpuAtomicAddNoReturn(histogram + bin, total);
+      }
     }
   }
 }
@@ -223,6 +225,11 @@ void histogramdd_out_cuda_template(
              shared_bytes * replicas * 2 <= replica_budget) {
         replicas *= 2;
       }
+      // Amortize shared histogram initialization and merging over the samples,
+      // including the replicas. Keep the regular grid to preserve parallelism.
+      const int64_t samples_per_block = (num_samples - 1) / blocks + 1;
+      const bool use_shared = shared_bytes <= properties->sharedMemPerBlock &&
+          (histogram.numel() * replicas - 1) / histogram_shared_bins_per_sample < samples_per_block;
       const scalar_t* weight_data = weights.defined() ? weights.const_data_ptr<scalar_t>() : nullptr;
       const int64_t weight_stride = weights.defined() ? weights.stride(0) : 0;
       const int64_t* offsets = edge_offsets.defined() ? edge_offsets.const_data_ptr<int64_t>() : nullptr;
@@ -230,7 +237,7 @@ void histogramdd_out_cuda_template(
           canUse32BitIndexMath(edges) && (!weights.defined() || canUse32BitIndexMath(weights));
       AT_DISPATCH_INDEX_TYPES(use_32bit ? kInt : kLong, "histogram_cuda_index", [&]() {
         auto launch = [&]<bool one_dimensional, bool weighted>() {
-          if (shared_bytes <= properties->sharedMemPerBlock) {
+          if (use_shared) {
             histogramdd_cuda_kernel<scalar_t, index_t, linear_bins, one_dimensional, weighted, true>
                 <<<blocks, histogram_threads, shared_bytes * replicas, stream>>>(
                     input.const_data_ptr<scalar_t>(), num_samples, dimensions, input.stride(0), input.stride(1),

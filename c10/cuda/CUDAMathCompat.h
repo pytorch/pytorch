@@ -9,10 +9,8 @@
 #include <c10/util/Exception.h>
 
 #ifdef __HIPCC__
-#include <numeric>
 #define __MATH_FUNCTIONS_DECL__ inline C10_DEVICE
 #else /* __HIPCC__ */
-#include <cuda/std/numeric>
 #ifdef __CUDACC_RTC__
 #define __MATH_FUNCTIONS_DECL__ C10_HOST_DEVICE
 #else /* __CUDACC_RTC__ */
@@ -99,12 +97,6 @@ __MATH_FUNCTIONS_DECL__ float min(float x, float y) {
 __MATH_FUNCTIONS_DECL__ double min(double x, double y) {
   return ::fmin(x, y);
 }
-
-#ifdef __HIPCC__
-using ::std::midpoint;
-#else
-using ::cuda::std::midpoint;
-#endif
 
 __MATH_FUNCTIONS_DECL__ float pow(float x, float y) {
   return ::powf(x, y);
