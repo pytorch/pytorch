@@ -5273,13 +5273,23 @@ class TestPrecompileDynamoCapture(TestCase):
             load(other_artifact, self.cache)
 
 
-def _capture_files(test, fn, example_inputs, backend, dynamic=None, tracer=None):
-    """Capture ``fn`` (Dynamo tracer by default) and return (artifact_path, cache_path)."""
-    temp_dir = tempfile.TemporaryDirectory()
-    test.addCleanup(temp_dir.cleanup)
-    directory = temp_dir.name
-    artifact_path = os.path.join(directory, "artifact.py")
-    cache_path = os.path.join(directory, "artifact.cache")
+def _capture_files(
+    test, fn, example_inputs, backend, dynamic=None, tracer=None, paths=None, then=None
+):
+    """Capture ``fn`` (Dynamo tracer by default) and return (artifact_path, cache_path).
+
+    ``paths`` reuses an existing pair's paths; ``then`` runs in the capture block
+    after the example calls.
+    """
+    if paths is None:
+        temp_dir = tempfile.TemporaryDirectory()
+        test.addCleanup(temp_dir.cleanup)
+        directory = temp_dir.name
+        paths = (
+            os.path.join(directory, "artifact.py"),
+            os.path.join(directory, "artifact.cache"),
+        )
+    artifact_path, cache_path = paths
     renamed = contextlib.nullcontext()
     if tracer is None:
         tracer = DynamoTracer(dynamic=dynamic, require_no_risky_drops=False)
@@ -5303,6 +5313,8 @@ def _capture_files(test, fn, example_inputs, backend, dynamic=None, tracer=None)
     ):
         for args in example_inputs:
             cap(*args)
+        if then is not None:
+            then()
     return artifact_path, cache_path
 
 
@@ -5381,7 +5393,7 @@ class TestPrecompileNoCompilation(TestCase):
                 tracer=MakeFxTracer() if tracer == "make_fx" else None,
             )
             # A new process on the capture host: kernel binaries on disk, none in
-            # memory. A cold host needs the frozen kernels of finalize_cache().
+            # memory. A cold host needs the frozen kernels a capture writes.
             clear_caches()
             with torch.compiler.precompile.no_compilation(), torch.no_grad():
                 self.assertEqual(
@@ -5649,6 +5661,162 @@ class TestPrecompileNoCompilation(TestCase):
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
+    def test_misused_overlapping_captures_keep_one_scope(self):
+        # Overlapping captures are unsupported (their cache halves mix); the
+        # scope only must not close under the outer capture.
+        from torch.compiler import _runtime_cache
+
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [
+                (os.path.join(directory, f"{i}.py"), os.path.join(directory, f"{i}.c"))
+                for i in range(2)
+            ]
+            with capture(
+                _no_compilation_single_graph,
+                artifact_path=paths[0][0],
+                cache_path=paths[0][1],
+                tracer=DynamoTracer(require_no_risky_drops=False),
+                backend="eager",
+            ) as outer:
+                owner = _runtime_cache._capture
+                _capture_files(
+                    self,
+                    _no_compilation_single_graph,
+                    [(torch.ones(4),)],
+                    backend="eager",
+                    paths=paths[1],
+                )
+                self.assertIs(_runtime_cache._capture, owner)
+                outer(torch.ones(4))
+            self.assertIsNone(_runtime_cache._capture)
+            for _, cache in paths:
+                self.assertIn("artifact", torch.load(cache, weights_only=True))
+
+    def test_capture_scope_inherited_across_fork_is_not_the_childs(self):
+        from torch.compiler import _runtime_cache
+
+        with _runtime_cache.capture_scope():
+            parent = _runtime_cache._capture
+            # A forked child inherits the parent's scope object.
+            with mock.patch.object(parent, "pid", os.getpid() + 1):
+                with _runtime_cache.capture_scope():
+                    self.assertIsNot(_runtime_cache._capture, parent)
+                self.assertEqual(parent.captures, 1)
+
+    def test_failed_write_leaves_the_paths_and_a_new_capture_retries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, "m.py")
+            cache = os.path.join(directory, "m.cache")
+            with (
+                self.assertRaisesRegex(PrecompileError, "could not write") as ctx,
+                contextlib.ExitStack() as stack,
+                capture(
+                    _no_compilation_single_graph,
+                    artifact_path=source,
+                    cache_path=cache,
+                    tracer=DynamoTracer(require_no_risky_drops=False),
+                    backend="eager",
+                ) as cap,
+            ):
+                cap(torch.ones(4))
+                replace = os.replace
+
+                def fail_into_directory(src, dst):
+                    if os.path.dirname(os.fspath(dst)) == directory:
+                        raise OSError("disk full")
+                    replace(src, dst)
+
+                stack.enter_context(
+                    mock.patch("os.replace", side_effect=fail_into_directory)
+                )
+            self.assertIsInstance(ctx.exception.__cause__, OSError)
+            self.assertEqual(os.listdir(directory), [])
+            _capture_files(
+                self,
+                _no_compilation_single_graph,
+                [(torch.ones(4),)],
+                "eager",
+                paths=(source, cache),
+            )
+            torch.compiler.precompile.load(source, cache)
+
+    def test_snapshot_oserror_is_not_reported_as_a_write_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, "m.py")
+            cache = os.path.join(directory, "m.cache")
+            with (
+                self.assertRaisesRegex(
+                    PrecompileError, "could not freeze the runtime dependencies"
+                ) as ctx,
+                contextlib.ExitStack() as stack,
+                capture(
+                    _no_compilation_single_graph,
+                    artifact_path=source,
+                    cache_path=cache,
+                    tracer=DynamoTracer(require_no_risky_drops=False),
+                    backend="eager",
+                ) as cap,
+            ):
+                cap(torch.ones(4))
+                stack.enter_context(
+                    mock.patch.object(
+                        cap._session,
+                        "snapshot_artifact",
+                        side_effect=BrokenPipeError(),
+                    )
+                )
+            self.assertIsInstance(ctx.exception.__cause__, BrokenPipeError)
+            self.assertNotIn("could not write", str(ctx.exception))
+            self.assertEqual(os.listdir(directory), [])
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_strict_load_serves_captured_pair(self, backend):
+        pc = torch.compiler.precompile
+        fn = (
+            _no_compilation_single_graph
+            if backend == "eager"
+            else _no_compilation_inductor_graph
+        )
+        x = torch.ones(4)
+        source, cache = _capture_files(self, fn, [(x,)], backend=backend)
+        with pc.no_compilation():
+            runnable = pc.load(source, cache)
+            with torch.no_grad():
+                self.assertEqual(runnable(x), fn(x))
+
+    def test_inductor_capture_without_artifact_is_refused(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch(
+                "torch.compiler._cache.CacheArtifactManager.serialize",
+                return_value=None,
+            ),
+        ):
+            with (
+                self.assertRaisesRegex(PrecompileError, "saved none"),
+                capture(
+                    _no_compilation_inductor_graph,
+                    artifact_path=os.path.join(directory, "m.py"),
+                    cache_path=os.path.join(directory, "m.cache"),
+                    tracer=DynamoTracer(require_no_risky_drops=False),
+                ) as cap,
+            ):
+                cap(torch.ones(4))
+            self.assertEqual(os.listdir(directory), [])
+
+    def test_inductor_capture_without_fx_graph_cache_is_served(self):
+        # The capture saves its artifact through the bundled AOTAutograd cache,
+        # so it does not need Inductor's FX graph cache.
+        pc = torch.compiler.precompile
+        fn = _no_compilation_inductor_graph
+        x = torch.ones(4)
+        with torch._inductor.config.patch(fx_graph_cache=False):
+            source, cache = _capture_files(self, fn, [(x,)], backend="inductor")
+        with pc.no_compilation():
+            runnable = pc.load(source, cache)
+            with torch.no_grad():
+                self.assertEqual(runnable(x), fn(x))
+
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     @parametrize("device", (0, None))
     @parametrize("explicit_cache", (False, True))
