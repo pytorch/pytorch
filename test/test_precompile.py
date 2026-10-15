@@ -6830,7 +6830,9 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertEqual(owner.triton_kernels, {})
         self.assertIsNone(reference())
 
-    def test_overlapping_captures_share_one_scope(self):
+    def test_misused_overlapping_captures_keep_one_scope(self):
+        # Overlapping captures are unsupported (their cache halves mix); the
+        # scope only must not close under the outer capture.
         from torch.compiler import _runtime_cache
 
         with tempfile.TemporaryDirectory() as directory:
@@ -6892,6 +6894,29 @@ class TestPrecompileRuntimeCache(TestCase):
                 cap.save()
                 cap(torch.ones(2, 3))  # leaves the final write something to add
         self.assertEqual(shutdowns, [False, False])
+
+    def test_write_snapshots_after_waiting_on_compiles(self):
+        from torch._inductor.async_compile import AsyncCompile
+        from torch.compiler._cache import CacheArtifactManager
+
+        def record(**kw):
+            # A compile that finishes during the wait records its artifact then.
+            CacheArtifactManager.record_artifact("inductor", "late", b"late")
+
+        drain = mock.patch.object(AsyncCompile, "drain_pending", side_effect=record)
+        with tempfile.TemporaryDirectory() as directory, drain:
+            cache = os.path.join(directory, "m.cache")
+            with capture(
+                _no_compilation_single_graph,
+                artifact_path=os.path.join(directory, "m.py"),
+                cache_path=cache,
+                tracer=DynamoTracer(require_no_risky_drops=False),
+                backend="inductor",
+            ) as cap:
+                cap(torch.ones(4))
+            artifact = torch.load(cache, weights_only=True)["artifact"]
+        artifacts = CacheArtifactManager.deserialize(artifact)
+        self.assertIn("late", [a.key for a in artifacts["inductor"]])
 
     def test_failed_write_leaves_the_paths_and_a_new_capture_retries(self):
         with tempfile.TemporaryDirectory() as directory:

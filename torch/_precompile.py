@@ -772,8 +772,23 @@ class _DynamoCapture(Capture[_P, _R]):
     def _write(self) -> None:
         from torch.compiler._runtime_cache import freeze_runtime_cache
 
-        python_code, cache = self._map(self._session.snapshot_artifact, **self._gates)
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        python_code = ""
+        blob: dict[str, Any] = {}
+
+        # Called by freeze_runtime_cache after it waits on pending compiles, so
+        # what they record is in the snapshot.
+        def snapshot() -> bytes | None:
+            nonlocal python_code, blob
+            python_code, cache = self._map(
+                self._session.snapshot_artifact, **self._gates
+            )
+            blob = torch.load(io.BytesIO(cache), weights_only=True)
+            if blob["backend"] != "eager" and blob["artifact"] is None:
+                raise RuntimeError(
+                    "precompile.capture requires the cache artifact of a compiled "
+                    "capture, and this capture saved none"
+                )
+            return blob["artifact"]
 
         def write(artifact: bytes | None) -> None:
             buf = io.BytesIO()
@@ -783,9 +798,7 @@ class _DynamoCapture(Capture[_P, _R]):
             )
 
         try:
-            freeze_runtime_cache(
-                blob["artifact"], write, compiled=blob["backend"] != "eager"
-            )
+            freeze_runtime_cache(snapshot, write)
         except OSError as e:
             # Only the on-disk rewrite failed; _write_artifact leaves whatever
             # pair was already at these paths in place.
