@@ -93,18 +93,19 @@ def _live_objects(*kinds: type) -> list[list[Any]]:
 
 
 def _importable(root: Path, digest: str, keys: set[str]) -> bool:
-    # import_runtime_cache's own rule: besides this cache's entries, only
-    # marker-prefixed ones (the staging directory of an import that is running
-    # or was killed), and a marker, if any, for this cache.
+    # import_runtime_cache's own rule: a root marked for this cache, whatever
+    # was compiled into it since, or an unmarked one holding only this cache's
+    # entries and marker-prefixed ones (the staging directory of an import that
+    # is running or was killed).
     from torch.compiler._triton_runtime_cache import _READY
 
     if not root.is_dir():
         return not root.exists()
     marker = root / _READY
-    if marker.exists() and (
-        marker.is_symlink() or not marker.is_file() or marker.read_text() != digest
-    ):
-        return False
+    if marker.exists():
+        return (
+            not marker.is_symlink() and marker.is_file() and marker.read_text() == digest
+        )
     return all(
         entry.name in keys or entry.name.startswith(_READY) for entry in root.iterdir()
     )
