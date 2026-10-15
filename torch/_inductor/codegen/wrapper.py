@@ -2711,10 +2711,9 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
-        # Neither line is a use of async_compile: a module that compiles nothing has no
-        # need of either.
-        self.prefix.writelines(["", ""])
-        for line in ("async_compile.wait(globals())", "del async_compile"):
+        # None of these lines is a use of async_compile: a module that compiles nothing
+        # has no need of them.
+        for line in ("", "", "async_compile.wait(globals())", "del async_compile"):
             self.write_if_used(self.prefix, line, ("async_compile",))
 
     def write_args(self, input_names: list[str]):
