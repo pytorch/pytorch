@@ -94,6 +94,7 @@ from ..utils import (
     no_positional,
     product,
     proxy_args_kwargs,
+    specialize_symnode,
     unpack_iterable,
     unwrap_if_wrapper,
 )
@@ -112,7 +113,7 @@ from .functions import (
     UserFunctionVariable,
 )
 from .lists import ListVariable, SizeVariable, TupleVariable
-from .object_protocol import pynumber_index, vt_is_iterable
+from .object_protocol import mro_lookup, pynumber_index, vt_is_iterable
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -193,6 +194,8 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
         torch.fx.traceback._dynamo_region_activation_memory_budget,
         torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
+        torch.fx.traceback._dynamo_annotate,
+        torch.fx.traceback._dynamo_annotate.__wrapped__,  # type: ignore[attr-defined]
         # We'll let Dynamo inline into the contextlib part of these context
         # manager instances, all the way till it invokes the wrapped function
         # itself (at which point we wrap it back to special context manager
@@ -800,9 +803,52 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 raise AssertionError(
                     f"torch.fx.traceback.annotate expects no kwargs, got {len(kwargs)}"
                 )
-            return FxTracebackAnnotateVariable(
-                args[0].as_python_constant(), source=self.source
-            )
+
+            def annotation_constant(value: VariableTracker) -> Any:
+                value = value.realize()
+                if isinstance(value, variables.SymNodeVariable):
+                    if value.python_type() is not float:
+                        unimplemented(
+                            gb_type="dynamic value in torch.fx.traceback.annotate",
+                            context=str(value),
+                            explanation="Annotation values are stored as constants in the graph. "
+                            "Dynamic floats are specialized, but other dynamic values are not, "
+                            "since specializing them (e.g. a tensor size) can cause a recompile "
+                            "for every distinct value.",
+                            hints=[
+                                "Compute the annotation value from configuration rather than from tensors or sizes.",
+                            ],
+                        )
+                    # e.g. per-layer float settings sharing one forward
+                    value = specialize_symnode(value)
+                return value.as_python_constant()
+
+            annotation = args[0].realize()
+            if isinstance(annotation, variables.UserDefinedDictVariable):
+                unimplemented(
+                    gb_type="dict subclass in torch.fx.traceback.annotate",
+                    context=str(annotation),
+                    explanation="Dynamo reads annotation entries directly, which would bypass "
+                    "overridden mapping methods (e.g. __getitem__) on a dict subclass.",
+                    hints=[
+                        "Pass a plain dict to torch.fx.traceback.annotate.",
+                    ],
+                )
+            if isinstance(annotation, variables.ConstDictVariable):
+                annotation_dict = {
+                    k.vt.as_python_constant(): annotation_constant(v)
+                    for k, v in annotation.items.items()
+                }
+            else:
+                annotation_dict = annotation.as_python_constant()
+            return FxTracebackAnnotateVariable(annotation_dict)
+        elif self.value in (
+            torch.fx.traceback._dynamo_annotate,
+            torch.fx.traceback._dynamo_annotate.__wrapped__,  # type: ignore[attr-defined]
+        ):
+            if len(args) != 1 or kwargs:
+                raise AssertionError("_dynamo_annotate expects one positional argument")
+            return FxTracebackAnnotateVariable(dict(args[0].as_python_constant()))
         elif self.value in (
             torch.fx.traceback._dynamo_region_activation_memory_budget,
             torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
@@ -818,8 +864,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     f"expected a float budget, got {type(budget).__name__}"
                 )
             return FxTracebackAnnotateVariable(
-                {torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget},
-                source=self.source,
+                {torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget}
             )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
@@ -2989,11 +3034,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker:
-            device = None
+            device_arg = None
             if kwargs and "device" in kwargs:
-                device = torch.device(as_python_device(kwargs["device"]))
+                device_arg = as_python_device(kwargs["device"])
             elif args:
-                device = torch.device(as_python_device(args[0]))
+                device_arg = as_python_device(args[0])
+            # An explicit None means "current device", same as no argument.
+            device = None if device_arg is None else torch.device(device_arg)
 
             if device is None:
                 device_type = _synchronize_fn_to_device_type.get(self.value)
@@ -3851,7 +3898,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                                 "Ensure you do not modify input tensor in place.",
                             ],
                         )
-            return self.call_tensor_method(tx, list(args), kwargs)
+            # call_tensor_method records `x.<name>(...)`, which resolves on
+            # type(x) when the graph runs. If a tensor subclass overrides the
+            # method, fall through so the graph calls the descriptor itself.
+            self_type = args[0].python_type() if args and args[0].is_tensor() else None
+            if (
+                self_type is None
+                or self_type is torch.Tensor
+                or mro_lookup(self_type, name) is mro_lookup(torch.Tensor, name)
+            ):
+                return self.call_tensor_method(tx, list(args), kwargs)
 
         special_handler = self._get_handlers().get(self.value)
         if special_handler:

@@ -477,6 +477,7 @@ test_python_smoke() {
   # Smoke tests for H100/B200
   install_nvmath
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_triton_kernels -k test_tma_descriptor_subclass_codegen $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_cuda -k test_graph_capture_cublas_workspace $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -490,6 +491,37 @@ test_python_smoke_b200() {
   # Targeted smoke tests for B200 including FlashAttention CuTe coverage
   install_flash_attn_cute
   install_cutlass_operators
+  (
+    local test_library_path="${LD_LIBRARY_PATH:-}"
+    if [[ "$BUILD_ENVIRONMENT" == *cuda13.4* ]]; then
+      pip install 'cuda-bindings>=13.4,<14'
+      local driver_version
+      driver_version=$(cd test && python -c 'from torch.cuda.green_contexts import _get_driver_version; print(_get_driver_version())')
+      if [[ "$driver_version" -lt 13040 ]]; then
+        local compat_dir compat_package compat_sha256
+        compat_dir=$(mktemp -d)
+        trap 'rm -rf "$compat_dir"' EXIT
+        compat_package=cuda-compat-13-4_615.71.09-2ubuntu1_amd64.deb
+        compat_sha256=1b814aa705b4dfe955420c967bd545f39ef7b67f32bd0f285a005ea296b02831
+        curl -fL --retry 3 "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/$compat_package" -o "$compat_dir/$compat_package"
+        echo "$compat_sha256  $compat_dir/$compat_package" | sha256sum --check
+        dpkg-deb --extract "$compat_dir/$compat_package" "$compat_dir"
+        test_library_path="$compat_dir/usr/local/cuda-13.4/compat${test_library_path:+:$test_library_path}"
+      fi
+      (cd test && env LD_LIBRARY_PATH="$test_library_path" python - <<'PY'
+import torch
+from torch.cuda import green_contexts
+
+torch.cuda.init()
+print(f"CUDA driver API version: {green_contexts._get_driver_version()}")
+green_contexts._ensure_locality_supported()
+if not green_contexts.is_localization_supported():
+    raise RuntimeError("B200 CUDA 13.4 smoke tests require locality-domain support")
+PY
+      )
+    fi
+    time env LD_LIBRARY_PATH="$test_library_path" python test/run_test.py --include test_cuda -k "greencontext or LocalizedAllocator" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  )
   time python test/run_test.py \
     --include \
       test_matmul_cuda \
@@ -1331,7 +1363,11 @@ version = importlib.metadata.version("flydsl")
 print(f"FlyDSL {version} runtime available on {arch}")
 PY
   )
-  python test/run_test.py --include inductor/test_flydsl_template.py inductor/test_flydsl_grouped_scheduler.py --verbose
+  python test/run_test.py --include \
+    inductor/test_flydsl_template.py \
+    inductor/test_flydsl_grouped_scheduler.py \
+    inductor/test_flydsl_flex_attention.py \
+    --verbose
   assert_git_not_dirty
 }
 
@@ -1873,6 +1909,10 @@ test_distributed() {
   echo "Testing distributed python tests (${multigpu_filter:-all})"
   # Same NVSHMEM team limit as test_b200_symm_mem; test_nvshmem.py runs here too.
   export NVSHMEM_MAX_TEAMS=512
+  # rocSHMEM FlyDSL tests import the same PyPI wheel as test_inductor_flydsl.
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* && "$multigpu_filter" != "not-multigpu" ]]; then
+    install_flydsl
+  fi
   # shellcheck disable=SC2086
   time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
@@ -1917,6 +1957,7 @@ test_distributed_single_gpu() {
   # `default` config's Python tests.
   install_torchcomms
   install_spmd_types
+  install_nccl4py
   test_distributed not-multigpu
 }
 
@@ -2591,6 +2632,7 @@ elif [[ "$TEST_CONFIG" == distributed_4gpu ]]; then
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchcomms
   install_spmd_types
+  install_nccl4py
   # On CUDA and ROCm the single-process (single-GPU) distributed tests are hived
   # off to the `default` config's 1-GPU runner (see below), so this multi-GPU box
   # only runs the process-spawning ones. Elsewhere (e.g. CPU pull) there is no
@@ -2815,6 +2857,7 @@ elif [[ "${TEST_CONFIG}" == dtensor ]]; then
   test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   install_torchcomms
+  install_nccl4py
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
   test_h100_symm_mem

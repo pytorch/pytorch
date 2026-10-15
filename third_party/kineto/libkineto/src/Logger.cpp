@@ -47,7 +47,7 @@ Logger::Logger(int severity, int line, const char* filePath, int errnum)
 
   const auto tt =
       std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-  std::tm tm_result;
+  std::tm tm_result{};
   get_local_time(&tt, &tm_result);
   const char* file = std::strrchr(filePath, '/');
   fmt::print(
@@ -80,7 +80,10 @@ Logger::~Logger() {
   }
 
   // Finally, print to terminal or console.
-  out_ << buf_.str() << std::endl;
+  if (messageSeverity_ >= severityLevel_) {
+    // NOLINTNEXTLINE(performance-avoid-endl)
+    out_ << buf_.str() << std::endl;
+  }
 }
 
 void Logger::setVerboseLogModules(const std::vector<std::string>& modules) {
@@ -195,6 +198,7 @@ void Logger::writeStageCancellation(
 USTLoggerStageGuard::~USTLoggerStageGuard() {
   try {
     UST_LOGGER_MARK_COMPLETED(stage_);
+    // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (...) {
   }
 }
