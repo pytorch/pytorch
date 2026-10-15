@@ -33,7 +33,7 @@ inline int64_t convertCuptiTimestamp(uint64_t timestamp) {
   if (use_cupti_tsc()) {
     return get_time_converter()(timestamp);
   } else {
-    return timestamp;
+    return static_cast<int64_t>(timestamp);
   }
 #endif
 }
@@ -45,7 +45,7 @@ inline int64_t convertCuptiDuration(uint64_t start, uint64_t end) {
   if (use_cupti_tsc()) {
     return get_time_converter()(end) - get_time_converter()(start);
   } else {
-    return end - start;
+    return static_cast<int64_t>(end - start);
   }
 #endif
 }
