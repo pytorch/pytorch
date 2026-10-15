@@ -99,9 +99,8 @@ def _importable(root: Path, digest: str, keys: set[str]) -> bool:
         return not root.exists()
     marker = root / _READY
     if marker.exists():
-        return (
-            not marker.is_symlink() and marker.is_file() and marker.read_text() == digest
-        )
+        valid = marker.is_file() and not marker.is_symlink()
+        return valid and marker.read_text() == digest
     return all(
         entry.name in keys or entry.name.startswith(_READY) for entry in root.iterdir()
     )
