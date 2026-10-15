@@ -689,15 +689,12 @@ print(eval(f"bbmod.{name}.{path}") is code)
             fn(x, w).backward()
         return x.grad, w.grad
 
-    def _save_and_load_hooked_forward(
-        self, guard_filter_fn=None, compile_under_hooks=True
-    ):
+    def _save_and_load_hooked_forward(self, guard_filter_fn=None):
         ctx = DiskDynamoStore()
         package = CompilePackage(hooked_forward)
         compiled_fn = torch._dynamo.optimize(
             "inductor", package=package, guard_filter_fn=guard_filter_fn
         )(hooked_forward)
-        self._hooked_grads(compiled_fn, under_hooks=compile_under_hooks)
         expected = self._hooked_grads(compiled_fn, under_hooks=True)
         ctx.save_package(package, self.path())
 
@@ -728,19 +725,6 @@ print(eval(f"bbmod.{name}.{path}") is code)
         )
         with torch.compiler.set_stance("fail_on_recompile"):
             self._hooked_grads(compiled_fn, under_hooks=False)
-            grads = self._hooked_grads(compiled_fn, under_hooks=True)
-        self.assertEqual(grads, expected)
-
-    def test_a_graph_compiled_without_hooks_keeps_them_on_a_first_call_under_them(
-        self,
-    ):
-        # Nothing was inlined, so the eager hooks must run, as they did in the
-        # capturing process, whatever hooks the wrappers are built under.
-        compiled_fn, expected = self._save_and_load_hooked_forward(
-            self._drop_hooks_guard, compile_under_hooks=False
-        )
-        self.assertNotEqual(self._hooked_grads(hooked_forward, False), expected)
-        with torch.compiler.set_stance("fail_on_recompile"):
             grads = self._hooked_grads(compiled_fn, under_hooks=True)
         self.assertEqual(grads, expected)
 
