@@ -7717,6 +7717,23 @@ def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((S, S)))
     yield SampleInput(make_arg((S, S, S)))
 
+def sample_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
+    # Small values keep tanh away from its complex poles and the gradients well conditioned.
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=-1, high=1)
+    for n, d, m in ((2, 3, 4), (5, 5, 5), (1, 3, 2)):
+        yield SampleInput(make_arg((n, d)), args=(make_arg((n, d)), make_arg((n, m))))
+
+
+def error_inputs_attn(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+    yield ErrorInput(SampleInput(make_arg((2, 3, 1)), args=(make_arg((2, 3)), make_arg((2, 4)))),
+                     error_regex="expected q, k and v to be 2D")
+    yield ErrorInput(SampleInput(make_arg((2, 3)), args=(make_arg((3, 3)), make_arg((2, 4)))),
+                     error_regex="same size in dimension 0")
+    yield ErrorInput(SampleInput(make_arg((2, 3)), args=(make_arg((2, 5)), make_arg((2, 4)))),
+                     error_regex="same size in dimension 1")
+
+
 def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, low=None,
                        high=None, requires_grad=requires_grad)
@@ -14726,6 +14743,13 @@ op_db: list[OpInfo] = [
            ),
            supports_out=False,
            ),
+    OpInfo('attn',
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_attn,
+           error_inputs_func=error_inputs_attn,
+           supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True),
     OpInfo('matmul',
            aliases=('linalg.matmul',),
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
