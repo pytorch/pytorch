@@ -191,6 +191,7 @@ class ModProblem(NamedTuple):
     def from_args(cls, mod, transform_a, named_args):
         A, B = named_args["A"], named_args["B"]
         A_idx = named_args.get("A_idx")
+        cu_seqlens_k = named_args.get("cu_seqlens_k")
         m_gemm, n_gemm = _gemm_mn(A, B, named_args.get("b_kn", False))
         if A_idx is not None:
             m_gemm = A_idx.shape[0]
@@ -203,7 +204,9 @@ class ModProblem(NamedTuple):
             device=A.device,
             m=m_gemm,
             n=n_gemm,
-            lead=_lead(A, A_idx, m_gemm),
+            lead=(cu_seqlens_k.shape[0] - 1, m_gemm)
+            if cu_seqlens_k is not None
+            else _lead(A, A_idx, m_gemm),
             b_kn=named_args.get("b_kn", False),
             varlen_m=named_args.get("cu_seqlens_m") is not None,
             gather_A=A_idx is not None,
@@ -226,7 +229,6 @@ def prune_mod_configs(mod, transform_a, configs, problem):
     m_gemm, n_gemm, n_full = problem.m, problem.n, problem.n_full
     has_out = bool(mod.outputs)
     survivors = []
-    varlen_or_gather = problem.varlen_m or problem.gather_A
     blockscaled = problem.blockscaled
     epi_ops = tuple(
         dict.fromkeys(
@@ -266,7 +268,6 @@ def prune_mod_configs(mod, transform_a, configs, problem):
         if c.swap_ab and (
             not problem.b_kn
             or n_gemm % 8
-            or varlen_or_gather
             or problem.concat
             or not mod.supports_swap_ab()
         ):
@@ -479,6 +480,7 @@ def mod_selection_args(
     B,
     b_kn,
     cu_seqlens_m=None,
+    cu_seqlens_k=None,
     A_idx=None,
     SFA=None,
     concat_layout=None,
@@ -491,6 +493,7 @@ def mod_selection_args(
         "B": B,
         "b_kn": b_kn,
         "cu_seqlens_m": cu_seqlens_m,
+        "cu_seqlens_k": cu_seqlens_k,
         "A_idx": A_idx,
         "SFA": SFA,
         "concat_layout": concat_layout,
