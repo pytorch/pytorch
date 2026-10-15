@@ -793,18 +793,19 @@ class _DynamoCapture(Capture[_P, _R]):
         def write(artifact: bytes | None) -> None:
             buf = io.BytesIO()
             torch.save({**blob, "artifact": artifact}, buf)
-            _write_artifact(
-                self._artifact_path, self._cache_path, python_code, buf.getvalue()
-            )
+            try:
+                _write_artifact(
+                    self._artifact_path, self._cache_path, python_code, buf.getvalue()
+                )
+            except OSError as e:
+                # Only the on-disk rewrite failed; _write_artifact leaves
+                # whatever pair was already at these paths in place.
+                raise PrecompileError(
+                    f"precompile could not write the artifact: {e}"
+                ) from e
 
         try:
             freeze_runtime_cache(snapshot, write)
-        except OSError as e:
-            # Only the on-disk rewrite failed; _write_artifact leaves whatever
-            # pair was already at these paths in place.
-            raise PrecompileError(
-                f"precompile could not write the artifact: {e}"
-            ) from e
         except PrecompileError:
             raise
         except Exception as e:
@@ -3293,7 +3294,8 @@ def capture(
     needs, and raises :class:`~torch.compiler.PrecompileError` for one it cannot
     freeze. That includes kernels launched directly through ``@triton.jit`` and
     ``@triton.autotune`` inside the block: Triton compiles into a fresh cache
-    directory there, with its autotuning cache on. A JIT kernel or autotuner
+    directory there, with its autotuning cache on, so a ``TRITON_CACHE_DIR``
+    you set is not used inside the block and its kernels compile again. A JIT kernel or autotuner
     already used before the block reuses what it compiled or tuned then, which
     is not carried, so launch each one for the first time inside the block.
     Triton does not cache the decision of an autotuner with ``pre_hook``
