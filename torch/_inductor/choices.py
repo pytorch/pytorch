@@ -170,15 +170,22 @@ class InductorChoices:
         seq_len: sympy.Expr,
         dtype: torch.dtype,
         device_type: str | None = "cuda",
+        v_head_dim: int | None = None,
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
-        return flex_heuristics.get_flex_attn_fwd_configs(head_dim, seq_len, dtype)
+        return flex_heuristics.get_flex_attn_fwd_configs(
+            head_dim, seq_len, dtype, v_head_dim
+        )
 
     def get_flex_attention_bwd_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
+        self,
+        head_dim: int,
+        dtype: torch.dtype,
+        device_type: str | None = "cuda",
+        v_head_dim: int | None = None,
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
-        return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype)
+        return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype, v_head_dim)
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
@@ -197,10 +204,31 @@ class InductorChoices:
         sparse_q_block_size: int,
         sparse_kv_block_size: int,
     ) -> list[Any]:
-        """Append backend-specific flex-attention template choices.
+        """Append backend-specific forward flex-attention template choices.
 
         Default is a no-op. Subclasses may override to inject additional
         autotuning candidates (e.g. TLX templates in fbcode).
+        """
+        return choices
+
+    def append_flex_attention_backward_choices(
+        self,
+        choices: list[Any],
+        configs: list[Any],
+        input_nodes: list[Any],
+        subgraphs: list[Any],
+        layout: Any,
+        kernel_options: dict[str, Any],
+        sparse_q_block_size: int,
+        sparse_kv_block_size: int,
+        *,
+        mutated_inputs: list[Any],
+    ) -> list[Any]:
+        """Append backend-specific backward flex-attention template choices.
+
+        Default is a no-op. Subclasses may override to inject additional
+        autotuning candidates. Backward calls provide sixteen input nodes, four
+        subgraphs, and the output buffers in ``mutated_inputs``.
         """
         return choices
 
@@ -398,7 +426,20 @@ class InductorChoices:
                 if hasattr(ktc, "_choice"):
                     del ktc._choice
         # Third pass: Convert to ChoiceCaller objects
-        return [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
+        callers = [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
+
+        if config.cuda.autotune_tunableop_dynamic_dims_wildcard:
+            # Only ExternKernelCaller (aten) reads this mask to drive TunableOp
+            # wildcard persistence; Triton/CUTLASS callers ignore it. Imported
+            # here rather than at module scope to avoid an import cycle.
+            from torch._inductor.select_algorithm import ExternKernelCaller
+
+            mask = kernel_inputs.dynamic_dim_mask(op_name)
+            for caller in callers:
+                if isinstance(caller, ExternKernelCaller):
+                    caller.tunable_dyn_dims_mask = mask
+
+        return callers
 
     def triton_kernel_kwargs(
         self,

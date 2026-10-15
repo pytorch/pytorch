@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <numeric>
 #include <ostream>
 
 #include <torch/csrc/profiler/unwind/lexer.h>
@@ -68,7 +69,7 @@ struct EHFrameHdr {
     uint64_t low = 0;
     uint64_t high = nentries();
     while (low + 1 < high) {
-      auto mid = (low + high) / 2;
+      auto mid = std::midpoint(low, high);
       if (addr < lowpc(mid)) {
         high = mid;
       } else {

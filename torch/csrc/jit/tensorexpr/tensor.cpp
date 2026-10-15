@@ -117,9 +117,9 @@ Tensor Compute(
     const std::vector<ExprHandle>& dims,
     const std::optional<std::vector<ExprHandle>>& strides,
     const std::function<ExprHandle(const VarHandle&)>& body_func) {
-  if (dims.size() != 1) {
-    throw malformed_input("mismatch between body and arg size (1)");
-  }
+  TORCH_CHECK(
+      dims.size() == 1,
+      "MALFORMED INPUT: mismatch between body and arg size (1)");
 
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args[0]);
@@ -139,9 +139,9 @@ Tensor Compute(
     const std::optional<std::vector<ExprHandle>>& strides,
     const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
         body_func) {
-  if (dims.size() != 2) {
-    throw malformed_input("mismatch between body and arg size (2)");
-  }
+  TORCH_CHECK(
+      dims.size() == 2,
+      "MALFORMED INPUT: mismatch between body and arg size (2)");
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args[0], args[1]);
   BufHandle buf = Buf::make(name, dims, body.dtype(), std::nullopt, strides);
@@ -162,9 +162,9 @@ Tensor Compute(
     const std::function<
         ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
         body_func) {
-  if (dims.size() != 3) {
-    throw malformed_input("mismatch between body and arg size (3)");
-  }
+  TORCH_CHECK(
+      dims.size() == 3,
+      "MALFORMED INPUT: mismatch between body and arg size (3)");
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args[0], args[1], args[2]);
   BufHandle buf = Buf::make(name, dims, body.dtype(), std::nullopt, strides);
@@ -188,9 +188,9 @@ Tensor Compute(
         const VarHandle&,
         const VarHandle&,
         const VarHandle&)>& body_func) {
-  if (dims.size() != 4) {
-    throw malformed_input("mismatch between body and arg size (4)");
-  }
+  TORCH_CHECK(
+      dims.size() == 4,
+      "MALFORMED INPUT: mismatch between body and arg size (4)");
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args[0], args[1], args[2], args[3]);
   BufHandle buf = Buf::make(name, dims, body.dtype(), std::nullopt, strides);

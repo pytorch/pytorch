@@ -382,7 +382,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             gradients are not reduced across ranks. This argument unifies with
             the existing ``ignored_modules`` argument, and we may deprecate
             ``ignored_modules`` soon. For backward compatibility, we keep both
-            ``ignored_states`` and `ignored_modules``, but FSDP only allows one
+            ``ignored_states`` and ``ignored_modules``, but FSDP only allows one
             of them to be specified as not ``None``.
         device_mesh (Optional[DeviceMesh]): DeviceMesh can be used as an alternative to
             process_group. When device_mesh is passed, FSDP will use the underlying process

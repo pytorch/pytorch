@@ -565,7 +565,7 @@ def expectedFailureCodegenDynamic(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     return fn
 
 
-# Controls test generated in test/inductor/test_cpp_wrapper.py
+# Controls tests generated in test/inductor/test_cpp_wrapper.py
 def expectedFailureDynamicWrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     fn._expected_failure_dynamic_wrapper = True  # type: ignore[attr-defined]
     return fn
@@ -580,6 +580,20 @@ def reset_rng_state(use_xla: bool = False) -> None:
         import torch_xla.core.xla_model as xm
 
         xm.set_rng_state(1337, str(xm.xla_device()))
+
+
+@contextlib.contextmanager
+def lru_cache_reordering(enabled: bool) -> Generator[None]:
+    """Force Dynamo's LRU cache reordering on or off, restoring it on exit.
+
+    The default differs between GIL and free-threaded builds, so tests that
+    assert on cache entry order must pin it.  Also usable as a decorator.
+    """
+    prior = torch._C._dynamo.eval_frame._set_lru_cache(enabled)
+    try:
+        yield
+    finally:
+        torch._C._dynamo.eval_frame._set_lru_cache(prior)
 
 
 def _skipped_function_for_test_reconstruct(

@@ -2362,7 +2362,7 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (Tensor): indices of ``source`` to select from,
+    index (Tensor): indices of :attr:`self` to add to,
             should have dtype either `torch.int64` or `torch.int32`
     source (Tensor): the tensor containing values to add
 
@@ -6127,6 +6127,17 @@ If any of the above conditions are not met, an error is thrown.
 
     This overload is not supported by TorchScript, and using it in a Torchscript
     program will cause undefined behavior.
+
+.. warning::
+
+    Viewing a tensor as ``torch.bool`` reinterprets its bytes without
+    converting them. A ``torch.bool`` tensor must only contain the byte values
+    ``0`` (``False``) and ``1`` (``True``). If any byte of the viewed data has
+    another value, the behavior of operations on the returned tensor is
+    undefined: depending on the operation, device and memory layout, such bytes
+    may be preserved as-is or normalized to ``1``, and eager mode and
+    :func:`torch.compile` may give different results. To convert values to
+    booleans, use :meth:`~Tensor.bool` (or ``self != 0``) instead.
 
 
 Args:

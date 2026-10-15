@@ -31,7 +31,7 @@ _kernel_category_choices = [
 def get_kernel_category_by_source_code(src_code: str) -> str:
     """
     Similar to get_kernel_category but use the source code. Call this API
-    if we have not compile the src_code to module yet.
+    if we have not compiled the src_code to module yet.
     """
     choices = [
         ch for ch in _kernel_category_choices if f"@triton_heuristics.{ch}" in src_code
@@ -112,12 +112,12 @@ def benchmark_all_kernels(
 
         def get_info_str(
             ms: float,
-            n_regs: Any | None,
-            n_spills: Any | None,
-            shared: Any | None,
+            n_regs: int | None,
+            n_spills: int | None,
+            shared: int | None,
             prefix: str = "",
         ) -> str:
-            if not any(x is None for x in [n_regs, n_spills, shared]):
+            if n_regs is not None and n_spills is not None and shared is not None:
                 kernel_detail_str = (
                     f"  {n_regs:3} regs  {n_spills:3} spills  {shared:8} shared mem"
                 )
