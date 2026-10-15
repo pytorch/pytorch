@@ -153,7 +153,7 @@ def _format_geometry(geometry: "FlexGemmLocalReduceGeometry") -> str:
     return f"axis={axis}, group={geometry.group}"
 
 
-def _format_output_contraction(contraction: "FlexGemmOutputTransform | None") -> str:
+def _format_output_transform(contraction: "FlexGemmOutputTransform | None") -> str:
     """Format the lane transform applied to the main output."""
     if contraction is None:
         return "none"
@@ -205,7 +205,7 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
     lines = [
         "outputs:",
         f"  main: {_format_fx_tensor(outputs.output)}",
-        f"  output_contraction: {_format_output_contraction(outputs.output_contraction)}",
+        f"  output_transform: {_format_output_transform(outputs.output_transform)}",
     ]
     if outputs.aux_outputs:
         lines.append("  auxiliary:")
