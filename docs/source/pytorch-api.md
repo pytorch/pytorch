@@ -34,6 +34,7 @@ meta
 torch.backends <backends>
 torch.export <user_guide/torch_compiler/export>
 torch.distributed <distributed>
+distributed/custom_backends
 torch.distributed.tensor <distributed/tensor>
 torch.distributed.functional_collectives <distributed/functional_collectives>
 torch.distributed.algorithms.join <distributed/algorithms.join>

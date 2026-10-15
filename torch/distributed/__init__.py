@@ -79,6 +79,7 @@ if is_available():
         _test_python_store,
         _verify_params_across_processes,
         Backend as _Backend,
+        Backend as BackendBase,
         BuiltinCommHookType,
         DebugLevel,
         FileStore,
