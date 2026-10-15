@@ -8,6 +8,7 @@
 // This file is auto-generated. See "generate_kernels.py"
 #pragma once
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h>
+#include <ATen/native/cuda/cutlass_common.cuh>
 using namespace PyTorchMemEffAttention;
 // ======== bf16 / sm80 ========
 __global__ void __launch_bounds__(
@@ -284,30 +285,66 @@ template <typename DT, typename T>
 void dispatch_cutlassF(T cb, int cc = 0) {
 
     if (std::is_same_v<DT, cutlass::bfloat16_t> && 80 <= cc && cc <= 121) {
-        dispatch_cutlassF_bf16_sm80(cb, cc);
+        if constexpr (std::is_same_v<DT, cutlass::bfloat16_t> && at::cuda::detail::cuda_arch_list_has(800, 1220)) {
+            dispatch_cutlassF_bf16_sm80(cb, cc);
+        } else {
+            at::cuda::detail::cutlass_arch_not_built("memory-efficient attention");
+        }
     }
     if (std::is_same_v<DT, cutlass::half_t> && 50 <= cc && cc <= 69) {
-        dispatch_cutlassF_f16_sm50(cb, cc);
+        if constexpr (std::is_same_v<DT, cutlass::half_t> && at::cuda::detail::cuda_arch_list_has(500, 700)) {
+            dispatch_cutlassF_f16_sm50(cb, cc);
+        } else {
+            at::cuda::detail::cutlass_arch_not_built("memory-efficient attention");
+        }
     }
     if (std::is_same_v<DT, cutlass::half_t> && 70 <= cc && cc <= 74) {
-        dispatch_cutlassF_f16_sm70(cb, cc);
+        if constexpr (std::is_same_v<DT, cutlass::half_t> && at::cuda::detail::cuda_arch_list_has(700, 750)) {
+            dispatch_cutlassF_f16_sm70(cb, cc);
+        } else {
+            at::cuda::detail::cutlass_arch_not_built("memory-efficient attention");
+        }
     }
     if (std::is_same_v<DT, cutlass::half_t> && 75 <= cc && cc <= 79) {
-        dispatch_cutlassF_f16_sm75(cb, cc);
+        if constexpr (std::is_same_v<DT, cutlass::half_t> && at::cuda::detail::cuda_arch_list_has(750, 800)) {
+            dispatch_cutlassF_f16_sm75(cb, cc);
+        } else {
+            at::cuda::detail::cutlass_arch_not_built("memory-efficient attention");
+        }
     }
     if (std::is_same_v<DT, cutlass::half_t> && 80 <= cc && cc <= 121) {
-        dispatch_cutlassF_f16_sm80(cb, cc);
+        if constexpr (std::is_same_v<DT, cutlass::half_t> && at::cuda::detail::cuda_arch_list_has(800, 1220)) {
+            dispatch_cutlassF_f16_sm80(cb, cc);
+        } else {
+            at::cuda::detail::cutlass_arch_not_built("memory-efficient attention");
+        }
     }
     if (std::is_same_v<DT, float> && 50 <= cc && cc <= 69) {
-        dispatch_cutlassF_f32_sm50(cb, cc);
+        if constexpr (std::is_same_v<DT, float> && at::cuda::detail::cuda_arch_list_has(500, 700)) {
+            dispatch_cutlassF_f32_sm50(cb, cc);
+        } else {
+            at::cuda::detail::cutlass_arch_not_built("memory-efficient attention");
+        }
     }
     if (std::is_same_v<DT, float> && 70 <= cc && cc <= 74) {
-        dispatch_cutlassF_f32_sm70(cb, cc);
+        if constexpr (std::is_same_v<DT, float> && at::cuda::detail::cuda_arch_list_has(700, 750)) {
+            dispatch_cutlassF_f32_sm70(cb, cc);
+        } else {
+            at::cuda::detail::cutlass_arch_not_built("memory-efficient attention");
+        }
     }
     if (std::is_same_v<DT, float> && 75 <= cc && cc <= 79) {
-        dispatch_cutlassF_f32_sm75(cb, cc);
+        if constexpr (std::is_same_v<DT, float> && at::cuda::detail::cuda_arch_list_has(750, 800)) {
+            dispatch_cutlassF_f32_sm75(cb, cc);
+        } else {
+            at::cuda::detail::cutlass_arch_not_built("memory-efficient attention");
+        }
     }
     if (std::is_same_v<DT, float> && 80 <= cc && cc <= 121) {
-        dispatch_cutlassF_f32_sm80(cb, cc);
+        if constexpr (std::is_same_v<DT, float> && at::cuda::detail::cuda_arch_list_has(800, 1220)) {
+            dispatch_cutlassF_f32_sm80(cb, cc);
+        } else {
+            at::cuda::detail::cutlass_arch_not_built("memory-efficient attention");
+        }
     }
 }
