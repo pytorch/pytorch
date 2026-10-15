@@ -82,6 +82,7 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/detail/Binary.h>
 #include <ATen/native/layer_norm.h>
 #include <ideep/abstract_types.hpp>
 
@@ -171,8 +172,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
                                            static_cast<float>(momentum)};
       const std::vector<float> scales_var{static_cast<float>(1 - momentum),
                                           static_cast<float>(momentum * static_cast<double>(len) / (static_cast<double>(len) - 1))};
-      ideep::sum::compute(scales_mean, {m, saved_mean}, m);
-      ideep::sum::compute(scales_var, {v, saved_var}, v);
+      mkldnn::sum(scales_mean, {m, saved_mean}, m);
+      mkldnn::sum(scales_var, {v, saved_var}, v);
     }
     return std::make_tuple(
          new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
