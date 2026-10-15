@@ -454,17 +454,3 @@ def freeze_runtime_cache(
         serializer = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
         serializer.extend(artifacts.items())
         write(serializer.to_bytes())
-
-
-def prepare_runtime_cache(artifact: bytes | None) -> None:
-    if artifact is None:
-        artifacts = {}
-    elif (artifacts := CacheArtifactManager.deserialize(artifact)) is None:
-        raise RuntimeError(
-            "Cannot prepare runtime dependencies from an unreadable precompile cache"
-        )
-    if len(artifacts.get(InductorTritonCacheArtifact.type(), ())) != 1:
-        raise RuntimeError(
-            "precompile.prepare_runtime requires a cache whose capture froze its "
-            "runtime dependencies"
-        )
