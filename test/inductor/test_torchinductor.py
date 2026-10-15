@@ -3606,6 +3606,35 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(4, (4,)),))
 
+    def test_clamp_int_bound_out_of_range(self):
+        # https://github.com/pytorch/pytorch/issues/198071
+        # An int bound outside an integer dtype's range is a no-op in eager.
+        # It must not wrap when it becomes a constant of the tensor's dtype.
+        def fn(a, b):
+            return (
+                a.clamp(0, 255),
+                a.clamp(-1000, 1000),
+                torch.clamp_max(a, 200),
+                torch.clamp_min(a, -300),
+                b.clamp(-5, 300),
+                (a // 2).clamp(max=300) + 1,
+                *torch._foreach_clamp_max([a, b], 300),
+                *torch._foreach_maximum([a, b], -300),
+            )
+
+        a = torch.tensor([-128, -5, 0, 3, 100, 127], dtype=torch.int8)
+        b = torch.tensor([0, 10, 200, 255], dtype=torch.uint8)
+        self.common(fn, (a, b))
+
+        # The same with the bounds as SymInts.
+        def fn2(x, lo, hi):
+            return x.clamp(lo, hi)
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn2)
+        a = a.to(self.device)
+        for lo, hi in ((-1, 2), (0, 255), (-1000, 1000)):
+            self.assertEqual(cfn(a, lo, hi), fn2(a, lo, hi))
+
     def test_comparison_scalar_type_promotion_bf16(self):
         if self.device == "mps":
             raise unittest.SkipTest(
