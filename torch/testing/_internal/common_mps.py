@@ -267,6 +267,9 @@ if torch.backends.mps.is_available():
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
             "cdouble": None,
             "double": None,
+            "_refs._conversions.cdouble": None,
+            "_refs._conversions.double": None,
+            "_refs.special.ndtri": None,
             "log_softmaxwith_dtype": [
                 torch.uint8,
                 torch.int8,
@@ -415,6 +418,46 @@ if torch.backends.mps.is_available():
             "nn.functional.grid_sample": [torch.float16, torch.bfloat16],
         }
 
+        # Failures in TestUnaryUfuncs, which compares against NumPy references,
+        # keyed by test name and then by op name
+        UNARY_UFUNCS_XFAILLIST: dict[str, dict[str, tuple[torch.dtype, ...]]] = {
+            "test_reference_numerics_extremal": {
+                # MPS bug: C99 special values for inf/nan inputs, e.g. exp(inf+infj) is nan+nanj
+                **dict.fromkeys(
+                    (
+                        "exp",
+                        "_refs.exp",
+                        "exp2",
+                        "_refs.exp2",
+                        "tan",
+                        "_refs.tan",
+                        "tanh",
+                        "_refs.tanh",
+                        "nn.functional.tanhshrink",
+                        "_refs.nn.functional.tanhshrink",
+                    ),
+                    (torch.complex64,),
+                ),
+                # NumPy deviates from C99, e.g. atanh(1+0j) is inf+0.785j rather than
+                # inf+0j (CPU skips these tests for the same reason)
+                **dict.fromkeys(
+                    ("_refs.atan", "atanh", "_refs.atanh"), (torch.complex64,)
+                ),
+            },
+            "test_reference_numerics_small": {
+                # MPS bug: cancellation for small arguments
+                **dict.fromkeys(("expm1", "_refs.expm1", "sinc"), (torch.complex64,)),
+                # NumPy deviates from C99 for atan(+-1j)
+                "_refs.atan": (torch.complex64,),
+                # NumPy reference computes int8/uint8 in float16
+                "nn.functional.silu": (torch.int8, torch.uint8),
+            },
+            "test_reference_numerics_normal": {
+                # NumPy reference can't negate bool and computes int8/uint8 in float16
+                "nn.functional.silu": (torch.bool, torch.int8, torch.uint8),
+            },
+        }
+
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
             if device_type is not None:
                 d.device_type = device_type
@@ -468,6 +511,18 @@ if torch.backends.mps.is_available():
                     addDecorator(
                         op,
                         DecorateInfo(unittest.expectedFailure, dtypes=xfaillist[key]),
+                    )
+
+            for test_name, xfails in UNARY_UFUNCS_XFAILLIST.items():
+                if key in xfails:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.expectedFailure,
+                            "TestUnaryUfuncs",
+                            test_name,
+                            dtypes=xfails[key],
+                        ),
                     )
 
             # If op is not supported for complex types, expect it to fail
