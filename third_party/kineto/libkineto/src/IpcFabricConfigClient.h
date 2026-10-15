@@ -68,7 +68,7 @@ enum LibkinetoConfigType {
 class IpcFabricConfigClient {
  public:
   IpcFabricConfigClient();
-  virtual ~IpcFabricConfigClient() {}
+  virtual ~IpcFabricConfigClient() = default;
 
   // Registers this application with the daemon
   virtual int32_t registerInstance(int32_t gpu);
