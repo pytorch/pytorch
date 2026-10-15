@@ -1237,6 +1237,10 @@ class TritonTemplateKernel(TritonKernel):
                 f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
             )
 
+        # the indexing math below is emitted into the kernel, so the scatter
+        # target's strides must be final
+        ir.freeze_storage_layout(scatter_graph)
+
         def contiguous_strides(x):
             # We always create a fresh contiguous grad for scattering into
             return sum(
