@@ -120,8 +120,8 @@ the cwd.
 
 In CI, `run_test.py` defaults to `test/torchci-reports`, which is uploaded as
 described below, in the jobs `_torchci_reports_default` selects: for now, the
-trunk and pull workflows' jobs. `run_tests` has no default, so a test file run
-some other way writes no report.
+trunk, pull, slow, inductor and periodic-strict workflows' jobs. `run_tests` has
+no default, so a test file run some other way writes no report.
 
 ## Upload
 
