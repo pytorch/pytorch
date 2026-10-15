@@ -761,13 +761,19 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     def _helper_test_extra_cuda_context_by_nvml(self):
         """
-        A helper for `test_extra_cuda_context`, if pynvml is available.
-        pynvml provides python bindings for NVIDIA NVML functionalities.
-        Here we are interested in: nvmlDeviceGetComputeRunningProcesses
+        A helper for `test_extra_cuda_context`, if pynvml (CUDA) or amdsmi (ROCm)
+        is available. They provide python bindings for NVML / AMD SMI.
+        Here we are interested in: nvmlDeviceGetComputeRunningProcesses /
+        amdsmi_get_gpu_process_list
         """
-        import pynvml
+        if torch.version.hip:
+            # Raises ModuleNotFoundError if amdsmi is not available.
+            handle = torch.cuda._get_amdsmi_handler(self.rank)
+            import amdsmi
+        else:
+            import pynvml
 
-        pynvml.nvmlInit()
+            pynvml.nvmlInit()
 
         device = torch.device(f"cuda:{self.rank:d}")
         x = torch.empty((1,), device=device)
@@ -777,8 +783,11 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Wait for every rank to delete Work without touching another CUDA context.
         store = c10d.distributed_c10d._get_default_store()
         store.barrier("work_deleted", self.world_size)
-        handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
-        processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+        if torch.version.hip:
+            processes = amdsmi.amdsmi_get_gpu_process_list(handle)
+        else:
+            handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
+            processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
         nprocs = len(processes)
 
         # A barrier for non-0 ranks
@@ -796,6 +805,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         A helper for `test_extra_cuda_context`, if pynvml is NOT available.
         If extra context is created, it would manifest into device 0's memory usage.
         """
+        if torch.version.hip:
+            raise SkipTest(
+                "Requires amdsmi on ROCm: an extra HIP context uses almost no device "
+                "memory, while the first RCCL kernel launch allocates ~1 GB of scratch "
+                "on the rank's own device, so memory growth cannot detect it."
+            )
         device = torch.device(f"cuda:{self.rank:d}")
         x = torch.empty((1,), device=device)
         # Rank 0 takes a snapshot before collective -- this snapshot should have
@@ -1113,6 +1128,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         if self.rank == 0:
             # Ideally we want to sleep for a very long time, but this is not
             # feasible in unit test. So this is only a very tiny case.
+            # Hold the first allreduce until rank 1 has issued both allreduces:
+            # w1 completing earlier releases its extension before w2 exists.
+            store.wait(["extend_timeout_issued"])
             time.sleep(5)
             pg.allreduce(torch.rand(10).cuda(self.rank))
             time.sleep(5)
@@ -1126,6 +1144,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             )
             w1 = pg.allreduce(torch.rand(10).cuda(self.rank))
             w2 = pg.allreduce(torch.rand(5).cuda(self.rank))
+            store.set("extend_timeout_issued", "1")
             self.assertEqual(w1.timeout, timedelta(seconds=13))
             self.assertEqual(w2.timeout, timedelta(seconds=13))
             w1.wait()
@@ -5032,6 +5051,33 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(pg_opts.config.host_cft_mode, 3)
         # Tests functionality when passing nccl config
         self._test_pass_nccl_options(pg_opts)
+
+    @requires_nccl()
+    @requires_nccl_version(
+        (2, 32, 3), "Need NCCL 2.32.3+ for testing nvls_host_mode in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("nvls_host_mode", [0, 1, 2, 3, 2147483647])
+    def test_pass_nccl_options_config_nvls_host_mode(self, nvls_host_mode):
+        if c10d.ProcessGroupNCCL.get_build_nccl_version() < (2, 32, 3):
+            raise SkipTest("nvls_host_mode requires building with NCCL 2.32.3+")
+
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        self.assertEqual(nccl_cfg.nvls_host_mode, -2147483648)
+        self.assertEqual(pg_opts.config.nvls_host_mode, -2147483648)
+
+        nccl_cfg.nvls_host_mode = nvls_host_mode
+        self.assertEqual(nccl_cfg.nvls_host_mode, nvls_host_mode)
+        self.assertEqual(copy.copy(nccl_cfg).nvls_host_mode, nvls_host_mode)
+        self.assertEqual(copy.deepcopy(nccl_cfg).nvls_host_mode, nvls_host_mode)
+        pg_opts.config = nccl_cfg
+        self.assertEqual(pg_opts.config.nvls_host_mode, nvls_host_mode)
+
+        copied_opts = copy.deepcopy(pg_opts)
+        pg_opts.config.nvls_host_mode = -2147483648
+        self.assertEqual(copied_opts.config.nvls_host_mode, nvls_host_mode)
+        self._test_pass_nccl_options(copied_opts)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)

@@ -40,7 +40,7 @@ open-ended string-to-string maps.
 | `cpu_capability` | string | `torch.backends.cpu.get_cpu_capability()` lower-cased (`default`, `avx2`, `avx512`, `sve256`, ...), with `ATEN_CPU_CAPABILITY` applied; `amx` for `avx512` on CPUs with AMX tiles |
 | `python_version` | string | Python major.minor, with `t` for free-threaded builds |
 | `cc_compiler` | string | `gcc`, `clang`, `msvc`, or `""`, from `torch.__config__._cxx_compiler()`; `""` with a torch that predates it |
-| `cc_compiler_version` | string | Compiler major version |
+| `cc_compiler_version` | string | Compiler version as `torch.__config__._cxx_compiler()` gives it (`11.4`, `21.1.0`, or MSVC's `_MSC_FULL_VER`, `194134120`) |
 | `accelerator` | string | `cpu`, `cuda`, `rocm`, `xpu`, or `mps` |
 | `accelerator_version` | string | `torch.version.cuda`, `torch.version.rocm` (the ROCm release, not HIP), or `torch.version.xpu` (the SYCL compiler, `20250101`); `""` for CPU and MPS |
 | `device_count` | int | Visible devices of `accelerator`, honoring `CUDA_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES`; `0` for CPU |
