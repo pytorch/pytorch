@@ -11,6 +11,7 @@
 #include <cutlass/tensor_ref.h>
 #include <cutlass/gemm/device/gemm_sparse_with_visitor.h>
 #include <cutlass/epilogue/threadblock/fusion/visitors.hpp>
+#include <ATen/native/cuda/cutlass_common.cuh>
 #endif
 
 #include <type_traits>
@@ -26,6 +27,10 @@
 
 namespace {
     enum class Activation{NONE, RELU, SILU};
+
+    // Only 8.x devices are supported at runtime (is_sm8x), so only 8.x code
+    // is reachable.
+    constexpr bool kBuiltForSm8x = at::cuda::detail::cuda_arch_list_has_major(8);
 }
 #endif
 
@@ -512,7 +517,7 @@ Tensor two_four_sgemm_dispatch_layouts_bias_activation(
     const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
     const Tensor& meta, const std::string_view& activation) {
     // Perform dispatching.
-    if constexpr (EnableActivationNone) {
+    if constexpr (kBuiltForSm8x && EnableActivationNone) {
         if (activation == "none") {
             return two_four_sgemm_dispatch_layouts_bias<
                 ElementInputA,
@@ -534,7 +539,7 @@ Tensor two_four_sgemm_dispatch_layouts_bias_activation(
                 meta);
         }
     }
-    if constexpr (EnableActivationReLU) {
+    if constexpr (kBuiltForSm8x && EnableActivationReLU) {
         if (activation == "relu") {
             return two_four_sgemm_dispatch_layouts_bias<
                 ElementInputA,
@@ -556,7 +561,7 @@ Tensor two_four_sgemm_dispatch_layouts_bias_activation(
                 meta);
         }
     }
-    if constexpr (EnableActivationSiLU) {
+    if constexpr (kBuiltForSm8x && EnableActivationSiLU) {
         if (activation == "silu") {
             return two_four_sgemm_dispatch_layouts_bias<
                 ElementInputA,
@@ -644,6 +649,9 @@ Tensor _sparse_semi_structured_linear(
     TORCH_CHECK(is_sm8x,
                 "_sparse_semi_structured_linear: Supported only on GPUs with "
                 "compute capability 8.x");
+    if constexpr (!kBuiltForSm8x) {
+        at::cuda::detail::cutlass_arch_not_built("_sparse_semi_structured_linear");
+    }
 
     // Validate datatypes of input tensors.
     TORCH_CHECK(tensor_a.dtype() == at::kChar ||
