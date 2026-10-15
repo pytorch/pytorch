@@ -7952,6 +7952,35 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertEqual(fake.imports, [])
             self.assertEqual(_runtime_cache._imported_triton_runtime, set())
 
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_malformed_triton_runtime_cache_only_warns_when_not_strict(self):
+        import hashlib
+        import struct
+
+        from torch.compiler import _runtime_cache
+        from torch.compiler._triton_runtime_cache import _MAGIC
+
+        # The right digest, but a header that is not a JSON object.
+        payload = _MAGIC + struct.pack("!Q", 2) + b"[]"
+        runtime = _runtime_cache.TritonRuntimeCacheArtifact(
+            hashlib.sha256(payload).hexdigest(), payload
+        )
+        with mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()):
+            with (
+                _triton_settings_unchanged(self),
+                self.assertLogs(_runtime_cache.log, "WARNING") as logs,
+            ):
+                runtime.populate_cache()
+            self.assertIn("rejected (Malformed", logs.output[0])
+            with (
+                _triton_settings_unchanged(self),
+                torch.compiler.precompile.no_compilation(),
+                self.assertRaisesRegex(RuntimeError, "rejected \\(Malformed") as raised,
+            ):
+                runtime.populate_cache()
+            self.assertIsInstance(raised.exception.__cause__.__cause__, AttributeError)
+            self.assertEqual(_runtime_cache._imported_triton_runtime, set())
+
     def test_triton_runtime_cache_needs_import_support_only_when_strict(self):
         import hashlib
 
