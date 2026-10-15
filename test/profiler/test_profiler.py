@@ -4686,6 +4686,8 @@ instantiate_device_type_tests(
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @instantiate_parametrized_tests
 class TestProfilerTraceCompression(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("use_python_export", [False, True])
     @parametrize(
         "suffix",
@@ -4702,7 +4704,7 @@ class TestProfilerTraceCompression(TestCase):
         else:
             opener = open
 
-        value = "caf\u00e9 \u4e2d"
+        value = "café 中"
         escape_unicode = use_python_export and not suffix.endswith(".zst")
         metadata = json.dumps(value, ensure_ascii=escape_unicode)
         with profile(activities=[ProfilerActivity.CPU]) as prof:
@@ -4723,9 +4725,7 @@ class TestProfilerTraceCompression(TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "trace.json.zst")
             with patch.dict(sys.modules, {"zstandard": None, "pyzstd": None}):
-                message = (
-                    "requires zstandard or pyzstd.*pip install zstandard.*pip install pyzstd"
-                )
+                message = "requires zstandard or pyzstd.*pip install zstandard.*pip install pyzstd"
                 with self.assertRaisesRegex(ImportError, message):
                     prof.export_chrome_trace(path, use_python_export=use_python_export)
                 self.assertFalse(os.path.exists(path))

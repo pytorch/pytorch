@@ -4055,9 +4055,7 @@ cuspy_core.enable_hes_early()
             self.assertFalse(os.path.exists(path + ".gz"))
             with zstd.open(path, "rt", encoding="utf-8") as f:
                 trace = json.load(f)
-            self.assertTrue(
-                any(e.get("cat") == "kernel" for e in trace["traceEvents"])
-            )
+            self.assertTrue(any(e.get("cat") == "kernel" for e in trace["traceEvents"]))
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")

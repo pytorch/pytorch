@@ -678,7 +678,11 @@ class _KinetoProfile:
             )
         path = os.fspath(path)
         if self._use_cuspy and path.endswith(".zst") and ".pftrace" in path:
-            raise ValueError("Zstd compression is only supported for Chrome JSON traces")
+            raise ValueError(
+                "Zstd compression is only supported for Chrome JSON traces"
+            )
+        # Validate compression before Kineto saves and consumes the trace, so a
+        # missing zstd dependency leaves it available for a later export.
         trace_file_opener = _get_trace_file_opener(path)
         if self._use_cuspy:
             obs = self._cuspy_profiler_observer
@@ -729,7 +733,10 @@ class _KinetoProfile:
             with tempfile.TemporaryDirectory() as tmpdir:
                 trace_path = os.path.join(tmpdir, "trace.json")
                 self.profiler.export_chrome_trace(trace_path, self._trace_metadata)
-                with open(trace_path, "rb") as fin, trace_file_opener(path, "wb") as fout:
+                with (
+                    open(trace_path, "rb") as fin,
+                    trace_file_opener(path, "wb") as fout,
+                ):
                     shutil.copyfileobj(fin, fout)
         else:
             self.profiler.export_chrome_trace(path, self._trace_metadata)
