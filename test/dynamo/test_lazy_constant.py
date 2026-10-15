@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import keyword
-import operator
 import sys
 
 import torch
@@ -631,6 +630,7 @@ class ComputedLazyConstantTests(TestCase):
             ("pos", lambda t, a: t * (+a)),
             ("abs", lambda t, a: t * abs(a)),
             ("not", lambda t, a: t * (not a)),
+            ("invert", lambda t, a: t * (~a)),
         ]
         for name, fn in cases:
             with self.subTest(name=name):
@@ -675,21 +675,18 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, True), (t, False)], expected_frames=2)
 
-    def test_concrete_only_op_on_symbolic_int_compiles(self):
+    def test_str_on_symbolic_int_compiles(self):
         t = torch.ones(2)
-        for name, op in [("str", str), ("invert", operator.invert)]:
-            with self.subTest(name=name):
-                torch._dynamo.reset()
-                d = {op(i): i for i in range(4)}
+        d = {str(i): i for i in range(4)}
 
-                def fn(t, idx):
-                    return t.relu() * d[op(idx)]
+        def fn(t, idx):
+            return t.relu() * d[str(idx)]
 
-                counter = CompileCounter()
-                opt_fn = torch.compile(fn, backend=counter)
-                for idx in range(4):
-                    self.assertEqual(fn(t, idx), opt_fn(t, idx))
-                self.assertGreater(counter.frame_count, 1)
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        for idx in range(4):
+            self.assertEqual(fn(t, idx), opt_fn(t, idx))
+        self.assertGreater(counter.frame_count, 1)
 
     def test_builtin_fn_in_branch_recompiles(self):
         t = torch.ones(2)

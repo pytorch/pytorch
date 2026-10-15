@@ -106,8 +106,8 @@ class ComputedLazyCache:
             if isinstance(lazy_var.realize(), SymNodeVariable):
                 any_symbolic = True
 
-        if any_symbolic and self.op in (str, operator.invert):
-            # SymNodeVariable has no tp_repr_impl/nb_invert_impl; specialize instead
+        if any_symbolic and self.op is str:
+            # SymNodeVariable has no tp_repr_impl; specialize instead
             (arg,) = (arg.realize() for arg in self.args)
             value = (
                 arg.evaluate_expr()
