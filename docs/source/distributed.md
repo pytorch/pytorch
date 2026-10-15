@@ -88,8 +88,6 @@ through the `torch.distributed.backends` entry point group and loaded on first u
 - `nccl-lazy`: CUDA. Variant of `nccl` that runs collectives on one communicator and
   creates a 2-rank communicator per point-to-point peer pair on first use.
 - `nccl-legacy`: CUDA. The legacy `ProcessGroupNCCL` implementation.
-- `nccl4py`: CUDA. Python backend built on [nccl4py](https://pypi.org/project/nccl4py/);
-  requires the `nccl4py` package.
 - `mpi`: only when PyTorch is built with MPI.
 - `ucc`: CPU and CUDA; only when PyTorch is built with UCC.
 - `xccl`: Intel XPU.
@@ -1558,11 +1556,6 @@ capability.
 **TorchComms FlightRecorder JSON** ``/torchcomms_fr_trace_json``
   Same data as ``/torchcomms_fr_trace`` but rendered as raw formatted JSON.
 
-**TorchComms Health Check** ``/torchcomms_health_check``
-  Fetches the TorchComms health state from every rank. When any rank reports
-  itself unhealthy, the server requests a TorchComms Flight Recorder dump
-  (``torchcomms_fr_dump_file``) from every worker.
-
 **c10d Health Check** ``/c10d_health_check``
   Fetches the c10d health state from every rank. When any rank reports an
   unhealthy backend, the server requests a Flight Recorder dump for that
@@ -1717,29 +1710,27 @@ Dump files are saved as ``<handler_name>_<timestamp>.txt`` (e.g.,
 Handlers that support dumping:
 
 ```{eval-rst}
-+-------------------------------------+-----------------------------+-------------------------------------------------+
-| Handler                             | Dump filename               | Content                                         |
-+=====================================+=============================+=================================================+
-| ``StacksHandler``                   | ``stacks``                  | Python stack traces for all ranks.              |
-+-------------------------------------+-----------------------------+-------------------------------------------------+
-| ``PySpyHandler``                    | ``pyspy_dump``              | py-spy stack dumps (nonblocking) for all ranks. |
-+-------------------------------------+-----------------------------+-------------------------------------------------+
-| ``FlightRecorderHandler``           | ``fr_trace``                | CPU + NCCL flight-recorder tables.              |
-+-------------------------------------+-----------------------------+-------------------------------------------------+
-| ``TorchCommsFlightRecorderHandler`` | ``torchcomms_fr_trace``     | TorchComms flight-recorder tables.              |
-+-------------------------------------+-----------------------------+-------------------------------------------------+
-| ``TorchCommsHealthCheckHandler``    | ``torchcomms_health_check`` | TorchComms health and Flight Recorder dumps.    |
-+-------------------------------------+-----------------------------+-------------------------------------------------+
-| ``C10dHealthCheckHandler``          | ``c10d_health_check``       | c10d health and backend Flight Recorder dumps.  |
-+-------------------------------------+-----------------------------+-------------------------------------------------+
-| ``WaitCountersHandler``             | ``wait_counters``           | Wait counter JSON for all ranks.                |
-+-------------------------------------+-----------------------------+-------------------------------------------------+
-| ``TCPStoreHandler``                 | ``tcpstore``                | All TCPStore key-value pairs.                   |
-+-------------------------------------+-----------------------------+-------------------------------------------------+
++------------------------------------+------------------------+---------------------------------------------------+
+| Handler                            | Dump filename          | Content                                           |
++====================================+========================+===================================================+
+| ``StacksHandler``                  | ``stacks``             | Python stack traces for all ranks.                |
++------------------------------------+------------------------+---------------------------------------------------+
+| ``PySpyHandler``                   | ``pyspy_dump``         | py-spy stack dumps (nonblocking) for all ranks.   |
++------------------------------------+------------------------+---------------------------------------------------+
+| ``FlightRecorderHandler``          | ``fr_trace``           | CPU + NCCL flight-recorder tables.                |
++------------------------------------+------------------------+---------------------------------------------------+
+| ``TorchCommsFlightRecorderHandler``| ``torchcomms_fr_trace``| TorchComms flight-recorder tables.                |
++------------------------------------+------------------------+---------------------------------------------------+
+| ``C10dHealthCheckHandler``         | ``c10d_health_check``  | c10d health and backend Flight Recorder dumps.    |
++------------------------------------+------------------------+---------------------------------------------------+
+| ``WaitCountersHandler``            | ``wait_counters``      | Wait counter JSON for all ranks.                  |
++------------------------------------+------------------------+---------------------------------------------------+
+| ``TCPStoreHandler``                | ``tcpstore``           | All TCPStore key-value pairs.                     |
++------------------------------------+------------------------+---------------------------------------------------+
 ```
 
-By default (when ``enabled_dumps=None``), ``"stacks"``, ``"fr_trace"``,
-``"torchcomms_health_check"`` and ``"c10d_health_check"`` are enabled.
+By default (when ``enabled_dumps=None``), ``"stacks"``, ``"fr_trace"``, and
+``"c10d_health_check"`` are enabled.
 
 #### Registering Custom Handlers
 
