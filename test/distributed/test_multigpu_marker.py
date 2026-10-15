@@ -9,21 +9,30 @@ __wrapped__). Class world_size is not a GPU requirement: on a 4-GPU runner a
 literal 4 is indistinguishable from capacity-scaled NUM_DEVICES/DEVICE_COUNT
 values that still run on 2 GPUs. distributed_4gpu relies on decorator stamps:
 --multigpu-min-gpus 3 keeps tests that declare >= 3 GPUs and drops the rest.
+
+TestSkippedReason covers the `_skipped_reason` stamps that let launchers skip
+before spawning ranks.
 """
 
 import os
 import sys
 import tempfile
 import types
+import unittest
 from unittest.mock import patch
 
+import torch
 from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
     nccl_skip_if_lt_x_gpu,
     require_n_gpus_for_nccl_backend,
     requires_world_size,
     skip_if_lt_x_gpu,
+    skip_if_no_gpu,
+    skip_if_small_worldsize,
+    TEST_SKIPS,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import IS_SANDCASTLE, run_tests, TestCase
 
 
 # The marker resolver lives in test/conftest.py. Make it importable whether this
@@ -170,6 +179,70 @@ class TestMultiGpuMarker(TestCase):
                 )
             with open(count_file) as fp:
                 self.assertEqual(fp.read(), "2\n")
+
+
+def _noop(self):
+    pass
+
+
+class TestSkippedReason(TestCase):
+    """Decorators set `_skipped_reason` when every rank would skip."""
+
+    def test_small_worldsize(self):
+        with patch.dict(os.environ, {"BACKEND": "gloo", "WORLD_SIZE": "2"}):
+            self.assertEqual(
+                skip_if_small_worldsize(_noop)._skipped_reason,
+                TEST_SKIPS["small_worldsize"].message,
+            )
+        for env in ({"BACKEND": "gloo", "WORLD_SIZE": "8"}, {"BACKEND": "mpi"}):
+            with patch.dict(os.environ, env):
+                self.assertFalse(
+                    hasattr(skip_if_small_worldsize(_noop), "_skipped_reason")
+                )
+
+    def test_no_accelerator(self):
+        with patch.object(torch.accelerator, "current_accelerator", return_value=None):
+            self.assertEqual(
+                skip_if_no_gpu(_noop)._skipped_reason,
+                TEST_SKIPS["no_accelerator"].message,
+            )
+            self.assertEqual(
+                skip_if_lt_x_gpu(2)(_noop)._skipped_reason,
+                TEST_SKIPS["multi-device-2"].message,
+            )
+            self.assertFalse(
+                hasattr(skip_if_lt_x_gpu(2, allow_cpu=True)(_noop), "_skipped_reason")
+            )
+
+        with patch.object(
+            torch.accelerator,
+            "current_accelerator",
+            return_value=torch.device("cuda"),
+        ):
+            self.assertFalse(hasattr(skip_if_no_gpu(_noop), "_skipped_reason"))
+            self.assertFalse(hasattr(skip_if_lt_x_gpu(2)(_noop), "_skipped_reason"))
+
+    @unittest.skipIf(IS_SANDCASTLE, "Sandcastle leaves skips to the ranks")
+    def test_dist_backend_skips_before_spawn(self):
+        # distributed_test reads BACKEND and WORLD_SIZE at import.
+        with patch.dict(os.environ, {"BACKEND": "gloo", "WORLD_SIZE": "2"}):
+            from torch.testing._internal.distributed.distributed_test import (
+                TestDistBackend,
+            )
+
+            class Skipped(TestDistBackend):
+                @skip_if_small_worldsize
+                def test_fn(self):
+                    pass
+
+        with (
+            patch.object(MultiProcessTestCase, "setUp") as spawn_setup,
+            self.assertRaisesRegex(
+                unittest.SkipTest, TEST_SKIPS["small_worldsize"].message
+            ),
+        ):
+            Skipped("test_fn").setUp()
+        spawn_setup.assert_not_called()
 
 
 if __name__ == "__main__":

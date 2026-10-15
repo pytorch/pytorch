@@ -1546,6 +1546,41 @@ class ForeachTests(TestCase):
         actual = torch.compile(fn)(*args_clone)
         self.assertEqual(actual, expected)
 
+    @requires_cuda_and_triton
+    def test_foreach_pow_int_fallback(self):
+        from torch._inductor import scheduler
+
+        def fn_inplace(t, e):
+            torch._foreach_pow_(t, e)
+            return t[0]
+
+        def fn_outplace(t, e):
+            res = torch._foreach_pow(t, e)
+            return res[0]
+
+        create_foreach_nodes_calls = 0
+        orig_create_foreach_nodes = scheduler.Scheduler.create_foreach_nodes
+
+        def create_foreach_nodes_spy(self):
+            nonlocal create_foreach_nodes_calls
+            create_foreach_nodes_calls += 1
+            return orig_create_foreach_nodes(self)
+
+        t = [torch.tensor([2], device=GPU_TYPE, dtype=torch.int32)]
+        e = [torch.tensor(3, device=GPU_TYPE, dtype=torch.int32)]
+        with mock.patch.object(
+            scheduler.Scheduler, "create_foreach_nodes", create_foreach_nodes_spy
+        ):
+            self.assertEqual(
+                fn_inplace([t[0].clone()], e),
+                torch.compile(fn_inplace)([t[0].clone()], e),
+            )
+            self.assertEqual(
+                fn_outplace([t[0].clone()], e),
+                torch.compile(fn_outplace)([t[0].clone()], e),
+            )
+        self.assertGreaterEqual(create_foreach_nodes_calls, 2)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

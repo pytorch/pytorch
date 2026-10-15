@@ -318,30 +318,25 @@ struct __to_constant__ {
 // UST Logger Semantics to describe when a stage is complete.
 // Use libkineto::Logger directly instead of the LOG/LOG_IS_ON macros, which
 // can be redefined by glog in translation units that include both Logger.h
-// and glog/logging.h. Inline the severity gate so messages are still
-// suppressed when libkineto's severity threshold is above the message
-// severity.
-#define UST_LOGGER_MARK_COMPLETED(stage)                                      \
-  !(libkineto::LoggerOutputType::STAGE >= libkineto::Logger::severityLevel()) \
-      ? (void)0                                                               \
-      : libkineto::VoidLogger() &                                             \
-          libkineto::Logger(                                                  \
-              libkineto::LoggerOutputType::STAGE, __LINE__, __FILE__)         \
-                  .stream()                                                   \
-              << "Completed Stage: " << stage
+// and glog/logging.h. Stages always reach observers, which use them as
+// processing hooks; ~Logger() applies the severity threshold to the console.
+#define UST_LOGGER_MARK_COMPLETED(stage)                          \
+  libkineto::VoidLogger() &                                       \
+      libkineto::Logger(                                          \
+          libkineto::LoggerOutputType::STAGE, __LINE__, __FILE__) \
+              .stream()                                           \
+          << "Completed Stage: " << stage
 
 // RAII helper that fires UST_LOGGER_MARK_COMPLETED(stage) on scope exit.
 #define UST_LOGGER_STAGE_SCOPE(stage) \
   libkineto::USTLoggerStageGuard LOCAL_VARNAME(ust_stage_guard)(stage)
 
-#define USDT_LOGGER_EMIT_MESSAGE(usdt_type)                                  \
-  !(libkineto::LoggerOutputType::USDT >= libkineto::Logger::severityLevel()) \
-      ? (void)0                                                              \
-      : libkineto::VoidLogger() &                                            \
-          libkineto::Logger(                                                 \
-              libkineto::LoggerOutputType::USDT, __LINE__, __FILE__)         \
-                  .stream()                                                  \
-              << usdt_type
+#define USDT_LOGGER_EMIT_MESSAGE(usdt_type)                      \
+  libkineto::VoidLogger() &                                      \
+      libkineto::Logger(                                         \
+          libkineto::LoggerOutputType::USDT, __LINE__, __FILE__) \
+              .stream()                                          \
+          << usdt_type
 #define USDT_EMIT_START_TRACE() USDT_LOGGER_EMIT_MESSAGE("profiler_start")
 #define USDT_EMIT_STOP_TRACE() USDT_LOGGER_EMIT_MESSAGE("profiler_stop")
 

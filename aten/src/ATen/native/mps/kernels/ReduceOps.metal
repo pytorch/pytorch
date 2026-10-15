@@ -276,7 +276,7 @@ struct WelfordOp {
   }
   template <typename TI>
   static inline acc_t load(TI v) {
-    return acc_t(static_cast<float>(v), 0, 1);
+    return acc_t(static_cast<float>(v), static_cast<float>(v - v), 1);
   }
   static inline acc_t load(float3 partial) {
     return partial;
@@ -344,7 +344,7 @@ struct WelfordOp {
 template <typename OP, typename TI, typename TO, uint NCHAINS = SUM_NCHAINS>
 [[max_total_threads_per_threadgroup(MAX_THREADGROUP_SIZE)]]
 kernel void reduction_generic(
-    constant TI* input [[buffer(0)]],
+    device const TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
     constant NormParams<>& params [[buffer(2)]],
     uint tid [[thread_position_in_threadgroup]],
@@ -457,7 +457,7 @@ template <
     uint NCHAINS = SUM_NCHAINS>
 [[max_total_threads_per_threadgroup(TG_X * TG_Y)]]
 kernel void reduction_outer(
-    constant TI* input [[buffer(0)]],
+    device const TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
     // [dim_size, inner_size, num_segs, unused]
     constant uint4& sizes [[buffer(2)]],
@@ -537,7 +537,7 @@ template <
     uint NCHAINS = SUM_NCHAINS>
 [[max_total_threads_per_threadgroup(TG_SIZE)]]
 kernel void reduction_narrow(
-    constant TI* input [[buffer(0)]],
+    device const TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
     // [dim_size, inner_size, num_segs, unused]
     constant uint4& sizes [[buffer(2)]],
@@ -597,7 +597,7 @@ kernel void reduction_narrow(
 // No shared memory needed since simd_reduce suffices for intra-row collapse.
 template <typename OP, typename TI, typename TO, uint NCHAINS = SUM_NCHAINS>
 kernel void reduction_innermost(
-    constant TI* input [[buffer(0)]],
+    device const TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
     constant uint2& sizes [[buffer(2)]], // [M, N]
     constant float& param [[buffer(3)]], // >0 divides accumulator before cast
@@ -615,7 +615,7 @@ kernel void reduction_innermost(
   if (row >= M)
     return;
 
-  constant TI* row_ptr = input + row * N;
+  device const TI* row_ptr = input + row * N;
 
   metal::array<TA, NCHAINS> acc;
   for (uint j = 0; j < NCHAINS; j++)
@@ -695,7 +695,7 @@ template <
     typename TI,
     ::metal::enable_if_t<chunk_has_vec4_v<TI>, bool> = true>
 inline uint chunk_quads(
-    constant TI* input,
+    device const TI* input,
     uint row_base,
     uint seg_begin,
     uint seg_end,
@@ -708,7 +708,8 @@ inline uint chunk_quads(
     return seg_begin + row_lane;
   }
   using V = vec4type_t<TI>;
-  constant V* vin = reinterpret_cast<constant V*>(input + row_base + seg_begin);
+  device const V* vin =
+      reinterpret_cast<device const V*>(input + row_base + seg_begin);
   for (uint q = row_lane; q < num_quads; q += lanes_per_row) {
     const V v = vin[q];
 #pragma unroll
@@ -725,7 +726,7 @@ template <
     typename TI,
     ::metal::enable_if_t<!chunk_has_vec4_v<TI>, bool> = true>
 inline uint chunk_quads(
-    constant TI*,
+    device const TI*,
     uint,
     uint seg_begin,
     uint,
@@ -745,7 +746,7 @@ inline uint chunk_quads(
 // loads otherwise.
 template <typename OP, typename TI, typename TO>
 kernel void reduction_innermost_chunk(
-    constant TI* input [[buffer(0)]],
+    device const TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
     constant uint4& sizes [[buffer(2)]], // [rows, row_len, lanes, segs]
     constant float& param [[buffer(3)]],
@@ -819,7 +820,7 @@ kernel void reduction_innermost_chunk(
 // the slice base needs no vector alignment.
 template <typename OP, typename TI, typename TO, uint NCHAINS = SUM_NCHAINS>
 kernel void reduction_flat(
-    constant TI* input [[buffer(0)]],
+    device const TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
     constant uint2& params [[buffer(2)]],
     uint tid [[thread_position_in_threadgroup]],
@@ -827,7 +828,7 @@ kernel void reduction_flat(
     uint tgid [[threadgroup_position_in_grid]]) {
   using TA = typename OP::acc_t;
   const uint E = params.y;
-  constant TI* in = input + tgid * E;
+  device const TI* in = input + tgid * E;
   const uint n_quads = E / 4;
 
   metal::array<TA, NCHAINS> acc;
@@ -865,6 +866,79 @@ kernel void reduction_flat(
   }
 }
 
+// Pass-1 kernel for two-pass full reductions over a non-contiguous input that
+// collapses to rows of one equal-strided run: element (r, k) lives at
+// r * strides.x + k * strides.y. Rows longer than the GPU can use are split
+// into sizes.z equal chunks of sizes.y elements, so a view that collapses to
+// a single run (a strided 1-D tensor) still spreads over every threadgroup.
+//
+// Threadgroups grid-stride over the rows * chunks virtual rows and pay one
+// divmod per virtual row; inside a row, lanes step the run with a fixed
+// stride. This keeps the input in place: the alternative is a .contiguous()
+// copy, which moves more bytes than the reduction itself reads.
+template <typename OP, typename TI, typename TO, uint NCHAINS = SUM_NCHAINS>
+kernel void reduction_flat_strided(
+    device const TI* input [[buffer(0)]],
+    device TO* output [[buffer(1)]],
+    // [rows, chunk_len, chunks_per_row, unused]
+    constant uint4& sizes [[buffer(2)]],
+    // [row_stride, element_stride, unused, unused]
+    constant uint4& strides [[buffer(3)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint ntg [[threadgroups_per_grid]]) {
+  using TA = typename OP::acc_t;
+  const uint chunk_len = sizes.y;
+  const uint num_chunks = sizes.z;
+  const uint num_vrows = sizes.x * num_chunks;
+
+  // Short rows would leave most of a threadgroup idle, so split it into
+  // several row-workers of the smallest power-of-two width covering a row.
+  uint tpr = simdgroup_size;
+  while (tpr < chunk_len && tpr < tptg) {
+    tpr <<= 1;
+  }
+  tpr = ::metal::min(tpr, tptg);
+  const uint rows_at_once = tptg / tpr;
+  const uint row_of = tid / tpr;
+  const uint col_of = tid % tpr;
+
+  metal::array<TA, NCHAINS> acc;
+  for (uint j = 0; j < NCHAINS; j++) {
+    acc[j] = OP::identity();
+  }
+  // Lanes past rows_at_once * tpr, and threadgroups that draw no rows, keep
+  // OP::identity(), which the threadgroup reduction and pass 2 absorb.
+  if (row_of < rows_at_once) {
+    for (uint v = tgid * rows_at_once + row_of; v < num_vrows;
+         v += ntg * rows_at_once) {
+      const uint r = v / num_chunks;
+      const uint c = v - r * num_chunks;
+      device const TI* in = input + r * strides.x + c * chunk_len * strides.y;
+      uint k = col_of;
+      for (; k + (NCHAINS - 1) * tpr < chunk_len; k += tpr * NCHAINS) {
+#pragma unroll
+        for (uint j = 0; j < NCHAINS; j++) {
+          acc[j] = OP::combine(acc[j], OP::load(in[(k + j * tpr) * strides.y]));
+        }
+      }
+      for (; k < chunk_len; k += tpr) {
+        acc[0] = OP::combine(acc[0], OP::load(in[k * strides.y]));
+      }
+    }
+  }
+  TA val = acc[0];
+  for (uint j = 1; j < NCHAINS; j++) {
+    val = OP::combine(val, acc[j]);
+  }
+  threadgroup TA shared[MAX_THREADGROUP_SIZE / 32];
+  val = OP::threadgroup_reduce(shared, val, tid, tptg);
+  if (tid == 0) {
+    output[tgid] = OP::finalize(val, 0);
+  }
+}
+
 #define INSTANTIATE_KERNEL(name, func, ...) \
   template [[host_name(                     \
       name)]] [[kernel]] decltype(func<__VA_ARGS__>) func<__VA_ARGS__>
@@ -879,6 +953,12 @@ kernel void reduction_flat(
   INSTANTIATE_KERNEL(                                  \
       PREFIX "reduction_flat_" #TI "_" #TO,            \
       reduction_flat,                                  \
+      __VA_ARGS__,                                     \
+      TI,                                              \
+      TO);                                             \
+  INSTANTIATE_KERNEL(                                  \
+      PREFIX "reduction_flat_strided_" #TI "_" #TO,    \
+      reduction_flat_strided,                          \
       __VA_ARGS__,                                     \
       TI,                                              \
       TO);                                             \
@@ -1143,7 +1223,7 @@ inline bool arg_replace(
 template <template <typename> class OpFn, typename TI>
 [[max_total_threads_per_threadgroup(MAX_THREADGROUP_SIZE)]]
 kernel void arg_reduction(
-    constant TI* input [[buffer(0)]],
+    device const TI* input [[buffer(0)]],
     device long* output [[buffer(1)]],
     constant NormParams<>& params [[buffer(2)]],
     uint tid [[thread_position_in_threadgroup]],
@@ -1254,11 +1334,11 @@ enum ArgMode : uint { ARG_PLAIN = 0, ARG_SPLIT_P1 = 1, ARG_COMBINE = 2 };
 // collapse uses simd_arg_reduce which ties on lowest IDX, not lowest LANE.
 template <template <typename> class OpFn, typename TI, ArgMode MODE = ARG_PLAIN>
 kernel void arg_reduction_innermost(
-    constant TI* input [[buffer(0)]],
+    device const TI* input [[buffer(0)]],
     device long* output [[buffer(1)]],
     // ARG_SPLIT_P1: [num_partials, seg_len, num_segs, row_len]; else [M, N]
     constant uint4& sizes [[buffer(2)]],
-    constant int* idx_in [[buffer(3)]],
+    device const int* idx_in [[buffer(3)]],
     device TI* val_out [[buffer(4)]],
     device int* idx_out [[buffer(5)]],
     uint tptg [[threads_per_threadgroup]],
@@ -1279,7 +1359,7 @@ kernel void arg_reduction_innermost(
   const uint seg_off = split ? (row % num_segs) * sizes.y : 0;
   const uint span = split ? min(seg_off + sizes.y, sizes.w) - seg_off : sizes.y;
   const uint row_base = split ? (row / num_segs) * sizes.w : row * sizes.y;
-  constant TI* row_ptr = input + row_base + seg_off;
+  device const TI* row_ptr = input + row_base + seg_off;
 
   TA best_val = Op::identity();
   uint32_t best_idx =
@@ -1328,7 +1408,7 @@ template <
     bool SPLIT = false>
 [[max_total_threads_per_threadgroup(TG_X * TG_Y)]]
 kernel void arg_reduction_outer(
-    constant TI* input [[buffer(0)]],
+    device const TI* input [[buffer(0)]],
     device long* output [[buffer(1)]],
     // [dim_size, inner_size, num_segs, unused]
     constant uint4& sizes [[buffer(2)]],
@@ -1418,7 +1498,7 @@ template <
     uint TG_SIZE = NARROW_TG_SIZE>
 [[max_total_threads_per_threadgroup(TG_SIZE)]]
 kernel void arg_reduction_narrow_p1(
-    constant TI* input [[buffer(0)]],
+    device const TI* input [[buffer(0)]],
     device TI* val_out [[buffer(1)]],
     device int* idx_out [[buffer(2)]],
     // [dim_size, inner_size, num_segs, unused]

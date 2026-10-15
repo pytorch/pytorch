@@ -193,15 +193,8 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     if (!or_event) {
       auto or_flag = orEventDisableTiming;
-      switch (flag) {
-        case EventFlag::PYTORCH_DEFAULT:
-          or_flag = orEventDisableTiming;
-          break;
-        case EventFlag::BACKEND_DEFAULT:
-          or_flag = orEventEnableTiming;
-          break;
-        default:
-          TORCH_CHECK(false, "Received unknown flag");
+      if (flag & c10::EventFlag::TIMING) {
+        or_flag = orEventEnableTiming;
       }
 
       OPENREG_CHECK(orEventCreateWithFlags(&or_event, or_flag));
