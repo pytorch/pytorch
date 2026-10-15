@@ -18,7 +18,10 @@ from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwis
 from torch._inductor import CompiledArtifact, config, load_from_python
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import PyCodeCache
-from torch._inductor.codegen.wrapper import _rename_kernel_module_globals
+from torch._inductor.codegen.wrapper import (
+    _rename_kernel_module_globals,
+    PythonWrapperCodegen,
+)
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
@@ -126,6 +129,19 @@ def doc_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
     mask = offs < n
     tl.store(out_ptr + offs, tl.load(in_ptr + offs, mask=mask) + 1, mask=mask)
 '''
+
+
+_TAG_MODULE = r"""
+import triton
+import triton.language as tl
+
+
+@triton.jit
+def tag_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr, TAG: tl.constexpr):
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n
+    tl.store(out_ptr + offs, tl.load(in_ptr + offs, mask=mask) + 1, mask=mask)
+"""
 
 
 def _import_kernels(d, template, kernels):
@@ -648,6 +664,31 @@ class TestModuleLevelKernels(TestCase):
             result, code = _code_for(fn, x)
             self.assertEqual(result, x + 1)
             self.assertIn(r'"""Adds one.\n"""', code)
+
+    @requires_cuda_and_triton
+    @parametrize("as_code", [False, True])
+    def test_user_defined_kernel_meta_with_backslashes(self, as_code):
+        # A string constexpr lands in the decorator's triton_meta repr, which the
+        # string form's literal and the module-level decode both read back.
+        with tempfile.TemporaryDirectory() as d:
+            (mod,) = _import_kernels(d, _TAG_MODULE, {f"_kd_tag_{as_code}": {}})
+
+            def fn(x):
+                out = torch.empty_like(x)
+                mod.tag_kernel[(4,)](x, out, x.numel(), BLOCK=64, TAG="a\\nb")
+                return out
+
+            x = torch.randn(256, device="cuda")
+            with mock.patch.object(
+                PythonWrapperCodegen,
+                "defines_triton_kernels_as_code",
+                lambda self: as_code,
+            ):
+                result, code = _code_for(fn, x, fx_graph_cache=False)
+            self.assertEqual(result, x + 1)
+            # The string form holds the decorator escaped for its literal.
+            meta = r"'TAG': 'a\\nb'"
+            self.assertIn(meta if as_code else meta.replace("\\", "\\\\"), code)
 
     @requires_cuda_and_triton
     @parametrize("autotune_at_compile_time", [False, True])
