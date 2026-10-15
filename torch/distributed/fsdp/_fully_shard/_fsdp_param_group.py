@@ -5,7 +5,7 @@ import contextlib
 import functools
 import logging
 from dataclasses import dataclass
-from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
+from typing import Any, Literal, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
 
 import torch
@@ -1123,6 +1123,9 @@ class FSDPParamGroup:
 
     def _to_sharded_post_forward(self):
         if not self.is_sharded_post_forward:
+            # Check every parameter before resharding any
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.check_post_forward_reshard()
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded_post_forward()
             self._sharded_state = ShardedState.SHARDED_POST_FORWARD
@@ -1215,8 +1218,10 @@ class FSDPParamGroup:
 
     @property
     def _all_gather_process_group(self) -> dist.ProcessGroup:
+        # Post-forward shards are gathered over the mesh their parameters resharded
+        # with, which set_reshard_after_forward does not change
         mesh_info = (
-            cast(FSDPMeshInfo, self.post_forward_mesh_info)
+            self.fsdp_params[0].post_forward_mesh_info
             if self.is_sharded_post_forward
             else self.mesh_info
         )
