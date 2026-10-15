@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import ast
+import importlib
 import itertools
 import os
 import re
@@ -16,7 +17,10 @@ from torch._higher_order_ops.associative_scan import associative_scan
 from torch._inductor import CompiledArtifact, config
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import PyCodeCache
-from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.codegen.wrapper import (
+    _rename_kernel_module_globals,
+    PythonWrapperCodegen,
+)
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
@@ -67,8 +71,103 @@ def _cond_softmax(x):
     )
 
 
+# Two user kernels from different modules that bind the same top-level names to
+# different values. The kernel's SCALE parameter (its numel) shadows the global SCALE,
+# which only the helper reads.
+_SCALE_MODULE = """
+import triton
+import triton.language as tl
+from triton.language import {op} as op
+
+SCALE = tl.constexpr({scale})
+
+
+@triton.jit
+def scale(x):
+    return op(x) * SCALE
+
+
+@triton.jit
+def scale_kernel(in_ptr, out_ptr, SCALE, BLOCK: tl.constexpr):
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < SCALE
+    tl.store(out_ptr + offs, scale(tl.load(in_ptr + offs, mask=mask)), mask=mask)
+"""
+
+# A kernel with no helpers or globals of its own, only an imported alias. The kernels
+# are named apart: Triton keys its cache on the source, which does not cover `op`.
+_OP_MODULE = """
+import triton
+import triton.language as tl
+from triton.language import {op} as op
+
+
+@triton.jit
+def {op}_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n
+    tl.store(out_ptr + offs, op(tl.load(in_ptr + offs, mask=mask)), mask=mask)
+"""
+
+
+def _import_kernels(d, template, kernels):
+    for name, fields in kernels.items():
+        with open(os.path.join(d, f"{name}.py"), "w") as f:
+            f.write(template.format(**fields))
+    sys.path.insert(0, d)
+    try:
+        return [importlib.import_module(name) for name in kernels]
+    finally:
+        sys.path.remove(d)
+
+
 def _compiled_in_this_process(*args, **kwargs):
     raise AssertionError("a kernel was compiled in the compiling process")
+
+
+class TestRenameKernelModuleGlobals(TestCase):
+    def test_renames_only_what_refers_to_a_kernel_global(self):
+        # Parameters and locals that shadow a global keep their names, as do the
+        # header imports above the first def; the non-ASCII text checks byte offsets.
+        src = """\
+import triton
+X = 1
+from triton.language import exp as exp
+
+@triton.jit
+def k(a, SCALE):
+    b = ("\u00e9", SCALE + X)
+    return helper(exp(b))
+
+@triton.jit
+def helper(x):
+    X = 2
+    return x * SCALE * X + op(x)
+
+SCALE = 4
+from triton.language import floor as op
+import triton.language.math
+"""
+        expected = """\
+import triton
+X_k_0 = 1
+from triton.language import exp as exp
+
+@triton.jit
+def k_0(a, SCALE):
+    b = ("\u00e9", SCALE + X_k_0)
+    return helper_k_0(exp(b))
+
+@triton.jit
+def helper_k_0(x):
+    X = 2
+    return x * SCALE_k_0 * X + op_k_0(x)
+
+SCALE_k_0 = 4
+from triton.language import floor as op_k_0
+import triton.language.math
+"""
+        self.assertEqual(_rename_kernel_module_globals(src, "k_0", "k"), expected)
 
 
 class TestModuleLevelKernels(TestCase):
@@ -476,6 +575,55 @@ class TestModuleLevelKernels(TestCase):
         with config.patch({wrapper: True}):
             result = torch.compile(fn)(x)
         self.assertEqual(result, fn(x))
+
+    @requires_cuda_and_triton
+    def test_user_defined_kernels(self):
+        with tempfile.TemporaryDirectory() as d:
+            modules = {
+                "_kd_scale_a": {"op": "abs", "scale": 2.0},
+                "_kd_scale_b": {"op": "floor", "scale": 3.0},
+            }
+            mod_a, mod_b = _import_kernels(d, _SCALE_MODULE, modules)
+            kernel_a, kernel_b = mod_a.scale_kernel, mod_b.scale_kernel
+
+            def fn(x):
+                a, b = torch.empty_like(x), torch.empty_like(x)
+                kernel_a[(4,)](x, a, x.numel(), BLOCK=64)
+                kernel_b[(4,)](x, b, x.numel(), BLOCK=64)
+                return a + 1, b + 1
+
+            x = torch.randn(256, device="cuda")
+            expected = (x.abs() * 2 + 1, x.floor() * 3 + 1)
+            result, code = _code_for(fn, x)
+            self.assertEqual(result, expected)
+            self.assertNotIn("async_compile.triton", code)
+            kernels = re.findall(r"^def scale_kernel_\d\(", code, re.MULTILINE)
+            self.assertEqual(len(kernels), 2, code)
+            # The pool compiles each kernel from its own module; only a standalone run
+            # of the wrapper resolves the kernels' globals in the one shared namespace.
+            self.assertEqual(tuple(_run_from_file(code, [x])), expected)
+
+    @requires_cuda_and_triton
+    def test_user_defined_kernels_that_import_the_same_alias(self):
+        with tempfile.TemporaryDirectory() as d:
+            modules = {"_kd_op_a": {"op": "abs"}, "_kd_op_b": {"op": "floor"}}
+            mod_a, mod_b = _import_kernels(d, _OP_MODULE, modules)
+            kernel_a, kernel_b = mod_a.abs_kernel, mod_b.floor_kernel
+
+            def fn(x):
+                a, b = torch.empty_like(x), torch.empty_like(x)
+                kernel_a[(4,)](x, a, x.numel(), BLOCK=64)
+                kernel_b[(4,)](x, b, x.numel(), BLOCK=64)
+                return a + 1, b + 1
+
+            x = torch.randn(256, device="cuda")
+            expected = (x.abs() + 1, x.floor() + 1)
+            result, code = _code_for(fn, x)
+            self.assertEqual(result, expected)
+            self.assertNotIn("async_compile.triton", code)
+            for op in ("abs", "floor"):
+                self.assertRegex(code, rf"(?m) import {op} as op_{op}_kernel_\d+$")
+            self.assertEqual(tuple(_run_from_file(code, [x])), expected)
 
 
 class TestDefaultWrapper(TestCase):
