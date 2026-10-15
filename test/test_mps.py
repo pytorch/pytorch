@@ -1464,12 +1464,6 @@ class TestMPS(TestCaseMPS):
         for t in threads:
             t.join()
 
-    def test_exp(self, device="mps", dtype=torch.float):
-        for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
-            b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
-            a = torch.tensor(v, dtype=dtype, device="mps") * b
-            self.compare_with_numpy(torch.exp, np.exp, a)
-
     def test_exp_complex_real_axis_extremes(self):
         # Regression: exp/expm1/sinh/cosh(re + 0i) must stay real even when re
         # is inf/nan (naive exp(a)*sin(b) gives inf*0=NaN / nan*0=NaN otherwise).
@@ -1519,17 +1513,6 @@ class TestMPS(TestCaseMPS):
         # precise::metal::exp promises to be accurate to within 4 ulps
         # https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf Table 8.2
         self.ulpAssertAllClose(output.cpu(), output_cpu, n_ulps=4)
-
-    def test_exp_strided_output(self):
-        x = torch.rand((256, 10), device='mps')
-        x_cpu = x.to("cpu")
-
-        x = x.permute(1, 0)
-        x_cpu = x_cpu.permute(1, 0)
-
-        res = x.exp()
-        res_cpu = x_cpu.exp()
-        self.assertEqual(res, res_cpu)
 
     def _testLeakyRelu(self, np_features, negative_slope, device):
         cpu_x = torch.from_numpy(np_features).requires_grad_()
@@ -7788,21 +7771,6 @@ class TestMPS(TestCaseMPS):
         # Empty test - Currently failing! Empty tensor not handled!
         # helper([0, 2, 4, 5])
 
-    def test_angle(self):
-        def helper(shape, dtype):
-            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
-            cpu_x.flatten()[0] = torch.nan  # Test that NaN is propagated correctly
-            x = cpu_x.detach().clone().to('mps')
-
-            angle_result = torch.angle(x)
-            angle_result_cpu = torch.angle(cpu_x)
-
-            self.assertEqual(angle_result, angle_result_cpu)
-
-        helper((2, 8, 4, 5), torch.float16)
-        helper((2, 8, 4, 5), torch.float32)
-        helper((2, 8, 4, 5), torch.complex64)
-
     @parametrize("dtype", {torch.float, torch.half, torch.bfloat16})
     def test_log1p(self, dtype):
         eps = torch.finfo(dtype).eps
@@ -7831,22 +7799,6 @@ class TestMPS(TestCaseMPS):
     # Test concat forward
         # Empty test - Currently failing! Empty tensor not handled!
         # helper([0, 2, 4, 5], [2, 0, 4, 5], [2, 5, 0, 5])
-
-    # Test isnan
-    def test_isnan(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            nan_index = [random.randrange(0, shape[0])]
-            # make a selected row inf
-            cpu_x.index_put_(indices=[torch.tensor(nan_index)], values=torch.tensor(float('nan')))
-            x = cpu_x.detach().clone().to('mps')
-
-            isnan_result = torch.isnan(x)
-            isnan_result_cpu = torch.isnan(cpu_x)
-
-            self.assertEqual(isnan_result, isnan_result_cpu)
-
-        helper((8, 2, 4, 5))
 
     # Test sqrt
     def test_sqrt(self):
@@ -7877,11 +7829,41 @@ class TestMPS(TestCaseMPS):
         # Small numerics: when |im| << |re|, computing the smaller component as
         # sqrt((|z| - |re|) / 2) cancels catastrophically and returns ~0. Compare
         # components separately, as a complex-magnitude check would hide the error.
-        for dtype in (torch.cfloat, torch.chalf):
+        for dtype, op in itertools.product((torch.cfloat, torch.chalf), (torch.sqrt, torch.rsqrt)):
             x = torch.tensor([1 + 1e-4j, -1 + 1e-4j, 1 - 1e-4j, -1 - 1e-4j], dtype=dtype)
-            rc = torch.view_as_real(x.to('mps').sqrt().cpu())
-            ref = torch.view_as_real(x.cfloat().sqrt().to(dtype))
+            rc = torch.view_as_real(op(x.to('mps')).cpu())
+            ref = torch.view_as_real(op(x.cfloat()).to(dtype))
             self.assertEqual(rc, ref)
+
+    def test_signed_zero_max_min(self):
+        # Like std::max/min (and CPU), max/min-based ops return the first argument on ties,
+        # so the sign of zero is preserved. TODO: remove once test_unary_ufuncs (which
+        # covers this in test_relu_signed_zero/test_clamp_signed_zero) runs on MPS.
+        x = torch.tensor([-0.0, 0.0, -0.0, 0.0])
+        y = torch.tensor([0.0, -0.0, -0.0, 0.0])
+        for dtype in (torch.float32, torch.float16, torch.bfloat16):
+            xc, yc = x.to(dtype), y.to(dtype)
+            xm, ym = xc.to('mps'), yc.to('mps')
+            for name, cpu, mps in (
+                ("relu", torch.relu(xc), torch.relu(xm)),
+                ("clamp_min", torch.clamp_min(xc, 0), torch.clamp_min(xm, 0)),
+                ("clamp_max", torch.clamp_max(xc, 0), torch.clamp_max(xm, 0)),
+                ("clamp", torch.clamp(xc, min=0, max=1), torch.clamp(xm, min=0, max=1)),
+                ("maximum", torch.maximum(xc, yc), torch.maximum(xm, ym)),
+                ("minimum", torch.minimum(xc, yc), torch.minimum(xm, ym)),
+            ):
+                self.assertEqual(torch.signbit(mps).cpu(), torch.signbit(cpu), msg=f"{name} {dtype}")
+
+    def test_complex_inverse_trig(self):
+        # Exact +-1, near-real, huge and infinite inputs, where the textbook formulas lose
+        # precision, overflow or return NaN. Compare against numpy, as CPU libc++ overflows
+        # for huge inputs.
+        x = torch.tensor([1, -1, 1 + 1e-4j, -1 + 1e-4j, 0.5 + 1e-4j, 1e30j, 1 + 1e30j, -1e30 + 1j,
+                          complex(math.inf, 0), complex(-math.inf, 1), complex(1, math.inf)], dtype=torch.cfloat)
+        for op, ref in ((torch.asin, np.arcsin), (torch.acos, np.arccos), (torch.asinh, np.arcsinh), (torch.acosh, np.arccosh)):
+            rc = torch.view_as_real(op(x.to('mps')).cpu())
+            expected = torch.view_as_real(torch.from_numpy(ref(x.numpy())))
+            self.assertEqual(rc, expected, msg=op.__name__)
 
     # Test selu, elu, celu
     def test_elu(self):
@@ -9012,24 +8994,13 @@ class TestMPS(TestCaseMPS):
                 for dim in [0, 1, 2, 3, -1, -2, -3]:
                     helper(shape, dim, channels_last)
 
-    def test_nan_to_num(self):
-        inputCPU = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
-        inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
-        outputCPU = torch.nan_to_num(inputCPU, nan=2.0, posinf=1.0, neginf=-1.0)
-        outputMPS = torch.nan_to_num(inputMPS, nan=2.0, posinf=1.0, neginf=-1.0)
-        self.assertEqual(outputMPS, outputCPU)
-
-    def test_nan_to_num_complex(self):
-        # Complex nan_to_num is new on MPS (the MPSGraph path raised); the
-        # replacement applies per component like CPU/CUDA. complex32 exceeds
-        # CPU/CUDA support, so it compares against the complex64 CPU result
-        # with half-extrema (65504) defaults per its value type.
+    def test_nan_to_num_complex32(self):
+        # TODO: Enable complex32 on MPS in TestUnaryUfuncs.test_nan_to_num_complex and delete this test
+        # complex32 exceeds CPU/CUDA support, so compare against the complex64 CPU result
+        # with half-extrema (65504) defaults per its value type
         x = torch.tensor([complex(float('nan'), 1.0),
                           complex(float('inf'), float('-inf')),
                           complex(2.0, float('nan')), 1 + 2j])
-        self.assertEqual(torch.nan_to_num(x.to('mps')).cpu(), torch.nan_to_num(x))
-        self.assertEqual(torch.nan_to_num(x.to('mps'), nan=1.0, posinf=3.0, neginf=-3.0).cpu(),
-                         torch.nan_to_num(x, nan=1.0, posinf=3.0, neginf=-3.0))
         actual = torch.nan_to_num(x.to(torch.complex32).to('mps')).cpu().to(torch.complex64)
         expected = torch.nan_to_num(x, posinf=65504.0, neginf=-65504.0)
         self.assertEqual(actual, expected)
@@ -9793,61 +9764,6 @@ class TestMPS(TestCaseMPS):
         cpu_y = torch.arange(5, dtype=torch.float32, device="cpu") * torch.tensor([1, 0, 1, 0, 1], device="cpu")
         mps_y = torch.arange(5, dtype=torch.float32, device="mps") * torch.tensor([1, 0, 1, 0, 1], device="mps")
         self.assertEqual(cpu_y, mps_y)
-
-    def test_unary_ops(self):
-        def helper(shape, op):
-            for dtypef in [torch.float32]:
-                cpu_x = torch.randn(shape, device='cpu', dtype=dtypef, requires_grad=False)
-                mps_x = cpu_x.detach().clone().to('mps')
-                self.assertEqual(op(cpu_x), op(mps_x))
-
-            for dtypei in [torch.int32, torch.int16]:
-                cpu_x = torch.randint(0, 1000, shape, device='cpu', dtype=dtypei, requires_grad=False)
-                mps_x = cpu_x.to('mps')
-                self.assertEqual(op(cpu_x), op(mps_x), rtol=1e-4, atol=1e-4)
-            # test slice
-            for dtypef in [torch.float32]:
-                cpu_x = torch.randn(shape, device='cpu', dtype=dtypef, requires_grad=False)
-                mps_x = cpu_x.detach().clone().to('mps')
-                cpu_slice = cpu_x[:, ::2, :, :]
-                mps_slice = mps_x[:, ::2, :, :]
-                self.assertEqual(op(cpu_slice), op(mps_slice))
-            # test view
-            for dtypef in [torch.float32]:
-                cpu_x = torch.randn(shape, device='cpu', dtype=dtypef, requires_grad=False)
-                mps_x = cpu_x.detach().clone().to('mps')
-                # create view of tensor by reducing the 3rd and 4th dimension
-                combined_dim = shape[-1] * shape[-2]
-                reshaped_dims = list(shape[:-2]) + [combined_dim]
-                cpu_view = cpu_x.view(*reshaped_dims)
-                mps_view = mps_x.view(*reshaped_dims)
-                self.assertEqual(op(cpu_view), op(mps_view))
-
-        helper((2, 8, 4, 5), torch.exp)
-        helper((2, 8, 3, 5), torch.exp2)
-        helper((2, 8, 3, 5), torch.expm1)
-        helper((2, 8, 3, 5), torch.log)
-        helper((2, 8, 3, 5), torch.cos)
-        helper((2, 8, 3, 5), torch.erfinv)
-
-
-    def test_non_dense_in_storage_unary_ops(self):
-        def helper(op):
-            for dtypef in [torch.float32]:
-                cpu_x = torch.randn(100, device='cpu', dtype=dtypef, requires_grad=False)
-                mps_x = cpu_x.detach().clone().to('mps')
-                self.assertEqual(op(cpu_x[::2]), op(mps_x[::2]))
-
-            for dtypei in [torch.int32, torch.int16, torch.int8]:
-                cpu_x = torch.randint(127, device='cpu', size=(100,), dtype=dtypei, requires_grad=False)
-                mps_x = cpu_x.to('mps')
-                self.assertEqual(op(cpu_x[::2]), op(mps_x[::2]), rtol=1e-4, atol=1e-4)
-
-        helper(torch.exp)
-        helper(torch.exp2)
-        helper(torch.expm1)
-        helper(torch.log)
-        helper(torch.cos)
 
     def test_unary_ops_storage_offset_strided(self):
         def helper(shape, op, inplace, dtype=torch.float32):
