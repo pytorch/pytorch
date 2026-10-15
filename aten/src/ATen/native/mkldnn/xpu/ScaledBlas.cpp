@@ -144,6 +144,10 @@ bool is_blockwise_1x16_scaling(const at::Tensor& t, const at::Tensor& scale) {
       is_blockwise_scaling(t, scale, at::kFloat8_e4m3fn, 1, 16);
 }
 
+bool isFloatOrE8m0Type(at::ScalarType t) {
+  return t == at::kFloat || t == at::kFloat8_e8m0fnu;
+}
+
 bool is_desired_scaling(
     const at::Tensor& t,
     const at::Tensor& scale,
@@ -699,8 +703,7 @@ Tensor& _scaled_block1x128_block1x128(
 
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
-          (scale_a.scalar_type() == kFloat ||
-           scale_a.scalar_type() == kFloat8_e8m0fnu),
+          isFloatOrE8m0Type(scale_a.scalar_type()),
       "scale_a must have shape ",
       M,
       " x ",
@@ -710,8 +713,7 @@ Tensor& _scaled_block1x128_block1x128(
 
   TORCH_CHECK_VALUE(
       scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
-          (scale_b.scalar_type() == kFloat ||
-           scale_b.scalar_type() == kFloat8_e8m0fnu),
+          isFloatOrE8m0Type(scale_b.scalar_type()),
       "scale_b must have shape ",
       N,
       " x ",
@@ -768,8 +770,7 @@ Tensor& _scaled_block128x128_block1x128(
   TORCH_CHECK_VALUE(
       scale_a.size(0) == ceil_div<int64_t>(K, 128) &&
           scale_a.size(1) == ceil_div<int64_t>(M, 128) &&
-          (scale_a.scalar_type() == kFloat ||
-           scale_a.scalar_type() == kFloat8_e8m0fnu),
+          isFloatOrE8m0Type(scale_a.scalar_type()),
       "scale_a must have shape ",
       ceil_div<int64_t>(K, 128),
       " x ",
@@ -779,8 +780,7 @@ Tensor& _scaled_block128x128_block1x128(
 
   TORCH_CHECK_VALUE(
       scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
-          (scale_b.scalar_type() == kFloat ||
-           scale_b.scalar_type() == kFloat8_e8m0fnu),
+          isFloatOrE8m0Type(scale_b.scalar_type()),
       "scale_b must have shape ",
       N,
       " x ",
@@ -837,8 +837,7 @@ Tensor& _scaled_block1x128_block128x128(
 
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
-          (scale_a.scalar_type() == kFloat ||
-           scale_a.scalar_type() == kFloat8_e8m0fnu),
+          isFloatOrE8m0Type(scale_a.scalar_type()),
       "scale_a must have shape ",
       M,
       " x ",
@@ -849,8 +848,7 @@ Tensor& _scaled_block1x128_block128x128(
   TORCH_CHECK_VALUE(
       scale_b.size(0) == ceil_div<int64_t>(K, 128) &&
           scale_b.size(1) == ceil_div<int64_t>(N, 128) &&
-          (scale_b.scalar_type() == kFloat ||
-           scale_b.scalar_type() == kFloat8_e8m0fnu),
+          isFloatOrE8m0Type(scale_b.scalar_type()),
       "scale_b must have shape ",
       ceil_div<int64_t>(K, 128),
       " x ",
