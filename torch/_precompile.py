@@ -3299,10 +3299,16 @@ def capture(
     used before the block compiles and tunes again on its first launch inside
     it. That retune benchmarks on the block's real inputs, and the config it
     picks, which is what ships and what the process keeps using afterwards, may
-    differ from the one picked before the block. Triton does not cache the
-    decision of an autotuner with ``pre_hook`` configs, so one that does not
-    prune its configs keeps its earlier decision in the block and is benchmarked
-    again on first use in the serving process.
+    differ from the one picked before the block. JIT kernels and autotuners the
+    block does not launch keep their compiled kernels and decisions afterwards.
+    Triton does not cache the decision of an autotuner with ``pre_hook``
+    configs, so one that does not prune its configs keeps its earlier decision
+    in the block and is benchmarked again on first use in the serving process.
+    No other thread should launch Triton kernels while the block opens or
+    closes: the in-memory caches are dropped and restored then without
+    synchronizing with launches, so a concurrent autotuner launch can fail.
+    Triton kernels another thread compiles or tunes while the block is open
+    go into the block's cache directory and ship with it.
 
     ``tracer`` picks the capture front-end and carries its tracer-specific
     configuration. :class:`DynamoTracer` (the default) is an execution-driven
