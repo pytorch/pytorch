@@ -845,12 +845,11 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             "bytes": lambda t: (t.view(torch.uint8),),
             "int8": lambda t: (t.to(torch.int8),),
             # A (7, 8) weight has post-forward shards of 4 and 3 rows
-            "uneven": lambda t: (AllGatherInput(t.new_ones(6), dim=0),),
+            "uneven": lambda t: (t.new_ones(6),),
         }
 
-        def fsdp_pre_all_gather(
-            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
-        ):
+        # The 1-argument hook is not checked for the padded size
+        def fsdp_pre_all_gather(local_tensor, mesh):
             return payloads[payload](local_tensor), None
 
         @torch.no_grad()
@@ -1010,7 +1009,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
 
     def _test_all_gather_extension_smaller_payload(self, shard_world_size: int):
         # Shard(0) Tensor payloads may shrink and fill a prefix of their output,
-        # also on a size-1 shard mesh. The bf16 tags make the group gather bytes.
+        # also on a size-1 shard mesh. On two shard ranks, the bf16 tags make the
+        # group gather bytes.
         mesh = self._init_hsdp_mesh(shard_world_size)
         num_tags, tags_dtype = 4, torch.bfloat16
 
@@ -1045,6 +1045,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         ref_model = copy.deepcopy(model)
         fully_shard(model, mesh=mesh, reshard_after_forward=True)
         self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+        # An input that requires grad saves the weight for backward, which all-gathers
+        # it again in place, so this also checks every output's version counter
         inp = torch.randn((2, 8), device=device_type, requires_grad=True)
         for num_tags in (4, 2):
             output = model(inp)
@@ -1087,6 +1089,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         inp = torch.randn((2, 8), device=device_type)
         for _ in range(2):
             self.assertEqual(model(inp), inp @ weight.T)
+        fsdp_param = fully_shard.state(model)._fsdp_param_group.fsdp_params[0]
+        self.assertEqual(fsdp_param.all_gather_output_layouts, ())
 
 
 class TestAllGatherInputValidation(TestCase):

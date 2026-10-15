@@ -265,11 +265,11 @@ class AllGatherInput:
     ``(2, N * F, D)`` over ``N`` ranks. Plain tensor inputs are instead read as rows
     of the padded sharded parameter, concatenated along its shard dim, and passed
     viewed as ``(-1, *tensor.shape[1:])``. With several shard ranks and rows, nonempty
-    ones need its element count or its dims before the shard dim.
+    ones need the padded sharded parameter's element count or dims before its shard dim.
 
-    The number of inputs, and each record's element count and dtype, must stay
-    fixed across calls, and every rank must return the same shapes and dtypes.
-    Plain tensors may also become uint8 byte views of their whole outputs, which
+    Every rank must return the same shapes and dtypes, and the number of inputs
+    and each input's element count and dtype must stay fixed across calls, except
+    that plain tensors may become uint8 byte views of their whole outputs, which
     are passed back in the outputs' dtype, or, with a single row (as for Shard(0))
     and nonzero trailing dims, shrink, leaving unspecified data after the gathered
     prefix. Extensions own any padding: the local shard is unpadded on ranks with
