@@ -177,8 +177,11 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
             try:
                 if hashlib.sha256(self.content).hexdigest() != self.key:
                     raise RuntimeError("Corrupt Triton runtime-cache artifact")
-                cache._decode(self.content, context)
-            except Exception as exc:
+                try:
+                    cache._decode(self.content, context)
+                except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                    raise RuntimeError("Malformed Triton runtime-cache bundle") from exc
+            except RuntimeError as exc:
                 problem = f"it was rejected ({exc})"
                 cause = exc
             else:
@@ -544,10 +547,10 @@ def _own_triton_cache(settings: contextlib.ExitStack) -> str | None:
     JIT functions and autotuners from before the scope keep compiled kernels
     and decisions in memory, which a launch in the scope would reuse without
     touching the directory, so those are dropped and produced again on first
-    use. When the scope closes, a JIT function gets back the per-device caches
-    and an autotuner the decisions the scope did not produce again, so ones
-    the scope never launched keep their state. Autotuners fix cache_results
-    when they are decorated, so existing ones are switched on for the scope too.
+    use. When the scope closes, a JIT function gets back the compiled
+    specializations and an autotuner the decisions the scope did not produce
+    again, so those keep their state. Autotuners fix cache_results when they
+    are decorated, so existing ones are switched on for the scope too.
     """
     if _triton_runtime_cache() is None:
         return None
@@ -596,8 +599,13 @@ def _own_triton_cache(settings: contextlib.ExitStack) -> str | None:
     def restore() -> None:
         # What the scope compiled or tuned again is what ships, so it wins.
         for fn, caches in compiled:
-            for device, cache in caches.items():
-                fn.device_caches.setdefault(device, cache)
+            for device, saved in caches.items():
+                current = fn.device_caches.setdefault(device, saved)
+                if current is not saved:
+                    # kernel_cache and kernel_key_cache, keyed by specialization.
+                    for fresh, earlier in zip(current[:2], saved[:2]):
+                        for key, value in earlier.items():
+                            fresh.setdefault(key, value)
         for tuner, cache_results, decisions in tuned:
             tuner.cache_results = cache_results
             for key, config in decisions.items():

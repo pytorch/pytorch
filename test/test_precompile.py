@@ -7901,6 +7901,9 @@ class TestPrecompileRuntimeCache(TestCase):
                 x_ptr + offsets, tl.load(x_ptr + offsets, mask=mask) + 1, mask=mask
             )
 
+        # Compiled for two block sizes before the capture, launched for one in it.
+        two_block_jit = triton.jit(untouched_jit.fn)
+
         hits = []
         compiled = []
 
@@ -7909,9 +7912,9 @@ class TestPrecompileRuntimeCache(TestCase):
             kernel[lambda meta: (triton.cdiv(1000, meta["BLOCK"]),)](x, 1000)
             self.assertEqual(x, torch.ones_like(x))
 
-        def launch_untouched_jit():
+        def launch_jit(kernel=untouched_jit, block=128):
             x = torch.zeros(1000, device="cuda")
-            untouched_jit[(triton.cdiv(1000, 128),)](x, 1000, BLOCK=128)
+            kernel[(triton.cdiv(1000, block),)](x, 1000, BLOCK=block)
             self.assertEqual(x, torch.ones_like(x))
 
         roots = []
@@ -7923,6 +7926,7 @@ class TestPrecompileRuntimeCache(TestCase):
             launch()
             launch(hooked_add_one)
             launch(pruned_add_one)
+            launch_jit(two_block_jit, 128)
 
         with (
             mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
@@ -7938,9 +7942,12 @@ class TestPrecompileRuntimeCache(TestCase):
             for kernel in (tuned_add_one, hooked_add_one, pruned_add_one):
                 launch(kernel)
             launch(untouched_add_one)
-            launch_untouched_jit()
+            launch_jit()
+            launch_jit(two_block_jit, 64)
+            launch_jit(two_block_jit, 128)
             self.assertEqual(hits, [False] * 4)
             self.assertIn(untouched_jit, compiled)
+            self.assertEqual(compiled.count(two_block_jit), 2)
             hooked = dict(hooked_add_one.cache)
             untouched = dict(untouched_add_one.cache)
             hooked_add_one.configs_timings = pruned_add_one.configs_timings = None
@@ -7961,13 +7968,16 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertEqual(hooked_add_one.cache, hooked)
             self.assertIsNone(hooked_add_one.configs_timings)
             self.assertIsNotNone(pruned_add_one.configs_timings)
-            # What the block did not launch kept its decision and kernel.
+            self.assertIn(two_block_jit, compiled)
+            # What the block did not launch kept its decision and kernels.
             compiled.clear()
             launch(untouched_add_one)
-            launch_untouched_jit()
+            launch_jit()
+            launch_jit(two_block_jit, 64)
+            launch_jit(two_block_jit, 128)
             self.assertEqual(hits, [False] * 6)
             self.assertEqual(untouched_add_one.cache, untouched)
-            self.assertNotIn(untouched_jit, compiled)
+            self.assertEqual(compiled, [])
             [root] = roots
             self.assertTrue(list(root.glob("*/*.autotune.json")))
             # The driver utility module this process loaded before the capture.
@@ -8094,6 +8104,35 @@ class TestPrecompileRuntimeCache(TestCase):
             ):
                 runtime.populate_cache()
             self.assertEqual(fake.imports, [])
+            self.assertEqual(_runtime_cache._imported_triton_runtime, set())
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_malformed_triton_runtime_cache_only_warns_when_not_strict(self):
+        import hashlib
+        import struct
+
+        from torch.compiler import _runtime_cache
+        from torch.compiler._triton_runtime_cache import _MAGIC
+
+        # The right digest, but a header that is not a JSON object.
+        payload = _MAGIC + struct.pack("!Q", 2) + b"[]"
+        runtime = _runtime_cache.TritonRuntimeCacheArtifact(
+            hashlib.sha256(payload).hexdigest(), payload
+        )
+        with mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()):
+            with (
+                _triton_settings_unchanged(self),
+                self.assertLogs(_runtime_cache.log, "WARNING") as logs,
+            ):
+                runtime.populate_cache()
+            self.assertIn("rejected (Malformed", logs.output[0])
+            with (
+                _triton_settings_unchanged(self),
+                torch.compiler.precompile.no_compilation(),
+                self.assertRaisesRegex(RuntimeError, "rejected \\(Malformed") as raised,
+            ):
+                runtime.populate_cache()
+            self.assertIsInstance(raised.exception.__cause__.__cause__, AttributeError)
             self.assertEqual(_runtime_cache._imported_triton_runtime, set())
 
     def test_triton_runtime_cache_needs_import_support_only_when_strict(self):
