@@ -206,15 +206,6 @@ import triton.language.math
 
 
 class TestModuleLevelKernels(TestCase):
-    def setUp(self):
-        super().setUp()
-        # Module-level kernels are not the default yet.
-        patcher = mock.patch.object(
-            PythonWrapperCodegen, "defines_triton_kernels_as_code", lambda self: True
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
     @requires_cuda_and_triton
     @parametrize("fn", [_softmax, _cond_softmax])
     def test_kernels_are_defined_at_module_level(self, fn):
@@ -759,14 +750,6 @@ class TestModuleLevelKernels(TestCase):
         self.assertEqual(load_from_python(code)([x])[0], result)
         shifted = "\n" * code.count("\n") + code
         self.assertEqual(load_from_python(shifted)([x])[0], result)
-
-
-class TestDefaultWrapper(TestCase):
-    @requires_cuda_and_triton
-    def test_default_wrapper_still_uses_async_compile(self):
-        x = torch.randn(64, 128, device="cuda")
-        _, code = _code_for(_softmax, x)
-        self.assertIn("async_compile.triton(", code)
 
 
 instantiate_parametrized_tests(TestModuleLevelKernels)

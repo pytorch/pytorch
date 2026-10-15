@@ -147,9 +147,10 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
         ):
             code = get_triton_code(opt_fn, x)
 
-        FileCheck().check("import triton").check("@triton.jit").check(
-            "tl_math.sin"
-        ).check("device_str='privateuseone'").run(code)
+        # The kernel's triton_meta names the device in both the string and module-level forms.
+        FileCheck().check("import triton").check("type='privateuseone'").check(
+            "@triton.jit"
+        ).check("tl_math.sin").run(code)
 
     def _register_custom_backend_with_heuristics(self, device):
         path_to_ext_heuristics = str(
