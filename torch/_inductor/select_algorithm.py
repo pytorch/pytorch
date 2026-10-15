@@ -4575,8 +4575,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     return timings
 
             # No choice has won yet, so take the union of inputs allowed at each
-            # producer-fusion placement. During benchmark fusion, exclude choices
-            # that do not support the full union for the enabled placements.
+            # producer-fusion placement. During benchmark fusion, only consider
+            # choices that support every input produced by the fused producers.
             load_input_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
             store_output_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
             for c in choices:
@@ -5425,7 +5425,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 # Layout offsets are relative to the input data pointer, so views
                 # reaching before it have a negative offset and as_strided
                 # rejects those. Allocate the base to cover the rebased view and
-                # shift the offset into it instead.
+                # shift the offset into it instead. The base comes from
+                # benchmark_example_value, which already put the data pointer
+                # -storage_offset elements in, so this stays absolute.
                 shift = max(0, -storage_offset)
                 storage_offset += shift
 
@@ -6492,15 +6494,14 @@ class AlgorithmSelectorCache(PersistentCache):
             view_span = torch._prims_common.compute_required_storage_length(
                 size, stride, 0
             )
-        # A negative view_offset reaches before the buffer, and as_strided
-        # rejects those, so place the data pointer that much further in.
+        # A negative view_offset reaches before the buffer and cannot be given
+        # to as_strided, so place the data pointer that much further in.
         shift = max(0, -view_offset)
-        # The kernel can index the buffer and the whole view, in front of and
-        # past the data pointer, so the storage has to hold all of it.
-        backing_size = max(
-            extra_size + shift + reserve_span,
-            shift + view_offset + view_span,
-        )
+        # The kernel can index both the buffer and the whole view, so the
+        # storage holds shift elements in front of the data pointer and then
+        # whichever of the two reaches further past it. A negative extra_size
+        # means the buffer has no leading region, not that it needs less of one.
+        backing_size = max(extra_size, 0) + shift + max(reserve_span, view_span)
         # rand_strided allocates reserve_span + extra_size, and only pads behind,
         # so the view's room in front of the buffer is requested as padding.
         pad_after = backing_size - reserve_span
