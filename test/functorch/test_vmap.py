@@ -4078,68 +4078,153 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                 )(query, key, value)
 
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
-    def test_sdpa_backward(self, device, backend):
-        """Test that vmap over SDPA backward uses batching rule, not fallback."""
+    @parametrize(
+        "in_dims",
+        [(0, 0, 0), (0, None, None), (None, 0, None), (None, None, 0), (2, 1, None)],
+    )
+    def test_sdpa_backward(self, device, backend, in_dims):
         if device == "cpu":
             raise unittest.SkipTest("This test is only for CUDA for now")
 
-        backend_ctx = sdpa_kernel([backend])
-        with backend_ctx:
+        with sdpa_kernel([backend]):
             B = 3
-            batch, heads, seq_len, head_dim = 2, 4, 32, 32
-            query = torch.randn(
-                B,
-                batch,
-                heads,
-                seq_len,
-                head_dim,
+            shape = (2, 4, 32, 32)
+            make = functools.partial(
+                torch.randn,
                 dtype=torch.float16,
                 device=device,
                 requires_grad=True,
             )
-            key = torch.randn(
-                B,
-                batch,
-                heads,
-                seq_len,
-                head_dim,
-                dtype=torch.float16,
-                device=device,
-                requires_grad=True,
-            )
-            value = torch.randn(
-                B,
-                batch,
-                heads,
-                seq_len,
-                head_dim,
-                dtype=torch.float16,
-                device=device,
-                requires_grad=True,
+            inputs = tuple(
+                make(*shape) if dim is None else make(B, *shape).movedim(0, dim)
+                for dim in in_dims
             )
 
             def f(q, k, v):
                 return F.scaled_dot_product_attention(q, k, v).sum()
 
+            grad_fn = grad(f, argnums=(0, 1, 2))
             with DisableVmapFallback():
-                grads = vmap(grad(f, argnums=(0, 1, 2)))(query, key, value)
-            self.assertEqual(grads[0].shape, query.shape)
-            self.assertEqual(grads[1].shape, key.shape)
-            self.assertEqual(grads[2].shape, value.shape)
+                grads = vmap(grad_fn, in_dims=in_dims)(*inputs)
 
-            # Numerical accuracy: compare against manual per-sample loop
             expected_grads = []
             for i in range(B):
-                q_i = query[i].detach().requires_grad_(True)
-                k_i = key[i].detach().requires_grad_(True)
-                v_i = value[i].detach().requires_grad_(True)
-                out_i = F.scaled_dot_product_attention(q_i, k_i, v_i).sum()
-                out_i.backward()
-                expected_grads.append((q_i.grad, k_i.grad, v_i.grad))
+                sample = tuple(
+                    tensor if dim is None else tensor.select(dim, i)
+                    for tensor, dim in zip(inputs, in_dims)
+                )
+                expected_grads.append(grad_fn(*sample))
 
-            for j in range(3):
-                expected = torch.stack([eg[j] for eg in expected_grads])
-                self.assertEqual(grads[j], expected, atol=1e-2, rtol=1e-2)
+            expected = tuple(torch.stack(parts) for parts in zip(*expected_grads))
+            self.assertEqual(grads, expected, atol=1e-2, rtol=1e-2)
+
+    @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
+    def test_sdpa_backward_dropout(self, device, backend):
+        if device == "cpu" or backend == SDPBackend.MATH:
+            raise unittest.SkipTest("This test requires fused CUDA SDPA backends")
+        if (
+            backend == SDPBackend.CUDNN_ATTENTION
+            and 91100 <= TEST_CUDNN_VERSION <= 91300
+        ):
+            raise unittest.SkipTest("cuDNN 9.11-9.13 vmap dropout is unsupported")
+
+        B, batch = 3, 2
+        make = functools.partial(
+            torch.randn,
+            dtype=torch.float16,
+            device=device,
+            requires_grad=True,
+        )
+        inputs = tuple(make(B, batch, 2, 16, 32) for _ in range(3))
+
+        def f(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v, dropout_p=0.2).sum()
+
+        with sdpa_kernel([backend]):
+            grad_fn = grad(f, argnums=(0, 1, 2))
+            rng_state = torch.cuda.get_rng_state(device)
+            with DisableVmapFallback():
+                actual = vmap(grad_fn, randomness="different")(*inputs)
+            torch.cuda.set_rng_state(rng_state, device)
+            flat_grads = grad_fn(*(tensor.flatten(0, 1) for tensor in inputs))
+            expected = tuple(tensor.unflatten(0, (B, batch)) for tensor in flat_grads)
+            self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+
+    @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
+    @parametrize("dropout_p", [0.0, 0.2])
+    @parametrize("in_dim", [0, 2, -1])
+    @parametrize("has_mask", [False, True])
+    def test_sdpa_batched_vjp(self, device, backend, dropout_p, in_dim, has_mask):
+        if device == "cpu" and backend != SDPBackend.MATH:
+            raise unittest.SkipTest("Fused CUDA SDPA backend")
+        if has_mask and backend == SDPBackend.FLASH_ATTENTION:
+            raise unittest.SkipTest(
+                "Flash attention does not support an attention mask"
+            )
+
+        dtype = torch.float32 if device == "cpu" else torch.float16
+        make = functools.partial(torch.randn, dtype=dtype, device=device)
+        inputs = tuple(make(2, 2, 16, 32).requires_grad_() for _ in range(3))
+        mask = make(2, 2, 16, 16) if has_mask else None
+        if mask is not None and backend != SDPBackend.CUDNN_ATTENTION:
+            inputs += (mask.requires_grad_(),)
+
+        def f(q, k, v, attn_mask=mask):
+            return F.scaled_dot_product_attention(
+                q, k, v, attn_mask=attn_mask, dropout_p=dropout_p
+            )
+
+        with sdpa_kernel([backend]):
+            output, vjp_fn = vjp(f, *inputs)
+            cotangents = make(3, *output.shape)
+            rng_state = (
+                torch.get_rng_state()
+                if device == "cpu"
+                else torch.cuda.get_rng_state(device)
+            )
+            expected = tuple(
+                torch.stack(parts)
+                for parts in zip(*(vjp_fn(cotangent) for cotangent in cotangents))
+            )
+            with DisableVmapFallback():
+                actual = vmap(vjp_fn, in_dims=in_dim)(cotangents.movedim(0, in_dim))
+            self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+            actual_rng_state = (
+                torch.get_rng_state()
+                if device == "cpu"
+                else torch.cuda.get_rng_state(device)
+            )
+            self.assertEqual(actual_rng_state, rng_state)
+
+    @parametrize(
+        "backend",
+        [
+            backend
+            for backend in PLATFORM_SPECIFIC_SDPA
+            if backend in (SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION)
+        ],
+    )
+    def test_sdpa_backward_mask_only(self, device, backend):
+        if device == "cpu" and backend != SDPBackend.MATH:
+            raise unittest.SkipTest("Fused CUDA SDPA backend")
+
+        dtype = torch.float32 if device == "cpu" else torch.float16
+        make = functools.partial(torch.randn, dtype=dtype, device=device)
+        inputs = tuple(make(2, 2, 16, 32).requires_grad_() for _ in range(3))
+        masks = make(3, 2, 2, 16, 16).requires_grad_()
+
+        def f(q, k, v, mask):
+            return F.scaled_dot_product_attention(q, k, v, attn_mask=mask).sum()
+
+        with sdpa_kernel([backend]):
+            grad_fn = grad(f, argnums=(0, 1, 2, 3))
+            expected = tuple(
+                torch.stack(parts)
+                for parts in zip(*(grad_fn(*inputs, mask) for mask in masks))
+            )
+            with DisableVmapFallback():
+                actual = vmap(grad_fn, in_dims=(None, None, None, 0))(*inputs, masks)
+            self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
 
     @parametrize(
         "backend",
@@ -4275,70 +4360,28 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                 expected = torch.stack([eg[j] for eg in expected_shared])
                 self.assertEqual(shared_grads[j], expected, atol=1e-2, rtol=1e-2)
 
-    @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
-    def test_sdpa_unbatched_under_vmap(self, device, backend):
-        """Test that unbatched (3D) SDPA input uses fused kernels under vmap."""
-        if device == "cpu" or backend == SDPBackend.MATH:
-            raise unittest.SkipTest("This test requires fused CUDA SDPA backends")
+    def test_sdpa_unrelated_vmap(self, device):
+        dtype = torch.float32 if device == "cpu" else torch.float16
+        inputs = tuple(
+            torch.randn(2, 16, 32, dtype=dtype, device=device) for _ in range(3)
+        )
 
-        with sdpa_kernel([backend]):
-            B = 4
-            heads, seq_len, head_dim = 8, 32, 64
-            query = torch.randn(
-                B,
-                heads,
-                seq_len,
-                head_dim,
-                dtype=torch.float16,
-                device=device,
-                requires_grad=True,
+        with sdpa_kernel([SDPBackend.MATH]):
+            expected = F.scaled_dot_product_attention(*inputs)
+            actual = vmap(lambda _: F.scaled_dot_product_attention(*inputs))(
+                torch.arange(3, device=device)
             )
-            key = torch.randn(
-                B,
-                heads,
-                seq_len,
-                head_dim,
-                dtype=torch.float16,
-                device=device,
-                requires_grad=True,
-            )
-            value = torch.randn(
-                B,
-                heads,
-                seq_len,
-                head_dim,
-                dtype=torch.float16,
-                device=device,
-                requires_grad=True,
-            )
+            self.assertEqual(actual, expected.expand(3, *expected.shape))
 
-            result = vmap(F.scaled_dot_product_attention)(query, key, value)
-            self.assertEqual(result.shape, (B, heads, seq_len, head_dim))
-
-            def f(q, k, v):
-                return F.scaled_dot_product_attention(q, k, v).sum()
-
-            with DisableVmapFallback():
-                grads = vmap(grad(f, argnums=(0, 1, 2)))(query, key, value)
-            self.assertEqual(grads[0].shape, query.shape)
-            self.assertEqual(grads[1].shape, key.shape)
-            self.assertEqual(grads[2].shape, value.shape)
-
-            # Promotion is vmap-scoped, so the per-sample reference feeds 4D.
-            expected_grads = []
-            for i in range(B):
-                q_i = query[i].unsqueeze(0).detach().requires_grad_(True)
-                k_i = key[i].unsqueeze(0).detach().requires_grad_(True)
-                v_i = value[i].unsqueeze(0).detach().requires_grad_(True)
-                out_i = F.scaled_dot_product_attention(q_i, k_i, v_i).sum()
-                out_i.backward()
-                expected_grads.append(
-                    (q_i.grad.squeeze(0), k_i.grad.squeeze(0), v_i.grad.squeeze(0))
-                )
-
-            for j in range(3):
-                expected = torch.stack([eg[j] for eg in expected_grads])
-                self.assertEqual(grads[j], expected, atol=1e-2, rtol=1e-2)
+        with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                    F.scaled_dot_product_attention(*inputs)
+                with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                    vmap(lambda _: F.scaled_dot_product_attention(*inputs))(
+                        torch.arange(3, device=device)
+                    )
 
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
