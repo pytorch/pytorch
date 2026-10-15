@@ -240,4 +240,20 @@ class FlexGemmOutputContraction:
         return ("B",) if self.chunked else ()
 
 
+@dataclasses.dataclass(frozen=True)
+class FlexGemmOutputExpansion:
+    """Main output stores two epilogue lanes interleaved along N.
+
+    ``out[..., 2 * n + j]`` is lane ``j`` at accumulator column ``n``; the body
+    returns ``torch.stack([a, b], -1).view(..., 2 * N)``.
+    """
+
+    @property
+    def concat_layout(self) -> tuple[str, ...]:
+        return ()
+
+
+FlexGemmOutputTransform = FlexGemmOutputContraction | FlexGemmOutputExpansion
+
+
 FlexGemmLocalReduceGeometry = GemmReductionGeometry
