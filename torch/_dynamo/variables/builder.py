@@ -133,6 +133,7 @@ from ..side_effects import SideEffects
 from ..source import (
     AttrProxySource,
     AttrSource,
+    CallFunctionNoArgsSource,
     CallMethodItemSource,
     ChainedSource,
     ConstDictKeySource,
@@ -1533,18 +1534,37 @@ class VariableBuilder:
             )
             # Preserve cache_hash for SAC context_fn caching
             original_cache_hash = getattr(value, "cache_hash", None)
-            # partial(value, ...) unwraps value only if its instance dict was
-            # never created. Reading value.__dict__ would create it, so check
-            # the state from __reduce__, whose dict slot is None in that case.
-            flattenable = (
-                type(value) is functools.partial and value.__reduce__()[2][3] is None
-            )
+            # CPython's partial_new unwraps value in partial(value, ...) only if
+            # value's instance dict was never created. Subclasses qualify too,
+            # before 3.13 only if they keep partial's __call__. Reading
+            # value.__dict__ would create the dict, so read the state from
+            # __reduce__, whose dict slot is None while it is unset. Subclasses
+            # overriding __reduce__ are not flattened, as the guard on that
+            # state would call the override.
+            flattenable = False
+            dict_state_source = None
+            value_type = type(value)
+            if value_type.__reduce__ is functools.partial.__reduce__ and (
+                sys.version_info >= (3, 13)
+                or value_type.__call__ is functools.partial.__call__
+            ):
+                flattenable = value.__reduce__()[2][3] is None
+                dict_state_source = GetItemSource(
+                    GetItemSource(
+                        CallFunctionNoArgsSource(
+                            AttrSource(self.get_source(), "__reduce__")
+                        ),
+                        2,
+                    ),
+                    3,
+                )
             return FunctoolsPartialVariable(
                 func_obj,
                 args,
                 keywords,
                 original_cache_hash=original_cache_hash,
                 flattenable=flattenable,
+                dict_state_source=dict_state_source,
             )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.

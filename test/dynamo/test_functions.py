@@ -498,6 +498,68 @@ partial_fn = functools.partial(fn, scale=2)
         self.assertTrue(opt_fn(inner, x)[0])
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_functools_partial_nested_with_attribute_then_without(self):
+        # The flatten decision is guarded both ways: code compiled for an inner
+        # partial with an instance dict is not reused for one without.
+        def fn(inner, x):
+            p = functools.partial(inner, bar=True)
+            return p.func is inner, p.args, p.keywords, p(x.sin())
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3)
+        inner = functools.partial(capture_args, "asdf")
+        inner.attr = "spam"
+        self.assertEqual(opt_fn(inner, x), fn(inner, x))
+        self.assertTrue(opt_fn(inner, x)[0])
+        self.assertEqual(cnt.frame_count, 1)
+
+        fresh = functools.partial(capture_args, "asdf")
+        self.assertEqual(opt_fn(fresh, x), fn(fresh, x))
+        self.assertFalse(opt_fn(fresh, x)[0])
+        self.assertEqual(cnt.frame_count, 2)
+
+        other = functools.partial(capture_args, "asdf")
+        other.attr = "eggs"
+        self.assertEqual(opt_fn(other, x), fn(other, x))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_functools_partial_nested_subclass_flattened(self):
+        # CPython also flattens a partial subclass instance without an instance
+        # dict; before 3.13 only if the subclass keeps partial's __call__.
+        class PartialSubclass(functools.partial):
+            pass
+
+        class PartialSubclassWithCall(functools.partial):
+            def __call__(self, *args, **kwargs):
+                return super().__call__(*args, **kwargs)
+
+        def fn(inner, x):
+            p = functools.partial(inner, "b")
+            return p.func is capture_args, p.args, x.sin()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        for cls in (PartialSubclass, PartialSubclassWithCall):
+            inner = cls(capture_args, "a")
+            self.assertEqual(opt_fn(inner, x), fn(inner, x))
+        self.assertTrue(opt_fn(PartialSubclass(capture_args, "a"), x)[0])
+
+    @unittest.skipIf(sys.version_info < (3, 14), "functools.Placeholder is 3.14+")
+    def test_functools_partial_nested_placeholder_not_flattened(self):
+        # CPython fills the inner partial's Placeholder slots with the outer
+        # args. Dynamo does not model Placeholder, so the inner partial is left
+        # wrapped instead of being merged into (Placeholder, 1, 2).
+        def fn(inner, x):
+            p = functools.partial(inner, 2)
+            return p.func is inner, p.args, x.sin()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        inner = functools.partial(capture_args, functools.Placeholder, 1)
+        res = opt_fn(inner, torch.randn(3))
+        self.assertTrue(res[0])
+        self.assertEqual(res[1], (2,))
+
     def test_functools_partial_nested_merge_order(self):
         # Inner args come before outer args; outer keywords override inner ones.
         def fn(x):
@@ -536,7 +598,9 @@ partial_fn = functools.partial(fn, scale=2)
             return p.func is inner, p(x.sin())
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(
+            Unsupported, r"setattr\(\) is not supported on type partial"
+        ):
             opt_fn(torch.randn(3))
 
     @make_test
