@@ -658,7 +658,7 @@ def _acceleration_cache_bytes(
 
     This is a PURE ACCELERATOR, not a serialized callable. It is the raw
     ``save_cache_artifacts()`` bundle (FxGraph entry + any triton/autotune cache);
-    ``load_from_python`` feeds it to ``load_cache_artifacts`` so that exec'ing the emitted
+    ``load_from_python`` feeds it to ``load_cache_artifacts`` so that running the emitted
     ``python_code`` loads the precompiled kernels instead of JIT-compiling them. The
     ``python_code`` runs correctly without it, so it carries no key/header framing -- it is
     handed straight back to ``load_cache_artifacts``.
@@ -675,8 +675,12 @@ def load_from_python(
 ) -> Callable[..., Any]:
     """Load the module emitted by ``compile_to_python`` into a runnable ``call``.
 
-    ``python_code`` is self-contained: exec'ing it defines ``call`` and JIT-compiles the
-    inlined kernels on first use, so it runs with ``cache=None``. When ``cache`` (the
+    ``python_code`` is self-contained: running it defines ``call`` and JIT-compiles the
+    inlined kernels on first use, so it runs with ``cache=None``. It runs from a file
+    written into the inductor cache dir (``codecache.exec_from_cache_file``), because a
+    module-level Triton kernel reads its source back through its module's file; so the
+    cache dir must be writable, and each distinct ``python_code`` leaves one file there,
+    keyed on its text. When ``cache`` (the
     accelerator bundle from ``compile_to_python``) is provided, it is loaded FIRST so the
     kernels load their precompiled binaries instead of recompiling -- a pure speedup, never
     a correctness requirement. Mirrors ``compile_to_python``: (python_code, cache) in,
