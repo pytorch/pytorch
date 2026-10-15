@@ -21,7 +21,7 @@ when working with multi-dimensional sharding.
 Please see examples from the PyTorch native parallelism solutions that are built on top of `DTensor`:
 
 - [Tensor Parallel](https://pytorch.org/docs/main/distributed.tensor.parallel.html)
-- [FSDP2](https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md)
+- [FSDP2](https://github.com/pytorch/torchtitan/blob/main/torchtitan/distributed/FSDP.md)
 
 ```{eval-rst}
 .. automodule:: torch.distributed.tensor
