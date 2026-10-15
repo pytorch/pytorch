@@ -14,7 +14,13 @@ import time
 import traceback
 import typing
 from collections.abc import Callable
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import (
+    Future,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    TimeoutError as FuturesTimeoutError,
+    wait,
+)
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from enum import Enum, IntEnum
@@ -590,6 +596,23 @@ class SubprocPool:
 
     def wakeup(self) -> None:
         self._send(MsgHeader.WAKEUP)
+
+    def drain_pending(self, timeout: float | None = None) -> None:
+        """Wait for every submitted job to finish, leaving the pool running.
+
+        ``timeout`` bounds the total wait and raises
+        ``concurrent.futures.TimeoutError`` when exceeded. A failed job
+        re-raises its error.
+        """
+        with self.futures_lock:
+            futures = [job.future for job in self.pending_jobs.values()]
+        done, not_done = wait(futures, timeout=timeout)
+        if not_done:
+            raise FuturesTimeoutError(
+                f"{len(not_done)} compile job(s) still pending after {timeout}s"
+            )
+        for future in done:
+            future.result()
 
     def shutdown(self) -> None:
         try:
