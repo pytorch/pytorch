@@ -311,6 +311,48 @@ def infer_flex_gemm_epilogue_arg_kinds(
     return tuple(epilogue_arg_kinds)
 
 
+def require_tma_loadable_tile_captures(
+    epilogue_args: list[TensorBox], output_size: list[Any]
+) -> list[TensorBox]:
+    """Give full-tile captures a layout QuACK's TMA ``TileLoad`` can read in place.
+
+    A tile load needs one unit-stride matrix dim and 16-byte multiple outer strides.
+    Views such as ``h.view(m, n, 2)[..., 0]`` have neither, so they are copied to a
+    contiguous layout here instead of failing QuACK's launch-time stride check.
+    Row-strided views such as ``h[:, :n]`` already qualify and load in place.
+    """
+    from torch._inductor.virtualized import V
+
+    sizevars = V.graph.sizevars
+
+    def loadable(arg: TensorBox) -> bool:
+        stride = arg.maybe_get_stride()
+        if stride is None:
+            return True
+        alignment = max(16 // arg.get_dtype().itemsize, 1)
+        for unit in (-1, -2):
+            if statically_known_equal(stride[unit], 1) and all(
+                sizevars.statically_known_multiple_of(s, alignment)
+                for dim, s in enumerate(stride)
+                if dim != len(stride) + unit
+            ):
+                return True
+        return False
+
+    return [
+        arg
+        if not statically_known_shape_equal(arg.get_size(), output_size)
+        or loadable(arg)
+        else cast(
+            TensorBox,
+            ir.ExternKernel.require_exact_strides(
+                arg, ir.FlexibleLayout.contiguous_strides(arg.get_size())
+            ),
+        )
+        for arg in epilogue_args
+    ]
+
+
 CAPTURE_RESHAPE_TARGETS = frozenset(
     (
         torch.ops.aten.unsqueeze.default,
@@ -788,6 +830,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     gemm_input_nodes = [
         ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args
     ]
+    epilogue_args = require_tma_loadable_tile_captures(
+        epilogue_args, logical_output_size
+    )
     epilogue_input_nodes = [
         ir.TemplateBuffer.realize_template_input(arg) for arg in epilogue_args
     ]
