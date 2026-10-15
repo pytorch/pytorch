@@ -3299,8 +3299,9 @@ def capture(
     used before the block compiles and tunes again on its first launch inside
     it. That retune benchmarks on the block's real inputs, and the config it
     picks, which is what ships and what the process keeps using afterwards, may
-    differ from the one picked before the block. JIT kernels and autotuners the
-    block does not launch keep their compiled kernels and decisions afterwards.
+    differ from the one picked before the block. Compiled JIT kernel
+    specializations and autotuning decisions the block does not produce again
+    are kept afterwards.
     Triton does not cache the decision of an autotuner with ``pre_hook``
     configs, so one that does not prune its configs keeps its earlier decision
     in the block and is benchmarked again on first use in the serving process.
