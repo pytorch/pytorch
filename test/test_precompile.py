@@ -2850,7 +2850,6 @@ class TestPrecompile(TestCase):
         # export list would otherwise generate no cases and pass vacuously.
         exported = {
             "capture",
-            "capture_runtime",
             "load",
             "prepare_runtime",
             "Capture",
@@ -5275,13 +5274,23 @@ class TestPrecompileDynamoCapture(TestCase):
             load(other_artifact, self.cache)
 
 
-def _capture_files(test, fn, example_inputs, backend, dynamic=None, tracer=None):
-    """Capture ``fn`` (Dynamo tracer by default) and return (artifact_path, cache_path)."""
-    temp_dir = tempfile.TemporaryDirectory()
-    test.addCleanup(temp_dir.cleanup)
-    directory = temp_dir.name
-    artifact_path = os.path.join(directory, "artifact.py")
-    cache_path = os.path.join(directory, "artifact.cache")
+def _capture_files(
+    test, fn, example_inputs, backend, dynamic=None, tracer=None, paths=None, then=None
+):
+    """Capture ``fn`` (Dynamo tracer by default) and return (artifact_path, cache_path).
+
+    ``paths`` reuses an existing pair's paths; ``then`` runs in the capture block
+    after the example calls.
+    """
+    if paths is None:
+        temp_dir = tempfile.TemporaryDirectory()
+        test.addCleanup(temp_dir.cleanup)
+        directory = temp_dir.name
+        paths = (
+            os.path.join(directory, "artifact.py"),
+            os.path.join(directory, "artifact.cache"),
+        )
+    artifact_path, cache_path = paths
     renamed = contextlib.nullcontext()
     if tracer is None:
         tracer = DynamoTracer(dynamic=dynamic, require_no_risky_drops=False)
@@ -5305,6 +5314,8 @@ def _capture_files(test, fn, example_inputs, backend, dynamic=None, tracer=None)
     ):
         for args in example_inputs:
             cap(*args)
+        if then is not None:
+            then()
     return artifact_path, cache_path
 
 
@@ -5651,40 +5662,11 @@ class TestPrecompileNoCompilation(TestCase):
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
-    def test_capture_seals_runtime_scope_and_prepare_skips_graph(self):
-        from pathlib import Path
-
-        from torch.compiler._no_compile import (
-            check_compilation_allowed,
-            is_compilation_forbidden,
-        )
-
+    def test_prepare_runtime_skips_graph_and_cuda(self):
         pc = torch.compiler.precompile
-        env = "TORCH_PRECOMPILE_NO_COMPILATION"
-        previous = os.environ.get(env)
-        with pc.capture_runtime():
-            with self.assertRaisesRegex(PrecompileError, "already active"):
-                with pc.capture_runtime():
-                    self.fail("Nested runtime capture was accepted")
-            self.assertFalse(is_compilation_forbidden())
-            source, cache = _capture_files(
-                self,
-                _no_compilation_single_graph,
-                [(torch.ones(4),)],
-                backend="eager",
-            )
-            cache = Path(cache)
-            frozen = cache.read_bytes()
-            self.assertTrue(is_compilation_forbidden())
-            with self.assertRaises(PrecompileError):
-                _capture_files(
-                    self, _no_compilation_inductor_graph, [(torch.ones(4),)], "eager"
-                )
-            self.assertEqual(cache.read_bytes(), frozen)
-            with self.assertRaisesRegex(PrecompileError, "forbids cleanup compiler"):
-                check_compilation_allowed("cleanup compiler")
-        self.assertEqual(os.environ.get(env), previous)
-        self.assertFalse(is_compilation_forbidden())
+        source, cache = _capture_files(
+            self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
+        )
         with (
             mock.patch(
                 "torch._precompile._make_inlined_forward",
@@ -5697,61 +5679,49 @@ class TestPrecompileRuntimeCache(TestCase):
             pc.prepare_runtime(artifact_path=source, cache_path=cache)
             pc.prepare_runtime(artifact_path=source, cache_path=cache)
 
-    @parametrize("explicit", (False, True))
-    def test_capture_seals_only_a_capture_runtime_scope(self, explicit):
-        from torch.compiler._no_compile import is_compilation_forbidden
+    def test_overlapping_captures_share_one_scope(self):
+        from torch.compiler import _runtime_cache
 
-        pc = torch.compiler.precompile
-        scope = pc.capture_runtime() if explicit else contextlib.nullcontext()
-        with tempfile.TemporaryDirectory() as directory, scope:
-            source = os.path.join(directory, "m.py")
-            cache = os.path.join(directory, "m.cache")
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [
+                (os.path.join(directory, f"{i}.py"), os.path.join(directory, f"{i}.c"))
+                for i in range(2)
+            ]
             with capture(
                 _no_compilation_single_graph,
-                artifact_path=source,
-                cache_path=cache,
+                artifact_path=paths[0][0],
+                cache_path=paths[0][1],
                 tracer=DynamoTracer(require_no_risky_drops=False),
                 backend="eager",
-            ) as cap:
-                with self.assertRaisesRegex(PrecompileError, "already active"):
-                    with pc.capture_runtime():
-                        self.fail("capture_runtime started inside a capture")
-                cap(torch.ones(4))
-                # The last save() covers every call, so exit writes nothing more.
-                cap.save()
-                self.assertFalse(is_compilation_forbidden())
-            self.assertEqual(is_compilation_forbidden(), explicit)
-        self.assertFalse(is_compilation_forbidden())
-
-    def test_capture_runtime_rejects_start_under_no_compilation(self):
-        pc = torch.compiler.precompile
-        with (
-            pc.no_compilation(),
-            self.assertRaisesRegex(PrecompileError, "compilation is forbidden"),
-        ):
-            with pc.capture_runtime():
-                self.fail("capture_runtime started under no_compilation")
-
-    def test_capture_runtime_rejects_a_make_fx_capture(self):
-        from torch.compiler._no_compile import is_compilation_forbidden
-
-        pc = torch.compiler.precompile
-        with pc.capture_runtime():
-            with self.assertRaisesRegex(PrecompileError, "only DynamoTracer"):
+            ) as outer:
+                owner = _runtime_cache._capture
                 _capture_files(
                     self,
                     _no_compilation_single_graph,
                     [(torch.ones(4),)],
                     backend="eager",
-                    tracer=MakeFxTracer(),
+                    paths=paths[1],
                 )
-            _capture_files(
-                self, _no_compilation_single_graph, [(torch.ones(4),)], "eager"
-            )
-            self.assertTrue(is_compilation_forbidden())
+                self.assertIs(_runtime_cache._capture, owner)
+                outer(torch.ones(4))
+            self.assertIsNone(_runtime_cache._capture)
+            for source, cache in paths:
+                torch.compiler.precompile.prepare_runtime(
+                    artifact_path=source, cache_path=cache
+                )
 
-    @parametrize("explicit", (False, True))
-    def test_only_a_sealing_write_shuts_down_compile_workers(self, explicit):
+    def test_capture_scope_inherited_across_fork_is_not_the_childs(self):
+        from torch.compiler import _runtime_cache
+
+        with _runtime_cache.capture_scope():
+            parent = _runtime_cache._capture
+            # A forked child inherits the parent's scope object.
+            with mock.patch.object(parent, "pid", os.getpid() + 1):
+                with _runtime_cache.capture_scope():
+                    self.assertIsNot(_runtime_cache._capture, parent)
+                self.assertEqual(parent.captures, 1)
+
+    def test_writes_keep_compile_workers(self):
         from torch._inductor.async_compile import AsyncCompile
 
         pc = torch.compiler.precompile
@@ -5761,8 +5731,7 @@ class TestPrecompileRuntimeCache(TestCase):
             "drain_pending",
             side_effect=lambda **kw: shutdowns.append(kw["shutdown"]),
         )
-        scope = pc.capture_runtime() if explicit else contextlib.nullcontext()
-        with tempfile.TemporaryDirectory() as directory, drain, scope:
+        with tempfile.TemporaryDirectory() as directory, drain:
             with pc.capture(
                 _no_compilation_single_graph,
                 artifact_path=os.path.join(directory, "m.py"),
@@ -5773,28 +5742,10 @@ class TestPrecompileRuntimeCache(TestCase):
                 cap(torch.ones(4))
                 cap.save()
                 cap(torch.ones(2, 3))  # leaves the final write something to add
-        self.assertEqual(shutdowns, [False, explicit])
+        self.assertEqual(shutdowns, [False, False])
 
-    def test_capture_runtime_inherited_across_fork_does_not_block_the_child(self):
-        from torch.compiler import _runtime_cache
-        from torch.compiler._no_compile import is_compilation_forbidden
-
-        pc = torch.compiler.precompile
-        with pc.capture_runtime():
-            # A forked child inherits the parent's scope object.
-            with mock.patch.object(_runtime_cache._capture, "pid", os.getpid() + 1):
-                with pc.capture_runtime():
-                    _capture_files(
-                        self, _no_compilation_single_graph, [(torch.ones(4),)], "eager"
-                    )
-                    self.assertTrue(is_compilation_forbidden())
-            self.assertFalse(is_compilation_forbidden())
-
-    def test_failed_final_write_leaves_runtime_scope_unsealed(self):
-        from torch.compiler._no_compile import is_compilation_forbidden
-
-        pc = torch.compiler.precompile
-        with tempfile.TemporaryDirectory() as directory, pc.capture_runtime():
+    def test_failed_write_leaves_the_paths_and_a_new_capture_retries(self):
+        with tempfile.TemporaryDirectory() as directory:
             source = os.path.join(directory, "m.py")
             cache = os.path.join(directory, "m.cache")
             with (
@@ -5812,15 +5763,20 @@ class TestPrecompileRuntimeCache(TestCase):
                 stack.enter_context(
                     mock.patch("os.replace", side_effect=OSError("disk full"))
                 )
-            self.assertFalse(is_compilation_forbidden())
             self.assertEqual(os.listdir(directory), [])
             _capture_files(
-                self, _no_compilation_single_graph, [(torch.ones(4),)], "eager"
+                self,
+                _no_compilation_single_graph,
+                [(torch.ones(4),)],
+                "eager",
+                paths=(source, cache),
             )
-            self.assertTrue(is_compilation_forbidden())
+            torch.compiler.precompile.prepare_runtime(
+                artifact_path=source, cache_path=cache
+            )
 
     @parametrize("backend", ("eager", "inductor"))
-    def test_strict_load_serves_pair_captured_in_runtime_scope(self, backend):
+    def test_strict_load_serves_captured_pair(self, backend):
         pc = torch.compiler.precompile
         fn = (
             _no_compilation_single_graph
@@ -5828,51 +5784,32 @@ class TestPrecompileRuntimeCache(TestCase):
             else _no_compilation_inductor_graph
         )
         x = torch.ones(4)
-        with pc.capture_runtime():
-            source, cache = _capture_files(self, fn, [(x,)], backend=backend)
-            with open(cache, "rb") as f:
-                captured = torch.load(io.BytesIO(f.read()), weights_only=True)
-            # An eager capture carries no artifact, and freezing must keep it so.
-            self.assertEqual(captured["artifact"] is None, backend == "eager")
+        source, cache = _capture_files(self, fn, [(x,)], backend=backend)
+        with pc.no_compilation():
+            pc.prepare_runtime(artifact_path=source, cache_path=cache)
             runnable = pc.load(source, cache)
             with torch.no_grad():
                 self.assertEqual(runnable(x), fn(x))
 
-    @parametrize("explicit", (False, True))
-    def test_inductor_capture_without_artifact_is_refused_by_runtime_scope(
-        self, explicit
-    ):
-        pc = torch.compiler.precompile
-        scope = pc.capture_runtime() if explicit else contextlib.nullcontext()
+    def test_inductor_capture_without_artifact_is_refused(self):
         with (
             tempfile.TemporaryDirectory() as directory,
-            scope,
             mock.patch(
                 "torch.compiler._cache.CacheArtifactManager.serialize",
                 return_value=None,
             ),
         ):
-            source = os.path.join(directory, "m.py")
-            cache = os.path.join(directory, "m.cache")
-            refusal = (
-                self.assertRaisesRegex(PrecompileError, "saved none")
-                if explicit
-                else contextlib.nullcontext()
-            )
-            with refusal:
-                with capture(
+            with (
+                self.assertRaisesRegex(PrecompileError, "saved none"),
+                capture(
                     _no_compilation_inductor_graph,
-                    artifact_path=source,
-                    cache_path=cache,
+                    artifact_path=os.path.join(directory, "m.py"),
+                    cache_path=os.path.join(directory, "m.cache"),
                     tracer=DynamoTracer(require_no_risky_drops=False),
-                ) as cap:
-                    cap(torch.ones(4))
-            if explicit:
-                self.assertEqual(os.listdir(directory), [])
-            else:
-                with open(cache, "rb") as f:
-                    blob = torch.load(io.BytesIO(f.read()), weights_only=True)
-                self.assertIsNone(blob["artifact"])
+                ) as cap,
+            ):
+                cap(torch.ones(4))
+            self.assertEqual(os.listdir(directory), [])
 
     def test_prepare_runtime_rejects_make_fx_capture(self):
         from pathlib import Path
