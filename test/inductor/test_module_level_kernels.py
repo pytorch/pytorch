@@ -34,6 +34,7 @@ from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -701,6 +702,7 @@ class TestModuleLevelKernels(TestCase):
             self.assertIn(meta if as_code else meta.replace("\\", "\\\\"), code)
 
     @requires_cuda_and_triton
+    @skipIfRocm  # the inline asm is PTX
     @parametrize("autotune_at_compile_time", [False, True])
     def test_kernel_source_with_backslashes(self, autotune_at_compile_time):
         # Inline asm escapes its newlines for the string form's ''' literal.
