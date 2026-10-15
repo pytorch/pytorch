@@ -901,12 +901,10 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
 
         with V.set_graph_handler(MockGraphHandler()):
             # Power-of-two reciprocals are exact, so they apply without fast math.
-            # Epilogue codegen passes Python floats; ops.constant passes strings.
             self.assertIn("x * cute.full_like(x, 0.25)", lowered(4.0, False))
-            self.assertIn("x * cute.full_like(x, 0.25)", lowered("4.0", False))
-            self.assertIn("x / ", lowered("25.0", False))
-            self.assertIn("x * cute.full_like(x, 0.04)", lowered("25.0", True))
-            self.assertIn("x / ", lowered("0.0", True))
+            self.assertIn("x / ", lowered(25.0, False))
+            self.assertIn("x * cute.full_like(x, 0.04)", lowered(25.0, True))
+            self.assertIn("x / ", lowered(0.0, True))
 
     def test_cutedsl_op_overrides_fast_math(self):
         from torch._inductor.codegen.common import CSEVariable
