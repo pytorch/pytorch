@@ -39,8 +39,8 @@ jobs:
     needs: get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm86
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc13-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc13-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0;8.6'
       test-matrix: |
@@ -61,7 +61,7 @@ jobs:
         ]}
       build-additional-packages: "vision audio fbgemm torchao"
       python-version: "3.11"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
 
@@ -76,7 +76,7 @@ jobs:
       docker-image: ${{ needs.periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.periodic-dynamo-benchmarks-build.outputs.test-matrix }}
       python-version: "3.11"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
 
@@ -124,8 +124,8 @@ jobs:
       - get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc13-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc13-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0'
       test-matrix: |
@@ -134,7 +134,7 @@ jobs:
         ]}
       build-additional-packages: "vision audio fbgemm torchao"
       python-version: "3.11"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
 
@@ -149,7 +149,7 @@ jobs:
       docker-image: ${{ needs.inductor-smoke-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-smoke-build.outputs.test-matrix }}
       python-version: "3.11"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
 
