@@ -2931,6 +2931,9 @@ class LoweringTest(MultiProcContinuousTest):
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
     )
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
     @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
@@ -3002,6 +3005,9 @@ class LoweringTest(MultiProcContinuousTest):
 
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
+    )
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
@@ -3108,6 +3114,9 @@ class LoweringTest(MultiProcContinuousTest):
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
     )
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
     @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
@@ -3161,6 +3170,9 @@ class LoweringTest(MultiProcContinuousTest):
 
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
+    )
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
@@ -3270,6 +3282,9 @@ class LoweringTest(MultiProcContinuousTest):
         finally:
             lc._has_multicast_support = old_has_multicast_support
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
     @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     def test_low_contention_all_gather_out_rewrite_preserves_out(self) -> None:
@@ -3292,6 +3307,9 @@ class LoweringTest(MultiProcContinuousTest):
 
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
+    )
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
@@ -3331,6 +3349,9 @@ class LoweringTest(MultiProcContinuousTest):
 
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
+    )
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
@@ -3380,6 +3401,9 @@ class LoweringTest(MultiProcContinuousTest):
     @skipIfXpu(
         msg="is_symm_mem_tensor is always False on XPU (has_allocation not overridden): https://github.com/intel/torch-xpu-ops/issues/5404"
     )
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
     @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
@@ -3422,6 +3446,9 @@ class LoweringTest(MultiProcContinuousTest):
 
     @skipIfXpu(
         msg="symm_mem::one_shot_all_reduce_out is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
+    )
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
