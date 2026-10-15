@@ -107,7 +107,7 @@ static void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, co
 
 static void threshold_kernel(TensorIteratorBase& iter, const Scalar& threshold, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND3(c10::kHalf, c10::kBFloat16, c10::kBool, iter.common_dtype(), "threshold_mps", [&]() {
-    ThresholdParams<scalar_t> params{threshold.to<c10::metal::opmath_t<scalar_t>>(), value.to<scalar_t>()};
+    ThresholdParams<scalar_t> params{threshold.to<scalar_t>(), value.to<scalar_t>()};
     lib.exec_binary_kernel_with_params(
         iter,
         "threshold",
