@@ -1284,8 +1284,8 @@ torch.{device_type}.synchronize()
                 output_size = (2,) * numel
                 module = module_cls(output_size)
                 input = torch.randn((4,) * (numel + 1), device=device).to(dtype)
-                # MPS 2D supports int adaptive pool; 3D falls through.
-                if device.startswith("mps") and numel == 2:
+                # MPS supports int adaptive max pool and 2D avg pool.
+                if device.startswith("mps") and (numel == 2 or pool_type == "Max"):
                     cm = contextlib.nullcontext()
                 else:
                     cm = self.assertRaisesRegex(
@@ -2031,7 +2031,6 @@ torch.{device_type}.synchronize()
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
-    @expectedFailureMPS
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
