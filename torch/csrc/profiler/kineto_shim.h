@@ -1,7 +1,10 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Skip Kineto dependency on mobile unless explicitly asked for.
@@ -25,10 +28,6 @@ class GenericTraceActivity;
 struct CpuTraceBuffer;
 class ActivityTraceInterface;
 } // namespace libkineto
-#endif
-
-#if defined(USE_KINETO) && defined(HAS_XPUPTI)
-#include <XpuptiMetricQuery.h>
 #endif
 
 namespace torch {
@@ -143,8 +142,8 @@ void logInvariantViolation(
     const std::string& group_profile_id);
 
 #if defined(USE_KINETO) && defined(HAS_XPUPTI)
-TORCH_API std::vector<libkineto::XpuMetricGroupNames> xpuAvailableMetrics(
-    const libkineto::XpuDeviceUuid& deviceUuid);
+TORCH_API std::vector<std::pair<std::string, std::vector<std::string>>>
+xpuAvailableMetrics(const std::array<uint8_t, 16>& deviceUuid);
 #endif
 
 } // namespace impl::kineto
