@@ -1012,14 +1012,16 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         # Shard(0) Tensor payloads may shrink and fill a prefix of their output,
         # also on a size-1 shard mesh. The bf16 tags make the group gather bytes.
         mesh = self._init_hsdp_mesh(shard_world_size)
-        num_tags = 4
+        num_tags, tags_dtype = 4, torch.bfloat16
 
         def fsdp_pre_all_gather(
             local_tensor, mesh, outer_size, outer_stride, module, mp_policy
         ):
             rank = mesh.get_local_rank()
             tags = torch.arange(num_tags, device=local_tensor.device) + 10.0 * rank
-            return (tags.bfloat16(), local_tensor), (outer_size, num_tags)
+            tags = tags.to(tags_dtype)
+            payloads = (tags, local_tensor) if num_tags else (tags,)
+            return payloads, (outer_size, num_tags)
 
         @torch.no_grad()
         def fsdp_post_all_gather(
@@ -1048,6 +1050,13 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             output = model(inp)
             self.assertEqual(output, ref_model(inp))
             output.sum().backward()
+        # A payload whose dtype changes, or a dropped payload, raises
+        tags_dtype = torch.float16
+        with self.assertRaisesRegex(ValueError, "must keep the dtype"):
+            model(inp)
+        num_tags, tags_dtype = 0, torch.bfloat16
+        with self.assertRaisesRegex(ValueError, "returned 1 inputs"):
+            model(inp)
 
     @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_single_rank_no_payloads(self):
@@ -1066,10 +1075,10 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         def fsdp_post_all_gather(
             local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
         ):
-            return _finish_post_all_gather(weight, out)
+            return _finish_post_all_gather(weight.clone(), out)
 
         model = nn.Linear(8, 8, bias=False, device=device_type)
-        fully_shard(model, mesh=mesh)
+        fully_shard(model, mesh=mesh, reshard_after_forward=True)
         self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
         inp = torch.randn((2, 8), device=device_type)
         for _ in range(2):
