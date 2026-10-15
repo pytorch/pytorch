@@ -65,12 +65,12 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     CDNA2OrLater,
     CDNA5OrLater,
+    PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     requires_triton_ptxas_compat,
-    SM80OrLater,
     SM90OrLater,
     tf32_on_and_off,
 )
@@ -1562,7 +1562,7 @@ class AOTInductorTestsTemplate:
     def test_conv_freezing(self):
         dtypes = (
             [torch.bfloat16, torch.float]
-            if SM80OrLater or torch.version.hip
+            if PLATFORM_SUPPORTS_BF16 and not TEST_XPU
             else [torch.float]
         )
         for dtype, groups in itertools.product(dtypes, [1, 2]):
@@ -1622,7 +1622,7 @@ class AOTInductorTestsTemplate:
     def test_linear_freezing(self):
         dtypes = (
             [torch.bfloat16, torch.float]
-            if SM80OrLater or torch.version.hip
+            if PLATFORM_SUPPORTS_BF16 and not TEST_XPU
             else [torch.float]
         )
         for dtype in dtypes:
@@ -2376,7 +2376,7 @@ class AOTInductorTestsTemplate:
 
     # scaled_dot_product_flash_attention
     @unittest.skipIf(
-        not (SM80OrLater or torch.version.hip) and not HAS_XPU_AND_TRITON,
+        not PLATFORM_SUPPORTS_BF16 and not HAS_XPU_AND_TRITON,
         "bfloat16 only supported in sm80+ or XPU",
     )
     def test_sdpa(self):
@@ -2395,7 +2395,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(
-        not (SM80OrLater or torch.version.hip) and not HAS_XPU_AND_TRITON,
+        not PLATFORM_SUPPORTS_BF16 and not HAS_XPU_AND_TRITON,
         "bfloat16 only supported in sm80+ or XPU",
     )
     @unittest.skipIf(
@@ -6008,7 +6008,7 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    @unittest.skipIf(not (SM90OrLater or torch.version.hip), "FA3 requires SM90+")
+    @unittest.skipIf(not SM90OrLater, "FA3 requires SM90+")
     def test_varlen_attn_paged_kv_cache(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -6190,7 +6190,7 @@ class AOTInductorTestsTemplate:
 
         if not TEST_MPS:
             dtypes.append(torch.float64)
-        if SM80OrLater or torch.version.hip:
+        if PLATFORM_SUPPORTS_BF16 and not TEST_XPU:
             dtypes.append(torch.bfloat16)
 
         for dtype in dtypes:
@@ -6213,7 +6213,7 @@ class AOTInductorTestsTemplate:
         }
         if not TEST_MPS:
             dynamic_shapes["x_torch.float64"] = {0: dim0}
-        if SM80OrLater or torch.version.hip:
+        if PLATFORM_SUPPORTS_BF16 and not TEST_XPU:
             dynamic_shapes["x_torch.bfloat16"] = {1: dim1}
 
         m = Model()
@@ -6226,7 +6226,7 @@ class AOTInductorTestsTemplate:
 
         # Expected results for the following checks:
         # ("unmatched dtype", "unmatched dim value at", "dim value is too", "unmatched stride value at")
-        if SM80OrLater or torch.version.hip:
+        if PLATFORM_SUPPORTS_BF16 and not TEST_XPU:
             # 10 dynamic dims
             expected_results = (10, 21, 18, 21)
         elif TEST_MPS:

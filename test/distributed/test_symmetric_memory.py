@@ -39,7 +39,11 @@ from torch.distributed._symmetric_memory._nccl import (
     register_external_nccl_comm,
 )
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
-from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_ASYNC_INPUT_MM,
+    PLATFORM_SUPPORTS_FP8,
+    SM100OrLater,
+)
 from torch.testing._internal.common_device_type import (
     e4m3_type,
     instantiate_device_type_tests,
@@ -1611,7 +1615,7 @@ class AsyncTPTest(MultiProcContinuousTest):
                 )
 
     @skipIf(
-        not (SM90OrLater or torch.version.hip),
+        not PLATFORM_SUPPORTS_ASYNC_INPUT_MM,
         "_fused_all_gather_matmul_native currently only supports sm>=90",
     )
     @skip_if_lt_x_gpu(2)
@@ -1760,7 +1764,9 @@ class AsyncTPTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skipUnless(SM89OrLater or torch.version.hip, "Requires compute capability >= 8.9")
+    @skipUnless(
+        PLATFORM_SUPPORTS_FP8 and not TEST_XPU, "Requires compute capability >= 8.9"
+    )
     @parametrize("gather_dim", [0, 1])
     @parametrize(
         "scale_mode", ["tensor-wise", "row-wise-replicated", "row-wise-sharded"]
@@ -1922,7 +1928,9 @@ class AsyncTPTest(MultiProcContinuousTest):
         self.assertEqual(output_0.stride(), output_2.stride())
 
     @skip_if_lt_x_gpu(2)
-    @skipUnless(SM89OrLater or torch.version.hip, "Requires compute capability >= 8.9")
+    @skipUnless(
+        PLATFORM_SUPPORTS_FP8 and not TEST_XPU, "Requires compute capability >= 8.9"
+    )
     @parametrize("scatter_dim", [0, 1])
     @parametrize("rowwise", [True, False])
     @skipIf(

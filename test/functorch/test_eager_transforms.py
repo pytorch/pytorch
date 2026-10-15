@@ -51,7 +51,6 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.func import functional_call, linearize, stack_module_state
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
-    SM70OrLater,
     TEST_CUDA,
     tf32_on_and_off,
     with_tf32_off,
@@ -80,6 +79,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils._triton import has_triton
 
 
 USE_TORCHVISION = False
@@ -5544,10 +5544,7 @@ class TestCompileTransformsDevice(TestCase):
     # Triton only supports GPU with SM70 or later.
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @expectedFailureIf(
-        (IS_WINDOWS and TEST_CUDA)
-        or (TEST_CUDA and not (SM70OrLater or torch.version.hip))
-    )
+    @expectedFailureIf((IS_WINDOWS and TEST_CUDA) or (TEST_CUDA and not has_triton()))
     @unittest.skipIf(
         TEST_CUDA_MEM_LEAK_CHECK,
         "Leaking memory, see https://github.com/pytorch/pytorch/pull/150059 for example",

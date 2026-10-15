@@ -15,7 +15,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCPUIf,
@@ -575,7 +575,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
-    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80 or later.")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
         if device == "cpu":
@@ -601,7 +601,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.compile(fn, fullgraph=True)(x)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
-    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80 or later.")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdfpa_unbacked_strides(self, device):
         if device == "cpu":

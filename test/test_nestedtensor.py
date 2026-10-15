@@ -29,9 +29,9 @@ from torch.nested._internal.nested_tensor import (
     ViewNestedFromBuffer,
 )
 from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM70OrLater,
-    SM80OrLater,
     tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -62,6 +62,7 @@ from torch.testing._internal.common_utils import (
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
+    TEST_XPU,
     xfailIfTorchDynamo,
     xfailIfWindows,
 )
@@ -74,6 +75,7 @@ from torch.testing._internal.opinfo.core import (
 )
 from torch.testing._internal.opinfo.definitions.nested import _sample_njts, njt_op_db
 from torch.utils._pytree import tree_flatten, tree_map_only
+from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
 
 
@@ -6836,7 +6838,7 @@ torch.cuda.synchronize()
         check_size(nt1_t, nt2_t, nt3_t, nt4_t)
 
     @skipIfTorchDynamo("compiles internally")
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     def test_specialize_dynamic_shape(self, device):
         values = torch.randn((18, 16), device=device)
         offsets = torch.tensor([0, 2, 3, 6, 15, 18], device=device)
@@ -6857,7 +6859,7 @@ torch.cuda.synchronize()
         )
 
     @skipIfTorchDynamo("compiles internally")
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     def test_specialize_dynamic_shape_recompile(self, device):
         def generate_inp(total_len):
             values = torch.randn((total_len, 16), device=device)
@@ -6898,7 +6900,7 @@ torch.cuda.synchronize()
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
-            if SM80OrLater or torch.version.hip
+            if PLATFORM_SUPPORTS_BF16 and not TEST_XPU
             else [torch.float16, torch.float32]
         )
     )
@@ -7163,13 +7165,13 @@ torch.cuda.synchronize()
                     check_forward_backward(skip_backward=True)
 
     @skipIfTorchDynamo("SDPA test compiles internally")
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     @xfailIfWindows
     @onlyCUDA
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
-            if SM80OrLater or torch.version.hip
+            if PLATFORM_SUPPORTS_BF16
             else [torch.float16, torch.float32]
         )
     )
@@ -7299,7 +7301,7 @@ torch.cuda.synchronize()
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
-            if SM80OrLater or torch.version.hip
+            if PLATFORM_SUPPORTS_BF16
             else [torch.float16, torch.float32]
         )
     )
@@ -7350,12 +7352,12 @@ torch.cuda.synchronize()
 
     @decorateIf(xfailIfWindows, lambda params: params["dtype"] == torch.float32)
     @skipIfTorchDynamo("SDPA test compiles internally")
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     @onlyCUDA
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
-            if SM80OrLater or torch.version.hip
+            if PLATFORM_SUPPORTS_BF16
             else [torch.float16, torch.float32]
         )
     )
@@ -7380,7 +7382,7 @@ torch.cuda.synchronize()
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Platform doesn't support flash or mem-efficient attention",
     )
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     @onlyCUDA
     @skipIfTorchDynamo()
     def test_sdpa_autocast(self, device):
@@ -7462,7 +7464,9 @@ torch.cuda.synchronize()
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Platform doesn't support flash or mem-efficient attention",
     )
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(
+        torch.version.cuda is not None and not SM70OrLater, "GPU capability is < SM70"
+    )
     @onlyCUDA
     @skipIfTorchDynamo()
     def test_sdpa_flop_counter(self, device):
@@ -7511,7 +7515,7 @@ torch.cuda.synchronize()
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
     @skipIfTorchDynamo("compiles internally")
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     @parametrize("use_legacy_api", [True, False])
     @skipCPUIf(True, "SDPA Math NT fallback causes failure: see issue #133644")
     @unittest.skipIf(
@@ -7877,7 +7881,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     def test_compile_preserves_metadata_cache(self, device, dtype):
         # shape (B, *, D)
         nt = random_nt_from_dims(
@@ -7903,7 +7907,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     def test_compile_with_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
         # max seq len: 18
@@ -7935,7 +7939,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     def test_compile_with_dynamic_min_seq_len(self, device, dtype):
         # shape (B, *, D)
         # min seq len: 7
@@ -7967,7 +7971,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
         # max seq len: 18
@@ -8093,7 +8097,7 @@ torch.cuda.synchronize()
     # blows up due to test parametrization otherwise
     @torch._dynamo.utils.disable_cache_limit()
     @skipIfTorchDynamo("SDPA test compiles internally")
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
@@ -8319,7 +8323,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     def test_compile_padded_dense_conversion_preserves_metadata_cache(
         self, device, dtype
     ):
@@ -8407,7 +8411,7 @@ torch.cuda.synchronize()
         self.assertEqual(res.shape, (4, nt.shape[1], 6))
 
     @skipIfTorchDynamo("compiles internally")
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     @dtypes(torch.float32)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
@@ -8442,7 +8446,7 @@ torch.cuda.synchronize()
             self.assertEqual(nt_component.shape, output_component.shape)
 
     @skipIfTorchDynamo("compiles internally")
-    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
+    @skipCUDAIf(not has_triton(), "GPU capability is < SM70")
     @dtypes(torch.float32)
     @parametrize("scalar_input", ["self", "other"])
     def test_where_scalar_broadcast_on_in_graph_constructed_njt(

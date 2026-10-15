@@ -890,7 +890,7 @@ class TestFxGraphCache(TestCase):
             device == "cuda"
             and torch.version.hip is None
             and dtype == torch.bfloat16
-            and not (SM80OrLater or torch.version.hip)
+            and not SM80OrLater
         ):
             raise unittest.SkipTest("requires SM80 or later")
         if use_static_triton_launcher and not (
@@ -1151,7 +1151,7 @@ class TestFxGraphCache(TestCase):
             device == "cuda"
             and torch.version.hip is None
             and dtype == torch.bfloat16
-            and not (SM80OrLater or torch.version.hip)
+            and not SM80OrLater
         ):
             raise unittest.SkipTest("requires SM80 or later")
         if use_static_triton_launcher and not (
@@ -1223,7 +1223,7 @@ class TestFxGraphCache(TestCase):
             device == "cuda"
             and torch.version.hip is None
             and dtype == torch.bfloat16
-            and not (SM80OrLater or torch.version.hip)
+            and not SM80OrLater
         ):
             raise unittest.SkipTest("requires SM80 or later")
 
@@ -1320,7 +1320,7 @@ class TestFxGraphCache(TestCase):
             device == "cuda"
             and torch.version.hip is None
             and dtype == torch.bfloat16
-            and not (SM80OrLater or torch.version.hip)
+            and not SM80OrLater
         ):
             raise unittest.SkipTest("requires SM80 or later")
 
@@ -1819,7 +1819,7 @@ class TestFxGraphCache(TestCase):
             device == "cuda"
             and torch.version.hip is None
             and dtype == torch.bfloat16
-            and not (SM80OrLater or torch.version.hip)
+            and not SM80OrLater
         ):
             raise unittest.SkipTest("requires CUDA SM80 or later")
 
@@ -1873,7 +1873,7 @@ class TestFxGraphCache(TestCase):
             device == "cuda"
             and torch.version.hip is None
             and dtype == torch.bfloat16
-            and not (SM80OrLater or torch.version.hip)
+            and not SM80OrLater
         ):
             raise unittest.SkipTest("requires SM80 or later")
 
@@ -5395,7 +5395,7 @@ class TestAutotuneCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and not (SM80OrLater or torch.version.hip),
+        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
         "Requires SM80+",
     )
     @config.patch({"use_static_triton_launcher": True})
@@ -5447,7 +5447,7 @@ class TestAutotuneCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and not (SM80OrLater or torch.version.hip),
+        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})
@@ -5491,7 +5491,7 @@ class TestAutotuneCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and not (SM80OrLater or torch.version.hip),
+        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})
@@ -5555,7 +5555,7 @@ class TestAutotuneCache(TestCase):
     @requires_triton()
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and not (SM80OrLater or torch.version.hip),
+        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})
@@ -5622,7 +5622,8 @@ class TestAutotuneCache(TestCase):
 class TestRemoteAOTAutogradCache(TestCase):
     @requires_gpu()
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and not (SM80OrLater or torch.version.hip),
+        not HAS_XPU_AND_TRITON
+        and (not torch.cuda.is_available() or (torch.version.cuda and not SM80OrLater)),
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})
@@ -5664,7 +5665,7 @@ class TestRemoteAOTAutogradCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and not (SM80OrLater or torch.version.hip),
+        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})

@@ -46,9 +46,9 @@ from torch.testing._internal.common_cuda import (
     CUDA_DEVICE_IS_INTEGRATED,
     has_device_side_assert,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
+    PLATFORM_SUPPORTS_SYSTEM_SCOPE_SPIN_WAIT,
     PLATFORM_SUPPORTS_WORKQUEUE_CONFIG,
     ROCM_VERSION,
-    SM70OrLater,
     SM89OrLater,
     TEST_CUDNN,
     TEST_MULTIGPU,
@@ -7551,7 +7551,9 @@ class TestCudaAllocator(TestCase):
         "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
     )
     @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
-    @unittest.skipIf(not SM70OrLater, "requires system-scope PTX loads")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_SYSTEM_SCOPE_SPIN_WAIT, "requires system-scope PTX loads"
+    )
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     def test_expandable_segments_empty_cache_wrong_device(self):
         flag_cpu = torch.zeros(1, dtype=torch.int32, device="cpu").pin_memory()
@@ -11623,7 +11625,8 @@ print(json.dumps({"allocs": len(alloc_calls), "frees": len(free_calls)}))
     )
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(
-        not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
+        not PLATFORM_SUPPORTS_SYSTEM_SCOPE_SPIN_WAIT,
+        "Compute capability >= SM70 required for relaxed ptx flag",
     )
     def test_graph_capture_pre_capture_stream_use(self):
         # Tests that a block with pre-capture stream uses is correctly handled
@@ -14111,7 +14114,7 @@ class TestCudaDeviceParametrized(TestCase):
 
     @skipIfRocmVersionLessThan((7, 0))
     @skipCUDAIf(
-        not (SM70OrLater or torch.version.hip),
+        not PLATFORM_SUPPORTS_SYSTEM_SCOPE_SPIN_WAIT,
         "Compute capability >= SM70 required for relaxed ptx flag",
     )
     def test_graph_external_wait_and_record(self):

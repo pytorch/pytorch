@@ -67,7 +67,6 @@ from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
-    SM70OrLater,
 )
 from torch.testing._internal.common_device_type import (
     E4M3_MAX_POS,
@@ -85,6 +84,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     xfailIfS390X,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -6399,7 +6399,7 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         self.assertEqual(actual_str, expected_str)
 
     @unittest.skipIf(
-        not (SM70OrLater or torch.version.hip),
+        not HAS_CUDA_AND_TRITON,
         "Triton only supports devices of CUDA capability >= 7.0",
     )
     def test_add_complex_conj(self):

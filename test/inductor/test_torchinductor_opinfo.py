@@ -20,7 +20,7 @@ from torch._subclasses.fake_tensor import (
     DynamicOutputShapeException,
     FakeTensorMode,
 )
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.testing._internal.common_device_type import (
     dtypes as device_dtypes,
     instantiate_device_type_tests,
@@ -244,7 +244,7 @@ inductor_skips["cuda"] = {
     "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
-if not (SM80OrLater or torch.version.hip):
+if not PLATFORM_SUPPORTS_BF16:
     inductor_skips["cuda"]["bfloat16"] = {b8, f16, f32, f64, i32, i64}
 
 inductor_skips["xpu"] = {

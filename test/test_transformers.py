@@ -70,6 +70,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_CK_SDPA,
     PLATFORM_FUSED_ATTENTION_SUPPORTS_HDIM512,
+    PLATFORM_SUPPORTS_BF16,
     tf32_off,
     tf32_on_and_off,
     tf32_enabled,
@@ -2450,7 +2451,7 @@ class TestSDPAFailureModes(NNTestCase):
     ])
     @tf32_off()
     def test_sdpa_large_batch_or_heads(self, device, dtype, batch, heads, kv_heads, with_bias, dropout_p, backend):
-        if dtype == torch.bfloat16 and not SM80OrLater:
+        if dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
             self.skipTest("bfloat16 requires SM80 or later")
         seq_len, head_dim = 4, 8
         query = torch.randn(batch, heads, seq_len, head_dim, device=device, dtype=dtype, requires_grad=True)
@@ -5308,9 +5309,9 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertEqual(actual, expected, atol=2e-2, rtol=2e-2)
 
     @unittest.skipIf(not PLATFORM_FUSED_ATTENTION_SUPPORTS_HDIM512, "hdim=512 fused attention is unsupported.")
-    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "bfloat16 requires SM80 or later")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16 or TEST_XPU, "bfloat16 requires SM80 or later")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
-    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "bfloat16 requires SM80 or later")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16 or TEST_XPU, "bfloat16 requires SM80 or later")
     @parametrize("kv_len,num_heads,is_causal", [(289, 40, False), (400, 16, True)])
     def test_mem_eff_attention_single_query_tail(self, device, kv_len, num_heads, is_causal):
         # head_dim > 128 gives 32 queries per block, so 289 queries leave a single-query
@@ -5331,7 +5332,7 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertEqual(actual, expected, atol=2e-2, rtol=2e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
-    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "bfloat16 requires SM80 or later")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16 or TEST_XPU, "bfloat16 requires SM80 or later")
     def test_mem_eff_attention_dropout_rng_offset_no_wraparound(self, device):
         # num_queries * num_keys == 2^32, which wraps a 32-bit offset so that head 1
         # replays head 0's mask. Inputs are identical per head, so a shared mask shows
@@ -5346,7 +5347,7 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertFalse(torch.equal(out[0, 0], out[0, 1]))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
-    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "bfloat16 requires SM80 or later")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16 or TEST_XPU, "bfloat16 requires SM80 or later")
     def test_mem_eff_attention_dropout_single_query_tail(self, device):
         # The tail remap makes rows heads while the RNG offset still treats them as
         # queries, so head h's tail row would replay head 1's row h - 1. kv_len == 1

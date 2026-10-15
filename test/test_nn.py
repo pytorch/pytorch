@@ -42,7 +42,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
     TEST_WITH_TORCHDYNAMO, HardwareClassification
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
-    SM80OrLater, SM90OrLater, has_device_side_assert
+    PLATFORM_SUPPORTS_BF16, SM90OrLater, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
@@ -14456,9 +14456,7 @@ class TestNNDeviceType(NNTestCase):
         unsaturated (mild cancellation, error ~ dtype eps); worst-case ULP
         calibration across (policy, dtype, device) belongs in the harness.
         """
-        if dtype == torch.bfloat16 and "cuda" in device and not (
-            SM80OrLater or torch.version.hip
-        ):
+        if dtype == torch.bfloat16 and "cuda" in device and not PLATFORM_SUPPORTS_BF16:
             self.skipTest("bf16 requires SM80+ on CUDA")
         torch.manual_seed(0)
         N, F_, C = 16, 8, 32
@@ -14649,9 +14647,7 @@ class TestNNDeviceType(NNTestCase):
             and acc_policy == "compact"
         ):
             self.skipTest("times out on ROCm 10")
-        if dtype == torch.bfloat16 and "cuda" in device and not (
-            SM80OrLater or torch.version.hip
-        ):
+        if dtype == torch.bfloat16 and "cuda" in device and not PLATFORM_SUPPORTS_BF16:
             self.skipTest("bf16 requires SM80+ on CUDA")
         self._test_linear_cross_entropy_loss(
             device=device, dtype=dtype, acc_policy=acc_policy,
@@ -14678,9 +14674,7 @@ class TestNNDeviceType(NNTestCase):
         # against the fp64 reference across acc_policy / dtype / bias,
         # with its own ULP caps. See the ``none_reduction`` cap block
         # in _test_linear_cross_entropy_loss.
-        if dtype == torch.bfloat16 and "cuda" in device and not (
-            SM80OrLater or torch.version.hip
-        ):
+        if dtype == torch.bfloat16 and "cuda" in device and not PLATFORM_SUPPORTS_BF16:
             self.skipTest("bf16 requires SM80+ on CUDA")
         self._test_linear_cross_entropy_loss(
             device=device, dtype=dtype, acc_policy=acc_policy,
@@ -14707,9 +14701,7 @@ class TestNNDeviceType(NNTestCase):
         # Mixed-precision probability-target leg (exercises the
         # prob_target_buf scratch: weight*target staged at the logits
         # dtype).
-        if dtype == torch.bfloat16 and "cuda" in device and not (
-            SM80OrLater or torch.version.hip
-        ):
+        if dtype == torch.bfloat16 and "cuda" in device and not PLATFORM_SUPPORTS_BF16:
             self.skipTest("bf16 requires SM80+ on CUDA")
         self._test_linear_cross_entropy_loss(
             device=device, dtype=dtype, acc_policy=acc_policy,
@@ -14736,9 +14728,7 @@ class TestNNDeviceType(NNTestCase):
     def test_linear_cross_entropy_loss_prob_target_none_reduction_with_acc_dtype(
         self, device, dtype, acc_policy, bias
     ):
-        if dtype == torch.bfloat16 and "cuda" in device and not (
-            SM80OrLater or torch.version.hip
-        ):
+        if dtype == torch.bfloat16 and "cuda" in device and not PLATFORM_SUPPORTS_BF16:
             self.skipTest("bf16 requires SM80+ on CUDA")
         self._test_linear_cross_entropy_loss(
             device=device, dtype=dtype, acc_policy=acc_policy,
@@ -17616,10 +17606,7 @@ def _make_misaligned_rmsnorm_input(
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @skipIfNoCuteDSL
-@unittest.skipIf(
-    not (SM90OrLater or torch.version.hip),
-    "cutedsl rms_norm override requires SM90+",
-)
+@unittest.skipIf(not SM90OrLater, "cutedsl rms_norm override requires SM90+")
 class TestFusedRMSNormOverrideRouting(TestCase):
     """Stage 1: verify the override's cond predicates return True/False as
     expected on the exact inputs stage 2 uses.
@@ -17910,10 +17897,7 @@ class TestFusedRMSNormOverrideRouting(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @skipIfNoCuteDSL
-@unittest.skipIf(
-    not (SM90OrLater or torch.version.hip),
-    "cutedsl rms_norm override requires SM90+",
-)
+@unittest.skipIf(not SM90OrLater, "cutedsl rms_norm override requires SM90+")
 class TestFusedRMSNormOverrideNumerics(TestCase):
     """Stage 2: numerical equivalence between the cutedsl override and aten.
 

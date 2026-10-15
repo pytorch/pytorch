@@ -15,8 +15,8 @@ from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
-    SM80OrLater,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -509,7 +509,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             sfdp_pattern_7,
             args,
-            contains=SM80OrLater or torch.version.hip,
+            contains=self.device == "cuda" and PLATFORM_SUPPORTS_FLASH_ATTENTION,
             has_dropout=True,
             override_check_equal=True,
             atol=atol,
@@ -536,7 +536,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_7),
             args,
-            contains=SM80OrLater or torch.version.hip,
+            contains=self.device == "cuda" and PLATFORM_SUPPORTS_FLASH_ATTENTION,
             has_dropout=True,
             override_check_equal=True,
             atol=atol,
@@ -549,7 +549,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_7_v2),
             args,
-            contains=SM80OrLater or torch.version.hip,
+            contains=self.device == "cuda" and PLATFORM_SUPPORTS_FLASH_ATTENTION,
             has_dropout=True,
             override_check_equal=True,
             atol=atol,
@@ -647,7 +647,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             sfdp_pattern_9,
             args,
-            contains=SM80OrLater or torch.version.hip,
+            contains=self.device == "cuda" and PLATFORM_SUPPORTS_FLASH_ATTENTION,
             has_dropout=True,
             override_check_equal=True,
             atol=2e-3,
@@ -660,7 +660,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             sfdp_pattern_9_v2,
             args,
-            contains=SM80OrLater or torch.version.hip,
+            contains=self.device == "cuda" and PLATFORM_SUPPORTS_FLASH_ATTENTION,
             has_dropout=True,
             override_check_equal=True,
             atol=2e-3,
@@ -673,7 +673,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_9),
             args,
-            contains=SM80OrLater or torch.version.hip,
+            contains=self.device == "cuda" and PLATFORM_SUPPORTS_FLASH_ATTENTION,
             has_dropout=True,
             override_check_equal=True,
             atol=2e-3,
@@ -686,7 +686,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_9_v2),
             args,
-            contains=SM80OrLater or torch.version.hip,
+            contains=self.device == "cuda" and PLATFORM_SUPPORTS_FLASH_ATTENTION,
             has_dropout=True,
             override_check_equal=True,
             atol=2e-3,

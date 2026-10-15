@@ -1352,7 +1352,7 @@ class ComboKernelTests(TestCase):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
-    @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
+    @unittest.skipIf(torch.version.cuda and not SM90OrLater, "Avoid oom on CI")
     @fresh_cache()
     def test_combo_kernel_yz_overflow(self):
         from torch.profiler import ProfilerActivity

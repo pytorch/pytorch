@@ -335,9 +335,27 @@ def evaluate_platform_supports_half_atomics():
     return True
 
 
+def _cuda_sm_or_any_rocm(sm_gate):
+    if torch.version.cuda:
+        return bool(sm_gate)
+    return bool(torch.version.hip) and TEST_CUDA
+
+
+def evaluate_platform_supports_async_input_mm():
+    if torch.version.cuda:
+        return SM90OrLater
+    return evaluate_gfx_arch_within(["gfx942", "gfx950"])
+
+
 PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: evaluate_platform_supports_bf16())
 PLATFORM_SUPPORTS_BF16_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_bf16_atomics())
 PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_half_atomics())
+# cuBLAS/cuSPARSE reduced-precision (fp16/bf16) GEMM and SDDMM
+PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM53OrLater))
+# A kernel spinning on a host-written flag with a system-scope relaxed load
+PLATFORM_SUPPORTS_SYSTEM_SCOPE_SPIN_WAIT: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM70OrLater))
+PLATFORM_SUPPORTS_INT_MM: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM80OrLater))
+PLATFORM_SUPPORTS_ASYNC_INPUT_MM: bool = LazyVal(lambda: evaluate_platform_supports_async_input_mm())
 
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 

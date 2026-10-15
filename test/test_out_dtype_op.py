@@ -18,7 +18,10 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater, _get_torch_cuda_version
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    PLATFORM_SUPPORTS_INT_MM,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
@@ -195,10 +198,7 @@ class TestOutDtypeOpDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @unittest.skipIf(IS_WINDOWS, "_int_mm unavailable")
-    @unittest.skipIf(
-        TEST_CUDA and not (SM80OrLater or torch.version.hip),
-        "_int_mm unavailable",
-    )
+    @unittest.skipIf(TEST_CUDA and not PLATFORM_SUPPORTS_INT_MM, "_int_mm unavailable")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(_get_torch_cuda_version() >= (11, 7), "_int_mm unavailable")
     @skipIfNoDynamoSupport

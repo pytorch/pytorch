@@ -41,7 +41,7 @@ from torch._subclasses.functional_tensor import (
     PythonFunctionalizeAPI,
 )
 from torch.fx.graph import _BoxedCodeGen
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipXPUIf,
@@ -3522,7 +3522,7 @@ class TestInvokeSubgraphCompileCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @requires_cuda_and_triton
-    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "Requires sm80 or later.")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Requires sm80 or later.")
     def test_sdpa(self):
         @nested_compile_region
         def gn(q, k, v):

@@ -811,15 +811,15 @@ class CUDATestBase(DeviceTypeTestBase):
     @classmethod
     def _capabilities(cls):
         from torch.testing._internal.common_cuda import (
+            PLATFORM_SUPPORTS_BF16,
             PLATFORM_SUPPORTS_FLASH_ATTENTION,
             PLATFORM_SUPPORTS_FP8,
             PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-            SM80OrLater,
         )
 
         return {
             Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
-            Capability.dtype.bf16: lambda: SM80OrLater or torch.version.hip,
+            Capability.dtype.bf16: lambda: PLATFORM_SUPPORTS_BF16,
             Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
             Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         }

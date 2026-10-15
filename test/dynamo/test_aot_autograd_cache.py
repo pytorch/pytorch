@@ -56,7 +56,7 @@ from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -87,7 +87,7 @@ def _acc_supports_bf16():
     if not HAS_ACCELERATOR:
         return False
     if ACC_TYPE == "cuda":
-        return SM80OrLater or torch.version.hip
+        return PLATFORM_SUPPORTS_BF16
     return True
 
 
@@ -395,11 +395,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if (
-            device == "cuda"
-            and dtype == torch.bfloat16
-            and not (SM80OrLater or torch.version.hip)
-        ):
+        if device == "cuda" and dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
             raise unittest.SkipTest("requires SM80 or later")
 
         def fn(x, y):
@@ -1892,11 +1888,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if (
-            device == "cuda"
-            and dtype == torch.bfloat16
-            and not (SM80OrLater or torch.version.hip)
-        ):
+        if device == "cuda" and dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
             raise unittest.SkipTest("requires CUDA SM80 or later")
 
         def fn(x, y):
@@ -2003,11 +1995,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if (
-            device == "cuda"
-            and dtype == torch.bfloat16
-            and not (SM80OrLater or torch.version.hip)
-        ):
+        if device == "cuda" and dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
             raise unittest.SkipTest("requires CUDA SM80 or later")
 
         def fn(x, y):
@@ -2228,7 +2216,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @unittest.skipIf(not HAS_ACCELERATOR, "requires accelerator")
     @unittest.skipIf(not ACC_SUPPORTS_BF16, "requires bfloat16/float8 support")
     @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
-    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "bfloat16, float8")
+    @unittest.skipIf(not (TEST_CUDA and PLATFORM_SUPPORTS_BF16), "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -2333,7 +2321,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @unittest.skipIf(not HAS_ACCELERATOR, "requires accelerator")
     @unittest.skipIf(not ACC_SUPPORTS_BF16, "requires bfloat16/float8 support")
     @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
-    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "bfloat16, float8")
+    @unittest.skipIf(not (TEST_CUDA and PLATFORM_SUPPORTS_BF16), "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -2430,11 +2418,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if (
-            device == "cuda"
-            and dtype == torch.bfloat16
-            and not (SM80OrLater or torch.version.hip)
-        ):
+        if device == "cuda" and dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
             raise unittest.SkipTest("requires SM80 or later")
 
         def fn(x, y):

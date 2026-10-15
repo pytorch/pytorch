@@ -35,9 +35,9 @@ from torch.testing._internal.common_device_type import (
     skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, e4m3_type, e5m2_type, E4M3_MAX_POS, E5M2_MAX_POS,
 )
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
-    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
+    PLATFORM_SUPPORTS_BF16, PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS,
+    SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_quantized import (
@@ -12675,7 +12675,7 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
-                                                       if SM53OrLater or TEST_WITH_ROCM else []),
+                                                       if PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS else []),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.uint8, torch.int8, torch.bfloat16),
            backward_dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -12710,8 +12710,7 @@ op_db: list[OpInfo] = [
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                            device_type='cuda',
-                            active_if=not (SM53OrLater or torch.version.hip)),
+                            device_type='cuda', active_if=not PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS),
                # addbmm does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # https://github.com/pytorch/pytorch/issues/55907
@@ -12721,7 +12720,8 @@ op_db: list[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
                                            torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.float16,
-                                                    *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else [],
+                                                    *[torch.bfloat16]
+                                                    if PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS else [],
                                                     torch.complex64, torch.complex128),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
@@ -12790,7 +12790,7 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
-                                                       if SM53OrLater or TEST_WITH_ROCM else []),
+                                                       if PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS else []),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.uint8, torch.int8, torch.bfloat16),
            backward_dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -12801,8 +12801,7 @@ op_db: list[OpInfo] = [
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                            device_type='cuda',
-                            active_if=not (SM53OrLater or torch.version.hip)),
+                            device_type='cuda', active_if=not PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                             "TestCommon", "test_out"),
            ),
@@ -14106,7 +14105,7 @@ op_db: list[OpInfo] = [
            # ROCm 7.14.
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_and_complex_types_and(
-               torch.half, *([torch.bfloat16] if SM80OrLater or torch.version.hip else [])),
+               torch.half, *([torch.bfloat16] if SM80OrLater else [])),
            backward_dtypesIfROCM=(
                floating_and_complex_types_and(torch.half, torch.bfloat16)
                if TEST_WITH_ROCM and getRocmVersion() >= (7, 14)
@@ -14120,9 +14119,8 @@ op_db: list[OpInfo] = [
            skips=(
                # Reduced-precision sampled_addmm needs CC >= 5.3 (cuSPARSE SDDMM);
                # skip the dtype check on older CUDA arches that have no CI runner.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                            device_type='cuda',
-                            active_if=not (SM53OrLater or torch.version.hip)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda',
+                            active_if=not PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS),
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
                # RuntimeError: Sparse CSR tensors do not have strides.
@@ -14735,7 +14733,7 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
-                                                       if SM53OrLater or TEST_WITH_ROCM or TEST_XPU else []),
+                                                       if PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS or TEST_XPU else []),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            backward_dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
@@ -14749,8 +14747,7 @@ op_db: list[OpInfo] = [
            decorators=[
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                            device_type=('cuda', 'xpu'),
-                            active_if=not (SM53OrLater or torch.version.hip)),
+                            device_type=('cuda', 'xpu'), active_if=not PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS),
                # ROCm intermittently fails the test with standard atol/rtol
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0)}),
                             'TestCommon', 'test_noncontiguous_samples', device_type=('cuda', 'xpu'),
@@ -17150,7 +17147,7 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_bilinear,
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16,
-                                           *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else []),
+                                           *[torch.bfloat16] if PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS else []),
            dtypesIfXPU=floating_types_and(torch.bfloat16, torch.float16, torch.uint8, torch.int8),
            backward_dtypesIfXPU=floating_types_and(torch.float16, torch.bfloat16),
            decorators=(
@@ -17160,8 +17157,7 @@ op_db: list[OpInfo] = [
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                            device_type=('cuda', 'xpu'),
-                            active_if=not (SM53OrLater or torch.version.hip)),
+                            device_type=('cuda', 'xpu'), active_if=not PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
                # https://github.com/pytorch/pytorch/issues/159150
                DecorateInfo(unittest.skip, "TestCommon", "test_fake_crossref_backward_amp", device_type="cuda", dtypes=(torch.float32,), active_if=IS_LINUX or TEST_WITH_ROCM or TEST_WITH_TORCHINDUCTOR),
@@ -17468,8 +17464,7 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip('This is '), 'TestInductorOpInfo', 'test_comprehensive'),
             # skip for sm < 80
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
-                         device_type='cuda', dtypes=(torch.bfloat16,),
-                         active_if=not (SM80OrLater or torch.version.hip)),
+                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not PLATFORM_SUPPORTS_BF16),
             # FIXME
             DecorateInfo(unittest.skip('test_cow_input does not work with efficient attention on ROCM'),
                          'TestCompositeCompliance', 'test_cow_input',
@@ -17481,7 +17476,7 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_flash_attention_forward,
         dtypes=empty_types(),
         dtypesIfCUDA=custom_types(torch.float16)
-        if not (SM80OrLater or torch.version.hip)
+        if not PLATFORM_SUPPORTS_BF16
         else custom_types(torch.float16, torch.bfloat16),
         supports_out=False,
         has_nondeterministic_output=True,
@@ -17519,7 +17514,7 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_efficient_attention_forward,
         dtypes=empty_types(),
         dtypesIfCUDA=custom_types(torch.float16, torch.float32)
-        if not (SM80OrLater or torch.version.hip)
+        if not PLATFORM_SUPPORTS_BF16
         else custom_types(torch.float16, torch.float32, torch.bfloat16),
         supports_out=False,
         has_nondeterministic_output=True,
@@ -18721,7 +18716,7 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
-                                                       if SM53OrLater or TEST_WITH_ROCM else []),
+                                                       if PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS else []),
            dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.uint8, torch.int8, torch.bfloat16),
            backward_dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
@@ -18734,9 +18729,8 @@ op_db: list[OpInfo] = [
            check_batched_forward_grad=False,
            decorators=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                            device_type='cuda',
-                            active_if=not (SM53OrLater or torch.version.hip)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda',
+                            active_if=not PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS),
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestMathBits', 'test_conj_view'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
@@ -23163,10 +23157,7 @@ if "cutedsl" in dsl_ops_by_dsl:
             sample_inputs_func=sample_inputs_rms_norm_cutedsl,
             decorators=[
                 onlyCUDA,
-                skipCUDAIf(
-                    not (SM90OrLater or torch.version.hip),
-                    "cutedsl rms_norm override requires SM90+",
-                ),
+                skipCUDAIf(not SM90OrLater, "cutedsl rms_norm override requires SM90+"),
             ],
             skips=(
                 # test_dtypes probes every dtype and expects the listed set
