@@ -755,13 +755,14 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             (self.world_size, 1),
             mesh_dim_names=("replicate", "shard"),
         )
-        num_tags = 4
+        num_tags, tags_dtype = 4, torch.bfloat16
 
         def fsdp_pre_all_gather(
             local_tensor, mesh, outer_size, outer_stride, module, mp_policy
         ):
-            tags = torch.arange(num_tags, device=local_tensor.device).bfloat16()
-            return (tags, local_tensor), (outer_size, num_tags)
+            tags = torch.arange(num_tags, device=local_tensor.device).to(tags_dtype)
+            payloads = (tags, local_tensor) if num_tags else (tags,)
+            return payloads, (outer_size, num_tags)
 
         @torch.no_grad()
         def fsdp_post_all_gather(
@@ -784,6 +785,13 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             output = model(inp)
             self.assertEqual(output, ref_model(inp))
             output.sum().backward()
+        # A payload whose dtype and size change, or a dropped payload, raises
+        tags_dtype = torch.float16
+        with self.assertRaisesRegex(RuntimeError, "must match the size"):
+            model(inp)
+        num_tags, tags_dtype = 0, torch.bfloat16
+        with self.assertRaisesRegex(ValueError, "zip"):
+            model(inp)
 
     @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_single_rank_no_payloads(self):
@@ -802,10 +810,10 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         def fsdp_post_all_gather(
             local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
         ):
-            return _finish_post_all_gather(weight, out)
+            return _finish_post_all_gather(weight.clone(), out)
 
         model = nn.Linear(8, 8, bias=False, device=device_type)
-        fully_shard(model, mesh=mesh)
+        fully_shard(model, mesh=mesh, reshard_after_forward=True)
         self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
         inp = torch.randn((2, 8), device=device_type)
         for _ in range(2):
