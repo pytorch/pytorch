@@ -73,9 +73,9 @@ static inline string stripComment(const string& s) {
 
 string AbstractConfig::toLower(string& s) const {
   string res = s;
-  for (size_t i = 0; i < res.size(); i++) {
-    if (res[i] >= 'A' && res[i] <= 'Z') {
-      res[i] += ('a' - 'A');
+  for (char& c : res) {
+    if (c >= 'A' && c <= 'Z') {
+      c += ('a' - 'A');
     }
   }
   return res;
