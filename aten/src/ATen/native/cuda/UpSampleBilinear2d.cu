@@ -299,7 +299,75 @@ __global__ void upsample_bilinear2d_backward_nhwc_out_frame(
     const int channels,
     const index_t o_numel,
     const index_t i_numel) {
+#ifdef USE_ROCM
+  // Gather: one thread per grad_input element, no atomics.
+  const index_t index = static_cast<index_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
+  if (index < i_numel) {
+    // Decode NHWC input pixel coordinates: index = ((n * H + h) * W + w) * C + c
+    const index_t c = index % channels;
+    index_t index_temp = index / channels;
+    const int w1 = index_temp % width1;
+    index_temp /= width1;
+    const int h1 = index_temp % height1;
+    const index_t n = index_temp / height1;
+
+    accscalar_t grad_sum = 0;
+
+    // Find range of output pixels that could interpolate from this input pixel
+    int h2_min, h2_max, w2_min, w2_max;
+    compute_output_range<accscalar_t>(h1, rheight, height2, align_corners, h2_min, h2_max);
+    compute_output_range<accscalar_t>(w1, rwidth, width2, align_corners, w2_min, w2_max);
+
+    // Iterate over potential output pixels
+    for (int h2 = h2_min; h2 <= h2_max; h2++) {
+      for (int w2 = w2_min; w2 <= w2_max; w2++) {
+        // Compute source coordinates for this output pixel
+        const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
+            rheight, h2, align_corners, /*cubic=*/false);
+        const int h1_base = (int)h1r;
+        const int h1p = (h1_base < height1 - 1) ? 1 : 0;
+        const accscalar_t h1lambda = h1r - h1_base;
+        const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
+
+        const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
+            rwidth, w2, align_corners, /*cubic=*/false);
+        const int w1_base = (int)w1r;
+        const int w1p = (w1_base < width1 - 1) ? 1 : 0;
+        const accscalar_t w1lambda = w1r - w1_base;
+        const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+
+        // Check if our input pixel participates in this interpolation and accumulate all weights
+        // At boundaries, h1p=0 or w1p=0 causes some sampling positions to collapse
+        // to the same pixel, so we need to accumulate weights from all matching positions
+        accscalar_t weight = 0;
+
+        // Check all four interpolation positions and accumulate weights
+        if (h1 == h1_base && w1 == w1_base) {
+          weight += h0lambda * w0lambda;  // top-left
+        }
+        if (h1 == h1_base && w1 == w1_base + w1p) {
+          weight += h0lambda * w1lambda;  // top-right (may be same as top-left if w1p=0)
+        }
+        if (h1 == h1_base + h1p && w1 == w1_base) {
+          weight += h1lambda * w0lambda;  // bottom-left (may be same as top-left if h1p=0)
+        }
+        if (h1 == h1_base + h1p && w1 == w1_base + w1p) {
+          weight += h1lambda * w1lambda;  // bottom-right (may collapse to other positions)
+        }
+
+        if (weight > 0) {
+          const index_t output_idx =
+              idx_cl<index_t>(n, h2, w2, c, height2, width2, channels);
+          grad_sum += weight * static_cast<accscalar_t>(odata[output_idx]);
+        }
+      }
+    }
+
+    // Write accumulated gradient (no atomics needed)
+    idata[index] = static_cast<scalar_t>(grad_sum);
+  }
+#else
   const index_t index = static_cast<index_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
   if (index < o_numel) {
@@ -348,6 +416,7 @@ __global__ void upsample_bilinear2d_backward_nhwc_out_frame(
         static_cast<scalar_t>(h1lambda * w1lambda * d2val),
         true);
   }
+#endif
 }
 
 static void upsample_bilinear2d_out_cuda_template(
@@ -486,11 +555,6 @@ static void upsample_bilinear2d_backward_out_cuda_template(
 
   const auto memory_format = grad_output_.suggest_memory_format();
 
-  // initialization to zero is required here. As we launch one thread per output
-  // element, and atomicAdd to input gradient. Given a sparse sampling case, our
-  // threads are not covering the whole input tensor.
-  grad_input.zero_();
-
   const int num_threads = std::min(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -506,11 +570,20 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   constexpr bool use_input = false;
 #endif
 
+  const bool use_nhwc = memory_format == at::MemoryFormat::ChannelsLast &&
+      channels >= 4 && grad_input.is_contiguous(memory_format);
+
+  // Zero-init is required for the scatter path (one thread per output element,
+  // atomicAdd into grad_input). The ROCm channels_last gather writes every
+  // grad_input element, so it can skip the fill.
+  if (!(use_input && use_nhwc)) {
+    grad_input.zero_();
+  }
+
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       grad_output_.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
-    if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 && \
-          grad_input.is_contiguous(memory_format)) {
+    if (use_nhwc) {
       using accscalar_t = at::acc_type<scalar_t, true>;
 
       Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
@@ -523,9 +596,11 @@ static void upsample_bilinear2d_backward_out_cuda_template(
       const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
           input_width, output_width, align_corners, scales_w);
 
-      const size_t num_kernels = static_cast<size_t>(nbatch) * channels * output_height * output_width;
-
-      // One thread per output element, so the grid is bounded by maxGridSize[0].
+      // ROCm gather: one thread per grad_input element; CUDA scatter: one per
+      // grad_output element. Grid is bounded by maxGridSize[0].
+      const size_t num_kernels = static_cast<size_t>(nbatch) * channels *
+          (use_input ? input_height * input_width
+                     : output_height * output_width);
       const size_t num_blocks = ceil_div(num_kernels, static_cast<size_t>(num_threads));
       TORCH_CHECK(
           num_blocks <= static_cast<size_t>(at::cuda::getCurrentDeviceProperties()->maxGridSize[0]),
