@@ -945,10 +945,9 @@ class TestFP8Matmul(TestCase):
     @parametrize("out_dtype", [e4m3_type, e5m2_type])
     def test_float8_scale_result(self, device, out_dtype) -> None:
         torch.manual_seed(0)
-        # cuBLASLt has no e4m3 x e4m3 -> e5m2 kernel and hipBLASLt has no mixed fp8 inputs.
-        b_dtype = e5m2_type if out_dtype == e5m2_type and torch.version.hip is None else e4m3_type
         a = torch.randint(-1, 2, (32, 16), device=device).float().to(e4m3_type)
-        b = torch.randint(-1, 2, (16, 32), device=device).float().t().contiguous().t().to(b_dtype)
+        # cuBLASLt has no e4m3 x e4m3 -> e5m2 kernel, so b takes the output dtype.
+        b = torch.randint(-1, 2, (16, 32), device=device).float().t().contiguous().t().to(out_dtype)
         scale = torch.ones((), device=device)
         scale_result = torch.full((), 0.5, device=device)
 
