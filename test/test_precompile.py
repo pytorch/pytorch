@@ -6437,6 +6437,26 @@ def _producer_triton_cache(directory):
         yield
 
 
+@contextlib.contextmanager
+def _triton_settings_unchanged(test):
+    # A warm TRITON_CACHE_DIR no import could use, so repointing it is visible.
+    import triton
+
+    knobs = triton.knobs
+    with (
+        tempfile.TemporaryDirectory() as warm,
+        mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": warm}),
+        knobs.cache.scope(),
+        knobs.autotuning.scope(),
+    ):
+        pathlib.Path(warm, "kernel").mkdir()
+        knobs.autotuning.cache = False
+        yield
+        test.assertEqual(os.environ.get("TRITON_CACHE_DIR"), warm)
+        test.assertEqual(knobs.cache.dir, warm)
+        test.assertFalse(knobs.autotuning.cache)
+
+
 class _FakeTritonRuntimeCache:
     """Stands in for a triton.runtime.cache that can export its runtime cache."""
 
@@ -6451,6 +6471,9 @@ class _FakeTritonRuntimeCache:
     def export_runtime_cache(self, *, context, exclude=()):
         self.exclusions.append(frozenset(exclude))
         return f"runtime cache from {self.root}".encode()
+
+    def _decode(self, bundle, context):
+        return [], {}
 
     def import_runtime_cache(self, payload, *, context):
         self.imports.append((payload, self.root))
@@ -7855,12 +7878,50 @@ class TestPrecompileRuntimeCache(TestCase):
             tempfile.TemporaryDirectory() as directory,
             _fake_triton_runtime_cache(Path(directory)) as fake,
         ):
+            with _triton_settings_unchanged(self):
+                with (
+                    torch.compiler.precompile.no_compilation(),
+                    self.assertRaisesRegex(RuntimeError, "Corrupt"),
+                ):
+                    runtime.populate_cache()
+            self.assertEqual(fake.imports, [])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_strict_import_rejects_incompatible_triton_runtime_cache(self):
+        import hashlib
+
+        from torch.compiler import _runtime_cache
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as directory:
+            with _triton_cache_namespace(directory):
+                _write_triton_runtime_entries()
+                bundle = export_runtime_cache(context={"torch_key": "other"})
+            runtime = _runtime_cache.TritonRuntimeCacheArtifact(
+                hashlib.sha256(bundle).hexdigest(), bundle
+            )
             with (
+                mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
+                _triton_settings_unchanged(self),
                 torch.compiler.precompile.no_compilation(),
-                self.assertRaisesRegex(RuntimeError, "Corrupt"),
+                self.assertRaisesRegex(RuntimeError, "Incompatible"),
             ):
                 runtime.populate_cache()
-            self.assertEqual(fake.imports, [])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_scope_leaves_triton_alone_without_active_backend(self):
+        from triton.backends import backends
+
+        from torch.compiler import _runtime_cache
+
+        with contextlib.ExitStack() as stack:
+            for backend in backends.values():
+                stack.enter_context(
+                    mock.patch.object(backend.driver, "is_active", return_value=False)
+                )
+            stack.enter_context(_triton_settings_unchanged(self))
+            with _runtime_cache.capture_scope():
+                self.assertIsNone(_runtime_cache._capture.cache_root)
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_corrupt_triton_runtime_cache_only_warns_when_not_strict(self):
@@ -7877,7 +7938,10 @@ class TestPrecompileRuntimeCache(TestCase):
             mock.patch.dict(os.environ),
             _fake_triton_runtime_cache(Path(directory)) as fake,
         ):
-            with self.assertLogs(_runtime_cache.log, "WARNING") as logs:
+            with (
+                _triton_settings_unchanged(self),
+                self.assertLogs(_runtime_cache.log, "WARNING") as logs,
+            ):
                 runtime.populate_cache()
             self.assertIn("Corrupt", logs.output[0])
             with (
