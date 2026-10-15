@@ -8263,6 +8263,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(torch.allclose(dynamo_output, output))
 
+    def test_cross_entropy_loss_ctor_dim(self):
+        input = torch.randn(2, 4, 5)
+        target = torch.randint(5, (2, 4))
+
+        def fn(input, target):
+            return torch.nn.CrossEntropyLoss(reduction="none", dim=-1)(input, target)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(input, target), fn(input, target))
+
     def test_cross_entropy_loss_prob_target_dynamic(self):
         shapes = [(3, 5), (4, 7)]
         compiled = torch.compile(F.cross_entropy, dynamic=True, backend="eager")
