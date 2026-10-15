@@ -10,7 +10,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_LANE_DOMAIN_MIXED_ERROR,
     FLEX_GEMM_LANE_DOMAIN_REDUCTION_SPAN_ERROR,
     FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR,
-    FlexGemmOutputContraction,
+    FlexGemmOutputTransform,
     local_reduce_compressed_shape,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR,
@@ -282,7 +282,7 @@ class GemmOutputPlan:
     returned_aux_outputs: tuple[torch.fx.Node, ...] = ()
     local_reduce: GemmOutputLocalReducePlan | None = None
     indexed_output: GemmIndexedOutputStore | None = None
-    output_contraction: FlexGemmOutputContraction | None = None
+    output_contraction: FlexGemmOutputTransform | None = None
     output_storage: torch.fx.Node | None = None
     output_storage_nodes: tuple[torch.fx.Node, ...] = ()
 

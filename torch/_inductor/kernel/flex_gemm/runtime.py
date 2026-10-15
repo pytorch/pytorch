@@ -12,6 +12,8 @@ import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmLocalReduceGeometry,
     FlexGemmOutputContraction,
+    FlexGemmOutputExpansion,
+    FlexGemmOutputTransform,
     INDEXED_OUTPUT_INDICES_ARG_NAME,
     INDEXED_OUTPUT_STORE_ARG_NAME,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
@@ -229,7 +231,7 @@ def flex_gemm_epimod(
     aux_output_count: int,
     indexed_dtypes: tuple[torch.dtype, torch.dtype] | None,
     local_reduce: FlexGemmRuntimeLocalReducePlan | None,
-    output_contraction: FlexGemmOutputContraction | None,
+    output_contraction: FlexGemmOutputTransform | None,
     *,
     varlen_m: bool,
 ):
@@ -253,6 +255,10 @@ def flex_gemm_epimod(
         return epimod
 
     from torch._inductor.kernel.flex_gemm.quack_ops.col_load import ScalarColVecLoad
+    from torch._inductor.kernel.flex_gemm.quack_ops.interleaved import (
+        InterleavedMainStore,
+        InterleavedTileLoad,
+    )
     from torch._vendor.quack import cute_dsl_utils
     from torch._vendor.quack.epilogue import frontend as epilogue_module, ops as epi_ops
 
@@ -261,6 +267,7 @@ def flex_gemm_epimod(
         "row": epi_ops.RowVecLoad,
         "col": epi_ops.ColVecLoad,
         "tile": epi_ops.TileLoad,
+        "interleaved": InterleavedTileLoad,
     }
     ops: dict[str, Any] = {}
     for index, (arg_dtype, kind) in enumerate(
@@ -273,7 +280,7 @@ def flex_gemm_epimod(
             op_type = ScalarColVecLoad
         ops[name] = op_type(name, dtype=dtype)
     aux_output_names = tuple(f"output{index}" for index in range(aux_output_count))
-    if output_contraction is not None:
+    if isinstance(output_contraction, FlexGemmOutputContraction):
         from torch._inductor.kernel.flex_gemm.quack_ops.main_store import (
             GroupedMainStore,
         )
@@ -293,6 +300,8 @@ def flex_gemm_epimod(
             ),
             *aux_output_names,
         )
+    elif isinstance(output_contraction, FlexGemmOutputExpansion):
+        outputs = (InterleavedMainStore("main"), *aux_output_names)
     else:
         outputs = aux_output_names
     sinks: dict[str, Any] = {}
@@ -417,7 +426,7 @@ def gemm_epilogue(
     indexed_out: torch.Tensor | None = None,
     indexed_indices: torch.Tensor | None = None,
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
-    output_contraction: FlexGemmOutputContraction | None = None,
+    output_contraction: FlexGemmOutputTransform | None = None,
     cu_seqlens_m: torch.Tensor | None = None,
     cu_seqlens_k: torch.Tensor | None = None,
     config: QuackConfigKey,
@@ -453,7 +462,7 @@ def gemm_epilogue(
     else:
         indexed_dtypes = None
     if (
-        output_contraction is not None
+        isinstance(output_contraction, FlexGemmOutputContraction)
         and output_contraction.chunked
         and b.stride(-1) == 1
     ):

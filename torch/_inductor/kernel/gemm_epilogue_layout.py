@@ -8,17 +8,19 @@ reduction dataflow and kernel scheduling remain with their respective owners.
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR,
     FlexGemmOutputContraction,
+    FlexGemmOutputExpansion,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     FlexGemmStructuralInt,
     tensor_meta_shape,
+    view_or_reshape_args,
 )
 from torch._inductor.kernel.gemm_epilogue import (
     GemmReductionGeometry,
@@ -307,4 +309,87 @@ def build_output_contraction_plan(
         {node: use.index % use.group for node, use in lanes},
         {use.layout_node: GemmReductionGeometry(use.group, 1) for _, use in lanes},
         tuple(value for _, use in lanes for value in use.structural_values),
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class OutputExpansionPlan:
+    """Describe a main output that packs two lanes interleaved along N.
+
+    ``pack`` is the stack (or cat of unsqueezed lanes) and ``alias_nodes`` are the
+    reshapes between the lanes and the returned ``[..., 2N]`` value.
+    """
+
+    transform: FlexGemmOutputExpansion
+    pack: torch.fx.Node
+    lanes: tuple[torch.fx.Node, torch.fx.Node]
+    alias_nodes: frozenset[torch.fx.Node]
+
+
+def match_output_expansion(
+    outputs: GemmOutputPlan, gemm: torch.fx.Node
+) -> OutputExpansionPlan | None:
+    """Match a main output ``stack([a, b], -1).view(..., 2N)`` of GEMM-shaped lanes.
+
+    ``torch.stack`` reaches the body decomposed as ``cat([a.unsqueeze(-1),
+    b.unsqueeze(-1)], -1)``; a trailing dtype conversion lowers generically.
+    """
+    aten = torch.ops.aten
+    value = outputs.output
+    if value.target in (
+        torch.ops.prims.convert_element_type.default,
+        aten._to_copy.default,
+    ):
+        value = value.args[0]
+    if not isinstance(value, torch.fx.Node):
+        return None
+    view_args = view_or_reshape_args(value)
+    if view_args is None or not isinstance(view_args[0], torch.fx.Node):
+        return None
+    pack = view_args[0]
+    gemm_shape = tensor_meta_shape(gemm)
+    if gemm_shape is None:
+        return None
+    lane_dims = (-1, len(gemm_shape))
+    packed = pack.args[0]
+    if not isinstance(packed, (tuple, list)) or len(packed) != 2:
+        return None
+    if pack.target is aten.stack.default:
+        lanes, aliases = list(packed), [value]
+    elif pack.target is aten.cat.default and all(
+        isinstance(lane, torch.fx.Node)
+        and lane.target is aten.unsqueeze.default
+        and lane.args[1] in lane_dims
+        for lane in packed
+    ):
+        unsqueezes = cast("list[torch.fx.Node]", list(packed))
+        lanes, aliases = [node.args[0] for node in unsqueezes], [value, *unsqueezes]
+    else:
+        return None
+    if not all(isinstance(node, torch.fx.Node) for node in lanes):
+        return None
+    lane_nodes = cast("tuple[torch.fx.Node, torch.fx.Node]", tuple(lanes))
+    dim = pack.args[1] if len(pack.args) > 1 else pack.kwargs.get("dim", 0)
+    metas = [lane.meta.get("val") for lane in lane_nodes]
+    value_shape = tensor_meta_shape(value)
+    if (
+        dim not in lane_dims
+        or value_shape is None
+        or not all(
+            isinstance(meta, torch.Tensor)
+            and statically_known_shape_equal(meta.shape, gemm_shape)
+            and meta.dtype is getattr(metas[0], "dtype", None)
+            for meta in metas
+        )
+        or not statically_known_shape_equal(
+            value_shape, (*gemm_shape[:-1], 2 * gemm_shape[-1])
+        )
+    ):
+        return None
+    if outputs.aux_outputs or outputs.local_reduce is not None:
+        raise NotImplementedError(
+            "FlexGEMM interleaved outputs support only two plain epilogue lanes"
+        )
+    return OutputExpansionPlan(
+        FlexGemmOutputExpansion(), pack, lane_nodes, frozenset(aliases)
     )
