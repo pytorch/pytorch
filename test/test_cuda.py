@@ -1732,6 +1732,109 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
         self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), not orig)
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig
 
+    @unittest.skipUnless(TEST_CUDNN, "cuDNN not available")
+    def test_cudnn_flags_thread_local(self):
+        cudnn = torch.backends.cudnn
+        local = dict(
+            enabled=False,
+            benchmark=True,
+            benchmark_limit=3,
+            deterministic=True,
+            allow_tf32=False,
+            fp32_precision="ieee",
+            depthwise_kernel="native",
+        )
+        remote = dict(
+            enabled=True,
+            benchmark=False,
+            benchmark_limit=7,
+            deterministic=False,
+            allow_tf32=True,
+            fp32_precision="tf32",
+            depthwise_kernel="cudnn",
+        )
+
+        def read_flags():
+            return {name: getattr(cudnn, name) for name in local}
+
+        original = read_flags()
+        with ThreadPoolExecutor(1) as worker, contextlib.ExitStack() as cleanup:
+            scope = cudnn.flags(**remote)
+            with cudnn.flags(**local):
+                with self.assertRaisesRegex(ValueError, "scope failed"):
+                    with cudnn.flags(**remote):
+                        raise ValueError("scope failed")
+                self.assertEqual(read_flags(), local)
+                with self.assertRaisesRegex(RuntimeError, "precision 'bf16'"):
+                    with cudnn.flags(fp32_precision="bf16"):
+                        self.fail("invalid cuDNN flags were accepted")
+                self.assertEqual(read_flags(), local)
+                worker.submit(scope.__enter__).result(timeout=30)
+                cleanup.callback(
+                    lambda: worker.submit(scope.__exit__, None, None, None).result(
+                        timeout=30
+                    )
+                )
+                self.assertEqual(read_flags(), local)
+                self.assertEqual(worker.submit(read_flags).result(timeout=30), remote)
+            self.assertEqual(read_flags(), original)
+            self.assertEqual(worker.submit(read_flags).result(timeout=30), remote)
+        self.assertEqual(read_flags(), original)
+
+    @serialTest()
+    def test_cudnn_flags_export_context(self):
+        from torch.export._trace import _ignore_backend_decomps
+
+        cudnn = torch.backends.cudnn
+        original = cudnn.enabled
+        with cudnn.flags(enabled=True, benchmark=True):
+            with _ignore_backend_decomps():
+                self.assertFalse(cudnn.enabled)
+                self.assertTrue(cudnn.benchmark)
+            self.assertTrue(cudnn.enabled)
+        self.assertEqual(cudnn.enabled, original)
+
+    @serialTest()
+    @parametrize("override", (False, True))
+    def test_cudnn_flags_global_default(self, override):
+        cudnn = torch.backends.cudnn
+        original = cudnn.enabled
+        try:
+            with ThreadPoolExecutor(max_workers=1) as worker:
+                with cudnn.flags(enabled=not original if override else None):
+                    torch._C._set_cudnn_enabled(original)
+                    self.assertEqual(
+                        cudnn.enabled, not original if override else original
+                    )
+                    self.assertEqual(
+                        worker.submit(lambda: cudnn.enabled).result(timeout=30),
+                        original,
+                    )
+                    torch._C._set_cudnn_enabled(not original)
+                    self.assertEqual(cudnn.enabled, not original)
+                self.assertEqual(cudnn.enabled, not original)
+        finally:
+            torch._C._set_cudnn_enabled(original)
+
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_cudnn_flags_precision(self):
+        cudnn = torch.backends.cudnn
+
+        def read_precisions():
+            return cudnn.conv.fp32_precision, cudnn.rnn.fp32_precision
+
+        with torch.backends.flags(fp32_precision="ieee"):
+            cudnn.conv.fp32_precision = "none"
+            cudnn.rnn.fp32_precision = "tf32"
+            with cudnn.flags(allow_tf32=None, fp32_precision="none"):
+                self.assertEqual(read_precisions(), ("ieee", "tf32"))
+                with cudnn.flags(allow_tf32=False, fp32_precision="ieee"):
+                    self.assertEqual(read_precisions(), ("ieee", "ieee"))
+                self.assertEqual(read_precisions(), ("ieee", "tf32"))
+                with torch.backends.flags(fp32_precision="tf32"):
+                    self.assertEqual(read_precisions(), ("tf32", "tf32"))
+
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(
             enabled=None, benchmark=None, deterministic=None, allow_tf32=False

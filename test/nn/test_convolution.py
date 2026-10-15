@@ -2,8 +2,10 @@
 import itertools
 import math
 import os
+import threading
 import unittest
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from itertools import product
 
 import torch
@@ -4110,6 +4112,41 @@ class TestConvolutionNNCUDA(NNTestCase):
     hw_classification = HardwareClassification.CUDA
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    def test_cudnn_flags_thread_local(self, device):
+        x = torch.randn(2, 4, 8, 8, device=device, dtype=torch.double)
+        w = torch.randn(4, 4, 3, 3, device=device, dtype=torch.double)
+        producer = torch.cuda.current_stream(device)
+        ready = threading.Barrier(2)
+
+        def run(enabled):
+            torch.cuda.current_stream(device).wait_stream(producer)
+            with cudnn.flags(enabled=enabled, deterministic=True, allow_tf32=False):
+                ready.wait(timeout=30)
+                input = x.clone().requires_grad_()
+                weight = w.clone().requires_grad_()
+                observed = []
+                input.register_hook(lambda grad: observed.append(cudnn.enabled))
+                one, zero = (1, 1), (0, 0)
+                args = [input, weight, None, one, one, one, False, zero, 1]
+                backend = torch._C._select_conv_backend(*args)
+                output = F.conv2d(input, weight, padding=1)
+                grads = torch.autograd.grad(output.sum(), (input, weight))
+                torch.cuda.synchronize(device)
+                return (output.detach(), grads), backend, observed
+
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            native = workers.submit(run, False)
+            accelerated = workers.submit(run, True)
+            native_result, native_backend, native_flags = native.result(timeout=60)
+            cudnn_result, cudnn_backend, cudnn_flags = accelerated.result(timeout=60)
+        backends = torch._C._ConvBackend
+        self.assertEqual(native_backend, backends.Slow2d)
+        self.assertEqual(cudnn_backend, backends.Cudnn)
+        self.assertEqual(native_result, cudnn_result)
+        self.assertEqual((native_flags, cudnn_flags), ([False], [True]))
 
     @skipCUDAIfNoCudnn
     @skipCUDAIfRocm

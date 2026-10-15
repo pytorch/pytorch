@@ -12,6 +12,7 @@
 #include <ATen/ATen.h>
 #include <ATen/BlasBackend.h>
 #include <ATen/CachedTensorUtils.h>
+#include <ATen/CuDNNFlags.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/FakeTensor.h>
@@ -3308,6 +3309,61 @@ Call this whenever a new thread is created in order to propagate values from
         return at::precision2str(at::globalContext().float32Precision(
             at::str2backend(backend), at::str2op(op)));
       });
+
+  py::class_<at::impl::CuDNNFlags>(py_module, "_CuDNNFlags");
+  py_module.def("_get_cudnn_flags", []() {
+    return at::impl::CuDNNFlags::get_tls_state();
+  });
+  py_module.def(
+      "_set_cudnn_flags",
+      [](py::handle enabled,
+         py::handle benchmark,
+         std::optional<int> benchmark_limit,
+         py::handle deterministic,
+         py::handle allow_tf32,
+         const std::optional<std::string>& fp32_precision,
+         const std::optional<std::string>& depthwise_kernel) {
+        auto flags = at::impl::CuDNNFlags::get_tls_state();
+        auto set_bool =
+            [](py::handle value, std::optional<bool>& flag, const char* name) {
+              if (!value.is_none()) {
+                TORCH_CHECK(
+                    PyBool_Check(value.ptr()),
+                    "set_cudnn_flags expects ",
+                    name,
+                    " to be a bool, but got ",
+                    THPUtils_typename(value.ptr()));
+                flag = Py_IsTrue(value.ptr());
+              }
+            };
+        set_bool(enabled, flags.enabled, "enabled");
+        set_bool(benchmark, flags.benchmark, "benchmark");
+        if (benchmark_limit.has_value()) {
+          flags.benchmark_limit = benchmark_limit;
+        }
+        set_bool(deterministic, flags.deterministic, "deterministic");
+        set_bool(allow_tf32, flags.allow_tf32, "allow_tf32");
+        if (!allow_tf32.is_none()) {
+          flags.conv_fp32_precision = flags.rnn_fp32_precision =
+              *flags.allow_tf32 ? at::Float32Precision::TF32
+                                : at::Float32Precision::NONE;
+        }
+        if (fp32_precision.has_value()) {
+          flags.fp32_precision = at::str2precision(*fp32_precision);
+        }
+        if (depthwise_kernel.has_value()) {
+          flags.depthwise_kernel = at::str2cudnn_depthwise(*depthwise_kernel);
+        }
+        at::impl::CuDNNFlags::set_tls_state(flags);
+      },
+      py::arg("enabled"),
+      py::arg("benchmark"),
+      py::arg("benchmark_limit").noconvert(),
+      py::arg("deterministic"),
+      py::arg("allow_tf32"),
+      py::arg("fp32_precision"),
+      py::arg("depthwise_kernel"));
+  py_module.def("_restore_cudnn_flags", &at::impl::CuDNNFlags::set_tls_state);
 
   py_module.def(
       "_set_fp32_precision_setter",
