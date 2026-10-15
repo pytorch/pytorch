@@ -9,6 +9,7 @@
 // TODO: enable on Windows.
 #ifndef _WIN32
 #include <fmt/format.h>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -63,35 +64,42 @@ struct LoadedKernel {
   uint32_t numArgs = 0;
 };
 
-syclDevicePtr_t getPointer(
-    PyObject* obj,
-    int idx,
-    const sycl::queue* queuePtr) {
-  syclDevicePtr_t data_ptr = nullptr;
-
-  if (THPUtils_checkLong(obj)) {
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    data_ptr = reinterpret_cast<syclDevicePtr_t>(THPUtils_unpackUInt64(obj));
-
-    return data_ptr;
-  }
-  if (Py_IsNone(obj)) {
-    // valid nullptr
-    return data_ptr;
-  }
+syclDevicePtr_t callDataPtrMethod(PyObject* obj) {
   auto ptr = THPObjectPtr{PyObject_GetAttrString(obj, "data_ptr")};
   TORCH_CHECK(
       ptr != nullptr,
       "Pointer argument must be either uint64 or have data_ptr method")
   auto empty_tuple = THPObjectPtr{PyTuple_New(0)};
   auto ret = THPObjectPtr{PyObject_Call(ptr, empty_tuple, nullptr)};
+  // THPUtils_checkLong dereferences its argument, so without this a raising
+  // data_ptr() segfaults instead of reporting the python error.
+  if (ret == nullptr) {
+    // TORCH_CHECK would report a RuntimeError of its own and leave the python
+    // error data_ptr() raised set.
+    // @allow-raw-throw: re-raises the error data_ptr() raised
+    throw python_error();
+  }
   TORCH_CHECK(
       THPUtils_checkLong(ret),
       "data_ptr method of Pointer object must return 64-bit int");
 
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  data_ptr = reinterpret_cast<syclDevicePtr_t>(THPUtils_unpackUInt64(ret));
+  return reinterpret_cast<syclDevicePtr_t>(THPUtils_unpackUInt64(ret));
+}
 
+syclDevicePtr_t getPointer(
+    PyObject* obj,
+    int idx,
+    const sycl::queue* queuePtr) {
+  if (THPUtils_checkLong(obj)) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    return reinterpret_cast<syclDevicePtr_t>(THPUtils_unpackUInt64(obj));
+  }
+  if (Py_IsNone(obj)) {
+    // valid nullptr
+    return nullptr;
+  }
+  syclDevicePtr_t data_ptr = callDataPtrMethod(obj);
   if (!data_ptr)
     return data_ptr;
 
@@ -133,17 +141,75 @@ void convertType(F converter, const char* name, void* slot, PyObject* item) {
 }
 
 /**
-  Given a list of args and their types (in a string), along with two stack
-  allocated arrays, puts each argument arg_{i} into argStorage[i], and a
-  pointer to the argument in kernelArgs[i]. We then can pass `kernelArgs`
-  directly to launchKernel. Note that some args can be less than 8 bytes, but
-  we'll still allocate 8 bytes on the stack for them.
+  Puts argument `item`, of the type `typeChar` names, into the 8-byte `slot`.
+  Note that some args can be less than 8 bytes, but we'll still allocate 8
+  bytes for them. `getPtr` resolves a pointer argument to a device pointer, so
+  that a caller can choose how much it validates.
 */
+template <typename PointerGetter>
+void packKernelArg(
+    char typeChar,
+    void* slot,
+    PyObject* item,
+    int idx,
+    const PointerGetter& getPtr) {
+  switch (typeChar) {
+    case 'b':
+      convertType<int8_t>(THPUtils_unpackInt, "int8", slot, item);
+      break;
+    case 'h':
+      convertType<int16_t>(THPUtils_unpackInt, "int16", slot, item);
+      break;
+    case 'i':
+      convertType<int32_t>(THPUtils_unpackLong, "int32", slot, item);
+      break;
+    case 'l':
+      convertType<int64_t>(THPUtils_unpackLong, "int64", slot, item);
+      break;
+    case 'B':
+      convertType<uint8_t>(THPUtils_unpackUInt32, "uint8", slot, item);
+      break;
+    case 'H':
+      convertType<uint16_t>(THPUtils_unpackUInt32, "uint16", slot, item);
+      break;
+    case 'I':
+      convertType<uint32_t>(THPUtils_unpackUInt32, "uint32", slot, item);
+      break;
+    case 'K':
+      convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
+      break;
+    case 'e':
+      convertType<uint16_t>(
+          torch::inductor::static_launcher::unpackTritonFp16,
+          "float16",
+          slot,
+          item);
+      break;
+    case 'y':
+      convertType<uint16_t>(
+          torch::inductor::static_launcher::unpackTritonBf16,
+          "bfloat16",
+          slot,
+          item);
+      break;
+    case 'f':
+      convertType<float>(THPUtils_unpackDouble, "float", slot, item);
+      break;
+    case 'd':
+      convertType<double>(THPUtils_unpackDouble, "double", slot, item);
+      break;
+    case 'O': // pointer
+      *reinterpret_cast<syclDevicePtr_t*>(slot) = getPtr(item, idx);
+      break;
+    default:
+      TORCH_CHECK(false, "Unknown type passed in: ", typeChar);
+  }
+}
+
 void parseKernelArgs(
     PyObject* varArgs,
     const char* argTypes,
     uint64_t* argStorage,
-    void** kernelArgs,
     const sycl::queue* queuePtr) {
   int numKernelArgs = static_cast<int>(std::strlen(argTypes));
   TORCH_CHECK(
@@ -152,67 +218,12 @@ void parseKernelArgs(
       PyTuple_Size(varArgs) == static_cast<Py_ssize_t>(numKernelArgs),
       "Mismatch between number of argument types and provided arguments");
 
+  auto getPtr = [queuePtr](PyObject* item, int idx) {
+    return getPointer(item, idx, queuePtr);
+  };
   for (int i = 0; i < numKernelArgs; ++i) {
-    // Get pointer to the ith 8-byte slot.
-    void* slot = static_cast<void*>(&argStorage[i]);
-    PyObject* item = PyTuple_GetItem(varArgs, i);
-    char typeChar = argTypes[i];
-    switch (typeChar) {
-      case 'b':
-        convertType<int8_t>(THPUtils_unpackInt, "int8", slot, item);
-        break;
-      case 'h':
-        convertType<int16_t>(THPUtils_unpackInt, "int16", slot, item);
-        break;
-      case 'i':
-        convertType<int32_t>(THPUtils_unpackLong, "int32", slot, item);
-        break;
-      case 'l':
-        convertType<int64_t>(THPUtils_unpackLong, "int64", slot, item);
-        break;
-      case 'B':
-        convertType<uint8_t>(THPUtils_unpackUInt32, "uint8", slot, item);
-        break;
-      case 'H':
-        convertType<uint16_t>(THPUtils_unpackUInt32, "uint16", slot, item);
-        break;
-      case 'I':
-        convertType<uint32_t>(THPUtils_unpackUInt32, "uint32", slot, item);
-        break;
-      case 'K':
-        convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
-        break;
-      case 'e':
-        convertType<uint16_t>(
-            torch::inductor::static_launcher::unpackTritonFp16,
-            "float16",
-            slot,
-            item);
-        break;
-      case 'y':
-        convertType<uint16_t>(
-            torch::inductor::static_launcher::unpackTritonBf16,
-            "bfloat16",
-            slot,
-            item);
-        break;
-      case 'f':
-        convertType<float>(THPUtils_unpackDouble, "float", slot, item);
-        break;
-      case 'd':
-        convertType<double>(THPUtils_unpackDouble, "double", slot, item);
-        break;
-      case 'O': { // pointer; using helper getPointer() (which may call
-                  // data_ptr() if needed)
-        syclDevicePtr_t ptr = getPointer(item, i, queuePtr);
-        *reinterpret_cast<syclDevicePtr_t*>(slot) = ptr;
-        break;
-      }
-      default:
-        TORCH_CHECK(false, "Unknown type passed in: ", typeChar);
-    }
-    // Save the pointer to this slot.
-    kernelArgs[i] = slot;
+    packKernelArg(
+        argTypes[i], &argStorage[i], PyTuple_GetItem(varArgs, i), i, getPtr);
   }
 }
 
@@ -381,41 +392,30 @@ void setKernelArg(
   }
 }
 
-void launchKernel(
-    const LoadedKernel* loadedKernel,
+/**
+  Submits `kernel` with the arguments packed in `argStorage`. `localRangeX` is
+  the work-group size (num_warps * the SIMD width the kernel was compiled for),
+  and `bindLocal` says whether the kernel takes a trailing dynamic shared memory
+  argument.
+*/
+void submitKernel(
+    const sycl::kernel& kernel,
     uint32_t gridX,
     uint32_t gridY,
     uint32_t gridZ,
-    uint32_t numWarps,
-    uint32_t sharedMemBytes,
+    size_t localRangeX,
+    uint32_t numParams,
     const char* argTypes,
-    void** params,
+    const uint64_t* argStorage,
+    uint32_t sharedMemBytes,
+    bool bindLocal,
     sycl::queue* queuePtr) {
-  const sycl::kernel& kernel = loadedKernel->kernel;
-  const uint32_t threadsPerWarp = loadedKernel->threadsPerWarp;
-  const uint32_t kernelNumArgs = loadedKernel->numArgs;
-  const uint32_t numParams = static_cast<uint32_t>(std::strlen(argTypes));
-  size_t globalRangeX = static_cast<size_t>(gridX) * threadsPerWarp * numWarps;
-  size_t globalRangeY = gridY;
-  size_t globalRangeZ = gridZ;
-  size_t localRangeX = static_cast<size_t>(numWarps) * threadsPerWarp;
-  size_t localRangeY = 1;
-  size_t localRangeZ = 1;
-  sycl::range<3> globalRange(globalRangeZ, globalRangeY, globalRangeX);
-  sycl::range<3> localRange(localRangeZ, localRangeY, localRangeX);
+  sycl::range<3> globalRange(gridZ, gridY, gridX * localRangeX);
+  sycl::range<3> localRange(1, 1, localRangeX);
   sycl::nd_range<3> parallelWorkSize(globalRange, localRange);
-  const bool bindLocal = sharedMemBytes > 0 && kernelNumArgs == numParams + 1;
-  TORCH_CHECK(
-      kernelNumArgs == numParams + (bindLocal ? 1 : 0),
-      "Kernel argument count mismatch: kernel expects ",
-      kernelNumArgs,
-      " arguments, launcher has ",
-      numParams,
-      " scalar/pointer arguments");
-  // Submit the imported kernel.
   auto cgf = [&](sycl::handler& cgh) {
     for (uint32_t i = 0; i < numParams; ++i) {
-      setKernelArg(cgh, static_cast<int>(i), argTypes[i], params[i]);
+      setKernelArg(cgh, static_cast<int>(i), argTypes[i], &argStorage[i]);
     }
 
     if (bindLocal) {
@@ -428,6 +428,40 @@ void launchKernel(
     }
   };
   queuePtr->submit(cgf);
+}
+
+void launchKernel(
+    const LoadedKernel* loadedKernel,
+    uint32_t gridX,
+    uint32_t gridY,
+    uint32_t gridZ,
+    uint32_t numWarps,
+    uint32_t sharedMemBytes,
+    const char* argTypes,
+    const uint64_t* argStorage,
+    sycl::queue* queuePtr) {
+  const uint32_t kernelNumArgs = loadedKernel->numArgs;
+  const uint32_t numParams = static_cast<uint32_t>(std::strlen(argTypes));
+  const bool bindLocal = sharedMemBytes > 0 && kernelNumArgs == numParams + 1;
+  TORCH_CHECK(
+      kernelNumArgs == numParams + (bindLocal ? 1 : 0),
+      "Kernel argument count mismatch: kernel expects ",
+      kernelNumArgs,
+      " arguments, launcher has ",
+      numParams,
+      " scalar/pointer arguments");
+  submitKernel(
+      loadedKernel->kernel,
+      gridX,
+      gridY,
+      gridZ,
+      static_cast<size_t>(numWarps) * loadedKernel->threadsPerWarp,
+      numParams,
+      argTypes,
+      argStorage,
+      sharedMemBytes,
+      bindLocal,
+      queuePtr);
 }
 
 /* Load the kernel into memory (called during torch.compile), and
@@ -482,14 +516,10 @@ PyObject* launch_kernel_inner(
     PyObject* varArgs,
     sycl::queue* queuePtr) {
   // Launch the kernel
-  // Prepare the arguments for the kernel
-  // We allocate 8 bytes per argument on the stack. We then allocate 8 more
-  // bytes to point to each 8 byte slot in argStorage, and pass that array of
-  // pointers to launchKernel.
+  // Prepare the arguments for the kernel: 8 bytes per argument on the stack,
+  // which is what launchKernel reads them from.
   std::array<uint64_t, MAX_ARGS> argStorage = {};
-  std::array<void*, MAX_ARGS> kernelArgs = {};
-  parseKernelArgs(
-      varArgs, argTypes, argStorage.data(), kernelArgs.data(), queuePtr);
+  parseKernelArgs(varArgs, argTypes, argStorage.data(), queuePtr);
   launchKernel(
       func,
       gridX,
@@ -498,7 +528,7 @@ PyObject* launch_kernel_inner(
       numWarps,
       sharedMemBytes,
       argTypes,
-      kernelArgs.data(),
+      argStorage.data(),
       queuePtr);
 
   Py_RETURN_NONE;
@@ -517,10 +547,8 @@ PyObject* launch_kernel_slow(
   /* For the slow case, allocate memory on the stack instead of the heap */
   size_t numArgs = std::strlen(argTypes);
   std::vector<uint64_t> argStorage(numArgs);
-  std::vector<void*> kernelArgs(numArgs);
 
-  parseKernelArgs(
-      varArgs, argTypes, argStorage.data(), kernelArgs.data(), queuePtr);
+  parseKernelArgs(varArgs, argTypes, argStorage.data(), queuePtr);
 
   launchKernel(
       func,
@@ -530,7 +558,7 @@ PyObject* launch_kernel_slow(
       numWarps,
       sharedMemBytes,
       argTypes,
-      kernelArgs.data(),
+      argStorage.data(),
       queuePtr);
   Py_RETURN_NONE;
 }
@@ -683,6 +711,7 @@ PyTypeObject StaticXpuLauncherType = {
     nullptr, // tp_alloc
     nullptr, // tp_new
 };
+
 } // anonymous namespace
 // Module initialization: add StaticXpuLauncher to the module with our static
 // methods.
