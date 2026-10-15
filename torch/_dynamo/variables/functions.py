@@ -46,6 +46,7 @@ from typing_extensions import Never
 from weakref import WeakKeyDictionary
 
 import torch
+from torch._C._dynamo import get_type_tp_name
 from torch._dynamo.exc import get_stack_above_dynamo
 from torch._guards import Source
 from torch.utils._pytree import is_namedtuple_class
@@ -113,6 +114,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
+from .object_protocol import python_constant_repr_impl
 from .user_defined import (
     is_reconstructable_decorator_ctx_manager_clone,
     maybe_reconstruct_decorator_ctx_manager_clone,
@@ -2980,6 +2982,9 @@ class SkipFunctionVariable(VariableTracker):
             "Python codegen not implemented for sourceless SkipFunctionVariable"
         )
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
     def __init__(
@@ -3706,6 +3711,9 @@ class FunctoolsPartialVariable(VariableTracker):
             result.cache_hash = self.original_cache_hash  # type: ignore[missing-attribute]
         return result
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class PolyfilledFunctionVariable(VariableTracker):
     _nonvar_fields = {
@@ -3863,6 +3871,9 @@ class PolyfilledFunctionVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return self.fn
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class SysFunctionVariable(VariableTracker):
@@ -4717,6 +4728,18 @@ def _check_descriptor_obj_type(
         )
 
 
+def descr_repr(
+    tx: "InstructionTranslatorBase", descr: Any, kind: str
+) -> VariableTracker:
+    # https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L40-L48
+    name, objclass = descr.__name__, descr.__objclass__
+    if sys.version_info >= (3, 15) and objclass is object:
+        return VariableTracker.build(tx, f"<{kind} '{name}'>")
+    return VariableTracker.build(
+        tx, f"<{kind} '{name}' of '{get_type_tp_name(objclass)}' objects>"
+    )
+
+
 class DescriptorVariable(VariableTracker):
     """Base class for CPython descriptor VTs.
 
@@ -4769,6 +4792,10 @@ class WrapperDescriptorVariable(DescriptorVariable):
         super().__init__(**kwargs)
         self.descriptor = descriptor
         self.owner = owner
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # wrapperdescr_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L71-L76
+        return descr_repr(tx, self.descriptor, "slot wrapper")
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
@@ -4968,6 +4995,10 @@ class MethodDescriptorVariable(DescriptorVariable):
         super().__init__(**kwargs)
         self.descriptor = descriptor
         self.owner = owner
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # method_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L50-L55
+        return descr_repr(tx, self.descriptor, "method")
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
@@ -5295,6 +5326,10 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # method_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L50-L55
+        return descr_repr(tx, self.descriptor, "method")
+
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
         return f"ClassMethodDescriptorVariable({cls_name}.{self.descriptor.__name__})"
@@ -5469,6 +5504,9 @@ class StaticMethodVariable(VariableTracker):
         codegen(self.descriptor)
         codegen.extend_output(create_call_function(1, False))
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class ClassMethodVariable(VariableTracker):
     """classmethod descriptor wrapping a callable.
@@ -5579,6 +5617,9 @@ class ClassMethodVariable(VariableTracker):
         codegen(self.descriptor)
         codegen.extend_output(create_call_function(1, False))
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class ClassAttrClassMethodVariable(ClassMethodVariable):
     """classmethod found in a class __dict__, built by from_descriptor.
@@ -5625,6 +5666,10 @@ class MemberDescriptorVariable(DescriptorVariable):
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # member_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L57-L62
+        return descr_repr(tx, self.descriptor, "member")
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
@@ -5721,6 +5766,10 @@ class GetSetDescriptorVariable(DescriptorVariable):
     def __init__(self, descriptor: types.GetSetDescriptorType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # getset_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L64-L69
+        return descr_repr(tx, self.descriptor, "attribute")
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
@@ -6061,3 +6110,6 @@ class TupleGetterVariable(VariableTracker):
         # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2665-L2673
         msg = "can't delete attribute" if value is None else "can't set attribute"
         raise_observed_exception(AttributeError, tx, args=[msg])
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
