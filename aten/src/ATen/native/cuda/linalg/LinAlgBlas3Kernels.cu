@@ -5,9 +5,17 @@
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <c10/util/complex.h>
+#include <c10/util/irange.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/imag.h>
+#endif
+
 #include <thrust/swap.h>
+#include <cooperative_groups.h>
 
 /*
   The following file contains implementation for a batched LU-factorization with partial pivoting.
@@ -904,6 +912,594 @@ void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Te
       );
     }
   });
+}
+
+
+namespace ldl {
+
+// Panel width. Wider panels cut the memory traffic of the trailing GEMMs,
+// at the price of more work in the panel.
+template <typename scalar_t>
+int panel_width(int n) {
+  const auto* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major * 10 + prop->minor == 100) {
+    // Tuned on GB200 for indefinite and positive definite inputs
+    if constexpr (std::is_same_v<scalar_t, float>) {
+      return n < 1024 ? 32 : (n <= 8192 ? 24 : (n <= 16384 ? 32 : 48));
+    } else if constexpr (std::is_same_v<scalar_t, double>) {
+      return n <= 768 ? 24 : (n <= 6144 ? 16 : (n < 16384 ? 32 : 96));
+    } else if constexpr (std::is_same_v<scalar_t, c10::complex<float>>) {
+      return n <= 1536 ? 24 : (n <= 4096 ? 16 : (n <= 12288 ? 32 : 96));
+    } else {
+      return n <= 256 ? 32 : (n <= 6144 ? 16 : (n <= 12288 ? 48 : (n <= 20480 ? 64 : 96)));
+    }
+  }
+  // Tuned on H100 for all dtypes
+  return n <= 4096 ? 32 : (n <= 8192 ? 64 : (n <= 16384 ? 96 : 128));
+}
+
+// Width of the panel starting at step. cuBLAS runs the trailing GEMM at full speed
+// only with 256-byte aligned operands, so panels end on such a boundary (as far as
+// nb allows), while staying at least nb / 2 wide.
+template <typename scalar_t>
+int aligned_panel_width(int step, int nb, int n) {
+  const int boundary = std::min<int>(256 / sizeof(scalar_t), nb);
+  int panel_end = (step + nb) / boundary * boundary;
+  if (panel_end - step < nb / 2) {
+    panel_end += boundary;
+  }
+  return std::min(panel_end, n) - step;
+}
+
+// Panels with more rows than this are factored by a cooperative grid of
+// blocks, one row per thread, rather than by a single block.
+constexpr int COOP_MIN_ROWS = 2048;
+constexpr int COOP_NTHREADS = 256;
+
+// LDL factorization is square-root-free, hence,
+// as in LAPACK, abs(a + ib) = abs(a) + abs(b).
+template <typename scalar_t>
+__device__ __forceinline__
+auto abs(const scalar_t& v) {
+  if constexpr (c10::is_complex<scalar_t>::value) {
+    return std::abs(v.real()) + std::abs(v.imag());
+  } else {
+    return std::abs(v);
+  }
+}
+
+template <typename scalar_t>
+__device__ __forceinline__
+auto real(const scalar_t& v) {
+  if constexpr (c10::is_complex<scalar_t>::value) {
+    return v.real();
+  } else {
+    return v;
+  }
+}
+
+// A[j, i] given A[i, j] for a Hermitian (hermitian == true) or symmetric matrix
+template <bool hermitian, typename scalar_t>
+__device__ __forceinline__
+scalar_t mirror(const scalar_t& v) {
+  if constexpr (hermitian && c10::is_complex<scalar_t>::value) {
+    return std::conj(v);
+  } else {
+    return v;
+  }
+}
+
+} // namespace ::ldl
+
+
+// The rows of the panel are spread cyclically over the threads of a single block
+// or, if cooperative, over a grid of blocks that synchronize grid-wide.
+template <typename scalar_t, int BS, bool hermitian, bool cooperative>
+__global__ void __launch_bounds__(BS)
+ldl_diagonal_panel_fused_kernel(
+  scalar_t* __restrict__ dLD, int n, int lda,
+  int nb, int curr_step, int* dcurr_step,
+  int* dipiv, int* dinfo,
+  // cooperative only: scratch for the grid-wide argmax, 2 * gridDim.x elements each
+  typename c10::scalar_value_type<scalar_t>::type* __restrict__ dpart_max,
+  int* __restrict__ dpart_idx
+) {
+  using real_t = c10::scalar_value_type<scalar_t>::type;
+  const real_t ALPHA = (1 + std::sqrt(17)) / 8;
+  const int tid = threadIdx.x;
+  const int gtid = blockIdx.x * BS + tid;
+  const int nthreads = gridDim.x * BS;
+  const auto panel_start = curr_step;
+  const auto panel_end = panel_start + nb;
+
+  const auto sync = [] {
+    if constexpr (cooperative) {
+      cooperative_groups::this_grid().sync();
+    } else {
+      __syncthreads();
+    }
+  };
+
+  // Argmax over all threads. The result gets a shared slot of its own, so that
+  // the next call may start before every thread has read it. If cooperative,
+  // the block results go through dpart_max/dpart_idx, and the grid-wide sync
+  // in between also orders the global memory accesses made before the call.
+  // Those have two slots per block, as a fast block may already write the next
+  // partials while slower blocks still read these.
+  constexpr int NWARPS = BS / 32;
+  __shared__ real_t smax[NWARPS + 1];
+  __shared__ int sidx[NWARPS + 1];
+  int parity = 0;
+  const auto reduce_argmax = [&](const std::tuple<real_t, int>& thread_max) {
+    real_t my_max = std::get<0>(thread_max);
+    int my_idx = std::get<1>(thread_max);
+    const int warp = tid / 32;
+    const int lane = tid % 32;
+    warp_argmax(my_max, my_idx);
+    if (lane == 0) {
+      smax[warp] = my_max;
+      sidx[warp] = my_idx;
+    }
+    __syncthreads();
+    if (warp == 0) {
+      my_max = lane < NWARPS ? smax[lane] : static_cast<real_t>(-1);
+      my_idx = lane < NWARPS ? sidx[lane] : -1;
+      warp_argmax(my_max, my_idx);
+    }
+    if constexpr (cooperative) {
+      auto* part_max = dpart_max + parity * gridDim.x;
+      auto* part_idx = dpart_idx + parity * gridDim.x;
+      parity ^= 1;
+      if (tid == 0) {
+        part_max[blockIdx.x] = my_max;
+        part_idx[blockIdx.x] = my_idx;
+      }
+      cooperative_groups::this_grid().sync();
+      if (warp == 0) {
+        my_max = static_cast<real_t>(-1);
+        my_idx = -1;
+        for (int b = lane; b < gridDim.x; b += 32) {
+          AGGREGATE_ARGMAX(my_max, my_idx, part_max[b], part_idx[b]);
+        }
+        warp_argmax(my_max, my_idx);
+      }
+    }
+    if (tid == 0) {
+      smax[NWARPS] = my_max;
+      sidx[NWARPS] = my_idx;
+    }
+    __syncthreads();
+    return std::make_tuple(smax[NWARPS], sidx[NWARPS]);
+  };
+
+  // The panel is processed left to right. Rows/cols >= curr_step are stale,
+  // i.e. they lack the updates from the panel's factored columns to the left,
+  // and are made current only when needed. With
+  //   Lprev = dLD[:, panel_start:curr_step],
+  //   Uprev = dLD[panel_start:curr_step, :],
+  // this subtracts (or adds back, if undo) Lprev @ Uprev from dLD[first:, k],
+  // leaving out index skip. Subtracting one column at a time in place rounds
+  // like a right-looking update. Lprev @ Uprev = Lprev @ D @ op(Lprev) is
+  // symmetric/Hermitian, so dLD[k, first:] is the mirror of the column
+  // and is copied rather than recomputed with strided reads.
+  //
+  // Interchanges do not touch Lprev/Uprev, so the stale data moved to a
+  // position p is later updated with row/col p of Lprev/Uprev.
+  // To keep that consistent, only current data is ever moved to p,
+  // and adding the update for p back to it makes it stale again.
+  //
+  // Also returns the thread's share of the argmax of the off-diagonal
+  // |dLD[first:, k]| it has written, for reduce_argmax.
+  const auto update_rowcol = [&](const int k, const int first, const int skip, const bool undo = false) {
+    auto my_max = static_cast<real_t>(-1);
+    auto my_idx = -1;
+    // No early exit when curr_step == panel_start: the row is still copied
+    // from the column. Every row of U has to come from a column, otherwise
+    // the rounding mismatch between the triangles left by the trailing GEMMs
+    // leaks into L and D, and grows from panel to panel.
+    for (int i = first + gtid; i < n; i += nthreads) {
+      if (i == skip) continue;
+      auto a = dLD[LinOff(i, k, lda)];
+      for (int j = panel_start; j < curr_step; ++j) {
+        if (undo) {
+          a += dLD[LinOff(i, j, lda)] * dLD[LinOff(j, k, lda)];
+        } else {
+          a -= dLD[LinOff(i, j, lda)] * dLD[LinOff(j, k, lda)];
+        }
+      }
+      if (i == k) {
+        // A Hermitian diagonal is real, but complex rounding leaves an imaginary
+        // residue. The mirrored rows assume a real pivot, so drop it (as zhetf2 does).
+        if constexpr (hermitian) {
+          a = ldl::real(a);
+        }
+      } else {
+        dLD[LinOff(k, i, lda)] = ldl::mirror<hermitian>(a);
+        AGGREGATE_ARGMAX(my_max, my_idx, ldl::abs(a), i);
+      }
+      dLD[LinOff(i, k, lda)] = a;
+    }
+    return std::make_tuple(my_max, my_idx);
+  };
+
+  // The processed block will factor nb or nb+1 rows/cols
+  while (curr_step < panel_end) {
+    int piv;
+    int pivot_rank = 1;
+
+    // Bring the current row/col up to date, finding its off-diagonal max
+    // on the way. Argmax index is global! The sync inside reduce_argmax
+    // is also the barrier after the update.
+    const auto [lambda, ilambda] = reduce_argmax(update_rowcol(curr_step, /*first=*/curr_step, /*skip=*/-1));
+
+    if (curr_step == panel_end - 1) {
+      // The last column is a 1x1 pivot of its own: nothing is left to eliminate
+      // but its singularity, which is checked here. Advancing curr_step ends the
+      // factorization.
+      if (curr_step == n - 1) {
+        if (gtid == 0) {
+          dipiv[n - 1] = n;
+          if (ldl::abs(dLD[LinOff(n - 1, n - 1, lda)]) == static_cast<real_t>(0) && *dinfo == 0) {
+            *dinfo = n;
+          }
+        }
+        curr_step = n;
+      }
+      break;
+    }
+
+    // Bunch-Kaufman pivoting.
+    // We follow p192 of
+    // Golub, G. H., & Van Loan, C. F. (2013).
+    // Matrix computations (4th ed.). Johns Hopkins University Press. {
+    const auto diag_abs = ldl::abs(dLD[LinOff(curr_step, curr_step, lda)]);
+    bool ilambda_updated = false;
+
+    // ilambda is -1 when the scan found no candidate at all, which happens once
+    // NaNs reach the column: every comparison against a NaN is false, so the
+    // argmax never leaves its sentinel. Without this guard the sentinel is used
+    // as a column index below and reads off the front of the buffer.
+    if (ilambda < 0 || diag_abs >= ALPHA * lambda) {
+      // No permutation, 1x1 pivot
+      piv = curr_step;
+    } else {
+      // Bring the candidate row/col up to date. Its entries in row/col
+      // curr_step are already current, and |dLD[curr_step, ilambda]| == lambda,
+      // being the mirror of dLD[ilambda, curr_step].
+      const auto [sigma_below, _] = reduce_argmax(update_rowcol(ilambda, /*first=*/curr_step + 1, /*skip=*/-1));
+      const auto sigma = sigma_below > lambda ? sigma_below : lambda;
+      ilambda_updated = true;
+      // Checking whether ilambda diagonal pivot is "stable".
+      // As in LAPACK, lambda / sigma <= 1 avoids the overflowing lambda * lambda.
+      if (diag_abs >= ALPHA * lambda * (lambda / sigma)) {
+        // No permutation, 1x1 pivot
+        piv = curr_step;
+      } else if (ldl::abs(dLD[LinOff(ilambda, ilambda, lda)]) >= ALPHA * sigma) {
+        // New 1x1 pivot
+        piv = ilambda;
+      } else {
+        // New 2x2 pivot
+        piv = ilambda;
+        pivot_rank = 2;
+        // The swap below moves row/col curr_step + 1 to ilambda, so it has
+        // to be current too. The entries shared with ilambda already are.
+        if (ilambda != curr_step + 1) {
+          update_rowcol(curr_step + 1, /*first=*/curr_step + 1, /*skip=*/ilambda);
+          sync();
+        }
+      }
+    }
+    // }
+
+    // Update piv vector. info is set further below, for a 1x1 pivot only:
+    // a 2x2 block is never singular (see there).
+    if (gtid == 0) {
+      if (pivot_rank == 1) {
+        dipiv[curr_step] = piv + 1;
+      } else {
+        dipiv[curr_step + 0] = -(piv + 1);
+        dipiv[curr_step + 1] = -(piv + 1);
+      }
+    }
+
+    // Column/Row swaps {
+    // 1x1 pivot -> swap with the current diagonal,
+    // 2x2 pivot -> swap with the next to the current diagonal
+    const int swp = curr_step + pivot_rank - 1;
+    // The swaps and the undo below overwrite entries the pivot test above has read
+    if (swp != piv || ilambda_updated) {
+      sync();
+    }
+    if (swp != piv) {
+      // Swap columns -- contiguous access
+      for (int i = curr_step + gtid; i < n; i += nthreads) {
+        thrust::swap(dLD[LinOff(i, swp, lda)], dLD[LinOff(i, piv, lda)]);
+      }
+      sync();
+      // Swap rows -- noncontiguous access -- paying penalty here
+      for (int i = curr_step + gtid; i < n; i += nthreads) {
+        thrust::swap(dLD[LinOff(swp, i, lda)], dLD[LinOff(piv, i, lda)]);
+      }
+      sync();
+    }
+    // }
+
+    // Unless it is part of the pivot, row/col ilambda now holds current data,
+    // yet it gets updated later either here (in-panel) or by the GEMM.
+    // Make it stale again.
+    // NOTE: this costs accuracy. Adding the update back and subtracting it again
+    // later each round by about eps * |update|, which is large next to a column that
+    // cancels down to much less than its update. LAPACK's ?lasyf/?lahef never undo:
+    // they update a copy of the candidate column in their workspace W. So, with the
+    // same pivots as LAPACK, the solve residual averages about 1.2x LAPACK's on
+    // random indefinite matrices, and a pivot that results from heavy cancellation,
+    // e.g. in a graded matrix, can lose several digits (normwise backward stability
+    // holds). Avoiding the undo takes a saved copy of the stale candidate and, after
+    // an interchange, swapping the rows of Lprev along with the data (and back after
+    // the trailing GEMM), as ?lasyf does.
+    if (ilambda_updated && ilambda >= curr_step + pivot_rank) {
+      update_rowcol(ilambda, /*first=*/curr_step + pivot_rank, /*skip=*/-1, /*undo=*/true);
+      sync();
+    }
+
+    // Update L21 {
+    // L21 = dLD[curr_step + pivot_rank:, curr_step:curr_step + pivot_rank]
+    // L21 = L21 @ inv(D)
+    // NOTE: D is kept in scalar_t, not made real as in zhetf2,
+    // so as not to desync it from U12
+    // NOTE: as in LAPACK's ?sytrf/?hetrf, subnormal pivots below 1 / max are not
+    // supported: t / d01 and t / d10 below overflow, and so does a complex /= D11,
+    // as c10::complex multiplies by the reciprocal of the denominator. Supporting
+    // them means dividing by d01, d10 inside the loop as ?lahef_rook does, with a
+    // complex division that divides by the denominator instead.
+    // Nor is a complex d01 close to overflow, e.g. with both parts above max / 2,
+    // where the denominator of c10::complex division overflows: r0, r1, s0, s1, L
+    // come out 0 rather than ~1 / |d01|. This is normwise stable, but loses the
+    // components of a solve on that block. ?lahef does the same, while ?hetf2
+    // divides by the real |d01| instead.
+    bool D_is_singular = false;
+    if (pivot_rank == 1) {
+      auto D11 = dLD[LinOff(curr_step, curr_step, lda)];
+      if (ldl::abs(D11) == static_cast<real_t>(0)) {
+        D_is_singular = true;
+      } else {
+        for (int i = curr_step + pivot_rank + gtid; i < n; i += nthreads) {
+          dLD[LinOff(i, curr_step, lda)] /= D11;
+        }
+      }
+    } else {
+      // D = [[d00, d01], [d10, d11]]. Its determinant overflows past sqrt(max) and
+      // underflows below sqrt(min), so, as in LAPACK, it is never formed. Instead,
+      // det(D) = d01 * d10 * (r0 * r1 - 1) with r0 = d00 / d01, r1 = d11 / d10,
+      // and its scale is applied in the loop. The pivot test bounds |r0 * r1|
+      // well below 1, so a 2x2 block is never singular.
+      const auto d01 = dLD[LinOff(curr_step, curr_step + 1, lda)];
+      const auto d10 = dLD[LinOff(curr_step + 1, curr_step, lda)];
+      const auto r0 = dLD[LinOff(curr_step, curr_step, lda)] / d01;
+      const auto r1 = dLD[LinOff(curr_step + 1, curr_step + 1, lda)] / d10;
+      const auto t = static_cast<scalar_t>(1) / (r0 * r1 - static_cast<scalar_t>(1));
+      const auto s0 = t / d01;
+      const auto s1 = t / d10;
+      for (int i = curr_step + pivot_rank + gtid; i < n; i += nthreads) {
+        const auto l0 = dLD[LinOff(i, curr_step + 0, lda)];
+        const auto l1 = dLD[LinOff(i, curr_step + 1, lda)];
+        dLD[LinOff(i, curr_step + 0, lda)] = s0 * (r1 * l0 - l1);
+        dLD[LinOff(i, curr_step + 1, lda)] = s1 * (r0 * l1 - l0);
+      }
+    }
+    // Update info if singular and if detected for the first time.
+    // Not guaranteed to fire for a singular input, even one with an exactly zero
+    // row/col: interchanges move data but not Lprev/Uprev, so a moved column is
+    // updated with the factors of its new position, and the exact zero survives
+    // only if the undo above and the trailing GEMM cancel bit for bit, which
+    // they do not. LAPACK keeps the zero exact, as the factors travel with the data.
+    if (D_is_singular && gtid == 0 && *dinfo == 0) {
+      *dinfo = curr_step + 1;
+    }
+    // }
+
+    // Finish iteration. No barrier needed: the only L21 entries the next update
+    // reads right away are its own rows, which this thread has just scaled --
+    // both loops start at curr_step + pivot_rank.
+    curr_step += pivot_rank;
+  }
+
+  if (gtid == 0) {
+    // Panel is processed -- update curr_step in the global memory
+    *dcurr_step = curr_step;
+  }
+}
+
+// Upper bound on the grid of the cooperative panel kernel, as all of its blocks
+// have to be resident at once. 0 if the device cannot launch cooperative kernels.
+template <typename scalar_t, bool hermitian>
+int max_cooperative_panel_blocks() {
+  const auto* props = at::cuda::getCurrentDeviceProperties();
+  if (!props->cooperativeLaunch) {
+    return 0;
+  }
+  int blocks_per_sm = 0;
+  C10_CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+    &blocks_per_sm,
+    ldl_diagonal_panel_fused_kernel<scalar_t, ldl::COOP_NTHREADS, hermitian, /*cooperative=*/true>,
+    ldl::COOP_NTHREADS, 0
+  ));
+  return blocks_per_sm * props->multiProcessorCount;
+}
+
+template <typename scalar_t, bool hermitian>
+void ldl_diagonal_panel(
+  scalar_t* dLD, int n, int lda,
+  int nb, int curr_step, int* dcurr_step,
+  int* dipiv, int* dinfo,
+  typename c10::scalar_value_type<scalar_t>::type* dpart_max, int* dpart_idx,
+  int max_coop_blocks
+) {
+  // TODO: can be easily extended to the batched case
+  constexpr int PANEL_THRESHOLD = 512;
+  constexpr int LARGE_PANEL_NTHREADS = 1024;
+  constexpr int SMALL_PANEL_NTHREADS = 256;
+  const auto stream = at::cuda::getCurrentCUDAStream();
+
+  auto problem_dim = n - curr_step;
+  if (problem_dim > ldl::COOP_MIN_ROWS && max_coop_blocks > 1) {
+    const auto nblocks = std::min((problem_dim + ldl::COOP_NTHREADS - 1) / ldl::COOP_NTHREADS, max_coop_blocks);
+    void* args[] = {&dLD, &n, &lda, &nb, &curr_step, &dcurr_step, &dipiv, &dinfo, &dpart_max, &dpart_idx};
+    const auto err = cudaLaunchCooperativeKernel(
+      reinterpret_cast<void*>(ldl_diagonal_panel_fused_kernel<scalar_t, ldl::COOP_NTHREADS, hermitian, /*cooperative=*/true>),
+      nblocks, ldl::COOP_NTHREADS, args, 0, stream
+    );
+    // The grid may not fit when the device is shared (e.g. under MPS). Both kernels
+    // produce identical results, so fall back to the single-block one.
+    if (err != cudaErrorCooperativeLaunchTooLarge) {
+      C10_CUDA_CHECK(err);
+      return;
+    }
+    (void)cudaGetLastError();
+  }
+
+  if (problem_dim > PANEL_THRESHOLD) {
+    ldl_diagonal_panel_fused_kernel<scalar_t, LARGE_PANEL_NTHREADS, hermitian, /*cooperative=*/false><<<1, LARGE_PANEL_NTHREADS, 0, stream>>>(
+      dLD, n, lda,
+      nb, curr_step, dcurr_step,
+      dipiv, dinfo, nullptr, nullptr
+    );
+  } else {
+    ldl_diagonal_panel_fused_kernel<scalar_t, SMALL_PANEL_NTHREADS, hermitian, /*cooperative=*/false><<<1, SMALL_PANEL_NTHREADS, 0, stream>>>(
+      dLD, n, lda,
+      nb, curr_step, dcurr_step,
+      dipiv, dinfo, nullptr, nullptr
+    );
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+template <typename scalar_t, bool hermitian>
+void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& info, int n, int lda) {
+  using real_t = c10::scalar_value_type<scalar_t>::type;
+  auto* dLD = static_cast<scalar_t*>(LD.data_ptr());
+  auto* dipiv = static_cast<int*>(pivots.data_ptr());
+  auto* dinfo = static_cast<int*>(info.data_ptr());
+
+  auto panel_step_holder = at::empty({1}, LD.options().dtype(at::kInt));
+  auto* dstep = static_cast<int*>(panel_step_holder.data_ptr());
+
+  // Scratch for the grid-wide argmax of the cooperative panel kernel
+  const auto max_coop_blocks = max_cooperative_panel_blocks<scalar_t, hermitian>();
+  const auto coop_blocks = std::min(max_coop_blocks, (n + ldl::COOP_NTHREADS - 1) / ldl::COOP_NTHREADS);
+  auto part_max = at::empty({2 * coop_blocks}, LD.options().dtype(toRealValueType(LD.scalar_type())));
+  auto part_idx = at::empty({2 * coop_blocks}, LD.options().dtype(at::kInt));
+  auto* dpart_max = static_cast<real_t*>(part_max.data_ptr());
+  auto* dpart_idx = static_cast<int*>(part_idx.data_ptr());
+
+  const auto nb = ldl::panel_width<scalar_t>(n);
+  int step = 0;
+
+  // Right-Down-Diagonal-looking blocked LDLT/LDLH:
+  // step through columns/rows in blocks of NB or NB-1 (pivots are 1x1 or 2x2)
+  // and factor diagonal panels, then update the trailing matrix with a GEMM
+  while (step < n) {
+    // 1. Panel factorization {
+    const auto curr_nb = ldl::aligned_panel_width<scalar_t>(step, nb, n);
+    ldl_diagonal_panel<scalar_t, hermitian>(
+      dLD, n, lda,
+      curr_nb, step, dstep,
+      dipiv, dinfo,
+      dpart_max, dpart_idx, max_coop_blocks
+    );
+    // }
+
+    // 2. Trailing matrix update of B[step + curr_nb: step + curr_nb:] {
+    // D2H to update the step on the host
+    auto curr_step = panel_step_holder.item().toInt();
+    if (step + curr_nb < n) {
+      // TODO: LD22 is symmetric/Hermitian, so updating its lower triangle suffices.
+      // cuBLAS syrkx/herkx with W = op(U12) as an m x k matrix (a transpose, e.g. via
+      // cublas<t>geam) beats this gemm by 1.2-1.9x for n >= 16384 on H100 (1.6-1.9x
+      // at n = 24576). That requires the panel kernel to stop reading the upper
+      // triangle of LD22 (candidate column, swaps).
+      at::cuda::blas::gemm(
+        'n', 'n',
+        n - step - curr_nb, n - step - curr_nb, curr_step - step,
+        /*alpha=*/static_cast<scalar_t>(-1),
+        /*L21=*/dLD + LinOff(step + curr_nb, step, lda), lda,
+        /*U12=*/dLD + LinOff(step, step + curr_nb, lda), lda,
+        /*beta=*/static_cast<scalar_t>(1),
+        /*LD22=*/dLD + LinOff(step + curr_nb, step + curr_nb, lda), lda
+      );
+    }
+    // }
+
+    // Finish iteration
+    step = curr_step;
+  }
+}
+
+// Factors a single matrix: the panel kernels run on a 1x1x1 grid.
+static void ldl_factor_blas3_single(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool hermitian) {
+  int n = cuda_int_cast(LD.size(-1), "LD.size(-1)");
+  int lda = std::max(cuda_int_cast(LD.stride(-1), "LD.stride(-1)"), std::max(1, n));
+  info.zero_();
+
+  // Disabling TF32 in GEMMs
+  NoTF32Guard disable_tf32;
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LD.scalar_type(), "ldl_factor_blas3_kernel", [&] {
+    // Real types: symmetric and Hermitian coincide, so one instantiation suffices
+    constexpr bool is_complex = c10::is_complex<scalar_t>::value;
+    if (hermitian && is_complex) {
+      ldl_factor_panels<scalar_t, /*hermitian=*/is_complex>(LD, pivots, info, n, lda);
+    } else {
+      ldl_factor_panels<scalar_t, /*hermitian=*/false>(LD, pivots, info, n, lda);
+    }
+  });
+}
+
+void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool hermitian) {
+  const auto n = LD.size(-1);
+  if (LD.numel() == 0) {
+    return;
+  }
+  // As in LAPACK, the imaginary part of a Hermitian diagonal is ignored. It has to
+  // go before any GEMM: one non-finite there would turn the real part into NaN via
+  // beta * C = (1 + 0i) * C, as 0 * inf is NaN.
+  if (hermitian && LD.is_complex()) {
+    at::imag(LD.diagonal(0, -2, -1)).zero_();
+  }
+  if (n == 1) {
+    // The only pivot is the lone entry, and it is singular iff it is zero.
+    pivots.fill_(1);
+    info.copy_(LD.eq(0).squeeze(-1).squeeze(-1));
+    return;
+  }
+
+  // LD is lower triangular.
+  // We materialize the upper triangular part for GEMM-friendly residual updates,
+  // and that also spares us from swaps that restore the initial triangular structure.
+  // NOTE: the tril copy is crucial because x.add_(x.mT()) raises: it is a partial
+  // self-overlap. The conjugate is applied in place on that copy, as a lazy conj view
+  // (mH(), or conj() before tril) gets resolved into a second n x n temporary.
+  // Scoped, so that the copy is freed before the factorization.
+  {
+    auto L21 = LD.tril(-1);
+    if (hermitian) {
+      L21.conj_physical_();
+    }
+    LD.add_(L21.mT());
+  }
+
+  const auto batch_size = batchCount(LD);
+  if (batch_size == 1) {
+    ldl_factor_blas3_single(LD, pivots, info, hermitian);
+    return;
+  }
+  // view, not reshape: a silent copy would discard the in-place result.
+  auto LD_3d = LD.view({-1, n, n});
+  auto pivots_2d = pivots.view({-1, n});
+  auto info_1d = info.view({-1});
+  for (const auto i : c10::irange(batch_size)) {
+    ldl_factor_blas3_single(LD_3d[i], pivots_2d[i], info_1d[i], hermitian);
+  }
 }
 
 } // at::native
