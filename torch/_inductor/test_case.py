@@ -10,13 +10,16 @@ from torch._dynamo.test_case import (
 from torch._functorch import config as functorch_config
 from torch._inductor import config
 from torch._inductor.utils import fresh_cache
+from torch.utils._ordered_set import OrderedSet
 
 
 # Test files that run with config.strict_flexible_layout_strides on. Files are
 # added as the code they exercise is fixed, until it can be on everywhere.
-STRICT_FLEXIBLE_LAYOUT_STRIDES_FILES = {
-    "test_layout_freezing",
-}
+STRICT_FLEXIBLE_LAYOUT_STRIDES_FILES = OrderedSet(
+    [
+        "test_layout_freezing",
+    ]
+)
 
 
 def run_tests(needs: str | tuple[str, ...] = ()) -> None:
