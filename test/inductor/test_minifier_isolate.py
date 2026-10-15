@@ -60,10 +60,9 @@ class MinifierIsolateTestsACCELERATOR(MinifierIsolateTests):
     def test_after_aot_gpu_runtime_error(self, device):
         # CUDA's __assertfail surfaces through PyTorch as "device-side assert";
         # ROCm's Triton AMD lowering prints the injected assertion text before trapping.
-        device_type = torch.device(device).type
         expected_error = (
             "injected assert fail"
-            if device_type == "xpu" or TEST_WITH_ROCM
+            if self.device_type == "xpu" or TEST_WITH_ROCM
             else "device-side assert"
         )
         self._test_after_aot_runtime_error(device, expected_error)
