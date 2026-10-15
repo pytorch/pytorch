@@ -475,6 +475,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # comment at CppWrapperCpu `codegen_subgraph` function.
         return CppWrapperCpu()
 
+    def defines_triton_kernels_as_code(self) -> bool:
+        # The C++ wrapper keeps each Triton kernel as an async_compile.triton(...) source
+        # string: its call wrappers and its compile-time autotune block compile from it.
+        return False
+
     @contextlib.contextmanager
     def _target_buf(self, attr: str, buf: IndentedBuffer):
         """Temporarily redirect self.<attr> to a specific buffer."""
