@@ -57,11 +57,13 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    DictGetItemSource,
     GetItemSource,
     GlobalSource,
     is_constant_source,
     LocalSource,
     Source,
+    TypeDictSource,
     TypeSource,
 )
 from ..utils import (
@@ -74,6 +76,7 @@ from ..utils import (
     get_fake_value,
     has_torch_function,
     is_tensor_getset_descriptor,
+    is_torch_class,
     istype,
     no_keywords,
     numpy_operator_wrapper,
@@ -512,6 +515,29 @@ class BaseBuiltinVariable(VariableTracker):
             attr = getattr(fn, name)
         except AttributeError as e:
             raise_observed_exception(AttributeError, tx, args=list(e.args))
+        if name == "__dict__":
+            # Each access allocates a fresh mappingproxy. Keep sources on its
+            # immutable builtin-type entries, not on the allocation itself.
+            dict_source = self.source and TypeDictSource(self.source)
+            items: dict[VariableTracker, VariableTracker] = {}
+            for key, value in attr.items():
+                value_source = dict_source and DictGetItemSource(dict_source, key)
+                value_vt = (
+                    variables.LazyVariableTracker.create(value, value_source, tx=tx)
+                    if value_source
+                    else VariableTracker.build(tx, value)
+                )
+                items[ConstantVariable.create(key)] = value_vt
+            return variables.MappingProxyVariable(variables.ConstDictVariable(items))
+        if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
+            # Unbound C method read off a builtin type, e.g. list.count. Torch
+            # types keep their trace-rule path through GetAttrVariable.
+            from .functions import MethodDescriptorVariable
+
+            owner: VariableTracker = self
+            if attr.__objclass__ is not fn:
+                owner = VariableTracker.build(tx, attr.__objclass__)
+            return MethodDescriptorVariable(attr, owner=owner, source=source)
         return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
 
     def call_obj_hasattr(
@@ -581,11 +607,10 @@ class BaseBuiltinVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
         """Dispatch an unbound method of the wrapped builtin type, if that is
-        what the call is.  Written out (list.copy(lst)) or read out as a value
-        (`copier = list.copy`): CPython looks the descriptor up on the type,
-        checks the receiver against __objclass__, and runs that descriptor's
-        slot on the receiver.  Shared by every builtin type rather than copied
-        per type.
+        what the call is: written out (list.copy(lst)) or read out as a value
+        (`copier = list.copy`).  Mirrors methoddescr_call -- look the descriptor
+        up on the type, check the receiver against __objclass__, run the
+        descriptor's slot on the receiver.
         """
         fn = self.as_python_constant()
         if args and isinstance(fn, type):
@@ -597,73 +622,72 @@ class BaseBuiltinVariable(VariableTracker):
                 try:
                     obj_type = obj.python_type()
                 except NotImplementedError:
-                    # No type to check the descriptor against; leave the call to
-                    # the receiver rather than graph breaking with a dynamo bug.
                     return None
                 if not issubclass(obj_type, descriptor.__objclass__):
-                    # descr_check: the descriptor does not apply to this receiver
-                    # type, and dispatching by name would silently run another
-                    # type's method of the same name.
+                    # descr_check: the descriptor does not apply to this
+                    # receiver, and dispatching by name would run another type's
+                    # method of the same name.
                     raise_type_error(
                         tx,
                         f"descriptor '{name}' for "
                         f"'{descriptor.__objclass__.__name__}' objects doesn't "
                         f"apply to a '{obj_type.__name__}' object",
                     )
-                if name in _RICHCOMPARE_OPS and (kwargs or len(rest) != 1):
-                    # descriptor_call checks the arity before it reaches the
-                    # receiver, and the comparison slots take no keywords.  A
-                    # user class inherits that check, so it precedes its
-                    # call_base_method below for the same reason it precedes the
-                    # slot lookup in CPython.
-                    raise_type_error(tx, f"expected 1 argument, got {len(args)}")
                 if isinstance(obj, UserDefinedObjectVariable):
-                    # A user class reaches this call through its own dispatch,
-                    # and call_base_method starts the slot lookup at the builtin
-                    # base rather than the user class, so a Python override of
-                    # the same name never runs in place of the descriptor's
-                    # slot: list.append(OverridingAppend(), 3) appends.
+                    # methoddescr_call runs the slot, so a Python override of the
+                    # same name must not run: list.append(OverridingAppend(), 3)
+                    # appends.  call_base_method skips the user class's own MRO.
                     return obj.call_base_method(tx, name, rest, kwargs)
-                if descriptor.__objclass__ is object and name in _RICHCOMPARE_OPS:
-                    # object's comparison slots are not "the receiver's method
-                    # of this name" on every type: tp_richcompare is identity
-                    # based, so object.__eq__(lst_a, lst_b) is NotImplemented
-                    # rather than list equality.  Run object's slot here instead
-                    # of dispatching the name on the receiver.
-                    from .object_protocol import object_richcompare
-
-                    return object_richcompare(obj, tx, rest[0], name)
-                if descriptor.__objclass__ is object and name == "__hash__":
-                    # object.__hash__ is PyObject_GenericHash on every type, so
-                    # it never runs the receiver's tp_hash: on a list, whose type
-                    # leaves tp_hash NULL, hash(lst) raises where this answers.
-                    # Where the object has no address tracing can use, the value
-                    # is a fake one, marked so that it cannot reach the graph.
-                    # Realized first so that hashing one receiver repeatedly sees
-                    # one object, as id() does.
-                    obj = obj.realize()
-                    if not obj.is_hashable():
-                        return FakeIdVariable(id(obj), kind=FakeValueKind.HASH)
-                    return generic_hash(tx, obj)
                 # A builtin VT dispatches by name, which is this descriptor's
-                # slot only when the receiver's own type still resolves the name
-                # to it.  Where a subclass installs a comparison of its own
-                # (OrderedDict.__eq__ over dict.__eq__) eager runs the
-                # descriptor's slot, and dispatching by name runs the
-                # receiver's, so those go to the receiver's comparison slot
-                # rather than through a call_method that cannot reach one.  The
-                # view methods keep the receiver's dispatch: it serves their
-                # callers (Dynamo's own dict___eq__ reads dict.keys) and differs
-                # only on an ordering those callers do not observe.
+                # slot only when the receiver's type still resolves the name to
+                # it; methoddescr_call runs the slot of the type the descriptor
+                # was read from, so a receiver that shadows the name needs the
+                # receiver's own slot instead of a call_method by name.
                 shadow = inspect.getattr_static(obj_type, name, None)
+                # A call of another shape than the descriptor's own (CPython's
+                # signatures: ($self, value) for the comparisons, ($self) for
+                # __hash__) is not the slot call, so the receiver reports the
+                # arity rather than this path reaching into rest.
+                if name in _RICHCOMPARE_OPS and shadow is not descriptor:
+                    if kwargs or len(rest) != 1:
+                        return obj.call_method(tx, name, rest, kwargs)
+                    if descriptor.__objclass__ is object:
+                        # object's slots are identity based on every type, and
+                        # its __ne__ asks the receiver's tp_richcompare for
+                        # equality, so both need object's slot rather than the
+                        # receiver's.
+                        from .object_protocol import object_richcompare
+
+                        return object_richcompare(obj, tx, rest[0], name)
+                    obj = obj.realize()
+                    if isinstance(obj, ConstDictVariable):
+                        # dict.__eq__ is dict's slot, which ignores order, where
+                        # OrderedDict's own shadow compares the orderings.
+                        from .dicts import dict_richcompare_impl
+
+                        return dict_richcompare_impl(
+                            tx, obj, rest[0], name, ordered=False
+                        )
+                    return obj.tp_richcompare_impl(tx, rest[0], name)
+                if descriptor.__objclass__ is object and name == "__hash__":
+                    if rest or kwargs:
+                        return obj.call_method(tx, name, rest, kwargs)
+                    # object.__hash__ is PyObject_GenericHash, so it hashes the
+                    # receiver's address rather than running the receiver's
+                    # tp_hash.  A receiver whose own rule already reports an
+                    # address hash (a container's id, a NaN's float_hash) is the
+                    # one case where the two agree.
+                    obj = obj.realize()
+                    if shadow is not object.__hash__:
+                        value, is_fake = id(obj), True
+                        if obj.is_hashable():
+                            hashed, is_fake = obj.hash_impl(tx)
+                            if is_fake:
+                                value = hashed
+                        return FakeIdVariable(value, kind=FakeValueKind.HASH)
+                    return generic_hash(tx, obj)
                 if shadow is None:
                     return None
-                if name in _RICHCOMPARE_OPS and shadow is not descriptor:
-                    # methoddescr_call runs the slot of the type the descriptor
-                    # was read from; the receiver's own slot is the closest the
-                    # VTs can get to it, and the receiver's call_method cannot
-                    # reach a comparison at all.
-                    return obj.realize().tp_richcompare_impl(tx, rest[0], name)
                 return obj.call_method(tx, name, rest, kwargs)
         return None
 
@@ -3153,6 +3177,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         # (__doc__, __module__, __qualname__, __type_params__) to real guarded
         # values so they are usable during tracing, and defer everything else
         # (callables, complex objects) to a GetAttrVariable.
+        if name == "__dict__":
+            return super().tp_getattro_impl(tx, name)
         source = self.source and AttrSource(self.source, name)
         try:
             value = getattr(self.fn, name)
