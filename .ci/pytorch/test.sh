@@ -477,6 +477,7 @@ test_python_smoke() {
   # Smoke tests for H100/B200
   install_nvmath
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_triton_kernels -k test_tma_descriptor_subclass_codegen $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_cuda -k test_graph_capture_cublas_workspace $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -1908,6 +1909,10 @@ test_distributed() {
   echo "Testing distributed python tests (${multigpu_filter:-all})"
   # Same NVSHMEM team limit as test_b200_symm_mem; test_nvshmem.py runs here too.
   export NVSHMEM_MAX_TEAMS=512
+  # rocSHMEM FlyDSL tests import the same PyPI wheel as test_inductor_flydsl.
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* && "$multigpu_filter" != "not-multigpu" ]]; then
+    install_flydsl
+  fi
   # shellcheck disable=SC2086
   time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty

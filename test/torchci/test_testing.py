@@ -572,10 +572,10 @@ class TestReportHelpers(TestCase):
     @parametrize(
         "compiler, expected",
         [
-            subtest((("clang", "21.1.0"), ("clang", "21")), name="clang"),
-            subtest((("gcc", "11.4"), ("gcc", "11")), name="gcc"),
+            subtest((("clang", "21.1.0"), ("clang", "21.1.0")), name="clang"),
+            subtest((("gcc", "11.4"), ("gcc", "11.4")), name="gcc"),
             # _MSC_FULL_VER of MSVC 19.41.34120.
-            subtest((("msvc", "194134120"), ("msvc", "19")), name="msvc"),
+            subtest((("msvc", "194134120"), ("msvc", "194134120")), name="msvc"),
             # A torch that predates torch.__config__._cxx_compiler.
             subtest((None, ("", "")), name="missing"),
         ],

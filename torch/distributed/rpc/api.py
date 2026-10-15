@@ -518,7 +518,8 @@ def method_factory(method_name, docstring):
     def method(self, *args, **kwargs):
         return getattr(super(RRef, self), method_name)(*args, **kwargs)
 
-    method.__doc__ = docstring
+    if method.__doc__:
+        method.__doc__ = docstring
     return method
 
 
@@ -541,17 +542,13 @@ for method_name, method in inspect.getmembers(PyRRef):
         raise AssertionError("RRef user-facing methods should all have docstrings.")
 
     # Do surgery on pybind11 generated docstrings.
-    for pyrref_name in (
-        "torch._C._distributed_rpc.PyRRef",
-        "torch.distributed.rpc.PyRRef",
-    ):
-        docstring = docstring.replace(pyrref_name, "torch.distributed.rpc.RRef")
+    docstring = docstring.replace(
+        "torch.distributed.rpc.PyRRef", "torch.distributed.rpc.RRef"
+    )
 
     # Attach user-facing RRef method with modified docstring.
     new_method = method_factory(method_name, docstring)
     setattr(RRef, method_name, new_method)
-
-RRef.__doc__ = PyRRef.__doc__
 
 
 @_require_initialized
