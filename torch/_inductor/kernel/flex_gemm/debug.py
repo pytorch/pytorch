@@ -24,6 +24,8 @@ from torch._inductor.kernel.gemm_epilogue import (
 )
 from torch._logging import LazyString, trace_structured
 
+from .constraints import FlexGemmOutputExpansion
+
 
 if TYPE_CHECKING:
     from torch._inductor import ir
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
         FlexGemmOutputStorageLayout,
     )
 
-    from .constraints import FlexGemmLocalReduceGeometry, FlexGemmOutputContraction
+    from .constraints import FlexGemmLocalReduceGeometry, FlexGemmOutputTransform
 
 
 flex_gemm_log = logging.getLogger(__name__)
@@ -151,10 +153,12 @@ def _format_geometry(geometry: "FlexGemmLocalReduceGeometry") -> str:
     return f"axis={axis}, group={geometry.group}"
 
 
-def _format_output_contraction(contraction: "FlexGemmOutputContraction | None") -> str:
-    """Format the logical contraction applied to the main output."""
+def _format_output_contraction(contraction: "FlexGemmOutputTransform | None") -> str:
+    """Format the lane transform applied to the main output."""
     if contraction is None:
         return "none"
+    if isinstance(contraction, FlexGemmOutputExpansion):
+        return "N-axis, expansion, layout=interleaved"
     layout = "chunked" if contraction.chunked else "interleaved"
     return f"N-axis, group={contraction.group}, layout={layout}"
 

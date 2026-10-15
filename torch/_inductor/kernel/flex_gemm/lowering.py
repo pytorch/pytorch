@@ -47,6 +47,8 @@ from ..gemm_epilogue_utils import statically_known_equal, statically_known_shape
 from .constraints import (
     aux_output_shape_error,
     FLEX_GEMM_CAPTURE_SHAPE_ERROR,
+    FlexGemmOutputContraction,
+    FlexGemmOutputExpansion,
     LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
 )
 from .debug import (
@@ -280,10 +282,14 @@ def flex_gemm_epilogue_arg_placeholders(
 
 def infer_flex_gemm_epilogue_arg_kinds(
     gemm_op: torch._ops.OpOverload,
-    epilogue_args: list[IRNode],
+    epilogue_args: Sequence[IRNode],
     output_size: list[Any],
 ) -> tuple[str, ...]:
-    """Classify realized captured epilogue tensors for static wrapper kwargs."""
+    """Classify captured epilogue tensors for static wrapper kwargs.
+
+    ``output_size`` is the shape the epilogue computes with (the lane shape of
+    a contracted or interleaved main output).
+    """
     if not epilogue_args:
         return ()
     if gemm_op not in QUACK_EPILOGUE_FEATURE_OPS:
@@ -299,6 +305,11 @@ def infer_flex_gemm_epilogue_arg_kinds(
             epilogue_arg_kinds.append("scalar")
         elif statically_known_shape_equal(epilogue_arg_size, output_size):
             epilogue_arg_kinds.append("tile")
+        elif statically_known_shape_equal(
+            epilogue_arg_size, [*output_size[:-1], 2 * n]
+        ):
+            # Two lanes interleaved along N, read as ``h.view(..., N, 2)[..., j]``.
+            epilogue_arg_kinds.append("interleaved")
         elif statically_known_shape_equal(epilogue_arg_size, [1, n]):
             epilogue_arg_kinds.append("row")
         elif statically_known_shape_equal(epilogue_arg_size, [m, 1]):
@@ -309,6 +320,49 @@ def infer_flex_gemm_epilogue_arg_kinds(
                 f"against GEMM output {list(output_size)}"
             )
     return tuple(epilogue_arg_kinds)
+
+
+def require_tma_loadable_tile_captures(
+    epilogue_args: list[TensorBox], epilogue_arg_kinds: Sequence[str]
+) -> list[TensorBox]:
+    """Give tile and interleaved captures a layout QuACK's TMA load can read in place.
+
+    A tile load needs one unit-stride matrix dim and 16-byte multiple outer strides;
+    an interleaved load pairs adjacent N columns, so it must be N-major. Views
+    such as ``h.view(m, n, 2)[..., 0]`` have neither, so they are copied to a
+    contiguous layout here instead of failing QuACK's launch-time stride check.
+    Row-strided views such as ``h[:, :n]`` already qualify and load in place.
+    """
+    from torch._inductor.virtualized import V
+
+    sizevars = V.graph.sizevars
+
+    def loadable(arg: TensorBox, unit_dims: tuple[int, ...]) -> bool:
+        stride = arg.maybe_get_stride()
+        if stride is None:
+            return True
+        alignment = max(16 // arg.get_dtype().itemsize, 1)
+        for unit in unit_dims:
+            if statically_known_equal(stride[unit], 1) and all(
+                sizevars.statically_known_multiple_of(s, alignment)
+                for dim, s in enumerate(stride)
+                if dim != len(stride) + unit
+            ):
+                return True
+        return False
+
+    unit_dims = {"tile": (-1, -2), "interleaved": (-1,)}
+    out = []
+    for arg, kind in zip(epilogue_args, epilogue_arg_kinds, strict=True):
+        if kind in unit_dims and not loadable(arg, unit_dims[kind]):
+            arg = cast(
+                TensorBox,
+                ir.ExternKernel.require_exact_strides(
+                    arg, ir.FlexibleLayout.contiguous_strides(arg.get_size())
+                ),
+            )
+        out.append(arg)
+    return out
 
 
 CAPTURE_RESHAPE_TARGETS = frozenset(
@@ -712,7 +766,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         )
     if (
         blockscaled is not None
-        and output_contraction is not None
+        and isinstance(output_contraction, FlexGemmOutputContraction)
         and output_contraction.chunked
     ):
         # TODO: Upstream block-scaled concat_layout support to QuACK if needed.
@@ -728,7 +782,17 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             "FlexGEMM generated epilogues require output metadata"
         )
     logical_output_size = ir.convert_shape_to_inductor(output_meta.shape)
-    if output_contraction is not None and outputs.aux_outputs:
+    # Captures broadcast against the epilogue's lane shape: the GEMM shape when
+    # the main output interleaves two lanes, else the (contracted) output shape.
+    epilogue_lane_size = (
+        ir.convert_shape_to_inductor(gemm_fx_node.meta["val"].shape)
+        if isinstance(output_contraction, FlexGemmOutputExpansion)
+        else logical_output_size
+    )
+    if (
+        isinstance(output_contraction, FlexGemmOutputContraction)
+        and outputs.aux_outputs
+    ):
         aux_metas = (gemm_fx_node.meta["val"],)
     else:
         aux_metas = validate_flex_gemm_aux_outputs(
@@ -754,7 +818,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         else output_storage.meta["val"].dtype
     )
     packed_uint8_main = (
-        output_contraction is not None and output_storage_dtype is torch.uint8
+        isinstance(output_contraction, FlexGemmOutputContraction)
+        and output_storage_dtype is torch.uint8
     )
     if (
         not output_storage_dtype.is_floating_point
@@ -765,7 +830,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             "FlexGEMM generic main outputs support only floating-point and bool dtypes"
         )
     local_reduce_metas = flex_gemm_local_reduce_metas(outputs.local_reduce)
-    if output_contraction is not None:
+    if isinstance(output_contraction, FlexGemmOutputContraction):
         # Grouped-main kernel stores use compact N rows through TMA, even
         # when the epilogue returns a strided lane view. Keep outer strides
         # 16-byte aligned when the contracted N extent is not aligned.
@@ -785,9 +850,19 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         logical_output_size,
         output_stride,
     )
+    mainloop_scale_count = len(mainloop_scale_nodes)
+    epilogue_arg_kinds = (
+        *("scalar" for _ in range(mainloop_scale_count)),
+        *infer_flex_gemm_epilogue_arg_kinds(
+            gemm_op, epilogue_args[mainloop_scale_count:], epilogue_lane_size
+        ),
+    )
     gemm_input_nodes = [
         ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args
     ]
+    epilogue_args = require_tma_loadable_tile_captures(
+        epilogue_args, epilogue_arg_kinds
+    )
     epilogue_input_nodes = [
         ir.TemplateBuffer.realize_template_input(arg) for arg in epilogue_args
     ]
@@ -815,16 +890,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     local_reduce_out_index = (
         aux_out_start + len(aux_input_nodes) if local_reduce_input_nodes else None
     )
-    mainloop_scale_count = len(mainloop_scale_nodes)
-    epilogue_arg_kinds = (
-        *("scalar" for _ in range(mainloop_scale_count)),
-        *infer_flex_gemm_epilogue_arg_kinds(
-            gemm_op,
-            epilogue_input_nodes[mainloop_scale_count:],
-            logical_output_size,
-        ),
-    )
-    if output_contraction is not None and any(
+    if isinstance(output_contraction, FlexGemmOutputContraction) and any(
         kind != "scalar" for kind in epilogue_arg_kinds
     ):
         raise NotImplementedError(
@@ -833,7 +899,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     # Varlen-M tile captures load plain [total_m, N] rows, so rows past a group
     # end only reach predicated stores; grouped reductions that would fold them
     # are rejected above.
-    if varlen_axis == "k" and "tile" in epilogue_arg_kinds:
+    if varlen_axis == "k" and (
+        "tile" in epilogue_arg_kinds or "interleaved" in epilogue_arg_kinds
+    ):
         raise NotImplementedError(
             "FlexGEMM varlen-K does not yet support captured tensors of the full "
             "output shape"

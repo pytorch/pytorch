@@ -20,6 +20,7 @@ from torch._inductor.heuristics.template.flex_gemm import QuackConfigKey
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmLocalReduceGeometry,
     FlexGemmOutputContraction,
+    FlexGemmOutputTransform,
     LOCAL_REDUCE_FINALIZE_NAMES,
     LOCAL_REDUCE_PREPASS_FN_SUFFIX,
 )
@@ -128,6 +129,8 @@ class FlexGemmEpilogueConfig:
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
         aux_out_indices: Template input indices for same-shape aux outputs.
         local_reduce: Concrete local-reduce consumer rendered into runtime kwargs.
+        output_contraction: Lane transform between the accumulator and the main
+            output (``GroupedMainStore`` or ``InterleavedMainStore``), if any.
     """
 
     epilogue_name: str
@@ -142,7 +145,7 @@ class FlexGemmEpilogueConfig:
     epilogue_arg_kinds: tuple[str, ...]
     aux_out_indices: tuple[int, ...]
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
-    output_contraction: FlexGemmOutputContraction | None
+    output_contraction: FlexGemmOutputTransform | None
 
     def epimod(
         self,
@@ -216,6 +219,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             import torch
             from torch._inductor.kernel.flex_gemm.constraints import (
                 FlexGemmOutputContraction,
+                FlexGemmOutputExpansion,
                 FlexGemmLocalReduceGeometry,
             )
             from torch._inductor.kernel.flex_gemm import (
@@ -387,7 +391,7 @@ class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):
         sizevars = V.graph.sizevars
         if fields["swap_ab"]:
             sizevars.check(sympy.Eq(sympy.Mod(n, 8), 0))
-        if config.output_contraction is not None:
+        if isinstance(config.output_contraction, FlexGemmOutputContraction):
             sizevars.check_leq(fields["tile_n"], n)
         return super().output_node()
 
