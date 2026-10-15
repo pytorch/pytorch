@@ -4033,10 +4033,35 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 "rsplit_mask = xmask if RSPLIT_IS_POWER_OF_2 else ((rsplit_arange < RSPLIT) & xmask)"
             )
 
+    def _codegen_numel_alignment(
+        self, tree: IterationRangesRoot, code: IndentedBuffer
+    ) -> None:
+        # Dynamic extents such as 1536 * batch are not constexpr, but their
+        # divisibility can still be proved without specializing batch. Passing
+        # this fact to Triton lets masked tails retain vector memory accesses.
+        if not tree.numel.free_symbols:
+            return
+        divisor = 1
+        limit = self.max_block(tree.prefix)
+        while divisor * 2 <= limit and V.graph.sizevars.statically_known_multiple_of(
+            tree.numel, divisor * 2
+        ):
+            divisor *= 2
+        if divisor > 1:
+            code.writeline(
+                f"{tree.prefix}numel = tl.multiple_of({tree.prefix}numel, {divisor})"
+            )
+
     def codegen_range_tree(self):
         for tree in self.range_trees:
             # reduction indexing goes inside a loop
             if not tree.is_loop:
+                if (
+                    type(self) is TritonKernel
+                    and not self.features.is_reduction()
+                    and not tree.has_custom_codegen_header()
+                ):
+                    self._codegen_numel_alignment(tree, self.body)
                 self.iteration_ranges_codegen_header(tree, self.body)
             elif self.inside_reduction:
                 # workaround for this issue:
