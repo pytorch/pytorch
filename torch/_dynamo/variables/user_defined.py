@@ -27,6 +27,7 @@ import collections
 import contextlib
 import dataclasses
 import enum
+import fractions
 import functools
 import inspect
 import random
@@ -436,6 +437,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     @functools.cache
     def _constant_fold_classes() -> set[type[object]]:
         return {
+            fractions.Fraction,
             torch.device,
             torch.finfo,
             torch.iinfo,
