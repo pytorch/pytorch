@@ -220,6 +220,15 @@ def compile_mps_shader(source: str) -> Any:
         raise SyntaxError(f"failed to compile {source} with {err.msg}") from err
 
 
+def metal_include(header: str) -> str:
+    """Return the #include line for a header of a generated Metal kernel.
+
+    Bare names are resolved as <c10/metal/{name}.h>, paths are used as is.
+    """
+    path = header if "/" in header else f"c10/metal/{header}.h"
+    return f"#include <{path}>"
+
+
 def compile_mps_shaders(
     kernels: list[tuple[str, str, list[str]]],
 ) -> dict[str, Any]:
@@ -227,7 +236,7 @@ def compile_mps_shaders(
 
     Args:
         kernels: list of (kernel_name, metal_source, headers) tuples.
-            headers are bare names resolved as <c10/metal/{name}.h>.
+            headers are resolved by metal_include.
 
     Returns:
         dict mapping each kernel_name to its compiled function handle.
@@ -235,7 +244,7 @@ def compile_mps_shaders(
     from torch.utils._ordered_set import OrderedSet
 
     all_headers = sorted(OrderedSet(h for _, _, hs in kernels for h in hs))
-    header_src = "\n".join(f"#include <c10/metal/{h}.h>" for h in all_headers)
+    header_src = "\n".join(metal_include(h) for h in all_headers)
     body_src = "\n".join(src for _, src, _ in kernels)
     lib = compile_mps_shader(header_src + "\n" + body_src)
     return {name: getattr(lib, name) for name, _, _ in kernels}
