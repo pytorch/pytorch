@@ -173,6 +173,27 @@ class TestWrapperPreamble(TestCase):
         self.assertIn("import extern_kernels", code)
         self.assertEqual(_run_from_file(code, [x])[0], result)
 
+    def test_a_graph_that_compiles_nothing_has_no_async_compile(self):
+        def fn(a, b):
+            return a @ b
+
+        a, b = torch.randn(8, 8), torch.randn(8, 8)
+        result, code = _code_for(fn, a, b)
+        self.assertIn("extern_kernels.mm(", code)
+        self.assertNotIn("async_compile", code)
+        self.assertNotIn("AsyncCompile", code)
+        self.assertEqual(_run_from_file(code, [a, b])[0], result)
+
+    @requires_cuda_and_triton
+    def test_module_level_kernels_keep_async_compile_wait(self):
+        # Nothing but the wait names async_compile, and the wait is what compiles the
+        # kernels when the module runs on its own.
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(_softmax, x)
+        self.assertNotIn("async_compile.triton(", code)
+        self.assertIn("async_compile = AsyncCompile()", code)
+        self.assertIn("async_compile.wait(globals())\ndel async_compile", code)
+
     @requires_cuda_and_triton
     def test_a_name_used_only_in_a_nested_subgraph_is_kept(self):
         # Only the inner true branch calls extern_kernels.mm. Its code is spliced into

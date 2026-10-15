@@ -2406,10 +2406,13 @@ class PythonWrapperCodegen(CodeGen):
             "async_compile = AsyncCompile()",
         )
 
-    def write_if_used(self, buf: IndentedBuffer, line: str) -> None:
-        """Write an import or binding that is kept only if the module uses a name it
-        binds."""
-        names = self._names_bound_by(line)
+    def write_if_used(
+        self, buf: IndentedBuffer, line: str, names: tuple[str, ...] | None = None
+    ) -> None:
+        """Write a line that is kept only if the module uses a name in ``names``, by
+        default the names the import or binding on it binds."""
+        if names is None:
+            names = self._names_bound_by(line)
         if "torch" in names:
             # The rest of the preamble is written in terms of it.
             buf.writeline(line)
@@ -2435,7 +2438,7 @@ class PythonWrapperCodegen(CodeGen):
             if len(names) == m.group(2).count(",") + 1:
                 return tuple(names)
         raise AssertionError(
-            f"cannot tell what {line!r} binds; write it in a form _names_bound_by reads"
+            f"cannot tell what {line!r} binds; write it with an explicit `names`"
         )
 
     def write_omitted_from_scan(self, buf: IndentedBuffer, code: str) -> None:
@@ -2708,13 +2711,10 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
-        self.prefix.splice(
-            """
-
-            async_compile.wait(globals())
-            del async_compile
-            """
-        )
+        # None of these lines is a use of async_compile: a module that compiles nothing
+        # has no need of them.
+        for line in ("", "", "async_compile.wait(globals())", "del async_compile"):
+            self.write_if_used(self.prefix, line, ("async_compile",))
 
     def write_args(self, input_names: list[str]):
         lhs = ", ".join(input_names)
@@ -4431,6 +4431,9 @@ class PythonWrapperCodegen(CodeGen):
         if not standalone:
             self.header.splice(body)
             return
+        # Run as a script, the module compiles its module-level kernels at
+        # async_compile.wait.
+        self.names_used_unscanned.add("async_compile")
         self.write_omitted_from_scan(self.header, body)
 
     def emit_triton_kernel_definition(
