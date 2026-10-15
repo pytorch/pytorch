@@ -1109,6 +1109,22 @@ class CompiledOptimizerTests(TestCase):
         self.assertEqual(opt.param_groups[0]["capturable"], original_capturable)
 
 
+def _fp16_ulp_distance(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Elementwise fp16 ULP distance between two float16 tensors.
+
+    Reinterprets each value's fp16 bits as int16 and maps the sign-magnitude
+    pattern to a monotonic integer ordering in which adjacent representable
+    values differ by exactly one, so the result counts the representable fp16
+    values between ``a`` and ``b`` (0 == bitwise identical).
+    """
+
+    def _ordered(t: torch.Tensor) -> torch.Tensor:
+        i = t.contiguous().view(torch.int16).to(torch.int32)
+        return torch.where(i < 0, -32768 - i, i)
+
+    return (_ordered(a) - _ordered(b)).abs()
+
+
 @requires_gpu_and_triton
 class CompiledOptimizerBitwiseTests(TestCase):
     """
@@ -1159,19 +1175,25 @@ class CompiledOptimizerBitwiseTests(TestCase):
                 expected = fn(start, end)
                 actual = torch.compile(fn)(start, end)
 
-                # Default: require bitwise-identical compiled vs eager results.
-                atol = rtol = 0
                 if TEST_WITH_ROCM and dtypes == (torch.float16, torch.float16):
-                    # On ROCm the fp16 lerp result for this element is an exact
-                    # fp16 tie. Eager rounds twice (fp32 FMA, then convert to
-                    # fp16), while the AMDGPU backend fuses the compiled kernel's
-                    # fma(...).to(float16) into a single v_fma_mixlo_f16 that
-                    # rounds once to the correctly-rounded neighbor. That leaves a
-                    # 1-ulp difference, so allow
-                    # 1 fp16 ulp here instead of requiring bitwise equality.
-                    atol = 2**-13
-                    rtol = 1e-3
-                self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+                    # On ROCm the fp16 lerp result for the tying element is an
+                    # exact fp16 tie: eager rounds twice (fp32 FMA, then convert to
+                    # fp16) while the AMDGPU backend fuses fma(...).to(float16) into
+                    # a single v_fma_mixlo_f16 that rounds once to the correctly-
+                    # rounded neighbor -- a 1-ulp difference. Enforce exactly that:
+                    # every element must be bitwise-identical to eager or at most
+                    # one fp16 ULP away. (A fixed atol/rtol would instead admit
+                    # >1-ulp drift for mid-range values and many ulps near zero,
+                    # hiding the compiled-vs-eager regressions this test detects.)
+                    for a, e in zip(actual, expected):
+                        self.assertLessEqual(
+                            _fp16_ulp_distance(a, e).max().item(),
+                            1,
+                            "compiled vs eager fp16 result differs by more than 1 ULP",
+                        )
+                else:
+                    # Require bitwise-identical compiled vs eager results.
+                    self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @staticmethod
     def _test_optimizer_bitwise(
