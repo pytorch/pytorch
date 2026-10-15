@@ -5033,6 +5033,26 @@ class CPUReproTests(TestCase):
             "cpp_fused", 3 if config.cpp_wrapper else 2, exactly=True
         ).run(code)
 
+    def test_kernel_group_skips_exact_arg_count_below_limit(self):
+        def fn(*xs):
+            return [x + 1 for x in xs]
+
+        xs = [torch.randn(8) for _ in range(10)]
+        with (
+            fresh_cache(),
+            patch.object(
+                KernelGroup,
+                "get_num_args",
+                autospec=True,
+                side_effect=KernelGroup.get_num_args,
+            ) as get_num_args,
+        ):
+            opt_fn = torch.compile(fn, backend="inductor")
+            self.assertEqual(opt_fn(*xs), fn(*xs))
+        # Twenty arguments is far below the limit, so the exact count, which
+        # formats every argument, is never needed.
+        get_num_args.assert_not_called()
+
     @patch.object(CppScheduling, "MAX_FUSED_KERNEL_ARGS_NUM", 6)
     def test_kernel_group_flushes_when_args_exceed_limit(self):
         def fn(*xs):
