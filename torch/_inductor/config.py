@@ -1801,8 +1801,8 @@ padding_stride_threshold = 1024
 # so a read that outlives the freeze silently produces wrong results (see
 # https://github.com/pytorch/pytorch/pull/192575). Code that persists strides
 # must freeze first (as_storage_and_layout); heuristics that tolerate stale
-# values should read Layout.stride_hint() instead. Off in production;
-# inductor tests opt in via torch/_inductor/test_case.py.
+# values should read Layout.stride_hint() instead. Off in production; on in
+# inductor tests (torch/_inductor/test_case.py) and CI (.ci/pytorch/test.sh).
 strict_flexible_layout_strides = (
     os.environ.get("TORCHINDUCTOR_STRICT_FLEXIBLE_LAYOUT_STRIDES", "0") == "1"
 )
