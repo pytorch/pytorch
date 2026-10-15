@@ -506,9 +506,7 @@ def generic_repr(
     result_type = maybe_get_python_type(result)
     if not issubclass(result_type, str):
         if sys.version_info >= (3, 15):
-            err_str = (
-                f"{obj.python_qualified_name()}.__repr__() must return a str, not int"
-            )
+            err_str = f"{obj.python_qualified_name()}.__repr__() must return a str, not {result.python_qualified_name()}"
         else:
             err_str = f"__repr__ returned non-string (type {result_type.__name__})"
         raise_type_error(tx, err_str)

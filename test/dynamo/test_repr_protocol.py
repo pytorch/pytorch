@@ -26,6 +26,13 @@ class _OpaqueReprDescriptorObject:
     __repr__ = str.upper
 
 
+class _Slotted:
+    __slots__ = ("a",)
+
+    class Nested:
+        __slots__ = ("b",)
+
+
 class _SetSubclass(set):
     pass
 
@@ -587,6 +594,29 @@ class TpReprTests(TestCase):
         x = torch.randn(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x, obj)[1], compiled(x, obj)[1])
+
+    @parametrize(
+        "descr",
+        [
+            dict.__dict__["fromkeys"],
+            collections.deque.append,
+            int.__add__,
+            type(len).__dict__["__name__"],
+            type.__dict__["__dictoffset__"],
+            _Slotted.a,
+            _Slotted.Nested.b,
+            _OpaqueReprDescriptorObject.__dict__["__dict__"],
+            _OpaqueReprDescriptorObject.__dict__["__weakref__"],
+        ],
+        name_fn=lambda d: f"{type(d).__name__}_{d.__name__}",
+    )
+    def test_descriptor_repr(self, descr):
+        def fn(x):
+            return x + 1, repr(descr)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
 
 
 if __name__ == "__main__":
