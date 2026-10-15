@@ -76,6 +76,7 @@ def _validate_and_normalize_blockscaled_tma(
         if is_square_scaling:
             raise ValueError("compact scales do not support square scaling")
 
+    # TODO: Support an explicit quantization dimension and batched inputs.
     if input.dim() != 2:
         raise ValueError(
             f"blockscaled TMA requires a 2D input; got {input.dim()} dimensions"
