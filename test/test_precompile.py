@@ -41,6 +41,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfCrossRef,
@@ -5812,6 +5813,298 @@ class TestPrecompileRuntimeCache(TestCase):
             with fresh_cache():
                 self.assertIsNone(_runtime_cache.load_triton_kernel("source"))
 
+    def test_frozen_cpp_kernel_serves_fresh_cache_without_compiling(self):
+        import ctypes
+        import hashlib
+
+        from torch._inductor.codecache import CppCodeCache
+        from torch._inductor.utils import fresh_cache
+        from torch.compiler import _runtime_cache
+
+        no_compilation = torch.compiler.precompile.no_compilation
+        export = "__declspec(dllexport) " if IS_WINDOWS else ""
+        source = (
+            f'extern "C" {export}long frozen_cpp_kernel(long x) {{ return x + 7; }}'
+        )
+        with fresh_cache():
+            lib = CppCodeCache.load(source)
+            with open(lib._name, "rb") as binary:
+                payload = pickle.dumps({lib.key: binary.read()})
+        artifact = _runtime_cache.InductorCppCacheArtifact(
+            hashlib.sha256(payload).hexdigest(), payload
+        )
+        with mock.patch.object(_runtime_cache, "_frozen_cpp_kernels", {}):
+            for submit in (None, lambda fn: self.fail("compiled a frozen C++ kernel")):
+                with fresh_cache(), no_compilation():
+                    artifact.populate_cache()
+                    loaded = CppCodeCache.load_async(source, submit_fn=submit)()
+                    kernel = loaded.frozen_cpp_kernel
+                    kernel.restype = ctypes.c_long
+                    self.assertEqual(kernel(ctypes.c_long(5)), 12)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_freezes_cpp_kernel_binaries(self):
+        from pathlib import Path
+
+        from torch._inductor.codecache import CppCodeCache
+        from torch._inductor.utils import fresh_cache
+        from torch.compiler._cache import CacheArtifactManager
+
+        with fresh_cache():
+            loaded = []
+
+            def load():
+                loaded.append(
+                    CppCodeCache.load(
+                        'extern "C" long captured_cpp_kernel(long x) { return x; }'
+                    )
+                )
+
+            source, cache = _capture_files(
+                self,
+                _no_compilation_single_graph,
+                [(torch.ones(4),)],
+                backend="eager",
+                then=load,
+            )
+            [lib] = loaded
+            binary = Path(lib._name).read_bytes()
+            artifacts = CacheArtifactManager.deserialize(
+                torch.load(cache, weights_only=True)["artifact"]
+            )
+            (frozen,) = artifacts["inductor_cpp"]
+            self.assertEqual(pickle.loads(frozen.content), {lib.key: binary})
+
+    def test_cpp_kernel_is_recorded_on_every_load(self):
+        from torch._inductor.codecache import CppCodeCache
+        from torch._inductor.utils import fresh_cache
+        from torch.compiler import _runtime_cache
+
+        source = 'extern "C" long memoized_cpp_kernel(long x) { return x; }'
+        with fresh_cache():
+            # Loaded before the scope opens, so the scope sees only a memo hit.
+            CppCodeCache.load_async(source)
+            with _runtime_cache.capture_scope():
+                CppCodeCache.load_async(source)
+                [(key, (binary_path, _))] = _runtime_cache._capture.cpp_kernels.items()
+            self.assertEqual(CppCodeCache._binary_paths[key], binary_path)
+
+    def test_capture_builds_unforced_cpp_loads_and_rejects_missing_binaries(self):
+        from pathlib import Path
+
+        from torch._inductor.codecache import CppCodeCache
+        from torch._inductor.utils import fresh_cache
+        from torch.compiler import _runtime_cache
+        from torch.compiler._cache import CacheArtifactManager
+
+        with tempfile.TemporaryDirectory() as directory, fresh_cache():
+            source = os.path.join(directory, "artifact.py")
+            cache = os.path.join(directory, "artifact.cache")
+            recorded = []
+
+            def record():
+                CppCodeCache.load_async(
+                    'extern "C" long unforced_cpp_kernel(long x) { return x; }'
+                )
+                [(key, (binary_path, _))] = _runtime_cache._capture.cpp_kernels.items()
+                self.assertFalse(os.path.exists(binary_path))
+                recorded.append((key, binary_path))
+                missing = os.path.join(directory, "missing.so")
+                _runtime_cache.record_cpp_kernel("missing", missing, lambda: None)
+
+            with _runtime_cache.capture_scope():
+                with self.assertRaisesRegex(
+                    PrecompileError, "could not freeze"
+                ) as failure:
+                    _capture_files(
+                        self,
+                        _no_compilation_single_graph,
+                        [(torch.ones(4),)],
+                        backend="eager",
+                        paths=(source, cache),
+                        then=record,
+                    )
+                self.assertIn("'missing'", str(failure.exception.__cause__))
+                self.assertFalse(os.path.exists(cache))
+                del _runtime_cache._capture.cpp_kernels["missing"]
+                _capture_files(
+                    self,
+                    _no_compilation_single_graph,
+                    [(torch.ones(4),)],
+                    backend="eager",
+                    paths=(source, cache),
+                )
+            [(key, binary_path)] = recorded
+            artifacts = CacheArtifactManager.deserialize(
+                torch.load(cache, weights_only=True)["artifact"]
+            )
+            (frozen,) = artifacts["inductor_cpp"]
+            self.assertEqual(
+                pickle.loads(frozen.content), {key: Path(binary_path).read_bytes()}
+            )
+
+    def test_capture_rejects_a_failed_cpp_build(self):
+        from torch._inductor.utils import fresh_cache
+        from torch.compiler import _runtime_cache
+
+        def fail_build():
+            raise RuntimeError("compiler crashed")
+
+        def record():
+            failed = os.path.join(directory, "failed.so")
+            _runtime_cache.record_cpp_kernel("failed", failed, fail_build)
+
+        with tempfile.TemporaryDirectory() as directory, fresh_cache():
+            cache = os.path.join(directory, "artifact.cache")
+            with self.assertRaisesRegex(PrecompileError, "freeze.*compiler crashed"):
+                _capture_files(
+                    self,
+                    _no_compilation_single_graph,
+                    [(torch.ones(4),)],
+                    backend="eager",
+                    paths=(os.path.join(directory, "artifact.py"), cache),
+                    then=record,
+                )
+            self.assertFalse(os.path.exists(cache))
+
+    def test_frozen_cpp_kernels_follow_cache_reset(self):
+        import hashlib
+
+        from torch._inductor.codecache import CppCodeCache
+        from torch._inductor.utils import fresh_cache
+        from torch.compiler import _runtime_cache
+
+        payload = pickle.dumps({"key": b"binary"})
+        artifact = _runtime_cache.InductorCppCacheArtifact(
+            hashlib.sha256(payload).hexdigest(), payload
+        )
+        with mock.patch.object(_runtime_cache, "_frozen_cpp_kernels", {}):
+            artifact.populate_cache()
+            CppCodeCache.cache_clear()
+            self.assertEqual(_runtime_cache._frozen_cpp_kernels, {})
+            artifact.populate_cache()
+            with fresh_cache():
+                self.assertEqual(_runtime_cache._frozen_cpp_kernels, {})
+
+    def test_restore_cpp_kernel_keeps_an_existing_binary(self):
+        import hashlib
+
+        from torch.compiler import _runtime_cache
+
+        payload = pickle.dumps({"key": b"frozen"})
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(_runtime_cache, "_frozen_cpp_kernels", {}),
+        ):
+            _runtime_cache.InductorCppCacheArtifact(
+                hashlib.sha256(payload).hexdigest(), payload
+            ).populate_cache()
+            existing = os.path.join(directory, "existing.so")
+            with open(existing, "wb") as f:
+                f.write(b"local")
+            _runtime_cache.restore_cpp_kernel("key", existing)
+            missing = os.path.join(directory, "nested", "missing.so")
+            _runtime_cache.restore_cpp_kernel("key", missing)
+            with open(existing, "rb") as f:
+                self.assertEqual(f.read(), b"local")
+            with open(missing, "rb") as f:
+                self.assertEqual(f.read(), b"frozen")
+            self.assertEqual(sorted(os.listdir(directory)), ["existing.so", "nested"])
+            self.assertEqual(os.listdir(os.path.dirname(missing)), ["missing.so"])
+
+    @parametrize("damage", ("sha", "type"))
+    def test_cpp_artifact_rejects_damaged_records(self, damage):
+        import hashlib
+
+        from torch.compiler import _runtime_cache
+
+        payload = pickle.dumps({"key": "not bytes" if damage == "type" else b"ok"})
+        digest = hashlib.sha256(payload).hexdigest()
+        if damage == "sha":
+            digest = hashlib.sha256(b"other").hexdigest()
+        with (
+            mock.patch.object(_runtime_cache, "_frozen_cpp_kernels", {}),
+            self.assertRaisesRegex(
+                RuntimeError, "Corrupt" if damage == "sha" else "Invalid"
+            ),
+        ):
+            _runtime_cache.InductorCppCacheArtifact(digest, payload).populate_cache()
+        self.assertEqual(_runtime_cache._frozen_cpp_kernels, {})
+
+    @parametrize("build_separate", (False, True))
+    @parametrize("precompile_headers", (False, True))
+    def test_frozen_cpu_graph_serves_strict_load_from_empty_caches(
+        self, precompile_headers, build_separate
+    ):
+        from torch._inductor import codecache, config as inductor_config, cpp_builder
+        from torch._inductor.utils import clear_caches
+        from torch.compiler import _runtime_cache
+
+        @contextlib.contextmanager
+        def fresh_host(root):
+            # The precompiled-header directory is fixed at import time and
+            # _precompile_header memoizes its result, so neither follows
+            # TORCHINDUCTOR_CACHE_DIR.
+            headers = os.path.join(root, "precompiled_headers")
+            with (
+                mock.patch.dict(os.environ, {"TORCHINDUCTOR_CACHE_DIR": root}),
+                mock.patch.object(codecache, "_HEADER_DIR", headers),
+                mock.patch.object(
+                    codecache, "_HEADER_LOCK_DIR", os.path.join(headers, "locks")
+                ),
+                mock.patch.object(
+                    codecache,
+                    "_precompile_header",
+                    functools.cache(codecache._precompile_header.__wrapped__),
+                ),
+            ):
+                yield
+
+        pc = torch.compiler.precompile
+        fn = _no_compilation_inductor_graph
+        x = torch.randn(8, 16)
+        # Windows can't delete the loaded kernel modules.
+        with (
+            tempfile.TemporaryDirectory(ignore_cleanup_errors=IS_WINDOWS) as directory,
+            inductor_config.patch(
+                cpp_cache_precompile_headers=precompile_headers,
+                # Builds the C++ wrapper as main.o + optimized.o + a link step.
+                cpp_wrapper=build_separate,
+                cpp_wrapper_build_separate=build_separate,
+            ),
+        ):
+            clear_caches()
+            try:
+                with (
+                    fresh_host(os.path.join(directory, "p")),
+                    _runtime_cache.capture_scope(),
+                ):
+                    source, cache = _capture_files(self, fn, [(x,)], backend="inductor")
+                    self.assertTrue(_runtime_cache._capture.cpp_kernels)
+                # Inductor never precompiles headers on Windows.
+                self.assertEqual(
+                    os.path.isdir(os.path.join(directory, "p", "precompiled_headers")),
+                    precompile_headers and not IS_WINDOWS,
+                )
+                clear_caches()
+                with (
+                    fresh_host(os.path.join(directory, "c")),
+                    pc.no_compilation(),
+                    # no_compilation() does not gate C++ builds; compile in-process
+                    # so a build on the serving host hits the patched build().
+                    inductor_config.patch(compile_threads=1),
+                    mock.patch.object(
+                        cpp_builder.CppBuilder,
+                        "build",
+                        side_effect=AssertionError("built C++ on the serving host"),
+                    ),
+                ):
+                    runnable = pc.load(source, cache)
+                    with torch.no_grad():
+                        self.assertEqual(runnable(x), fn(x))
+            finally:
+                clear_caches()
+
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_capture_releases_static_kernel_instances(self):
         from torch.compiler import _runtime_cache
@@ -6033,6 +6326,9 @@ class TestPrecompileRuntimeCache(TestCase):
             record_triton_kernel("eligible_duplicate", eligible)
             with (
                 mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"),
+                mock.patch(
+                    "torch.compiler._runtime_cache._freeze_cpp_kernels"
+                ) as export,
                 mock.patch("torch._logging.trace_structured") as trace,
                 self.assertRaisesRegex(PrecompileError, "could not freeze") as failure,
             ):
@@ -6085,6 +6381,7 @@ class TestPrecompileRuntimeCache(TestCase):
                 and call.kwargs["metadata_fn"]()["name"]
                 == "precompile_triton_export_failures"
             ]
+            export.assert_not_called()
             self.assertEqual(
                 failures.kwargs["metadata_fn"](),
                 {"name": "precompile_triton_export_failures", "encoding": "json"},
@@ -6097,7 +6394,7 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertIs(eligible.fn.fn, live_fn)
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
-    @parametrize("stage", ("cubin", "pickle"))
+    @parametrize("stage", ("cpp", "cubin", "pickle"))
     def test_failed_freeze_keeps_cache_and_scope_open(self, stage):
         from pathlib import Path
 
@@ -6119,6 +6416,7 @@ class TestPrecompileRuntimeCache(TestCase):
         live_launchers = kernel.launchers
         live_fn = kernel.fn.fn
         target = {
+            "cpp": "torch.compiler._runtime_cache._freeze_cpp_kernels",
             "cubin": (
                 "torch._inductor.runtime.triton_heuristics."
                 "StaticTritonCompileResult.reload_cubin_path"
