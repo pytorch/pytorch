@@ -4,6 +4,7 @@ import contextlib
 from functools import partial
 from collections import namedtuple
 import os
+import pickle
 import sys
 import torch
 import torch.nn as nn
@@ -345,6 +346,10 @@ def make_strided_sdpa_input(
 
 class TestTransformersGeneric(NNTestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_sdp_backend_pickle(self):
+        for backend in SDPBackend.__members__.values():
+            self.assertEqual(pickle.loads(pickle.dumps(backend)), backend)
 
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
     def test_encoder_padding_and_src_mask_bool(self):
