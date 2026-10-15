@@ -157,7 +157,7 @@ Compared to PyTorch FSDP1 (`FullyShardedDataParallel`):
   APIs like `DTensor.full_tensor()` or by using higher-level APIs like
   [PyTorch Distributed Checkpoint](https://pytorch.org/docs/stable/distributed.checkpoint.html) 's
   distributed state dict APIs. Also, some other args have been removed; see
-  [here](https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md) for
+  [here](https://github.com/pytorch/torchtitan/blob/main/torchtitan/distributed/FSDP.md) for
   details.
 
 
