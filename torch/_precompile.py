@@ -791,18 +791,19 @@ class _DynamoCapture(Capture[_P, _R]):
         def write(artifact: bytes | None) -> None:
             buf = io.BytesIO()
             torch.save({**blob, "artifact": artifact}, buf)
-            _write_artifact(
-                self._artifact_path, self._cache_path, python_code, buf.getvalue()
-            )
+            try:
+                _write_artifact(
+                    self._artifact_path, self._cache_path, python_code, buf.getvalue()
+                )
+            except OSError as e:
+                # Only the on-disk rewrite failed; _write_artifact leaves
+                # whatever pair was already at these paths in place.
+                raise PrecompileError(
+                    f"precompile could not write the artifact: {e}"
+                ) from e
 
         try:
             freeze_runtime_cache(snapshot, write)
-        except OSError as e:
-            # Only the on-disk rewrite failed; _write_artifact leaves whatever
-            # pair was already at these paths in place.
-            raise PrecompileError(
-                f"precompile could not write the artifact: {e}"
-            ) from e
         except PrecompileError:
             raise
         except Exception as e:
