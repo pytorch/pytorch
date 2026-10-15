@@ -25,11 +25,13 @@ _MAX_UNRANKED_CANDIDATES = 12
 
 def _sm100_priority_rank(
     order: tuple[tuple[int, int, int, int, bool], ...],
+    *,
+    swap_ab: bool = False,
 ) -> dict[tuple[Any, ...], int]:
     # Keys are tile M/N, cluster M/N, pingpong, swap_ab, dynamic persistence,
     # and device capacity.
     return {
-        (tile_m, tile_n, cluster_m, cluster_n, False, False, dynamic, 10): rank
+        (tile_m, tile_n, cluster_m, cluster_n, False, swap_ab, dynamic, 10): rank
         for rank, (tile_m, tile_n, cluster_m, cluster_n, dynamic) in enumerate(order)
     }
 
@@ -53,12 +55,39 @@ _PRIORITY_RANK = _sm100_priority_rank(
     )
 )
 
+# Swapping puts skinny M on the 32-wide N tile. Measured on GB200 dense SiLU;
+# keep these out of larger shapes, where the expanded search can regress.
+_SKINNY_PRIORITY_RANK = _sm100_priority_rank(
+    ((128, 32, 2, 1, True), (128, 32, 2, 2, False)), swap_ab=True
+)
+# 1-CTA M64 tiles: half the padded rows of M128 and twice the CTAs along N.
+# Unswapped they are the only skinny tiles grouped-main (SwiGLU) stores accept.
+# Measured on GB200 bf16 decode (M <= 64, N 4096..14336, K 4096).
+_SKINNY_M64 = tuple(
+    (64, tile_n, 1, cluster_n, dynamic)
+    for tile_n, cluster_n in ((64, 1), (32, 1), (64, 4), (64, 2), (128, 1), (16, 1))
+    for dynamic in (True, False)
+)
+_SKINNY_PRIORITY_RANK = {
+    **_SKINNY_PRIORITY_RANK,
+    **{
+        key: rank + len(_SKINNY_PRIORITY_RANK)
+        for key, rank in _sm100_priority_rank(_SKINNY_M64).items()
+    },
+    **{
+        key: rank + len(_SKINNY_PRIORITY_RANK) + len(_SKINNY_M64)
+        for key, rank in _sm100_priority_rank(_SKINNY_M64, swap_ab=True).items()
+    },
+}
+
 # Measured varlen-M (grouped_mm) order on SM100 over DeepSeek-V3 16B/671B
 # expert shapes (E in 8..256, balanced and skewed offs); the first entry is
-# the untuned default for ordinary varlen calls. Of the measured entries here,
-# grouped-main stores accept the last two: both have cluster_n == 1, and the
-# tile_m=128 choice also has cluster_m == 1. Grouped SwiGLU therefore defaults
-# to 128x128 c1x1 (measured at E=64) and autotunes 256x128 c2x1 (E=8).
+# the untuned default for ordinary varlen calls. Grouped-main stores accept
+# only cluster_n == 1 (and cluster_m == 1 at tile_m=128), so grouped SwiGLU
+# defaults to 128x128 c1x1 (measured at E=64). The last three were measured on
+# GB200 MoE GEMMs (T=8192, N=2816, K=2048, ragged offs): 256x256 c2x1 wins at
+# ~1k rows per expert (E=8) and 128x256 c2x1 at ~128 (E=64), ~12% over the
+# entries above.
 _VARLEN_PRIORITY_RANK = _sm100_priority_rank(
     (
         (128, 128, 2, 1, True),
@@ -67,6 +96,9 @@ _VARLEN_PRIORITY_RANK = _sm100_priority_rank(
         (128, 128, 2, 1, False),
         (128, 128, 1, 1, True),
         (256, 128, 2, 1, True),
+        (256, 256, 2, 1, True),
+        (256, 256, 2, 1, False),
+        (128, 256, 2, 1, True),
     )
 )
 
@@ -120,7 +152,10 @@ def _prioritized(
 
 
 def flex_gemm_search_space(
-    legal_configs: tuple[QuackConfigKey, ...], *, varlen: bool = False
+    legal_configs: tuple[QuackConfigKey, ...],
+    *,
+    varlen: bool = False,
+    dense_shape: tuple[int, int] | None = None,
 ) -> tuple[QuackConfigKey, ...]:
     """Return the legal configs Inductor benchmarks, best-known first.
 
@@ -129,14 +164,22 @@ def flex_gemm_search_space(
     EXHAUSTIVE keeps everything. Legal sets that miss the priority list
     entirely (other capabilities, or constrained calls such as pinned ``swap_ab``)
     benchmark QuACK's order, capped at ``_MAX_UNRANKED_CANDIDATES``. Varlen-M
-    calls rank by the grouped_mm order and only add QuACK's dense default when
-    it is measured (it is the slowest common choice for ragged groups).
+    calls rank by the grouped_mm order and do not add QuACK's dense default
+    unless the varlen order ranks it.
+    Dense mm shape hints additionally admit two small-N swapped configs for M <= 128.
     """
     if inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE":
         return legal_configs
     prioritized = _prioritized(legal_configs, varlen=varlen)
     if not prioritized:
         return legal_configs[:_MAX_UNRANKED_CANDIDATES]
+    if not varlen and dense_shape is not None and dense_shape[0] <= 128:
+        skinny = {
+            config: rank
+            for config in legal_configs
+            if (rank := _SKINNY_PRIORITY_RANK.get(_rank_key(config))) is not None
+        }
+        prioritized.extend(sorted(skinny, key=skinny.__getitem__))
     default = legal_configs[0]
     if default not in prioritized and not varlen:
         prioritized.insert(0, default)

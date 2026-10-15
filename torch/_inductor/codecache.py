@@ -117,6 +117,7 @@ from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
+    is_fake,
     TensorMetadata,
 )
 from torch._utils_internal import log_cache_bypass
@@ -751,7 +752,7 @@ class FxGraphCachePickler(pickle.Pickler):
         self.dispatch_table = copyreg.dispatch_table.copy()
         self.dispatch_table.update(
             {
-                FakeTensor: functools.partial(self._reduce_fake_tensor),
+                FakeTensor: functools.partial(self._reduce_tensor),
                 torch.Tensor: functools.partial(self._reduce_tensor),
                 torch.nn.parameter.Parameter: functools.partial(self._reduce_tensor),
                 torch.SymInt: functools.partial(self._reduce_symint),
@@ -837,9 +838,18 @@ class FxGraphCachePickler(pickle.Pickler):
         self, t: Tensor
     ) -> tuple[Callable[[T], T], tuple[TensorMetadata | TensorMetadataAndValues]]:
         """
-        Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
-        stored as attributes on the GraphModule.
+        Route fake tensors to metadata-only serialization and real tensors to
+        constant serialization.
         """
+        if is_fake(t):
+            return self._reduce_fake_tensor(t)
+
+        return self._reduce_constant_tensor(t)
+
+    def _reduce_constant_tensor(
+        self, t: Tensor
+    ) -> tuple[Callable[[T], T], tuple[TensorMetadata | TensorMetadataAndValues]]:
+        """Serialize a real tensor constant stored on the GraphModule."""
         from .graph import GraphLowering
 
         if t.is_mkldnn:
@@ -1119,13 +1129,26 @@ class CacheabilityValidator:
             if not isinstance(module, torch.fx.GraphModule):
                 continue
             for node in module.graph.nodes:
+                target = node.target
                 if (
-                    isinstance(node.target, torch._ops.HigherOrderOperator)
-                    and not node.target.cacheable()
+                    isinstance(target, torch._ops.HigherOrderOperator)
+                    and not target.cacheable()
                 ):
-                    self.bypass(
-                        f"Can't cache HigherOrderOperator: {node.target.name()}"
+                    # with_effects(token, op, *args) is as cacheable as the op it
+                    # wraps: always for an OpOverload, per cacheable() for a HOP.
+                    inner = (
+                        node.args[1]
+                        if target is torch.ops.higher_order.with_effects
+                        else None
                     )
+                    if not (
+                        isinstance(inner, torch._ops.OpOverload)
+                        or (
+                            isinstance(inner, torch._ops.HigherOrderOperator)
+                            and inner.cacheable()
+                        )
+                    ):
+                        self.bypass(f"Can't cache HigherOrderOperator: {target.name()}")
                 # TODO: this check is broken in two ways:
                 # 1. FX uses "get_attr" (with underscore), not "getattr"
                 # 2. It only checks for ScriptObject, not FakeScriptObject
@@ -1511,6 +1534,57 @@ class FxGraphHashDetails:
                     return True
         return False
 
+    @classmethod
+    def _collect_tensor_device_types(
+        cls, value: object, device_types: OrderedSet[str]
+    ) -> None:
+        if isinstance(value, torch.Tensor):
+            device_types.add(value.device.type)
+            return
+        if isinstance(value, (list, tuple, OrderedSet, frozenset)):
+            for item in value:
+                cls._collect_tensor_device_types(item, device_types)
+            return
+        if isinstance(value, dict):
+            for item in itertools.chain(value.keys(), value.values()):
+                cls._collect_tensor_device_types(item, device_types)
+
+    @classmethod
+    def _graph_device_types(
+        cls, gm: torch.fx.GraphModule | None, example_inputs: Sequence[InputType]
+    ) -> OrderedSet[str]:
+        device_types: OrderedSet[str] = OrderedSet()
+        cls._collect_tensor_device_types(example_inputs, device_types)
+        if gm is None:
+            return device_types
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                cls._collect_tensor_device_types(
+                    cls._tensor_metadata(node), device_types
+                )
+                factory_device = cls._factory_device_type(node)
+                if factory_device is not None:
+                    device_types.add(factory_device)
+        return device_types
+
+    @classmethod
+    def _mm_template_allow_tf32(
+        cls, gm: torch.fx.GraphModule | None, example_inputs: Sequence[InputType]
+    ) -> tuple[tuple[str, bool], ...]:
+        # NotImplementedError means this device has no DeviceInterface.
+        # allow_tf32() itself is not caught: a broken implementation should
+        # fail the compile instead of being cached as ALLOW_TF32=False.
+        flags: list[tuple[str, bool]] = []
+        for device_type in sorted(cls._graph_device_types(gm, example_inputs)):
+            try:
+                iface = get_interface_for_device(device_type)
+            except NotImplementedError:
+                continue
+            flags.append((device_type, bool(iface.allow_tf32())))
+        return tuple(flags)
+
     def __init__(
         self,
         gm: torch.fx.GraphModule | None,
@@ -1646,6 +1720,11 @@ class FxGraphHashDetails:
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
         )
+        # MM template ALLOW_TF32 follows DeviceInterface.allow_tf32. CUDA's
+        # precision string is already in cuda_matmul_settings; this records the
+        # resolved flag for every device in the graph so other backends
+        # invalidate the FX graph cache when their flag changes.
+        self.mm_template_allow_tf32 = self._mm_template_allow_tf32(gm, example_inputs)
 
         # compile-on-one-rank changes wrapper and kernel codegen (runtime device
         # resolution, DeviceProperties(index=None)) even for graphs that contain no
@@ -4963,7 +5042,11 @@ class PyCodeCache:
         attrs: dict[str, Any] | None = None,
         *,
         set_sys_modules: bool | None = None,
+        kernel_sources: dict[str, tuple[str, str]] | None = None,
     ) -> ModuleType:
+        """kernel_sources maps each module-level Triton kernel def to the (name, source)
+        AsyncCompile compiles it from, so the module binds the kernels the worker pool
+        built (see compiled_kernels_for_load)."""
         if linemap is None:
             linemap = []
 
@@ -4977,7 +5060,12 @@ class PyCodeCache:
                 sys.modules.setdefault(mod.__name__, mod)
             return mod
 
-        mod = _reload_python_module(key, path, set_sys_modules=set_sys_modules)
+        if kernel_sources:
+            mod = _load_with_compiled_kernels(
+                key, path, set_sys_modules, kernel_sources
+            )
+        else:
+            mod = _reload_python_module(key, path, set_sys_modules=set_sys_modules)
 
         # unzip into separate lines/nodes lists
         if set_sys_modules:
@@ -5041,6 +5129,44 @@ class PyCodeCache:
             ]
 
         return parse_stack_trace(entry)
+
+
+def _load_with_compiled_kernels(
+    key: str,
+    path: str,
+    set_sys_modules: bool,
+    kernel_sources: dict[str, tuple[str, str]],
+) -> ModuleType:
+    from torch._inductor.async_compile import AsyncCompile
+    from torch._inductor.runtime.triton_heuristics import compiled_kernels_for_load
+
+    async_compile = AsyncCompile()
+
+    def compile_kernel(subs_name: str, source: str) -> Any:
+        # Compiling serially loads the kernel's own module in this process, and its
+        # decorator must build the kernel rather than ask for it again.
+        token = compiled_kernels_for_load.set(None)
+        try:
+            return async_compile.triton(subs_name, source)
+        finally:
+            compiled_kernels_for_load.reset(token)
+
+    token = compiled_kernels_for_load.set(
+        {
+            name: functools.partial(compile_kernel, subs_name, source)
+            for name, (subs_name, source) in kernel_sources.items()
+        }
+    )
+    try:
+        mod = _reload_python_module(key, path, set_sys_modules=set_sys_modules)
+    finally:
+        compiled_kernels_for_load.reset(token)
+    # The module's own wait, if it has one, has already resolved these.
+    scope = {name: getattr(mod, name) for name in kernel_sources}
+    async_compile.wait(scope)
+    for name, kernel in scope.items():
+        setattr(mod, name, kernel)
+    return mod
 
 
 def _load_triton_kernel_from_source(
