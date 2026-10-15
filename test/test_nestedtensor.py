@@ -45,12 +45,14 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
     skipCUDAIf,
     skipMeta,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import floating_types_and_half
 from torch.testing._internal.common_utils import (
     decorateIf,
     freeze_rng_state,
     gradcheck,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     markDynamoStrictTest,
@@ -321,6 +323,8 @@ def convert_nt_to_jagged(nt):
 @markDynamoStrictTest
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensor(NestedTensorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
     @parametrize("vocab_size", [10, 20])
@@ -912,6 +916,8 @@ class TestNestedTensor(NestedTensorTestCase):
 @markDynamoStrictTest
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorDeviceType(NestedTensorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
     def random_nt_pair(self, device, dtype, num_tensors, max_dims):
@@ -3147,6 +3153,8 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 @markDynamoStrictTest
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorAutograd(NestedTensorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
     # includes the default parameters used for testing ops with gradcheck. However nested tensor
     # does not support the stack op therefore we turn it off for these tests
@@ -3970,6 +3978,8 @@ def get_tolerances(
 @markDynamoStrictTest
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorSubclass(NestedTensorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # TODO: consolidate with the below
     def _get_list_for_jagged_tensor(self, nested_size, device, requires_grad=True):
         Ds = nested_size[1:]
@@ -6903,6 +6913,15 @@ torch.cuda.synchronize()
         )
     )
     def test_sdpa(self, device, dtype):
+        if torch.device(device).type == "xpu" and dtype in (
+            torch.float16,
+            torch.bfloat16,
+        ):
+            self.skipTest(
+                "XPU float16/bfloat16 SDPA failure: "
+                "https://github.com/intel/torch-xpu-ops/issues/5346"
+            )
+
         batch_size = 1
         emb_dims = 128
         n_heads = 8
@@ -7264,6 +7283,12 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32, torch.double, torch.half)
     def test_sdpa_with_constant_sequence_length(self, device, dtype):
+        if torch.device(device).type == "xpu" and dtype == torch.half:
+            self.skipTest(
+                "XPU float16 SDPA failure: "
+                "https://github.com/intel/torch-xpu-ops/issues/5346"
+            )
+
         # shape (B, P*, S, D)
         # B: batch size
         # P*: ragged number of prompts
@@ -7512,6 +7537,7 @@ torch.cuda.synchronize()
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
     @skipIfTorchDynamo("compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3093")
     @parametrize("use_legacy_api", [True, False])
     @skipCPUIf(True, "SDPA Math NT fallback causes failure: see issue #133644")
     @unittest.skipIf(
@@ -7534,6 +7560,15 @@ torch.cuda.synchronize()
         max_seqlen_value = 28
 
         torch.manual_seed(0)
+
+        # XPU has no fused SDPA kernel for nested inputs
+        if torch.device(device).type == "xpu":
+            sdp_backends = [torch.nn.attention.SDPBackend.MATH]
+        else:
+            sdp_backends = [
+                torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+                torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
+            ]
 
         class mha(torch.nn.Module):
             def __init__(self, use_legacy_api) -> None:
@@ -7564,12 +7599,7 @@ torch.cuda.synchronize()
                 k = key.view(bs, -1, n_heads, d_head).transpose(1, 2)
                 v = value.view(bs, -1, n_heads, d_head).transpose(1, 2)
 
-                with torch.nn.attention.sdpa_kernel(
-                    [
-                        torch.nn.attention.SDPBackend.FLASH_ATTENTION,
-                        torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
-                    ]
-                ):
+                with torch.nn.attention.sdpa_kernel(sdp_backends):
                     attn_output = torch.nn.functional.scaled_dot_product_attention(
                         q,
                         k,
@@ -9060,6 +9090,8 @@ COMPARE_TENSOR_COMPONENT_EQUALITY = {
 #   * All tests run with dtype=torch.float32 only
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorOpInfo(NestedTensorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # TODO: move this
     def _gen_grad_outputs(self, out_val):
         if isinstance(out_val, (list, tuple)):
@@ -9308,6 +9340,8 @@ from torch.nested._internal.nested_int import NestedIntNode
 
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedInt(torch.testing._internal.common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_comparisons(self):
         a = torch.SymInt(NestedIntNode(1, 1))
         b = torch.SymInt(NestedIntNode(1, 1))
@@ -9400,10 +9434,10 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
 
 
 instantiate_parametrized_tests(TestNestedTensor)
-instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
-instantiate_device_type_tests(TestNestedTensorAutograd, globals())
-instantiate_device_type_tests(TestNestedTensorSubclass, globals())
-instantiate_device_type_tests(TestNestedTensorOpInfo, globals())
+instantiate_device_type_tests(TestNestedTensorDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestNestedTensorAutograd, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestNestedTensorSubclass, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestNestedTensorOpInfo, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

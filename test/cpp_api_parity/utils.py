@@ -3,6 +3,7 @@ import shutil
 import unittest
 import warnings
 from collections import namedtuple
+from functools import wraps
 
 import torch
 import torch.testing._internal.common_nn as common_nn
@@ -339,14 +340,30 @@ def compute_arg_dict(test_params_dict, test_instance):
     return arg_dict
 
 
-def decorate_test_fn(test_fn, test_accelerator, has_impl_parity, device):
-    if hasattr(torch.get_device_module(device), "is_available"):
+def decorate_test_fn(test_fn, test_accelerator, has_impl_parity, device=None):
+    if device is None:
+        original_test_fn = test_fn
+
+        @wraps(original_test_fn)
+        def test_fn(self, device):
+            device_type = torch.device(device).type
+            device_module = torch.get_device_module(device)
+            if (
+                hasattr(device_module, "is_available")
+                and not device_module.is_available()
+            ):
+                raise unittest.SkipTest(f"{device.upper()} unavailable")
+            if device_type != "cpu" and not test_accelerator:
+                raise unittest.SkipTest("Excluded from accelerator tests")
+            return original_test_fn(self, device)
+
+    elif hasattr(torch.get_device_module(device), "is_available"):
         test_fn = unittest.skipIf(
             not torch.get_device_module(device).is_available(),
             f"{device.upper()} unavailable",
         )(test_fn)
 
-    if device != "cpu":
+    if device is not None and device != "cpu":
         test_fn = unittest.skipIf(
             not test_accelerator, "Excluded from accelerator tests"
         )(test_fn)

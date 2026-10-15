@@ -1185,7 +1185,7 @@ class TestTypePromotion(TestCase):
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
 
-instantiate_device_type_tests(TestTypePromotionDevice, globals())
+instantiate_device_type_tests(TestTypePromotionDevice, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()
