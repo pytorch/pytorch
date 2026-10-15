@@ -192,15 +192,21 @@ static std::pair<id<MTLBuffer>, NSUInteger> buffer_with_offset_from_tensor(const
   const void* host = static_cast<const char*>(cpu_tensor.storage().data()) + byte_offset;
   NSUInteger alignedLength = 0;
   void* alignedPtr = pageAlignedBlockPtr(host, (NSUInteger)nbytes, &alignedLength);
-  // Only capture on non_blocking - capturing across waitUntilCompleted would
-  // deadlock Metal's completion thread on the GIL.
+  // Only capture on non_blocking: a blocking copy's caller keeps the tensor alive across the wait.
   auto* storage = non_blocking ? new c10::Storage(cpu_tensor.storage()) : nullptr;
+  // Dropping a Python-owned storage takes the GIL and a thread that holds the GIL may be waiting for Metal's
+  // completion thread, which runs the deallocator. So drop the storage from another thread.
+  static dispatch_queue_t release_queue = dispatch_queue_create("mps host storage release", DISPATCH_QUEUE_SERIAL);
   MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
   id<MTLBuffer> buffer = [[device newBufferWithBytesNoCopy:alignedPtr
                                                     length:alignedLength
                                                    options:options
                                                deallocator:^(void*, NSUInteger) {
-                                                 delete storage;
+                                                 if (storage) {
+                                                   dispatch_async(release_queue, ^{
+                                                     delete storage;
+                                                   });
+                                                 }
                                                }] autorelease];
   return {buffer, static_cast<NSUInteger>(uintptr_t(host) - uintptr_t(alignedPtr))};
 }

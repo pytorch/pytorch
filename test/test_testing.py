@@ -492,6 +492,8 @@ if __name__ == '__main__':
             dynamic_dispatch = opinfo.utils.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
                 dtypes = op.dtypes
+            elif self.device_type == 'xpu':
+                dtypes = op.dtypesIfXPU
             else:  # device_type ='cuda'
                 dtypes = op.dtypesIfCUDA
 
@@ -1361,7 +1363,7 @@ class TestAssertCloseMultiDevice(TestCase):
                 fn(check_device=False)
 
 
-instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for="cuda")
+instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
 
 
 class TestAssertCloseErrorMessage(TestCase):
@@ -3031,6 +3033,7 @@ class TestImports(TestCase):
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.linear_cross_entropy.fused_grad_logits_kernel",  # depends on cutlass
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
+                           "torch._native.ops.norm.rmsnorm_kernels",  # depends on cutlass
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.reductions.inner_tree_kernel",  # depends on cutlass
                            "torch._native.ops.reductions.kernel_general",  # depends on cutlass
