@@ -37,11 +37,13 @@ Particularly, {class}`torch.distributed.GradBucket` represents a bucket of gradi
 
 ```{eval-rst}
 .. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks
+.. autoclass:: DDPCommHookType
 .. autofunction:: register_ddp_comm_hook
 ```
 
 ```{eval-rst}
 .. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook
+.. autoclass:: PostLocalSGDState
 .. autofunction:: post_localSGD_hook
 ```
 

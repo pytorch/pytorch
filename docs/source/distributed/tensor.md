@@ -21,7 +21,7 @@ when working with multi-dimensional sharding.
 Please see examples from the PyTorch native parallelism solutions that are built on top of `DTensor`:
 
 - [Tensor Parallel](https://pytorch.org/docs/main/distributed.tensor.parallel.html)
-- [FSDP2](https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md)
+- [FSDP2](https://github.com/pytorch/torchtitan/blob/main/torchtitan/distributed/FSDP.md)
 
 ```{eval-rst}
 .. automodule:: torch.distributed.tensor
@@ -316,7 +316,7 @@ DTensor:
 
 ```
 tensor = torch.arange(10)
-tensor = DTensor.from_local(tensor, placements=(Replicate(),))
+tensor = DTensor.from_local(tensor, dtensor.device_mesh, placements=(Replicate(),))
 return tensor + dtensor
 ```
 
@@ -325,8 +325,14 @@ Semantically this means that your Tensor data is split between the shards
 and that operations act on the "full stacked data".
 
 ```
-tensor = torch.full([], RANK)
-tensor = DTensor.from_local(tensor, placements=(Shard(0),))
+tensor = torch.arange(10).chunk(WORLD_SIZE)[RANK]
+tensor = DTensor.from_local(
+    tensor,
+    dtensor.device_mesh,
+    placements=(Shard(0),),
+    shape=dtensor.shape,
+    stride=dtensor.stride(),
+)
 return tensor + dtensor
 ```
 
