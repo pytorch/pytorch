@@ -319,8 +319,9 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
 class _RuntimeCapture:
     def __init__(self) -> None:
         self.pid = os.getpid()
-        # The precompile.capture blocks open in this process; the last to exit
-        # closes the scope.
+        # The precompile.capture blocks open in this process. Overlapping
+        # captures are unsupported; counting them only keeps a misuse from
+        # closing the scope under the other capture.
         self.captures = 0
         self.freeze_lock = threading.Lock()
         self.triton_kernels: dict[str, list[CachingAutotuner]] = {}
@@ -339,8 +340,9 @@ def _active_capture() -> _RuntimeCapture | None:
 
 @contextlib.contextmanager
 def capture_scope() -> Iterator[None]:
-    """The scope a precompile.capture block records into, shared by the
-    captures open in this process and closed by the last one to exit.
+    """The scope a precompile.capture block records into, closed when the
+    block exits. Overlapping captures are unsupported; a misused overlap shares
+    the scope rather than closing it under the other capture.
     """
     global _capture
     with _capture_lock:
@@ -387,17 +389,17 @@ def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
 
 
 def freeze_runtime_cache(
-    artifact: bytes | None, write: Callable[[bytes | None], None], *, compiled: bool
+    snapshot: Callable[[], bytes | None], write: Callable[[bytes | None], None]
 ) -> None:
     """Freeze the scope's static Triton kernels and C++ kernel binaries into the
     cache artifact and pass it to ``write``.
 
     Pending async compiles are waited on and every recorded C++ kernel is built
-    first. A kernel that cannot be frozen raises, as does a capture that did not
-    run eagerly (``compiled``) but saved no artifact, since precompile.load
-    could not serve either without compiling. The caller must stop compiling
-    before calling this: a kernel submitted on another thread after the wait is
-    neither waited on nor frozen.
+    before ``snapshot`` renders the artifact, so what they record is in it. A
+    kernel that cannot be frozen raises, since precompile.load could not serve
+    it without compiling. The caller must stop compiling before calling this: a
+    kernel submitted on another thread after the wait is neither waited on nor
+    frozen.
     """
     import torch
     from torch._inductor.async_compile import AsyncCompile
@@ -405,12 +407,18 @@ def freeze_runtime_cache(
     owner = _active_capture()
     if owner is None:
         raise RuntimeError("precompile.capture has no runtime capture scope")
-    if compiled and artifact is None:
-        raise RuntimeError(
-            "precompile.capture requires the cache artifact of a compiled "
-            "capture, and this capture saved none"
-        )
     with owner.freeze_lock:
+        # Keep the workers: a save() checkpoint is followed by more of the block.
+        AsyncCompile.drain_pending(shutdown=False)
+        with _capture_lock:
+            cpp_loads = [load for _, load in owner.cpp_kernels.values()]
+        # Finishes pending C++ builds and builds loads that were never forced, so
+        # no binary is missing or partially written when it is frozen.
+        for load in cpp_loads:
+            load()
+        if torch.cuda.is_initialized():
+            torch.cuda.synchronize()
+        artifact = snapshot()
         artifacts = (
             CacheArtifactManager.deserialize(artifact) if artifact is not None else {}
         )
@@ -426,16 +434,6 @@ def freeze_runtime_cache(
             raise RuntimeError(
                 "The precompile cache already contains frozen runtime dependencies"
             )
-        # Another open capture may still be compiling, so keep the workers.
-        AsyncCompile.drain_pending(shutdown=False)
-        with _capture_lock:
-            cpp_loads = [load for _, load in owner.cpp_kernels.values()]
-        # Finishes pending C++ builds and builds loads that were never forced, so
-        # no binary is missing or partially written when it is frozen.
-        for load in cpp_loads:
-            load()
-        if torch.cuda.is_initialized():
-            torch.cuda.synchronize()
         with _capture_lock:
             kernels = {key: list(found) for key, found in owner.triton_kernels.items()}
             cpp_kernels = {key: path for key, (path, _) in owner.cpp_kernels.items()}
