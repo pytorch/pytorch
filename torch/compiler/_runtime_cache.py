@@ -61,21 +61,14 @@ def freeze_runtime_cache(
 ) -> None:
     """Pass the cache artifact, with the scope's runtime dependencies, to ``write``.
 
-    Pending async compiles are waited on before ``snapshot`` renders the
-    artifact, so what they record is in it. The caller must stop compiling
-    before calling this: a compile submitted on another thread after the wait is
-    not waited on.
+    Nothing is waited on: every graph compile already waited on its own
+    kernels. The caller must stop compiling before calling this, since a
+    compile still running on another thread is not waited on.
     """
-    import torch
-    from torch._inductor.async_compile import AsyncCompile
-
     owner = _active_capture()
     if owner is None:
         raise RuntimeError("precompile.capture has no runtime capture scope")
     with owner.freeze_lock:
-        AsyncCompile.drain_pending()
-        if torch.cuda.is_initialized():
-            torch.cuda.synchronize()
         artifact = snapshot()
         artifacts = (
             CacheArtifactManager.deserialize(artifact) if artifact is not None else {}
