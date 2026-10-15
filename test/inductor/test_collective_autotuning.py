@@ -38,7 +38,7 @@ class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
         """
         dist.init_process_group(
             backend="nccl",
-            init_method=f"file:///tmp/test_equiv_allreduce_{self.id()}",
+            init_method=f"file://{self.file_name}",
             world_size=self.world_size,
             rank=self.rank,
         )
@@ -120,7 +120,7 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
         """
         dist.init_process_group(
             backend="nccl",
-            init_method=f"file:///tmp/test_vllm_allreduce_{self.id()}",
+            init_method=f"file://{self.file_name}",
             world_size=self.world_size,
             rank=self.rank,
         )
