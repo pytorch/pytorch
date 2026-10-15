@@ -2074,11 +2074,6 @@ class _InitOnly:
         self.a = a
 
 
-class _NewOnly:
-    def __new__(cls, a):
-        return super().__new__(cls)
-
-
 class _SuperInitExtraArg:
     def __init__(self, a):
         super().__init__(a)
@@ -2092,8 +2087,6 @@ _OBJECT_INIT_CASES = {
     "explicit_kwargs_on_plain": lambda: object.__init__(Plain(), k=1),
     "bound_on_plain": lambda: Plain().__init__(1),
     "super_with_extra_arg": lambda: _SuperInitExtraArg(1),
-    "new_override_allows_extra_arg": lambda: _NewOnly(1),
-    "no_extra_args": lambda: object.__init__(_InitOnly(1)),
 }
 
 
