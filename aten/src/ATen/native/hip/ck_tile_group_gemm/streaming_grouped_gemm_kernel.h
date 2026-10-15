@@ -91,6 +91,7 @@ using ck_tile::safe_underlying_type_t;
 			using namespace ck_tile;
 			const GroupArg* args = reinterpret_cast<const GroupArg*>(cast_pointer_to_generic_address_space(group_args_const));
 			const index_t grid_size = get_grid_size();
+			
 			// ct is the tile being computed; lt is where the global loads are, two K steps ahead
 			Tile ct;
 			ct.block_id = get_block_1d_id();
@@ -98,7 +99,9 @@ using ck_tile::safe_underlying_type_t;
 			Tile lt = ct;
 			bool lt_valid = true;
 
+			// shared memory in LDS. accessable by all the threads in the workgroup.
 			__shared__ char smem[kMainSmem + kOutSmem];
+
 			ImplBase base;
 			auto&& [a_lds, b_lds] = base.GetABLdsTensorViews(smem);
 			constexpr auto a_lds_load_distr = make_static_tile_distribution(BlockGemm::MakeABlockDistributionEncode());
