@@ -176,8 +176,8 @@ void convertType(F converter, const char* name, void* slot, PyObject* item) {
 /**
   Puts argument `item`, of the type `typeChar` names, into the 8-byte `slot`.
   Note that some args can be less than 8 bytes, but we'll still allocate 8
-  bytes for them. `getPtr` resolves a pointer argument to a device pointer; the
-  launchers differ in how much they validate it.
+  bytes for them. `getPtr` resolves a pointer argument to a device pointer, so
+  that a caller can choose how much it validates.
 */
 template <typename PointerGetter>
 void packKernelArg(
