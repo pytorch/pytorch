@@ -467,18 +467,15 @@ Tensor& do_metal_addmm(const Tensor& self,
                        const Scalar& beta,
                        const Tensor& bias) {
   // beta == 0 means bias is ignored, so nan/inf in it must not propagate. Lower to a plain
-  // mm (skipping the bias) and scale by alpha in place only for the uncommon alpha != 1.
-  if (beta.toComplexDouble() == 0.0) {
+  // mm when alpha == 1; otherwise hand the fused kernel a zero bias (it applies alpha before rounding).
+  if (beta.toComplexDouble() == 0.0 && alpha.toComplexDouble() == 1.0) {
     do_metal_mm(self, other, output);
-    if (alpha.toComplexDouble() != 1.0) {
-      output.mul_(alpha);
-    }
     return output;
   }
   // Handle conjugated inputs by creating resolved copies
   auto self_ = self.is_conj() ? self.resolve_conj() : self;
   auto other_ = other.is_conj() ? other.resolve_conj() : other;
-  auto bias_ = bias.is_conj() ? bias.resolve_conj() : bias;
+  auto bias_ = beta.toComplexDouble() == 0.0 ? at::zeros({}, bias.options()).expand_as(output) : bias.resolve_conj();
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
@@ -2225,9 +2222,11 @@ static Tensor mps_orthonormal_complement(const Tensor& proj, int64_t want) {
   out_sh.push_back(dim);
   out_sh.push_back(want);
   Tensor out = at::zeros(out_sh, proj.options());
+  // Pivot on the largest residual column norm, so columns of proj already in the span (e.g. zero ones) are skipped.
+  Tensor res = at::real(proj.diagonal(0, -2, -1)).unsqueeze(-2);
   int64_t got = 0;
   for (int64_t c = 0; c < dim && got < want; ++c) {
-    Tensor v = proj.narrow(-1, c, 1);
+    Tensor v = proj.take_along_dim(res.argmax(-1, true), -1);
     if (got > 0) {
       Tensor Qc = out.narrow(-1, 0, got);
       Tensor coeff = Qc.mH().matmul(v);
@@ -2237,6 +2236,7 @@ static Tensor mps_orthonormal_complement(const Tensor& proj, int64_t want) {
     Tensor safe = nrm.clamp_min(1e-12);
     Tensor vn = v.div(safe.to(v.dtype()));
     out.narrow(-1, got, 1).copy_(vn);
+    res = res.sub(vn.abs().square().mT());
     got += 1;
   }
   return out;
@@ -2385,7 +2385,7 @@ static void svd_kernel_mps(const Tensor& A,
       if (c10::isComplexType(proj.scalar_type())) {
         comp = mps_orthonormal_complement(proj, dim - kk);
       } else {
-        comp = std::get<0>(at::linalg_qr(proj, "reduced")).narrow(-1, 0, dim - kk);
+        comp = std::get<0>(at::linalg_qr(Q, "complete")).narrow(-1, kk, dim - kk);
       }
       M.narrow(-1, kk, dim - kk).copy_(comp);
     };
@@ -2599,17 +2599,6 @@ static void lstsq_kernel_mps(const Tensor& a,
 
   const bool sets_rank = (driver_name != "gels");
   const bool sets_singular_values = (driver_name == "gelsd" || driver_name == "gelss");
-
-  // Without singular values the minimum-norm solution is zero and the rank is 0.
-  // b keeps the right-hand sides, which are then all residual.
-  if (std::min(m, n) == 0) {
-    b.narrow(-2, 0, n).zero_();
-    if (sets_rank) {
-      rank.zero_();
-    }
-    infos.zero_();
-    return;
-  }
 
   const double rcond_value =
       rcond > 0 ? rcond : _get_epsilon(real_dtype) * static_cast<double>(std::max<int64_t>(m, n));
