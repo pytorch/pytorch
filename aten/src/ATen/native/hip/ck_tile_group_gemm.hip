@@ -12,6 +12,7 @@
 #include <ck_tile/ops/gemm.hpp>
 
 #include <array>
+#include <concepts>
 #include <cstdint>
 #include <limits>
 #include <type_traits>
@@ -138,55 +139,140 @@ namespace at::hip::detail {
 				ck_tile::GroupedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>>;
 		};
 
-		// Tile configs for one target. Deliberately undefined so an arch without configs fails to compile.
-		template <amdgcn_target_id Arch, typename DataType>
-        struct CkTileGroupGemmConfigs;
+		// helper function to get the number of elements in one 16 byte load vector op
+		template <typename T>
+		constexpr index_t vector16_elems() { return 16 / sizeof(T); }
 
-		// configs for bf16 and fp16 for gfx950
-		template <>
-		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t> {
-			// Tuned on MI355X (gfx950). Classes that share a tile alias the same type, so they share one instantiation.
-			// Prefer the 32x32x16 MFMA. The ROCm 10.1 compiler keeps MFMA accumulators in arch VGPRs, so a four-wave
-			// tile can hold at most ~192 accumulators per lane without spilling: 256x192 instead of 256x256, or eight
-			// waves (two per SIMD, 128 accumulators each) for 256x256.
-			// Forward (2D x 3D, 3D x 3D): row-major A, column-major B, K % 64 == 0
-			using ForwardN8 = CkTileGroupGemmConfig<256, 192, 64, 32, 32, 16, 2, 2, false, true, false, false, 0, 0, true>; // N % 8 == 0
-			using ForwardN256 = ForwardN8;
-			using ForwardN128 = ForwardN8;
-			using ForwardN64 = ForwardN8;
-			using ForwardN32 = ForwardN8;
-			using ForwardN16 = ForwardN8;
-			using ForwardUnalignedN = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false, false, 0, 1>; // N % 8 != 0, C width 1 for odd N
-
-			// dX (2D x 3D, 3D x 3D): row-major A and B, K % 64 == 0
-			using GradInputN256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, false, false, 0, 0, true>; // N % 256 == 0
-			using GradInputN128 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, false, false>; // N % 128 == 0
-			using GradInputN64 = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, true, false>; // N % 64 == 0
-			using GradInputN32 = GradInputN64; // N % 32 == 0
-			using GradInputN16 = GradInputN64; // N % 16 == 0
-			using GradInputN8 = GradInputN64; // N % 8 == 0
-			using GradInputUnalignedN = ForwardUnalignedN;
-
-			// dW (2D x 2D, jagged K)
-			using WeightGradNM256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, true>; // M, N % 256 == 0
-			using WeightGradNM8 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, true, true, true>; // M, N % 8 == 0
-			using WeightGradNM128 = WeightGradNM8;
-			using WeightGradNM64 = WeightGradNM8;
-			using WeightGradNM32 = WeightGradNM8;
-			using WeightGradNM16 = WeightGradNM8;
-
-			// Anything the classes above reject: K % 64 != 0, column-major A, jagged N (3D x 2D)
-			using FallbackEvenN = CkTileGroupGemmConfig<256, 256, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>; // even N, C width 2
-			using FallbackOddN = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 1>; // jagged or odd N, C width 1
-			// M or N not a multiple of 8: the host alignment check rejects these for 16-bit types, so this is never selected today
-			using WeightGradUnaligned = FallbackOddN;
+		// One size set, tried in this order: the first class whose condition holds and whose config fits is launched.
+		//   N256 / N128 / N64: output dims divisible by 256 / 128 / 64 (dW: both M and N), so a tile that wide fits exactly
+		//   Aligned:           every contiguous dim of A, B and C is a whole number of 16-byte vectors
+		//   Unaligned:         any shape; must pad M, N and K and use 1-element C vectors
+		// A specialization missing a name fails its static_assert.
+		template <typename S>
+		concept ConfigSizeSet = requires {
+			typename S::N256;
+			typename S::N128;
+			typename S::N64;
+			typename S::Aligned;
+			typename S::Unaligned;
 		};
 
+		// One GEMM type (forward, dX or dW). FewTokens is used when the average tokens per expert is below
+		// kFewTokensBelow; it is the slot for shorter tiles, which waste less of each expert's last partial tile.
+		template <typename G>
+		concept GemmTypeConfigs = requires {
+			{ G::kFewTokensBelow } -> std::convertible_to<int64_t>;
+		} && ConfigSizeSet<typename G::Main> && ConfigSizeSet<typename G::FewTokens>;
+
+		template <typename T>
+		concept GroupGemmConfigs = GemmTypeConfigs<typename T::Forward> && GemmTypeConfigs<typename T::GradInput> &&
+				GemmTypeConfigs<typename T::GradWeight> && requires { typename T::Fallback; };
+
+		// Tile configs for one target. Deliberately undefined so an arch without configs fails to compile.
+		template <amdgcn_target_id Arch, typename AType, typename BType, typename OutputType>
+        struct CkTileGroupGemmConfigs;
+
+		// configs for a=bf16, b=bf16, c=bf16 for gfx950
+		// this is re-used for any combo of a=bf16/fp16, b=bf16/fp16, c=bf16/fp16 on gfx950
+		template <>
+		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t, ck_tile::bf16_t, ck_tile::bf16_t> {
+			// Pads M, N and K with 1-element C vectors, so it accepts every shape.
+			using AnyShape = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 1>;
+
+			// Forward (2D x 3D, 3D x 3D): row-major A, column-major B
+			struct Forward {
+				static constexpr int64_t kFewTokensBelow = 0;
+				struct Main {
+					// 256x192 holds the 192 accumulators per lane this compiler keeps in VGPRs; streaming removes per-tile drains
+					using N256 = CkTileGroupGemmConfig<256, 192, 64, 32, 32, 16, 2, 2, false, true, false, false, 0, 0, true>;
+					using N128 = N256;
+					using N64 = N256;
+					using Aligned = N256;
+					using Unaligned = AnyShape;
+				};
+				using FewTokens = Main;
+			};
+
+			// dX (2D x 3D, 3D x 3D): row-major A and B
+			struct GradInput {
+				static constexpr int64_t kFewTokensBelow = 0;
+				struct Main {
+					// eight waves split 256x256 into 128 accumulators per lane
+					using N256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, false, false, 0, 0, true>;
+					using N128 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, false, false>;
+					using N64 = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, true, false>;
+					using Aligned = N64;
+					using Unaligned = AnyShape;
+				};
+				using FewTokens = Main;
+			};
+
+			// dW (2D x 2D): column-major A, row-major B, jagged K, so every config pads K
+			struct GradWeight {
+				static constexpr int64_t kFewTokensBelow = 0;
+				struct Main {
+					using N256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, true>;
+					using N128 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, true, true, true>;
+					using N64 = N128;
+					using Aligned = N128;
+					using Unaligned = AnyShape;
+				};
+				using FewTokens = Main;
+			};
+
+			// Layouts none of the three cover, e.g. column-major A with jagged M or jagged N (3D x 2D)
+			using Fallback = AnyShape;
+		};
 
 		// fp16 has the same element size and MFMA shapes as bf16
 		template <>
-		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::half_t>
-			: CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t> {};
+		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::half_t, ck_tile::half_t, ck_tile::half_t>
+			: CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t, ck_tile::bf16_t, ck_tile::bf16_t> {};
+
+		static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t, ck_tile::bf16_t, ck_tile::bf16_t>>);
+		static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::half_t, ck_tile::half_t, ck_tile::half_t>>);
+
+		// Host-side view of one launch, for picking a config. -1 marks the jagged dim.
+		struct GemmProblem {
+			int64_t M, N, K;
+			int64_t avg_tokens;  // average tokens per expert: the jagged dim's total / groups, or M for 3D x 3D
+			bool aligned;        // every contiguous dim of A, B and C is a whole number of 16-byte vectors
+			bool classes_test_m; // dW: M is an output dim and A's contiguous dim, so the classes test it too
+		};
+
+		// A config fits when every known dim it does not pad is a multiple of its tile. Checked against the config itself,
+		// so a wrong alias falls through to the next class instead of launching an out-of-bounds kernel.
+		template <typename Config>
+		bool config_fits(const GemmProblem& p) {
+			const auto fits = [](int64_t extent, index_t tile, bool pad) { return extent < 0 || pad || extent % tile == 0; };
+			return fits(p.N, Config::N_Tile, Config::PadN) && fits(p.K, Config::K_Tile, Config::PadK) &&
+					(!p.classes_test_m || fits(p.M, Config::M_Tile, Config::PadM));
+		}
+
+		template <GemmTypeConfigs Type, typename Run>
+		void run_gemm_type(const GemmProblem& p, Run&& run) {
+			const auto run_size_set = [&](auto size_set) { // runs either the FewTokens or the Main config
+				using Set = decltype(size_set);
+				const auto divisible = [&](int64_t d) { return p.aligned && p.N % d == 0 && (!p.classes_test_m || p.M % d == 0); };
+				const auto try_run = [&](auto config) {
+					if (!config_fits<decltype(config)>(p)) {
+						return false;
+					}
+					run(config);
+					return true;
+				};
+				if (divisible(256) && try_run(typename Set::N256{})) return;
+				if (divisible(128) && try_run(typename Set::N128{})) return;
+				if (divisible(64) && try_run(typename Set::N64{})) return;
+				if (p.aligned && try_run(typename Set::Aligned{})) return;
+				TORCH_CHECK(try_run(typename Set::Unaligned{}), "ck_tile group gemm: the Unaligned config must accept every shape");
+			};
+			if (p.avg_tokens < Type::kFewTokensBelow) {
+				run_size_set(typename Type::FewTokens{});
+			} else {
+				run_size_set(typename Type::Main{});
+			}
+		}
 
 		using Strides = std::array<int64_t, 3>;
 
@@ -322,7 +408,8 @@ namespace at::hip::detail {
 				int32_t M,                           // -1 if jagged, see prepare_grouped_gemm_data
 				int32_t N,
 				int32_t K,
-				int32_t group_count) {
+				int32_t group_count,
+				int64_t avg_tokens) {                // average tokens per expert, see group_gemm_ck_tile
 			//TODO: not a permanent restriction, will add support for mixed dtypes later
 			TORCH_CHECK(mat_a.scalar_type() == mat_b.scalar_type(), "ck_tile group gemm: mixed dtypes are not supported, got mat_a ", mat_a.scalar_type(), " and mat_b ", mat_b.scalar_type());
 			
@@ -364,70 +451,32 @@ namespace at::hip::detail {
 
 			// TODO: add fp32 config
 			TORCH_CHECK((!std::is_same_v<DataType, float>), "ck_tile group gemm: no fp32 config yet");
-			
-			using Configs = CkTileGroupGemmConfigs<Arch, DataType>;
-			// K < 0 or N < 0 means that dimension is jagged and unknown here.
+
+			using Configs = CkTileGroupGemmConfigs<Arch, DataType, DataType, DataType>;
+			// Contiguous dims: A's is K (row-major) or M, B's is N (row-major) or K, C's is N. A jagged dim (-1) is never contiguous.
+			const auto vectors_fit = [](int64_t extent, index_t elems) { return extent < 0 || extent % elems == 0; };
+			const GemmProblem problem{
+				M, N, K, avg_tokens,
+				vectors_fit(a_row_major ? K : M, vector16_elems<DataType>()) &&
+						vectors_fit(b_row_major ? N : K, vector16_elems<DataType>()) &&
+						vectors_fit(N, vector16_elems<DataType>()),
+				/*classes_test_m=*/K < 0};
+
 			if (K < 0) {
 				// dW (2D x 2D): K is jagged, M and N are fixed per group
-				if (M % 256 == 0 && N % 256 == 0) {
-					run_with_config(typename Configs::WeightGradNM256{});
-				} else if (M % 128 == 0 && N % 128 == 0) {
-					run_with_config(typename Configs::WeightGradNM128{});
-				} else if (M % 64 == 0 && N % 64 == 0) {
-					run_with_config(typename Configs::WeightGradNM64{});
-				} else if (M % 32 == 0 && N % 32 == 0) {
-					run_with_config(typename Configs::WeightGradNM32{});
-				} else if (M % 16 == 0 && N % 16 == 0) {
-					run_with_config(typename Configs::WeightGradNM16{});
-				} else if (M % 8 == 0 && N % 8 == 0) {
-					run_with_config(typename Configs::WeightGradNM8{});
-				} else {
-					run_with_config(typename Configs::WeightGradUnaligned{});
-				}
-			} else if (a_row_major && !b_row_major && K % 64 == 0 && N > 0) {
-				// Forward (2D x 3D, 3D x 3D): no K padding and row-major A (no M padding)
-				auto run = [&](auto config) {
+				run_gemm_type<typename Configs::GradWeight>(problem, run_with_config);
+			} else if (a_row_major && !b_row_major && N > 0) {
+				// Forward (2D x 3D, 3D x 3D)
+				run_gemm_type<typename Configs::Forward>(problem, [&](auto config) {
 					run_ck_tile_group_gemm<DataType, RowMajor, ColMajor, decltype(config)>(group_args.const_data_ptr(), group_count, stream);
-				};
-				if (N % 256 == 0) {
-					run(typename Configs::ForwardN256{});
-				} else if (N % 128 == 0) {
-					run(typename Configs::ForwardN128{});
-				} else if (N % 64 == 0) {
-					run(typename Configs::ForwardN64{});
-				} else if (N % 32 == 0) {
-					run(typename Configs::ForwardN32{});
-				} else if (N % 16 == 0) {
-					run(typename Configs::ForwardN16{});
-				} else if (N % 8 == 0) {
-					run(typename Configs::ForwardN8{});
-				} else {
-					run(typename Configs::ForwardUnalignedN{});
-				}
-			} else if (a_row_major && b_row_major && K % 64 == 0 && N > 0) {
-				// dX (2D x 3D, 3D x 3D): as forward, with row-major B
-				auto run = [&](auto config) {
+				});
+			} else if (a_row_major && b_row_major && N > 0) {
+				// dX (2D x 3D, 3D x 3D)
+				run_gemm_type<typename Configs::GradInput>(problem, [&](auto config) {
 					run_ck_tile_group_gemm<DataType, RowMajor, RowMajor, decltype(config)>(group_args.const_data_ptr(), group_count, stream);
-				};
-				if (N % 256 == 0) {
-					run(typename Configs::GradInputN256{});
-				} else if (N % 128 == 0) {
-					run(typename Configs::GradInputN128{});
-				} else if (N % 64 == 0) {
-					run(typename Configs::GradInputN64{});
-				} else if (N % 32 == 0) {
-					run(typename Configs::GradInputN32{});
-				} else if (N % 16 == 0) {
-					run(typename Configs::GradInputN16{});
-				} else if (N % 8 == 0) {
-					run(typename Configs::GradInputN8{});
-				} else {
-					run(typename Configs::GradInputUnalignedN{});
-				}
-			} else if (N < 0 || N % 2 != 0) {
-				run_with_config(typename Configs::FallbackOddN{});
+				});
 			} else {
-				run_with_config(typename Configs::FallbackEvenN{});
+				run_with_config(typename Configs::Fallback{});
 			}
 		}
 	}
@@ -475,11 +524,15 @@ namespace at::hip::detail {
 		int64_t K = mat_a.size(-1);
 		int64_t N = mat_b.size(-1);
 		int64_t group_count = 0;
+		// Average tokens per expert, known without reading offs: the jagged dim's total over the groups, else M.
+		int64_t avg_tokens = M;
 		if (a_is_2d && b_is_2d) {
 			group_count = offs->size(0);
+			avg_tokens = group_count > 0 ? K / group_count : 0;
 			K = -1;
 		} else if (a_is_2d) {
 			group_count = mat_b.size(0);
+			avg_tokens = group_count > 0 ? M / group_count : 0;
 			M = -1;
 		} else if (b_is_2d) {
 			group_count = mat_a.size(0);
@@ -527,7 +580,7 @@ namespace at::hip::detail {
 			using DataType = decltype(dtype_tag);
 			launch_ck_tile_group_gemm<decltype(arch_tag)::value, DataType>(
 					mat_a, mat_b, offs, out, group_args, a_row_major, b_row_major,
-					static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), static_cast<int32_t>(group_count));
+					static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), static_cast<int32_t>(group_count), avg_tokens);
 		};
 		auto launch_for_arch = [&](auto dtype_tag) {
 			if (at::detail::getCUDAHooks().isGPUArch({"gfx950"})) {
