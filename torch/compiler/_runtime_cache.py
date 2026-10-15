@@ -89,32 +89,39 @@ def _live_autotuners() -> list[Autotuner]:
     return [obj for obj in gc.get_objects() if issubclass(type(obj), Autotuner)]
 
 
-def _importable(root: Path, digest: str) -> bool:
+def _importable(root: Path, digest: str, keys: set[str]) -> bool:
+    # import_runtime_cache's own rule: besides this cache's entries, only
+    # marker-prefixed ones (the staging directory of an import that is running
+    # or was killed), and a marker, if any, for this cache.
     from torch.compiler._triton_runtime_cache import _READY
 
     if not root.is_dir():
         return not root.exists()
     marker = root / _READY
-    return not any(root.iterdir()) or (
-        marker.is_file() and marker.read_text() == digest
+    if marker.exists() and (
+        marker.is_symlink() or not marker.is_file() or marker.read_text() != digest
+    ):
+        return False
+    return all(
+        entry.name in keys or entry.name.startswith(_READY) for entry in root.iterdir()
     )
 
 
-def _serving_triton_root(cache: ModuleType, digest: str) -> str:
+def _serving_triton_root(cache: ModuleType, digest: str, keys: set[str]) -> str:
     """Point Triton at a cache directory to import a runtime cache into, and turn
     its autotuning cache on, for the rest of the process.
 
-    That is TRITON_CACHE_DIR if it is empty or already holds this cache, and a
-    fresh directory otherwise, since the import refuses to mix with unrelated
-    entries (Inductor points TRITON_CACHE_DIR at its shared cache once it
-    compiles). Autotuners fix cache_results when they are decorated, so
-    existing ones are switched too, or they would benchmark again instead of
-    reading the imported decisions.
+    That is TRITON_CACHE_DIR if the import accepts it, i.e. it holds only this
+    cache's entries, complete or partial, and a fresh directory otherwise, since
+    the import refuses to mix with unrelated entries (Inductor points
+    TRITON_CACHE_DIR at its shared cache once it compiles). Autotuners fix
+    cache_results when they are decorated, so existing ones are switched too,
+    or they would benchmark again instead of reading the imported decisions.
     """
     from triton import knobs
 
     configured = os.environ.get("TRITON_CACHE_DIR")
-    if configured is None or not _importable(Path(configured), digest):
+    if configured is None or not _importable(Path(configured), digest, keys):
         os.environ["TRITON_CACHE_DIR"] = _private_directory(
             "torch_precompile_triton_load_"
         )
@@ -173,7 +180,7 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
                 if hashlib.sha256(self.content).hexdigest() != self.key:
                     raise RuntimeError("Corrupt Triton runtime-cache artifact")
                 try:
-                    cache._decode(self.content, context)
+                    keys = {key for key, _ in cache._decode(self.content, context)[1]}
                 except (AttributeError, KeyError, TypeError, ValueError) as exc:
                     raise RuntimeError("Malformed Triton runtime-cache bundle") from exc
             except RuntimeError as exc:
@@ -181,7 +188,7 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
                 cause = exc
             else:
                 try:
-                    root = _serving_triton_root(cache, self.key)
+                    root = _serving_triton_root(cache, self.key, keys)
                 except Exception as exc:
                     problem = f"Triton has no cache directory to import it into ({exc})"
                     cause = exc
@@ -656,16 +663,12 @@ def freeze_runtime_cache(
     """Freeze the scope's static Triton kernels, C++ kernel binaries and Triton
     JIT cache into the cache artifact and pass it to ``write``.
 
-    Pending async compiles are waited on and every recorded C++ kernel is built
-    before ``snapshot`` renders the artifact, so what they record is in it. A
+    Every recorded C++ kernel is built before ``snapshot`` renders the
+    artifact; every graph compile already waited on its own Triton kernels. A
     kernel that cannot be frozen raises, since precompile.load could not serve
     it without compiling. The caller must stop compiling before calling this: a
-    kernel submitted on another thread after the wait is neither waited on nor
-    frozen.
+    kernel compiled on another thread meanwhile is neither waited on nor frozen.
     """
-    import torch
-    from torch._inductor.async_compile import AsyncCompile
-
     owner = _active_capture()
     if owner is None:
         raise RuntimeError("precompile.capture has no runtime capture scope")
@@ -673,15 +676,12 @@ def freeze_runtime_cache(
     with owner.freeze_lock:
         if cache is not None and _current_root(cache) != owner.cache_root:
             raise RuntimeError("Triton's cache directory changed during the capture")
-        AsyncCompile.drain_pending()
         with _capture_lock:
             cpp_loads = [load for _, load in owner.cpp_kernels.values()]
         # Finishes pending C++ builds and builds loads that were never forced, so
         # no binary is missing or partially written when it is frozen.
         for load in cpp_loads:
             load()
-        if torch.cuda.is_initialized():
-            torch.cuda.synchronize()
         artifact = snapshot()
         artifacts = (
             CacheArtifactManager.deserialize(artifact) if artifact is not None else {}
