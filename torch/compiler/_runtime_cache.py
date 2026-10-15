@@ -161,6 +161,7 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
 
     def import_into_triton(self, *, strict: bool) -> None:
         cache = _triton_runtime_cache()
+        context = _runtime_context()
         problem = cause = root = None
         if cache is None:
             problem = "Triton is not installed or too old to import one"
@@ -172,11 +173,21 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
                 served = (self.key, str(cache.runtime_cache_root()))
                 if served in _imported_triton_runtime:
                     return
+            # Validate before _serving_triton_root repoints Triton for the process.
             try:
-                root = _serving_triton_root(cache, self.key)
+                if hashlib.sha256(self.content).hexdigest() != self.key:
+                    raise RuntimeError("Corrupt Triton runtime-cache artifact")
+                cache._decode(self.content, context)
             except Exception as exc:
-                problem = f"Triton has no cache directory to import it into ({exc})"
+                problem = f"it was rejected ({exc})"
                 cause = exc
+            else:
+                try:
+                    root = _serving_triton_root(cache, self.key)
+                except Exception as exc:
+                    problem = f"Triton has no cache directory to import it into ({exc})"
+                    cause = exc
+        # root is None whenever cache is; the cache check narrows cache for pyrefly.
         if cache is None or root is None:
             message = (
                 f"The precompile cache contains a Triton runtime cache, but {problem}"
@@ -192,16 +203,15 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
             if imported in _imported_triton_runtime:
                 return
             try:
-                if hashlib.sha256(self.content).hexdigest() != self.key:
-                    raise RuntimeError("Corrupt Triton runtime-cache artifact")
-                cache.import_runtime_cache(self.content, context=_runtime_context())
+                cache.import_runtime_cache(self.content, context=context)
             except Exception as exc:
                 if strict:
                     raise
                 # Raising here would stop the artifacts populated after this one
                 # (populate_first), leaving the frozen Inductor kernels cold too.
-                # The TRITON_CACHE_DIR and autotuning settings _serving_triton_root
-                # made persist, so later JIT compiles land in that directory.
+                # A failure here (the directory's entries conflict, or a write
+                # fails) keeps the TRITON_CACHE_DIR and autotuning settings
+                # _serving_triton_root made, so later JIT compiles land there.
                 log.warning(
                     "Could not import the precompile cache's Triton runtime cache "
                     "(%s); Triton JIT kernels will compile or autotune on first use",
@@ -397,14 +407,15 @@ def _triton_export_diagnostic(
     compile_id = getattr(kernel, "compile_id", None)
     # CachingAutotuner.precompile drops configs once it has compile_results.
     configs = getattr(kernel, "configs", None)
+    direction = None
+    if compile_id is not None:
+        direction = "backward" if kernel.is_backward else "forward"
     return {
         "reason": reason,
         "kernel_name": kernel.inductor_meta.get("kernel_name"),
         "filename": getattr(kernel, "filename", None),
         "compile_id": str(compile_id) if compile_id is not None else None,
-        "direction": None
-        if compile_id is None
-        else ("backward" if kernel.is_backward else "forward"),
+        "direction": direction,
         "heuristic": getattr(getattr(kernel, "heuristic_type", None), "name", None),
         "config_count": len(kernel.compile_results if configs is None else configs),
         "launcher_count": len(kernel.launchers),
@@ -533,15 +544,23 @@ def _own_triton_cache(settings: contextlib.ExitStack) -> str | None:
     JIT functions and autotuners from before the scope keep compiled kernels
     and decisions in memory, which a launch in the scope would reuse without
     touching the directory, so those are dropped and produced again on first
-    use. Autotuners fix cache_results when they are decorated, so existing
-    ones are switched on for the scope too.
+    use. When the scope closes, a JIT function gets back the per-device caches
+    and an autotuner the decisions the scope did not produce again, so ones
+    the scope never launched keep their state. Autotuners fix cache_results
+    when they are decorated, so existing ones are switched on for the scope too.
     """
     if _triton_runtime_cache() is None:
         return None
     from triton import knobs
+    from triton.backends import backends
     from triton.runtime import driver
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
+
+    # Without an active backend no JIT kernel runs, and the interpreter never
+    # uses the cache.
+    if not any(backend.driver.is_active() for backend in backends.values()):
+        return None
 
     root = _private_directory("torch_precompile_triton_")
     # Triton builds its driver's utility module (cuda_utils, hip_utils) into
@@ -562,9 +581,10 @@ def _own_triton_cache(settings: contextlib.ExitStack) -> str | None:
     knobs.cache.dir = root
     knobs.autotuning.cache = True
     jit_functions, tuners = _live_objects(JITFunction, Autotuner)
+    compiled = [(fn, dict(fn.device_caches)) for fn in jit_functions]
     for fn in jit_functions:
         fn.device_caches.clear()
-    restore = [(tuner, tuner.cache_results) for tuner in tuners]
+    tuned = [(tuner, tuner.cache_results, dict(tuner.cache)) for tuner in tuners]
     for tuner in tuners:
         # Triton never writes a decision to disk when a config it tuned among
         # has a pre_hook, so dropping it would only benchmark again.
@@ -573,11 +593,17 @@ def _own_triton_cache(settings: contextlib.ExitStack) -> str | None:
             tuner.cache.clear()
         tuner.cache_results = not knobs.runtime.interpret
 
-    def restore_cache_results() -> None:
-        for tuner, cache_results in restore:
+    def restore() -> None:
+        # What the scope compiled or tuned again is what ships, so it wins.
+        for fn, caches in compiled:
+            for device, cache in caches.items():
+                fn.device_caches.setdefault(device, cache)
+        for tuner, cache_results, decisions in tuned:
             tuner.cache_results = cache_results
+            for key, config in decisions.items():
+                tuner.cache.setdefault(key, config)
 
-    settings.callback(restore_cache_results)
+    settings.callback(restore)
     return root
 
 
