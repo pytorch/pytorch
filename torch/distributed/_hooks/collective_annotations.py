@@ -10,7 +10,12 @@ per-collective pre/post hooks instead, until
 from collections.abc import Callable
 from typing import TYPE_CHECKING, TypeAlias
 
-from torch._C._distributed_c10d import HookOpName, PreHookArgs, ProcessGroup
+from torch._C._distributed_c10d import (
+    HookOpName,
+    PostHookArgs,
+    PreHookArgs,
+    ProcessGroup,
+)
 from torch.distributed.distributed_c10d import (
     _world,
     Backend,
@@ -29,28 +34,28 @@ if TYPE_CHECKING:
 
 
 # The fields saveNcclMeta in torch/csrc/profiler/util.cpp writes onto a
-# collective's record_param_comms event, e.g. "Collective name" -> "allreduce".
+# collective's record_param_comms event, e.g. "Collective name" -> "all_reduce".
 CollectiveMetadata: TypeAlias = dict[str, str | int | bool]
 
 
-# The collective name ProcessGroupNCCL passes to record_param_comms for each op
-# that fires c10d hooks. gather_into_tensor also fires GATHER, so it is named
-# "gather" where ProcessGroupNCCL records "gather_single".
-_NCCL_COLLECTIVE_NAMES: dict[HookOpName, str] = {
+# The collective name for each op that fires c10d hooks: the collective's family,
+# whatever API variant issued it (list, _base, coalesced), so names don't depend
+# on the API or the backend.
+_COLLECTIVE_NAMES: dict[HookOpName, str] = {
     HookOpName.SEND: "send",
     HookOpName.RECV: "recv",
     HookOpName.BROADCAST: "broadcast",
-    HookOpName.ALLREDUCE: "allreduce",
-    HookOpName.ALLREDUCE_COALESCED: "allreduce_coalesced",
+    HookOpName.ALLREDUCE: "all_reduce",
+    HookOpName.ALLREDUCE_COALESCED: "all_reduce",
     HookOpName.REDUCE: "reduce",
     HookOpName.ALLGATHER: "all_gather",
-    HookOpName.ALLGATHER_BASE: "_allgather_base",
-    HookOpName.ALLGATHER_INTO_TENSOR_COALESCED: "allgather_into_tensor_coalesced",
+    HookOpName.ALLGATHER_BASE: "all_gather",
+    HookOpName.ALLGATHER_INTO_TENSOR_COALESCED: "all_gather",
     HookOpName.REDUCE_SCATTER: "reduce_scatter",
-    HookOpName.REDUCE_SCATTER_BASE: "_reduce_scatter_base",
-    HookOpName.REDUCE_SCATTER_TENSOR_COALESCED: "reduce_scatter_tensor_coalesced",
+    HookOpName.REDUCE_SCATTER_BASE: "reduce_scatter",
+    HookOpName.REDUCE_SCATTER_TENSOR_COALESCED: "reduce_scatter",
     HookOpName.ALLTOALL: "all_to_all",
-    HookOpName.ALLTOALL_BASE: "all_to_allv",
+    HookOpName.ALLTOALL_BASE: "all_to_all",
     HookOpName.GATHER: "gather",
     HookOpName.SCATTER: "scatter",
     HookOpName.BARRIER: "barrier",
@@ -90,16 +95,17 @@ def _nccl_collective_metadata(
     group: ProcessGroup, group_fields: CollectiveMetadata, args: PreHookArgs
 ) -> CollectiveMetadata:
     """Mirrors the fields ``saveNcclMeta`` writes for a ProcessGroupNCCL
-    collective, in the same format, with the group's from ``group_fields``. Split
-    sizes, Comms Id, the p2p Seq and the global rank start/stride aren't available
-    from the hook."""
+    collective, in the same format except for the collective name (see
+    ``_COLLECTIVE_NAMES``), with the group's from ``group_fields``. Split sizes,
+    Comms Id, the p2p Seq and the global rank start/stride aren't available from
+    the hook."""
     op = args.name
     inputs = args.input_tensors
     outputs = inputs if op in _IN_PLACE_OPS else args.output_tensors
     metadata: CollectiveMetadata = {
         # An op c10d adds later gets its lowercased name rather than raising,
         # which would fail the collective.
-        "Collective name": _NCCL_COLLECTIVE_NAMES.get(op, op.name.lower()),
+        "Collective name": _COLLECTIVE_NAMES.get(op, op.name.lower()),
         "In msg nelems": sum(t.numel() for t in inputs),
         "Out msg nelems": sum(t.numel() for t in outputs),
         **group_fields,
@@ -145,7 +151,7 @@ def _pgs_to_annotate() -> list[ProcessGroup]:
 def register_collective_annotation_hooks(
     annotator: "graph | CuspyObserver",
     push: Callable[[CollectiveMetadata], None],
-    pop: Callable[[], None],
+    pop: Callable[[], object],
 ) -> None:
     """Hook every existing process group that runs CUDA collectives on NCCL, so that
     each of its collectives calls ``push(metadata)`` just before it launches its
@@ -167,6 +173,10 @@ def register_collective_annotation_hooks(
     thread is issuing collectives on a hooked group, e.g. between steps. Other
     groups, such as async checkpointing's Gloo group, are never touched.
     """
+
+    def post_hook(_: PostHookArgs) -> None:
+        pop()
+
     for group in _pgs_to_annotate():
         group_fields = _process_group_fields(group)
 
@@ -179,7 +189,7 @@ def register_collective_annotation_hooks(
             push(_nccl_collective_metadata(group, group_fields, args))
 
         group.register_pre_hook(id(annotator), pre_hook)
-        group.register_post_hook(id(annotator), lambda _: pop())
+        group.register_post_hook(id(annotator), post_hook)
 
 
 def unregister_collective_annotation_hooks(

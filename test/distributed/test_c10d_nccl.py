@@ -7805,7 +7805,7 @@ class CollectiveAnnotationTest(MultiProcContinuousTest):
         ]
         self.assertTrue(annotations, "no kernel carries collective metadata")
         for annotation in annotations:
-            self.assertEqual(annotation["Collective name"], "allreduce")
+            self.assertEqual(annotation["Collective name"], "all_reduce")
             self.assertEqual(annotation["In msg nelems"], 1024)
 
     @skipIfRocm
@@ -7838,7 +7838,7 @@ class CollectiveAnnotationTest(MultiProcContinuousTest):
         ]
         self.assertTrue(kernels, "no NCCL kernel in the trace")
         for kernel in kernels:
-            self.assertEqual(kernel["args"]["Collective name"], "allreduce")
+            self.assertEqual(kernel["args"]["Collective name"], "all_reduce")
             self.assertEqual(kernel["args"]["In msg nelems"], 1024)
 
 
