@@ -698,8 +698,8 @@ class TestTransformersAccelerator(NNTestCase):
         # Naively patching the NaN out of the softmax *output* afterwards
         # (nan_to_num/masked_fill/where) does not work: softmax()'s backward
         # reuses its own (NaN) saved forward output internally, so NaN
-        # reappears in softmax's own backward pass regardless. The fix
-        # computes a NaN-free softmax by hand for masked rows instead.
+        # reappears in softmax's own backward pass regardless. The fix uses
+        # torch._safe_softmax, which is NaN-free in forward and backward.
         #
         # need_weights=False already avoids NaN in the output for this exact
         # input (cross-checked below as the reference), which is what

@@ -7075,32 +7075,12 @@ def multi_head_attention_forward(
         if not torch.jit.is_scripting():
             del q_scaled, k
         if attn_mask is not None:
-            # A row that is fully masked out (all -inf before softmax) is
-            # mathematically 0/0 under plain softmax, producing an all-NaN
-            # row. That row's contribution is typically excluded from the
-            # loss by the caller, but autograd still backprops through it --
-            # and because softmax()'s backward reuses its own (NaN) saved
-            # forward output internally, patching the NaN out of the *value*
-            # afterwards (nan_to_num/masked_fill/where) does NOT stop NaN
-            # from reappearing in softmax's own backward pass. The fix has
-            # to avoid ever materializing NaN in the forward computation in
-            # the first place, so fully-masked rows get a dedicated,
-            # NaN-free softmax computed by hand: same semantic the fused
-            # SDPA kernels adopted in gh-131863 (out[masked_out_rows] = 0).
-            max_vals = attn_output_weights.max(dim=-1, keepdim=True).values
-            fully_masked = torch.isneginf(max_vals)
-            safe_max = torch.where(
-                fully_masked, torch.zeros_like(max_vals), max_vals
-            )
-            exp_weights = torch.exp(attn_output_weights - safe_max)
-            exp_weights = torch.where(
-                fully_masked.expand_as(exp_weights),
-                torch.zeros_like(exp_weights),
-                exp_weights,
-            )
-            sums = exp_weights.sum(dim=-1, keepdim=True)
-            safe_sums = torch.where(fully_masked, torch.ones_like(sums), sums)
-            attn_output_weights = exp_weights / safe_sums
+            # A fully masked row (all -inf) is 0/0 under plain softmax and gives
+            # NaN weights; autograd then carries the NaN into every parameter
+            # gradient, even when the caller excludes that row from the loss.
+            # _safe_softmax returns 0 for fully masked rows, NaN-free in both
+            # forward and backward: the same semantic SDPA uses (gh-133882).
+            attn_output_weights = torch._safe_softmax(attn_output_weights, dim=-1)
         else:
             attn_output_weights = softmax(attn_output_weights, dim=-1)
         if dropout_p > 0.0:
