@@ -870,14 +870,14 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   }
 
   // `compare` guarantees that rhs is always a TupleType.
-  auto rhsTuple = rhs.expect<TupleType>();
-  if (schema_ == nullptr && rhsTuple->schema_ == nullptr) {
+  const auto& rhsTuple = rhs.expectRef<TupleType>();
+  if (schema_ == nullptr && rhsTuple.schema_ == nullptr) {
     return typesSame;
   }
-  if (schema_ == nullptr || rhsTuple->schema_ == nullptr) {
+  if (schema_ == nullptr || rhsTuple.schema_ == nullptr) {
     return false;
   }
-  return *schema_ == *rhsTuple->schema_;
+  return *schema_ == *rhsTuple.schema_;
 }
 
 std::string TupleType::str() const {

@@ -80,6 +80,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_no_gpu,
     skip_if_odd_worldsize,
     skip_if_rocm_multiprocess,
+    skip_if_rocm_ver_atleast_multiprocess,
     skip_if_small_worldsize,
     TEST_SKIPS,
     verify_ddp_error_logged,
@@ -87,6 +88,7 @@ from torch.testing._internal.common_distributed import (
     with_nccl_blocking_wait,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     FILE_SCHEMA,
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -549,7 +551,7 @@ class Barrier:
 
             if time.time() - start_time > timeout:
                 raise RuntimeError("barrier timeout")
-            time.sleep(0.1)
+            time.sleep(0.01)
 
 
 class TestDistBackend(MultiProcessTestCase):
@@ -560,6 +562,12 @@ class TestDistBackend(MultiProcessTestCase):
         super().setUpClass()
 
     def setUp(self):
+        # Decorators set `_skipped_reason` when every rank would skip; skip here
+        # to avoid spawning ranks. Sandcastle reports rank skips as passes, so
+        # leave those to the ranks.
+        reason = getattr(getattr(self, self._testMethodName), "_skipped_reason", None)
+        if reason is not None and not IS_SANDCASTLE:
+            self.skipTest(reason)
         super().setUp()
         # initialize temp directories
         initialize_temp_directories()
@@ -4855,9 +4863,15 @@ class DistributedTest:
                     model.parameters(), model_optim_in_bwd.parameters(), strict=True
                 ):
                     self.assertEqual(p1, p2, "Parameters not initially equal!")
-                # Enable determinism in cudnn operators
-                with torch.backends.cudnn.flags(
-                    enabled=True, deterministic=True, benchmark=False
+                # The loss diverges quickly, so any run-to-run nondeterminism
+                # (e.g. rocBLAS GEMMs using atomics) is amplified past the
+                # default tolerances. Enable determinism in cudnn and BLAS.
+                # ResNet50's adaptive average pool backward has no deterministic path.
+                with (
+                    torch.backends.cudnn.flags(
+                        enabled=True, deterministic=True, benchmark=False
+                    ),
+                    DeterministicGuard(True, warn_only=j == 2),
                 ):
                     for i in range(8):
                         inp = (
@@ -7463,7 +7477,7 @@ class DistributedTest:
                 DDPUnevenTestInput(
                     name="large_conv_model",
                     model=large_model,
-                    inp=torch.ones(batch, batch, dim, dim, device=rank),
+                    inp=torch.ones(batch, batch, 64, 64, device=rank),
                     sync_interval=1,
                 ),
                 DDPUnevenTestInput(
@@ -8923,11 +8937,17 @@ class DistributedTest:
                         monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks
                     )
 
+            # The timed-out wait aborted nccl_pg's communicator on ranks != 0,
+            # so abort it on every rank. Finalizing it on rank 0 in
+            # destroy_process_group() runs an intra-node barrier with the
+            # aborted peers (NCCL >= 2.31), which fails.
+            dist.distributed_c10d._abort_process_group(nccl_pg)
             self._barrier(timeout=30)
 
         @with_nccl_blocking_wait
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
         def test_monitored_barrier_allreduce_hang(self):
             # tests expected behavior when nonzero rank hangs and we want to
             # report first timed out rank.
@@ -8936,6 +8956,7 @@ class DistributedTest:
         @with_nccl_blocking_wait
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
         def test_monitored_barrier_allreduce_hang_wait_all_ranks(self):
             # Need to disable TORCH_NCCL_DUMP_ON_TIMEOUT otherwise this test times out
             os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"

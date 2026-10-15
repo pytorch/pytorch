@@ -18,7 +18,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   build-windows-magma:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     runs-on: windows-2022
     strategy:

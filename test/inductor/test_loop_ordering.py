@@ -19,6 +19,7 @@ from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
 from torch._inductor.scheduler import (
+    _iter_loop_state_nodes,
     _LoopMutationTracker,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
@@ -39,7 +40,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
 
 
 # set so that metrics appear
@@ -53,6 +54,7 @@ if HAS_GPU:
 
 class MockScheduler:
     available_buffer_names = ()
+    _loop_mutation_trackers = []
 
     @staticmethod
     def get_backend(cls, *args):
@@ -96,6 +98,17 @@ class ImplDetailTest(MockSchedulerTest):
         if not prefix:
             raise AssertionError
         return prefix
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _tracking(*nodes):
+        tracker = _LoopMutationTracker(nodes)
+        trackers = V.graph.scheduler._loop_mutation_trackers
+        trackers.append(tracker)
+        try:
+            yield tracker
+        finally:
+            trackers.pop()
 
     @staticmethod
     def _create_computed_buffer_ax2(sizes=(32, 64), strides=None):
@@ -279,13 +292,10 @@ class ImplDetailTest(MockSchedulerTest):
             V.graph.scheduler, self._create_computed_buffer_ax2()
         )
         original_body = computed_node._body
-        tracker = _LoopMutationTracker.create((template_node, computed_node))
-
-        try:
+        with self._tracking(template_node, computed_node) as tracker:
             computed_node.apply_indexing_exprs({})
             self.assertIsNot(computed_node._body, original_body)
-        finally:
-            tracker.finish(rollback=True)
+        tracker.finish(rollback=True)
 
         self.assertIsNone(template_node._body)
         self.assertIs(computed_node._body, original_body)
@@ -294,29 +304,66 @@ class ImplDetailTest(MockSchedulerTest):
         """A nested scope committing must not hide the mutation from the outer one."""
         snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
         original_body = snode._body
-        outer = _LoopMutationTracker.create((snode,))
-        inner = _LoopMutationTracker.create((snode,))
-
-        try:
-            snode.apply_new_loop_order([1, 0])
-            self.assertIsNot(snode._body, original_body)
-            # The inner scope keeps the mutation, but the outer scope still saw
-            # it via the chained listener and can roll it back.
+        with self._tracking(snode) as outer:
+            with self._tracking(snode) as inner:
+                snode.apply_new_loop_order([1, 0])
+                self.assertIsNot(snode._body, original_body)
+            # The inner scope keeps the mutation, but the outer scope was also
+            # notified and can roll it back.
             inner.finish(rollback=False)
             self.assertIsNot(snode._body, original_body)
-        finally:
-            outer.finish(rollback=True)
+        outer.finish(rollback=True)
 
         self.assertIs(snode._body, original_body)
-        self.assertIsNone(snode._loop_mutation_listener)
+        self.assertEqual(V.graph.scheduler._loop_mutation_trackers, [])
+
+    def test_can_fuse_pops_loop_mutation_tracker_on_exception(self):
+        scheduler = mock.Mock(spec=Scheduler)
+        scheduler._loop_mutation_trackers = []
+        scheduler._fusion_memory_state = None
+        snodes = [
+            SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+            for _ in range(2)
+        ]
+        scheduler._can_fuse_impl.side_effect = RuntimeError("stop")
+        with self.assertRaisesRegex(RuntimeError, "stop"):
+            Scheduler.can_fuse(scheduler, *snodes)
+
+        self.assertEqual(scheduler._loop_mutation_trackers, [])
+
+    def test_can_fuse_does_not_walk_candidates_without_mutation(self):
+        scheduler = mock.Mock(spec=Scheduler)
+        scheduler.available_buffer_names = ()
+        scheduler._loop_mutation_trackers = []
+        scheduler._fusion_memory_state = None
+        snodes = [
+            SchedulerNode(scheduler, self._create_computed_buffer_ax2())
+            for _ in range(2)
+        ]
+        scheduler._can_fuse_impl.return_value = False
+
+        with mock.patch(
+            "torch._inductor.scheduler._iter_loop_state_nodes",
+            wraps=_iter_loop_state_nodes,
+        ) as iter_nodes:
+            self.assertFalse(Scheduler.can_fuse(scheduler, *snodes))
+            iter_nodes.assert_not_called()
+
+            # Control: a mutation does trigger the walk, so the spy is wired up.
+            def mutate(*args, **kwargs):
+                snodes[0].apply_new_loop_order([1, 0])
+                return False
+
+            scheduler._can_fuse_impl.side_effect = mutate
+            self.assertFalse(Scheduler.can_fuse(scheduler, *snodes))
+            iter_nodes.assert_called()
 
     def test_expand_dimension_loop_state_rollback(self):
         snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
         original_state = snode.snapshot_loop_state()
-        tracker = _LoopMutationTracker.create((snode,))
-
-        snode.expand_dimension_for_pointwise_node(0, 64)
-        self.assertNotEqual(snode.snapshot_loop_state(), original_state)
+        with self._tracking(snode) as tracker:
+            snode.expand_dimension_for_pointwise_node(0, 64)
+            self.assertNotEqual(snode.snapshot_loop_state(), original_state)
         tracker.finish(rollback=True)
 
         self.assertEqual(snode.snapshot_loop_state(), original_state)
@@ -338,12 +385,11 @@ class ImplDetailTest(MockSchedulerTest):
         original_body = snodes[0]._body
         original_group = subkernel.group
         original_read_writes = foreach.read_writes
-        tracker = _LoopMutationTracker.create((foreach,))
-
-        snodes[0].expand_dimension_for_pointwise_node(0, 64)
-        subkernel.group = (original_group[0], (sympy.S.One, sympy.S.One))
-        refresh_group_node_dependencies(subkernel)
-        refresh_group_node_dependencies(foreach)
+        with self._tracking(foreach) as tracker:
+            snodes[0].expand_dimension_for_pointwise_node(0, 64)
+            subkernel.group = (original_group[0], (sympy.S.One, sympy.S.One))
+            refresh_group_node_dependencies(subkernel)
+            refresh_group_node_dependencies(foreach)
         tracker.finish(rollback=True)
 
         self.assertIs(snodes[0]._body, original_body)
@@ -1993,6 +2039,18 @@ class MemoryCoalescingTest(MockSchedulerTest):
             result = tiling_utils.solve_for_zero(expr)
             self.assertEqual(result, expected)
 
+    def test_solve_for_zero_floordiv_does_not_query_constant(self):
+        from torch._inductor import tiling_utils
+
+        x = sympy.Symbol("x", integer=True, nonnegative=True)
+        expr = FloorDiv(Mod(x, 4), 2)
+        with mock.patch.object(
+            FloorDiv,
+            "is_constant",
+            side_effect=AssertionError("FloorDiv.is_constant is unsafe"),
+        ):
+            self.assertIsNone(tiling_utils.solve_for_zero(expr))
+
     def test_solve_for_tiling(self):
         from torch._inductor import tiling_utils
 
@@ -2460,6 +2518,83 @@ class TestSplitIterationRanges(MockSchedulerTest):
                 [sympy.Integer(2), sympy.Integer(2)],
                 [[sympy.Integer(2)], []],
             )
+
+    @staticmethod
+    def _unbacked_size_like():
+        """An unbacked symint constrained size-like, as a sympy symbol."""
+        from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+        symint = V.graph.sizevars.shape_env.create_unbacked_symint()
+        _constrain_range_for_size(symint)
+        return symint.node.expr
+
+    def test_unbacked_leftover_extent_raises_cant_split(self):
+        """Leftover extent is an unbacked size-like symbol.
+
+        Same shape as test_leftover_extent_raises_cant_split, but the
+        unconsumed group extent is unbacked rather than a constant. The
+        leftover check must not try to resolve it to a concrete hint:
+        guarding_hint_or_throw raises GuardOnDataDependentSymNode, which is not
+        a CantSplit, so it escapes the `except CantSplit` in every caller and
+        aborts the whole compile instead of just skipping the fusion.
+        """
+        from torch._inductor.codegen.simd import CantSplit, SIMDKernel
+
+        u0 = self._unbacked_size_like()
+
+        # groups=[2, u0], lengths=[[2], []]: size 2 maps onto group 0, leaving
+        # group 1 (extent u0) unconsumed -> remaining=[1, u0].
+        with self.assertRaises(CantSplit):
+            SIMDKernel._split_iteration_ranges(
+                [sympy.Integer(2), u0],
+                [[sympy.Integer(2)], []],
+            )
+
+    def test_is_compatible_false_for_unbacked_leftover(self):
+        """is_compatible answers False rather than propagating.
+
+        This is the contract _try_reindex_pointwise_for_reduction relies on: it
+        asks is_compatible whether a pointwise can be reindexed onto a
+        reduction's groups and expects a bool back, so anything that escapes
+        turns a skipped fusion into a lowering failure.
+        """
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        u0 = self._unbacked_size_like()
+
+        self.assertFalse(
+            SIMDKernel.is_compatible(
+                [sympy.Integer(2), u0],
+                [[sympy.Integer(2)], []],
+            )
+        )
+
+    def test_backed_leftover_extent_still_splits(self):
+        """A backed leftover extent that resolves to 1 still splits.
+
+        Guards against over-tightening the leftover check to
+        statically_known_equals, which cannot prove s0 == 1 for a backed symbol
+        and would silently stop fusing on every dynamic-shape model. Resolving
+        a backed symbol here is fine, it just installs a guard.
+        """
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.codegen.simd import SIMDKernel
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        s0 = V.graph.sizevars.shape_env.create_symbol(
+            1,
+            ConstantSource("s0"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+            do_not_specialize_zero_one=True,
+        )
+        # Guard the guard: a specialized-away s0 would make this test vacuous.
+        self.assertNotEqual(s0, sympy.Integer(1))
+
+        new_ranges, _ = SIMDKernel._split_iteration_ranges(
+            [sympy.Integer(2), s0],
+            [[sympy.Integer(2)], []],
+        )
+        self.assertEqual(new_ranges[0], [sympy.Integer(2)])
 
 
 class TestIndexInversion(TestCase):

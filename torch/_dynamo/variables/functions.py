@@ -25,6 +25,7 @@ import _collections  # type: ignore[import-not-found]
 import builtins
 import collections
 import functools
+import importlib
 import importlib.metadata
 import importlib.util
 import inspect
@@ -52,6 +53,7 @@ from torch.utils._pytree import is_namedtuple_class
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
+    CompileOnOneRankUnsupported,
     format_frame_info,
     get_dynamo_observed_exception,
     InfiniteGeneratorError,
@@ -86,6 +88,7 @@ from ..utils import (
     is_function,
     is_lru_cache_wrapper_trace_without_warning_allowed,
     is_tensor_base_attr_getter,
+    is_torch_class,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
@@ -97,18 +100,24 @@ from .base import (
     GetSet,
     getset_build,
     getset_load_or_build,
+    getset_read,
     getset_set,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
     readonly_setter,
     store_attr_mutation,
+    type_qualified_name,
     unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import (
+    is_reconstructable_decorator_ctx_manager_clone,
+    maybe_reconstruct_decorator_ctx_manager_clone,
+    UserDefinedObjectVariable,
+)
 
 
 try:
@@ -487,6 +496,14 @@ class BaseUserFunctionVariable(VariableTracker):
     def get_function(self) -> types.FunctionType:
         raise NotImplementedError
 
+    def bind_args(
+        self,
+        parent: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> dict[str, VariableTracker]:
+        raise NotImplementedError
+
     def get_module(self) -> str:
         return self.get_globals()["__name__"]
 
@@ -762,7 +779,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def as_python_constant(self) -> Any:
         if istype(self, UserFunctionVariable):
             return self.fn
-        # subclasses (such as methods) usually aren't a constant
+        # istype, not isinstance: the wrapper subclasses below stand for a
+        # decorated callable, not for `fn` itself. Methods are no longer
+        # subclasses of this class at all.
         return super().as_python_constant()
 
     def reconstruct_pycode(self, codegen):
@@ -773,6 +792,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         )
 
     def get_real_python_backed_value(self) -> Any:
+        # Same istype reasoning as as_python_constant above.
         if istype(self, UserFunctionVariable):
             return self.fn
         return super().get_real_python_backed_value()
@@ -807,13 +827,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if is_ngb_suppressed_inline(filename):
             return False
         return True
-
-    def get_source(self) -> Source:
-        source = self.source
-
-        if source and isinstance(self, variables.UserMethodVariable):
-            source = self.source_fn  # type: ignore[assignment]
-        return source  # type: ignore[return-value]
 
     def bind_args(
         self,
@@ -915,10 +928,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors func_descr_get which calls PyMethod_New to bind
-        # the function to an instance.
+        # the function to an instance, and returns the function itself when
+        # there is no instance.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1119
+        if obj.is_constant_none():
+            return self
         source = obj.source and AttrSource(obj.source, self.fn.__name__)
-        return UserMethodVariable(self.fn, obj, source_fn=self.source, source=source)
+        return UserMethodVariable(self, obj, source=source)
 
     def call_function(
         self,
@@ -994,6 +1010,25 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     ],
                 )
 
+            if isinstance(fn_var, UserMethodVariable):
+                # Trace the *bound* method, so the receiver is captured rather
+                # than passed as an argument. That matches what decorating a
+                # bound method outside the region already does: the wrapper
+                # closes over `self` and nonstrict_trace only ever sees the
+                # explicit arguments, which is what its input-type restriction
+                # expects.
+                #
+                # Two consequences of capturing rather than passing: the
+                # receiver never reaches nonstrict_trace's graphable-input
+                # check, which the decorated path applies to everything it is
+                # handed, and nothing guards type(obj).m, so rebinding the
+                # method on the class is not detected. guard_as_python_constant
+                # does install ID_MATCH on the receiver itself.
+                return variables.TorchInGraphFunctionVariable(
+                    fn_var.guard_as_python_constant(),
+                    kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE,
+                )
+
             if not isinstance(fn_var, UserFunctionVariable):
                 fn_name = fn_var.get_name()
                 msg = f"Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."
@@ -1027,6 +1062,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             ):
                 return super().call_function(tx, args, kwargs)
 
+        # FSDP2 registers _pre_forward/_post_forward as bound methods, but a
+        # UserMethodVariable never reaches this branch: its call_function chains
+        # to BaseUserFunctionVariable, not here, and module-hook dispatch unwraps
+        # the bound method before the call. Instrumenting the branch over an
+        # FSDP2 + activation-checkpointing run, every arrival was a
+        # UserFunctionVariable and none was a method VT, so widening the check
+        # to method VTs would be dead code.
         if (
             getattr(tx.output.current_tracer, "description", None)
             == "torch.utils.checkpoint.checkpoint"
@@ -1711,6 +1753,14 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         return getattr(self.vt, name)
 
     # These need to be explicit so the custom __getattr__ doesn't fall back to the unimplemented base class version
+    def bind_args(
+        self,
+        parent: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> dict[str, VariableTracker]:
+        return self.vt.bind_args(parent, args, kwargs)
+
     def get_code(self) -> types.CodeType:
         return self.vt.get_code()
 
@@ -1796,39 +1846,70 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         )
 
 
-class UserMethodVariable(UserFunctionVariable):
+class UserMethodVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined method"""
 
     # PyMethod_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L332
+    # Mirrors PyMethodObject, which composes im_func/im_self rather than
+    # subclassing the function type (MethodType is not a FunctionType subclass).
     _cpython_type = types.MethodType
 
     def __init__(
         self,
-        fn: Callable[..., Any],
-        obj: VariableTracker,
-        source_fn: Source | None = None,
+        im_func: "BaseUserFunctionVariable",
+        im_self: VariableTracker,
         **kwargs: Any,
     ) -> None:
-        super().__init__(fn=fn, **kwargs)  # type: ignore[arg-type]
-        self.obj = obj
-        self.source_fn = source_fn
-        # Note on source and source_fn
-        # Be careful with `source` when delegating to UserFunctionVariable
-        # (base-class) methods. In this __init__, `source` is a *bound method*
-        # object, but the base class expects the underlying *function* object.
-        # One way is to simplly use `__func__` to unwrap it.
-        #
-        # For recursive dict-tag optimizations, it can be faster to fetch the
-        # function directly from `cls.__dict__`; that's why we pass on
-        # `source_fn`. Whenever it is possible to access the function from
-        # cls.__dict__, we pass that on to `source_fn`. Because bind_args
-        # operates on the unbound function, most guards should target
-        # `source_fn` rather than the original `source`.
-        if source_fn is None and kwargs.get("source") is not None:
-            self.source_fn = AttrSource(kwargs.get("source"), "__func__")  # type: ignore[assignment, arg-type]
+        super().__init__(**kwargs)
+        # `source` denotes the bound method; im_func carries the source of the
+        # underlying function, which is what guards and bind_args operate on.
+        self.im_func = im_func
+        self.im_self = im_self
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.fn}, {self.obj})"
+        return f"{self.__class__.__name__}({self.get_function()}, {self.im_self})"
+
+    # A method delegates to its function for everything the function object
+    # backs; ref method_getattro / method_call in CPython classobject.c.
+    def get_function(self) -> types.FunctionType:
+        return self.im_func.get_function()
+
+    def get_code(self) -> types.CodeType:
+        return self.im_func.get_code()
+
+    def get_globals(self) -> dict[str, Any]:
+        return self.im_func.get_globals()
+
+    def has_self(self) -> bool:
+        # Reports the *function's* __self__, not the binding: Dynamo decomposes
+        # method calls into function calls with an explicit self argument, and
+        # check_inlineable refuses to inline anything reporting True here.
+        return self.im_func.has_self()
+
+    def bind_args(
+        self,
+        parent: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> dict[str, VariableTracker]:
+        return self.im_func.bind_args(parent, args, kwargs)
+
+    def should_allow_nested_graph_breaks(self) -> bool:
+        return self.im_func.should_allow_nested_graph_breaks()
+
+    @property
+    def fn(self) -> types.FunctionType:
+        # Call sites probe `vt.fn` to reach the underlying function (e.g. the
+        # skipped-function message in symbolic_convert); keep that working
+        # without duplicating im_func's state.
+        return self.get_function()
+
+    @property
+    def is_constant(self) -> bool:
+        # Only UserFunctionVariable tracks constant-ness; other function VTs
+        # (nested, generator, wrapper) never do.
+        fn_vt = self.im_func
+        return isinstance(fn_vt, UserFunctionVariable) and fn_vt.is_constant
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython method_hash: hash(self) ^ hash(func)
@@ -1839,15 +1920,69 @@ class UserMethodVariable(UserFunctionVariable):
         # Sourceless: compute method_hash from components.
         from .object_protocol import generic_hash_impl
 
-        self_hash, self_fake = generic_hash_impl(tx, self.obj)
-        func_hash = hash(self.fn)
+        self_hash, self_fake = generic_hash_impl(tx, self.im_self)
+        func_hash = hash(self.get_function())
         h = self_hash ^ func_hash
         if h == -1:
             h = -2
         return h, self_fake
 
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        # method_richcompare: only == and != are handled, and only against
+        # another method; anything else is NotImplemented, which is why
+        # `obj.m < obj.m` is a TypeError. im_func is compared by equality and
+        # im_self by identity. Ref method_richcompare in CPython
+        # Objects/classobject.c.
+        if op not in ("__eq__", "__ne__") or not isinstance(other, UserMethodVariable):
+            return variables.ConstantVariable.create(NotImplemented)
+
+        if self.get_function() is not other.get_function():
+            equal = False
+        else:
+            from .object_protocol import vt_identity_compare
+
+            same_self = vt_identity_compare(self.im_self, other.im_self)
+            if same_self is None:
+                # Receiver identity is not decidable at trace time. Returning
+                # NotImplemented here would fall back to comparing the method
+                # objects by identity, which is always False for two separate
+                # attribute reads, so break instead of answering wrongly.
+                unimplemented(
+                    gb_type="method comparison with undecidable receiver",
+                    context=f"{self} {op} {other}",
+                    explanation="Dynamo cannot tell at trace time whether the "
+                    "two bound methods share a receiver.",
+                    hints=[*graph_break_hints.DIFFICULT],
+                )
+            equal = same_self.as_python_constant()
+
+        return variables.ConstantVariable.create(equal if op == "__eq__" else not equal)
+
     def self_args(self) -> list[VariableTracker]:
-        return [self.obj]
+        return [self.im_self]
+
+    def get_source(self) -> Source | None:
+        return self.im_func.get_source()
+
+    def reconstruct_pycode(self, codegen):
+        # `source` denotes the bound method itself, which is the expression
+        # that regenerates it. im_func's source is the plain function and
+        # would drop the binding.
+        if self.source:
+            return self.source.reconstruct_pycode(codegen)
+        raise NotImplementedError(
+            "Python codegen not implemented for sourceless UserMethodVariable"
+        )
+
+    def guard_as_python_constant(self) -> Any:
+        # A bound method is rebuilt on every attribute access, so it has no
+        # stable identity and as_python_constant() declines. Call sites that
+        # need a real callable (comptime, checkpoint's context_fn) can still
+        # have one by binding the guarded receiver, which is what the
+        # equivalent functools.partial(func, obj) already does here.
+        return self.get_function().__get__(self.im_self.guard_as_python_constant())
 
     def python_type(self) -> type[types.MethodType]:
         return types.MethodType
@@ -1868,17 +2003,19 @@ class UserMethodVariable(UserFunctionVariable):
         # function/method wrapping code paths.
         from ..trace_rules import is_leaf_function, is_nonstrict_trace_callable
 
-        if is_nonstrict_trace_callable(self.fn):
+        func = self.get_function()
+
+        if is_nonstrict_trace_callable(func):
             call_args = [*self.self_args(), *args]
             var = variables.TorchInGraphFunctionVariable(
-                self.fn, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
+                func, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
             )
             return var.call_function(tx, call_args, kwargs)
 
-        if is_leaf_function(self.fn):
+        if is_leaf_function(func):
             call_args = [*self.self_args(), *args]
             var = variables.TorchInGraphFunctionVariable(
-                self.fn, kind=variables.torch.AllowInGraphKind.LEAF_FUNCTION
+                func, kind=variables.torch.AllowInGraphKind.LEAF_FUNCTION
             )
             return var.call_function(tx, call_args, kwargs)
 
@@ -1892,12 +2029,12 @@ class UserMethodVariable(UserFunctionVariable):
         # the module call so that Dynamo can see the underlying parameters and
         # buffers and raise them as inputs to the graph. The is_root_tracer
         # check bypasses the if condition for non-root tracers and directly
-        # calls the super().call_function at the end, which is basically
-        # equivalent of inlining the method.
+        # delegates to im_func at the end, which is basically equivalent of
+        # inlining the method.
         if tx.output.is_root_tracer() and isinstance(
-            self.obj, variables.NNModuleVariable
+            self.im_self, variables.NNModuleVariable
         ):
-            module_attr = getattr(self.fn, "__module__", "")
+            module_attr = getattr(func, "__module__", "")
             # inline torch.nn.utils.parametrize
             if (
                 module_attr is not None
@@ -1905,36 +2042,88 @@ class UserMethodVariable(UserFunctionVariable):
                 and module_attr != "torch.nn.utils.parametrize"
                 or self.is_constant
             ):
-                return self.obj.call_method(
-                    tx, self.fn.__name__, list(args), kwargs, constant=self.is_constant
+                return self.im_self.call_method(
+                    tx, func.__name__, list(args), kwargs, constant=self.is_constant
                 )
         elif (
             _fsdp_param_group is not None
-            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
+            and func is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
         ):
-            return variables.TorchCtxManagerClassVariable(self.fn).call_function(
-                tx, [self.obj, *args], kwargs
+            return variables.TorchCtxManagerClassVariable(func).call_function(
+                tx, [self.im_self, *args], kwargs
             )
         if self.is_constant:
-            fn = getattr(self.obj.value, self.fn.__name__)  # type: ignore[attr-defined]
+            fn = getattr(self.im_self.value, func.__name__)  # type: ignore[attr-defined]
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
+        if (
+            self.source is None
+            and isinstance(self.im_self, variables.UserDefinedObjectVariable)
+            and isinstance(
+                self.im_self.value, torch.utils._contextlib._DecoratorContextManager
+            )
+            and is_reconstructable_decorator_ctx_manager_clone(
+                self.get_function(), type(self.im_self.value)
+            )
+        ):
+            # A bound `clone` method reached with no source -- e.g. via a
+            # closure cell wrapping a context manager created outside the
+            # traced region (see gh-194763) -- can't be inlined the normal
+            # way: constructing a fresh instance requires a `source` on the
+            # class reference (see UserDefinedClassVariable.call_function's
+            # generic-construction gate). maybe_reconstruct_decorator_ctx_manager_clone
+            # handles this the same way UserDefinedObjectVariable.call_function
+            # already does for a bound `clone` reached as a plain callable
+            # value. The predicate guarantees a supported function/class
+            # pair; only source-dependent reconstruction can still decline.
+            reconstructed = maybe_reconstruct_decorator_ctx_manager_clone(
+                tx,
+                self.get_function(),
+                self.im_self.value,
+                self.im_self.source,
+                args,
+                kwargs,
+            )
+            if reconstructed is not None:
+                return reconstructed
+        # method_call calls im_func with im_self prepended. Inline this VT
+        # rather than im_func so a nested graph break resumes the bound method;
+        # self_args() supplies im_self.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L61
         return super().call_function(tx, args, kwargs)
 
-    def _get_func(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # We might have a better way to access the function object, this
-        # information is stored in self.source_fn, use that to construct the
-        # variable tracker.
-        return VariableTracker.build(tx, self.fn, self.source_fn)  # type: ignore[arg-type]
+    def read_func_slot(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        # method_getattro forwards slot reads to __func__, so __defaults__,
+        # __kwdefaults__, __closure__ and friends come off the function.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L269
+        return self.im_func.read_func_slot(tx, name)
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        # method_descr_get: a bound method does not re-bind. Only reached where
+        # method has tp_descr_get (3.10 and 3.13+); see tp_getset below.
+        return self
 
     # __self__ / __func__ are read-only members on method objects.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L20-L24
     tp_members = {
-        "__self__": Member(lambda s, _: s.obj, readonly_setter),
-        "__func__": Member(_get_func, readonly_setter),
+        "__self__": Member(lambda s, _: s.im_self, readonly_setter),
+        "__func__": Member(lambda s, _: s.im_func, readonly_setter),
     }
 
-    def get_real_python_backed_value(self) -> Any:
-        return self.fn
+    if "__get__" not in types.MethodType.__dict__:
+        # 3.11 and 3.12: method has no __get__, so method_getattro forwards the
+        # attribute to __func__, whose __get__ re-binds.
+        tp_getset = {
+            "__get__": GetSet(
+                lambda s, tx: s.im_func._get_dunder_get(tx), readonly_setter
+            )
+        }
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
@@ -1944,9 +2133,9 @@ class WrappedUserMethodVariable(UserMethodVariable):
         context: "ContextWrappingVariable",
         **kwargs: Any,
     ) -> None:
-        kwargs.pop("fn", None)
-        kwargs.pop("obj", None)
-        super().__init__(wrapped.fn, wrapped.obj, **kwargs)
+        kwargs.pop("im_func", None)
+        kwargs.pop("im_self", None)
+        super().__init__(wrapped.im_func, wrapped.im_self, **kwargs)
         self.wrapped = wrapped
         self.context = context
 
@@ -2038,10 +2227,19 @@ def invoke_and_store_as_constant(
     args = [convert(x) for x in args]
     kwargs = {k: convert(v) for k, v in kwargs.items()}
     res = fn(*args, **kwargs)
+    if isinstance(res, torch.Tensor):
+        # ConstantSource reconstructs with LOAD_GLOBAL. Unlike the non-tensor
+        # branch of register_attr_or_module, the tensor branch does not install
+        # its source name as a global.
+        source_name = tx.output.install_global_by_id(name, res)
+        tx.output.update_co_names(source_name)
+        source = ConstantSource(source_name)
+    else:
+        source = ConstantSource(name)
     return tx.output.register_attr_or_module(
         res,
         name,
-        source=ConstantSource(name),
+        source=source,
     )
 
 
@@ -2182,7 +2380,23 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
                 try:
                     value = cell_contents.as_python_constant()
-                    cells.append(make_cell(value))
+                    cell = make_cell(value)
+                    if allow_sourced_cells:
+                        needs_tracking = False
+
+                        def check_mutation(var):
+                            nonlocal needs_tracking
+                            if var.mutation_type is not None:
+                                needs_tracking = True
+
+                        VariableTracker.visit(check_mutation, cell_contents)
+                        if needs_tracking:
+                            # Preserve tracked mutable contents, including
+                            # those nested inside immutable containers.
+                            tx.output.side_effects.track_cell_existing(
+                                None, cell, cell_contents
+                            )
+                    cells.append(cell)
                     continue
                 except (NotImplementedError, Unsupported):
                     if not allow_sourced_cells:
@@ -2425,6 +2639,18 @@ RE_CONSTANT_FOLD_FNS = {
 }
 
 
+@functools.cache
+def _device_setters() -> dict[Any, str]:
+    """Functions that move the rank off whatever device it is currently on."""
+    return {
+        torch.cuda.set_device: "torch.cuda.set_device",
+        torch.xpu.set_device: "torch.xpu.set_device",
+        torch.accelerator.set_device_index: "torch.accelerator.set_device_index",
+        torch.accelerator.set_device_idx: "torch.accelerator.set_device_idx",
+        torch.mtia.set_device: "torch.mtia.set_device",
+    }
+
+
 class SkipFunctionVariable(VariableTracker):
     _nonvar_fields = {
         "value",
@@ -2496,6 +2722,41 @@ class SkipFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if self.value in _device_setters():
+            from torch.fx.experimental.proxy_tensor import (
+                _coor_current_accelerator,
+                _coor_enabled,
+            )
+
+            # Under CooR a rank owns exactly one accelerator, and device contexts are
+            # traced as no-ops on that basis. Moving off it would leave the rest of
+            # the frame's rank-relative devices pointing at the wrong GPU, and no
+            # graph break undoes it, so refuse rather than diverge from eager.
+            cur = _coor_current_accelerator() if _coor_enabled() else None
+            if cur is not None:
+                name = _device_setters()[self.value]
+                raise CompileOnOneRankUnsupported(
+                    f"Cannot call {name} under compile_on_one_rank: this rank is on "
+                    f"{cur} and CooR gives it a single accelerator, so changing the "
+                    "current device invalidates every rank-relative device in the "
+                    "frame.\n"
+                    "Next steps: drop the call, or turn off compile_on_one_rank "
+                    "for this region."
+                )
+
+        if self.value is torch.autograd.backward:
+            inputs = args[5] if len(args) > 5 else kwargs.get("inputs")
+            inputs = inputs.realize() if inputs is not None else None
+            if isinstance(inputs, variables.MappingProxyVariable) and inputs.source:
+                unimplemented(
+                    gb_type="autograd inputs from an external mapping proxy",
+                    context="",
+                    explanation="Dynamo cannot identify the underlying mapping or its items/values overrides.",
+                    hints=["Construct the mapping proxy inside the compiled region."],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
+
         # importlib functions are frozen builtins that Dynamo cannot trace
         # into.  They are deterministic for a given package name, so
         # constant-fold them when all args are constants.
@@ -2625,9 +2886,7 @@ class SkipFunctionVariable(VariableTracker):
                 func_var = args[0]
                 obj_var = args[1]
                 if isinstance(func_var, UserFunctionVariable):
-                    return UserMethodVariable(
-                        func_var.fn, obj_var, source_fn=func_var.source
-                    )
+                    return UserMethodVariable(func_var, obj_var)
             unimplemented(
                 gb_type="unsupported function.__get__ call",
                 context=f"call_function {self}, args: {args}, kwargs: {kwargs}",
@@ -2778,13 +3037,15 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     __script_if_tracing_wrapper have the original attr at "__original_fn".
     """
 
-    def python_type(self) -> type:
-        return types.FunctionType
+    _cpython_type = types.FunctionType
 
     def __init__(self, wrapper_obj: Any, attr_to_trace: str, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.wrapper_obj = wrapper_obj
         self.attr_to_trace = attr_to_trace
+
+    def python_type(self) -> type:
+        return types.FunctionType
 
     def get_module(self) -> str:
         return self.wrapper_obj.__module__
@@ -2919,28 +3180,67 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         return self.wrapper_obj
 
 
-class WrapperUserMethodVariable(WrapperUserFunctionVariable):
+class WrapperUserMethodVariable(BaseUserFunctionVariable):
     """
-    Similar to WrapperUserFunctionVariable, but for methods. The only delta is
-    saving the vt for `self` object of the method which is then used by
-    WrapperUserFunctionVariable in `call_function` method.
+    Similar to WrapperUserFunctionVariable, but for methods. Sibling class
+    inheriting from BaseUserFunctionVariable so that
+    issubclass(WrapperUserMethodVariable, WrapperUserFunctionVariable) is False,
+    matching CPython (MethodType is not a FunctionType).
     """
+
+    _cpython_type = types.MethodType
+
+    def __init__(
+        self,
+        fn: WrapperUserFunctionVariable,
+        self_obj: VariableTracker,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.fn = fn
+        self.obj = self_obj
 
     def python_type(self) -> type:
         return types.MethodType
 
-    def __init__(
-        self,
-        wrapper_obj: Any,
-        attr_to_trace: str,
-        self_obj: VariableTracker,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(wrapper_obj, attr_to_trace, **kwargs)
-        self.obj = self_obj
-
     def self_args(self) -> list[VariableTracker]:
         return [self.obj]
+
+    def get_module(self) -> str:
+        return self.fn.get_module()
+
+    def get_name(self) -> str:
+        return self.fn.get_name()
+
+    def get_qualname(self) -> str:
+        return self.fn.get_qualname()
+
+    def get_code(self) -> types.CodeType:
+        return self.fn.get_code()
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        return self.fn.tp_getattro_impl(tx, name)
+
+    def get_function(self):
+        return self.fn.get_function()
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        return self.fn.lookup_instance_dict(tx, name)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.fn.call_function(tx, self.self_args() + list(args), kwargs)
+
+    def get_real_python_backed_value(self) -> object:
+        return self.fn.get_real_python_backed_value()
 
 
 def _traceable_collective_remaps() -> dict[Any, Any]:
@@ -3143,7 +3443,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
         import torch.distributed as dist
-        from torch.distributed._functional_collectives import REDUCE_OP_TO_STR
+        from torch.distributed._functional_collectives import (
+            _ASYNC_OP_REMAP_ERROR,
+            REDUCE_OP_TO_STR,
+        )
 
         # Merge args into kwargs so positional and keyword args
         # can be processed the same way.
@@ -3155,7 +3458,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             unimplemented(
                 gb_type="async_op=True for distributed collectives",
                 context=f"{self.fn}, {args=}, {kwargs=}",
-                explanation=f"`torch.compile` doesn't support `async_op=True for {self.fn}",
+                explanation=_ASYNC_OP_REMAP_ERROR,
                 hints=[
                     *graph_break_hints.SUPPORTABLE,
                 ],
@@ -3553,11 +3856,9 @@ class PolyfilledFunctionVariable(VariableTracker):
         method = getattr(self.fn, name, None)
         if not (method or is_function(method)):
             raise_type_error(tx, f"Cannot find callable {name} in {self.fn}")
-        options = {}
-        if self.source:
-            options["source"] = AttrSource(self.source, name)
-        polyfilled_method_variable = PolyfilledFunctionVariable(method, **options)
-        return polyfilled_method_variable.call_function(tx, args, kwargs)
+        source = AttrSource(self.source, name) if self.source else None
+        method_variable = VariableTracker.build(tx, method, source=source)
+        return method_variable.call_function(tx, args, kwargs)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
@@ -3617,8 +3918,10 @@ class SysFunctionVariable(VariableTracker):
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
+    bind_tma_descriptor_factory_call,
     create_tma_experimental_metadata,
     create_tma_stable_metadata,
+    get_importable_tma_descriptor_path,
     TMADescriptorMetadata,
     TritonHOPifier,
 )
@@ -3633,9 +3936,11 @@ class DynamoTritonHOPifier(TritonHOPifier):
             hints=[],
         )
 
-    def is_callable(self, maybe_callable: VariableTracker) -> bool:
+    def is_callable(self, maybe_callable: object) -> bool:
+        # functions and methods are both valid triton grid callables
         return isinstance(
-            maybe_callable, (NestedUserFunctionVariable, UserFunctionVariable)
+            maybe_callable,
+            (NestedUserFunctionVariable, UserFunctionVariable, UserMethodVariable),
         )
 
     def get_value(self, val: VariableTracker) -> Any:
@@ -3938,6 +4243,8 @@ class TMADescriptorStableVariable(VariableTracker):
         self,
         tensor: "TensorVariable",
         block_shape: "ListVariable",
+        descriptor_module: str,
+        descriptor_class: str,
         **kwargs: Any,
     ) -> None:
         if not tensor.is_tensor():
@@ -3945,16 +4252,20 @@ class TMADescriptorStableVariable(VariableTracker):
         super().__init__(**kwargs)
         self.tensor = tensor
         self.block_shape = block_shape
+        self.descriptor_module = descriptor_module
+        self.descriptor_class = descriptor_class
 
     def to_metadata(self) -> Any:
         return create_tma_stable_metadata(
             self.block_shape.as_proxy(),
+            self.descriptor_module,
+            self.descriptor_class,
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.load_import_from(
-            "triton.tools.tensor_descriptor",
-            "TensorDescriptor",
+            self.descriptor_module,
+            self.descriptor_class,
         )
         codegen.load_method("from_tensor")
         codegen(self.tensor)
@@ -4041,9 +4352,80 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
         )
 
 
+def _get_tma_descriptor_import_path(
+    tx: "InstructionTranslatorBase",
+    descriptor_type: type[Any],
+    factory: Callable[..., Any],
+) -> tuple[str, str]:
+    descriptor_module = descriptor_type.__module__
+    descriptor_class = descriptor_type.__name__
+    descriptor_path = f"{descriptor_module}.{descriptor_class}"
+
+    if get_importable_tma_descriptor_path(descriptor_type) is None:
+        unimplemented(
+            gb_type="TMA descriptor class is not importable",
+            context=f"descriptor_type={descriptor_type!r}, path={descriptor_path}",
+            explanation=(
+                f"Triton tensor descriptor class {descriptor_type.__qualname__} must "
+                f"be importable as {descriptor_path} so compiled code can reconstruct it."
+            ),
+            hints=[
+                "Define the descriptor class at module scope and export it under its class name."
+            ],
+        )
+
+    descriptor_source = AttrSource(
+        tx.import_source(descriptor_module), descriptor_class
+    )
+    # The class may already be tracked under another source, so build can reuse it.
+    install_guard(descriptor_source.make_guard(GuardBuilder.ID_MATCH))
+    VariableTracker.build(tx, descriptor_type, descriptor_source).realize()
+
+    reconstruction_factory = descriptor_type.from_tensor
+    reconstruction_function = getattr(
+        reconstruction_factory, "__func__", reconstruction_factory
+    )
+    captured_function = getattr(factory, "__func__", factory)
+    reconstruction_owner = getattr(reconstruction_factory, "__self__", None)
+    captured_owner = getattr(factory, "__self__", None)
+    if (
+        reconstruction_function is not captured_function
+        or reconstruction_owner is not captured_owner
+    ):
+        unimplemented(
+            gb_type="TMA descriptor reconstruction factory mismatch",
+            context=f"descriptor_type={descriptor_type!r}, factory={factory!r}",
+            explanation=(
+                "The captured TMA descriptor factory no longer matches the class's "
+                "from_tensor attribute used to reconstruct compiled descriptors."
+            ),
+            hints=["Use the descriptor class's current from_tensor factory."],
+        )
+
+    factory_source = AttrSource(descriptor_source, "from_tensor")
+    if isinstance(factory, types.MethodType):
+        install_guard(
+            AttrSource(factory_source, "__self__").make_guard(GuardBuilder.ID_MATCH)
+        )
+        factory_source = AttrSource(factory_source, "__func__")
+    install_guard(factory_source.make_guard(GuardBuilder.FUNCTION_MATCH))
+    install_guard(factory_source.make_guard(GuardBuilder.CLOSURE_MATCH))
+    return descriptor_module, descriptor_class
+
+
 class CreateTMADescriptorStableVariable(VariableTracker):
+    def __init__(
+        self,
+        descriptor_type: type[Any],
+        factory: Callable[..., Any],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.descriptor_type = descriptor_type
+        self.factory = factory
+
     def python_type(self) -> type:
-        return types.FunctionType
+        return type(self.factory)
 
     def call_function(
         self,
@@ -4051,12 +4433,48 @@ class CreateTMADescriptorStableVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        tensor = kwargs["tensor"] if "tensor" in kwargs else args[0]
-        block_shape = kwargs["block_shape"] if "block_shape" in kwargs else args[1]
+        bound_call = bind_tma_descriptor_factory_call(self.factory, args, kwargs)
+        if bound_call is None:
+            unimplemented(
+                gb_type="Unsupported TMA descriptor factory call",
+                context="from_tensor() arguments must match its signature and defaults",
+                explanation=(
+                    "Dynamo supports stable TMA descriptor factories with tensor and "
+                    "block_shape, plus optional scalar arguments equal to their defaults."
+                ),
+                hints=[
+                    "Call from_tensor(tensor, block_shape) or pass only default values "
+                    "for optional arguments."
+                ],
+            )
 
+        tensor, block_shape, supplied_options = bound_call
+        descriptor_module, descriptor_class = _get_tma_descriptor_import_path(
+            tx, self.descriptor_type, self.factory
+        )
+        factory_source = AttrSource(
+            AttrSource(tx.import_source(descriptor_module), descriptor_class),
+            "from_tensor",
+        )
+        if isinstance(self.factory, types.MethodType):
+            factory_source = AttrSource(factory_source, "__func__")
+        if any(default_index is not None for _, default_index in supplied_options):
+            install_guard(
+                AttrSource(factory_source, "__defaults__").make_guard(
+                    GuardBuilder.SEQUENCE_LENGTH
+                )
+            )
+        for name, default_index in supplied_options:
+            if default_index is None:
+                default_source = DefaultsSource(factory_source, name, is_kw=True)
+            else:
+                default_source = DefaultsSource(factory_source, default_index)
+            install_guard(default_source.make_guard(GuardBuilder.CONSTANT_MATCH))
         return TMADescriptorStableVariable(
-            tensor=tensor,  # type: ignore[arg-type]
-            block_shape=block_shape,  # type: ignore[arg-type]
+            tensor=cast("TensorVariable", tensor),
+            block_shape=cast("ListVariable", block_shape),
+            descriptor_module=descriptor_module,
+            descriptor_class=descriptor_class,
         )
 
 
@@ -4587,16 +5005,21 @@ class MethodDescriptorVariable(DescriptorVariable):
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L427
         if not args:
             raise_type_error(
-                tx,
-                f"descriptor '{self.descriptor.__name__}' of "
-                f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
+                tx, f"unbound method {self.descriptor.__qualname__}() needs an argument"
             )
         obj, *rest = args
         name = self.descriptor.__name__
         _check_descriptor_obj_type(tx, self.descriptor, obj)
-        # Dispatch through the owner (UDCV for the defining class) rather
-        # than obj.call_method, which would do MRO resolution from type(obj)
-        # and find Python overrides on subclasses.
+        obj = obj.realize()
+        if isinstance(obj, UserDefinedObjectVariable):
+            base_methods = obj._base_methods
+            if base_methods is not None and self.descriptor in base_methods:
+                return obj.call_base_method(tx, name, rest, kwargs)
+        method = obj.lookup_tp_method(name)
+        if method is not None:
+            result = method(obj, tx, name, rest, kwargs)
+            if result is not None:
+                return result
         return self.owner.call_method(tx, name, [obj, *rest], kwargs)
 
     def tp_descr_get_impl(
@@ -4604,13 +5027,61 @@ class MethodDescriptorVariable(DescriptorVariable):
         tx: "InstructionTranslatorBase",
         obj: VariableTracker,
         owner: VariableTracker,
-    ) -> "BoundBuiltinMethodVariable":
+    ) -> VariableTracker:
         # Mirrors method_get which calls PyCFunction_NewEx to produce a
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
+        if obj.is_constant_none():
+            return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
-        return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
+        # PyCFunction_NewEx creates a fresh object; see ClassMethodDescriptorVariable.
+        return BoundBuiltinMethodVariable(self.descriptor, obj)
+
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        # PyMethodDescr_Type leaves tp_richcompare NULL and inherits
+        # object_richcompare from object.
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
+
+@functools.cache
+def _same_c_function(left: Any, right: Any) -> bool | None:
+    """meth_richcompare's ml_meth check for two descriptors already known to
+    share a receiver. ml_meth is only observable through that comparison, so
+    bind both to one receiver and compare. Distinct descriptors can alias one C
+    function, e.g. int.conjugate and int.__trunc__. None means undecidable.
+    """
+    if left is right:
+        return True
+    if type(left) is not type(right):
+        return None
+    if isinstance(left, types.BuiltinFunctionType):
+        # Stored unbound in a type dict; m_self is the type itself.
+        return left == right
+    owner = left.__objclass__
+    if issubclass(right.__objclass__, owner):
+        owner = right.__objclass__
+    if isinstance(left, types.ClassMethodDescriptorType):
+        return left.__get__(None, owner) == right.__get__(None, owner)
+    try:
+        receiver = owner.__new__(owner)
+    except TypeError:
+        return None
+    return left.__get__(receiver, owner) == right.__get__(receiver, owner)
+
+
+def _bind_builtin_method(descriptor: Any, obj: Any) -> Any:
+    if isinstance(descriptor, types.ClassMethodDescriptorType):
+        return descriptor.__get__(None, obj)
+    # METH_METHOD descriptors need an explicit owner on Python 3.12.
+    return descriptor.__get__(obj, type(obj))
 
 
 class BoundBuiltinMethodVariable(VariableTracker):
@@ -4626,7 +5097,59 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     _nonvar_fields = {
         "descriptor",
+        "value",
         *VariableTracker._nonvar_fields,
+    }
+
+    def _qualname(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L239
+        # If __self__ is a module or NULL, return m.__name__
+        #    (e.g. len.__qualname__ == 'len')
+        #
+        #    If __self__ is a type, return m.__self__.__qualname__ + '.' + m.__name__
+        #    (e.g. dict.fromkeys.__qualname__ == 'dict.fromkeys')
+        #
+        #    Otherwise return type(m.__self__).__qualname__ + '.' + m.__name__
+        #    (e.g. [].append.__qualname__ == 'list.append')
+        from .object_protocol import generic_getattr
+
+        name = self.descriptor.__name__
+        obj = self.obj
+        obj_type = obj.python_type()
+        if issubclass(obj_type, types.ModuleType):
+            return ConstantVariable.create(name)
+        if issubclass(obj_type, type):
+            owner = obj
+        else:
+            # Read type(obj).__qualname__ through a source so the result follows
+            # a later reassignment of the class's __qualname__.
+            if isinstance(obj, UserDefinedObjectVariable):
+                owner_source = obj.cls_source
+            else:
+                owner_source = obj.source and TypeSource(obj.source)
+            owner = VariableTracker.build(tx, obj_type, owner_source)
+        # PyObject_GetAttr, so a __qualname__ assigned earlier in the frame is seen.
+        owner_qualname = generic_getattr(tx, owner.realize(), "__qualname__")
+        return ConstantVariable.create(f"{owner_qualname.as_python_constant()}.{name}")
+
+    tp_getset = {
+        "__doc__": GetSet(
+            getset_build(lambda vt: vt.descriptor.__doc__),
+            readonly_setter,
+        ),
+        "__name__": GetSet(
+            getset_build(lambda vt: vt.descriptor.__name__),
+            readonly_setter,
+        ),
+        "__qualname__": GetSet(_qualname, readonly_setter),
+        "__self__": GetSet(
+            getset_read(lambda vt: vt.obj),
+            readonly_setter,
+        ),
+        "__text_signature__": GetSet(
+            getset_build(lambda vt: vt.descriptor.__text_signature__),
+            readonly_setter,
+        ),
     }
 
     def __init__(
@@ -4635,11 +5158,14 @@ class BoundBuiltinMethodVariable(VariableTracker):
         | types.BuiltinFunctionType
         | types.ClassMethodDescriptorType,
         obj: VariableTracker,
+        value: types.BuiltinMethodType | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
         self.obj = obj
+        # The ID_MATCH-guarded runtime method, when built from one.
+        self.value = value
 
     def __repr__(self) -> str:
         cls_name = getattr(
@@ -4652,22 +5178,46 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
-        try:
-            return hash(self.as_python_constant()), False
-        except AsPythonConstantNotImplementedError:
-            return id(self), True
+        # It hashes m_self by identity, so only a guarded runtime method has a
+        # real hash; a method bound during tracing gets a compile-time-only one.
+        if self.value is not None:
+            return hash(self.value), False
+        return id(self), True
 
     def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
+        # meth_richcompare: equal iff both are builtin methods with the same
+        # m_self and the same C function (ml_meth).
+        # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L289-L317
+        if op not in ("__eq__", "__ne__") or not isinstance(
+            other, BoundBuiltinMethodVariable
+        ):
+            return ConstantVariable.create(NotImplemented)
 
-        return object_richcompare(self, tx, other, op)
+        if self.value is not None and other.value is not None:
+            eq = self.value == other.value
+            return ConstantVariable.create(eq if op == "__eq__" else not eq)
+
+        from .object_protocol import vt_identity_compare
+
+        same_self = vt_identity_compare(self.obj.realize(), other.obj.realize())
+        eq = None
+        if same_self is not None:
+            eq = same_self.as_python_constant() and _same_c_function(
+                self.descriptor, other.descriptor
+            )
+        if eq is None:
+            unimplemented(
+                gb_type="builtin method comparison with undecidable identity",
+                context=f"{self} {op} {other}",
+                explanation="Dynamo cannot determine the C-function and receiver identities of these builtin methods.",
+                hints=[*graph_break_hints.DIFFICULT],
+            )
+        return ConstantVariable.create(eq if op == "__eq__" else not eq)
 
     def as_python_constant(self) -> Any:
         obj = self.obj.as_python_constant()
-        if isinstance(self.descriptor, types.ClassMethodDescriptorType):
-            return self.descriptor.__get__(None, obj)
         if hasattr(self.descriptor, "__get__"):
-            return self.descriptor.__get__(obj)  # type: ignore[union-attr]
+            return _bind_builtin_method(self.descriptor, obj)
         return getattr(obj, self.descriptor.__name__)
 
     def call_function(
@@ -4676,11 +5226,59 @@ class BoundBuiltinMethodVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
+        from .object_protocol import mro_lookup
+
+        # Handles calls like `list.append(L_subclass, item)`
+        # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L60-L90
+        # CPython calls the C function the method was created with. Dynamo has
+        # no function pointer, so it picks the implementation to trace from the
+        # descriptor and the receiver.
+        name = self.descriptor.__name__
+        obj = self.obj.realize()
+        descriptor = self.descriptor
+        args = list(args)
+        if isinstance(descriptor, types.ClassMethodDescriptorType):
+            # PyCMethod_New bound the C function to the class in obj; the class
+            # VT models the classmethod with itself as receiver.
+            return obj.call_method(tx, name, args, kwargs)
+        if not isinstance(descriptor, types.MethodDescriptorType):
+            # METH_STATIC C functions stored directly in a type dict, e.g.
+            # tuple.__new__; the receiver is the class itself.
+            return obj.call_method(tx, name, args, kwargs)
+        if is_torch_class(descriptor.__objclass__):
+            # TorchInGraphFunctionVariable records the descriptor itself in the
+            # graph, so a tensor subclass override never runs.
+            fn = VariableTracker.build(tx, descriptor)
+            return fn.call_function(tx, [obj, *args], kwargs)
+        if mro_lookup(obj.python_type(), name) is descriptor:
+            # Nothing overrides it, so name lookup reaches the same C method.
+            return obj.call_method(tx, name, args, kwargs)
+        if isinstance(obj, UserDefinedObjectVariable):
+            base_methods = obj._base_methods
+            if base_methods is not None and descriptor in base_methods:
+                return obj.call_base_method(tx, name, args, kwargs)
+        unimplemented(
+            gb_type="Bound builtin method shadowed by an override",
+            context=f"{self}",
+            explanation=f"type({obj}) overrides {name}, and Dynamo has no base implementation of the bound C method to call instead.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Rebuild through the descriptor: loading obj.<name> would resolve the
+        # name on type(obj) and find a subclass override.
+        descriptor = self.descriptor
+        load_descriptor = codegen.create_load_const_unchecked(descriptor)
+        if not hasattr(descriptor, "__get__"):
+            # METH_STATIC functions are already bound, e.g. tuple.__new__.
+            codegen.append_output(load_descriptor)
+            return
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(__name__, "_bind_builtin_method")
+        )
+        codegen.append_output(load_descriptor)
         codegen(self.obj)
-        codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
+        codegen.extend_output(create_call_function(2, False))
 
 
 class ClassMethodDescriptorVariable(DescriptorVariable):
@@ -4740,8 +5338,75 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
     ) -> BoundBuiltinMethodVariable:
         # classmethod_get binds the C method to the class (ignoring obj),
         # producing a builtin_function_or_method via PyCMethod_New.
+        # It first requires owner to be a type and a subtype of __objclass__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
-        return BoundBuiltinMethodVariable(self.descriptor, owner, source=self.source)
+        owner_type = owner.python_type()
+        if not issubclass(owner_type, type):
+            raise_type_error(
+                tx,
+                f"descriptor '{self.descriptor.__name__}' for type "
+                f"'{self.descriptor.__objclass__.__name__}' needs a type, not a "
+                f"'{owner_type.__name__}' as arg 2",
+            )
+        owner_value = owner.get_real_python_backed_value()
+        if not isinstance(owner_value, type):
+            unimplemented(
+                gb_type="Unresolved classmethod descriptor owner",
+                context=f"{self} owner={owner}",
+                explanation="Dynamo cannot resolve the class this classmethod descriptor is bound to.",
+                hints=[*graph_break_hints.DYNAMO_BUG],
+            )
+        if not issubclass(owner_value, self.descriptor.__objclass__):
+            raise_type_error(
+                tx,
+                f"descriptor '{self.descriptor.__name__}' requires a subtype of "
+                f"'{self.descriptor.__objclass__.__name__}' but received "
+                f"'{owner_value.__name__}'",
+            )
+        return BoundBuiltinMethodVariable(self.descriptor, owner)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # classmethoddescr_call: bind args[0] through classmethod_get, then call
+        # the bound builtin_function_or_method with the remaining arguments.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L302-L326
+        if not args:
+            raise_type_error(
+                tx,
+                f"descriptor '{self.descriptor.__name__}' of "
+                f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
+            )
+        bound = self.tp_descr_get_impl(tx, ConstantVariable.create(None), args[0])
+        return bound.call_function(tx, args[1:], kwargs)
+
+
+# sm_init/cm_init run functools_wraps(), which copies these off the wrapped
+# callable into the descriptor's instance dict, skipping the ones it does not
+# have. The instance dict is read before the type's own attribute of the same
+# name, so e.g. staticmethod(f).__doc__ is f.__doc__, not staticmethod.__doc__.
+# Dynamo resolves them through the traced callable: materializing the descriptor
+# to read that dict would rebuild the callable, which is inexact for synthesized
+# functions (NestedUserFunctionVariable) and unavailable for wrapper VTs.
+# https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1090-L1117
+_WRAPS_COPIED_ATTRS = frozenset(
+    ("__module__", "__name__", "__qualname__", "__doc__", "__annotations__")
+)
+
+
+def _lookup_wraps_copied_attr(
+    tx: "InstructionTranslatorBase",
+    descriptor: VariableTracker,
+    name: str,
+) -> VariableTracker | None:
+    if name not in _WRAPS_COPIED_ATTRS:
+        return None
+    from .object_protocol import generic_getattr
+
+    return generic_getattr(tx, descriptor, name)
 
 
 class StaticMethodVariable(VariableTracker):
@@ -4754,28 +5419,47 @@ class StaticMethodVariable(VariableTracker):
     https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1418-L1428
     """
 
-    _nonvar_fields = {
-        "descriptor",
-        *VariableTracker._nonvar_fields,
+    # sm_memberlist: both members are readonly aliases of the wrapped callable.
+    # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1469-L1473
+    tp_members = {
+        "__func__": Member(lambda s, _: s.descriptor, readonly_setter),
+        "__wrapped__": Member(lambda s, _: s.descriptor, readonly_setter),
     }
 
-    def __init__(
-        self,
-        descriptor: staticmethod,  # type: ignore[type-arg]
-        **kwargs: Any,
-    ) -> None:
+    def __init__(self, descriptor: VariableTracker, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @classmethod
+    def from_descriptor(
+        cls,
+        tx: "InstructionTranslatorBase",
+        descriptor: staticmethod,  # type: ignore[type-arg]
+        source: "Source | None" = None,
+    ) -> "StaticMethodVariable":
+        func_source = AttrSource(source, "__func__") if source else None
+        return cls(
+            VariableTracker.build(tx, descriptor.__func__, func_source),
+            source=source,
+        )
+
     def __repr__(self) -> str:
-        func_name = getattr(self.descriptor.__func__, "__name__", "?")
-        return f"StaticMethodVariable({func_name})"
+        # A staticmethod built by user code can wrap any callable, so only a
+        # traced function has a name to report.
+        if isinstance(self.descriptor, BaseUserFunctionVariable):
+            return f"StaticMethodVariable({self.descriptor.get_name()})"
+        return f"StaticMethodVariable({self.descriptor})"
 
     def python_type(self) -> type:
         return staticmethod
 
     def as_python_constant(self) -> staticmethod:  # type: ignore[type-arg]
-        return self.descriptor
+        return staticmethod(self.descriptor.as_python_constant())
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        return _lookup_wraps_copied_attr(tx, self.descriptor, name)
 
     def tp_descr_get_impl(
         self,
@@ -4785,8 +5469,18 @@ class StaticMethodVariable(VariableTracker):
     ) -> VariableTracker:
         # sm_descr_get returns sm->sm_callable unconditionally.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1418-L1428
-        func_source = AttrSource(self.source, "__func__") if self.source else None
-        return VariableTracker.build(tx, self.descriptor.__func__, func_source)
+        return self.descriptor
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Rebuild the descriptor around the traced callable rather than
+        # restoring an original object, which may wrap an unrealized closure.
+        # Descriptor-path instances are consumed by tp_descr_get_impl and do not
+        # escape, so this effectively only serves values built by user code.
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", "staticmethod")
+        )
+        codegen(self.descriptor)
+        codegen.extend_output(create_call_function(1, False))
 
 
 class ClassMethodVariable(VariableTracker):
@@ -4799,28 +5493,63 @@ class ClassMethodVariable(VariableTracker):
     https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1215-L1227
     """
 
-    _nonvar_fields = {
-        "descriptor",
-        *VariableTracker._nonvar_fields,
+    # cm_memberlist: both members are readonly aliases of the wrapped callable.
+    # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1261-L1265
+    tp_members = {
+        "__func__": Member(lambda s, _: s.descriptor, readonly_setter),
+        "__wrapped__": Member(lambda s, _: s.descriptor, readonly_setter),
     }
 
-    def __init__(
-        self,
-        descriptor: classmethod,  # type: ignore[type-arg]
-        **kwargs: Any,
-    ) -> None:
+    def __init__(self, descriptor: VariableTracker, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @classmethod
+    def from_descriptor(
+        cls,
+        tx: "InstructionTranslatorBase",
+        descriptor: classmethod,  # type: ignore[type-arg]
+        name: str,
+        source: "Source | None" = None,
+    ) -> "ClassMethodVariable":
+        func_source = AttrSource(source, "__func__") if source else None
+        # Being in a class __dict__ is what makes the bound method addressable
+        # as `owner.<name>`, so build the VT that can source it.
+        # A classmethod may wrap any callable, so let the builder pick the VT;
+        # tp_descr_get_impl rejects the ones it cannot bind.
+        return ClassAttrClassMethodVariable(
+            name,
+            VariableTracker.build(tx, descriptor.__func__, func_source, realize=True),
+            source=source,
+        )
+
     def __repr__(self) -> str:
-        func_name = getattr(self.descriptor.__func__, "__name__", "?")
-        return f"ClassMethodVariable({func_name})"
+        # A classmethod built by user code can wrap any callable, so only a
+        # traced function has a name to report.
+        if isinstance(self.descriptor, BaseUserFunctionVariable):
+            return f"ClassMethodVariable({self.descriptor.get_name()})"
+        return f"ClassMethodVariable({self.descriptor})"
 
     def python_type(self) -> type:
         return classmethod
 
     def as_python_constant(self) -> classmethod:  # type: ignore[type-arg]
-        return self.descriptor
+        return classmethod(self.descriptor.as_python_constant())
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        return _lookup_wraps_copied_attr(tx, self.descriptor, name)
+
+    def _bound_source(
+        self, owner: VariableTracker, func: BaseUserFunctionVariable
+    ) -> "Source | None":
+        """Source naming the bound method, or None when it has none.
+
+        A `classmethod(...)` built by user code is not an entry in a class
+        __dict__, so `owner.<func name>` does not name its bound method.
+        """
+        return None
 
     def tp_descr_get_impl(
         self,
@@ -4830,18 +5559,58 @@ class ClassMethodVariable(VariableTracker):
     ) -> VariableTracker:
         # cm_descr_get binds the wrapped function to the class.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1215-L1227
-        func_source = AttrSource(self.source, "__func__") if self.source else None
-        bound_source = (
-            AttrSource(owner.source, self.descriptor.__func__.__name__)
-            if owner.source
-            else None
+        func = self.descriptor
+        # NestedUserFunctionVariable is not a UserFunctionVariable, but it is a
+        # Python function all the same and binds like one.
+        if not isinstance(func, BaseUserFunctionVariable):
+            unimplemented(
+                gb_type="classmethod of non-Python function",
+                context=f"tp_descr_get {self} on {owner}",
+                explanation="Dynamo can only bind a classmethod wrapping a "
+                "Python function to its class.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        bound_source = self._bound_source(owner, func)
+        if func.source is None and bound_source is not None:
+            # The descriptor had no source of its own (C().f, where the class
+            # came from obj.__class__), so take the function source from the
+            # bound attribute. Without this the function would go unguarded.
+            # Swap the source on the existing VT; get_function() would realize a
+            # synthesized function and can graph break.
+            # cast() is only for pyrefly.
+            func = cast(
+                BaseUserFunctionVariable,
+                func.clone(source=AttrSource(bound_source, "__func__")),
+            )
+        return UserMethodVariable(func, owner, source=bound_source)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # See StaticMethodVariable.reconstruct.
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", "classmethod")
         )
-        return UserMethodVariable(
-            self.descriptor.__func__,
-            owner,
-            source_fn=func_source,
-            source=bound_source,
-        )
+        codegen(self.descriptor)
+        codegen.extend_output(create_call_function(1, False))
+
+
+class ClassAttrClassMethodVariable(ClassMethodVariable):
+    """classmethod found in a class __dict__, built by from_descriptor.
+
+    Unlike `classmethod(f)` built by user code, the class attribute names its
+    bound method, so `owner.<name>` is a valid source for guards and
+    reconstruction. `name` is the attribute the descriptor is stored under,
+    which is not the wrapped callable's name: a functools.wraps wrapper keeps
+    its own code name, so `D.create` can wrap a function named `wrapper`.
+    """
+
+    def __init__(self, name: str, descriptor: VariableTracker, **kwargs: Any) -> None:
+        super().__init__(descriptor, **kwargs)
+        self.name = name
+
+    def _bound_source(
+        self, owner: VariableTracker, func: BaseUserFunctionVariable
+    ) -> "Source | None":
+        return AttrSource(owner.source, self.name) if owner.source else None
 
 
 class MemberDescriptorVariable(DescriptorVariable):
@@ -5022,7 +5791,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
             raise_attribute_error(
                 tx,
                 f"attribute '{name}' of "
-                f"'{self.descriptor.__objclass__.__name__}' objects "
+                f"'{type_qualified_name(self.descriptor.__objclass__)}' objects "
                 "is not writable",
             )
         entry.setter(obj, tx, value)
@@ -5098,6 +5867,71 @@ class PropertyVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    tp_members = {
+        "fget": Member(
+            getset_load_or_build(
+                lambda s: s.descriptor.fget,
+                "fget",
+                lambda s: s.source and AttrSource(s.source, "fget"),
+            ),
+            readonly_setter,
+        ),
+        "fset": Member(
+            getset_load_or_build(
+                lambda s: s.descriptor.fset,
+                "fset",
+                lambda s: s.source and AttrSource(s.source, "fset"),
+            ),
+            readonly_setter,
+        ),
+        "fdel": Member(
+            getset_load_or_build(
+                lambda s: s.descriptor.fdel,
+                "fdel",
+                lambda s: s.source and AttrSource(s.source, "fdel"),
+            ),
+            readonly_setter,
+        ),
+        "__doc__": Member(
+            getset_load_or_build(
+                lambda s: s.descriptor.__doc__,
+                "__doc__",
+                lambda s: s.source and AttrSource(s.source, "__doc__"),
+            ),
+            getset_set("__doc__"),
+        ),
+    }
+
+    def _name_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # property.__name__ only exists from 3.13
+        if sys.version_info >= (3, 13):
+            name = getattr(self.descriptor, "__name__", None)
+            if name is not None:
+                source = self.source and AttrSource(self.source, "__name__")
+                return VariableTracker.build(tx, name, source)
+        raise_attribute_error(
+            tx, f"'{self.python_type_name()}' object has no attribute '__name__'"
+        )
+
+    def _isabstractmethod_getter(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker:
+        from ..polyfills import property_isabstractmethod
+
+        # Trace truth testing so user-defined __bool__ methods and their
+        # exceptions are handled within the traced program.
+        return UserFunctionVariable(property_isabstractmethod).call_function(
+            tx, [self], {}
+        )
+
+    tp_getset = {
+        "__name__": GetSet(_name_getter, getset_set("__name__")),
+        "__isabstractmethod__": GetSet(
+            _isabstractmethod_getter,
+            readonly_setter,
+        ),
+    }
+
     def __init__(
         self,
         descriptor: property,
@@ -5115,6 +5949,46 @@ class PropertyVariable(VariableTracker):
 
     def as_python_constant(self) -> property:
         return self.descriptor
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        attr = "fset" if value is not None else "fdel"
+        fn = getattr(self.descriptor, attr)
+
+        if fn is None:
+            display_name = getattr(self.descriptor, "__name__", None)
+            kind = "setter" if value is not None else "deleter"
+            if sys.version_info >= (3, 11):
+                # property_descr_set formats %R of the owner's *type*, whose
+                # repr is its bare __qualname__ (no module prefix) -- unlike
+                # python_qualified_name(), which mirrors the module-qualified
+                # _PyType_GetFullyQualifiedName used elsewhere (e.g. __repr__).
+                try:
+                    cls_name = obj.python_type().__qualname__
+                except NotImplementedError:
+                    cls_name = obj.python_type_name()
+                if display_name is not None:
+                    msg = f"property '{display_name}' of '{cls_name}' object has no {kind}"
+                else:
+                    msg = f"property of '{cls_name}' object has no {kind}"
+            else:
+                # < 3.11: no owner/property-name in the message at all.
+                verb = "set" if value is not None else "delete"
+                if display_name is not None:
+                    msg = f"can't {verb} attribute '{display_name}'"
+                else:
+                    msg = f"can't {verb} attribute"
+            raise_attribute_error(tx, msg)
+
+        args = [obj] if value is None else [obj, value]
+        VariableTracker.build(
+            tx, fn, source=self.source and AttrSource(self.source, attr)
+        ).call_function(tx, args, {})
+        return ConstantVariable.create(None)
 
     def tp_descr_get_impl(
         self,

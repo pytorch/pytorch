@@ -1420,10 +1420,11 @@ returned tensor will have the same history.
 
 When :attr:`obj` is not a tensor, NumPy array, or DLPack capsule but implements Python's
 buffer protocol then the buffer is interpreted as an array of bytes grouped according to
-the size of the datatype passed to the :attr:`dtype` keyword argument. (If no datatype is
-passed then the default floating point datatype is used, instead.) The returned tensor
-will have the specified datatype (or default floating point datatype if none is specified)
-and, by default, be on the CPU device and share memory with the buffer.
+the size of the datatype passed to the :attr:`dtype` keyword argument. If no :attr:`dtype`
+is passed then it is inferred from the buffer's format, and an error is raised if the
+format cannot be mapped to a PyTorch datatype, in which case :attr:`dtype` must be passed
+explicitly. The returned tensor will have the specified (or inferred) datatype and, by
+default, be on the CPU device and share memory with the buffer.
 
 When :attr:`obj` is a NumPy scalar, the returned tensor will be a 0-dimensional tensor on
 the CPU and that doesn't share its memory (i.e. ``copy=True``). By default datatype will
@@ -7331,7 +7332,8 @@ Returns the median of the values in :attr:`input`.
     compute the mean of both medians, use :func:`torch.quantile` with ``q=0.5`` instead.
 
 .. warning::
-    This function produces deterministic (sub)gradients unlike ``median(dim=0)``
+    This function spreads the (sub)gradient evenly over every element equal to the
+    median, while ``median(dim=0)`` sends it to the element at the returned index.
 
 Args:
     {input}
@@ -7366,9 +7368,9 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
 .. warning::
     ``indices`` does not necessarily contain the first occurrence of each
     median value found, unless it is unique.
-    The exact implementation details are device-specific.
-    Do not expect the same result when run on CPU and GPU in general.
-    For the same reason do not expect the gradients to be deterministic.
+    The exact implementation details are device-specific: CUDA returns the
+    first occurrence, while other devices may return another one.
+    Do not expect the same indices, or the same gradients, on CPU and GPU.
 
 Args:
     {input}
@@ -12706,6 +12708,15 @@ defined by the variable argument :attr:`size`.
     Floating point and complex tensors are filled with NaN, and integer tensors
     are filled with the maximum value.
 
+.. warning::
+    For ``dtype=torch.bool``, the uninitialized bytes may hold values other
+    than ``0`` (``False``) and ``1`` (``True``), which are not valid booleans.
+    The behavior of operations that read such values is undefined: they may be
+    preserved as-is or normalized to ``1`` depending on the operation, device
+    and memory layout. Write to the tensor (e.g. with :meth:`~Tensor.fill_` or
+    :meth:`~Tensor.copy_`) before reading from it, or use :func:`torch.zeros`
+    instead.
+
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
@@ -14194,10 +14205,6 @@ Arguments:
     blocking (bool, optional): if ``True``, :meth:`wait` will be blocking (default: ``False``)
     interprocess (bool): if ``True``, the event can be shared between processes (default: ``False``)
 
-.. warning::
-
-    Both blocking and interprocess are not supported right now and are noops.
-
 Returns:
     Event: An torch.Event object.
 
@@ -14313,6 +14320,56 @@ Example::
     >>> s2_cuda = torch.Stream(device='cuda')
     >>> e_cuda = s1_cuda.record()
     >>> e_cuda.wait(s2)
+""",
+)
+
+
+add_docstr(
+    torch.Event.ipc_handle,
+    r"""
+Event.ipc_handle() -> bytes
+
+Return an IPC handle of this event.
+
+The event must have been constructed with ``interprocess=True``.
+If not yet recorded, the event is eagerly initialized on the current device.
+.. note:: The event reconstructed with :meth:`from_ipc_handle` cannot be re-exported via :meth:`ipc_handle`.
+
+Returns:
+    bytes: an opaque byte string that can be passed to :meth:`from_ipc_handle`
+        in another process to reconstruct this event.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> e_cuda = torch.Event(device='cuda', interprocess=True)
+    >>> ipc_handle = e_cuda.ipc_handle()
+""",
+)
+
+
+add_docstr(
+    torch.Event.from_ipc_handle,
+    r"""
+Event.from_ipc_handle(device, ipc_handle) -> Event
+
+Class method. Reconstruct an event from an IPC handle on the given device.
+
+Arguments:
+    device (:class:`torch.device`): the device on which to open the handle.
+    ipc_handle (bytes): the IPC handle returned by :meth:`ipc_handle`.
+
+Returns:
+    Event: an event reconstructed from the IPC handle.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> e_cuda = torch.Event(device='cuda', interprocess=True)
+    >>> e_cuda.record()
+    >>> ipc_handle = e_cuda.ipc_handle()
+    >>> # pass ipc handle to another process and reconstruct the event with it there
+    >>> ipc_event = torch.Event.from_ipc_handle(torch.device('cuda'), ipc_handle)
 """,
 )
 

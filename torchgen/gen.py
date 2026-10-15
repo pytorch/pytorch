@@ -2103,7 +2103,7 @@ def gen_per_operator_headers(
         dispatch_namespace = dispatch_key.lower()
         dispatch_names = []
 
-        for name, functions in functions_by_root_name.items():
+        for name in functions_by_root_name:
             grouped_functions = grouped_functions_by_root_name.get(name, [])
             declarations = list(
                 concatMap(
@@ -2196,13 +2196,21 @@ def gen_headers(
     # NB: base names repeat across groups (bmm and bmm.dtype, sum and sum.dim_IntList),
     # so the stub signature must come from the structured group the manifest targets.
     # Validation guarantees exactly one match per manifest.
-    native_aot_groups_by_op = {
+    native_aot_groups_by_op: dict[str, NativeFunction | NativeFunctionsGroup] = {
         op: g
         for g in structured_native_functions
         if g.structured
         for (_, op), m in native_aot_manifests.items()
         if m.matches_group(g)
     }
+    native_aot_groups_by_op.update(
+        {
+            op: f
+            for f in native_functions
+            for (_, op), m in native_aot_manifests.items()
+            if not m.structured and op == str(f.func.name)
+        }
+    )
     if per_operator_headers:
         gen_per_operator_headers(
             native_functions=native_functions,
@@ -2427,15 +2435,6 @@ def gen_source_files(
                 return headers
 
         backend_index = backend_indices[dispatch_key]
-        ns_grouped_native_functions = defaultdict(list)
-        for grouped_native_function in grouped_native_functions:
-            namespace = (
-                grouped_native_function.namespace
-                if isinstance(grouped_native_function, NativeFunction)
-                else grouped_native_function.functional.namespace
-            )
-            ns_grouped_native_functions[namespace].append(grouped_native_function)
-
         dispatch_namespace = str(dispatch_key).lower()
 
         # CompositeImplicitAutogradNestdTensor does not currently user the helpers generated
@@ -2444,13 +2443,22 @@ def gen_source_files(
             dispatch_key != DispatchKey.CompositeImplicitAutogradNestedTensor
         )
 
+        native_aot_manifests_for_key = {
+            op: m
+            for (key, op), m in native_aot_manifests.items()
+            if key == dispatch_key
+        }
+
         register_dispatch_key_base_env = {
             "extra_cuda_headers": extra_cuda_headers
             if is_cuda_dispatch_key(dispatch_key)
             else "",
             "external_backend_headers": "",
             "dispatch_headers": dest.gen_registration_headers(
-                backend_index, per_operator_headers, rocm
+                backend_index,
+                per_operator_headers,
+                rocm,
+                has_native_aot=bool(native_aot_manifests_for_key),
             ),
             # ops_headers *could* be sharded, but doesn't seem necessary?
             "ops_headers": operator_headers(),
@@ -2459,12 +2467,6 @@ def gen_source_files(
                 if gen_dispatch_helpers
                 else []
             ),
-        }
-
-        native_aot_manifests_for_key = {
-            op: m
-            for (key, op), m in native_aot_manifests.items()
-            if key == dispatch_key
         }
 
         def register_dispatch_key_env_callable(

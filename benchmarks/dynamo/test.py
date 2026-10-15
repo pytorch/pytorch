@@ -8,7 +8,8 @@ import os
 import sys
 import types
 import unittest
-from contextlib import redirect_stdout
+import weakref
+from contextlib import nullcontext, redirect_stdout
 from unittest import mock
 
 import torch
@@ -29,6 +30,57 @@ except ImportError:
 
 
 class TestDynamoBenchmark(TestCase):
+    def test_eager_warmup_does_not_retain_compiled_model(self) -> None:
+        live_copies = weakref.WeakSet()
+
+        class TrackingModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def __deepcopy__(self, memo):
+                model_copy = type(self)()
+                model_copy.load_state_dict(self.state_dict())
+                memo[id(self)] = model_copy
+                live_copies.add(model_copy)
+                return model_copy
+
+            def forward(self, inputs):
+                return self.linear(inputs)
+
+        class TrackingRunner(common.BenchmarkRunner):
+            def __init__(self):
+                super().__init__()
+                self.copy_counts = []
+
+            def pick_grad(self, name, is_training):
+                return nullcontext()
+
+        runner = TrackingRunner()
+        runner.args = parse_args(
+            ["-dcpu", "--backend=eager", "--performance", "--inference", "-n1"]
+        )
+
+        def model_iter_fn(model, inputs, collect_outputs=True):
+            runner.copy_counts.append(len(live_copies))
+            return model(inputs)
+
+        runner.model_iter_fn = model_iter_fn
+        experiment = mock.Mock(return_value="done")
+        experiment.func = common.speedup_experiment
+
+        with mock.patch("benchmarks.dynamo.common.current_device", "cpu"):
+            runner.run_performance_test(
+                "model",
+                TrackingModel(),
+                torch.ones(1, 2),
+                lambda fn: fn,
+                experiment,
+            )
+
+        self.assertTrue(runner.copy_counts)
+        self.assertEqual(max(runner.copy_counts), 1)
+
     def test_timm_auto_install_uses_no_deps(self) -> None:
         module_name = "benchmarks.dynamo._timm_models_install_test"
         module_path = os.path.join(os.path.dirname(__file__), "timm_models.py")

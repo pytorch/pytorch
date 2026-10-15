@@ -5,8 +5,11 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <unordered_map>
+#include <unordered_set>
 
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
@@ -92,6 +95,16 @@ struct ConstantBufferSet {
 };
 
 class AOTInductorModelContainer {
+ private:
+  struct StreamLock {
+    StreamLock() = default;
+    explicit StreamLock(const std::shared_ptr<std::mutex>& stream_mutex)
+        : stream_mutex_(stream_mutex), lock_(*stream_mutex_) {}
+
+    std::shared_ptr<std::mutex> stream_mutex_;
+    std::unique_lock<std::mutex> lock_;
+  };
+
  public:
   AOTInductorModelContainer(
       size_t num_models,
@@ -222,6 +235,46 @@ class AOTInductorModelContainer {
     out_spec_ = model->get_out_spec();
   }
 
+  // Stream affinity is intended for controlled multi-stream benchmarking with
+  // one model instance per long-lived stream. It deliberately waits for a
+  // stream's bound model instead of using another instance, trading host-side
+  // pipelining for stable stream-to-model assignment.
+  void set_use_stream_affinity(bool use_stream_affinity) {
+    std::lock_guard lk(models_mutex_);
+    AOTI_RUNTIME_CHECK(
+        available_models_.size() == models_.size() && pending_models_.empty() &&
+            checked_out_models_.empty(),
+        "Stream affinity can only be reconfigured while the model pool is "
+        "quiescent");
+#if defined(USE_CUDA) || defined(USE_XPU)
+    use_stream_affinity_ = use_stream_affinity;
+#else
+    AOTI_RUNTIME_CHECK(
+        !use_stream_affinity,
+        "Stream affinity is only supported for device runtimes");
+#endif
+    stream_models_.clear();
+    model_streams_.clear();
+    reclaim_unused_stream_mutexes();
+  }
+
+  int64_t get_stream_affinity_model_index(DeviceStreamType stream) {
+    std::lock_guard lk(models_mutex_);
+    if (!use_stream_affinity_) {
+      return AOTI_STREAM_AFFINITY_DISABLED;
+    }
+    const auto stream_it = stream_models_.find(stream);
+    if (stream == nullptr || stream_it == stream_models_.end()) {
+      return AOTI_STREAM_AFFINITY_UNBOUND;
+    }
+    for (size_t i = 0; i < models_.size(); ++i) {
+      if (models_[i].get() == stream_it->second) {
+        return static_cast<int64_t>(i);
+      }
+    }
+    AOTI_RUNTIME_CHECK(false, "Stream affinity refers to an unknown model");
+  }
+
   void run(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles
@@ -244,19 +297,19 @@ class AOTInductorModelContainer {
       // Double locking to make sure constant folding is only ran once.
       if (const_folded == ConstantState::INITIALIZED) {
         auto* model = get_available_model();
-        // TODO: add try catch block to handle exception.
-        auto folded_const_map = model->run_const_fold(
-            stream, proxy_executor, /* initialization = */ true);
-        update_constant_buffer(
-            std::move(folded_const_map),
-            /* use_inactive = */ false,
-            /* validate_full_update = */ false);
-        const_folded = ConstantState::FOLDED;
-        {
-          std::lock_guard lk(models_mutex_);
-          pending_models_.push_back(model);
+        try {
+          auto folded_const_map = model->run_const_fold(
+              stream, proxy_executor, /* initialization = */ true);
+          update_constant_buffer(
+              std::move(folded_const_map),
+              /* use_inactive = */ false,
+              /* validate_full_update = */ false);
+          const_folded = ConstantState::FOLDED;
+        } catch (...) {
+          return_model_to_available(model);
+          throw;
         }
-        pending_models_available_.notify_one();
+        return_model_to_pending(model);
       }
       constants_folding_lk.unlock();
       model_lk.lock();
@@ -266,21 +319,17 @@ class AOTInductorModelContainer {
           "Unknown constant state: " + toStringConstantState(const_folded));
     }
 
-    auto* model = get_available_model();
+    [[maybe_unused]] auto stream_lock = acquire_stream_lock(stream);
+    auto* model = get_available_model(stream);
 
     try {
       model->run(input_handles, output_handles, stream, proxy_executor);
     } catch (...) {
-      std::lock_guard lk(models_mutex_);
-      available_models_.push_back(model);
+      return_model_to_available(model);
       throw;
     }
 
-    {
-      std::lock_guard lk(models_mutex_);
-      pending_models_.push_back(model);
-    }
-    pending_models_available_.notify_one();
+    return_model_to_pending(model);
   }
 
   // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
@@ -295,6 +344,9 @@ class AOTInductorModelContainer {
                           // borrowed
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
+    AOTI_RUNTIME_CHECK(
+        !use_stream_affinity_,
+        "Stream affinity cannot be used with single-threaded execution");
     auto* model = available_models_[0];
 
     auto& const_folded = active().fold_state;
@@ -449,13 +501,14 @@ class AOTInductorModelContainer {
             /* validate_full_update = */ false);
         const_folded = ConstantState::FOLDED;
       } catch (...) {
-        std::lock_guard lk(models_mutex_);
-        available_models_.push_back(model);
+        return_model_to_available(model);
         throw;
       }
+      return_model_to_pending(model);
     } else {
       std::shared_lock model_lk(model_exec_mutex_);
-      model = get_available_model();
+      [[maybe_unused]] auto stream_lock = acquire_stream_lock(stream);
+      model = get_available_model(stream);
 
       // We swap the constant mapping to the inactive buffer in the model to run
       // const run.
@@ -481,17 +534,12 @@ class AOTInductorModelContainer {
         model->update_constants_array(active_array);
         const_folded = ConstantState::FOLDED;
       } catch (...) {
-        std::lock_guard lk(models_mutex_);
-        available_models_.push_back(model);
+        return_model_to_available(model);
         throw;
       }
-    }
 
-    {
-      std::lock_guard lk(models_mutex_);
-      pending_models_.push_back(model);
+      return_model_to_pending(model);
     }
-    pending_models_available_.notify_one();
   }
 
   bool _is_tensor_constant_type(const size_t idx) const {
@@ -938,7 +986,13 @@ class AOTInductorModelContainer {
   // Holds all the AOTInductorModel instances owned by this container.
   std::vector<std::unique_ptr<AOTInductorModel>> models_;
 
-  // Holds the AOTInductorModel instances available for inference.
+  // Holds the AOTInductorModel instances available for inference. When stream
+  // affinity is enabled, each model is in exactly one execution state under
+  // models_mutex_: available here, pending device completion below, or checked
+  // out by a host thread. Stream bindings are persistent preferences
+  // independent of those states; borrowing a bound model preserves its
+  // binding, while a failed run clears it so the next call may choose another
+  // model.
   std::vector<AOTInductorModel*> available_models_;
 
   // Holds the AOTInductorModel instances that have started running
@@ -946,11 +1000,20 @@ class AOTInductorModelContainer {
   // completion.
   std::deque<AOTInductorModel*> pending_models_;
 
-  // Protects available_models_ and pending_models_.
+  bool use_stream_affinity_{false};
+  // Callers enabling affinity must keep bound streams alive to avoid a reused
+  // device handle inheriting an old binding. Unbound mutexes are reclaimed
+  // once no in-flight StreamLock shares ownership.
+  std::unordered_map<DeviceStreamType, AOTInductorModel*> stream_models_;
+  std::unordered_map<AOTInductorModel*, DeviceStreamType> model_streams_;
+  std::unordered_map<DeviceStreamType, std::shared_ptr<std::mutex>>
+      stream_mutexes_;
+  std::unordered_set<AOTInductorModel*> checked_out_models_;
+
+  // Protects the model-state collections and affinity mappings.
   std::mutex models_mutex_;
 
-  // Notified whenever a model is placed onto pending_models_.
-  std::condition_variable pending_models_available_;
+  std::condition_variable model_state_changed_;
 
   std::vector<std::string> extracted_constant_map_entry_names_;
   std::vector<AOTInductorConstantMapEntry> extracted_constant_map_entries_;
@@ -970,12 +1033,173 @@ class AOTInductorModelContainer {
 
   AOTInductorModel* get_available_model() {
     std::unique_lock lk(models_mutex_);
-    if (available_models_.empty()) {
+    return checkout_available_model(lk);
+  }
+
+  AOTInductorModel* checkout_available_model(std::unique_lock<std::mutex>& lk) {
+    return take_available_model(lk, /*prefer_unbound=*/use_stream_affinity_);
+  }
+
+  AOTInductorModel* take_available_model(
+      std::unique_lock<std::mutex>& lk,
+      bool prefer_unbound) {
+    while (available_models_.empty()) {
       reclaim_finished_models(lk);
     }
-    auto* result = available_models_.back();
-    available_models_.pop_back();
+    auto result_it = available_models_.end() - 1;
+    if (prefer_unbound) {
+      // Preserve existing bindings when possible. If every available model is
+      // bound, the caller borrows one while its owning stream waits.
+      for (auto it = available_models_.end();
+           it != available_models_.begin();) {
+        --it;
+        if (model_streams_.find(*it) == model_streams_.end()) {
+          result_it = it;
+          break;
+        }
+      }
+    }
+    auto* result = *result_it;
+    available_models_.erase(result_it);
+    if (use_stream_affinity_) {
+      checked_out_models_.insert(result);
+    }
     return result;
+  }
+
+  AOTInductorModel* get_available_model(DeviceStreamType stream) {
+    std::unique_lock lk(models_mutex_);
+#if defined(USE_CUDA) || defined(USE_XPU)
+    if (use_stream_affinity_ && stream != nullptr) {
+      return get_stream_affine_model(stream, lk);
+    }
+#else
+    (void)stream;
+#endif
+    return checkout_available_model(lk);
+  }
+
+  AOTInductorModel* get_stream_affine_model(
+      DeviceStreamType stream,
+      std::unique_lock<std::mutex>& lk) {
+    while (true) {
+      const auto stream_it = stream_models_.find(stream);
+      if (stream_it == stream_models_.end()) {
+        break;
+      }
+
+      auto* model = stream_it->second;
+      const auto available_it =
+          std::find(available_models_.begin(), available_models_.end(), model);
+      if (available_it != available_models_.end()) {
+        available_models_.erase(available_it);
+        checked_out_models_.insert(model);
+        return model;
+      }
+
+      const auto pending_it =
+          std::find(pending_models_.begin(), pending_models_.end(), model);
+      if (pending_it != pending_models_.end()) {
+        pending_models_.erase(pending_it);
+        checked_out_models_.insert(model);
+        lk.unlock();
+        try {
+          model->wait_for_completion();
+        } catch (...) {
+          return_model_to_available(model);
+          throw;
+        }
+        return model;
+      }
+
+      // A null-stream checkout or pool reclamation can temporarily borrow a
+      // bound model. Same non-null stream calls serialize before this point.
+      model_state_changed_.wait(lk, [this, model]() {
+        return checked_out_models_.find(model) == checked_out_models_.end();
+      });
+    }
+
+    // Bind an unbound model on a stream's first use. If all model instances are
+    // already bound, reclaim and rebind one for an oversubscribed stream.
+    auto* model = take_available_model(lk, /*prefer_unbound=*/true);
+    bind_model_to_stream(model, stream);
+    return model;
+  }
+
+  StreamLock acquire_stream_lock(DeviceStreamType stream) {
+#if defined(USE_CUDA) || defined(USE_XPU)
+    std::shared_ptr<std::mutex> stream_mutex;
+    {
+      std::lock_guard lk(models_mutex_);
+      if (!use_stream_affinity_ || stream == nullptr) {
+        return {};
+      }
+      reclaim_unused_stream_mutexes();
+      auto [it, inserted] = stream_mutexes_.try_emplace(stream, nullptr);
+      if (inserted) {
+        it->second = std::make_shared<std::mutex>();
+      }
+      stream_mutex = it->second;
+    }
+    return StreamLock(stream_mutex);
+#else
+    (void)stream;
+    return {};
+#endif
+  }
+
+  void reclaim_unused_stream_mutexes() {
+    for (auto it = stream_mutexes_.begin(); it != stream_mutexes_.end();) {
+      if (stream_models_.find(it->first) == stream_models_.end() &&
+          it->second.use_count() == 1) {
+        it = stream_mutexes_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  void unbind_model_from_stream(AOTInductorModel* model) {
+    const auto model_it = model_streams_.find(model);
+    if (model_it == model_streams_.end()) {
+      return;
+    }
+    stream_models_.erase(model_it->second);
+    model_streams_.erase(model_it);
+  }
+
+  void bind_model_to_stream(AOTInductorModel* model, DeviceStreamType stream) {
+    unbind_model_from_stream(model);
+
+    const auto stream_it = stream_models_.find(stream);
+    if (stream_it != stream_models_.end()) {
+      model_streams_.erase(stream_it->second);
+      stream_models_.erase(stream_it);
+    }
+
+    stream_models_.emplace(stream, model);
+    model_streams_.emplace(model, stream);
+  }
+
+  void return_model_to_available(AOTInductorModel* model) {
+    {
+      std::lock_guard lk(models_mutex_);
+      // A failed execution invalidates its affinity so a subsequent call can
+      // select another model instance.
+      unbind_model_from_stream(model);
+      checked_out_models_.erase(model);
+      available_models_.push_back(model);
+    }
+    model_state_changed_.notify_all();
+  }
+
+  void return_model_to_pending(AOTInductorModel* model) {
+    {
+      std::lock_guard lk(models_mutex_);
+      checked_out_models_.erase(model);
+      pending_models_.push_back(model);
+    }
+    model_state_changed_.notify_all();
   }
 
   // This mutex is used to protect execution of model.
@@ -1002,30 +1226,43 @@ class AOTInductorModelContainer {
 
     if (it != pending_models_.end()) {
       // We have finished model instances that can be pushed into
-      // available_models_ so that we don't have to be blocked on waiting
-      // the pending_models_available_ condition.
+      // available_models_ so that we don't have to block waiting on
+      // model_state_changed_.
       available_models_.insert(
           available_models_.end(), it, pending_models_.end());
       pending_models_.erase(it, pending_models_.end());
+      model_state_changed_.notify_all();
       return;
     }
 
-    pending_models_available_.wait(
-        lk, [this]() { return !pending_models_.empty(); });
+    model_state_changed_.wait(lk, [this]() {
+      return !available_models_.empty() || !pending_models_.empty();
+    });
+    if (!available_models_.empty()) {
+      return;
+    }
     // Let's make the schedule simple first. We always wait on the first
     // pending_models_ to be complete.
     auto* model = pending_models_.front();
     pending_models_.pop_front();
+    if (use_stream_affinity_) {
+      checked_out_models_.insert(model);
+    }
     lk.unlock();
     try {
       model->wait_for_completion();
     } catch (...) {
       lk.lock();
+      unbind_model_from_stream(model);
+      checked_out_models_.erase(model);
       available_models_.push_back(model);
+      model_state_changed_.notify_all();
       throw;
     }
     lk.lock();
+    checked_out_models_.erase(model);
     available_models_.push_back(model);
+    model_state_changed_.notify_all();
   }
 };
 

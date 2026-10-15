@@ -28,17 +28,9 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     slowTest,
+    TEST_WITH_ROCM,
     TestCase,
 )
-
-
-class TestSortAndSelectCPU(TestCase):
-    def test_complex_unsupported_cpu(self, device):
-        x = torch.tensor([3.0 + 2j, 4.0 + 3j], device=device)
-        with self.assertRaisesRegex(
-            TypeError, " Sort does not support complex dtypes on CPU"
-        ):
-            torch.sort(input=x)
 
 
 class TestSortAndSelect(TestCase):
@@ -57,6 +49,23 @@ class TestSortAndSelect(TestCase):
 
 
 class TestSortAndSelectDevice(TestCase):
+    def test_sort_complex_unsupported(self, device):
+        x = torch.tensor([1.0 + 1j, 2.0 + 0j], device=device)
+        with self.assertRaisesRegex(TypeError, "Sort does not support complex dtypes"):
+            torch.sort(x)
+
+    def test_topk_complex_unsupported(self, device):
+        x = torch.tensor([1.0 + 1j, 2.0 + 0j], device=device)
+        with self.assertRaisesRegex(TypeError, "topk does not support complex dtypes"):
+            torch.topk(x, 1)
+
+    def test_topk_bool_unsupported(self, device):
+        x = torch.tensor([True, False], device=device)
+        with self.assertRaisesRegex(
+            NotImplementedError, "topk does not support bool dtypes"
+        ):
+            torch.topk(x, 1)
+
     def assertIsOrdered(self, order, x, mxx, ixx, task):
         SIZE = x.size(1)
         if order == "descending":
@@ -1408,6 +1417,36 @@ class TestSortAndSelectCUDA(TestCase):
                 self.assertEqual(top1, top2)
                 self.assertEqual(idx1, idx2)
 
+    @dtypes(torch.bfloat16, torch.float16, torch.float32)
+    def test_topk_deterministic_ties(self, device, dtype):
+        # Single-block topk on ROCm once ordered tied values by warp arrival (#196177).
+        # Slices longer than the block take the multi-round gather; few values force many ties.
+        for (rows, cols), high in product(
+            ((256, 257), (256, 1024), (8, 3000), (8, 4097)), (4, 1000)
+        ):
+            x = torch.randint(0, high, (rows, cols), device=device).to(dtype)
+            x_cpu = x.cpu()
+            for k, largest, sorted_ in product((8, 300), (True, False), (True, False)):
+                if k > cols:
+                    continue
+                msg = f"{rows=} {cols=} {high=} {k=} {largest=} {sorted_=}"
+                _, idx = torch.topk(x, k, largest=largest, sorted=sorted_)
+                for _ in range(10):
+                    rerun = torch.topk(x, k, largest=largest, sorted=sorted_)[1]
+                    self.assertEqual(rerun, idx, msg=msg)
+                # Same slices with a non-unit stride within the slice.
+                xt = x.t().contiguous()
+                idx_t = torch.topk(xt, k, dim=0, largest=largest, sorted=sorted_)[1]
+                self.assertEqual(idx_t.t(), idx, msg=msg)
+                if not sorted_:
+                    # Unsorted output is in gather order: indices strictly past the k-th value in
+                    # ascending order, then the lowest indices equal to it.
+                    kth = x_cpu.topk(k, largest=largest).values[:, -1:]
+                    past = x_cpu > kth if largest else x_cpu < kth
+                    rank = torch.where(past, 0, torch.where(x_cpu == kth, 1, 2))
+                    expected = rank.sort(stable=True).indices[:, :k]
+                    self.assertEqual(idx.cpu(), expected, msg=msg)
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @slowTest
     @largeTensorTest("170GB", "cpu")
@@ -1423,6 +1462,9 @@ class TestSortAndSelectCUDA(TestCase):
         - GPU: ~72 GB (data ~16GB + values ~16GB + indices ~32GB + other ~8GB)
         - CPU: ~170 GB (indices copy ~32GB + torch.unique extra memory ~130GB + other ~8GB)
         """
+        if TEST_WITH_ROCM and dtype in (torch.float16, torch.bfloat16):
+            self.skipTest("half dtypes take the ROCm sort path, capped at INT_MAX")
+
         extra = random.randint(500, 2000)
         n = 2**32 + extra
         k = random.randint(2**32 + 100, n - 100)
@@ -1496,7 +1538,6 @@ class TestSortAndSelectCUDA(TestCase):
             )
 
 
-instantiate_device_type_tests(TestSortAndSelectCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(TestSortAndSelectDevice, globals())
 instantiate_device_type_tests(TestSortAndSelectCUDA, globals(), only_for="cuda")
 
