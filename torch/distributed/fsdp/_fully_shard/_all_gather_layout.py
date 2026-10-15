@@ -47,9 +47,9 @@ if TYPE_CHECKING:
 # as (outer_sizes[i], -1), are concatenated along dim 1 of outputs[i] viewed the
 # same way. Outputs with outer_sizes[i] == 1 may be larger and then fill only a
 # prefix. A uint8 all_gather_output has split_sizes in bytes, while outputs keep
-# their dtypes. fn may only write outputs, whose version counters FSDP preserves,
-# and must not keep its arguments. FSDP skips it for a single rank or an empty
-# all-gather.
+# their dtypes. Of its arguments, fn may only write outputs, whose version
+# counters FSDP preserves, and must keep none. FSDP skips it for a single rank or
+# an empty all-gather.
 def _default_all_gather_output_fn(
     all_gather_output: torch.Tensor,
     outputs: list[torch.Tensor],

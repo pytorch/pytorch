@@ -606,24 +606,21 @@ def foreach_all_gather_copy_out(
 # allocates the reduce-scatter input and may replace entries of unsharded_grads.
 # copy_in(reduce_scatter_input) then fills that flat buffer so that, viewed as
 # (world_size, -1), row r holds each gradient's padded shard r in order, cast to the
-# buffer's dtype. Both run on the current stream; FSDP frees copy_in and the
-# gradients afterward, so keep neither. The keywords make callbacks with the 2.15
-# signature fail.
+# buffer's dtype. Both run under no_grad on the current stream, also for a single
+# rank; FSDP frees copy_in and the gradients afterward, so keep neither.
 def _default_reduce_scatter_input_fn(
     unsharded_grads: list[torch.Tensor],
     *,
     shard_dims: list[int],
     world_size: int,
-) -> Callable:
+) -> Callable[[torch.Tensor], None]:
     """Reorder gradients sharded on a nonzero dim by rank and return their copy-in."""
     if world_size > 1:
         for i, shard_dim in enumerate(shard_dims):
             if shard_dim != 0:
                 chunks = torch.chunk(unsharded_grads[i], world_size, dim=shard_dim)
                 unsharded_grads[i] = torch.cat(chunks, dim=0)
-    return lambda reduce_scatter_input: foreach_reduce_scatter_copy_in(
-        unsharded_grads, reduce_scatter_input, world_size
-    )
+    return lambda out: foreach_reduce_scatter_copy_in(unsharded_grads, out, world_size)
 
 
 @torch.no_grad()

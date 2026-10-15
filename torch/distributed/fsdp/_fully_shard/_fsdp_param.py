@@ -1604,8 +1604,9 @@ def _get_all_gather_output_layouts(
                 # whose shard needs no padding, which then hang in the collective
                 raise ValueError(
                     f"{param_name} is unevenly sharded, so its Tensor all-gather "
-                    f"inputs must have the padded sharded size "
-                    f"{tuple(padded_sharded_size)}, but input {i} has size {tuple(size)}"
+                    "inputs must have the padded sharded size "
+                    f"{tuple(padded_sharded_size)}, but input {i} has size "
+                    f"{tuple(size)}. Return other payloads as AllGatherInput records."
                 )
             if (
                 reassembled
@@ -1655,7 +1656,7 @@ def _get_all_gather_output_layouts(
             raise ValueError(
                 f"All-gather input {i} of {param_name} has trailing dims "
                 f"{tuple(size[1:])}, which do not divide the {output.numel()} "
-                f"elements of its output"
+                "elements of its output"
             )
     return tuple(layouts)
 
