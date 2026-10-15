@@ -1114,19 +1114,23 @@ def export_python(
 
     .. warning::
         An artifact is only valid on the machine type that produced it. The emitted
-        source hardcodes the CPU vector width inductor chose and, for CUDA, the compute
-        capability of the producing GPU; neither is re-checked. (A tensor on a different
-        device index than at capture is rejected when the artifact is called.) Running
-        a CPU artifact under a different ISA than it captured on is unsafe in both
-        directions, because the loop stride is baked at capture while the ISA is
-        re-picked when the artifact compiles: a *wider* ISA writes past the end of the
-        output, corrupting the heap, and a *narrower* one leaves roughly half of each
-        vectorized strip unwritten, so the output is part uninitialized memory. Neither
-        raises. ``torch._inductor.config.cpp.simdlen`` and ``ATEN_CPU_CAPABILITY``
-        change the ISA on one machine, so they count as part of the machine type.
-        Running a CUDA artifact on a different architecture fails with a kernel-image
-        error. Commit an artifact only alongside the machine type it captured on, and
-        regenerate (delete ``path``) when that changes; nothing detects the change for
+        source hardcodes the CPU vector width inductor chose and, for CUDA, the
+        compute capability of the producing GPU; the compute capability is never
+        re-checked. (A tensor on a different device index than at capture is
+        rejected when the artifact is called.) Running a CPU artifact under a
+        different ISA than it captured on is unsafe in both directions, because the
+        loop stride is baked at capture while the ISA is re-picked when the artifact
+        compiles: a *wider* ISA writes past the end of the output, corrupting the
+        heap, and a *narrower* one leaves roughly half of each vectorized strip
+        unwritten, so the output is part uninitialized memory. Neither raises.
+        ``torch._inductor.config.cpp.simdlen`` and ``ATEN_CPU_CAPABILITY`` change
+        the ISA on one machine, so they count as part of the machine type, and an
+        artifact containing a C++ kernel records the ISA it was generated against
+        and refuses to load under a different vector width or an ISA lacking one of
+        its features. Running a CUDA artifact on a different architecture fails
+        with a kernel-image error. Commit an artifact only
+        alongside the machine type it captured on, and regenerate (delete ``path``)
+        when that changes; apart from the CPU ISA, nothing detects the change for
         you.
 
     Keyword call arguments and positional defaults are normalized onto ``fn``'s full
@@ -1140,7 +1144,7 @@ def export_python(
     or a call that passes extra keyword arguments to ``fn``'s ``**kwargs``, is
     rejected, since neither is expressible in the artifact's positional convention.
 
-    Five things that ``make_fx`` or the code generator resolves without emitting a guard
+    Six things that ``make_fx`` or the code generator resolves without emitting a guard
     are recorded as comment stamps and checked on every call: each ``nn.Module``
     argument's per-submodule ``training`` state, which input tensors shared memory at
     capture (aliasing decides what an in-place mutation means), which input positions
@@ -1156,24 +1160,29 @@ def export_python(
     lowering, and, under determinism, the
     ``torch.utils.deterministic.fill_uninitialized_memory`` value inductor's
     ``empty_strided`` lowering bakes. Those last two are checked one-way: capturing with
-    one on and calling with it off is safe, the reverse is not. What is *not* guarded is a
-    change in *how* two aliased inputs overlap: when capture and the call both pass
-    intersecting views, the artifact runs with capture's relative offsets baked in and
-    may compute the wrong thing. ``torch.compile`` has the same hole *there*, but this
-    list is not a complete account of what the artifact bakes: a tensor subclass's inner
-    shapes and a DTensor's placements are unrecorded, and so is a CUDA artifact's
-    compute capability (see the machine-type warning above). Where ``torch.compile``
-    would recompile, an artifact cannot, so treat any ambient change between capture and
-    call as needing a fresh capture unless a stamp covers it. A hand-edit that drops a
-    stamp turns that one check off: a checked stamp then warns on every call, while a
-    dropped version stamp just silences the version warning. All stamps must stay in the
-    artifact's leading comment block: the reader stops at the first non-comment line, so
-    inserting code above them turns every check off. Other Python attributes and Python
-    control flow are specialized at capture and must remain compatible with the example.
-    That includes ``torch.is_grad_enabled()``: capture traces with grad enabled so a
-    backward inside ``fn`` is built as graph ops, so a ``fn`` that branches on it always
-    captures the grad-enabled branch, whatever the grad mode of the call that triggered
-    capture.
+    one on and calling with it off is safe, the reverse is not. The sixth, for an
+    artifact containing a C++ kernel, is the CPU vector ISA it was generated against
+    (the vector width is baked into the loop strides while the ISA is re-picked at
+    compile time, so a narrower host would leave part of the output uninitialized with
+    no error at all -- this one is checked once at load, before the kernel compiles, and
+    refuses to load rather than warning). What is *not* guarded is a change in *how* two
+    aliased inputs overlap: when capture and the call both pass intersecting views, the
+    artifact runs with capture's relative offsets baked in and may compute the wrong
+    thing. ``torch.compile`` has the same hole *there*, but this list is not a complete
+    account of what the artifact bakes: a tensor subclass's inner shapes and a DTensor's
+    placements are unrecorded, and so is a CUDA artifact's compute capability (see the
+    machine-type warning above). Where ``torch.compile`` would recompile, an artifact
+    cannot, so treat any ambient change between capture and call as needing a fresh
+    capture unless a stamp covers it. A hand-edit that drops a stamp turns that one
+    check off: a checked stamp then warns on every call (the CPU ISA stamp, on every
+    load), while a dropped version stamp just silences the version warning. All stamps
+    must stay in the artifact's leading comment block: the reader stops at the first
+    non-comment line, so inserting code above them turns every check off. Other Python
+    attributes and Python control flow are specialized at capture and must remain
+    compatible with the example. That includes ``torch.is_grad_enabled()``: capture
+    traces with grad enabled so a backward inside ``fn`` is built as graph ops, so a
+    ``fn`` that branches on it always captures the grad-enabled branch, whatever the
+    grad mode of the call that triggered capture.
     Calling the artifact under ``torch.no_grad()`` is unaffected and is the ordinary
     inference path.
 
