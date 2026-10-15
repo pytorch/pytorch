@@ -461,9 +461,9 @@ def _get_param_all_gather_inputs(
 # as (outer_sizes[i], -1), are concatenated along dim 1 of outputs[i] viewed the
 # same way. Outputs with outer_sizes[i] == 1 may be larger and then fill only a
 # prefix. A uint8 all_gather_output has split_sizes in bytes, while outputs keep
-# their dtypes. fn may only write outputs, whose version counters FSDP preserves,
-# and must not keep its arguments. FSDP skips it for a single rank or an empty
-# all-gather.
+# their dtypes. Of its arguments, fn may only write outputs, whose version
+# counters FSDP preserves, and must keep none. FSDP skips it for a single rank or
+# an empty all-gather.
 def _default_all_gather_output_fn(
     all_gather_output: torch.Tensor,
     outputs: list[torch.Tensor],
@@ -515,29 +515,17 @@ def foreach_all_gather_copy_out(
     *,
     all_gather_output_fn: Callable = _default_all_gather_output_fn,
 ) -> None:
-    (
-        all_gather_output,
-        all_gather_event,
-        all_gather_work,
-        param_all_gather_input_dtypes,
-        param_all_gather_input_numels,
-        all_gather_input_split_sizes,
-    ) = all_gather_result
-    device = all_gather_output.device
-    device_handle = _get_device_handle(device.type)
-    if all_gather_event is not None:  # sync op
-        device_handle.current_stream().wait_event(all_gather_event)
-    if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
-        all_gather_work.wait()
-    world_size = group.size()
+    _wait_all_gather(all_gather_result)
+    all_gather_output = all_gather_result.all_gather_output
+    device, world_size = all_gather_output.device, group.size()
     outputs: list[torch.Tensor] = []
     outer_sizes: list[int] = []
-    for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
-        param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
+    for fsdp_param, numels, dtypes in zip(
+        fsdp_params,
+        all_gather_result.param_all_gather_input_numels,
+        all_gather_result.param_all_gather_input_dtypes,
     ):
-        fsdp_param.init_all_gather_outputs(
-            all_gather_input_numels, all_gather_input_dtypes, world_size, device
-        )
+        fsdp_param.init_all_gather_outputs(numels, dtypes, world_size, device)
         fsdp_param.alloc_all_gather_outputs()
         outputs.extend(fsdp_param.all_gather_outputs)
         for layout in fsdp_param.all_gather_output_layouts:
@@ -551,7 +539,7 @@ def foreach_all_gather_copy_out(
         all_gather_output_fn(
             all_gather_output,
             outputs,
-            split_sizes=all_gather_input_split_sizes,
+            split_sizes=all_gather_result.all_gather_input_split_sizes,
             outer_sizes=outer_sizes,
             world_size=world_size,
         )
@@ -562,24 +550,21 @@ def foreach_all_gather_copy_out(
 # allocates the reduce-scatter input and may replace entries of unsharded_grads.
 # copy_in(reduce_scatter_input) then fills that flat buffer so that, viewed as
 # (world_size, -1), row r holds each gradient's padded shard r in order, cast to the
-# buffer's dtype. Both run on the current stream; FSDP frees copy_in and the
-# gradients afterward, so keep neither. The keywords make callbacks with the 2.15
-# signature fail.
+# buffer's dtype. Both run under no_grad on the current stream, also for a single
+# rank; FSDP frees copy_in and the gradients afterward, so keep neither.
 def _default_reduce_scatter_input_fn(
     unsharded_grads: list[torch.Tensor],
     *,
     shard_dims: list[int],
     world_size: int,
-) -> Callable:
+) -> Callable[[torch.Tensor], None]:
     """Reorder gradients sharded on a nonzero dim by rank and return their copy-in."""
     if world_size > 1:
         for i, shard_dim in enumerate(shard_dims):
             if shard_dim != 0:
                 chunks = torch.chunk(unsharded_grads[i], world_size, dim=shard_dim)
                 unsharded_grads[i] = torch.cat(chunks, dim=0)
-    return lambda reduce_scatter_input: foreach_reduce_scatter_copy_in(
-        unsharded_grads, reduce_scatter_input, world_size
-    )
+    return lambda out: foreach_reduce_scatter_copy_in(unsharded_grads, out, world_size)
 
 
 @torch.no_grad()
