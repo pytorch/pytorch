@@ -3433,12 +3433,11 @@ def capture(
     needs, and raises :class:`~torch.compiler.PrecompileError` for one it cannot
     freeze. That includes kernels launched directly through ``@triton.jit`` and
     ``@triton.autotune`` inside the block: Triton compiles into a fresh cache
-    directory there, with its autotuning cache on. A JIT kernel or autotuner
-    already used before the block reuses what it compiled or tuned then, which
-    is not carried, so launch each one for the first time inside the block.
-    Triton does not cache the decision of an autotuner with ``pre_hook``
-    configs, so such a kernel is benchmarked again on first use in the serving
-    process.
+    directory there, with its autotuning cache on, and a JIT kernel or
+    autotuner already used before the block compiles or tunes again on its
+    first launch inside it. Triton does not cache the decision of an autotuner
+    with ``pre_hook`` configs, so such a kernel is benchmarked again on first
+    use in the serving process.
 
     ``tracer`` picks the capture front-end and carries its tracer-specific
     configuration. :class:`DynamoTracer` (the default) is an execution-driven

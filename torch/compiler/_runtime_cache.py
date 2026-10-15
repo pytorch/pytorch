@@ -505,13 +505,17 @@ def _own_triton_cache(settings: contextlib.ExitStack) -> str | None:
     until ``settings`` closes, so the directory holds exactly the Triton JIT
     kernels and autotuning decisions the scope used.
 
-    Autotuners fix cache_results when they are decorated, so existing ones are
-    switched on for the scope too.
+    JIT functions and autotuners from before the scope keep compiled kernels
+    and decisions in memory, which a launch in the scope would reuse without
+    touching the directory, so those are dropped and produced again on first
+    use. Autotuners fix cache_results when they are decorated, so existing
+    ones are switched on for the scope too.
     """
     if _triton_runtime_cache() is None:
         return None
     from triton import knobs
     from triton.runtime import driver
+    from triton.runtime.jit import JITFunction
 
     root = _private_directory("torch_precompile_triton_")
     # Triton builds its driver's utility module (cuda_utils, hip_utils) into
@@ -529,9 +533,13 @@ def _own_triton_cache(settings: contextlib.ExitStack) -> str | None:
     settings.enter_context(knobs.autotuning.scope())
     knobs.cache.dir = root
     knobs.autotuning.cache = True
+    for obj in gc.get_objects():
+        if issubclass(type(obj), JITFunction):
+            obj.device_caches.clear()
     tuners = _live_autotuners()
     restore = [(tuner, tuner.cache_results) for tuner in tuners]
     for tuner in tuners:
+        tuner.cache.clear()
         tuner.cache_results = not knobs.runtime.interpret
 
     def restore_cache_results() -> None:
