@@ -956,7 +956,8 @@ class _OmittedFromScan(DeferredLineBase):
 
 class _KernelConfigs(DeferredLineBase):
     """``KERNEL_CONFIGS``: the config compile-time autotuning chose for each module-level
-    kernel, which the kernel launches with (see cached_autotune's pinned_config).
+    kernel, which the kernel launches with when the module is run on its own (see
+    cached_autotune's pinned_config).
 
     It is written ahead of the kernels, which read it when they are defined, but is only
     known once the autotune block has run, after every kernel, subgraphs' included, has
@@ -4489,8 +4490,9 @@ class PythonWrapperCodegen(CodeGen):
 
         The python wrapper defines the kernel as code. Wrappers that consume a kernel's
         ``async_compile.triton(...)`` source themselves get that string form instead.
-        With ``pin_config``, set for an inductor-generated kernel, the module launches
-        the kernel with the config compile-time autotuning chose (KERNEL_CONFIGS).
+        With ``pin_config``, set for an inductor-generated kernel, the module run on its
+        own launches the kernel with the config compile-time autotuning chose
+        (KERNEL_CONFIGS).
         """
         if not self.defines_triton_kernels_as_code():
             self.define_kernel(
