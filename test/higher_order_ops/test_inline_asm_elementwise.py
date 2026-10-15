@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
 )
 from torch.testing._internal.common_utils import (
+    GFX1250_ARCH,
     instantiate_parametrized_tests,
     MI200_ARCH,
     MI300_ARCH,
@@ -36,8 +37,8 @@ from torch.testing._internal.common_utils import (
 from torch.utils._triton import has_triton
 
 
-# Upstream Triton enables LLVM real-true16 for Navi3, Navi3.5, and Navi4.
-TRUE16_ARCH = (*NAVI3_ARCH, *NAVI3_5_ARCH, *NAVI4_ARCH)
+# Upstream Triton enables LLVM real-true16 for Navi3, Navi3.5, Navi4 and gfx1250.
+TRUE16_ARCH = (*NAVI3_ARCH, *NAVI3_5_ARCH, *NAVI4_ARCH, *GFX1250_ARCH)
 
 
 @dataclass
@@ -258,6 +259,10 @@ TEST_CASES = [
     # AMDGCN: v_cvt_pk_bf16_f32 packs two f32 values into bf16 in a single
     # 32-bit register.  We pass $0 twice — only the lower 16 bits (first
     # bf16 slot) are used by Triton.
+    # Under real-true16 the bf16 output is allocated to a VGPR half, which
+    # neither v_add_f32 nor v_cvt_pk_bf16_f32 can write (both require a full
+    # 32-bit destination).  Route both through physical v0, declared as a
+    # clobber, and copy the packed low half into the output with v_mov_b16.
     AsmTestCase(
         "add_bf16_native",
         lambda: (
@@ -274,6 +279,10 @@ TEST_CASES = [
         lambda x, y: x + y,
         compile_only=True,
         min_sm=90,
+        true16_asm_str=(
+            "v_add_f32 v0, $1, $2\nv_cvt_pk_bf16_f32 v0, v0, v0\nv_mov_b16 $0, v0.l"
+        ),
+        true16_constraints="=v,v,v,~{v0}",
     ),
     # pack=2: each asm invocation processes 2 elements (compile-only)
     AsmTestCase(
