@@ -116,9 +116,7 @@ def _compiler() -> tuple[str, str]:
     cxx_compiler = getattr(torch.__config__, "_cxx_compiler", None)
     if cxx_compiler is None:
         return "", ""
-    name, version = cxx_compiler()
-    # MSVC's version is _MSC_FULL_VER, e.g. 194134120 for 19.41.
-    return name, version[:2] if name == "msvc" else version.split(".")[0]
+    return cxx_compiler()
 
 
 def _accelerator() -> tuple[str, str]:
