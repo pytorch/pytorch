@@ -2006,7 +2006,10 @@ class BuiltinVariable(BaseBuiltinVariable):
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
 
-        if self.fn in (set, frozenset, list, tuple, int, str, float, complex) and name != "__new__":
+        if (
+            self.fn in (set, frozenset, list, tuple, int, str, float, complex)
+            and name != "__new__"
+        ):
             if isinstance(args[0], variables.UserDefinedObjectVariable):
                 return args[0].call_base_method(tx, name, args[1:], kwargs)
             else:

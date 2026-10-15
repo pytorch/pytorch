@@ -1206,7 +1206,14 @@ class FrozensetVariable(BaseSetVariable):
         # rejects kwargs.
         if not args:
             return VariableTracker.tp_new_impl(self, tx, args, kwargs)
-        no_keywords(tx, "frozenset", kwargs)
+        # frozenset_new: https://github.com/python/cpython/blob/v3.13.3/Objects/setobject.c
+        cls = args[0].as_python_constant()
+        if cls is frozenset or cls.__init__ is frozenset.__init__:
+            no_keywords(tx, "frozenset", kwargs)
+        if len(args) > 2:
+            raise_type_error(
+                tx, f"{cls.__name__} expected at most 1 argument, got {len(args) - 1}"
+            )
         if isinstance(args[0], variables.BuiltinVariable) and args[0].fn is frozenset:
             init_args = unpack_iterable(tx, args[1]) if len(args) > 1 else []
             return FrozensetVariable(init_args, mutation_type=ValueMutationNew())

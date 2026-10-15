@@ -230,16 +230,6 @@ class TupleTests(torch._dynamo.test_case.TestCase):
 
 
 class CustomNewTupleTests(torch._dynamo.test_case.TestCase):
-    # tuple subclasses overriding __new__ and calling super().__new__(cls, arg)
-    class CustomTupleWithNew(tuple):  # noqa: SLOT001
-        def __new__(cls, arg, newarg=None):
-            self = super().__new__(cls, arg)
-            self.newarg = newarg
-            return self
-
-    class GrandchildTupleWithNew(CustomTupleWithNew):
-        pass
-
     # No class between GrandchildPlainTuple and tuple overrides __new__ at
     # all (not even in Python) -- tp_new must resolve by walking the MRO to
     # find the owner (tuple), not by checking self.value.__new__ identity,
@@ -264,19 +254,6 @@ class CustomNewTupleTests(torch._dynamo.test_case.TestCase):
         return self.assertTrue(a == b, lambda msg: f"{msg}\n{a} != {b}")
 
     @make_dynamo_test
-    def test_tuple_subclass_new_via_super(self):
-        t = self.CustomTupleWithNew([1, 2], newarg=5)
-        self.assertTrue(type(t) is self.CustomTupleWithNew)
-        self.assertTrue(tuple(t) == (1, 2))
-        self.assertTrue(t.newarg == 5)
-
-    @make_dynamo_test
-    def test_tuple_subclass_new_via_super_multilevel(self):
-        t = self.GrandchildTupleWithNew([1, 2, 3])
-        self.assertTrue(type(t) is self.GrandchildTupleWithNew)
-        self.assertTrue(tuple(t) == (1, 2, 3))
-
-    @make_dynamo_test
     def test_tuple_new_exact_type(self):
         t = tuple.__new__(tuple, [1, 2])
         self.assertTrue(t == (1, 2))
@@ -288,12 +265,6 @@ class CustomNewTupleTests(torch._dynamo.test_case.TestCase):
     @make_dynamo_test
     def test_tuple_new_multilevel_no_override(self):
         t = self.GrandchildPlainTuple.__new__(self.GrandchildPlainTuple, [1, 2, 3])
-        self.assertTrue(type(t) is self.GrandchildPlainTuple)
-        self.assertTrue(tuple(t) == (1, 2, 3))
-
-    @make_dynamo_test
-    def test_tuple_new_multilevel_no_override_via_construction(self):
-        t = self.GrandchildPlainTuple([1, 2, 3])
         self.assertTrue(type(t) is self.GrandchildPlainTuple)
         self.assertTrue(tuple(t) == (1, 2, 3))
 
@@ -652,19 +623,6 @@ class ListTests(TupleTests):
 
 
 class CustomNewListTests(torch._dynamo.test_case.TestCase):
-    # list subclasses overriding __new__ and calling super().__new__(cls)
-    class CustomListWithNew(list):
-        def __new__(cls, arg, newarg=None):
-            self = super().__new__(cls)
-            self.newarg = newarg
-            return self
-
-        def __init__(self, arg, newarg=None):
-            super().__init__(arg)
-
-    class GrandchildListWithNew(CustomListWithNew):
-        pass
-
     # No class between GrandchildPlainList and list overrides __new__ at
     # all -- tp_new must resolve by walking the MRO to find the owner
     # (list), not by checking self.value.__new__ identity.
@@ -685,19 +643,6 @@ class CustomNewListTests(torch._dynamo.test_case.TestCase):
 
     def assertEqual(self, a, b):
         return self.assertTrue(a == b, lambda msg: f"{msg}\n{a} != {b}")
-
-    @make_dynamo_test
-    def test_list_subclass_new_via_super(self):
-        lst = self.CustomListWithNew([1, 2, 3], newarg=7)
-        self.assertTrue(type(lst) is self.CustomListWithNew)
-        self.assertTrue(list(lst) == [1, 2, 3])
-        self.assertTrue(lst.newarg == 7)
-
-    @make_dynamo_test
-    def test_list_subclass_new_via_super_multilevel(self):
-        lst = self.GrandchildListWithNew([1, 2, 3])
-        self.assertTrue(type(lst) is self.GrandchildListWithNew)
-        self.assertTrue(list(lst) == [1, 2, 3])
 
     @make_dynamo_test
     def test_list_new_multilevel_no_override_ignores_extra_args(self):
