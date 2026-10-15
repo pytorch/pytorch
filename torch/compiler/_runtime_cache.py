@@ -332,22 +332,16 @@ def freeze_runtime_cache(
     """Freeze the scope's static Triton kernels into the cache artifact and pass
     it to ``write``.
 
-    Pending async compiles are waited on before ``snapshot`` renders the
-    artifact, so what they record is in it. A kernel that cannot be frozen
-    raises, since precompile.load could not serve it without compiling. The
-    caller must stop compiling before calling this: a kernel submitted on
-    another thread after the wait is neither waited on nor frozen.
+    Nothing is waited on: every graph compile already waited on its own
+    kernels. A kernel that cannot be frozen raises, since precompile.load could
+    not serve it without compiling. The caller must stop compiling before
+    calling this: a kernel compiled on another thread meanwhile is neither
+    waited on nor frozen.
     """
-    import torch
-    from torch._inductor.async_compile import AsyncCompile
-
     owner = _active_capture()
     if owner is None:
         raise RuntimeError("precompile.capture has no runtime capture scope")
     with owner.freeze_lock:
-        AsyncCompile.drain_pending()
-        if torch.cuda.is_initialized():
-            torch.cuda.synchronize()
         artifact = snapshot()
         artifacts = (
             CacheArtifactManager.deserialize(artifact) if artifact is not None else {}
