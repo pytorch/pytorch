@@ -55,8 +55,8 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
-    HAS_XPU_AND_TRITON,
     has_triton,
+    HAS_XPU_AND_TRITON,
     maybe_skip_size_asserts,
 )
 from torch.utils._dtype_abbrs import dtype_abbrs
