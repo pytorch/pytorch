@@ -33,7 +33,17 @@ def user(login, kind="User"):
 
 
 class FakeApi:
-    def __init__(self, *, issue=(), reviews=(), inline=(), maintainers=(), unknown=()):
+    def __init__(
+        self,
+        *,
+        issue=(),
+        reviews=(),
+        inline=(),
+        maintainers=(),
+        unknown=(),
+        body="Why.",
+    ):
+        self.body = body
         self.pages = {
             f"repos/{REPO}/issues/{PR}/comments": list(issue),
             f"repos/{REPO}/pulls/{PR}/reviews": list(reviews),
@@ -46,7 +56,7 @@ class FakeApi:
     def __call__(self, endpoint):
         self.calls.append(endpoint)
         if endpoint == f"repos/{REPO}/pulls/{PR}":
-            return {"user": user("author")}
+            return {"user": user("author"), "title": "Fix x", "body": self.body}
         base, _, query = endpoint.partition("?")
         if base in self.pages:
             page = int(query.rsplit("page=", 1)[1])
@@ -73,6 +83,16 @@ def comment(
 
 
 class TestCollect(unittest.TestCase):
+    def test_carries_the_title_and_description(self):
+        # Stage A reads them as an interactive /pr-review does via `gh pr view`.
+        out = fpc.collect(FakeApi(), REPO, PR)
+        self.assertEqual((out["pr_title"], out["pr_body"]), ("Fix x", "Why."))
+
+    def test_the_description_is_capped_and_a_missing_one_is_empty(self):
+        out = fpc.collect(FakeApi(body="x" * (fpc.MAX_BODY + 5)), REPO, PR)
+        self.assertEqual(len(out["pr_body"]), fpc.MAX_BODY + len(" [truncated]"))
+        self.assertEqual(fpc.collect(FakeApi(body=None), REPO, PR)["pr_body"], "")
+
     def test_keeps_the_author_and_maintainers_only(self):
         api = FakeApi(
             issue=[
@@ -204,7 +224,11 @@ class TestCollect(unittest.TestCase):
     def test_the_byte_cap_counts_the_envelope(self):
         issue = [comment("maint", when=f"{i:05d}") for i in range(30)]
         api = FakeApi(issue=issue, maintainers={"maint"})
-        for limit in range(100, 4000, 7):
+        # From the smallest cap that fits the item-less envelope (title and
+        # description included) upward.
+        with mock.patch.object(fpc, "MAX_TOTAL_BYTES", 0):
+            floor = len(fpc.dumps(fpc.collect(api, REPO, PR)))
+        for limit in range(floor, 4000, 7):
             with mock.patch.object(fpc, "MAX_TOTAL_BYTES", limit):
                 out = fpc.collect(api, REPO, PR)
             self.assertLessEqual(len(fpc.dumps(out)), limit)

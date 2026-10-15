@@ -62,6 +62,7 @@ EXPECTED_MODULES = {
     "test_fetch_pr_comments.py",
     "test_post_review.py",
     "test_symlink_scrub.py",
+    "test_two_stage.py",
     "test_validate_findings.py",
     "test_workflow_contract.py",
 }

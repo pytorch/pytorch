@@ -6,6 +6,8 @@ neither the token nor network access to the API. The file is handed over as a
 `prepare` job output and rewritten in the review job from an environment
 variable, so it is one line of compact JSON capped at ``MAX_TOTAL_BYTES``.
 
+Also kept: the PR's title and description (`pr_title`, `pr_body`), capped.
+
 Kept: issue comments, reviews and inline review comments written by the PR
 author or by a user with triage access or above. Bots and other users are
 dropped. Bodies are capped and, if the conversation is too long, the oldest
@@ -29,6 +31,7 @@ from urllib.parse import quote
 PER_PAGE = 100
 MAX_PAGES = 30
 MAX_BODY = 4000
+MAX_TITLE = 300
 MAX_HUNK = 1500
 MAX_ITEMS = 200
 # Of the whole serialized file. One environment variable is limited to 128 KiB
@@ -100,7 +103,12 @@ def cap(text: str | None, limit: int) -> str:
 
 
 def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
-    author = human_login(api(f"repos/{repo}/pulls/{pr}"))
+    pull = api(f"repos/{repo}/pulls/{pr}")
+    author = human_login(pull)
+    # The title and description, as an interactive /pr-review sees them via
+    # `gh pr view`. Untrusted, like every body below.
+    title = cap(pull.get("title"), MAX_TITLE)
+    body = cap(pull.get("body"), MAX_BODY)
     sources = {
         "issue_comment": paginate(api, f"repos/{repo}/issues/{pr}/comments"),
         "review": paginate(api, f"repos/{repo}/pulls/{pr}/reviews"),
@@ -156,6 +164,8 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
     # The widest envelope: `false` and the largest possible count; +1 per comma.
     envelope = {
         "pr_author": author,
+        "pr_title": title,
+        "pr_body": body,
         "truncated": False,
         "omitted_items": len(items),
         "items": [],
@@ -170,6 +180,8 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
     omitted = len(items) - len(kept)
     return {
         "pr_author": author,
+        "pr_title": title,
+        "pr_body": body,
         "truncated": omitted > 0,
         "omitted_items": omitted,
         "items": kept,
