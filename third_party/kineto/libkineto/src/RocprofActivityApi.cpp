@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 #include "ApproximateClock.h"
@@ -135,6 +136,19 @@ int RocprofActivityApi::processActivities(
     externalCorrelations.clear();
   }
 
+  // Classify runtime-internal fill/copy kernels (dispatched to implement
+  // hipMemset/hipMemcpy calls) as GPU memsets/memcpies.  Done here, after
+  // the per-thread buffers are merged, so that every memset/memcpy runtime
+  // row is visible to the correlation lookup.
+  {
+    std::unordered_map<uint64_t, size_t> memsetOps;
+    {
+      std::lock_guard<std::mutex> lock(d->memsetMutex_);
+      memsetOps = d->memsetOps_;
+    }
+    detail::classifyRuntimeInternalDispatches(d->rows_, memsetOps);
+  }
+
   // Async ops are in CLOCK_MONOTONIC rather than junk clock.
   // Convert these timestamps, poorly.
   // These accurate timestamps will skew when converted to approximate time
@@ -166,8 +180,20 @@ int RocprofActivityApi::processActivities(
           break;
         case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
         default:
-          if (!isLogged(ActivityType::CONCURRENT_KERNEL))
+          if (item->type == ROCTRACER_ACTIVITY_ASYNC) {
+            const auto* async = reinterpret_cast<rocprofAsyncRow*>(item);
+            if (async->internalApi == RocLogger::RuntimeInternalMemset) {
+              if (!isLogged(ActivityType::GPU_MEMSET))
+                filtered = true;
+            } else if (async->internalApi == RocLogger::RuntimeInternalMemcpy) {
+              if (!isLogged(ActivityType::GPU_MEMCPY))
+                filtered = true;
+            } else if (!isLogged(ActivityType::CONCURRENT_KERNEL)) {
+              filtered = true;
+            }
+          } else if (!isLogged(ActivityType::CONCURRENT_KERNEL)) {
             filtered = true;
+          }
           break;
       }
     }
