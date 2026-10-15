@@ -97,6 +97,7 @@ class IActivityProfilerSession {
 
   virtual void processTrace(
       ActivityLogger& logger,
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
       [[maybe_unused]] getLinkedActivityCallback getLinkedActivity,
       [[maybe_unused]] int64_t startTime,
       [[maybe_unused]] int64_t endTime) {
