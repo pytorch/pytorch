@@ -40,7 +40,7 @@ static inline void maybe_resize_storage_mps(TensorImpl* self, uint64_t new_size)
       at::DataPtr new_data = storage->allocator()->allocate(new_size_bytes);
       size_t copy_capacity = std::min<size_t>(new_size_bytes, storage->nbytes());
       if (storage->data() && copy_capacity > 0) {
-        at::native::mps::copy_blit_mps(new_data.get(), storage->data(), copy_capacity);
+        at::native::mps::copy_bytes_mps(new_data.get(), storage->data(), copy_capacity);
       }
       // Destructively overwrite data_ptr
       storage->set_data_ptr_noswap(std::move(new_data));

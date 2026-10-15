@@ -18,7 +18,10 @@ from torch._inductor.codegen.cpp_wrapper_gpu import (
     CppWrapperGpu,
     DeferredTritonCallWrapper,
 )
+from torch._inductor.codegen.cpp_wrapper_mps import CppWrapperMps
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
+from torch._inductor.codegen.mps_device_op_overrides import MPSDeviceOpOverrides
+from torch._inductor.codegen.mtia.device_op_overrides import MTIADeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer
 from torch._inductor.virtualized import V
@@ -164,7 +167,11 @@ class TestGpuWrapper(InductorTestCase):
 
         wrapper.prefix = IndentedBuffer()
         wrapper._lazy_kernel_names = []
-        graph = SimpleNamespace(is_dual_wrapper_mode=False)
+        # The prologue hoists a stream declaration per device, so it reads the
+        # devices the graph lowered for.
+        graph = SimpleNamespace(
+            aot_mode=False, is_dual_wrapper_mode=False, device_idxs=()
+        )
         with (
             config.patch({"triton.debug_sync_graph": True}),
             V.set_graph_handler(graph),
@@ -184,6 +191,34 @@ class TestGpuWrapper(InductorTestCase):
             NotImplementedError, "triton debug sync is not supported"
         ):
             wrapper.generate_debug_sync(IndentedBuffer())
+
+    def test_prologue_stream_declaration_per_backend(self):
+        def prologue(wrapper_cls, device, device_codegen, aot_mode=False):
+            wrapper = wrapper_cls.__new__(wrapper_cls)
+            wrapper.device = device
+            wrapper.device_codegen = device_codegen
+            wrapper.prefix = IndentedBuffer()
+            wrapper._lazy_kernel_names = []
+            graph = SimpleNamespace(
+                aot_mode=aot_mode, is_dual_wrapper_mode=False, device_idxs=(0,)
+            )
+            with V.set_graph_handler(graph):
+                wrapper._codegen_entry_impl_prologue()
+            return wrapper.prefix.getvalue()
+
+        self.assertIn(
+            "stream0;", prologue(CppWrapperGpu, "cuda", CUDADeviceOpOverrides())
+        )
+        # Neither backend has a stream type to query: Metal kernels are
+        # dispatched without a raw stream, and pure AOTI takes the stream as a
+        # parameter, which is how MTIA runs through CppWrapperGpu.
+        self.assertNotIn(
+            "stream0", prologue(CppWrapperMps, "mps", MPSDeviceOpOverrides())
+        )
+        self.assertNotIn(
+            "stream0",
+            prologue(CppWrapperGpu, "mtia", MTIADeviceOpOverrides(), aot_mode=True),
+        )
 
     def test_debug_sync_graph(self):
         if not RUN_GPU:

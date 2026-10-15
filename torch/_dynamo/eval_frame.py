@@ -276,7 +276,96 @@ def _is_in_optimized_module() -> bool:
     return _in_optimized_module
 
 
+class _RecompileRefusedError(RuntimeError):
+    """Raised by a ``_RefuseRecompileCallback`` instead of compiling."""
+
+
+class _FailOnRecompileCallback:
+    """Serves cached entries but raises instead of compiling.
+
+    Built per call under the "fail_on_recompile" stance.
+    """
+
+    _message_prefix = (
+        "Detected recompile when torch.compile stance is 'fail_on_recompile'. "
+    )
+    _error: type[RuntimeError] = RuntimeError
+
+    def __init__(self, callback: DynamoCallback) -> None:
+        # to prevent cache miss due to different backend
+        self._torchdynamo_orig_backend = callback
+
+    def __call__(
+        self, frame: DynamoFrameType, *args: Any, **kwargs: Any
+    ) -> ConvertFrameReturn:
+        if trace_rules.check(frame.f_code):
+            return ConvertFrameReturn()
+        if not convert_frame.has_tensor_in_frame(frame):
+            return ConvertFrameReturn()
+
+        # convert_frame would skip a disable(recursive=False) frame rather than
+        # compile it, so a cache miss there is not a recompile. The eval-frame
+        # hook calls this method directly, so its caller is the missed frame's.
+        if (
+            disabled := convert_frame.nonrecursive_disable_skip(sys._getframe(1))
+        ) is not None:
+            return disabled
+
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _debug_get_precompile_entries,
+        )
+        from torch._dynamo.guards import get_and_maybe_log_recompilation_reasons
+
+        message = (
+            self._message_prefix
+            + f"filename: '{frame.f_code.co_filename}', "
+            + f"function name: '{frame.f_code.co_name}', "
+            + f"line number: {frame.f_lineno}"
+        )
+        callback = self._torchdynamo_orig_backend
+        cache_entries = _debug_get_cache_entry_list(frame.f_code)
+        if cache_entries:
+            reasons = get_and_maybe_log_recompilation_reasons(
+                cache_entries,
+                frame,
+                innermost_backend(callback),  # pyrefly: ignore [bad-argument-type]
+                skip_logging=True,
+            )
+            if reasons:
+                failures = textwrap.indent("\n".join(reasons), "- ")
+                guard_failure_details = (
+                    f"triggered by the following guard failure(s):\n{failures}"
+                )
+                message += f"\n{textwrap.indent(guard_failure_details, '    ')}"
+        precompile_entries = _debug_get_precompile_entries(frame.f_code)
+        if len(precompile_entries) > 0:
+            message += "\nFailed on the following precompiled guards: "
+            for entry in precompile_entries:
+                message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
+        raise self._error(message)
+
+
+class _RefuseRecompileCallback(_FailOnRecompileCallback):
+    """A ``_FailOnRecompileCallback`` bound once into a context's callback (an
+    installed precompile artifact); ``_callback_from_stance`` keeps it under
+    every stance that would compile.
+    """
+
+    _message_prefix = (
+        "Detected recompile of a frame whose callable refuses to recompile. "
+    )
+    _error = _RecompileRefusedError
+
+
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
+    if isinstance(callback, _RefuseRecompileCallback):
+        # Read the stance once: a concurrent set_stance must not slip a
+        # compiling callback in between the check and the choice.
+        stance = _stance.stance
+        if stance == "force_eager":
+            return None
+        return False if stance == "eager_on_recompile" else callback
     if _stance.stance == "default":
         # force_backend
         if _stance.backend is not None and callback not in (False, None):
@@ -300,52 +389,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
     elif _stance.stance == "fail_on_recompile":
         if callback in (False, None):
             return callback
-
-        def fail_callback(
-            frame: DynamoFrameType, *args: Any, **kwargs: Any
-        ) -> ConvertFrameReturn:
-            if trace_rules.check(frame.f_code):
-                return ConvertFrameReturn()
-            if not convert_frame.has_tensor_in_frame(frame):
-                return ConvertFrameReturn()
-
-            from torch._C._dynamo.eval_frame import (
-                _debug_get_cache_entry_list,
-                _debug_get_precompile_entries,
-            )
-            from torch._dynamo.guards import get_and_maybe_log_recompilation_reasons
-
-            message = (
-                "Detected recompile when torch.compile stance is 'fail_on_recompile'. "
-                + f"filename: '{frame.f_code.co_filename}', "
-                + f"function name: '{frame.f_code.co_name}', "
-                + f"line number: {frame.f_lineno}"
-            )
-            cache_entries = _debug_get_cache_entry_list(frame.f_code)
-            if cache_entries:
-                reasons = get_and_maybe_log_recompilation_reasons(
-                    cache_entries,
-                    frame,
-                    innermost_backend(callback),  # pyrefly: ignore [bad-argument-type]
-                    skip_logging=True,
-                )
-                if reasons:
-                    failures = textwrap.indent("\n".join(reasons), "- ")
-                    guard_failure_details = (
-                        f"triggered by the following guard failure(s):\n{failures}"
-                    )
-                    message += f"\n{textwrap.indent(guard_failure_details, '    ')}"
-            precompile_entries = _debug_get_precompile_entries(frame.f_code)
-            if len(precompile_entries) > 0:
-                message += "\nFailed on the following precompiled guards: "
-                for entry in precompile_entries:
-                    message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
-            raise RuntimeError(message)
-
-        # to prevent cache miss due to different backend
-        fail_callback._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
-
-        return fail_callback
+        return _FailOnRecompileCallback(callback)
     else:
         raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
 
@@ -522,6 +566,11 @@ class OptimizedModule(torch.nn.Module):
         self._initialize()
         self.training = self._orig_mod.training
 
+    def __bool__(self) -> bool:
+        # Proxy the bool call to the original module
+        # pyrefly: ignore [unsafe-overlap]
+        return bool(self._orig_mod)
+
     def __len__(self) -> int:
         # Proxy the len call to the original module
         # pyrefly: ignore [unsafe-overlap]
@@ -544,7 +593,7 @@ class OptimizedModule(torch.nn.Module):
             # Invoke hooks outside of dynamo then pickup the inner frame
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
-        if inspect.getattr_static(self._orig_mod, "_initialize_hook", None) is not None:
+        if _static_getattr(self._orig_mod, "_initialize_hook") is not None:
             self._forward = self.forward
             self.forward = self._call_lazy_check
 
@@ -671,9 +720,8 @@ class OptimizedModule(torch.nn.Module):
 
     def _call_lazy_check(self, *args: Any, **kwargs: Any) -> Any:
         if (
-            inspect.getattr_static(self._orig_mod, "_initialize_hook", None) is not None
-            and inspect.getattr_static(self._orig_mod, "_infer_parameters", None)
-            is not None
+            _static_getattr(self._orig_mod, "_initialize_hook") is not None
+            and _static_getattr(self._orig_mod, "_infer_parameters") is not None
             and callable(self._orig_mod._infer_parameters)
         ):
             # In the case of a lazy module, we want to run
@@ -979,6 +1027,21 @@ class _TorchDynamoContext:
         if isinstance(fn, staticmethod):
             return staticmethod(self(fn.__func__))
 
+        if inspect.isclass(fn):
+            # User has wrapped the class with a compile decorator. Apply to
+            # __call__. Must run before the caching_precompile block below,
+            # which would otherwise access fn.__code__ on the class and raise
+            # AttributeError at decoration time.
+            cls_obj = fn
+            call = cls_obj.__call__
+            if config.caching_precompile and not hasattr(call, "__code__"):
+                call = external_utils.wrap_inline(call)
+            cls_obj.__call__ = self(call)
+            if issubclass(cls_obj, torch.nn.Module):
+                # NN module variable tracker directly inlines the _call_impl.
+                cls_obj._call_impl = self(cls_obj._call_impl)
+            return cls_obj
+
         # public api for compiler config/options
         def get_compiler_config() -> CompilerConfig | None:
             return self.compiler_config
@@ -1065,23 +1128,13 @@ class _TorchDynamoContext:
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
             # check mod, not new_mod: OptimizedModule.__getattr__ delegates to mod
-            if inspect.getattr_static(mod, "get_compiler_config", None) is not None:
+            if _static_getattr(mod, "get_compiler_config") is not None:
                 raise AssertionError(
                     "new_mod already has a get_compiler_config attribute"
                 )
             new_mod.get_compiler_config = get_compiler_config
 
             return new_mod
-
-        if inspect.isclass(fn):
-            # User has wrapped the class with compile/disable decorator. Apply
-            # disable to init/call method.
-            cls_obj = fn
-            cls_obj.__call__ = self(cls_obj.__call__)
-            if issubclass(cls_obj, torch.nn.Module):
-                # NN module variable tracker directly inlines the _call_impl.
-                cls_obj._call_impl = self(cls_obj._call_impl)
-            return cls_obj
 
         if not callable(fn):
             raise AssertionError(
