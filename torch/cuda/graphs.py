@@ -1219,7 +1219,10 @@ class graph:
             recording on entry and automatically calls
             :func:`~torch.cuda._graph_annotations.resolve_pending_annotations` before
             the capture ends.  Annotations are **not** cleared on exit so that multiple
-            graphs in the same workload can accumulate annotations.
+            graphs in the same workload can accumulate annotations. The kernels of
+            captured c10d collectives are tagged with the fields ``record_param_comms``
+            gives them in eager mode (``"Collective name"``, ``"Process Group Name"``,
+            ``"Seq"``, ...).
             Requires ``cuda.bindings`` package and cuda-compat >= 13.1 or CUDA driver >= 13.1.
             Requires single-threaded autograd; wrap the capture in
             ``torch.autograd.grad_mode.set_multithreading_enabled(False)``.
@@ -1444,7 +1447,19 @@ class graph:
                     )
                 backend = "edge_walk"
             _set_annotation_backend(backend)
+            if self._enable_annotations and torch.distributed.is_available():
+                from torch.distributed._hooks.collective_annotations import (
+                    register_graph_capture_annotation_hooks,
+                )
+
+                register_graph_capture_annotation_hooks(self)
         except BaseException:
+            if self._enable_annotations and torch.distributed.is_available():
+                from torch.distributed._hooks.collective_annotations import (
+                    unregister_collective_annotation_hooks,
+                )
+
+                unregister_collective_annotation_hooks(self)
             _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
             try:
@@ -1492,6 +1507,12 @@ class graph:
             # Annotation recording is capture-scoped; clear it unconditionally. disarm() is
             # idempotent, so repeating it here just covers a capture that raised before the
             # call above (it must not stay armed past this context either way).
+            if self._enable_annotations and torch.distributed.is_available():
+                from torch.distributed._hooks.collective_annotations import (
+                    unregister_collective_annotation_hooks,
+                )
+
+                unregister_collective_annotation_hooks(self)
             _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
