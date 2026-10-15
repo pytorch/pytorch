@@ -2,6 +2,7 @@
 import gc
 import os
 import random
+import sys
 import tempfile
 import unittest
 import weakref
@@ -694,6 +695,32 @@ class TestStaticTritonLauncher(TestCase):
                 (arg0, 0),
                 stream,
             )
+
+    @unittest.skipUnless(GPU_TYPE == "xpu", "XPU only")
+    def test_xpu_load_kernel_hands_over_capsule_reference(self):
+        # _load_kernel must give its only capsule reference to the returned
+        # tuple. An extra reference keeps the capsule alive for the process
+        # lifetime, so its destructor never runs and neither close() nor the
+        # autotuner's launcher release frees the kernel and its Level Zero
+        # module.
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        cubin_file = self.write_cubin_to_tmp(compiled_kernel)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        from torch._C import _StaticXpuLauncher
+
+        (function, _n_regs, _n_spills) = _StaticXpuLauncher._load_kernel(
+            cubin_file,
+            compiled_kernel.name,
+            compiled_kernel.metadata.shared,
+            device_interface.current_device(),
+        )
+        # Only `function` and getrefcount's own argument hold the capsule.
+        self.assertEqual(sys.getrefcount(function), 2)
 
     @skipIfXpu(msg="Only testing CUDA OOM behavior")
     def test_too_high_shared_mem(self):
