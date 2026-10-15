@@ -5,30 +5,18 @@
 
 namespace at::native::mkldnn {
 
-namespace {
-
-// Weight is 1-D (channels); oneDNN needs it broadcastable to src's rank.
-ideep::tensor weight_with_src_rank(
-    const ideep::tensor& src,
-    const ideep::tensor& weight) {
-  auto weight_in = weight;
-  if (src.ndims() != weight.ndims()) {
-    dnnl::memory::dims dim_w(src.ndims(), 1);
-    dim_w[1] = weight.get_dim(0);
-    weight_in.reshape(dim_w);
-  }
-  return weight_in;
-}
-
-} // namespace
-
 void prelu_forward(
     const ideep::tensor& src,
     const ideep::tensor& weight,
     ideep::tensor& dst,
     dnnl::prop_kind prop_kind) {
   const auto& engine = ideep::engine::cpu_engine();
-  auto weight_in = weight_with_src_rank(src, weight);
+  auto weight_in = weight;
+  if (src.ndims() != weight.ndims()) {
+    dnnl::memory::dims dim_w(src.ndims(), 1);
+    dim_w[1] = weight.get_dim(0);
+    weight_in.reshape(dim_w);
+  }
 
   auto src_desc = src.get_desc();
   auto weight_desc = weight_in.get_desc().to_format_any();
@@ -69,7 +57,12 @@ void prelu_backward(
   }
   const auto& engine = ideep::engine::cpu_engine();
   auto weight_dims = weight.get_dims();
-  auto weight_in = weight_with_src_rank(src, weight);
+  auto weight_in = weight;
+  if (src.ndims() != weight.ndims()) {
+    dnnl::memory::dims dim_w(src.ndims(), 1);
+    dim_w[1] = weight.get_dim(0);
+    weight_in.reshape(dim_w);
+  }
 
   auto src_desc = src.get_desc();
   auto weight_desc = weight_in.get_desc().to_format_any();
