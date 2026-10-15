@@ -66,6 +66,24 @@ class XcclApi {
   // that wiring them up later is a one-line change.
   [[nodiscard]] virtual onecclResult_t commAbort(onecclComm_t comm) = 0;
 
+  [[nodiscard]] virtual onecclResult_t commRevoke(onecclComm_t comm) = 0;
+
+  [[nodiscard]] virtual onecclResult_t commGrow(
+      onecclComm_t comm,
+      int nRanks,
+      const onecclUniqueId* uniqueId,
+      int rank,
+      onecclComm_t* newcomm,
+      onecclConfig_t* config) = 0;
+
+  [[nodiscard]] virtual onecclResult_t commShrink(
+      onecclComm_t comm,
+      int* excludeRanksList,
+      int excludeRanksCount,
+      onecclComm_t* newcomm,
+      onecclConfig_t* config,
+      int shrinkFlags) = 0;
+
   [[nodiscard]] virtual onecclResult_t commGetAsyncError(
       onecclComm_t comm,
       onecclResult_t* asyncError) = 0;
@@ -240,6 +258,24 @@ class DefaultXcclApi : public XcclApi {
   [[nodiscard]] onecclResult_t commDestroy(onecclComm_t comm) override;
 
   [[nodiscard]] onecclResult_t commAbort(onecclComm_t comm) override;
+
+  [[nodiscard]] onecclResult_t commRevoke(onecclComm_t comm) override;
+
+  [[nodiscard]] onecclResult_t commGrow(
+      onecclComm_t comm,
+      int nRanks,
+      const onecclUniqueId* uniqueId,
+      int rank,
+      onecclComm_t* newcomm,
+      onecclConfig_t* config) override;
+
+  [[nodiscard]] onecclResult_t commShrink(
+      onecclComm_t comm,
+      int* excludeRanksList,
+      int excludeRanksCount,
+      onecclComm_t* newcomm,
+      onecclConfig_t* config,
+      int shrinkFlags) override;
 
   [[nodiscard]] onecclResult_t commGetAsyncError(
       onecclComm_t comm,
