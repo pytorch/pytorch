@@ -16256,3 +16256,5 @@
 # Autograd onboarding lab: attn(q, k, v) = (tanh(q @ k^T) @ v, tanh(q @ k^T)).
 - func: attn(Tensor q, Tensor k, Tensor v) -> (Tensor, Tensor)
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: attn

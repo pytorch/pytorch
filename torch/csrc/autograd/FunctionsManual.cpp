@@ -9056,4 +9056,53 @@ Tensor grid_sampler_3d_jvp(
   return result_t.defined() ? result_t : at::zeros_like(result);
 }
 
+// attn(q, k, v) = (o, a) with a = tanh(q @ k^T) and o = a @ v.
+// The backward reuses the saved output a, so tanh is not recomputed.
+std::tuple<Tensor, Tensor, Tensor> attn_backward(
+    const Tensor& grad_o,
+    const Tensor& grad_a,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const Tensor& a,
+    std::array<bool, 3> grad_input_mask) {
+  Tensor grad_q, grad_k, grad_v;
+  if (grad_o.defined() && grad_input_mask[2]) {
+    grad_v = a.mH().matmul(grad_o);
+  }
+  if (grad_input_mask[0] || grad_input_mask[1]) {
+    // a is both an output and an input to o, so its gradients add up.
+    Tensor grad_a_total = grad_a;
+    if (grad_o.defined()) {
+      auto grad_a_from_o = grad_o.matmul(v.mH());
+      grad_a_total =
+          grad_a_total.defined() ? grad_a_total + grad_a_from_o : grad_a_from_o;
+    }
+    if (grad_a_total.defined()) {
+      auto grad_x = at::tanh_backward(grad_a_total, a);
+      if (grad_input_mask[0]) {
+        grad_q = grad_x.matmul(k.conj());
+      }
+      if (grad_input_mask[1]) {
+        grad_k = grad_x.mT().matmul(q.conj());
+      }
+    }
+  }
+  return std::make_tuple(
+      std::move(grad_q), std::move(grad_k), std::move(grad_v));
+}
+
+std::tuple<Tensor, Tensor> attn_jvp(
+    const Tensor& q_p,
+    const Tensor& k_p,
+    const Tensor& v_p,
+    const Tensor& a,
+    const Tensor& q_t,
+    const Tensor& k_t,
+    const Tensor& v_t) {
+  auto a_t = (q_t.matmul(k_p.mT()) + q_p.matmul(k_t.mT())) * (1 - a * a);
+  auto o_t = a_t.matmul(v_p) + a.matmul(v_t);
+  return std::make_tuple(std::move(o_t), std::move(a_t));
+}
+
 } // namespace torch::autograd::generated::details
