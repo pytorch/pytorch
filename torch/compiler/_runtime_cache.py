@@ -299,8 +299,7 @@ def freeze_runtime_cache(
     if owner is None:
         raise RuntimeError("precompile.capture has no runtime capture scope")
     with owner.freeze_lock:
-        # Keep the workers: a save() checkpoint is followed by more of the block.
-        AsyncCompile.drain_pending(shutdown=False)
+        AsyncCompile.drain_pending()
         if torch.cuda.is_initialized():
             torch.cuda.synchronize()
         artifact = snapshot()

@@ -5869,29 +5869,6 @@ class TestPrecompileRuntimeCache(TestCase):
                     self.assertIsNot(_runtime_cache._capture, parent)
                 self.assertEqual(parent.captures, 1)
 
-    def test_writes_keep_compile_workers(self):
-        from torch._inductor.async_compile import AsyncCompile
-
-        pc = torch.compiler.precompile
-        shutdowns = []
-        drain = mock.patch.object(
-            AsyncCompile,
-            "drain_pending",
-            side_effect=lambda **kw: shutdowns.append(kw["shutdown"]),
-        )
-        with tempfile.TemporaryDirectory() as directory, drain:
-            with pc.capture(
-                _no_compilation_single_graph,
-                artifact_path=os.path.join(directory, "m.py"),
-                cache_path=os.path.join(directory, "m.cache"),
-                tracer=DynamoTracer(require_no_risky_drops=False),
-                backend="eager",
-            ) as cap:
-                cap(torch.ones(4))
-                cap.save()
-                cap(torch.ones(2, 3))  # leaves the final write something to add
-        self.assertEqual(shutdowns, [False, False])
-
     def test_write_snapshots_after_waiting_on_compiles(self):
         from torch._inductor.async_compile import AsyncCompile
         from torch.compiler._cache import CacheArtifactManager
