@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import collections
 import inspect
 import multiprocessing
 import os
@@ -8,6 +9,7 @@ import sys
 import tempfile
 import textwrap
 import traceback
+import types
 import unittest
 import warnings
 from concurrent.futures import Future
@@ -17,12 +19,18 @@ import torch
 from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
 from torch._inductor.compile_worker.subproc_pool import SubprocException
+from torch._inductor.runtime.hints import HeuristicType
 from torch._inductor.runtime.triton_compat import Config
 from torch._inductor.runtime.triton_heuristics import (
     generate_lookup_hash_from_source_code,
+    lookup_autotune_config,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import ensure_nv_universal_gemm_available, fresh_cache
+from torch._inductor.utils import (
+    ensure_nv_universal_gemm_available,
+    fresh_cache,
+    is_big_gpu,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -99,7 +107,7 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides=None,
 class TestNVGemmPickling(TestCase):
     @unittest.skipIf(
         not ensure_nv_universal_gemm_available(),
-        "NVIDIA Universal GEMM (cutlass_api) library not available",
+        "NVIDIA Universal GEMM (cutlass.operators) library not available",
     )
     def test_scaled_operand_constraints_pickle_round_trip(self):
         import cutlass
@@ -165,6 +173,41 @@ def _forked_daemon_compile_worker(q):
 
 @instantiate_parametrized_tests
 class TestAsyncCompile(TestCase):
+    @requires_gpu()
+    @requires_triton()
+    def test_template_kernel_single_submission(self):
+        if not is_big_gpu():
+            self.skipTest("Need big GPU for Triton mm templates")
+        # Template kernels are submitted eagerly to the warm pool and again from
+        # the wrapper; both submissions must carry the same source so the second
+        # is a cache hit instead of a second compile racing on the cache file.
+        sources = collections.defaultdict(set)
+        original = AsyncCompile.triton
+
+        def spy(self_, kernel_name, source_code, device_str="cuda"):
+            sources[kernel_name].add(source_code)
+            return original(self_, kernel_name, source_code, device_str)
+
+        a = torch.randn(256, 512, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(512, 256, device=GPU_TYPE, dtype=torch.float16)
+        with (
+            config.patch(
+                compile_threads=8,
+                max_autotune=True,
+                max_autotune_gemm_backends="TRITON",
+            ),
+            patch.object(AsyncCompile, "triton", spy),
+            fresh_cache(),
+        ):
+            shutdown_compile_workers()
+            AsyncCompile.wait_pool_ready()
+            self.assertTrue(AsyncCompile.use_process_pool())
+            torch.compile(lambda x, y: torch.mm(x, y) * 2)(a, b)
+        template_kernels = [k for k in sources if k.startswith("triton_tem_")]
+        self.assertTrue(template_kernels)
+        for kernel_name in template_kernels:
+            self.assertEqual(len(sources[kernel_name]), 1, kernel_name)
+
     def test_flydsl_returns_kernel_wrapper(self):
         source = """
 def test_flydsl_loader_main(value, stream):
@@ -468,6 +511,80 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         self.assertEqual(args[1].kwargs, autotune_config.kwargs)
         self.assertEqual(args[1].num_warps, autotune_config.num_warps)
         self.assertEqual(args[1].num_stages, autotune_config.num_stages)
+
+    @parametrize(
+        "scheduled_rsplit,cached_rsplit,xblock,num_stages,extra_meta,accepted",
+        (
+            (18, 18, 2, 1, {}, True),
+            (18, 32, 2, 1, {}, False),
+            (18, 18, 4, 1, {}, False),
+            (18, 18, 3, 1, {}, False),
+            (64, 64, 32, 1, {}, False),
+            (18, 18, 2, None, {}, False),
+            (18, 18, 2, 4, {}, False),
+            (18, 18, 2, 2, {"mix_order_reduction_allow_multi_stages": False}, False),
+            (18, 18, 2, 2, {"uses_device_tma": True}, False),
+            (18, 18, 2, 1, {"tma_min_block_sizes": {"XBLOCK": 4}}, False),
+        ),
+    )
+    @requires_triton()
+    def test_mix_order_autotune_lookup_table(
+        self,
+        scheduled_rsplit,
+        cached_rsplit,
+        xblock,
+        num_stages,
+        extra_meta,
+        accepted,
+    ):
+        size_hints = {"x": 4096, "r0_": 768}
+        fn = types.SimpleNamespace(src="def triton_fused_mix_order(): pass")
+        fn_hash = generate_lookup_hash_from_source_code(str(size_hints), fn.src)
+        cached_config = {
+            "XBLOCK": xblock,
+            "RSPLIT_SIZE": cached_rsplit,
+            "num_warps": 4,
+            "num_stages": 1,
+        }
+        if num_stages is not None:
+            cached_config["NUM_STAGES"] = num_stages
+        inductor_meta = {"RSPLIT_SIZE": scheduled_rsplit, **extra_meta}
+
+        with config.patch(autotune_lookup_table={fn_hash: cached_config}):
+            result = lookup_autotune_config(
+                size_hints, fn, inductor_meta, HeuristicType.PERSISTENT_REDUCTION
+            )
+
+        if accepted:
+            self.assertIsNotNone(result)
+            self.assertEqual(
+                result.kwargs,
+                {"XBLOCK": 2, "RSPLIT_SIZE": 18, "NUM_STAGES": 1},
+            )
+        else:
+            self.assertIsNone(result)
+
+    def test_fixed_config_skips_autotune_lookup_table(self):
+        size_hints = None
+        fn = types.SimpleNamespace(src="def triton_fused_mix_order(): pass")
+        fn_hash = generate_lookup_hash_from_source_code(str(size_hints), fn.src)
+        cached_config = {
+            "XBLOCK": 2,
+            "RSPLIT_SIZE": 18,
+            "NUM_STAGES": 1,
+            "num_warps": 4,
+            "num_stages": 1,
+        }
+
+        with config.patch(autotune_lookup_table={fn_hash: cached_config}):
+            result = lookup_autotune_config(
+                size_hints,
+                fn,
+                {"RSPLIT_SIZE": 18},
+                HeuristicType.FIXED,
+            )
+
+        self.assertIsNone(result)
 
     def test_wait_futures_timeout(self):
         """A compile future that doesn't finish within
@@ -1420,7 +1537,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
 
     @unittest.skipIf(
         not ensure_nv_universal_gemm_available(),
-        "NVIDIA Universal GEMM (cutlass_api) library not available",
+        "NVIDIA Universal GEMM (cutlass.operators) library not available",
     )
     def test_nv_universal_gemm_subprocess_precompile_skips_bad_fork(self):
         """NV Universal GEMM precompile skips compile in bad-fork workers."""

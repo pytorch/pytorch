@@ -1731,9 +1731,9 @@ int nnc_lowerings_lazy_registration() {
             [&](const std::vector<VarHandle>& axes) {
               int64_t dim = std::get<int64_t>(inputs[1]);
               if (dim < 0) {
-                if (axes.empty()) {
-                  throw malformed_input("axes are zero handling unsqueeze");
-                }
+                TORCH_CHECK(
+                    !axes.empty(),
+                    "MALFORMED INPUT: axes are zero handling unsqueeze");
                 dim += axes.size();
               }
               // To construct an expression for an 'unsqueezed' tensor we need

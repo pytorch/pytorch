@@ -10,7 +10,7 @@ c10::intrusive_ptr<rpc::Message> PropagateGradientsResp::toMessageImpl() && {
 }
 
 std::unique_ptr<PropagateGradientsResp> PropagateGradientsResp::fromMessage(
-    const rpc::Message& message) {
+    const rpc::Message& /*message*/) {
   return std::unique_ptr<PropagateGradientsResp>();
 }
 

@@ -1,4 +1,10 @@
 # mypy: allow-untyped-defs
+"""
+.. warning::
+    ``torch.distributed.nn.functional`` is deprecated. Use
+    :mod:`torch.distributed.functional_collectives` instead.
+"""
+
 import warnings
 
 import torch
@@ -49,9 +55,9 @@ def broadcast(tensor, src, group=group.WORLD):
     if torch.compiler.is_compiling():
         _not_supported_under_compile(
             "broadcast",
-            suggestion="torch.distributed._functional_collectives.broadcast",
+            suggestion="torch.distributed.functional_collectives.broadcast",
         )
-    _deprecated("broadcast", "torch.distributed._functional_collectives.broadcast")
+    _deprecated("broadcast", "torch.distributed.functional_collectives.broadcast")
     return _Broadcast.apply(src, group, tensor)
 
 
@@ -68,7 +74,11 @@ def gather(tensor, dst=0, group=group.WORLD):
         tuple[Tensor]: List of appropriately-sized tensors with the gathered data.
     """
     if torch.compiler.is_compiling():
-        _not_supported_under_compile("gather")
+        _not_supported_under_compile(
+            "gather",
+            suggestion="torch.distributed.functional_collectives.all_gather_single",
+        )
+    _deprecated("gather", "torch.distributed.functional_collectives.all_gather_single")
     return _Gather.apply(dst, group, tensor)
 
 
@@ -81,7 +91,7 @@ def scatter(tensors, src=0, group=group.WORLD):
 
     Arguments:
         tensors (list[Tensor]): List of tensors to scatter on the source rank.
-            Receivers must pass ``None`.
+            Receivers must pass ``None``.
         src (int, optional): Source rank (default is 0).
         group (ProcessGroup, optional): The process group to work on.
 
@@ -90,7 +100,11 @@ def scatter(tensors, src=0, group=group.WORLD):
 
     """
     if torch.compiler.is_compiling():
-        _not_supported_under_compile("scatter")
+        _not_supported_under_compile(
+            "scatter",
+            suggestion="torch.distributed.functional_collectives.all_to_all_single",
+        )
+    _deprecated("scatter", "torch.distributed.functional_collectives.all_to_all_single")
     return _Scatter.apply(src, group, *tensors)
 
 
@@ -113,7 +127,10 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=group.WORLD):
 
     """
     if torch.compiler.is_compiling():
-        _not_supported_under_compile("reduce")
+        _not_supported_under_compile(
+            "reduce", suggestion="torch.distributed.functional_collectives.all_reduce"
+        )
+    _deprecated("reduce", "torch.distributed.functional_collectives.all_reduce")
     return _Reduce.apply(dst, op, group, tensor)
 
 
@@ -136,11 +153,11 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=group.WORLD):
     if torch.compiler.is_compiling():
         _not_supported_under_compile(
             "reduce_scatter",
-            suggestion="torch.distributed._functional_collectives.reduce_scatter_single",
+            suggestion="torch.distributed.functional_collectives.reduce_scatter_single",
         )
     _deprecated(
         "reduce_scatter",
-        "torch.distributed._functional_collectives.reduce_scatter_single",
+        "torch.distributed.functional_collectives.reduce_scatter_single",
     )
     return _Reduce_Scatter.apply(op, group, output, *input_list)
 
@@ -160,10 +177,10 @@ def all_gather(tensor, group=group.WORLD):
     if torch.compiler.is_compiling():
         _not_supported_under_compile(
             "all_gather",
-            suggestion="torch.distributed._functional_collectives.all_gather_single",
+            suggestion="torch.distributed.functional_collectives.all_gather_single",
         )
     _deprecated(
-        "all_gather", "torch.distributed._functional_collectives.all_gather_single"
+        "all_gather", "torch.distributed.functional_collectives.all_gather_single"
     )
     return _AllGather.apply(group, tensor)
 
@@ -181,7 +198,7 @@ def _all_gather_base(output_tensor, input_tensor, group=group.WORLD):
 
     Examples:
         >>> # All tensors below are of torch.int64 dtype.
-        >>> # We have 2 process groups, 2 ranks.
+        >>> # We have 2 ranks.
         >>> # xdoctest: +SKIP("incorrect want text")
         >>> output_tensor = torch.zeros(2, dtype=torch.int64)
         >>> output_tensor
@@ -202,7 +219,13 @@ def _all_gather_base(output_tensor, input_tensor, group=group.WORLD):
 
     """
     if torch.compiler.is_compiling():
-        _not_supported_under_compile("_all_gather_base")
+        _not_supported_under_compile(
+            "_all_gather_base",
+            suggestion="torch.distributed.functional_collectives.all_gather_single",
+        )
+    _deprecated(
+        "_all_gather_base", "torch.distributed.functional_collectives.all_gather_single"
+    )
     return _AllGatherBase.apply(output_tensor, input_tensor, group)
 
 
@@ -220,7 +243,13 @@ def all_to_all(output_tensor_list, input_tensor_list, group=group.WORLD):
 
     """
     if torch.compiler.is_compiling():
-        _not_supported_under_compile("all_to_all")
+        _not_supported_under_compile(
+            "all_to_all",
+            suggestion="torch.distributed.functional_collectives.all_to_all_single",
+        )
+    _deprecated(
+        "all_to_all", "torch.distributed.functional_collectives.all_to_all_single"
+    )
     return _AlltoAll.apply(group, output_tensor_list, *input_tensor_list)
 
 
@@ -253,11 +282,11 @@ def all_to_all_single(
     if torch.compiler.is_compiling():
         _not_supported_under_compile(
             "all_to_all_single",
-            suggestion="torch.distributed._functional_collectives.all_to_all_single",
+            suggestion="torch.distributed.functional_collectives.all_to_all_single",
         )
     _deprecated(
         "all_to_all_single",
-        "torch.distributed._functional_collectives.all_to_all_single",
+        "torch.distributed.functional_collectives.all_to_all_single",
     )
     return _AlltoAllSingle.apply(
         group, output, output_split_sizes, input_split_sizes, input
@@ -285,9 +314,9 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=group.WORLD):
     if torch.compiler.is_compiling():
         _not_supported_under_compile(
             "all_reduce",
-            suggestion="torch.distributed._functional_collectives.all_reduce",
+            suggestion="torch.distributed.functional_collectives.all_reduce",
         )
-    _deprecated("all_reduce", "torch.distributed._functional_collectives.all_reduce")
+    _deprecated("all_reduce", "torch.distributed.functional_collectives.all_reduce")
     return _AllReduce.apply(op, group, tensor)
 
 
@@ -415,7 +444,7 @@ class _AllGather(Function):
             gx = torch.empty_like(grad_outputs[rank])
             gx = _Reduce_Scatter.apply(ReduceOp.SUM, ctx.group, gx, *grad_outputs)
         else:
-            # As many backends doesn't support ReduceScatter, we use AlltoAll with .sum()
+            # As many backends don't support ReduceScatter, we use AlltoAll with .sum()
             # to emulate the ReduceScatter behavior
             tensor_list = [torch.empty_like(tensor) for tensor in grad_outputs]
             gxs = _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)

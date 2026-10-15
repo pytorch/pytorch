@@ -13,6 +13,7 @@
 #include <ATen/ScalarOps.h>
 
 #include <c10/util/irange.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
 #include <limits>
@@ -87,7 +88,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
           throw py::cast_error(
               c10::str("Unable to cast ", py::str(obj), " to Tensor"));
         }
-        bool save_symint = false;
+        c10::SymNode symbolic_node;
         at::Scalar scalar;
         if (PyBool_Check(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackBool(obj.ptr()));
@@ -98,13 +99,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         } else if (THPUtils_checkDouble(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackDouble(obj.ptr()));
         } else if (torch::is_symint(py::handle(obj))) {
-          save_symint = true;
+          symbolic_node = obj.cast<c10::SymInt>().toSymNode();
           scalar = at::Scalar(7777777);
         } else if (torch::is_symfloat(py::handle(obj))) {
-          save_symint = true;
+          symbolic_node = obj.cast<c10::SymFloat>().toSymNodeImpl();
           scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
         } else if (torch::is_symbool(py::handle(obj))) {
-          save_symint = true;
+          symbolic_node = obj.cast<c10::SymBool>().toSymNodeImpl();
           scalar = at::Scalar(true);
         } else {
           throw py::cast_error(
@@ -113,7 +114,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         at::Tensor tensor = at::scalar_to_tensor(scalar);
         tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
 
-        if (save_symint) {
+        if (symbolic_node) {
+          tensor.unsafeGetTensorImpl()->set_symbolic_wrapped_number(
+              std::move(symbolic_node));
           auto py_tensor = py::cast(tensor);
           TORCH_CHECK_PYTHON(
               PyObject_SetAttrString(
@@ -475,12 +478,14 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         auto pyCu = get_python_cu();
         classType = pyCu->get_class(c10::QualifiedName(qualified_name));
         if (!classType) {
-          throw std::runtime_error(c10::str(
-              "Assigning the object ",
-              py::str(obj),
-              " to an interface fails because the value is not "
-              "a TorchScript compatible type, did you forget to",
-              "turn it into a user defined TorchScript class?"));
+          TORCH_CHECK(
+              false,
+              c10::str(
+                  "Assigning the object ",
+                  py::str(obj),
+                  " to an interface fails because the value is not "
+                  "a TorchScript compatible type, did you forget to",
+                  "turn it into a user defined TorchScript class?"));
         }
         res = toIValue(obj, classType);
       }
@@ -708,8 +713,9 @@ py::object toPyObject(IValue ivalue) {
           std::back_inserter(defaults),
           [](const Argument& arg) { return toPyObject(*arg.default_value()); });
 
-      std::vector<std::string> fieldNames =
-          fmap(tuple_args, [](const Argument& arg) { return arg.name(); });
+      std::vector<std::string> fieldNames = fmap(
+          std::move(tuple_args),
+          [](const Argument& arg) { return arg.name(); });
 
       return py::module::import("torch._jit_internal")
           .attr("_create_named_tuple")(
@@ -860,6 +866,11 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
       for (const auto& err : errors) {
         ss << err.what() << "\n\n";
       }
+      // rpc/python_functions.cpp catches std::runtime_error around
+      // getOpWithStack by name, to retry against the non-c10 overload set.
+      // c10::Error does not derive from it, so a check macro here silently
+      // disables RPC's overload fallback.
+      // @allow-raw-throw: rpc's overload fallback catches this base by name
       throw std::runtime_error(std::move(ss).str());
     }
 
@@ -879,7 +890,7 @@ bool checkSchemaAllowFakeScriptObject(
   try {
     match = matchSchemaAllowFakeScriptObject(schema, args, kwargs);
   } catch (schema_match_error& error) {
-    throw std::runtime_error(error.what());
+    TORCH_CHECK(false, error.what());
   }
   return match;
 }
@@ -898,6 +909,7 @@ py::object invokeOperatorFromPython(
     const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk) {
+  HANDLE_TH_ERRORS
   auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
@@ -909,6 +921,7 @@ py::object invokeOperatorFromPython(
   }
 
   return createPyObjectForStack(std::move(stack));
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 std::optional<py::object> _maybe_handle_torch_function(

@@ -9,7 +9,6 @@
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/dynamo/stackref_bridge.h>
-#include <torch/csrc/utils/python_compat.h>
 
 #include <algorithm>
 #include <optional>
@@ -383,7 +382,7 @@ PyObject* dynamo__custom_eval_frame(
     // immediately skip the frame, and (2) even if it did, this would only
     // be profitable if there was tensor code in the unwinding code.  Seems
     // unlikely.
-    DEBUG_TRACE("throw %s", get_frame_name(frame)); // @allow-raw-throw
+    DEBUG_TRACE("throw %s", get_frame_name(frame));
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
@@ -404,8 +403,10 @@ PyObject* dynamo__custom_eval_frame(
 
   // callback to run on recursively invoked frames
   py::handle recursive_callback = callback; // borrowed
-  PyCodeObject* cached_code = nullptr; // borrowed
-  const char* trace_annotation = "";
+  PyCodeObject* cached_code = nullptr; // borrowed from cache_hit
+  // Owns the code eval_custom runs and its annotation, since a concurrent
+  // torch._dynamo.reset() can free the cache entry they came from.
+  CacheLookupResult cache_hit;
   PyObject* eval_result = nullptr; // strong reference
 
   // exit functions
@@ -430,15 +431,15 @@ PyObject* dynamo__custom_eval_frame(
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
   auto eval_custom = [&]() {
-    if (fullgraph_compiled_frame_count >= 0) {
-      fullgraph_compiled_frame_count++;
+    if (get_fullgraph_compiled_frame_count() >= 0) {
+      bump_fullgraph_compiled_frame_count();
       // Under fullgraph, disable or error Dynamo for sub-frames of compiled
       // code. If fullgraph_error_on_nested_compile is set, wrap the callback
       // with get_fail_callback so compilation attempts error. Otherwise, set
       // callback to None to skip sub-frames entirely.
       if (!recursive_callback.is_none() &&
           !recursive_callback.is(py::bool_(false))) {
-        if (fullgraph_error_on_nested_compile) {
+        if (get_fullgraph_error_on_nested_compile()) {
           if (!convert_frame_get_fail_callback) {
             convert_frame_get_fail_callback =
                 py::module_::import("torch._dynamo.convert_frame")
@@ -474,7 +475,11 @@ PyObject* dynamo__custom_eval_frame(
       debugger_cb(py::handle((PyObject*)cached_code));
     }
     eval_result = dynamo_eval_custom_code(
-        tstate, frame, cached_code, trace_annotation, throw_flag);
+        tstate,
+        frame,
+        cached_code,
+        cache_hit.trace_annotation.c_str(),
+        throw_flag);
     if (!callback.is(recursive_callback)) {
       eval_frame_callback_set(callback.ptr());
     }
@@ -492,27 +497,25 @@ PyObject* dynamo__custom_eval_frame(
   }
 #endif
 
-  ExtraState* extra = get_extra_state(F_CODE(frame));
-
-  if (callback.is(py::bool_(false)) && extra == nullptr) {
+  PyCodeObject* code = F_CODE(frame);
+  // Resolve strategy per isolate_recompiles scope. For non-isolated
+  // frames (id < 0) this returns extra->strategy; for isolated regions
+  // it returns the region's own strategy with global SKIP applied
+  // (deliberate "do not trace" marks must apply across regions), but
+  // does not inherit RUN_ONLY (recompile-limit hits are per-region).
+  int64_t isolate_recompiles_id = get_current_isolate_recompiles_id();
+  FrameExecStrategy strategy{DEFAULT, DEFAULT};
+  // In run-only mode a code object without a cache is never compiled, so do
+  // not create one for it.
+  if (!get_frame_exec_strategy(
+          code,
+          isolate_recompiles_id,
+          /*create=*/!callback.is(py::bool_(false)),
+          &strategy)) {
     DEBUG_TRACE("skip (run only with empty cache) %s", get_frame_name(frame));
     eval_default();
     return eval_result;
   }
-
-  // create cache
-  if (extra == nullptr) {
-    extra = init_and_set_extra_state(F_CODE(frame));
-  }
-
-  // Resolve strategy per isolate_recompiles scope. For non-isolated
-  // frames (id < 0) this returns extra->strategy; for isolated regions
-  // it returns the region's own strategy if set, otherwise inherits
-  // global SKIP (deliberate "do not trace" marks must apply across
-  // regions) but not RUN_ONLY (recompile-limit hits are per-region).
-  int64_t isolate_recompiles_id = get_current_isolate_recompiles_id();
-  FrameExecStrategy strategy =
-      extra_state_get_region_exec_strategy(extra, isolate_recompiles_id);
 
   recursive_callback =
       _callback_from_action(recursive_callback, strategy.recursive_action);
@@ -533,26 +536,23 @@ PyObject* dynamo__custom_eval_frame(
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
-  PyObject* maybe_cached_code = nullptr;
   std::unique_ptr<FrameLocalsMapping> locals;
   if (!try_lookup_without_guard_eval(
-          extra,
+          code,
           backend,
           isolate_recompiles_id,
-          &maybe_cached_code,
-          &trace_annotation,
-          is_skip_guard_eval_unsafe)) {
+          get_skip_guard_eval_unsafe(),
+          &cache_hit)) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
     _PytorchRecordFunctionState* rf =
         _pytorch_record_function_enter(cache_lookup_profiler_str);
     lookup(
-        extra,
+        code,
         locals.get(),
         backend,
         isolate_recompiles_id,
-        &maybe_cached_code,
-        &trace_annotation,
-        is_skip_guard_eval_unsafe);
+        get_skip_guard_eval_unsafe(),
+        &cache_hit);
     _pytorch_record_function_exit(rf);
   }
 
@@ -564,7 +564,7 @@ PyObject* dynamo__custom_eval_frame(
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
   }
 
-  if (maybe_cached_code == nullptr) {
+  if (!cache_hit.code) {
     // guard eval failed, keep propagating
     fail();
     return eval_result;
@@ -575,19 +575,18 @@ PyObject* dynamo__custom_eval_frame(
   // overtriggering and we don't need to do guard collectives the very first
   // time we've seen a frame in this region.
   bool has_relevant_entries =
-      extra->cache_entry_map.count(isolate_recompiles_id) > 0 ||
-      extra->cache_entry_map.count(-1) > 0;
+      has_relevant_cache_entries(code, isolate_recompiles_id);
   if (guard_complete_hook != nullptr && has_relevant_entries) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
-    py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
+    py::object res = guard_complete_hook_handle(!cache_hit.code.is_none());
     if (!py::cast<bool>(res)) {
-      maybe_cached_code = Py_None; // NB: non-owning
+      cache_hit.code = py::none();
     }
   }
 
-  if (!Py_IsNone(maybe_cached_code)) {
-    cached_code = (PyCodeObject*)maybe_cached_code;
+  if (!cache_hit.code.is_none()) {
+    cached_code = (PyCodeObject*)cache_hit.code.ptr();
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     eval_custom();
@@ -596,7 +595,7 @@ PyObject* dynamo__custom_eval_frame(
 
   // cache miss
   DEBUG_TRACE("cache miss %s", get_frame_name(frame));
-  if (is_skip_guard_eval_unsafe) {
+  if (get_skip_guard_eval_unsafe()) {
     PyErr_SetString(
         PyExc_RuntimeError,
         "Recompilation triggered with skip_guard_eval_unsafe stance. "
@@ -615,8 +614,7 @@ PyObject* dynamo__custom_eval_frame(
   if (locals == nullptr) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
   }
-  CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
-  FrameState* frame_state = extract_frame_state(extra);
+  CompileInputs inputs = get_compile_inputs(code, isolate_recompiles_id);
   py::object callback_result;
   FrameExecStrategy new_strategy;
   bool apply_to_code = false;
@@ -631,7 +629,11 @@ PyObject* dynamo__custom_eval_frame(
     }
     PreserveGlobalState preserve_global_state;
     callback_result = dynamo_call_callback(
-        callback, frame, locals.get(), cache_entry, frame_state);
+        callback,
+        frame,
+        locals.get(),
+        inputs.cache_entry,
+        inputs.frame_state.ptr());
     new_strategy =
         callback_result.attr("frame_exec_strategy").cast<FrameExecStrategy>();
     apply_to_code = callback_result.attr("apply_to_code").cast<bool>();
@@ -665,27 +667,21 @@ PyObject* dynamo__custom_eval_frame(
       DEBUG_TRACE(
           "create recursive action: %d\n", new_strategy.recursive_action);
     }
-    extra_state_set_region_exec_strategy(
-        extra, isolate_recompiles_id, new_strategy);
   }
 
-  if (!Py_IsNone(guarded_code)) {
+  // The callback ran arbitrary Python, which may have reset this code object's
+  // cache; the strategy and the new entry go on whatever state it has now.
+  cache_hit = record_compile_result(
+      code,
+      isolate_recompiles_id,
+      apply_to_code,
+      new_strategy,
+      guarded_code,
+      backend);
+  if (!cache_hit.code.is_none()) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
-
-    // NB: We could use extract_cache_entry to get the cache_entry, but
-    // extract_cache_entry returns a borrowed reference. Modifying a borrowed
-    // reference seems wrong. Therefore, we directly access the
-    // extra->cache_entry. extra won't be NULL here.
-    CacheEntry* new_cache_entry =
-        create_cache_entry(extra, guarded_code, backend);
-
-    // Update the existing cache_entry on the extra object. This extra object
-    // is sitting on the extra scratch space, we are just changing the
-    // cache_entry ptr. As a result, extra now becomes the owner of CacheEntry
-    // object. This will be cleaned up when set_extra_state is called.
     // Re-enable custom behavior
-    cached_code = CacheEntry_get_code(new_cache_entry),
-    trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
+    cached_code = (PyCodeObject*)cache_hit.code.ptr();
     eval_custom();
   } else {
     eval_default();
@@ -693,7 +689,7 @@ PyObject* dynamo__custom_eval_frame(
   return eval_result;
 }
 
-PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
+PyObject* dynamo_set_code_exec_strategy(PyObject* /*dummy*/, PyObject* args) {
   PyObject* code_obj = nullptr;
   PyObject* strategy_obj = nullptr;
   if (!PyArg_ParseTuple(args, "OO", &code_obj, &strategy_obj)) {
@@ -704,26 +700,14 @@ PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
     return nullptr;
   }
 
-  PyCodeObject* code = (PyCodeObject*)code_obj;
-  ExtraState* extra = get_extra_state(code);
-  if (extra == nullptr) {
-    extra = init_and_set_extra_state(code);
-  }
-
   FrameExecStrategy strategy =
       py::handle(strategy_obj).cast<FrameExecStrategy>();
 
-  extra_state_set_exec_strategy(extra, strategy);
+  set_code_exec_strategy((PyCodeObject*)code_obj, strategy);
   Py_RETURN_NONE;
 }
 
 void dynamo_skip_code_recursive(PyCodeObject* code) {
-  ExtraState* extra = get_extra_state(code);
-  if (extra == nullptr) {
-    extra = init_and_set_extra_state(code);
-  }
-
-  FrameExecStrategy strategy =
-      FrameExecStrategy{FrameAction::SKIP, FrameAction::SKIP};
-  extra_state_set_exec_strategy(extra, strategy);
+  set_code_exec_strategy(
+      code, FrameExecStrategy{FrameAction::SKIP, FrameAction::SKIP});
 }

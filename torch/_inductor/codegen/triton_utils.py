@@ -58,15 +58,22 @@ def use_block_ptr_enabled() -> bool:
     return False
 
 
-def should_unwrap_unspec_arg(name: str):
-    if V.graph.is_unspec_arg(name):
-        # Unwrap on all devices except CPU
-        if V.graph.get_current_device_or_throw().type != "cpu":
-            return True
-        # Only unwrap on CPU if the input is not used as an output
-        if name not in V.graph.mutated_buffers:
-            return True
-    return False
+def should_unwrap_unspec_arg(name: str) -> bool:
+    if not V.graph.is_unspec_arg(name):
+        return False
+
+    wrapper_code = getattr(V.graph, "wrapper_code", None)
+    if getattr(wrapper_code, "preserve_zero_dim_tensor_args", False):
+        return False
+
+    device_type = V.graph.get_current_device_or_throw().type
+    if device_type == "mtia":
+        return False
+    # Unwrap on all other accelerators.
+    if device_type != "cpu":
+        return True
+    # Only unwrap on CPU if the input is not used as an output.
+    return name not in V.graph.mutated_buffers
 
 
 def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
@@ -92,6 +99,34 @@ def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
         return False
 
     return DeviceProperties.create(device).cc < 89
+
+
+def triton_meta_device_props(device: torch.device) -> DeviceProperties:
+    """DeviceProperties for a kernel's triton_meta, respecting compile-on-one-rank.
+
+    Under CooR the rank-specific index is dropped so a kernel's triton_meta -- hence
+    its cache key and its generated source -- is byte-identical across ranks; the
+    launcher resolves the real device at load time.
+
+    NB: torch.device("cuda").index is None, not 0, and that None is what reaches
+    DeviceProperties. The None is load-bearing, not cosmetic: in triton_heuristics.py
+    it is the sentinel _resolve_load_device keys on to pick the running rank's current
+    device, and what sets kernel.device_agnostic -- which in turn forces the per-device
+    static launcher instead of the fast launcher, whose single baked function pointer
+    would be for the wrong GPU. Baking index=0 on every rank would make the source
+    byte-identical yet still launch on rank 0's device, so a byte-identity check alone
+    does not catch it.
+
+    Every site that builds triton_meta must go through here. Applying the rule in
+    TritonKernel alone left Triton templates (select_algorithm.py) and combo kernels
+    (triton_combo_kernel.py) baking DeviceProperties(index=N), which makes their
+    generated code differ across ranks.
+    """
+    from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+    if _coor_enabled():
+        device = torch.device(device.type)
+    return DeviceProperties.create(device)
 
 
 def signature_of(
@@ -237,9 +272,13 @@ def signature_to_meta(
         # tl.int32 whenever the (deprecated) block-pointer path is actually
         # active. Templates like flex attention/decoding likewise use
         # hand-written block pointers, so they also stay on 32-bit ks indexing.
+        #
+        # assume_32bit_indexing already asserts (and guards) that every ks* symbol
+        # fits in int32.
         if (
             not is_template
             and not use_block_ptr_enabled()
+            and not config.assume_32bit_indexing
             and isinstance(arg, SizeArg)
             and arg.name.startswith("ks")
         ):
@@ -421,7 +460,7 @@ def config_of(
     # can use 32-bit pointer offsets and emit buffer load/store ops.
     if pointer_range_override is not None:
         pointer_range_32 = pointer_range_override
-    elif torch.version.hip is not None:
+    elif torch.version.hip is not None and config.triton.emit_pointer_range_32:
         pointer_range_32 = tuple(
             i
             for i, arg in zip(indices, args)
