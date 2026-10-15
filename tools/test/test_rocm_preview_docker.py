@@ -96,5 +96,6 @@ printf '%s\\n' "$@" >> "$DOCKER_LOG"
             build_args,
         )
 
+
 if __name__ == "__main__":
     unittest.main()
