@@ -434,6 +434,21 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def truediv(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
+        # Full-precision division is an instruction sequence, not one op, and
+        # dominates math-heavy GEMM epilogues. Dividing by a constant becomes a
+        # multiply by its reciprocal: always for powers of two (bit-exact), and
+        # for other constants under fast math (may differ by one ulp).
+        try:
+            divisor = float(b) if isinstance(b, (str, int, float)) else None
+        except ValueError:
+            divisor = None
+        if divisor is not None and math.isfinite(divisor) and divisor != 0:
+            reciprocal = 1.0 / divisor
+            exact = abs(math.frexp(divisor)[0]) == 0.5 and 2**-126 <= abs(reciprocal)
+            if exact or _CUTEDSL_FAST_MATH.get():
+                return CuteDSLOpOverrides._apply_binary_op(
+                    a, repr(reciprocal), "({a} * {b})"
+                )
         return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} / {b})")
 
     @staticmethod
