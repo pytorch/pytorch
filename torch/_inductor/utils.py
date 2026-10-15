@@ -1460,7 +1460,7 @@ def get_kernel_metadata(
                 if layout is None:
                     return ""
                 shape_annotation = f"{stringify_shape(layout.size)}"
-                stride_annotation = f"{stringify_shape(layout.stride)}"
+                stride_annotation = f"{stringify_shape(layout.stride_hint())}"
                 # Under compile-on-one-rank, render the bare device type so this kernel
                 # provenance comment is byte-identical across ranks.
                 from torch.fx.experimental.proxy_tensor import _coor_enabled
@@ -4100,7 +4100,7 @@ def is_dynamic(*args: object) -> bool:
             t, (ir.TensorBox, ir.StorageBox, ir.BaseView, ir.ComputedBuffer, ir.Buffer)
         ):
             if has_free_symbols(t.maybe_get_size() or ()) or has_free_symbols(
-                t.maybe_get_stride() or ()
+                t.maybe_get_stride_hint() or ()
             ):
                 return True
         elif not isinstance(t, ir.IRNode):
