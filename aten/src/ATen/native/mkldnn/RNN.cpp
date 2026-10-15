@@ -79,6 +79,7 @@ REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub)
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Lstm.h>
 
 namespace at::native {
 
@@ -272,18 +273,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   w2_ = weight_hh.is_mkldnn() ? itensor_from_tensor(weight_hh) : itensor_view_from_dense(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
   if (at::GradMode::is_enabled()) {
     Tensor workspace = Tensor();
-    auto pd = ideep::lstm_forward_training::prepare(
+    auto pd = mkldnn::lstm_forward_training_prepare(
         x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
     workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
     ideep::tensor mkldnn_workspace;
     mkldnn_workspace.init(
         pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
-    ideep::lstm_forward_training::compute(
-        pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, dnnl::prop_kind::forward_training);
+    mkldnn::lstm_forward_training(
+        pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy);
     return std::make_tuple(
         std::move(output), std::move(hy_), std::move(cy_), std::move(workspace));
   } else {
-    ideep::lstm_forward_inference::compute(
+    mkldnn::lstm_forward_inference(
         x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, dnnl::prop_kind::forward_inference);
     return std::make_tuple(std::move(output), std::move(hy_), std::move(cy_), Tensor());
   }
@@ -424,11 +425,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
         grad_cy, rnn.dst_iter_desc(dnnl::memory::data_type::f32));
   }
 
-  auto forward_hint = ideep::lstm_forward_training::prepare(x, hx, cx, w1, w2, b, y, hy, cy, reverse);
+  auto forward_hint = mkldnn::lstm_forward_training_prepare(x, hx, cx, w1, w2, b, y, hy, cy, reverse);
   ideep::tensor mkldnn_workspace;
   mkldnn_workspace.init(
       forward_hint.workspace_desc(), workspace.template data_ptr<uint8_t>());
-  ideep::lstm_backward::compute(forward_hint, x, hx, cx, w1, w2, b, y, hy, cy, diff_y, diff_hy, diff_cy, mkldnn_workspace, diff_x, diff_hx, diff_cx, diff_w1, diff_w2, diff_b, reverse);
+  mkldnn::lstm_backward(forward_hint, x, hx, cx, w1, w2, b, y, hy, cy, diff_y, diff_hy, diff_cy, mkldnn_workspace, diff_x, diff_hx, diff_cx, diff_w1, diff_w2, diff_b, reverse);
   auto diff_b2_ = at::clone(diff_b_);
   return std::make_tuple(std::move(diff_x_), std::move(diff_w1_), std::move(diff_w2_), std::move(diff_b_), std::move(diff_b2_), std::move(diff_hx_), std::move(diff_cx_));
 }
