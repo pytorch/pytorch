@@ -449,12 +449,12 @@ inline ScaleSpec make_scale_spec(
       // Blockwise 1x128 scaling (DeepSeek style)
       // For SRC (A): scale shape [M, ceil_div(K, 128)], groups = {1, 128}
       // For WEI (B): scale shape [ceil_div(K, 128), N], groups = {128, 1}
-      // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
+      int mask = (1 << 0) | (1 << 1); // mask: scale both dim0 and dim1
       auto dt = (scale_dtype == at::kFloat8_e8m0fnu)
           ? dnnl::memory::data_type::e8m0
           : dnnl::memory::data_type::f32;
       return {
-          (1 << 0) | (1 << 1),
+          mask,
           is_src ? dnnl::memory::dims{1, 128} : dnnl::memory::dims{128, 1},
           dt};
     }
@@ -463,11 +463,11 @@ inline ScaleSpec make_scale_spec(
       // Blockwise 128x128 scaling (2D block scaling)
       // For SRC (A): scale shape [M // 128, K // 128], groups = {128, 128}
       // For WEI (B): scale shape [K // 128, N // 128], groups = {128, 128}
-      // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
+      int mask = (1 << 0) | (1 << 1); // mask: scale both dim0 and dim1
       auto dt = (scale_dtype == at::kFloat8_e8m0fnu)
           ? dnnl::memory::data_type::e8m0
           : dnnl::memory::data_type::f32;
-      return {(1 << 0) | (1 << 1), dnnl::memory::dims{128, 128}, dt};
+      return {mask, dnnl::memory::dims{128, 128}, dt};
     }
 
     case at::blas::ScalingType::BlockWise1x32: {
