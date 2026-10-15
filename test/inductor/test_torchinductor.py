@@ -1891,6 +1891,28 @@ class CommonTemplate:
         for dtype in [torch.float32, torch.int32, torch.int64]:
             self.common(fn, (torch.arange(32, dtype=dtype),))
 
+    def test_scalar_overload_positional_alpha(self):
+        # add.Scalar/sub.Scalar declare alpha positionally, unlike the
+        # keyword-only alpha of their Tensor overloads.
+        def check(op, op_args, dtype):
+            def fn(a):
+                return (op(a, *op_args),)
+
+            if dtype.is_floating_point:
+                x = torch.randn(32, dtype=dtype, device=self.device)
+            else:
+                x = torch.randint(0, 10, (32,), dtype=dtype, device=self.device)
+            gm = make_fx(fn)(x)
+            self.assertEqual(compile_fx_inner(gm, [x])([x])[0], fn(x)[0])
+
+        for op, op_args, dtype in itertools.product(
+            (aten.add.Scalar, aten.sub.Scalar),
+            ((1,), (1, 2)),
+            (torch.float32, torch.int64),
+        ):
+            with self.subTest(op=op, args=op_args, dtype=dtype):
+                check(op, op_args, dtype)
+
     def test_add_const_float(self):
         def fn(a):
             return (a + 1.5,)
