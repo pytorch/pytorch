@@ -36,7 +36,7 @@ from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import has_triton_cuda_tma_device
 
 
 if HAS_XPU_AND_TRITON:
@@ -1266,8 +1266,8 @@ class TestFastCudaLauncherCompileResult(TestCase):
 
     @skipIfXpu(msg="Tests CUDA device-side TMA global scratch")
     @unittest.skipIf(
-        not has_triton_tma_device(),
-        "requires Triton device-side TMA support",
+        not has_triton_cuda_tma_device(),
+        "requires Triton device-side TMA support on CUDA",
     )
     @torch._inductor.config.patch(
         {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}
