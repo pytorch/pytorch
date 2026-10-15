@@ -114,6 +114,7 @@ class StaticallyLaunchedTritonKernel:
         self.name = kernel.src.fn.__name__
         # pyrefly: ignore [missing-attribute]
         self.cubin_path = kernel._cubin_path
+        self.cubin_filename = os.path.basename(self.cubin_path)
 
         # Used by torch.compile to filter constants in older triton versions
         # pyrefly: ignore [missing-attribute]
@@ -213,14 +214,16 @@ class StaticallyLaunchedTritonKernel:
         If the cubin file triton generated gets deleted under us, we can
         reload it from the raw cubin file.
         """
-        if self.cubin_path is None:
+        if not os.path.exists(filepath):
             if self.cubin_raw is None:
-                raise AssertionError("cubin_raw must be set when cubin_path is None")
+                raise AssertionError(
+                    "cubin_raw must be set to restore a missing binary"
+                )
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, "wb") as f:
                 f.write(self.cubin_raw)
-                self.cubin_path = filepath  # pyre-ignore
-        return self.cubin_path
+        self.cubin_path = filepath  # pyre-ignore
+        return filepath
 
     def _agnostic_cubin_path(self) -> str:
         # The cubin bytes are device-agnostic, so the same file loads onto any device.
