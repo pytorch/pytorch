@@ -168,6 +168,14 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
         with contextlib.suppress(Exception), _imported_triton_runtime_lock:
             if (self.key, str(cache.runtime_cache_root())) in _imported_triton_runtime:
                 return
+        # Validate before _serving_triton_root repoints Triton for the process.
+        if hashlib.sha256(self.content).hexdigest() != self.key:
+            raise RuntimeError("Corrupt Triton runtime-cache artifact")
+        context = _runtime_context()
+        try:
+            cache._decode(self.content, context)
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("Malformed Triton runtime-cache bundle") from exc
         try:
             root = _serving_triton_root(cache, self.key)
         except Exception as exc:
@@ -178,9 +186,7 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
         with _imported_triton_runtime_lock:
             if imported in _imported_triton_runtime:
                 return
-            if hashlib.sha256(self.content).hexdigest() != self.key:
-                raise RuntimeError("Corrupt Triton runtime-cache artifact")
-            cache.import_runtime_cache(self.content, context=_runtime_context())
+            cache.import_runtime_cache(self.content, context=context)
             _imported_triton_runtime.add(imported)
 
 
@@ -360,14 +366,15 @@ def _triton_export_diagnostic(
     compile_id = getattr(kernel, "compile_id", None)
     # CachingAutotuner.precompile drops configs once it has compile_results.
     configs = getattr(kernel, "configs", None)
+    direction = None
+    if compile_id is not None:
+        direction = "backward" if kernel.is_backward else "forward"
     return {
         "reason": reason,
         "kernel_name": kernel.inductor_meta.get("kernel_name"),
         "filename": getattr(kernel, "filename", None),
         "compile_id": str(compile_id) if compile_id is not None else None,
-        "direction": None
-        if compile_id is None
-        else ("backward" if kernel.is_backward else "forward"),
+        "direction": direction,
         "heuristic": getattr(getattr(kernel, "heuristic_type", None), "name", None),
         "config_count": len(kernel.compile_results if configs is None else configs),
         "launcher_count": len(kernel.launchers),
@@ -498,7 +505,13 @@ def _own_triton_cache(settings: contextlib.ExitStack) -> str | None:
     if _triton_runtime_cache() is None:
         return None
     from triton import knobs
+    from triton.backends import backends
     from triton.runtime import driver
+
+    # Without an active backend no JIT kernel runs, and the interpreter never
+    # uses the cache.
+    if not any(backend.driver.is_active() for backend in backends.values()):
+        return None
 
     root = _private_directory("torch_precompile_triton_")
     # Triton builds its driver's utility module (cuda_utils, hip_utils) into
