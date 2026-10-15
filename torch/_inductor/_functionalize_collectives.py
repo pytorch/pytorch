@@ -70,7 +70,16 @@ def _emit_collective_chain(
     """
     val = output_t.meta.get("val")
     with gm.graph.inserting_before(before):
-        ar = gm.graph.call_function(functional_target, (input_t, *extra_args, pg_arg))
+        if not isinstance(before.target, torch._ops.OpOverload):
+            raise AssertionError(f"expected collective OpOverload, got {before.target}")
+        config = before.kwargs.get("config")
+        for index, argument in enumerate(before.target._schema.arguments):
+            if argument.name == "config" and index < len(before.args):
+                config = before.args[index]
+        kwargs: dict[str, Any] = {"config": config} if config is not None else {}
+        ar = gm.graph.call_function(
+            functional_target, (input_t, *extra_args, pg_arg), kwargs
+        )
         wait = gm.graph.call_function(
             torch.ops._c10d_functional.wait_tensor.default, (ar,)
         )
