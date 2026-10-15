@@ -1506,7 +1506,6 @@ class TestConverterDevice(_ConverterTestMixin, TestCase):
         self._check_equal_ts_ep_converter(Module(), inp)
 
 
-# Default bases keep CPU and privateuse1; allow_xpu keeps the XPU class from #197113.
 instantiate_device_type_tests(
     TestConverterDevice,
     globals(),
