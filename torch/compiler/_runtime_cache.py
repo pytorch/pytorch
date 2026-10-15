@@ -147,6 +147,37 @@ def _triton_export_rejection(kernel: CachingAutotuner) -> str | None:
     return None
 
 
+def _triton_export_diagnostic(
+    kernel: CachingAutotuner, reason: str
+) -> dict[str, object]:
+    compile_id = getattr(kernel, "compile_id", None)
+    backward = getattr(kernel, "is_backward", None)
+    configs = getattr(kernel, "configs", None)
+    return {
+        "reason": reason,
+        "kernel_name": kernel.inductor_meta.get("kernel_name"),
+        "filename": getattr(kernel, "filename", None),
+        "compile_id": str(compile_id) if compile_id is not None else None,
+        "direction": None
+        if backward is None
+        else "backward"
+        if backward
+        else "forward",
+        "heuristic": getattr(getattr(kernel, "heuristic_type", None), "name", None),
+        "config_count": len(configs) if configs is not None else None,
+        "launcher_count": len(kernel.launchers),
+        "compile_result_count": len(kernel.compile_results),
+        "launcher_types": [type(launcher).__name__ for launcher in kernel.launchers],
+        "launcher_result_types": [
+            type(getattr(launcher, "_compile_result", None)).__name__
+            for launcher in kernel.launchers
+        ],
+        "compile_result_types": [
+            type(result).__name__ for result in kernel.compile_results
+        ],
+    }
+
+
 def _detached_copy(fn: object) -> object:
     # A shallow copy's bound methods (and cache factories) still point at the live
     # object, so pickling the copy would pickle the live object too.
@@ -184,7 +215,7 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
         with kernel.lock:
             reason = _triton_export_rejection(kernel)
             if reason is not None:
-                rejected.append({"reason": reason})
+                rejected.append(_triton_export_diagnostic(kernel, reason))
                 continue
             result = cast(
                 StaticTritonCompileResult, kernel.launchers[0]._compile_result
@@ -202,7 +233,9 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
         try:
             _retain_cubin(saved_result)
         except (OSError, RuntimeError) as exc:
-            rejected.append({"reason": "cubin_unavailable", "error": str(exc)})
+            diagnostic = _triton_export_diagnostic(kernel, "cubin_unavailable")
+            diagnostic["error"] = str(exc)
+            rejected.append(diagnostic)
             continue
         return pickle.dumps(
             StaticallyLaunchedAutotuner(
@@ -257,6 +290,8 @@ def capture_scope() -> Iterator[None]:
 
 
 def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
+    import torch
+
     static_kernels: dict[str, bytes] = {}
     rejected_sources: list[dict[str, object]] = []
     for key, instances in kernels.items():
@@ -265,7 +300,18 @@ def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
         except _UnresolvedTritonExport as exc:
             rejected_sources.extend(exc.sources)
     if rejected_sources:
-        raise _UnresolvedTritonExport(rejected_sources)
+        error = _UnresolvedTritonExport(rejected_sources)
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "precompile_triton_export_failures",
+                "encoding": "json",
+            },
+            payload_fn=lambda: error.report,
+            expect_trace_id=False,
+            record_logging_overhead=False,
+        )
+        raise error
     return pickle.dumps(static_kernels)
 
 
