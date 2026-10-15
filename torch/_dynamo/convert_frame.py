@@ -2288,11 +2288,6 @@ def _compile(
             # dynamo_compile table, and we will not have telemetry.
             # Be extra careful when making changes here!
 
-            if torch._dynamo.config.run_gc_after_compile:
-                with dynamo_timed("gc", dynamo_compile_column_us="gc_time_us"):
-                    log.info("run_gc_after_compile: running gc")
-                    gc.collect(1)
-
             output = None
             if tracer_output:
                 output = tracer_output.output_graph
@@ -2390,6 +2385,17 @@ def _compile(
                 tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.clear()
 
             clear_compile_context_weakrefs(tracer_output, compiler_fn)
+
+            # Collect only after dropping this frame's references to the tracing state.
+            # Collected while still referenced, the OutputGraph / SideEffects cycle (which
+            # holds the frame's real inputs via local_scope and LazyCache.value) survives
+            # into the oldest generation, which gc.collect(1) never scans again, so it
+            # pins those tensors until a full collection.
+            if torch._dynamo.config.run_gc_after_compile:
+                tracer_output = output = output_graph = tracer = None
+                with dynamo_timed("gc", dynamo_compile_column_us="gc_time_us"):
+                    log.info("run_gc_after_compile: running gc")
+                    gc.collect(1)
 
 
 class ConvertFrame:
