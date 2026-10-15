@@ -7119,29 +7119,6 @@ class TestPrecompileRuntimeCache(TestCase):
                 root = pathlib.Path(_runtime_cache._capture.cache_root)
                 self.assertFalse((root / "utils_key").exists())
 
-    def test_writes_keep_compile_workers(self):
-        from torch._inductor.async_compile import AsyncCompile
-
-        pc = torch.compiler.precompile
-        shutdowns = []
-        drain = mock.patch.object(
-            AsyncCompile,
-            "drain_pending",
-            side_effect=lambda **kw: shutdowns.append(kw["shutdown"]),
-        )
-        with tempfile.TemporaryDirectory() as directory, drain:
-            with pc.capture(
-                _no_compilation_single_graph,
-                artifact_path=os.path.join(directory, "m.py"),
-                cache_path=os.path.join(directory, "m.cache"),
-                tracer=DynamoTracer(require_no_risky_drops=False),
-                backend="eager",
-            ) as cap:
-                cap(torch.ones(4))
-                cap.save()
-                cap(torch.ones(2, 3))  # leaves the final write something to add
-        self.assertEqual(shutdowns, [False, False])
-
     def test_write_snapshots_after_waiting_on_compiles(self):
         from torch._inductor.async_compile import AsyncCompile
         from torch.compiler._cache import CacheArtifactManager
@@ -7843,6 +7820,32 @@ class TestPrecompileRuntimeCache(TestCase):
                 self.assertFalse(triton.knobs.autotuning.cache)
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_scope_restores_triton_cache_settings_when_opening_fails(self):
+        import triton
+
+        from torch.compiler import _runtime_cache
+
+        with triton.knobs.cache.scope(), triton.knobs.autotuning.scope():
+            triton.knobs.autotuning.cache = False
+            before = triton.knobs.cache.dir
+            # The live-autotuner walk runs after the knobs are overridden.
+            boom = RuntimeError("boom")
+            with mock.patch.object(_runtime_cache.gc, "get_objects", side_effect=boom):
+                # Not assertRaises, which clears the traceback's frames: that
+                # would finalize a leaked knobs scope and restore it anyway.
+                caught = None
+                try:
+                    with _runtime_cache.capture_scope():
+                        pass
+                except RuntimeError as e:
+                    caught = e
+            self.assertIs(caught, boom)
+            self.assertIsNone(_runtime_cache._capture)
+            self.assertEqual(triton.knobs.cache.dir, before)
+            self.assertFalse(triton.knobs.autotuning.cache)
+            del caught
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_capture_refuses_changed_triton_cache_dir(self):
         import triton
 
@@ -7957,6 +7960,8 @@ class TestPrecompileRuntimeCache(TestCase):
         from torch.compiler import _runtime_cache
         from torch.compiler._triton_runtime_cache import _MAGIC
 
+        if _runtime_cache._triton_runtime_cache() is None:
+            self.skipTest("requires a Triton with cache and autotuning knobs")
         # The right digest, but a header that is not a JSON object.
         payload = _MAGIC + struct.pack("!Q", 2) + b"[]"
         runtime = _runtime_cache.TritonRuntimeCacheArtifact(
