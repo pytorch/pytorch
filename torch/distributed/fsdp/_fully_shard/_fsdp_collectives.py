@@ -1,5 +1,6 @@
 import math
 from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from itertools import chain, groupby
 from typing import Any, cast, Literal, NamedTuple
 
@@ -13,6 +14,7 @@ from torch.distributed.tensor import DTensor
 
 from ._all_gather_layout import (
     _adopt_layout_outputs,
+    _can_use_param_contiguous_output,
     _check_layout_refill,
     _DefaultAllGatherCopyPlan,
     _PersistentBuffers,
@@ -20,6 +22,7 @@ from ._all_gather_layout import (
     AllGatherInputMetadata,
     AllGatherLayout,
     AllGatherParamMetadata,
+    BackendOwnedAllGatherLayout,
     DEFAULT_ALL_GATHER_LAYOUT,
     DefaultAllGatherLayout,
 )
@@ -47,6 +50,7 @@ class AllGatherResult(NamedTuple):
     # Kept until the collective completes, since a custom layout may pack it
     # into storage independent of the output
     all_gather_input: torch.Tensor | None = None
+    all_gather_version_ctx: AbstractContextManager[None] | None = None
 
 
 lib = torch.library.Library("fsdp", "FRAGMENT")
@@ -367,6 +371,17 @@ def record_grad_output_stream(buffer: torch.Tensor, stream: torch.Stream) -> Non
     )
 
 
+def _preserve_all_gather_version(
+    all_gather_output: torch.Tensor, layout: AllGatherLayout
+) -> AbstractContextManager[None]:
+    # Backend-owned collective buffers may back outputs that saved parameters alias
+    if isinstance(layout, BackendOwnedAllGatherLayout) and not (
+        all_gather_output.is_inference()
+    ):
+        return torch.autograd._unsafe_preserve_version_counter(all_gather_output)
+    return nullcontext()
+
+
 @torch.no_grad()
 def foreach_all_gather(
     fsdp_params: list[FSDPParam],
@@ -380,57 +395,75 @@ def foreach_all_gather(
 ) -> AllGatherResult:
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
-    with device_handle.stream(all_gather_copy_in_stream):
-        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
-        # Extension layouts are set by the all_gather_inputs call above
-        outer_sizes = [
-            layout.outer_size
-            for fsdp_param in fsdp_params
-            for layout in fsdp_param.all_gather_output_layouts
-        ]
-        (
-            param_all_gather_input_dtypes,
-            param_all_gather_input_numels,
-            dtype,
-        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-        if dtype == torch.uint8:
-            all_gather_inputs = [
-                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
+    try:
+        with device_handle.stream(all_gather_copy_in_stream):
+            param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
+            # Extension layouts are set by the all_gather_inputs call above
+            outer_sizes = [
+                copy_layout.outer_size
+                for fsdp_param in fsdp_params
+                for copy_layout in fsdp_param.all_gather_output_layouts
             ]
-        else:
-            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
-        inp_split_sizes = [t.numel() for t in all_gather_inputs]
-        all_gather_input_numel = sum(inp_split_sizes)
-        copy_in, call_layout, output_metadata = layout.prepare(
-            AllGatherInputMetadata(
-                input_split_sizes=inp_split_sizes,
-                input_outer_sizes=outer_sizes,
-                input_numel=all_gather_input_numel,
-                world_size=world_size,
-                dtype=dtype,
-                device=device,
+            (
+                param_all_gather_input_dtypes,
+                param_all_gather_input_numels,
+                dtype,
+            ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
+            if dtype == torch.uint8:
+                all_gather_inputs = [
+                    t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
+                ]
+            else:
+                all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
+            inp_split_sizes = [t.numel() for t in all_gather_inputs]
+            all_gather_input_numel = sum(inp_split_sizes)
+            copy_in, call_layout, output_metadata = layout.prepare(
+                AllGatherInputMetadata(
+                    input_split_sizes=inp_split_sizes,
+                    input_outer_sizes=outer_sizes,
+                    input_numel=all_gather_input_numel,
+                    world_size=world_size,
+                    dtype=dtype,
+                    device=device,
+                    can_use_param_contiguous_output=(
+                        type(layout) is not DefaultAllGatherLayout
+                        and _can_use_param_contiguous_output(
+                            fsdp_params,
+                            param_all_gather_input_dtypes,
+                            param_all_gather_input_numels,
+                            dtype,
+                        )
+                    ),
+                )
             )
-        )
-        all_gather_output = all_gather_comm.allocate(
-            (all_gather_input_numel * world_size,), dtype=dtype, device=device
-        )
-        all_gather_input, all_gather_output = copy_in(
-            all_gather_inputs,
-            all_gather_output,
-            inp_split_sizes,
-            all_gather_input_numel,
-            rank,
-        )
-        del param_all_gather_inputs, all_gather_inputs
-    all_gather_stream.wait_stream(all_gather_copy_in_stream)
-    with device_handle.stream(all_gather_stream):
-        all_gather_work = all_gather_comm(
-            output_tensor=all_gather_output,
-            input_tensor=all_gather_input,
-            group=group,
-            async_op=async_op,
-        )
-        all_gather_event = all_gather_stream.record_event()
+            all_gather_output = all_gather_comm.allocate(
+                (all_gather_input_numel * world_size,), dtype=dtype, device=device
+            )
+            with _preserve_all_gather_version(all_gather_output, layout):
+                all_gather_input, all_gather_output = copy_in(
+                    all_gather_inputs,
+                    all_gather_output,
+                    inp_split_sizes,
+                    all_gather_input_numel,
+                    rank,
+                )
+            del param_all_gather_inputs, all_gather_inputs
+        all_gather_stream.wait_stream(all_gather_copy_in_stream)
+        version_ctx = _preserve_all_gather_version(all_gather_output, layout)
+        with device_handle.stream(all_gather_stream), version_ctx:
+            all_gather_work = all_gather_comm(
+                output_tensor=all_gather_output,
+                input_tensor=all_gather_input,
+                group=group,
+                async_op=async_op,
+            )
+            all_gather_event = all_gather_stream.record_event()
+    except BaseException:
+        if isinstance(layout, BackendOwnedAllGatherLayout):
+            with device_handle.stream(all_gather_stream):
+                all_gather_stream.wait_stream(all_gather_copy_in_stream)
+                layout.release_output()
+        raise
     return AllGatherResult(
         all_gather_output,
         all_gather_event,
@@ -442,6 +475,7 @@ def foreach_all_gather(
         call_layout,
         output_metadata,
         all_gather_input,
+        version_ctx,
     )
 
 
@@ -513,8 +547,15 @@ def _prepare_default_all_gather_outputs(
         fsdp_param.init_all_gather_outputs(
             numels, dtypes, world_size, all_gather_output.device
         )
-        # Skips outputs that view the group's buffers, which it re-allocated
-        fsdp_param.alloc_all_gather_outputs()
+        if fsdp_param._keep_all_gather_output_storage:
+            # A rank-major fallback may gather into storage these outputs alias
+            plan.clone_input = plan.clone_input or any(
+                t.untyped_storage().data_ptr()
+                == all_gather_output.untyped_storage().data_ptr()
+                for t in fsdp_param.all_gather_outputs
+            )
+        else:
+            fsdp_param.alloc_all_gather_outputs()
         plan.outputs.append(fsdp_param.all_gather_outputs)
     return plan
 
@@ -526,7 +567,9 @@ def _wait_all_gather(all_gather_result: AllGatherResult) -> None:
     if (all_gather_event := all_gather_result.all_gather_event) is not None:
         device_handle.current_stream().wait_event(all_gather_event)
     if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
-        all_gather_work.wait()
+        # Reuse the context created before launch to preserve earlier writes too.
+        with all_gather_result.all_gather_version_ctx or nullcontext():
+            all_gather_work.wait()
 
 
 @torch.no_grad()
@@ -536,17 +579,17 @@ def foreach_all_gather_copy_out(
     group: dist.ProcessGroup,
     persistent_buffers: _PersistentBuffers | None = None,
 ) -> _PersistentBuffers | None:
-    """Finalizes the all-gather with the layout that prepared it and returns the
-    group's FSDP-owned persistent buffers, which a custom layout chooses on the
-    group's first unshard (None while each output is its own buffer)."""
+    """Finalize using the call's layout and retain FSDP-owned buffers or
+    backend-owned parameter aliases for later unshards.
+    """
     _wait_all_gather(all_gather_result)
     world_size = group.size()
     layout = all_gather_result.layout
     all_gather_output = all_gather_result.all_gather_output
     if persistent_buffers is not None:
         persistent_buffers.alloc()
-    if isinstance(layout, DefaultAllGatherLayout):
-        # Rank-major output, from the default layout or a custom layout's fallback
+    if type(layout) is DefaultAllGatherLayout:
+        # A custom layout fell back to rank-major output for this call
         plan = _prepare_default_all_gather_outputs(
             fsdp_params, all_gather_result, world_size
         )
@@ -563,7 +606,12 @@ def foreach_all_gather_copy_out(
             buffers = persistent_buffers.tensors
         else:
             # Outputs that the default layout created are their own buffers
-            buffers = [t for p in fsdp_params for t in p.all_gather_outputs]
+            buffers = [
+                t
+                for p in fsdp_params
+                if not p._keep_all_gather_output_storage
+                for t in p.all_gather_outputs
+            ]
     outer_sizes = iter(all_gather_result.all_gather_input_outer_sizes)
     param_metadata = [
         AllGatherParamMetadata(
@@ -571,6 +619,7 @@ def foreach_all_gather_copy_out(
             dtypes,
             [next(outer_sizes) for _ in numels],
             fsdp_param.all_gather_outputs,
+            fsdp_param._keep_all_gather_output_storage and persistent_buffers is None,
         )
         for fsdp_param, numels, dtypes in zip(
             fsdp_params,
@@ -595,9 +644,10 @@ def foreach_all_gather_copy_out(
                 buffers,
             )
         )
+    backend_owned = isinstance(layout, BackendOwnedAllGatherLayout)
     if first_unshard:
-        return _adopt_layout_outputs(fsdp_params, outputs)
-    _check_layout_refill(fsdp_params, outputs)
+        return _adopt_layout_outputs(fsdp_params, outputs, backend_owned)
+    _check_layout_refill(fsdp_params, outputs, backend_owned)
     return persistent_buffers
 
 

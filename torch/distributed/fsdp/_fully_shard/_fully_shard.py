@@ -12,7 +12,11 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 
-from ._all_gather_layout import AllGatherLayout, DEFAULT_ALL_GATHER_LAYOUT
+from ._all_gather_layout import (
+    AllGatherLayout,
+    DEFAULT_ALL_GATHER_LAYOUT,
+    DefaultAllGatherLayout,
+)
 from ._fsdp_api import (
     AllGather,
     DataParallelMeshDims,
@@ -934,9 +938,8 @@ class FSDPModule:
         output, requires that collective: installing the layout installs its
         comm too, and the group then rejects any other comm, including from
         :meth:`set_custom_all_gather`, until another layout is installed. A
-        layout that keeps per-call state must not be shared across parameter
-        groups, so install such a layout on each module with ``recurse=False``.
-        Set layouts before the first unshard.
+        stateful layout binds to one parameter group; create one per group
+        with ``recurse=False``. Set layouts before the first unshard.
 
         Args:
             layout (Optional[AllGatherLayout]): Layout, or ``None`` to restore
@@ -947,18 +950,31 @@ class FSDPModule:
         layout = DEFAULT_ALL_GATHER_LAYOUT if layout is None else layout
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
-        for module in modules:
-            if isinstance(module, FSDPModule):
-                state = module._get_fsdp_state()
-                for fsdp_param_group in state._fsdp_param_groups:
-                    comm = layout.comm or fsdp_param_group._all_gather_comm
-                    if (
-                        layout is not fsdp_param_group._all_gather_layout
-                        or comm is not fsdp_param_group._all_gather_comm
-                    ):
-                        _check_all_gather_replaceable(fsdp_param_group)
-                    fsdp_param_group._all_gather_layout = layout
-                    fsdp_param_group._all_gather_comm = comm
+        groups = [
+            group
+            for module in modules
+            if isinstance(module, FSDPModule)
+            for group in module._get_fsdp_state()._fsdp_param_groups
+        ]
+        # Jointly sharded modules can refer to the same parameter group.
+        groups = list(dict.fromkeys(groups))
+        if len(groups) > 1 and type(layout) is not DefaultAllGatherLayout:
+            raise ValueError(
+                "a stateful all-gather layout cannot be shared across FSDP "
+                "parameter groups; create one per group with recurse=False"
+            )
+        # Validate every group before changing any layout or comm.
+        for group in groups:
+            comm = layout.comm or group._all_gather_comm
+            if (
+                layout is not group._all_gather_layout
+                or comm is not group._all_gather_comm
+            ):
+                _check_all_gather_replaceable(group)
+        for group in groups:
+            layout._bind_owner(group)
+            group._all_gather_layout = layout
+            group._all_gather_comm = layout.comm or group._all_gather_comm
 
     def set_reduce_scatter_input_fn(
         self, fn: Callable | None, /, *, recurse: bool = True

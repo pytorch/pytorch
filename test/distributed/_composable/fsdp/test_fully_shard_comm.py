@@ -2,6 +2,7 @@
 
 import copy
 import functools
+import gc
 import itertools
 import math
 import os
@@ -11,6 +12,7 @@ import unittest
 import warnings
 import weakref
 from collections.abc import Callable
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -32,11 +34,11 @@ from torch.distributed.fsdp import (
     OffloadPolicy,
 )
 from torch.distributed.fsdp._fully_shard._all_gather_layout import (
+    _can_use_param_contiguous_output,
     _default_all_gather_output_fn,
-    AllGatherFinalizeMetadata,
     AllGatherLayout,
     AllGatherOutputs,
-    AllGatherParamMetadata,
+    BackendOwnedAllGatherLayout,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
@@ -56,7 +58,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _init_default_fully_shard_mesh,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import (
-    alloc_storage,
     free_storage,
     FSDPParam,
     ShardedState,
@@ -2989,41 +2990,97 @@ class _ParamContiguousAllGather(DefaultAllGather):
         return _ReorderWork(work, reorder)
 
 
+class _BackendOwnedLayout(BackendOwnedAllGatherLayout):
+    def __init__(self, mode, comm):
+        self.mode, self.comm = mode, comm
+        self.alternate = mode == "fallback"
+        self.split_sizes = None
+
+    def prepare_output(self, metadata):
+        enabled = self.mode != "rank_major" and metadata.can_use_param_contiguous_output
+        self.split_sizes = metadata.input_split_sizes if enabled else None
+        if self.alternate:
+            self.mode = "rank_major" if enabled else "custom"
+        return self.split_sizes
+
+    def finalize_outputs(self, metadata):
+        return AllGatherOutputs(
+            self.param_contiguous_output_views(
+                metadata.all_gather_output,
+                [param.input_numels for param in metadata.param_metadata],
+                metadata.world_size,
+            )
+        )
+
+    def release_output(self):
+        self.comm.release_output()
+
+
+class _BackendOwnedAllGather(_ParamContiguousAllGather):
+    """Keeps its collective buffer allocated and releases its lease on reshard."""
+
+    def __init__(self, mode):
+        super().__init__(mode)
+        self.layout = _BackendOwnedLayout(mode, self)
+        self.output = self.last_use = None
+        self.output_active = False
+
+    def allocate(self, size, *, dtype, device):
+        self.output_active = True
+        if self.last_use is not None:
+            torch.get_device_module(device).current_stream().wait_event(self.last_use)
+        if self.output is None or self.output.numel() != torch.Size(size).numel():
+            self.output = torch.empty(size, dtype=dtype, device=device)
+        return self.output
+
+    def release_output(self):
+        self.output_active = False
+        if self.output is not None:
+            stream = torch.get_device_module(self.output.device).current_stream()
+            self.last_use = stream.record_event()
+
+
 @instantiate_parametrized_tests
 class TestAllGatherLayouts(TestCase):
-    @parametrize("case", ["fsdp_owned", "no_buffers", "not_viewing", "new_outputs"])
+    @parametrize(
+        "case",
+        [
+            "fsdp_owned",
+            "backend_owned",
+            "backend_shift_2",
+            "backend_shift_4",
+            "no_buffers",
+            "not_viewing",
+            "new_outputs",
+        ],
+    )
     def test_output_ownership(self, case):
         world_size = 2
-        params = []
-        for _ in range(2):
-            param = FSDPParam.__new__(FSDPParam)
+        params = [FSDPParam.__new__(FSDPParam) for _ in range(2)]
+        for param in params:
             param.all_gather_outputs = []
             param._param_fqn = "lin.weight"
-            params.append(param)
+            param._release_all_gather_outputs_after_post_all_gather = False
+        backend_owned = case.startswith("backend_")
+        base = _BackendOwnedLayout if backend_owned else _ParamContiguousLayout
 
-        class Layout(AllGatherLayout):
-            def prepare_output(self, metadata):
-                return None
-
+        class Layout(base):
             def finalize_outputs(self, metadata):
-                output, params = metadata.all_gather_output, metadata.param_metadata
-                if metadata.buffers and case != "new_outputs":
-                    metadata.buffers[0].copy_(output)
-                    refilled = [param.outputs for param in params]
-                    return AllGatherOutputs(refilled, metadata.buffers)
-                buffer = output.clone()
-                views = _param_contiguous_views(buffer, params, metadata.world_size)
+                if case == "new_outputs":
+                    metadata.buffers = []
+                outputs = super().finalize_outputs(metadata)
                 if case == "no_buffers":
-                    return AllGatherOutputs(views, [])
-                if case == "not_viewing":
-                    return AllGatherOutputs(views, [torch.empty_like(output)])
-                return AllGatherOutputs(views, [buffer])
+                    outputs.buffers = []
+                elif case == "not_viewing":
+                    outputs.buffers = [torch.empty_like(metadata.all_gather_output)]
+                return outputs
+
+        layout = Layout("custom", None)
 
         def finalize(source, persistent):
             result = AllGatherResult(
                 source, None, None, [[source.dtype]] * 2, [[2], [2]], [2, 2], [1, 1]
             )
-            layout = Layout()
             return foreach_all_gather_copy_out(
                 result._replace(layout=layout),
                 params,
@@ -3032,127 +3089,329 @@ class TestAllGatherLayouts(TestCase):
             )
 
         source = torch.arange(8.0)
-        if case in ("no_buffers", "not_viewing"):
-            with self.assertRaisesRegex(AssertionError, "does not view the persistent"):
+        errors = {
+            "no_buffers": "no persistent buffers",
+            "not_viewing": "does not view the persistent buffers",
+        }
+        if case in errors:
+            with self.assertRaisesRegex(AssertionError, errors[case]):
                 finalize(source, None)
             return
-        persistent = finalize(source.clone(), None)
+        shift = int(case[-1]) if case.startswith("backend_shift_") else 0
+        arena = torch.empty(source.numel() + shift)
+        first_source = arena[shift:]
+        first_source.copy_(source)
+        persistent = finalize(first_source, None)
         outputs = [param.all_gather_outputs for param in params]
+        saved_params = [nn.Parameter(output[0]) for output in outputs]
+        losses = [param.square().sum() for param in saved_params]
+        versions = [param._version for param in saved_params]
         self.assertEqual(torch.cat([output[0] for output in outputs]), source)
-        (buffer,) = persistent.tensors
         storage = outputs[0][0].untyped_storage()
-        self.assertEqual(storage._cdata, buffer.untyped_storage()._cdata)
-        self.assertEqual(persistent.nbytes, [source.nbytes])
+        nbytes = arena.nbytes if backend_owned else source.nbytes
         for param in params:
-            # The group owns the shared storage, not the parameter
+            # The group or the backend owns the shared storage, not the parameter
             self.assertTrue(param._keep_all_gather_output_storage)
             param.free_all_gather_outputs()
-        self.assertEqual(storage.size(), source.nbytes)
-        # Reshard frees the group's buffer
-        persistent.free()
-        self.assertEqual(storage.size(), 0)
+        self.assertEqual(storage.size(), nbytes)
+        if backend_owned:
+            self.assertIsNone(persistent)
+        else:
+            (buffer,) = persistent.tensors
+            self.assertEqual(storage._cdata, buffer.untyped_storage()._cdata)
+            self.assertEqual(persistent.nbytes, [source.nbytes])
+            # Reshard frees the group's buffer
+            persistent.free()
+            self.assertEqual(storage.size(), 0)
         if case == "new_outputs":
             with self.assertRaisesRegex(AssertionError, "did not refill"):
                 finalize(source + 1, persistent)
             return
-        self.assertIs(finalize(source + 1, persistent), persistent)
+        refill_source = source + 1
+        if shift:
+            refill_source = arena[: source.numel()]
+            # Model the backend's raw writes to storage saved by autograd.
+            with torch.autograd._unsafe_preserve_version_counter(refill_source):
+                refill_source.copy_(source + 1)
+        self.assertIs(finalize(refill_source, persistent), persistent)
         for param, previous in zip(params, outputs):
             self.assertIs(param.all_gather_outputs, previous)
-        self.assertEqual(storage.size(), source.nbytes)
+        self.assertEqual(storage.size(), nbytes)
         self.assertEqual(torch.cat([output[0] for output in outputs]), source + 1)
+        for param, loss, version, value in zip(
+            saved_params, losses, versions, (source + 1).chunk(2)
+        ):
+            self.assertEqual(param._version, version)
+            loss.backward()
+            self.assertEqual(param.grad, 2 * value)
+
+    @parametrize("custom", [False, True])
+    def test_layout_ownership(self, custom):
+        class CustomDefaultLayout(DefaultAllGatherLayout):
+            pass
+
+        layout = (
+            CustomDefaultLayout()
+            if custom
+            else DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
+        )
+
+        owner = nn.Identity()
+        layout._bind_owner(owner)
+        layout._bind_owner(owner)
+        expected = self.assertRaisesRegex(ValueError, "cannot be shared")
+        with expected if custom else nullcontext():
+            layout._bind_owner(nn.Identity())
+        del owner
+        gc.collect()
+        with expected if custom else nullcontext():
+            layout._bind_owner(nn.Identity())
+
+    @parametrize(
+        "stage", ["allocate", "collective", "_reset_iter_state", "finalize_backward"]
+    )
+    def test_gather_lifecycle(self, stage):
+        output = torch.ones(4)
+        parameter = nn.Parameter(output)
+        loss = parameter.square().sum()
+        work = MagicMock(spec=dist.Work)
+        comm = MagicMock(spec=_BackendOwnedAllGather, return_value=work)
+        comm.allocate.return_value = output
+        layout = _BackendOwnedLayout("rank_major", comm)
+        failing = stage in ("allocate", "collective")
+        if failing:
+            target = comm.allocate if stage == "allocate" else comm
+            target.side_effect = RuntimeError("injected failure")
+        param = SimpleNamespace(
+            param_dtype=None,
+            all_gather_inputs=[torch.ones(2)],
+            all_gather_output_layouts=[SimpleNamespace(outer_size=1)],
+            fsdp_placement=Shard(1),
+        )
+        group = SimpleNamespace(size=lambda: 2, rank=lambda: 0)
+        stream = torch.cpu.current_stream()
+        expected = self.assertRaisesRegex(RuntimeError, "injected failure")
+        with expected if failing else nullcontext():
+            result = foreach_all_gather(
+                [param], group, True, stream, stream, torch.device("cpu"), comm, layout
+            )
+        if not failing:
+            self.assertIsInstance(result.layout, DefaultAllGatherLayout)
+
+            def write_output():
+                comm.release_output.assert_not_called()
+                output.copy_(output.clone())
+
+            group = MagicMock(
+                _all_gather_result=result,
+                _all_gather_comm=comm,
+                _all_gather_layout=layout,
+            )
+            group._release_all_gather_output = functools.partial(
+                FSDPParamGroup._release_all_gather_output, group
+            )
+            work.wait.side_effect = write_output
+            if stage == "finalize_backward":
+                write_output()
+                work.wait.side_effect = comm.release_output.assert_not_called
+            for _ in range(2):
+                getattr(FSDPParamGroup, stage)(group)
+            work.wait.assert_called_once()
+            loss.backward()
+            self.assertEqual(parameter.grad, 2 * output)
+        comm.release_output.assert_called_once()
+
+    @staticmethod
+    def _eligible(dtype=torch.float32, **overrides):
+        fields = dict(
+            fsdp_placement=Shard(0),
+            is_dtensor=False,
+            _sharded_local_tensor=SimpleNamespace(),
+            sharded_state=ShardedState.SHARDED,
+        )
+        return _can_use_param_contiguous_output(
+            [SimpleNamespace(**(fields | overrides))], [[dtype]], [[2]], torch.float32
+        )
+
+    @parametrize(
+        "overrides",
+        [
+            {},
+            {"dtype": torch.bfloat16},
+            {"fsdp_placement": Shard(1)},
+            {"is_dtensor": True},
+            {"sharded_state": ShardedState.SHARDED_POST_FORWARD},
+            {"_sharded_local_tensor": SimpleNamespace(fsdp_pre_all_gather=None)},
+            {"_sharded_local_tensor": SimpleNamespace(fsdp_post_all_gather=None)},
+        ],
+    )
+    def test_eligibility(self, overrides):
+        self.assertEqual(self._eligible(**overrides), not overrides)
+
+    def test_compiled_backward_eligibility(self):
+        from torch._dynamo import compiled_autograd as ca
+
+        backward_eligibility = []
+
+        @torch._dynamo.disable
+        def hook(grad):
+            self.assertFalse(ca.compiled_autograd_enabled)
+            self.assertTrue(ca.in_compiled_autograd_region)
+            backward_eligibility.append(self._eligible())
+            return grad
+
+        torch._dynamo.reset()
+        self.addCleanup(torch._dynamo.reset)
+        # Compiling fixes multiprocessing's default start method, which the
+        # FSDPTestContinuous classes later in this file need to be spawn
+        if torch.multiprocessing.get_start_method(allow_none=True) is None:
+            torch.multiprocessing.set_start_method("spawn")
+        value = torch.tensor([2.0], requires_grad=True)
+        output = value.square()
+        output.register_hook(hook)
+        with ca._enable(lambda graph: torch.compile(graph, backend="aot_eager")):
+            self.assertFalse(self._eligible())
+            output.sum().backward()
+        self.assertEqual(value.grad, torch.tensor([4.0]))
+        self.assertEqual(backward_eligibility, [False])
+        self.assertTrue(self._eligible())
 
 
 class TestAllGatherLayoutCopyOut(TestCase):
-    @parametrize("shard_dim", [0, 1, 2])
+    @parametrize("shard_dim,aliased", [(0, False), (1, False), (2, False), (0, True)])
     @parametrize("inference", [False, True])
     @parametrize("delegated", [False, True])
-    def test_default_copy_out(self, device, shard_dim, inference, delegated):
-        """FSDP's default path, or a custom layout that delegates to
-        DefaultAllGatherLayout, gives each output its own buffer on the first
-        unshard and later refills the same outputs in place."""
-        world_size, dims = 2, [shard_dim, 0]
-        params = [FSDPParam.__new__(FSDPParam) for _ in dims]
+    def test_default_copy_out(self, device, shard_dim, aliased, inference, delegated):
+        world_size = 2
+        params = [FSDPParam.__new__(FSDPParam) for _ in range(2)]
         for param in params:
             param.all_gather_outputs = []
-            param._keep_all_gather_output_storage = False
-        buffers = []
+            param._keep_all_gather_output_storage = aliased
 
-        def copy_out(tensors):
-            nonlocal buffers
-            # The fp32 and bf16 payloads share a rank-major uint8 buffer
-            shards = [t.chunk(world_size, d) for t, d in zip(tensors, dims)]
-            output = torch.cat(
-                [
-                    shard[rank].contiguous().view(-1).view(torch.uint8)
-                    for rank in range(world_size)
-                    for shard in shards
-                ]
-            )
-            numels = [[shard[0].numel()] for shard in shards]
-            dtypes = [[t.dtype] for t in tensors]
-            outer = [math.prod(shard[0].shape[:d]) for shard, d in zip(shards, dims)]
-            if not delegated:
-                splits = [n[0] * t.element_size() for n, t in zip(numels, tensors)]
-                fields = (output, None, None, dtypes, numels, splits, outer)
-                with unittest.mock.patch(
-                    "torch.distributed.fsdp._fully_shard._fsdp_collectives.AllGatherParamMetadata",
-                    side_effect=AssertionError("default path built parameter metadata"),
-                ):
-                    foreach_all_gather_copy_out(
-                        AllGatherResult(*fields),
-                        params,
-                        SimpleNamespace(size=lambda: world_size),
-                    )
-                return
-            metadata = [
-                AllGatherParamMetadata(n, dt, [o], p.all_gather_outputs)
-                for p, n, dt, o in zip(params, numels, dtypes, outer)
-            ]
-            outputs = DefaultAllGatherLayout().finalize_outputs(
-                AllGatherFinalizeMetadata(output, metadata, world_size, None, buffers)
-            )
-            if buffers:
-                self.assertIs(outputs.buffers, buffers)
-            else:
-                self.assertEqual(outputs.buffers, [ts[0] for ts in outputs.tensors])
-            buffers = outputs.buffers
-            for param, ts in zip(params, outputs.tensors):
-                param.all_gather_outputs = ts
+        class DelegatingLayout(DefaultAllGatherLayout):
+            def finalize_outputs(layout, metadata):
+                outputs = super().finalize_outputs(metadata)
+                if metadata.buffers:
+                    self.assertIs(outputs.buffers, metadata.buffers)
+                elif not aliased:
+                    self.assertEqual(outputs.buffers, [ts[0] for ts in outputs.tensors])
+                return outputs
 
+        layout = DelegatingLayout() if delegated else DefaultAllGatherLayout()
+        buffers, losses = None, []
+        group = SimpleNamespace(size=lambda: world_size)
         with torch.inference_mode(inference):
             values = [
                 torch.randn(2, 4, 6, device=device),
-                torch.randn(4, 2, device=device).to(torch.bfloat16),
+                torch.randn(4, 2, device=device).to(
+                    torch.float32 if aliased else torch.bfloat16
+                ),
             ]
-            copy_out(values)
-            first_outputs = [param.all_gather_outputs for param in params]
-            losses = []
-            for ts, value in zip(first_outputs, values):
-                self.assertEqual(ts[0].view(value.shape), value)
-                if not inference:
-                    parameter = nn.Parameter(ts[0])
-                    losses.append((parameter, parameter.square().sum()))
-                # Reshard frees each output's storage and the next unshard
-                # re-allocates it before the copy-out refills it
-                free_storage(ts[0])
-                alloc_storage(ts[0])
-            values = [value + 1 for value in values]
-            copy_out(values)
-            for param, ts, value in zip(params, first_outputs, values):
-                self.assertIs(param.all_gather_outputs, ts)
-                self.assertEqual(ts[0].view(value.shape), value)
-                if not inference:
-                    self.assertEqual(ts[0]._version, 0)
-        # Refills preserve version counters, so saved aliases stay valid
+            # Refill cached float outputs from flat byte payloads after reshard.
+            passes = (False,) if aliased else (False, False, True)
+            for iteration, flat in enumerate(passes):
+                sources = [
+                    value.flatten().view(torch.uint8) if flat else value
+                    for value in values
+                ]
+                dims = [0, 0] if flat else [shard_dim, 0]
+                shards = [t.chunk(world_size, d) for t, d in zip(sources, dims)]
+                wire_dtype = torch.float32 if aliased else torch.uint8
+                output = torch.cat(
+                    [
+                        shard[rank].contiguous().flatten().view(wire_dtype)
+                        for rank in range(world_size)
+                        for shard in shards
+                    ]
+                )
+                if aliased:
+                    # The rank-major source overlaps saved backend-owned outputs.
+                    for param, view in zip(
+                        params, output.split([t.numel() for t in values])
+                    ):
+                        param.all_gather_outputs = [view.data]
+                previous = [param.all_gather_outputs for param in params]
+                numels = [[t.numel() // world_size] for t in sources]
+                dtypes = [[t.dtype] for t in sources]
+                outer = [
+                    math.prod(shard[0].shape[:d]) for shard, d in zip(shards, dims)
+                ]
+                splits = [
+                    n[0] * t.element_size() // output.element_size()
+                    for n, t in zip(numels, sources)
+                ]
+                context = nullcontext()
+                if not delegated:
+                    error = AssertionError("default path built parameter metadata")
+                    context = unittest.mock.patch(
+                        "torch.distributed.fsdp._fully_shard._fsdp_collectives.AllGatherParamMetadata",
+                        side_effect=error,
+                    )
+                with context:
+                    buffers = foreach_all_gather_copy_out(
+                        AllGatherResult(
+                            output, None, None, dtypes, numels, splits, outer, layout
+                        ),
+                        params,
+                        group,
+                        buffers,
+                    )
+                for param, old, value in zip(params, previous, values):
+                    ts = param.all_gather_outputs
+                    self.assertEqual(ts[0].view(value.shape), value)
+                    if old:
+                        self.assertIs(ts, old)
+                    if not inference:
+                        self.assertEqual(ts[0]._version, 0)
+                        if iteration == 0:
+                            parameter = nn.Parameter(ts[0])
+                            losses.append((parameter, parameter.square().sum()))
+                    if not aliased and not flat:
+                        free_storage(ts[0])
+                if not flat and not aliased:
+                    values = [value + 1 for value in values]
         for (parameter, loss), value in zip(losses, values):
             loss.backward()
             self.assertEqual(parameter.grad, 2 * value.flatten())
 
+    def test_param_contiguous_output_versions(self, device):
+        output = torch.arange(10.0, device=device)[2:]
+        views = DefaultAllGatherLayout().param_contiguous_output_views(
+            output, [[4], [4]], 1
+        )
+        first, second = [nn.Parameter(tensors[0]) for tensors in views]
+        loss = first.square().sum()
+        with torch.no_grad():
+            second.add_(1)
+        self.assertEqual(first, torch.arange(2.0, 6.0, device=device))
+        self.assertEqual(first.data_ptr(), output.data_ptr())
+        self.assertEqual(second.data_ptr(), output[4:].data_ptr())
+        loss.backward()
+        self.assertEqual(first.grad, 2 * first.detach())
 
+
+@instantiate_parametrized_tests
 class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
         return 2
+
+    @parametrize("detach", [False, True])
+    def test_layout_does_not_retain_model(self, detach):
+        model = nn.Linear(8, 8)
+        fully_shard(model, mesh=init_device_mesh("cpu", (self.world_size,)))
+        layout = _ParamContiguousAllGather("custom").layout
+        model.set_all_gather_layout(layout)
+        model_ref, param_ref = weakref.ref(model), weakref.ref(model.weight)
+        if detach:
+            model.set_all_gather_layout(None)
+        del model
+        # GC is process-wide; all rank threads must finish before assertions.
+        dist.barrier()
+        gc.collect()
+        dist.barrier()
+        self.assertIsNone(model_ref())
+        self.assertIsNone(param_ref())
 
     def test_comm_bound_layout(self):
         model = nn.Linear(8, 8)
@@ -3183,6 +3442,34 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         model.set_custom_all_gather(comm)
         self.assertIs(group._all_gather_comm, comm)
 
+    @parametrize("joint", [False, True])
+    def test_recursive_layout_rejection(self, joint):
+        model = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8))
+        mesh = init_device_mesh("cpu", (self.world_size,))
+        if joint:
+            fully_shard(list(model), mesh=mesh)
+        else:
+            for block in model:
+                fully_shard(block, mesh=mesh)
+        groups = [block._get_fsdp_state()._fsdp_param_group for block in model]
+        layouts = [group._all_gather_layout for group in groups]
+        comms = [group._all_gather_comm for group in groups]
+        fully_shard(model, mesh=mesh)
+        layout = _ParamContiguousAllGather("custom").layout
+        if joint:
+            model.set_all_gather_layout(layout)
+            self.assertIs(groups[0], groups[1])
+            self.assertIs(groups[0]._all_gather_layout, layout)
+            return
+        with self.assertRaisesRegex(ValueError, "cannot be shared"):
+            model.set_all_gather_layout(layout)
+        self.assertIsNone(layout._owner)
+        for group, previous, comm in zip(groups, layouts, comms):
+            self.assertIs(group._all_gather_layout, previous)
+            self.assertIs(group._all_gather_comm, comm)
+        model[0].set_all_gather_layout(layout, recurse=False)
+        self.assertIs(groups[0]._all_gather_layout, layout)
+
 
 class TestFullyShardLayoutParity(FSDPTestContinuous):
     @property
@@ -3191,7 +3478,7 @@ class TestFullyShardLayoutParity(FSDPTestContinuous):
 
     @skip_if_lt_x_gpu(4)
     @parametrize(
-        "mode,reshard,async_op,mixed,keep",
+        "mode,reshard,async_op,mixed,backend_owned,keep,compiled",
         [
             *itertools.product(
                 ["custom", "rank_major", "alternate"],
@@ -3199,13 +3486,25 @@ class TestFullyShardLayoutParity(FSDPTestContinuous):
                 [False, True],
                 [False, True],
                 [False],
+                [False],
+                [False],
             ),
-            ("custom", True, False, False, True),
-            ("custom", 2, True, True, True),
+            ("custom", True, True, True, True, False, False),
+            ("custom", False, False, True, True, False, False),
+            ("custom", 2, True, True, True, False, False),
+            ("alternate", True, False, True, True, False, False),
+            ("alternate", False, True, True, True, False, False),
+            ("alternate", 2, False, True, True, False, False),
+            ("custom", True, False, False, True, False, False),
+            ("rank_major", True, False, False, True, False, False),
+            ("rank_major", 2, True, True, True, False, False),
+            ("custom", True, False, False, False, True, False),
+            ("custom", 2, True, True, False, True, False),
+            ("custom", True, False, True, True, False, True),
         ],
     )
-    def test_fsdp_owned_layout_training(
-        self, device, mode, reshard, async_op, mixed, keep
+    def test_layout_training(
+        self, device, mode, reshard, async_op, mixed, backend_owned, keep, compiled
     ):
         torch.manual_seed(42)
         ref_model = nn.Sequential(*[MLP(16) for _ in range(3)]).to(device)
@@ -3217,9 +3516,17 @@ class TestFullyShardLayoutParity(FSDPTestContinuous):
             fully_shard(module, mp_policy=mp_policy, reshard_after_forward=False)
             module._set_unshard_async_op(async_op)
             module.set_keep_unsharded_storage(keep)
-        comms = [_ParamContiguousAllGather(mode) for _ in model]
+        comm_cls = (
+            _BackendOwnedAllGather if backend_owned else _ParamContiguousAllGather
+        )
+        comm_mode = "fallback" if backend_owned and mode == "alternate" else mode
+        comms = [comm_cls(comm_mode) for _ in model]
         for block, comm in zip(model, comms):
             block.set_all_gather_layout(comm.layout, recurse=False)
+        run_model = model
+        if compiled:
+            torch._dynamo.reset()
+            run_model = torch.compile(model, backend="aot_eager")
         groups = [block._get_fsdp_state()._fsdp_param_group for block in model]
         ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2)
         optim = torch.optim.SGD(model.parameters(), lr=1e-2)
@@ -3230,13 +3537,17 @@ class TestFullyShardLayoutParity(FSDPTestContinuous):
             for sync in (False, True):
                 inp = torch.randn(4, 16, device=device)
                 losses = []
-                for module in (ref_model, model):
+                for module in (ref_model, run_model):
                     module.set_requires_gradient_sync(sync)
                     module.set_reshard_after_backward(sync)
                     losses.append(module(inp).float().square().sum())
                     losses[-1].backward()
                 self.assertEqual(losses[0], losses[1])
-                if mode != "custom":
+                if backend_owned:
+                    self.assertEqual(
+                        [comm.output_active for comm in comms], [not sync] * len(comms)
+                    )
+                if backend_owned or mode != "custom":
                     for group in groups:
                         self.assertIsNone(group._all_gather_buffers)
                     continue
@@ -3269,20 +3580,62 @@ class TestFullyShardLayoutParity(FSDPTestContinuous):
         for block, comm in zip(model, comms):
             self.assertEqual(comm.async_calls > 0, async_op)
             self.assertEqual(comm.param_contiguous_calls > 0, mode != "rank_major")
-            self.assertEqual(comm.rank_major_calls > 0, mode != "custom")
+            self.assertEqual(
+                comm.rank_major_calls > 0,
+                mode != "custom" or (backend_owned and type(reshard) is int),
+            )
+            if backend_owned and type(reshard) is not int:
+                for param in block._get_fsdp_state()._fsdp_param_group.fsdp_params:
+                    self.assertEqual(
+                        param._keep_all_gather_output_storage, mode != "rank_major"
+                    )
+                    if mode != "rank_major":
+                        self.assertEqual(
+                            param.all_gather_outputs[0].untyped_storage().data_ptr(),
+                            comm.output.data_ptr(),
+                        )
             if mode == "custom":
-                self.assertGreater(comm.layout.single_copy_refills, 0)
-                with self.assertRaisesRegex(ValueError, "bound to its comm"):
-                    block.set_custom_all_gather(DefaultAllGather())
+                if not backend_owned:
+                    self.assertGreater(comm.layout.single_copy_refills, 0)
                 with self.assertRaisesRegex(ValueError, "cannot replace"):
                     block.set_all_gather_layout(None)
+        if compiled:
+            torch._dynamo.reset()
+
+    @skip_if_lt_x_gpu(4)
+    @parametrize("async_op", [False, True])
+    @parametrize("reshard", [True, 2])
+    def test_unused_backward_prefetch_lease(self, device, async_op, reshard):
+        model = DoubleLinear(8).to(device)
+        for block in (model.lin1, model.lin2):
+            fully_shard(block, reshard_after_forward=reshard)
+        fully_shard(model)
+        model._set_unshard_async_op(async_op)
+        comm = _BackendOwnedAllGather("custom")
+        model.lin1.set_all_gather_layout(comm.layout)
+        group = model.lin1._get_fsdp_state()._fsdp_param_group
+        release_output = comm.release_output
+
+        def release():
+            self.assertIsNone(group._all_gather_result)
+            release_output()
+
+        for step in range(2):
+            model.set_is_last_backward(step == 1)
+            loss = model(torch.randn(2, 8, device=device))[1].sum()
+            with unittest.mock.patch.object(
+                comm, "release_output", side_effect=release
+            ):
+                loss.backward()
+            pending = reshard is True and step == 0
+            self.assertEqual(group._all_gather_result is not None, pending)
+            self.assertEqual(comm.output_active, pending)
 
 
 instantiate_device_type_tests(TestAllGatherLayoutCopyOut, globals(), allow_xpu=True)
 instantiate_device_type_tests(
     TestFullyShardLayoutParity, globals(), only_for=("cuda", "xpu")
 )
-
 
 if __name__ == "__main__":
     run_tests()

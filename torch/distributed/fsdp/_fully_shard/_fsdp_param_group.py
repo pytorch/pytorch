@@ -24,6 +24,7 @@ from torch.utils.hooks import RemovableHandle
 from ._all_gather_layout import (
     _PersistentBuffers,
     AllGatherLayout,
+    BackendOwnedAllGatherLayout,
     DEFAULT_ALL_GATHER_LAYOUT,
 )
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
@@ -618,6 +619,7 @@ class FSDPParamGroup:
         if self._all_gather_result is not None:
             _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
+            self._release_all_gather_output()
         if self._post_reduce_event is not None:
             current_stream.wait_event(self._post_reduce_event)
             self._post_reduce_event = None
@@ -913,6 +915,7 @@ class FSDPParamGroup:
             # then we wait here and clear the unshard
             _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
+            self._release_all_gather_output()
         self._post_forward_indices.clear()
 
     def _get_partial_reduce_grad(self, param: FSDPParam) -> torch.Tensor | None:
@@ -1165,6 +1168,11 @@ class FSDPParamGroup:
             fsdp_param.keep_unsharded_storage for fsdp_param in self.fsdp_params
         ):
             self._all_gather_buffers.free()
+        self._release_all_gather_output()
+
+    def _release_all_gather_output(self) -> None:
+        if isinstance(self._all_gather_layout, BackendOwnedAllGatherLayout):
+            self._all_gather_layout.release_output()
 
     def _to_unsharded(self):
         if not self.is_unsharded:

@@ -8,11 +8,13 @@ all-gather outputs after the collective completes. A layout may fall back to
 FSDP owns the persistent buffers behind those outputs. On a parameter group's
 first unshard, finalize allocates them in any layout it chooses (e.g. one buffer
 viewed by every parameter) and returns them with outputs that view them. The
-group frees their storage on reshard, unless its parameters keep their
+group frees their storage on reshard unless its parameters keep their
 unsharded storage, and re-allocates it to its recorded size before each later
 finalize, which must refill the same outputs in place.
 ``DefaultAllGatherLayout`` gives each output its own buffer, which its
 parameter allocates and frees, and refills it with its ``output_fn``.
+Only a ``BackendOwnedAllGatherLayout`` may instead return views into storage the
+backend owns, which FSDP keeps across reshard.
 
 A layout that needs a specific collective holds it as ``comm``.
 ``FSDPModule.set_all_gather_layout`` is the only way to install a layout, and
@@ -26,8 +28,9 @@ out-of-tree backends must target a matching revision of them.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+from weakref import ref, ReferenceType
 
 import torch
 
@@ -85,7 +88,7 @@ def _default_all_gather_output_fn(
 
 @dataclass(frozen=True, kw_only=True)
 class AllGatherInputMetadata:
-    """Description of this call's flattened local input.
+    """Description of this call's flattened local input and output eligibility.
 
     ``input_outer_sizes`` gives, for each payload, the product of its dims
     before the dim that ranks are concatenated along.
@@ -97,6 +100,7 @@ class AllGatherInputMetadata:
     world_size: int
     dtype: torch.dtype
     device: torch.device
+    can_use_param_contiguous_output: bool = False
 
 
 @dataclass
@@ -106,13 +110,15 @@ class AllGatherParamMetadata:
     ``outputs`` is empty on the group's first unshard and afterwards holds the
     outputs adopted then, which autograd may alias, so finalize refills them in
     place. ``outer_sizes`` is ``AllGatherInputMetadata.input_outer_sizes`` for
-    this parameter's payloads.
+    this parameter's payloads. ``backend_owned`` marks outputs adopted from a
+    ``BackendOwnedAllGatherLayout``.
     """
 
     input_numels: list[int]
     input_dtypes: list[torch.dtype]
     outer_sizes: list[int]
     outputs: list[torch.Tensor]
+    backend_owned: bool = False
 
 
 @dataclass
@@ -121,14 +127,14 @@ class AllGatherOutputs:
 
     On the group's first unshard FSDP adopts ``tensors`` as the parameters'
     outputs and ``buffers`` as the FSDP-owned buffers behind them; every
-    nonempty output must view one of the buffers and should have its own
-    version counter, e.g. a ``.data`` view, like a separately allocated output.
-    Later finalizes return the outputs they refilled and the buffers they were
-    given.
+    nonempty output must view one of the buffers. Only a
+    ``BackendOwnedAllGatherLayout`` may return no buffers, for outputs that view
+    storage the backend owns. Each output must have its own version counter,
+    e.g. a ``.data`` view. Later finalizes return the outputs they refilled.
     """
 
     tensors: list[list[torch.Tensor]]
-    buffers: list[torch.Tensor]
+    buffers: list[torch.Tensor] = field(default_factory=list)
 
 
 @dataclass
@@ -173,25 +179,37 @@ class _DefaultAllGatherCopyPlan:
     outputs: list[list[torch.Tensor]]
     split_sizes: list[int]
     outer_sizes: list[int]
+    clone_input: bool = False
 
 
 class AllGatherLayout(ABC):
-    """Input packing and output handling for an FSDP parameter group's all-gather.
+    """Input packing and output handling for an all-gather backend.
 
     FSDP orders collective completion before finalization and owns the
-    persistent buffers that finalize returns (see the module documentation).
-    Parameter groups' all-gathers can overlap, so a layout that keeps per-call
-    state, e.g. for its comm, must not be shared across groups.
+    persistent buffers that finalize returns (see the module documentation). A
+    stateful layout instance belongs to one parameter group.
     ``DefaultAllGatherLayout`` is stateless and may be shared. ``comm`` is the
     collective this layout requires, if any, which FSDP installs with it.
     """
 
     comm: AllGather | None = None
+    # Keep the original binding without retaining the group or its parameters.
+    _owner: ReferenceType[object] | None = None
+
+    def _bind_owner(self, owner: object) -> None:
+        if self._owner is None:
+            self._owner = ref(owner)
+        elif self._owner() is not owner:
+            raise ValueError(
+                "an all-gather layout instance cannot be shared across FSDP "
+                "parameter groups; create a separate stateful backend/layout "
+                "instance for each group (shared storage may use a backend pool)"
+            )
 
     def prepare(
         self, input_metadata: AllGatherInputMetadata
     ) -> tuple[Callable, AllGatherLayout, object | None]:
-        """Select input packing and per-call metadata before allocating the output."""
+        """Select input packing and metadata before allocating the output."""
         metadata = self.prepare_output(input_metadata)
         if metadata is None:
             return DEFAULT_ALL_GATHER_LAYOUT.prepare(input_metadata)
@@ -216,7 +234,8 @@ class AllGatherLayout(ABC):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Pack into independent input storage without modifying the output.
 
-        The signature matches the native rank-major copy-in operator.
+        The signature matches the native rank-major copy-in operator. Layouts
+        that opt into rank-local packing may use rank; this default does not.
         """
         all_gather_input = torch.empty(
             (all_gather_input_numel,),
@@ -241,9 +260,45 @@ class AllGatherLayout(ABC):
         """
         ...
 
+    def param_contiguous_output_views(
+        self,
+        all_gather_output: torch.Tensor,
+        param_input_numels: list[list[int]],
+        world_size: int,
+    ) -> list[list[torch.Tensor]]:
+        """Carve a parameter-contiguous output into per-parameter views."""
+        sizes = [numels[0] * world_size for numels in param_input_numels]
+        # Shared storage with independent version counters for each parameter.
+        return [[view.data] for view in all_gather_output.split(sizes)]
+
+
+class BackendOwnedAllGatherLayout(AllGatherLayout):
+    """Opt-in for outputs that view storage the all-gather backend owns.
+
+    FSDP adopts the outputs of this layout's first finalize without owning
+    them: it neither frees nor re-allocates their storage, preserves version
+    counters around input packing and the collective, which may write storage
+    that saved parameters alias, and calls ``release_output``. Later finalizes
+    may return new views; FSDP copies them into the adopted outputs if their
+    storage moved.
+    """
+
+    @abstractmethod
+    def release_output(self) -> None:
+        """Release the group's output lease on the current stream.
+
+        FSDP calls this after reshard, after waiting for a discarded unused
+        all-gather, and after a failed input preparation or collective setup,
+        so it must be idempotent when no output is active. Adopted outputs must
+        remain valid objects; a backend sharing their storage must restore the
+        same regions on the next gather and order overwrites after all local
+        and remote consumers, since FSDP does not synchronize that reuse.
+        """
+        ...
+
 
 class DefaultAllGatherLayout(AllGatherLayout):
-    r"""Rank-major all-gather copied into stable parameter storage.
+    r"""Rank-major collective output copied into stable parameter storage.
 
     .. warning::
         This API is experimental and may change without backward compatibility.
@@ -263,6 +318,11 @@ class DefaultAllGatherLayout(AllGatherLayout):
 
     def __init__(self, output_fn: Callable = _default_all_gather_output_fn):
         self.output_fn = output_fn
+
+    def _bind_owner(self, owner: object) -> None:
+        # Only the built-in default layout is known to be stateless.
+        if type(self) is not DefaultAllGatherLayout:
+            super()._bind_owner(owner)
 
     def prepare(
         self, input_metadata: AllGatherInputMetadata
@@ -301,6 +361,9 @@ class DefaultAllGatherLayout(AllGatherLayout):
         buffers = metadata.buffers or new_buffers
         if all_gather_output.numel() == 0:
             return AllGatherOutputs(plan.outputs, buffers)  # nothing was gathered
+        if plan.clone_input:
+            # Fallback may gather into storage that existing parameters alias.
+            all_gather_output = all_gather_output.clone()
         outputs = [output for param_outputs in plan.outputs for output in param_outputs]
         non_inference_outputs = tuple([t for t in outputs if not t.is_inference()])
         # Views share their base's version counter
@@ -337,6 +400,12 @@ def _plan_rank_major_outputs(
                 for numel, dtype in zip(param.input_numels, param.input_dtypes)
             ]
             new_buffers.extend(outputs)
+        elif param.backend_owned:
+            plan.clone_input = plan.clone_input or any(
+                t.untyped_storage().data_ptr()
+                == all_gather_output.untyped_storage().data_ptr()
+                for t in outputs
+            )
         plan.outputs.append(outputs)
         plan.split_sizes.extend(
             numel * dtype.itemsize // all_gather_output.element_size()
@@ -346,16 +415,60 @@ def _plan_rank_major_outputs(
     return plan, new_buffers
 
 
+def _can_use_param_contiguous_output(
+    fsdp_params: list[FSDPParam],
+    param_input_dtypes: list[list[torch.dtype]],
+    param_input_numels: list[list[int]],
+    output_dtype: torch.dtype,
+) -> bool:
+    from torch._dynamo.compiled_autograd import (
+        compiled_autograd_enabled,
+        in_compiled_autograd_region,
+    )
+
+    from ._fsdp_param import ShardedState
+
+    if compiled_autograd_enabled or in_compiled_autograd_region:
+        return False
+    if not (len(fsdp_params) == len(param_input_dtypes) == len(param_input_numels)):
+        return False
+    for fsdp_param, input_dtypes, input_numels in zip(
+        fsdp_params, param_input_dtypes, param_input_numels
+    ):
+        if (
+            len(input_dtypes) != 1
+            or len(input_numels) != 1
+            or input_dtypes[0] != output_dtype
+            or fsdp_param.fsdp_placement.dim != 0
+            or fsdp_param.is_dtensor
+            or hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
+            or hasattr(fsdp_param._sharded_local_tensor, "fsdp_post_all_gather")
+            or fsdp_param.sharded_state == ShardedState.SHARDED_POST_FORWARD
+        ):
+            return False
+    return True
+
+
 def _adopt_layout_outputs(
-    fsdp_params: list[FSDPParam], result: AllGatherOutputs
-) -> _PersistentBuffers:
-    """Adopts a group's first finalized outputs and returns the FSDP-owned
-    buffers behind them."""
+    fsdp_params: list[FSDPParam], result: AllGatherOutputs, backend_owned: bool
+) -> _PersistentBuffers | None:
+    """Adopts a group's first finalized outputs and returns its FSDP-owned
+    buffers, or None if the backend owns the outputs' storage."""
     if len(fsdp_params) != len(result.tensors):
         raise AssertionError(
             f"all-gather layout returned {len(result.tensors)} parameter outputs "
             f"for {len(fsdp_params)} parameters"
         )
+    if not result.buffers:
+        if not backend_owned:
+            raise AssertionError(
+                "all-gather layout returned no persistent buffers; only a "
+                "BackendOwnedAllGatherLayout may return outputs that FSDP does not own"
+            )
+        for fsdp_param, outputs in zip(fsdp_params, result.tensors):
+            fsdp_param.all_gather_outputs = outputs
+            fsdp_param._keep_all_gather_output_storage = True
+        return None
     buffer_storages = {buffer.untyped_storage().data_ptr() for buffer in result.buffers}
     for fsdp_param, outputs in zip(fsdp_params, result.tensors):
         # Refills write into the buffers, so outputs must view them
@@ -377,18 +490,49 @@ def _adopt_layout_outputs(
 
 
 def _check_layout_refill(
-    fsdp_params: list[FSDPParam], result: AllGatherOutputs
+    fsdp_params: list[FSDPParam], result: AllGatherOutputs, backend_owned: bool
 ) -> None:
     if len(fsdp_params) != len(result.tensors):
         raise AssertionError(
             f"all-gather layout returned {len(result.tensors)} parameter outputs "
             f"for {len(fsdp_params)} parameters"
         )
+    refills: list[tuple[torch.Tensor, torch.Tensor]] = []
     for fsdp_param, outputs in zip(fsdp_params, result.tensors):
         previous = fsdp_param.all_gather_outputs
-        if len(previous) != len(outputs) or any(
-            a is not b for a, b in zip(outputs, previous)
+        if len(previous) != len(outputs):
+            raise AssertionError("all-gather layout changed the number of outputs")
+        if not backend_owned:
+            if any(a is not b for a, b in zip(outputs, previous)):
+                raise AssertionError(
+                    "all-gather layout did not refill the outputs it was given in "
+                    "place; only a BackendOwnedAllGatherLayout may return new outputs"
+                )
+            continue
+        # Saved tensors alias the adopted outputs, so copy new views into them
+        for target, source in zip(previous, outputs):
+            if target.shape != source.shape or target.dtype != source.dtype:
+                raise AssertionError("all-gather layout changed output shape or dtype")
+            if target.data_ptr() != source.data_ptr():
+                refills.append((target, source))
+    if not refills:
+        return
+    # A moved view can share an arena with another destination. Save all such
+    # sources before any copy overwrites them, including overlapping slices.
+    destination_storages = {
+        target.untyped_storage().data_ptr() for target, _ in refills
+    }
+    refills = [
+        (
+            target,
+            source.clone()
+            if source.untyped_storage().data_ptr() in destination_storages
+            else source,
+        )
+        for target, source in refills
+    ]
+    for target, source in refills:
+        with torch.autograd._unsafe_preserve_version_counter(
+            () if target.is_inference() else (target,)
         ):
-            raise AssertionError(
-                "all-gather layout did not refill the outputs it was given in place"
-            )
+            target.copy_(source)
