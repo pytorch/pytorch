@@ -251,7 +251,7 @@ it.
 from __future__ import annotations
 
 import base64
-import contextlib  # noqa: TC003
+import contextlib
 import dataclasses
 import errno
 import functools
@@ -297,7 +297,6 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from contextlib import AbstractContextManager
     from typing_extensions import Self
 
     from torch._dynamo.precompile_package import PrecompileSession
@@ -716,7 +715,7 @@ class _DynamoCapture(Capture[_P, _R]):
             "require_no_risky_drops": require_no_risky_drops,
         }
         self._call: Callable[..., object] | None = None
-        self._fresh_cache: AbstractContextManager[None] | None = None
+        self._block = contextlib.ExitStack()
         self._in_call = False
         self._calls = 0
         # The call count the last save() wrote. -1, not 0, so a block that never
@@ -734,19 +733,20 @@ class _DynamoCapture(Capture[_P, _R]):
 
     def _start(self) -> None:
         from torch.compiler._cache import CacheArtifactManager
+        from torch.compiler._runtime_cache import capture_scope
 
         # The capture's compiles record into the process-global cache-artifact
         # list, which the cache half of the artifact bundles to prime the
         # kernel caches on load. A fresh one so the bundle holds only this
         # capture's compiles; left in _finish. The swap spans the whole
-        # block, so anything else compiled inside the block records here too.
-        self._fresh_cache = CacheArtifactManager.with_fresh_cache()
-        self._fresh_cache.__enter__()
+        # block, so anything else compiled inside the block records here too,
+        # as it does into the runtime scope whose dependencies _write freezes.
         try:
+            self._block.enter_context(capture_scope())
+            self._block.enter_context(CacheArtifactManager.with_fresh_cache())
             self._call = self._map(self._session.__enter__)
         except BaseException:
-            self._fresh_cache.__exit__(None, None, None)
-            self._fresh_cache = None
+            self._block.close()
             raise
 
     def _run(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
@@ -768,14 +768,47 @@ class _DynamoCapture(Capture[_P, _R]):
             self._in_call = False
 
     def _write(self) -> None:
-        rendered = self._map(self._session.snapshot_artifact, **self._gates)
+        from torch.compiler._runtime_cache import freeze_runtime_cache
+
+        python_code = ""
+        blob: dict[str, Any] = {}
+
+        # Called by freeze_runtime_cache under its freeze lock.
+        def snapshot() -> bytes | None:
+            nonlocal python_code, blob
+            python_code, cache = self._map(
+                self._session.snapshot_artifact, **self._gates
+            )
+            blob = torch.load(io.BytesIO(cache), weights_only=True)
+            if blob["backend"] != "eager" and blob["artifact"] is None:
+                raise RuntimeError(
+                    "precompile.capture requires the cache artifact of a compiled "
+                    "capture, and this capture saved none"
+                )
+            return blob["artifact"]
+
+        def write(artifact: bytes | None) -> None:
+            buf = io.BytesIO()
+            torch.save({**blob, "artifact": artifact}, buf)
+            try:
+                _write_artifact(
+                    self._artifact_path, self._cache_path, python_code, buf.getvalue()
+                )
+            except OSError as e:
+                # Only the on-disk rewrite failed; _write_artifact leaves
+                # whatever pair was already at these paths in place.
+                raise PrecompileError(
+                    f"precompile could not write the artifact: {e}"
+                ) from e
+
         try:
-            _write_artifact(self._artifact_path, self._cache_path, *rendered)
-        except OSError as e:
-            # Only the on-disk rewrite failed; _write_artifact leaves whatever
-            # pair was already at these paths in place.
+            freeze_runtime_cache(snapshot, write)
+        except PrecompileError:
+            raise
+        except Exception as e:
             raise PrecompileError(
-                f"precompile could not write the artifact: {e}"
+                "precompile could not freeze the runtime dependencies of "
+                f"cache_path={os.fspath(self._cache_path)!r}: {e}"
             ) from e
         self._saved_calls = self._calls
 
@@ -817,9 +850,7 @@ class _DynamoCapture(Capture[_P, _R]):
                     raise
                 raise e from error
         finally:
-            if self._fresh_cache is not None:
-                self._fresh_cache.__exit__(None, None, None)
-                self._fresh_cache = None
+            self._block.close()
         if exc[0] is None and error is not None:
             raise error
 
@@ -3253,7 +3284,12 @@ def capture(
     that made no call raises ``PrecompileError`` on exit. A capture is single-use:
     to capture again, call ``capture()`` again. A :class:`DynamoTracer` capture
     records the kernel-cache artifacts of everything compiled inside the block,
-    so compile nothing else there, and do not overlap two such captures.
+    so compile nothing else there, and do not overlap two such captures. Only
+    what runs inside the block is carried: run every kernel the serving process
+    needs there, since one compiled or launched only before the block is not in
+    the cache. Each write also freezes the compiled kernels the serving process
+    needs, and raises :class:`~torch.compiler.PrecompileError` for one it cannot
+    freeze.
 
     ``tracer`` picks the capture front-end and carries its tracer-specific
     configuration. :class:`DynamoTracer` (the default) is an execution-driven
