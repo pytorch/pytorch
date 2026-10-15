@@ -343,6 +343,20 @@ class TestLayoutFreezingDevice(TestCase):
             actual = torch.compile(fn)(q, k, v, b)
         self.assertEqual(actual, expected, atol=2e-4, rtol=2e-4)
 
+    def test_strict_mode_end_to_end(self, device):
+        # Common compile paths must not read unfrozen strides.
+        def fn(x, y):
+            a = (x @ y).relu()
+            b = torch.cat([a, a.transpose(0, 1)[: a.size(0)]], dim=1)
+            return b.reshape(b.size(0), -1, 2).sum(-1)
+
+        x = torch.randn(64, 1030, device=device)
+        y = torch.randn(1030, 64, device=device)
+        with inductor_config.patch(strict_flexible_layout_strides=True):
+            expected = fn(x, y)
+            actual = torch.compile(fn)(x, y)
+        self.assertEqual(actual, expected)
+
 
 instantiate_device_type_tests(
     TestLayoutFreezingDevice, globals(), allow_xpu=True, allow_mps=True
