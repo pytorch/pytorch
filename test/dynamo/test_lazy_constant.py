@@ -7,6 +7,7 @@ import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
+from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -763,6 +764,14 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, 7), (t, 9)], expected_frames=2)
 
+    def test_unused_int_truediv_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            return t.sin(), a / 2
+
+        self._check(fn, [(t, 7), (t, 9)], expected_frames=2)
+
     def test_unused_lazy_divisor_recompiles(self):
         t = torch.ones(2)
 
@@ -770,6 +779,19 @@ class ComputedLazyConstantTests(TestCase):
             return t.sin(), a // b
 
         self._check(fn, [(t, 7, 2), (t, 7, 4)], expected_frames=2)
+
+    def test_lazy_divisor_zero_raises_in_traced_handler(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            try:
+                r = a // b
+            except ZeroDivisionError:
+                r = -1
+            return t.sin(), r
+
+        self._check(fn, [(t, 7, 2), (t, 7, 0)], expected_frames=1)
+        self.assertEqual(counters["frames"]["total"], 2)
 
     def test_unused_comparison_does_not_recompile(self):
         t = torch.ones(2)
