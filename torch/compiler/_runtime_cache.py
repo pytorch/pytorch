@@ -190,7 +190,8 @@ class _UnresolvedTritonExport(RuntimeError):
         self.sources = sources
         self.report = {"sources": sources}
         super().__init__(
-            "Cannot export Triton sources: no fully resolved static launcher\n"
+            "Cannot export Triton sources: no fully resolved static launcher. Run "
+            "every Triton kernel the serving process needs inside the capture block.\n"
             + json.dumps(self.report, sort_keys=True)
         )
 
@@ -220,7 +221,7 @@ def _triton_export_diagnostic(
     kernel: CachingAutotuner, reason: str
 ) -> dict[str, object]:
     compile_id = getattr(kernel, "compile_id", None)
-    backward = getattr(kernel, "is_backward", None)
+    # CachingAutotuner.precompile drops configs once it has compile_results.
     configs = getattr(kernel, "configs", None)
     return {
         "reason": reason,
@@ -228,12 +229,10 @@ def _triton_export_diagnostic(
         "filename": getattr(kernel, "filename", None),
         "compile_id": str(compile_id) if compile_id is not None else None,
         "direction": None
-        if backward is None
-        else "backward"
-        if backward
-        else "forward",
+        if compile_id is None
+        else ("backward" if kernel.is_backward else "forward"),
         "heuristic": getattr(getattr(kernel, "heuristic_type", None), "name", None),
-        "config_count": len(configs) if configs is not None else None,
+        "config_count": len(kernel.compile_results if configs is None else configs),
         "launcher_count": len(kernel.launchers),
         "compile_result_count": len(kernel.compile_results),
         "launcher_types": [type(launcher).__name__ for launcher in kernel.launchers],
@@ -302,7 +301,8 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
         try:
             _retain_cubin(saved_result)
         except (OSError, RuntimeError) as exc:
-            diagnostic = _triton_export_diagnostic(kernel, "cubin_unavailable")
+            with kernel.lock:
+                diagnostic = _triton_export_diagnostic(kernel, "cubin_unavailable")
             diagnostic["error"] = str(exc)
             rejected.append(diagnostic)
             continue
@@ -311,8 +311,16 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
                 key, saved.inductor_meta.get("kernel_name", "unknown_kernel"), saved
             )
         )
+    kernel_name = instances[0].inductor_meta.get("kernel_name")
     raise _UnresolvedTritonExport(
-        [{"source_key": key, "instance_count": len(instances), "instances": rejected}]
+        [
+            {
+                "source_key": key,
+                "kernel_name": kernel_name,
+                "instance_count": len(instances),
+                "instances": rejected,
+            }
+        ]
     )
 
 
@@ -363,7 +371,7 @@ def capture_scope() -> Iterator[None]:
 
 
 def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
-    import torch
+    from torch._logging import trace_structured
 
     static_kernels: dict[str, bytes] = {}
     rejected_sources: list[dict[str, object]] = []
@@ -374,7 +382,7 @@ def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
             rejected_sources.extend(exc.sources)
     if rejected_sources:
         error = _UnresolvedTritonExport(rejected_sources)
-        torch._logging.trace_structured(
+        trace_structured(
             "artifact",
             metadata_fn=lambda: {
                 "name": "precompile_triton_export_failures",
