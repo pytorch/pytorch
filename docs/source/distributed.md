@@ -18,66 +18,6 @@ for a brief introduction to all features related to distributed training.
 .. currentmodule:: torch.distributed
 ```
 
-```{eval-rst}
-.. currentmodule:: torch.distributed.elastic.utils.api
-```
-
-```{eval-rst}
-.. autofunction:: get_env_variable_or_raise
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.elastic.utils.distributed
-```
-
-```{eval-rst}
-.. autofunction:: get_free_port
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.elastic.utils.log_level
-```
-
-```{eval-rst}
-.. autofunction:: get_log_level
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.elastic.utils.logging
-```
-
-```{eval-rst}
-.. autofunction:: get_logger
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.rendezvous
-```
-
-```{eval-rst}
-.. autofunction:: register_rendezvous_handler
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.algorithms.model_averaging.utils
-```
-
-```{eval-rst}
-.. autofunction:: average_parameters
-```
-
-```{eval-rst}
-.. autofunction:: average_parameters_or_parameter_groups
-```
-
-```{eval-rst}
-.. autofunction:: get_params_to_average
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed
-```
-
 (distributed-backends)=
 
 ## Backends
@@ -436,6 +376,14 @@ The machine with rank 0 will be used to set up all connections.
 
 This is the default method, meaning that `init_method` does not have to be specified (or
 can be `env://`).
+
+### Custom initialization methods
+
+Other `init_method` URL schemes can be added by registering a rendezvous handler.
+
+```{eval-rst}
+.. autofunction:: torch.distributed.rendezvous.register_rendezvous_handler
+```
 
 ### Improving initialization time
 

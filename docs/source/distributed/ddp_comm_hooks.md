@@ -111,6 +111,17 @@ instead.
 .. autofunction:: powerSGD_hook
 .. autofunction:: batched_powerSGD_hook
 ```
+## Model Averaging
+
+Utilities for averaging parameters across ranks, for example after training locally with
+{func}`~torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook.post_localSGD_hook`.
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.algorithms.model_averaging.utils
+.. autofunction:: average_parameters
+.. autofunction:: average_parameters_or_parameter_groups
+.. autofunction:: get_params_to_average
+```
 ## Debugging Communication Hooks
 
 As the name implies, debugging communication hooks are **only** used for debugging and performance optimization purpose.
