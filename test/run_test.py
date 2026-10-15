@@ -24,6 +24,8 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, cast, NamedTuple
 
+from conftest import STEPCURRENT_CACHE_DIR
+
 import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
@@ -215,7 +217,6 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/cuda/test_tensorpipe_agent",
     "test_determination",
     "test_jit_legacy",
-    "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
     "distributed/pipelining/test_dtensor_pp_integration",
     "inductor/test_cpu_repro",  # excessive runtimes compared to CUDA
@@ -844,16 +845,40 @@ def run_test_retries(
         print(s, file=output, flush=True)
 
     num_failures = defaultdict(int)
+    # pytest keeps cache values under <cache_dir>/v/<key>.
+    cache_dir = REPO_ROOT / ".pytest_cache/v" / STEPCURRENT_CACHE_DIR / stepcurrent_key
 
     def read_pytest_cache(key: str) -> Any:
-        cache_file = (
-            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
-        )
         try:
-            with open(cache_file) as f:
+            with open(cache_dir / key) as f:
                 return f.read()
         except FileNotFoundError:
             return None
+
+    def finish_torchci_report(ret_code: int, signal_name: str) -> None:
+        # The report writer publishes the run in flight next to lastrun; a process
+        # that died left it unrecorded (torchci/README.md).
+        if not HAS_TORCHCI_REPORTS:
+            return
+        try:
+            from torch.testing._internal.torchci import plugin
+
+            # An installed torch whose plugin predates the publication.
+            if not hasattr(plugin, "take_inflight"):
+                return
+            inflight = plugin.take_inflight(cache_dir)
+            # pytest's own exits (interrupted, internal error, usage error): the
+            # process didn't die, so the run is only consumed.
+            if inflight is None or ret_code in (2, 3, 4):
+                return
+            if ret_code == 124:
+                limit = f" after {timeout // 60}min" if timeout else ""
+                plugin.append_run(inflight, "timed_out", f"timed out{limit}")
+            else:
+                summary = f"exit code {ret_code}{signal_name}"
+                plugin.append_run(inflight, "crashed", summary)
+        except Exception as e:
+            print_to_file(f"Could not finish the test run report: {e}")
 
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
@@ -873,6 +898,8 @@ def run_test_retries(
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
+        if ret_code != 0:
+            finish_torchci_report(ret_code, signal_name)
 
         # Read what just failed/ran
         try:
