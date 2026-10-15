@@ -1014,7 +1014,7 @@ class OptimizeForInferenceTemplate(TestCase):
         def debug_inductor_force_stride_order(orig_fn, input_tensor, stride):
             nonlocal num_same_stride, num_diff_stride
             input_tensor.realize()
-            if tuple(input_tensor.get_stride()) == tuple(stride):
+            if tuple(input_tensor.get_stride_hint()) == tuple(stride):
                 num_same_stride += 1
             else:
                 num_diff_stride += 1
