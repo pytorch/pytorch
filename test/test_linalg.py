@@ -9808,6 +9808,18 @@ class TestLinalgSVD(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @dtypes(torch.float32, torch.complex64)
+    @parametrize("shape", [(3, 8, 2), (3, 2, 8)])
+    def test_svd_full_matrices_diagonal(self, device, dtype, shape):
+        A = torch.zeros(shape, dtype=dtype, device=device)
+        A.diagonal(dim1=-2, dim2=-1).copy_(torch.arange(1, 3))
+        U, S, Vh = torch.linalg.svd(A)
+        self.assertEqual(U.mH @ U, torch.eye(U.size(-1), dtype=dtype, device=device).expand_as(U))
+        self.assertEqual(Vh @ Vh.mH, torch.eye(Vh.size(-1), dtype=dtype, device=device).expand_as(Vh))
+        self.assertEqual((U[..., :2] * S.unsqueeze(-2)) @ Vh[..., :2, :], A)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_svd_ill_conditioned(self, device, dtype):
         # Small columns must still undergo Jacobi rotations: skipping them at
@@ -9826,6 +9838,19 @@ class TestLinalgSVD(TestCase):
             (S > 1e-4 * S[..., :1]).sum(-1),
             (cpu_s > 1e-4 * cpu_s[..., :1]).sum(-1),
         )
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @skipCUDAIfRocm(msg="ROCm SVD loses accuracy on inputs scaled by 1e-12/1e12")
+    @dtypes(torch.float32, torch.complex64)
+    @parametrize("scale", [1e-12, 1e12])
+    def test_svd_scaled_entries(self, device, dtype, scale):
+        q, v = (torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q for _ in range(2))
+        A = (q * torch.logspace(0, -1, 32, dtype=q.real.dtype)) @ v.mH
+        U, S, Vh = (t.cpu() for t in torch.linalg.svd((A * scale).to(device), full_matrices=False))
+        self.assertEqual(U.mH @ U, torch.eye(32, dtype=dtype).expand(16, 32, 32), atol=1e-4, rtol=1e-4)
+        self.assertEqual(S / scale, torch.linalg.svdvals(A), atol=1e-5, rtol=1e-4)
+        self.assertEqual((U * (S / scale).unsqueeze(-2)) @ Vh, A, atol=1e-4, rtol=1e-4)
 
     @onlyCUDA
     @skipCUDAIfNoCusolver

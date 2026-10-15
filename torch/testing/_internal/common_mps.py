@@ -421,7 +421,7 @@ if torch.backends.mps.is_available():
 
         # Failures in TestUnaryUfuncs, which compares against NumPy references,
         # keyed by test name and then by op name
-        UNARY_UFUNCS_XFAILLIST: dict[str, dict[str, list]] = {
+        UNARY_UFUNCS_XFAILLIST: dict[str, dict[str, tuple[torch.dtype, ...]]] = {
             "test_reference_numerics_extremal": {
                 # MPS bug: C99 special values for inf/nan inputs, e.g. exp(inf+infj) is nan+nanj
                 **dict.fromkeys(
@@ -437,25 +437,25 @@ if torch.backends.mps.is_available():
                         "nn.functional.tanhshrink",
                         "_refs.nn.functional.tanhshrink",
                     ),
-                    [torch.complex64],
+                    (torch.complex64,),
                 ),
                 # NumPy deviates from C99, e.g. atanh(1+0j) is inf+0.785j rather than
                 # inf+0j (CPU skips these tests for the same reason)
                 **dict.fromkeys(
-                    ("_refs.atan", "atanh", "_refs.atanh"), [torch.complex64]
+                    ("_refs.atan", "atanh", "_refs.atanh"), (torch.complex64,)
                 ),
             },
             "test_reference_numerics_small": {
                 # MPS bug: cancellation for small arguments
-                **dict.fromkeys(("expm1", "_refs.expm1", "sinc"), [torch.complex64]),
+                **dict.fromkeys(("expm1", "_refs.expm1", "sinc"), (torch.complex64,)),
                 # NumPy deviates from C99 for atan(+-1j)
-                "_refs.atan": [torch.complex64],
+                "_refs.atan": (torch.complex64,),
                 # NumPy reference computes int8/uint8 in float16
-                "nn.functional.silu": [torch.int8, torch.uint8],
+                "nn.functional.silu": (torch.int8, torch.uint8),
             },
             "test_reference_numerics_normal": {
                 # NumPy reference can't negate bool and computes int8/uint8 in float16
-                "nn.functional.silu": [torch.bool, torch.int8, torch.uint8],
+                "nn.functional.silu": (torch.bool, torch.int8, torch.uint8),
             },
         }
 
