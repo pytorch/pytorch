@@ -22990,10 +22990,22 @@ if RUN_GPU:
             self.assertEqual(result, fn(x, label, col))
             self.assertIn("ynumel", " ".join(code))
 
+        def test_small_strided_read_keeps_outer_reduction(self):
+            # A transposed (strided) read votes OUTER even when it is a small
+            # dtype: its per-element cost does not shrink with itemsize.
+            def fn(x, mask):
+                return (x * mask.t()).sum(1)
+
+            x = torch.randn(1024, 1024, device=GPU_TYPE)
+            mask = torch.rand(1024, 1024, device=GPU_TYPE) < 0.5
+            result, code = run_and_get_code(torch.compile(fn), x, mask)
+            self.assertEqual(result, fn(x, mask))
+            self.assertIn("reduction_hint=ReductionHint.OUTER", " ".join(code))
+
         def test_small_broadcast_read_does_not_split_inner_reduction(self):
-            # The per-group mask is a broadcast (outer-strided) read, but it is
-            # much smaller than the contiguous rows being reduced, so this must
-            # stay an unsplit inner reduction (one kernel).
+            # The per-group mask is constant along the innermost reduction var, so
+            # it must not outvote the contiguous rows being reduced: this stays an
+            # unsplit inner reduction (one kernel).
             def fn(x, mask):
                 masked = x.view(4096, 8, 32).masked_fill(
                     mask.unsqueeze(-1), float("-inf")
