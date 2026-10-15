@@ -275,6 +275,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "pow",
     "rsqrt",
     "tanh",
+    "attn",
     "tanh_backward",
     "asinh",
     "acosh",

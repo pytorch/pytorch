@@ -3309,3 +3309,7 @@
 - name: _foreach_mm(Tensor[] self, Tensor[] mat2) -> Tensor[]
   self: mm_mat1_backward(grads[i], mat2[i], self[i].sym_sizes(), self[i].sym_strides(), self[i].layout(), 1)
   mat2: mm_mat2_backward(grads[i], self[i], mat2[i].sym_sizes(), mat2[i].sym_strides(), mat2[i].layout(), 1)
+
+- name: attn(Tensor q, Tensor k, Tensor v) -> (Tensor, Tensor)
+  q, k, v: attn_backward(grads[0], grads[1], q, k, v, result1, grad_input_mask)
+  result0, result1: attn_jvp(q_p, k_p, v_p, result1, q_t, k_t, v_t)
