@@ -3245,6 +3245,18 @@ def _release_nvshmem_team_pool(group_name: str) -> None:
         release(group_name)
 
 
+def _release_nvshmem_team_pool_after_abort(group_name: str) -> None:
+    # The release synchronizes the device, which raises on a sticky CUDA error.
+    try:
+        _release_nvshmem_team_pool(group_name)
+    except Exception:
+        logger.warning(
+            "Failed to release NVSHMEM team pool of group %s after abort",
+            group_name,
+            exc_info=True,
+        )
+
+
 def _finalize_torchcomm(comm, *, best_effort: bool) -> None:
     try:
         comm.finalize()
@@ -3441,7 +3453,7 @@ def _abort_process_group(
             _finalize_torchcomm(comm, best_effort=True)
         _world.comms.clear()
         for pg_name in _world.pg_names.values():
-            _release_nvshmem_team_pool(pg_name)
+            _release_nvshmem_team_pool_after_abort(pg_name)
 
         _update_default_pg(None)
         _world.pg_map.clear()
@@ -3467,7 +3479,7 @@ def _abort_process_group(
         pg.abort()
         # As for WORLD above, only after the abort.
         _finalize_torchcomms(pg, best_effort=True)
-        _release_nvshmem_team_pool(_world.pg_names[pg])
+        _release_nvshmem_team_pool_after_abort(_world.pg_names[pg])
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]

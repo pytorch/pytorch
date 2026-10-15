@@ -1291,7 +1291,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
             self.assertCountEqual(calls.mock_calls[2:], freed)
             self.assertEqual(c10d._world.comms, [])
 
-    def test_abort_cleanup_continues_when_finalize_raises(self):
+    def test_abort_cleanup_continues_when_finalize_and_release_raise(self):
         calls = mock.Mock()
         comm_a, comm_b = calls.comm_a, calls.comm_b
         world = self._register_abortable_pg(calls, None, "world")
@@ -1299,6 +1299,11 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         group_b = self._register_abortable_pg(calls, comm_b, "b")
         c10d._world.default_pg = world
         c10d._world.comms.extend([comm_a, comm_b])
+        timeout = RuntimeError("Work timed out during finalize")
+        comm_a.finalize.side_effect = comm_b.finalize.side_effect = timeout
+        sticky_error = RuntimeError("CUDA error: unspecified launch failure")
+        calls.release.side_effect = sticky_error
+        finalize_failed = "Failed to finalize TorchComms communicator after abort"
 
         with mock.patch.multiple(
             c10d,
@@ -1310,26 +1315,25 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
             _update_default_pg=lambda pg: setattr(c10d._world, "default_pg", pg),
             create=True,
         ):
-            comm_a.finalize.side_effect = RuntimeError("Work timed out during finalize")
             with self.assertLogs(c10d.logger, level="WARNING") as logs:
                 c10d._abort_process_group(group_a)
-            self.assertIn(
-                "Failed to finalize TorchComms communicator after abort",
-                "\n".join(logs.output),
-            )
+            output = "\n".join(logs.output)
+            self.assertIn(finalize_failed, output)
+            self.assertIn("NVSHMEM team pool of group a", output)
             calls.release.assert_called_once_with("a")
             self.assertEqual(c10d._world.comms, [comm_b])
             self.assertNotIn(group_a, c10d._world.pg_map)
+            self.assertNotIn(group_a, c10d._world.pg_names)
+            self.assertNotIn(group_a, c10d._world.pg_group_ranks)
             self.assertIn(group_b, c10d._world.pg_map)
 
             calls.reset_mock()
-            comm_b.finalize.side_effect = RuntimeError("Work timed out during finalize")
             with self.assertLogs(c10d.logger, level="WARNING") as logs:
                 c10d._abort_process_group()
-            self.assertIn(
-                "Failed to finalize TorchComms communicator after abort",
-                "\n".join(logs.output),
-            )
+            output = "\n".join(logs.output)
+            self.assertIn(finalize_failed, output)
+            self.assertIn("NVSHMEM team pool of group world", output)
+            self.assertIn("NVSHMEM team pool of group b", output)
             calls.release.assert_has_calls(
                 [mock.call("world"), mock.call("b")], any_order=True
             )
