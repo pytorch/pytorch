@@ -72,6 +72,7 @@ from .object_protocol import (
     generic_getitem,
     generic_richcompare_bool,
     mro_lookup,
+    python_constant_repr_impl,
 )
 
 
@@ -1157,6 +1158,9 @@ class MappingProxyVariable(VariableTracker):
         if self.python_type() is types.MappingProxyType:
             return VariableTracker.build(tx, name in types.MappingProxyType.__dict__)
         return super().call_obj_hasattr(tx, name)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class NNModuleHooksDictVariable(OrderedDictVariable):
