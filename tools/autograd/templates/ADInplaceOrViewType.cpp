@@ -5,6 +5,7 @@
 #include <torch/library.h>
 #include <ATen/FunctionalInverses.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
 // ${generated_comment}
 
