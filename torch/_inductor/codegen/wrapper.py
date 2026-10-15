@@ -4841,10 +4841,7 @@ class PythonWrapperCodegen(CodeGen):
         triton_info_kernel_cls = self._get_triton_info_kernel_cls()
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
-        as_code = self.defines_triton_kernels_as_code()
         compile_wrapper = IndentedBuffer()
-        if not as_code:
-            compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
         for type_spec in get_importable_constexpr_types(
             triton_meta.get("constants", {}).values()
@@ -4881,16 +4878,21 @@ class PythonWrapperCodegen(CodeGen):
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
         metadata = f"# Original path: {srcfile}:{lineno}"
-        # emit_triton_kernel_definition decodes a module-level kernel from the source
-        # the string form would splice, so both forms take it escaped.
-        compile_wrapper.splice(_escape_triton_kernel_source_for_wrapper(kernel_src))
-        if as_code:
+        compile_wrapper.splice(kernel_src)
+        # The string form compiles what its ''' literal decodes to, and
+        # emit_triton_kernel_definition decodes a module-level kernel the same way, so
+        # both take the whole source escaped: the meta reprs as well as the kernel.
+        src_code = _escape_triton_kernel_source_for_wrapper(compile_wrapper.getvalue())
+        if self.defines_triton_kernels_as_code():
             self.emit_triton_kernel_definition(
-                name, subs_name, compile_wrapper.getvalue(), device_type, metadata
+                name, subs_name, src_code, device_type, metadata
             )
         else:
-            compile_wrapper.writeline(f"''', device_str='{device_type}')")
-            self.define_kernel(name, compile_wrapper.getvalue(), metadata)
+            string_form = IndentedBuffer()
+            string_form.writeline(f"async_compile.triton({subs_name!r}, '''")
+            string_form.splice(src_code)
+            string_form.writeline(f"''', device_str='{device_type}')")
+            self.define_kernel(name, string_form.getvalue(), metadata)
         # Add to the cache for the next use
         self.user_defined_kernel_cache[cache_key] = (name, triton_meta, inductor_meta)
         return name, triton_meta, inductor_meta, extra_launcher_call_args
