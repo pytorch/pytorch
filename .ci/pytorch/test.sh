@@ -495,7 +495,7 @@ setup_cuda_smoke_compat() {
   if [[ "$driver_version" -lt 13040 ]]; then
     local compat_package compat_repo_arch compat_sha256
     CUDA_COMPAT_DIR=$(mktemp -d)
-    trap_add 'rm -rf "$CUDA_COMPAT_DIR"' EXIT
+    trap_add "rm -rf \"$CUDA_COMPAT_DIR\"" EXIT
     case "$(dpkg --print-architecture)" in
       amd64)
         compat_repo_arch=x86_64
