@@ -5540,7 +5540,7 @@ class TestMPS(TestCaseMPS):
             torch.tensor([0, 1, 1, 1, 4], device=device, dtype=torch.int32),
             torch.tensor([1, 2, 3, 4, 5], dtype=torch.int8, device=device))
         self.assertEqual(
-            torch.tensor([1, 9, 0, 0, 5], device=device, dtype=torch.int32), byte_counts)
+            torch.tensor([1, 9, 0, 0, 5], device=device, dtype=torch.float32), byte_counts)
         # test non-contiguous inputs and weights
         inputs = torch.tensor([[0, 0], [3, 1], [2, 1], [1, 1], [3, 4]], device=device, dtype=torch.int32)
         weights = torch.tensor([[.1, 1], [.2, 2], [.3, 3], [.4, 4], [.5, 5]], device=device)

@@ -11,7 +11,9 @@ Tensor _bincount_mps(const Tensor& self, const std::optional<Tensor>& weights_op
   c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);
   const Tensor& weights = *weights_maybe_owned;
 
-  TORCH_CHECK_NOT_IMPLEMENTED(isIntegralType(self.scalar_type(), false), "bincount not implemented for ", self.dtype());
+  TORCH_CHECK_NOT_IMPLEMENTED(isIntegralType(self.scalar_type(), false) && !isBarebonesUnsignedType(self.scalar_type()),
+                              "bincount not implemented for ",
+                              self.dtype());
   TORCH_CHECK(minlength >= 0, "minlength should be >= 0");
 
   if (self.dim() == 1 && self.numel() == 0) {
@@ -29,7 +31,7 @@ Tensor _bincount_mps(const Tensor& self, const std::optional<Tensor>& weights_op
 
   const int64_t nbins = std::max(minmax[1].item<int64_t>() + 1L, minlength);
   if (has_weights) {
-    const auto weights_ = weights.to(isFloatingType(weights.scalar_type()) ? kFloat : kInt);
+    const auto weights_ = weights.to(kFloat);
     return at::zeros({nbins}, weights_.options()).index_add_(0, self.to(kLong), weights_);
   }
   return self.to(kLong).histc(nbins, 0, nbins);

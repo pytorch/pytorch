@@ -2332,7 +2332,7 @@ def bincount(
         return inputs.new_empty(new_size, dtype=torch.int64)  # type: ignore[return]
 
     if weights.device.type == "mps":
-        dtype = torch.float32 if weights.dtype.is_floating_point else torch.int32
+        dtype = torch.float32
     else:
         dtype = weights.dtype if weights.dtype == torch.float32 else torch.float64
     return weights.new_empty(new_size, dtype=dtype)  # type: ignore[return]
