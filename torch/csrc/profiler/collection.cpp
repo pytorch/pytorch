@@ -34,8 +34,9 @@ using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
-// A storage whose data pointer access is poisoned (e.g. a released
-// cudagraph-tree output) has no data, and reading it would throw mid-begin_op.
+// A storage whose data was released with an error message set (e.g. a remat
+// placeholder or an overwritten cudagraph-tree output) throws on data pointer
+// access: use null.
 static const void* storageData(const at::Tensor& t) {
   if (!t.has_storage()) {
     return nullptr;

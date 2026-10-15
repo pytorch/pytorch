@@ -579,19 +579,6 @@ class _KinetoProfile:
             # Open the trace window here (stamps the start boundary, native clock, no
             # device sync); records before this are excluded from the window.
             self._cuspy_profiler_observer.open_window()
-            # Not at prepare_trace: warmup collectives would pay for annotations
-            # the window drops.
-            if torch.distributed.is_available():
-                from torch.distributed._collective_annotations import (
-                    register_collective_annotation_hooks,
-                )
-
-                observer = self._cuspy_profiler_observer
-                register_collective_annotation_hooks(
-                    observer,
-                    observer._push_collective_kernel_metadata,
-                    observer.pop_annotation,
-                )
 
         if self.profile_memory:
             self.add_metadata_json("profile_memory", "1")
@@ -644,14 +631,6 @@ class _KinetoProfile:
             # export; the observer is kept alive past stop for the async write.
             prof._set_active_cuspy_profiler_observer(None)
             if self._cuspy_profiler_observer is not None:
-                if torch.distributed.is_available():
-                    from torch.distributed._collective_annotations import (
-                        unregister_collective_annotation_hooks,
-                    )
-
-                    unregister_collective_annotation_hooks(
-                        self._cuspy_profiler_observer
-                    )
                 self._cuspy_window_id = self._cuspy_profiler_observer.close_window()
         self.profiler.__exit__(None, None, None)
 
