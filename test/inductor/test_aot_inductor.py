@@ -3105,11 +3105,8 @@ class AOTInductorTestsTemplate:
             torch.randn((10, 20), device=self.device),
             torch.randn((10, 20), device=self.device),
         )
-        # TODO: the min value need to be 5 because in the body_fn, we're slicing over z1[2:],
-        # since the output size is [dim0_ab-3], when we extract tensor metadata out of the output
-        # we call guard_size_oblivious, which assumes the dim0_ab-3 != 0 or 1. So we have to set
-        # the minimum to 5 for now. We need to relax this restriction either by writing a less
-        # constrained shape checking in fake impl of cond.
+        # TODO: the sliced output has size dim0_ab-3. Keep it at least 2 to
+        # avoid zero/one specialization in cond's output metadata checks.
         dim0_ab = Dim("s0", min=5, max=1024)
         dynamic_shapes = {
             "p": {},

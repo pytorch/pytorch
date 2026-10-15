@@ -1923,20 +1923,53 @@ class f(torch.nn.Module):
             self.assertEqual(res, expected, exact_dtype=False)
 
     def test_backed_size_oblivious_01_spec(self):
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
         @torch.compile(dynamic=True, fullgraph=True)
         def f(a, b):
-            if guard_size_oblivious(a.size(0) == 1):
+            if a.size(0) == 1:
                 return b * 10
             else:
                 return b * 20
 
         with torch.fx.experimental._config.patch(backed_size_oblivious=True):
-            # always go to the >= 2 branch.
             self.assertEqual(
-                f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
+                f(torch.tensor([1]), torch.tensor([1])), torch.tensor([10])
             )
+
+    def test_guard_bool_preserves_size_bounds(self):
+        for upper in (4, 2**48, 2**63 - 1):
+            with self.subTest(upper=upper):
+                shape_env = ShapeEnv()
+                size = shape_env.create_unbacked_symint()
+                _constrain_range_for_size(size, min=0, max=upper)
+                self.assertEqual(
+                    shape_env.bound_sympy(size.node.expr), ValueRanges(0, upper)
+                )
+                for endpoint in (0, 1, upper):
+                    with self.subTest(endpoint=endpoint):
+                        self.assertIsNone(
+                            shape_env._maybe_evaluate_static(
+                                sympy.Ne(size.node.expr, endpoint)
+                            )
+                        )
+                        with self.assertRaises(GuardOnDataDependentSymNode):
+                            bool(size != endpoint)
+                self.assertEqual(shape_env.guards, [])
+
+    def test_sizevar_evaluation_preserves_size_bounds(self):
+        from torch._inductor.sizevars import SizeVarAllocator
+
+        shape_env = ShapeEnv()
+        size = shape_env.create_unbacked_symint()
+        _constrain_range_for_size(size, min=0, max=8192)
+        sizevars = SizeVarAllocator(shape_env)
+        comparison = sympy.Ge(size.node.expr, 4096)
+        self.assertFalse(sizevars.guard_or_false(comparison))
+        self.assertTrue(sizevars.guard_or_true(comparison))
+        self.assertEqual(shape_env.guards, [])
+
+        _constrain_range_for_size(size, min=4096, max=8192)
+        self.assertTrue(sizevars.guard_or_false(comparison))
+        self.assertEqual(shape_env.guards, [])
 
     @fresh_cache()
     def test_slice_backed_size_oblivious(self):

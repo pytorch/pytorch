@@ -309,10 +309,7 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
     Tensors are contiguous when they have no elements,
     one element, or when they have "nested" strides.
     """
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_size_oblivious,
-    )
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     def eval_eager(x):
         return bool(x)

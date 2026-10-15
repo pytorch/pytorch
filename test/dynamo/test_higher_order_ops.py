@@ -1120,8 +1120,6 @@ class GraphModule(torch.nn.Module):
             c: "i64[u0, 2]" = l_y_.nonzero();  l_y_ = None
 
             sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-            _check_is_size = torch._check_is_size(sym_size_int_1);  _check_is_size = None
-
             ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
             _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
 
