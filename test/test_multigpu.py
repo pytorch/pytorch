@@ -1,4 +1,4 @@
-# Owner(s): ["module: cuda"]
+# Owner(s): ["module: cuda", "module: xpu"]
 
 import collections
 import contextlib
@@ -641,7 +641,7 @@ class TestMultiGPUDevice(TestCase):
 
         # checks that the events preventing pinned memory from being reused
         # too early are recorded on the correct GPU
-        cycles_per_ms = get_cycles_per_ms(device=devices[0])
+        cycles_per_ms = get_cycles_per_ms(device=torch.device(devices[0]).type)
 
         t = torch.FloatTensor([1]).pin_memory()
         ptr = t.data_ptr()
@@ -1020,8 +1020,8 @@ t2.start()
 
             self.assertEqual(sum_requested, segment["requested_size"])
 
-        for device, expected in expected_each_device.items():
-            stats = device_module.memory_stats(device)
+        for dev_idx, expected in expected_each_device.items():
+            stats = device_module.memory_stats(dev_idx)
             for k, v in expected.items():
                 self.assertEqual(v, stats[k])
 
@@ -1309,7 +1309,7 @@ t2.start()
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA only tests!")
-class TestMultiGPUCUDA(TestCase):
+class TestMultiGPUCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
