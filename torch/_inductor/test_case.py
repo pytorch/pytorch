@@ -17,11 +17,14 @@ from torch.utils._ordered_set import OrderedSet
 # added as the code they exercise is fixed, until it can be on everywhere.
 STRICT_FLEXIBLE_LAYOUT_STRIDES_FILES = OrderedSet(
     [
+        "test_fused_attention",
         "test_layout_freezing",
         "test_lookup_table",
         "test_max_autotune",
+        "test_padding",
         "test_select_algorithm",
         "test_subgraph_choice",
+        "test_unbacked_symints",
     ]
 )
 
