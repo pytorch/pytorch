@@ -778,10 +778,13 @@ void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
     "gfx1150", "gfx1151"
 #endif
   };
+  // Keep in sync with torch_filter_ck_gemm_arches (cmake/public/utils.cmake)
+  // and at::Context::ckGemmSupported().
+  static const std::vector<std::string> supported_archs = {"gfx90a", "gfx942", "gfx950"};
   if (at::detail::getCUDAHooks().isGPUArch(wmma_archs)) {
     dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGS(at::BFloat16));
   }
-  else if (at::detail::getCUDAHooks().isGPUArch({"gfx9"})) {
+  else if (at::detail::getCUDAHooks().isGPUArch(supported_archs)) {
     dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGS(at::BFloat16));
   }
   else {
