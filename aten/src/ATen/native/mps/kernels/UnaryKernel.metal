@@ -293,7 +293,7 @@ inline hard_work_result do_hard_work(float x, float y) {
       const float Am1 = f(x, 1 + y, R) + f(x, 1 - y, S);
       r.rx = c10::metal::log1p(Am1 + precise::sqrt(Am1 * (A + 1)));
     } else if (y < 1) {
-      r.rx = x / precise::sqrt((1 - y) * (1 + y));
+      r.rx = x * precise::rsqrt((1 - y) * (1 + y));
     } else {
       r.rx = c10::metal::log1p((y - 1) + precise::sqrt((y - 1) * (y + 1)));
     }
