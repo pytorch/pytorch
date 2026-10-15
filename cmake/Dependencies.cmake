@@ -1093,7 +1093,7 @@ if(USE_ROCM)
     # aten/src/ATen/CMakeLists.txt. Remove once the CK submodule supports gfx1250.
     if(USE_ROCM_CK_GEMM)
       set(_ck_gemm_supported_arches ${PYTORCH_ROCM_ARCH})
-      list(REMOVE_ITEM _ck_gemm_supported_arches "gfx1250")
+      list(REMOVE_ITEM _ck_gemm_supported_arches "gfx1250" "gfx1250-strict")
       if(_ck_gemm_supported_arches STREQUAL "")
         message(STATUS "USE_ROCM_CK_GEMM disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch supported by composable_kernel")
         caffe2_update_option(USE_ROCM_CK_GEMM OFF)
