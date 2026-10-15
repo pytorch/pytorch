@@ -88,7 +88,6 @@ trace under the contract of Note [precompile programming model] in `torch/_preco
 
 .. autofunction:: torch.compiler.precompile.no_compilation
 
-.. autofunction:: torch.compiler.precompile.prepare_runtime
 
 .. autoexception:: torch.compiler.PrecompileError
 
