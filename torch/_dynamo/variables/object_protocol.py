@@ -104,7 +104,10 @@ def vt_identity_compare(
     # read off a tensor: `x.device is x.device` is False there too.
     from .dicts import ConstDictVariable, MappingProxyVariable
     from .exception import ExceptionVariable, TracebackVariable
-    from .functions import UserMethodVariable, WrappedSkipFunctionVariable
+    from .functions import (
+        _WrappedSkipFunctionMethodDescriptorCommonVariable,
+        UserMethodVariable,
+    )
     from .lists import ListVariable
     from .sets import (
         DictKeySetVariable,
@@ -132,7 +135,7 @@ def vt_identity_compare(
         TracebackVariable,
         ExceptionVariable,
         UserMethodVariable,
-        WrappedSkipFunctionVariable,
+        _WrappedSkipFunctionMethodDescriptorCommonVariable,
         CurrentDeviceVariable,
     )
     if isinstance(left, trace_created_types) or isinstance(right, trace_created_types):
