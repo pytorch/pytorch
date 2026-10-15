@@ -152,13 +152,6 @@ void* getTmaDescPtr(PyObject* obj) {
 
 #define SHARED_MEM_STATIC_MAX 49152 // 48 KB
 
-#if !defined(USE_ROCM)
-// CUDA 13 cuda.h values, spelled out so older toolkits still build.
-constexpr int kDeviceAttrMaxOversizedSharedMemoryPerBlock = 150;
-constexpr int kFuncAttrSharedMemoryMode = 17;
-constexpr int kSharedMemoryModeAllowOversized = 3;
-#endif
-
 #if defined(USE_ROCM)
 std::vector<char> readKernelImage(const std::string& filePath) {
   std::ifstream file(filePath, std::ios::binary);
@@ -211,22 +204,8 @@ std::pair<CUmodule, CUfunction> loadKernel(
   AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
       &shared_static, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, func));
   shared_needed += static_cast<uint32_t>(shared_static);
-
-  // Some devices (sm_107) allow more shared memory than the opt-in limit, but
-  // only in the oversized shared memory mode. Use it only when needed.
-  bool use_oversized = false;
-  if (shared_needed > static_cast<uint32_t>(shared_optin)) {
-    int shared_oversized = 0;
-    if (nvrtc().cuDeviceGetAttribute(
-            &shared_oversized,
-            static_cast<CUdevice_attribute>(
-                kDeviceAttrMaxOversizedSharedMemoryPerBlock),
-            device) == CUDA_SUCCESS &&
-        shared_oversized > shared_optin) {
-      use_oversized = shared_needed <= static_cast<uint32_t>(shared_oversized);
-      shared_optin = shared_oversized;
-    }
-  }
+  int shared_limit = torch::aot_inductor::sharedMemoryLimit(
+      shared_needed, shared_optin, device, nvrtc().cuDeviceGetAttribute);
 
 #endif
 
@@ -251,20 +230,21 @@ std::pair<CUmodule, CUfunction> loadKernel(
 #else
   TORCH_CHECK_WITH(
       OutOfMemoryError,
-      shared_needed <= static_cast<uint32_t>(shared_optin),
+      shared_needed <= static_cast<uint32_t>(shared_limit),
       "out of resource: ",
       funcName,
       " Required: ",
       shared_needed,
       " Hardware limit:",
-      shared_optin,
+      shared_limit,
       " Reducing block sizes or `num_stages` may help.");
 
-  if (use_oversized) {
+  if (shared_limit > shared_optin) {
     AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncSetAttribute(
         func,
-        static_cast<CUfunction_attribute>(kFuncAttrSharedMemoryMode),
-        kSharedMemoryModeAllowOversized));
+        static_cast<CUfunction_attribute>(
+            torch::aot_inductor::kFuncAttrSharedMemoryMode),
+        torch::aot_inductor::kSharedMemoryModeAllowOversized));
     return {mod, func};
   }
 #endif

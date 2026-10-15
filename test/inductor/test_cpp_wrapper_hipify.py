@@ -69,11 +69,6 @@ class TestCppWrapperHipify(TestCase):
                     return;
                 }
             #if !defined(USE_ROCM)
-                // CUDA 13 cuda.h values, spelled out so older toolkits still build:
-                // CU_FUNC_ATTRIBUTE_SHARED_MEMORY_MODE and
-                // CU_SHARED_MEMORY_MODE_ALLOW_OVERSIZED_SHARED_MEMORY.
-                constexpr int kFuncAttrSharedMemoryMode = 17;
-                constexpr int kSharedMemoryModeAllowOversized = 3;
                 hipDevice_t device;
                 CUDA_DRIVER_CHECK(hipCtxGetDevice(&device));
                 int sharedOptin = 0;
@@ -86,14 +81,16 @@ class TestCppWrapperHipify(TestCase):
                 CUDA_DRIVER_CHECK(hipFuncGetAttribute(
                     &sharedStatic, hipFuncAttributeSharedSizeBytes, func
                 ));
-                // Above the opt-in limit (sm_107), static + dynamic shared memory
-                // is only available in the oversized shared memory mode.
-                if (sharedMemBytes + static_cast<uint32_t>(sharedStatic) >
-                        static_cast<uint32_t>(sharedOptin)) {
+                if (torch::aot_inductor::sharedMemoryLimit(
+                        sharedMemBytes + static_cast<uint32_t>(sharedStatic),
+                        sharedOptin,
+                        device,
+                        hipDeviceGetAttribute) > sharedOptin) {
                     CUDA_DRIVER_CHECK(hipFuncSetAttribute(
                         func,
-                        static_cast<hipFuncAttribute_t>(kFuncAttrSharedMemoryMode),
-                        kSharedMemoryModeAllowOversized
+                        static_cast<hipFuncAttribute_t>(
+                            torch::aot_inductor::kFuncAttrSharedMemoryMode),
+                        torch::aot_inductor::kSharedMemoryModeAllowOversized
                     ));
                     return;
                 }
