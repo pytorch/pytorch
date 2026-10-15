@@ -52,41 +52,6 @@ struct vectypes<long> {
   using type2 = long2;
 };
 
-template <typename T>
-struct OpMathType {
-  using type = T;
-};
-
-template <>
-struct OpMathType<half> {
-  using type = float;
-};
-
-template <>
-struct OpMathType<short> {
-  using type = int;
-};
-
-template <>
-struct OpMathType<char> {
-  using type = int;
-};
-
-template <>
-struct OpMathType<uchar> {
-  using type = int;
-};
-
-template <>
-struct OpMathType<bfloat> {
-  using type = float;
-};
-
-template <>
-struct OpMathType<half2> {
-  using type = float2;
-};
-
 // Type promotion structure for higher precision accumulation
 template <typename T>
 struct AccumulationType {
@@ -169,9 +134,6 @@ using vec2type_t = typename detail::vectypes<T>::type2;
 
 template <typename T>
 using vec4type_t = typename detail::vectypes<T>::type4;
-
-template <typename T>
-using opmath_t = typename detail::OpMathType<T>::type;
 
 template <typename T>
 using accum_t = typename detail::AccumulationType<T>::type;
