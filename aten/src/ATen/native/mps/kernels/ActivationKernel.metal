@@ -239,11 +239,9 @@ REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, bfloat, bfloat, bfloat);
 // `other`. Forward passes (self, self), backward passes (self, grad_output)
 // with value 0.
 struct threshold_functor {
-  template <typename T, typename P>
-  inline T operator()(const T x, const T other, const P params) {
-    using threshold_t = decltype(params.threshold);
-    return static_cast<threshold_t>(x) <= params.threshold ? params.value
-                                                           : other;
+  template <typename T>
+  inline T operator()(const T x, const T other, const ThresholdParams<T> p) {
+    return x <= p.threshold ? p.value : other;
   }
 };
 

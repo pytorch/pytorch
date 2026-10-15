@@ -317,7 +317,8 @@ struct nextafter_functor {
 struct hypot_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return static_cast<T>(c10::metal::hypot(a, b));
+    return static_cast<T>(
+        c10::metal::hypot(::metal::fabs(a), ::metal::fabs(b)));
   }
 };
 
