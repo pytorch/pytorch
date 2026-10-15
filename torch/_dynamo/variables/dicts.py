@@ -695,7 +695,11 @@ class ConstDictVariable(VariableTracker):
             # Copies can expose hook IDs too; the hook-dict exemption is unsafe here.
             tx.output.guard_on_key_order.add(self.source)
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
-        return self._new_dict(self.items.copy())
+        result = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        if self.items:
+            # `PyDict_Copy` falls back to `PyDict_Merge` when `tp_iter` differs.
+            result.dict_update(tx, [self], {})
+        return result
 
     def dict_get(
         self,
@@ -1086,6 +1090,18 @@ class OrderedDictVariable(ConstDictVariable):
     # gives move_to_end/popitem(last=) below their real backing storage.
     items: "collections.OrderedDict[HashableTracker, VariableTracker]"  # pyrefly: ignore[bad-override]
 
+    def dict_copy(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        self.install_dict_keys_match_guard()
+        if self.source:
+            tx.output.guard_on_key_order.add(self.source)
+            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
+        return self._new_dict(self.items.copy())
+
     def tp_init_impl(
         self: ConstDictVariable,
         tx: "InstructionTranslatorBase",
@@ -1220,6 +1236,7 @@ class OrderedDictVariable(ConstDictVariable):
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
+        "copy": Method(dict_copy),
         "update": Method(tp_init_impl),
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
