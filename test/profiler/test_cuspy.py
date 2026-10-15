@@ -417,6 +417,21 @@ class TestCuspyRecords(TestCase):
         _attach_metadata(clean, {}, None)
         self.assertNotIn("metadata", clean["kernel"])
 
+    def test_resolver_invalidation_during_lookup(self):
+        from torch.profiler._cuspy.observers.base import _CachedResolver
+
+        annotations = {7: "region"}
+
+        def resolve(node_id):
+            value = annotations.get(node_id)
+            annotations.clear()
+            cached.cache_clear()
+            return value
+
+        cached = _CachedResolver(resolve)
+        self.assertEqual(cached(7), "region")
+        self.assertIsNone(cached(7))
+
     def test_attach_metadata_graph_resolver(self):
         # CUDA-graph-captured collectives have no replay-time external correlation;
         # their blob is resolved by graph_node_id via the metadata resolver (the same
@@ -1219,12 +1234,12 @@ class TestCuspyRecords(TestCase):
         self.assertEqual(names[(0, lane)], "side comms")
         self.assertEqual(names[(0, 9)].strip(), "stream 9")
 
-    def test_gpu_user_annotation_follows_display_lane(self):
-        # A GPU-side user annotation renders on the lane its kernels actually draw on: the
-        # logical lane when the resolver reassigned them, else the capture stream. Keying it
-        # to the capture stream instead strands a graphed collective's span on a lane holding
-        # none of its kernels -- dropped when nothing else renders there, and drawn over
-        # unrelated kernels when something does. No CUDA.
+    def test_gpu_user_annotation_stays_on_capture_stream(self):
+        # A GPU-side user annotation stays on its kernels' real capture stream, never a lane the
+        # resolver reassigned kernels onto. But when a capture stream has no work left to
+        # show (all its ops moved to a logical lane), the span would be orphaned on an empty
+        # lane, so it is dropped instead. A stream that still has non-reassigned work keeps
+        # its annotation. No CUDA.
         import numpy as np
 
         from torch.profiler._cuspy.trace import _gpu_user_annotation_events
@@ -1243,20 +1258,10 @@ class TestCuspyRecords(TestCase):
                 "stream_id": i64(7, 9, 5, 5),
                 "start_ns": i64(1000, 3000, 5000, 5500),
                 "end_ns": i64(2000, 4000, 6000, 6500),
-                # k11 graphed -> lane 8 (nothing left on stream 7); k12 eager on 9; k13
-                # graphed -> lane 6 while k14 stays eager on the same stream 5. The graphed
-                # ops carry their captured scope, which is the only name a replayed op has.
+                # k11 graphed -> lane 8 (orphans stream 7); k12 eager on 9; k13 graphed -> lane
+                # 6 but k14 is eager on the same stream 5, so stream 5 still shows work.
                 "graph_node_id": i64(101, 0, 103, 0),
                 "logical_lane": i64(8, 9, 6, 5),
-                "annotation": np.array(
-                    [
-                        '{"record_function": "all_reduce"}',
-                        None,
-                        '{"record_function": "reduce_scatter"}',
-                        None,
-                    ],
-                    dtype=object,
-                ),
             },
         }
         trace_window = {
@@ -1270,121 +1275,13 @@ class TestCuspyRecords(TestCase):
         events = _gpu_user_annotation_events(trace_window, base_ns=0)
         by_name = {e["name"]: e for e in events}
 
-        # graphed op moved to lane 8: the annotation follows its kernels there
-        self.assertEqual(by_name["all_reduce"]["cat"], "gpu_user_annotation")
-        self.assertEqual(by_name["all_reduce"]["tid"], 8)
+        # graphed op moved off stream 7 and nothing else renders there -> annotation dropped
+        self.assertNotIn("all_reduce", by_name)
         # eager: stays on the kernel's capture stream
+        self.assertEqual(by_name["matmul"]["cat"], "gpu_user_annotation")
         self.assertEqual(by_name["matmul"]["tid"], 9)
-        # k13 draws on lane 6, so its annotation belongs there -- not on capture stream 5,
-        # where the only kernel left is the unrelated eager k14.
-        self.assertEqual(by_name["reduce_scatter"]["tid"], 6)
-
-    def test_gpu_user_annotation_prefers_graphed_record_function(self):
-        # A graphed op's record_function ran at capture, so on a profiled replay step the
-        # live active-id chain only resolves the outer range still entered each step. Its
-        # own scope survives in the node annotation, and that is what the span must be
-        # named -- otherwise every graphed collective is labelled with the enclosing
-        # fwd/bwd range instead of e.g. FSDP::all_gather (layers.3). No CUDA.
-        import numpy as np
-
-        from torch.profiler._cuspy.trace import _gpu_user_annotation_events
-
-        def i64(*vals):
-            return np.array(vals, dtype=np.int64)
-
-        columns = {
-            "external_correlation": {
-                "correlation_id": i64(21, 22, 23),
-                "user_external_id": i64(400, 400, 400),
-            },
-            "kernel": {
-                "correlation_id": i64(21, 22, 23),
-                "device_id": i64(0, 0, 0),
-                "stream_id": i64(7, 7, 7),
-                "start_ns": i64(1000, 3000, 9000),
-                "end_ns": i64(2000, 4000, 9500),
-                # k21/k22 graphed onto one logical lane under two different captured
-                # scopes; k23 is eager on stream 7 and keeps the live enclosing name.
-                "graph_node_id": i64(11, 12, 0),
-                "logical_lane": i64(31, 31, 7),
-                "annotation": np.array(
-                    [
-                        '{"record_function": "FSDP::all_gather (layers.3)"}',
-                        '{"record_function": "FSDP::all_gather (layers.4)"}',
-                        None,
-                    ],
-                    dtype=object,
-                ),
-            },
-        }
-        trace_window = {
-            "columns": columns,
-            "user_annotations": {400: "forward_backward"},
-        }
-        events = _gpu_user_annotation_events(trace_window, base_ns=0)
-        by_name = {e["name"]: e for e in events}
-
-        # each graphed op gets its OWN captured scope, on the lane it renders on
-        self.assertEqual(by_name["FSDP::all_gather (layers.3)"]["tid"], 31)
-        self.assertEqual(by_name["FSDP::all_gather (layers.4)"]["tid"], 31)
-        # and they are distinct spans, not one range covering both
-        self.assertEqual(
-            by_name["FSDP::all_gather (layers.3)"]["dur"], 1000 / 1000 + 0.002
-        )
-        # the eager op still resolves through the live chain
-        self.assertEqual(by_name["forward_backward"]["tid"], 7)
-        # the coarse live name never lands on the graphed lane
-        self.assertNotIn(
-            31, [e["tid"] for e in events if e["name"] == "forward_backward"]
-        )
-
-    def test_gpu_user_annotation_skips_unstamped_graphed_op(self):
-        # A graphed op with no captured scope is left unlabelled rather than named from the
-        # live chain. That name is an outer range the loop re-enters every step, so every
-        # unstamped op on the lane would share it and merge into one span spanning the lane.
-        # Eager ops are unaffected -- the live chain is still their only name. No CUDA.
-        import numpy as np
-
-        from torch.profiler._cuspy.trace import _gpu_user_annotation_events
-
-        def i64(*vals):
-            return np.array(vals, dtype=np.int64)
-
-        columns = {
-            "external_correlation": {
-                "correlation_id": i64(31, 32, 33),
-                "user_external_id": i64(400, 400, 400),
-            },
-            "kernel": {
-                "correlation_id": i64(31, 32, 33),
-                "device_id": i64(0, 0, 0),
-                "stream_id": i64(7, 7, 7),
-                # k32 runs far after k31, so a span merging them would be unmistakable.
-                "start_ns": i64(1000, 50000, 9000),
-                "end_ns": i64(2000, 60000, 9500),
-                # k31/k32 both graphed onto one logical lane, only k31 stamped; k33 eager.
-                "graph_node_id": i64(11, 12, 0),
-                "logical_lane": i64(31, 31, 7),
-                "annotation": np.array(
-                    ['{"record_function": "FSDP::all_gather (layers.3)"}', None, None],
-                    dtype=object,
-                ),
-            },
-        }
-        trace_window = {
-            "columns": columns,
-            "user_annotations": {400: "forward_backward"},
-        }
-        events = _gpu_user_annotation_events(trace_window, base_ns=0)
-
-        # the lane carries the stamped scope and nothing else
-        lane = [e for e in events if e["tid"] == 31]
-        self.assertEqual([e["name"] for e in lane], ["FSDP::all_gather (layers.3)"])
-        # and k32 did not stretch it
-        self.assertEqual(lane[0]["dur"], 1000 / 1000 + 0.002)
-        # the eager op keeps the live chain
-        by_name = {e["name"]: e for e in events}
-        self.assertEqual(by_name["forward_backward"]["tid"], 7)
+        # stream 5 still has non-reassigned work (k14), so its annotation is kept there
+        self.assertEqual(by_name["reduce_scatter"]["tid"], 5)
 
     def test_graph_dependency_flows_json(self):
         # CUDA-graph node->node dependency arrows in the JSON export: one flow per edge from the
@@ -1676,9 +1573,9 @@ class TestCuspyRecords(TestCase):
 
     def test_pftrace_annotation_column_from_window(self):
         # pftrace builds its GPU annotation render column from the columnar window (kineto emits
-        # no gpu_user_annotation in Cuspy mode) through the same synthesizer as the chrome path,
-        # so a graphed op's span follows its kernels onto the logical lane and is named from the
-        # scope captured with the graph. No CUDA.
+        # no gpu_user_annotation in Cuspy mode), on the kernels' capture stream not the
+        # reassigned lane. Stream 7 keeps eager work, so the span stays there; one whose stream
+        # was fully reassigned is dropped (covered by the annotation commit's test). No CUDA.
         import numpy as np
 
         from torch.profiler._cuspy.trace import _gpu_annotation_render_column
@@ -1702,9 +1599,6 @@ class TestCuspyRecords(TestCase):
                     "logical_lane": i64(
                         8, 7
                     ),  # graphed moved to lane 8; eager stays on 7
-                    "annotation": np.array(
-                        ['{"record_function": "all_reduce"}', None], dtype=object
-                    ),
                 },
             },
             "user_annotations": {555: "all_reduce"},
@@ -1714,8 +1608,8 @@ class TestCuspyRecords(TestCase):
         self.assertEqual(col["name"].tolist(), ["all_reduce"])
         self.assertEqual(col["device_id"].tolist(), [0])
         self.assertEqual(
-            col["stream_id"].tolist(), [8]
-        )  # on the lane its kernels render on, not the capture stream
+            col["stream_id"].tolist(), [7]
+        )  # on the capture stream, not the reassigned lane
         # no annotations in the window -> no column
         self.assertIsNone(
             _gpu_annotation_render_column(
@@ -1872,11 +1766,7 @@ class TestCuspyRecords(TestCase):
                 "graph_id": i64(0, 1),
                 "graph_node_id": i64(0, 102),
                 "name": np.array(["eagerKernel", "graphKernel"], dtype=object),
-                # the graphed kernel carries the scope captured with the graph, which is the
-                # only name a replayed op has and what its annotation is built from.
-                "annotation": np.array(
-                    [None, '{"record_function": "side_comms_ag"}'], dtype=object
-                ),
+                "annotation": np.array([None, None], dtype=object),
                 "logical_lane": i64(7, 8),
                 "lane_name": np.array([None, "side comms"], dtype=object),
                 "grid_x": i64(1, 1),

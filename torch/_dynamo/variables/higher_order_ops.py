@@ -1487,6 +1487,21 @@ def check_aliasing_and_input_mutation(
                 ],
             )
 
+    if supports_input_input_aliasing:
+        aliased_mutation_info = subtracer.has_aliased_input_mutation()
+        if aliased_mutation_info.has_mutation:
+            context = f"{aliased_mutation_info.msg} in\n {graph}"
+            unimplemented(
+                gb_type="Encountered mutation of an aliased input during higher order op tracing",
+                context=context,
+                explanation=f"Higher order ops do not support mutating an input that shares "
+                f"storage with another input. Found in {name}",
+                hints=[
+                    "Clone one of the aliased inputs before the call, or stop mutating it.",
+                    "Please open an issue.",
+                ],
+            )
+
     if not supports_aliasing:
         aliasing_info = subtracer.has_aliasing(
             allow_input_input_aliasing=supports_input_input_aliasing
@@ -3342,6 +3357,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
+            supports_input_input_aliasing=True,
         )
 
         combine_mutated_inputs = set(
@@ -6235,6 +6251,9 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             enable_spmd_types,
             *user_args,
         ) = args
+        in_placements = in_placements.as_python_constant()
+        out_placements = out_placements.as_python_constant()
+        in_grad_placements = in_grad_placements.as_python_constant()
 
         # None placements are used to pass non-Tensors into the local_map function.
         # Containers passed this way can not hold tensors. Thus, Dynamo would have inlined
@@ -6252,14 +6271,14 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
                         )
             return seen_none
 
-        inputs_none_placements = check_none_last(in_placements.value)  # type: ignore[attr-defined]
-        output_none_placements = check_none_last(out_placements.value)  # type: ignore[attr-defined]
+        inputs_none_placements = check_none_last(in_placements)
+        output_none_placements = check_none_last(out_placements)
 
         local_map_kwargs = {
-            "out_placements": out_placements.value,  # type: ignore[attr-defined]
-            "in_placements": in_placements.value,  # type: ignore[attr-defined]
+            "out_placements": out_placements,
+            "in_placements": in_placements,
             "redistribute_inputs": redistribute_inputs.value,  # type: ignore[attr-defined]
-            "in_grad_placements": in_grad_placements.value,  # type: ignore[attr-defined]
+            "in_grad_placements": in_grad_placements,
             "device_mesh": device_mesh.value,  # type: ignore[attr-defined]
         }
         if local_map_kwargs["device_mesh"] is None:
@@ -6277,10 +6296,10 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             "Expecting {expected} {inputs_or_outputs} to local_map function based on placements"
             ", but found {actual}. Please ensure the count matches for eager. "
         )
-        if len(in_placements.value) != len(user_args):  # type: ignore[attr-defined]
+        if len(in_placements) != len(user_args):
             raise AssertionError(
                 template.format(
-                    expected=len(in_placements.value),  # type: ignore[attr-defined]
+                    expected=len(in_placements),
                     inputs_or_outputs="inputs",
                     actual=len(user_args),
                 )
@@ -6293,7 +6312,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
         # Step 2: Convert inputs to local shapes
         priors = {}
-        for placements, vt in zip(in_placements.value, user_args):  # type: ignore[attr-defined]
+        for placements, vt in zip(in_placements, user_args):
             if isinstance(vt, variables.lazy.LazyVariableTracker):
                 vt = variables.lazy.LazyVariableTracker.realize_all(vt)
 
@@ -6347,9 +6366,9 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         )
 
         # Step 4: Validate traced graph signature still matches placement information
-        expected_num_inputs = len(in_placements.value) - inputs_none_placements  # type: ignore[attr-defined]
+        expected_num_inputs = len(in_placements) - inputs_none_placements
         actual_num_inputs = len(body_gmod.graph.find_nodes(op="placeholder"))
-        expected_num_outputs = len(out_placements.value) - output_none_placements  # type: ignore[attr-defined]
+        expected_num_outputs = len(out_placements) - output_none_placements
         if len(body_gmod.graph.find_nodes(op="output")) != 1:
             raise AssertionError("Expected exactly one output node in body graph")
         actual_num_outputs = len(body_gmod.graph.find_nodes(op="output")[0].args[0])
@@ -6424,11 +6443,11 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             vt.synchronize_attributes(tx)
 
         outs = out.items if isinstance(out, TupleVariable) else [out]
-        if len(outs) != len(out_placements.value):  # type: ignore[attr-defined]
+        if len(outs) != len(out_placements):
             raise AssertionError(
                 "Number of outputs must match number of out_placements"
             )
-        for placements, vt in zip(out_placements.value, outs):  # type: ignore[attr-defined]
+        for placements, vt in zip(out_placements, outs):
             if not vt.is_tensor():  # type: ignore[attr-defined]
                 if placements is not None:
                     raise AssertionError(
@@ -6456,10 +6475,10 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         # Treat as const, so we don't have to deal with Placement types in fx IR
         # Guarded with EQUALS_MATCH on local_map call's arguments
         body_gmod.meta["local_map_kwargs"] = {
-            "out_placements": out_placements.value[:expected_num_outputs],  # type: ignore[attr-defined]
-            "in_placements": in_placements.value[:expected_num_inputs],  # type: ignore[attr-defined]
+            "out_placements": out_placements[:expected_num_outputs],
+            "in_placements": in_placements[:expected_num_inputs],
             "redistribute_inputs": redistribute_inputs.value,  # type: ignore[attr-defined]
-            "in_grad_placements": in_grad_placements.value,  # type: ignore[attr-defined]
+            "in_grad_placements": in_grad_placements,
             "device_mesh": device_mesh.value,  # type: ignore[attr-defined]
         }
         if out is None:

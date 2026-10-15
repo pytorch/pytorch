@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
 from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
+    IntTrueDiv,
     Max as TorchSymMax,
     Min as TorchSymMin,
     LShift,
@@ -739,6 +740,17 @@ class TestSympyInterp(TestCase):
                     gm(*args),
                 )
 
+    def test_python_interp_fx_int_truediv(self):
+        x = sympy.Symbol("x", integer=True)
+        y = sympy.Symbol("y", integer=True)
+        expr = IntTrueDiv(x, y)
+
+        def trace_f(px, py):
+            return sympy_interp(PythonReferenceAnalysis, {x: px, y: py}, expr)
+
+        gm = fx.symbolic_trace(trace_f)
+        self.assertEqual(gm(7, 2), 3.5)
+
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
     )
@@ -1157,7 +1169,7 @@ class TestSympyFunctions(TestCase):
         piecewise = sympy.Piecewise((s, s < 10), (s + 1, True))
         result = CeilDiv(piecewise, 2)
         self.assertIsInstance(result, FloorDiv)
-        for sv in range(0, 20):
+        for sv in range(20):
             p = sv if sv < 10 else sv + 1
             self.assertEqual(int(result.subs(s, sv)), (p + 1) // 2)
 
