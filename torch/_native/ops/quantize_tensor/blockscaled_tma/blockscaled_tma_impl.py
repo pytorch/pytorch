@@ -39,6 +39,7 @@ class _BlockscaledTmaSpec(NamedTuple):
     quant_orientation_id: int
     do_dim_k: bool
     do_dim_m: bool
+    input_transposed: bool
     is_square_scaling: bool
     is_scale_swizzled: bool
     s_num_row_blk_k: int | None
@@ -84,6 +85,18 @@ def _validate_and_normalize_blockscaled_tma(
         normalized_dims.append(normalized)
     if normalized_dims not in ([(0, 1)], [(1, 0)], [(0, 1), (1, 0)]):
         raise ValueError(f"unsupported quantization dim order: {dim}")
+    # The TMA input is row-major; swap logical axes for transpose-contiguous views.
+    if input.dim() != 2:
+        raise ValueError(
+            f"blockscaled TMA requires a 2D input; got {input.dim()} dimensions"
+        )
+    input_transposed = not input.is_contiguous()
+    if input_transposed:
+        if not input.t().is_contiguous():
+            raise ValueError(
+                "blockscaled TMA requires a contiguous or transpose-contiguous input"
+            )
+        normalized_dims = [(1 - first, 1 - last) for first, last in normalized_dims]
     do_dim_k = (0, 1) in normalized_dims
     do_dim_m = (1, 0) in normalized_dims
 
@@ -94,12 +107,6 @@ def _validate_and_normalize_blockscaled_tma(
             raise ValueError("compact scales do not support square scaling")
 
     # TODO: Support batched inputs.
-    if input.dim() != 2:
-        raise ValueError(
-            f"blockscaled TMA requires a 2D input; got {input.dim()} dimensions"
-        )
-    if not input.is_contiguous():
-        raise ValueError("blockscaled TMA requires a contiguous input")
     if input.dtype not in (torch.bfloat16, torch.float16, torch.float32):
         raise ValueError("blockscaled TMA supports only bf16, fp16, and fp32 input")
     if input.data_ptr() % _INPUT_ALIGNMENT_BYTES != 0:
@@ -108,7 +115,7 @@ def _validate_and_normalize_blockscaled_tma(
     if is_square_scaling:
         if do_dim_m:
             raise ValueError("square scaling currently supports only dim-k output")
-    M, K = input.shape
+    M, K = (input.t() if input_transposed else input).shape
     if is_square_scaling and M % 32 != 0:
         raise ValueError("32x32 requires M % 32 == 0")
     if do_dim_m:
@@ -144,6 +151,7 @@ def _validate_and_normalize_blockscaled_tma(
         quant_orientation_id=quant_orientation_id,
         do_dim_k=do_dim_k,
         do_dim_m=do_dim_m,
+        input_transposed=input_transposed,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
         s_num_row_blk_k=s_num_row_blk_k,
@@ -292,6 +300,14 @@ def _format_blockscaled_tma_output(
             scale_k = scale_k.view(spec.M, spec.K // 32)
         scale_k = scale_k.view(torch.float8_e8m0fnu)
 
+    if spec.input_transposed:
+        if output_k is not None:
+            output_k = output_k.t()
+            if scale_k is not None and not spec.is_scale_swizzled:
+                scale_k = scale_k.t()
+        if output_m is not None:
+            output_m = output_m.t()
+
     if spec.do_dim_k and not spec.do_dim_m:
         if output_k is None:
             raise AssertionError("expected output_k, got None")
@@ -312,6 +328,8 @@ def _format_blockscaled_tma_output(
         raise AssertionError("expected output_m, got None")
     if scale_m is None:
         raise AssertionError("expected scale_m, got None")
+    if spec.input_transposed:
+        return output_m, scale_m, output_k, scale_k
     return output_k, scale_k, output_m, scale_m
 
 
@@ -327,7 +345,8 @@ def _blockscaled_tma_impl_on_current_device(
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
     )
-    launch = _prepare_blockscaled_tma_launch(input, spec)
+    tma_input = input.t() if spec.input_transposed else input
+    launch = _prepare_blockscaled_tma_launch(tma_input, spec)
 
     # CUDA cannot launch a zero-sized grid. The preparation step still allocates
     # correctly shaped empty outputs so result formatting remains shared.
@@ -335,7 +354,7 @@ def _blockscaled_tma_impl_on_current_device(
         return _format_blockscaled_tma_output(spec, launch)
 
     fn = _compile_blockscaled_tma(
-        input.dtype,
+        tma_input.dtype,
         launch.plan.tile_m_size,
         launch.plan.tile_k_size,
         launch.plan.cluster_k,
@@ -345,7 +364,7 @@ def _blockscaled_tma_impl_on_current_device(
         spec.is_scale_swizzled,
     )
     fn(
-        input,
+        tma_input,
         launch.output_k,
         launch.scale_k,
         launch.output_m,

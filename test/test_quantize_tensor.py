@@ -35,12 +35,10 @@ def _quantize_mxfp8_reference(
     if input.ndim != 2 or dim not in (-2, -1, 0, 1) or is_square_scaling:
         raise ValueError("unsupported MXFP8 reference configuration")
     dim %= 2
-    if dim == 0 and not is_scale_swizzled:
-        raise ValueError("dim-0 MXFP8 reference requires swizzled scales")
     swizzle = (
         SwizzleType.SWIZZLE_32_4_4 if is_scale_swizzled else SwizzleType.NO_SWIZZLE
     )
-    source = input if dim == 1 else input.t().contiguous()
+    source = (input if dim == 1 else input.t()).contiguous()
     scales, qdata = to_mxfp8_reference(source, format="mxfp8", swizzle_type=swizzle)
     if dim == 0:
         # Note: we only transpose qdata here because swizzled scales are packed
@@ -265,13 +263,83 @@ class TestMXFP8ReferenceNumerics(TestCase):
             data_hp, -1 if expected_axis == 1 else -2, False, True
         )
         qdata, scales = _quantize_mxfp8_tma(data_hp, dim, False, True)
-        self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
-        self.assertEqual(
-            scales.view(torch.uint8).flatten(), scales_ref.view(torch.uint8).flatten()
-        )
+        self.assertEqual(qdata, qdata_ref)
+        self.assertEqual(scales.flatten(), scales_ref.flatten())
         self.assertEqual(qdata.shape, data_hp.shape)
         m, k = data_hp.shape
         self.assertEqual(qdata.stride(), (k, 1) if expected_axis == 1 else (1, m))
+
+    @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
+    @parametrize(
+        "dim,is_scale_swizzled",
+        (
+            subtest(((-2, -1), True), name="dim_k_swizzled"),
+            subtest(((0, 1), True), name="dim_k_positive"),
+            subtest(((-1, -2), True), name="dim_m_swizzled"),
+            subtest(((1, 0), True), name="dim_m_positive"),
+            subtest(((-1, -2), False), name="dim_m_compact"),
+        ),
+    )
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_transposed_input(
+        self, input_dtype, dim, is_scale_swizzled, device
+    ):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        data_hp = torch.randn(64, 128, dtype=input_dtype, device=device).t()
+        axis = dim[-1] % 2
+        qdata_ref, scales_ref = _quantize_mxfp8_reference(
+            data_hp, axis, False, is_scale_swizzled
+        )
+        qdata, scales = _quantize_mxfp8_tma(data_hp, dim, False, is_scale_swizzled)
+        self.assertEqual(qdata, qdata_ref)
+        self.assertEqual(scales.flatten(), scales_ref.flatten())
+        self.assertEqual(qdata.shape, data_hp.shape)
+        expected_stride = (data_hp.shape[1], 1) if axis == 1 else (1, data_hp.shape[0])
+        self.assertEqual(qdata.stride(), expected_stride)
+        if not is_scale_swizzled:
+            self.assertEqual(scales.shape, (data_hp.shape[0] // 32, data_hp.shape[1]))
+            self.assertEqual(scales.stride(), (1, data_hp.shape[0] // 32))
+
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_transposed_input_dual(self, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        data_hp = torch.randn(64, 128, dtype=torch.bfloat16, device=device).t()
+        qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference(data_hp, -1, False, True)
+        qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference(data_hp, -2, False, True)
+        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(
+            data_hp, False, True
+        )
+        self.assertEqual(qdata_k, qdata_k_ref)
+        self.assertEqual(qdata_m, qdata_m_ref)
+        self.assertEqual(scales_k.flatten(), scales_k_ref.flatten())
+        self.assertEqual(scales_m.flatten(), scales_m_ref.flatten())
+        self.assertEqual(qdata_k.shape, data_hp.shape)
+        self.assertEqual(qdata_m.shape, data_hp.shape)
+        self.assertEqual(qdata_k.stride(), (data_hp.shape[1], 1))
+        self.assertEqual(qdata_m.stride(), (1, data_hp.shape[0]))
+
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_transposed_input_square(self, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        data_hp = torch.randn(64, 128, dtype=torch.bfloat16, device=device).t()
+        qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp.t())
+        qdata, scales = _quantize_mxfp8_tma(data_hp, (-1, -2), True, True)
+        self.assertEqual(qdata, qdata_ref.t())
+        scales_ref = scales_ref.view(torch.float8_e8m0fnu)
+        self.assertEqual(scales.flatten(), scales_ref.flatten())
+        self.assertEqual(qdata.shape, data_hp.shape)
+        self.assertEqual(qdata.stride(), (1, data_hp.shape[0]))
+
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_strided_input_rejected(self, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        data_hp = torch.randn(64, 256, dtype=torch.bfloat16, device=device)[:, ::2]
+        with self.assertRaisesRegex(ValueError, "contiguous or transpose-contiguous"):
+            _quantize_mxfp8_tma(data_hp, (-2, -1), False, True)
 
     @parametrize(
         "dim",
