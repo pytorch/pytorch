@@ -61,6 +61,7 @@ from torch.profiler import profile, ProfilerActivity
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
 )
@@ -555,11 +556,13 @@ instantiate_device_type_tests(
 
 
 class TestFullyShardDefaultAllGatherOutputFn(TestCase):
+    # Only uint8 buffers hold bytes, not those of other 1-byte dtypes such as int8
+    @dtypes(torch.float32, torch.int8)
     @parametrize("byte_buffer", [False, True])
-    def test_smaller_payload_fills_prefix(self, device, byte_buffer: bool):
+    def test_smaller_payload_fills_prefix(self, device, dtype, byte_buffer: bool):
         # Two ranks gather two elements each into an output sized for eight each
-        output = torch.full((16,), -1.0, device=device)
-        all_gather_output = torch.arange(4.0, device=device)
+        output = torch.full((16,), -1.0, device=device, dtype=dtype)
+        all_gather_output = torch.arange(4.0, device=device).to(dtype)
         if byte_buffer:
             all_gather_output = all_gather_output.view(torch.uint8)
         with warnings.catch_warnings():
@@ -573,7 +576,7 @@ class TestFullyShardDefaultAllGatherOutputFn(TestCase):
                 world_size=2,
             )
         expected = torch.tensor([0.0, 1, 2, 3] + [-1] * 12, device=device)
-        self.assertEqual(output, expected)
+        self.assertEqual(output, expected.to(dtype))
 
     def test_byte_buffer_reassembles_typed_rows(self, device):
         # Mixed dtypes gather bytes: per rank, a (2, 2) chunk of a parameter
@@ -660,7 +663,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
             dist.broadcast(param.detach(), src=0)
         ref_model = copy.deepcopy(model)
         fully_shard(model, shard_placement_fn=lambda param: Shard(param.ndim - 1))
-        all_gather_calls: list[tuple[list[int], list[int], int]] = []
+        all_gather_calls: list[dict[str, object]] = []
         copy_in_numels: list[int] = []
         grad_refs: list[weakref.ReferenceType[torch.Tensor]] = []
         num_alive_grads: list[int] = []
@@ -704,7 +707,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
             self.assertEqual(param.grad.full_tensor(), ref_param.grad)
         # The Shard(1) weights' padded sharded sizes are (8, 2) and (4, 2)
         sizes = {"split_sizes": [16, 2, 8, 1], "outer_sizes": [8, 1, 4, 1]}
-        self.assertEqual(all_gather_calls, [{**sizes, "world_size": 4}])
+        self.assertEqual(all_gather_calls, [{**sizes, "world_size": self.world_size}])
         self.assertEqual(copy_in_numels, [27 * self.world_size])
         # FSDP frees the copy-in and its gradient copies before the reduce-scatter
         self.assertEqual(num_alive_grads, [0])
