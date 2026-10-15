@@ -371,7 +371,12 @@ inline common_dtype<T, U> div(const T x, const U y) {
   if (y.y == 0) {
     return T(x.x / y.x, x.y / y.x);
   }
-  return T(::metal::dot(x, y), x.y * y.x - x.x * y.y) / ::metal::dot(y, y);
+  if (::metal::abs(y.x) >= ::metal::abs(y.y)) {
+    const auto rat = y.y / y.x;
+    return T(x.x + x.y * rat, x.y - x.x * rat) / (y.x + y.y * rat);
+  }
+  const auto rat = y.x / y.y;
+  return T(x.x * rat + x.y, x.y * rat - x.x) / (y.y + y.x * rat);
 }
 
 template <
