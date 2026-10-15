@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
+     skipIfNoLapack,
      MI200_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision)
 from torch.testing._internal.common_device_type import \
@@ -9478,9 +9479,12 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 self.assertEqual(actual_pivots.shape, A.shape[:-1])
                 self.assertEqual(info.shape, A.shape[:-2])
 
-        # hermitian=True for complex inputs on CUDA is supported only with MAGMA 2.5.4+
+        # On ROCm, hermitian=True is tested only for complex inputs with MAGMA 2.5.4+
         magma_254_available = self.device_type == 'cuda' and _get_magma_version() >= (2, 5, 4)
-        hermitians = (True, False) if dtype.is_complex and (self.device_type == 'cpu' or magma_254_available) else (False,)
+        if self.device_type == 'cpu' or not TEST_WITH_ROCM or (dtype.is_complex and magma_254_available):
+            hermitians = (True, False)
+        else:
+            hermitians = (False,)
 
         shapes = (5,)
         batches = ((), (4,),)
@@ -9555,6 +9559,153 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         bad[0] = -(n + 1)
         with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
             torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
+
+    def _ldl_scaled_residuals(self, A, B, norms):
+        # LDL has no factors to multiply out, so its backward stability is checked
+        # through the solve, with the scaled residual of Netlib (see xSYT02) and MAGMA,
+        # ||AX - B|| / (||A|| * ||X|| * n * eps). The solve runs on the CPU.
+        compute_dtype = torch.cdouble if A.dtype.is_complex else torch.double
+        eps = torch.finfo(A.dtype).eps
+        n = A.shape[-1]
+        LD, pivots = torch.linalg.ldl_factor(A, hermitian=True)
+        A, B = A.cpu(), B.cpu()
+        X = torch.linalg.ldl_solve(LD.cpu(), pivots.cpu(), B, hermitian=True)
+        A, B, X = (t.to(compute_dtype) for t in (A, B, X))
+        residual = (A @ X).sub_(B)
+        return [norm(residual) / (norm(A) * norm(X) * n * eps) for norm in norms]
+
+    def _check_ldl_factor_random(self, n, device, dtype):
+        A = torch.randn(n, n, device=device, dtype=dtype)
+        A = A + A.mH
+        B = torch.randn(n, 3, device=device, dtype=dtype)
+        norm = partial(torch.linalg.matrix_norm, ord='fro')
+        [scaled_residual] = self._ldl_scaled_residuals(A, B, (norm,))
+        # see test_linalg_ldl_factor_stability_large_inputs
+        K = 1.0
+        self.assertTrue(scaled_residual < K)
+
+        # The last pivot is only checked, not factored. A zero last row/col is never
+        # interchanged and gets only zero updates, so that pivot is exactly zero.
+        A[-1, :] = A[:, -1] = 0
+        _, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertEqual(pivots[-1].item(), n)
+        self.assertEqual(info.item(), n)
+
+    @slowTest
+    @skipIfRocm
+    @skipIfNoLapack
+    @onlyCUDA
+    @skipCUDAIfNoCusolver
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_ldl_factor_stability_large_inputs(self, device, dtype):
+        # Check whether the LDL factorization (Bunch-Kaufman, hermitian=True) is
+        # backward stable, as in test_linalg_batched_lu_stability_large_inputs but
+        # through the solve (_ldl_scaled_residuals).
+        # NOTE: panels of more than 2048 rows are factored by a cooperative kernel
+        b = 2  # the batch is factored one matrix at a time
+        ns = (259, 513, 1027, 2048, 2049, 4100)
+
+        # Random Hermitian inputs are indefinite: about 60% of the pivots are 2x2
+        # blocks, and about 20% are 1x1 with an interchange
+        def make_well_conditioned(*shape):
+            # Eigenvalues of both signs
+            t = torch.randn(*shape, device=device, dtype=dtype)
+            q, _ = torch.linalg.qr(t)
+            s = torch.rand(*shape[:-1], device=device, dtype=dtype).real.add_(0.5)
+            s[..., ::2] *= -1
+            return (q * s.unsqueeze(-2)) @ q.mH
+
+        def make_ill_conditioned(*shape):
+            t = torch.randn(*shape, device=device, dtype=dtype)
+            return t + t.mH
+
+        make_input_methods = (make_well_conditioned, make_ill_conditioned)
+        matrix_norm = partial(torch.linalg.matrix_norm, dim=(-2, -1))
+
+        for n, make_input in product(ns, make_input_methods):
+            A = make_input(b, n, n)
+            B = torch.randn(b, n, 3, device=device, dtype=dtype)
+            # Netlib uses 1-norm, MAGMA uses Frobenius
+            norms = (partial(matrix_norm, ord=1), partial(matrix_norm, ord='fro'))
+            for scaled_residual in self._ldl_scaled_residuals(A, B, norms):
+                # Very conservative, see test_linalg_batched_lu_stability_large_inputs
+                K = 1.0
+                self.assertTrue((scaled_residual < K).all())
+
+        # Check info vector. Note, it is 1-based
+        for n in (300, 2049):
+            A = make_well_conditioned(5, n, n)
+            A[0, 0, :] = A[0, :, 0] = 0
+            A[2, -1, :] = A[2, :, -1] = 0
+            A[4].zero_()
+            LD, _, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+            self.assertTrue(torch.isfinite(LD).all())
+            self.assertEqual(info.tolist(), [1, 0, n, 0, 1])
+
+    @slowTest
+    @skipIfRocm
+    @skipIfNoLapack
+    @onlyCUDA
+    @skipCUDAIfNoCusolver
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_ldl_factor_edge_cases(self, device, dtype):
+        # Empty inputs, in the matrix, the batch, or both
+        for shape in ((0, 0), (2, 0, 0), (0, 5, 5), (0, 2, 5, 5), (2, 0, 5, 5), (0, 0, 0), (2, 0, 0, 0)):
+            A = torch.empty(shape, device=device, dtype=dtype)
+            LD, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+            self.assertEqual(LD.shape, A.shape)
+            self.assertEqual(pivots.shape, A.shape[:-1])
+            self.assertEqual(info, torch.zeros(A.shape[:-2], device=device, dtype=torch.int32))
+
+        # Small inputs, compared with LAPACK directly. n = 1 is not factored: the pivot is
+        # the entry itself, and info flags it if it is zero, ignoring its imaginary part
+        # as for any Hermitian diagonal. Up to n = 5, a single panel factors the matrix.
+        def compare_with_cpu(A):
+            LD, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+            LD_ref, pivots_ref, info_ref = torch.linalg.ldl_factor_ex(A.cpu(), hermitian=True)
+            # The kernel leaves working values in the upper triangle, which ldl_solve ignores
+            self.assertEqual(LD.tril(), LD_ref.tril())
+            self.assertEqual(pivots, pivots_ref)
+            self.assertEqual(info, info_ref)
+
+        values = [2.0, 0.0] + ([3j, -2 + 1j] if dtype.is_complex else [])
+        compare_with_cpu(torch.tensor(values, device=device, dtype=dtype).reshape(-1, 1, 1))
+        for n in range(2, 6):
+            t = torch.randn(5, n, n, device=device, dtype=dtype)
+            A = t + t.mH
+            A[1].diagonal().zero_()  # 2x2 pivots
+            A[2, 0, :] = A[2, :, 0] = 0  # info = 1
+            A[3, -1, :] = A[3, :, -1] = 0  # info = n
+            A[4].zero_()  # info = 1
+            compare_with_cpu(A)
+
+        # The smallest shapes, and shapes around the widths of the panels. A panel
+        # takes nb / 2 to nb + nb / 2 columns (see ldl::aligned_panel_width), where nb
+        # depends on the dtype, the GPU and n (see ldl::panel_width and
+        # test_linalg_ldl_factor_panel_widths).
+        panel_widths = (16, 24, 32, 48, 64, 96, 128)
+        ns = {1, 2, 3}
+        for nb in panel_widths:
+            ns |= {w + i for w in (nb, nb + nb // 2) for i in (-1, 0, 1)}
+        for n in sorted(ns):
+            self._check_ldl_factor_random(n, device, dtype)
+
+    @slowTest
+    @skipIfRocm
+    @skipIfNoLapack
+    @onlyCUDA
+    # nb grows with n (see ldl::panel_width). The first n with nb = 64, 96, 128 on H100.
+    # On GB200, 16385 reaches the widest nb of every dtype but complex128, which needs 20481.
+    @parametrize("n", (4097, 8193, 16385, 20481))
+    # A, LD and one temporary on the device
+    @largeTensorTest(lambda self, device, dtype, n: 3 * n * n * dtype.itemsize, device="cuda")
+    # A and LD in the CPU solve, in double precision
+    @largeTensorTest(lambda self, device, dtype, n: 2 * n * n * (16 if dtype.is_complex else 8), device="cpu")
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_ldl_factor_panel_widths(self, device, dtype, n):
+        if n == 20481 and dtype != torch.complex128:
+            self.skipTest("Reaches no new panel width")
+        self._check_ldl_factor_random(n, device, dtype)
 
     def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])
