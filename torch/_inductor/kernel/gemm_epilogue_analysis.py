@@ -268,7 +268,7 @@ class GemmOutputPlan:
     output: torch.fx.Node
     returned_aux_outputs: tuple[torch.fx.Node, ...] = ()
     local_reduce: GemmOutputLocalReducePlan | None = None
-    output_contraction: FlexGemmOutputTransform | None = None
+    output_transform: FlexGemmOutputTransform | None = None
     output_storage: torch.fx.Node | None = None
     output_storage_nodes: tuple[torch.fx.Node, ...] = ()
 

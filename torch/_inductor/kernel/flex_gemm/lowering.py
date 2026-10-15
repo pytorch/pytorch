@@ -285,11 +285,7 @@ def infer_flex_gemm_epilogue_arg_kinds(
     epilogue_args: Sequence[IRNode],
     output_size: list[Any],
 ) -> tuple[str, ...]:
-    """Classify captured epilogue tensors for static wrapper kwargs.
-
-    ``output_size`` is the shape the epilogue computes with (the lane shape of
-    a contracted or interleaved main output).
-    """
+    """Classify realized captured epilogue tensors for static wrapper kwargs."""
     if not epilogue_args:
         return ()
     if gemm_op not in QUACK_EPILOGUE_FEATURE_OPS:
@@ -515,7 +511,7 @@ def flex_gemm_quack_configs(
     from torch._inductor.virtualized import V
     from torch._vendor.quack.gemm_runtime.autotune import legal_mod_configs
 
-    output_contraction = template_config.output_contraction
+    output_transform = template_config.output_transform
     epimod = template_config.epimod(
         selection_callback,
         [node.get_dtype() for node in (*gemm_input_nodes, *epilogue_input_nodes)],
@@ -529,7 +525,7 @@ def flex_gemm_quack_configs(
         device,
         sizevars.optimization_hint(mat1.get_size()[-2]),
         sizevars.optimization_hint(mat2.get_size()[-1]),
-        None if output_contraction is None else output_contraction.concat_layout,
+        None if output_transform is None else output_transform.concat_layout,
         blockscaled=template_config.blockscaled_format is not None,
         varlen_m=template_config.varlen_axis == "m",
         varlen_k=template_config.varlen_axis == "k",
@@ -759,15 +755,15 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError(
             "FlexGEMM QUACK grouped_mm (varlen) does not yet support grouped reductions"
         )
-    output_contraction = outputs.output_contraction
-    if varlen_axis == "k" and output_contraction is not None:
+    output_transform = outputs.output_transform
+    if varlen_axis == "k" and output_transform is not None:
         raise NotImplementedError(
             "FlexGEMM varlen-K does not support output contractions"
         )
     if (
         blockscaled is not None
-        and isinstance(output_contraction, FlexGemmOutputContraction)
-        and output_contraction.chunked
+        and isinstance(output_transform, FlexGemmOutputContraction)
+        and output_transform.chunked
     ):
         # TODO: Upstream block-scaled concat_layout support to QuACK if needed.
         raise NotImplementedError(
@@ -782,22 +778,16 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             "FlexGEMM generated epilogues require output metadata"
         )
     logical_output_size = ir.convert_shape_to_inductor(output_meta.shape)
+    gemm_size = ir.convert_shape_to_inductor(gemm_fx_node.meta["val"].shape)
     # Captures broadcast against the epilogue's lane shape: the GEMM shape when
     # the main output interleaves two lanes, else the (contracted) output shape.
     epilogue_lane_size = (
-        ir.convert_shape_to_inductor(gemm_fx_node.meta["val"].shape)
-        if isinstance(output_contraction, FlexGemmOutputExpansion)
+        gemm_size
+        if isinstance(output_transform, FlexGemmOutputExpansion)
         else logical_output_size
     )
-    if (
-        isinstance(output_contraction, FlexGemmOutputContraction)
-        and outputs.aux_outputs
-    ):
-        aux_metas = (gemm_fx_node.meta["val"],)
-    else:
-        aux_metas = validate_flex_gemm_aux_outputs(
-            gemm_op, outputs.aux_outputs, logical_output_size
-        )
+    # Auxiliaries are plain GEMM-shaped tiles under either lane transform.
+    aux_metas = validate_flex_gemm_aux_outputs(gemm_op, outputs.aux_outputs, gemm_size)
     if varlen_axis == "k":
         for meta in (output_meta, *aux_metas):
             alignment = max(16 // meta.dtype.itemsize, 1)
@@ -818,7 +808,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         else output_storage.meta["val"].dtype
     )
     packed_uint8_main = (
-        isinstance(output_contraction, FlexGemmOutputContraction)
+        isinstance(output_transform, FlexGemmOutputContraction)
         and output_storage_dtype is torch.uint8
     )
     if (
@@ -830,7 +820,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             "FlexGEMM generic main outputs support only floating-point and bool dtypes"
         )
     local_reduce_metas = flex_gemm_local_reduce_metas(outputs.local_reduce)
-    if isinstance(output_contraction, FlexGemmOutputContraction):
+    if isinstance(output_transform, FlexGemmOutputContraction):
         # Grouped-main kernel stores use compact N rows through TMA, even
         # when the epilogue returns a strided lane view. Keep outer strides
         # 16-byte aligned when the contracted N extent is not aligned.
@@ -890,7 +880,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     local_reduce_out_index = (
         aux_out_start + len(aux_input_nodes) if local_reduce_input_nodes else None
     )
-    if isinstance(output_contraction, FlexGemmOutputContraction) and any(
+    if isinstance(output_transform, FlexGemmOutputContraction) and any(
         kind != "scalar" for kind in epilogue_arg_kinds
     ):
         raise NotImplementedError(
@@ -970,7 +960,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         epilogue_arg_kinds=epilogue_arg_kinds,
         aux_out_indices=aux_out_indices,
         local_reduce=template_local_reduce,
-        output_contraction=output_contraction,
+        output_transform=output_transform,
     )
     template_kwargs = dict(
         input_nodes=input_nodes,
