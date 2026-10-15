@@ -1870,8 +1870,27 @@ all thread stack traces and abort the process.
 This module is experimental and subject to change.
 :::
 
+Arguments passed to {func}`~torch.distributed._watchdog.init` override these environment variables:
+
+```{list-table}
+:header-rows: 1
+
+* - **Variable**
+  - **Description**
+* - ``TORCH_WATCHDOG_POLL_INTERVAL_SECS``
+  - Seconds between CUDA event polls. Default: ``1.0``.
+* - ``TORCH_WATCHDOG_HEALTH_INTERVAL_SECS``
+  - Seconds between health pings of the watchdog event loop. Default: ``30.0``.
+* - ``TORCH_WATCHDOG_STUCK_ACTION``
+  - Action when the event loop does not answer a health ping: ``log``, ``abort`` or ``exit``. Default: ``log``.
+```
+
 ```{eval-rst}
 .. currentmodule:: torch.distributed._watchdog
+```
+
+```{eval-rst}
+.. autofunction:: init
 ```
 
 ```{eval-rst}
