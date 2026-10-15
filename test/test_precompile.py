@@ -5920,7 +5920,48 @@ class TestPrecompileRuntimeCache(TestCase):
             source = os.path.join(directory, "m.py")
             cache = os.path.join(directory, "m.cache")
             with (
-                self.assertRaisesRegex(PrecompileError, "could not write"),
+                self.assertRaisesRegex(PrecompileError, "could not write") as ctx,
+                contextlib.ExitStack() as stack,
+                capture(
+                    _no_compilation_single_graph,
+                    artifact_path=source,
+                    cache_path=cache,
+                    tracer=DynamoTracer(require_no_risky_drops=False),
+                    backend="eager",
+                ) as cap,
+            ):
+                cap(torch.ones(4))
+                replace = os.replace
+
+                def fail_into_directory(src, dst):
+                    if os.path.dirname(os.fspath(dst)) == directory:
+                        raise OSError("disk full")
+                    replace(src, dst)
+
+                stack.enter_context(
+                    mock.patch("os.replace", side_effect=fail_into_directory)
+                )
+            self.assertIsInstance(ctx.exception.__cause__, OSError)
+            self.assertEqual(os.listdir(directory), [])
+            _capture_files(
+                self,
+                _no_compilation_single_graph,
+                [(torch.ones(4),)],
+                "eager",
+                paths=(source, cache),
+            )
+            torch.compiler.precompile.load(source, cache)
+
+    def test_compile_wait_oserror_is_not_reported_as_a_write_failure(self):
+        from torch._inductor.async_compile import AsyncCompile
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, "m.py")
+            cache = os.path.join(directory, "m.cache")
+            with (
+                self.assertRaisesRegex(
+                    PrecompileError, "could not freeze the runtime dependencies"
+                ) as ctx,
                 contextlib.ExitStack() as stack,
                 capture(
                     _no_compilation_single_graph,
@@ -5932,17 +5973,13 @@ class TestPrecompileRuntimeCache(TestCase):
             ):
                 cap(torch.ones(4))
                 stack.enter_context(
-                    mock.patch("os.replace", side_effect=OSError("disk full"))
+                    mock.patch.object(
+                        AsyncCompile, "drain_pending", side_effect=BrokenPipeError()
+                    )
                 )
+            self.assertIsInstance(ctx.exception.__cause__, BrokenPipeError)
+            self.assertNotIn("could not write", str(ctx.exception))
             self.assertEqual(os.listdir(directory), [])
-            _capture_files(
-                self,
-                _no_compilation_single_graph,
-                [(torch.ones(4),)],
-                "eager",
-                paths=(source, cache),
-            )
-            torch.compiler.precompile.load(source, cache)
 
     @parametrize("backend", ("eager", "inductor"))
     def test_strict_load_serves_captured_pair(self, backend):
@@ -6213,6 +6250,7 @@ class TestPrecompileRuntimeCache(TestCase):
         unlaunched = _static_runtime_kernel(32)
         unlaunched.launchers = []
         unlaunched._cached_launcher = None
+        unlaunched.inductor_meta = {"kernel_name": "triton_poi_unlaunched_0"}
 
         def record():
             _runtime_cache.record_triton_kernel("unlaunched", unlaunched)
@@ -6232,7 +6270,10 @@ class TestPrecompileRuntimeCache(TestCase):
                     paths=(os.path.join(directory, "artifact.py"), cache),
                     then=record,
                 )
-            self.assertIn("unlaunched", str(failure.exception.__cause__))
+            cause = str(failure.exception.__cause__)
+            self.assertIn("unlaunched", cause)
+            self.assertIn('"kernel_name": "triton_poi_unlaunched_0"', cause)
+            self.assertIn("inside the capture block", cause)
             self.assertFalse(os.path.exists(cache))
         self.assertIsNone(_runtime_cache._capture)
 
