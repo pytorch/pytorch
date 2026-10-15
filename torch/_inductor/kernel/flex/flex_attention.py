@@ -12,6 +12,7 @@ from typing import Any, cast, TYPE_CHECKING
 import sympy
 
 import torch
+from torch._dynamo.device_interface import DeviceInterface, get_interface_for_device
 from torch._inductor.virtualized import V
 from torch._logging import warning_once
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
@@ -130,9 +131,12 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
     """
     return (cdiv(num_queries, meta["BLOCK_M"]), batch_size, q_heads)
 
-
-def set_float32_precision(kernel_options: dict[str, Any], dtype: torch.dtype) -> None:
-    precision = torch.backends.cuda.matmul.fp32_precision
+def set_float32_precision(kernel_options: dict[str, Any], dtype: torch.dtype, device_type: str) -> None:
+    try:
+        iface = get_interface_for_device(device_type)
+    except NotImplementedError:
+        iface = DeviceInterface
+    precision = iface.get_fp32_attention_precision()
     if precision == "none":
         # Unset at every level of the per-backend hierarchy; the legacy
         # default is "highest". Do not fall back to the legacy getter,
@@ -288,7 +292,7 @@ def flex_attention(
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
-    set_float32_precision(kernel_options, query.get_dtype())
+    set_float32_precision(kernel_options, query.get_dtype(), query.get_device().type)
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
@@ -941,7 +945,7 @@ def flex_attention_backward(*args, **kwargs):
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
-    set_float32_precision(kernel_options, query.get_dtype())
+    set_float32_precision(kernel_options, query.get_dtype(), query.get_device().type)
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
