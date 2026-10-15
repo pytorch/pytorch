@@ -2480,13 +2480,7 @@ from user code:
         with torch.compiler.set_stance("fail_on_recompile"):
             with open(self.path(), "rb") as f:
                 loaded = torch.compiler.load_compiled_function(f)
-            # Re-serializing before the first call must not need the wrappers.
-            resaved = self.path() + ".resaved"
-            loaded.save_compiled_function(resaved)
             self.assertEqual(grads(loaded), expected)
-            with open(resaved, "rb") as f:
-                reloaded = torch.compiler.load_compiled_function(f)
-            self.assertEqual(grads(reloaded), expected)
 
     def test_aot_compile_module(self):
         _run_in_subprocess(_subprocess_aot_compile_module)

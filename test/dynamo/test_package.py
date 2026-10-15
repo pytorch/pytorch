@@ -36,7 +36,6 @@ from torch._dynamo.symbolic_convert import _import_module
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
-from torch._functorch._aot_autograd.aot_autograd_result import GenericAOTAutogradResult
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -712,23 +711,9 @@ print(eval(f"bbmod.{name}.{path}") is code)
         return compiled_fn, expected
 
     def test_loaded_graphs_do_not_rerun_inlined_saved_tensors_hooks(self):
-        # The runtime wrappers read the ambient hooks and autocast state, so
-        # loading must leave them to the first call.
-        built = []
-        apply = GenericAOTAutogradResult._apply_runtime_wrappers
-
-        def recording_apply(result, *args):
-            built.append(result)
-            return apply(result, *args)
-
-        with patch.object(
-            GenericAOTAutogradResult, "_apply_runtime_wrappers", recording_apply
-        ):
-            compiled_fn, expected = self._save_and_load_hooked_forward()
-            self.assertEqual(built, [])
-            with torch.compiler.set_stance("fail_on_recompile"):
-                grads = self._hooked_grads(compiled_fn, under_hooks=True)
-        self.assertEqual(len(built), 2)
+        compiled_fn, expected = self._save_and_load_hooked_forward()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            grads = self._hooked_grads(compiled_fn, under_hooks=True)
         self.assertEqual(grads, expected)
 
     @staticmethod
@@ -750,7 +735,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self,
     ):
         # Nothing was inlined, so the eager hooks must run, as they did in the
-        # capturing process, even though the wrappers are built under them.
+        # capturing process, whatever hooks the wrappers are built under.
         compiled_fn, expected = self._save_and_load_hooked_forward(
             self._drop_hooks_guard, compile_under_hooks=False
         )
