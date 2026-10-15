@@ -166,9 +166,6 @@ class TritonBundler:
         Lazily observes that we have seen a Triton kernel compilation. Remembers
         it for when collect is later called.
         """
-        from torch.compiler._runtime_cache import record_inductor_triton_binary
-
-        record_inductor_triton_binary(kernel_hash)
         if (entries := cls._entries) is not None:
             entries.append(
                 TritonBundleEntry(kernel_hash, device, triton_cache_dir(device))
@@ -411,7 +408,6 @@ class TritonBundler:
         or reading from the target directory.
         """
         from torch._inductor import config
-        from torch.compiler._runtime_cache import record_inductor_triton_binary
 
         if not TritonBundler.is_enabled():
             return None
@@ -447,7 +443,6 @@ class TritonBundler:
                         device = resolved
                 basedir = triton_cache_dir(device)
                 directory = os.path.join(basedir, artifacts.kernel_hash)
-                record_inductor_triton_binary(artifacts.kernel_hash)
 
                 if os.path.exists(directory) and len(os.listdir(directory)) != 0:
                     TritonBundler._check_existing_kernel(directory, artifacts)
