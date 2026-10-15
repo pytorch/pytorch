@@ -7,8 +7,8 @@ sharded model::
 
     model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
 
-The native CUDA copies skip the intermediate buffers and can improve
-performance for wide contiguous tensors with small ``outer_size`` (the product of
+The native CUDA copies write contiguous tensors without intermediate buffers and
+can improve performance for wide tensors with small ``outer_size`` (the product of
 dimensions before the shard dimension), such as ``Shard(1)`` over ``[2, F, D]``.
 Their CPU time, GPU time, and metadata memory grow with the total outer size of a
 parameter group, and strided collective buffers take a slower path. Benchmark
