@@ -622,6 +622,9 @@ function(torch_optimize_layout_if_enabled tgt)
       COMMENT "Optimizing $<TARGET_FILE_NAME:${tgt}> with LLVM BOLT (original kept in prebolt/)"
       VERBATIM
     )
+
     add_dependencies(bolt_profile_quality_summary ${tgt})
+    set_property(TARGET bolt_profile_quality_summary APPEND PROPERTY
+        SCRIPT_ARGS "--profile" "${_bolt_profile}" "${_logfile}")
   endif()
 endfunction()
