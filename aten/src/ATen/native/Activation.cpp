@@ -22,6 +22,7 @@
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Eltwise.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -402,13 +403,13 @@ auto approximate_type = get_gelutype_enum(approximate);
   if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
     const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor y = itensor_from_tensor(result);
-    ideep::eltwise_forward::compute(
+    mkldnn::eltwise_forward(
       x, y, dnnl::algorithm::eltwise_gelu_erf, dnnl::prop_kind::forward_training, /*alpha*/ 0.0);
 #ifdef __aarch64__
   } else if (use_mkldnn(self) && (approximate_type == GeluType::Tanh)) {
     const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor y = itensor_from_tensor(result);
-    ideep::eltwise_forward::compute(
+    mkldnn::eltwise_forward(
       x, y, dnnl::algorithm::eltwise_gelu_tanh, dnnl::prop_kind::forward_training, /*alpha*/ 0.0);
 #endif  // ifdef __aarch64__
   } else {
@@ -428,7 +429,7 @@ auto approximate_type = get_gelutype_enum(approximate);
     const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor grady = itensor_from_tensor(grad, /*from_const_data_ptr*/true);
     ideep::tensor gradx = itensor_from_tensor(grad_input);
-    ideep::eltwise_backward::compute(x, grady, gradx,
+    mkldnn::eltwise_backward(x, grady, gradx,
       dnnl::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
   } else {
     GeluBackwardKernel(kCPU, *this, approximate_type);
