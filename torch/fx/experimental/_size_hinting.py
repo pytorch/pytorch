@@ -15,10 +15,11 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import logging
+import math
 import sys
 import threading
 from functools import lru_cache
-from typing import Any, TYPE_CHECKING
+from typing import Any, NamedTuple, TYPE_CHECKING
 
 import sympy
 
@@ -35,6 +36,10 @@ SYMPY_FACTOR_MAX_FREE_SYMBOLS = 50
 # Maximum product of expression free symbols and non-symbol replacement count
 # before optimization_hint skips expensive SymPy subs() canonicalization.
 SYMPY_SUBS_MAX_SYMBOL_REPLACEMENT_PRODUCT = 1024
+
+# Inside consistent_hints, equal shares of an Eq's slack are rounded down to a
+# multiple of this, so the parts keep common alignments.
+_FAIR_SHARE_ALIGNMENT = 8
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -443,9 +448,27 @@ def consistent_hints(state: ConsistentHintState) -> Iterator[None]:
         _consistent_hints_tls.state = prev
 
 
+class _LinearBound(NamedTuple):
+    # c*s + k <= 0, with every other unknown symbol at its chosen range end.
+    c: int
+    k: int
+    # Other unknown symbols with a positive coefficient: the parts that share
+    # the bound with s (b in ``a + b - 100 <= 0``).
+    n_parts: int
+    # gcd of the coefficients of all other unknown symbols. For an Eq to have
+    # an integer solution, c*s + k must be a multiple of it.
+    peers_gcd: int
+    # sum over the parts t of c_t * (min(fallback, t's max) - t's min): how much
+    # more the parts take if each gets its fallback instead of its minimum.
+    parts_fallback: int
+
+
 def _implied_linear_bound(
-    shape_env: ShapeEnv, g: sympy.Expr, s: sympy.Symbol
-) -> tuple[int, int] | None:
+    shape_env: ShapeEnv,
+    g: sympy.Expr,
+    s: sympy.Symbol,
+    fallback: int | None = None,
+) -> _LinearBound | None:
     """Rewrite the runtime assert ``g <= 0`` as ``c*s + k <= 0``, where s is
     the symbol being bounded, by replacing every other symbol t in g with a
     number: the end of t's range that gives s the most room (t's minimum if its
@@ -458,10 +481,13 @@ def _implied_linear_bound(
     exact for a single assert, since t at that end is itself a valid choice.
 
     Returns None if g is not linear with integer coefficients or a needed range
-    end is infinite.
+    end is infinite. See _LinearBound for the other fields.
     """
     c = 0
     k = 0
+    n_parts = 0
+    peers_gcd = 0
+    parts_fallback = 0
     for term, coeff in sympy.expand(g).as_coefficients_dict().items():
         if not coeff.is_Integer:
             return None
@@ -478,15 +504,39 @@ def _implied_linear_bound(
             if not isinstance(bound, (int, sympy.Integer)):
                 return None
             k += coeff * int(bound)
+            peers_gcd = math.gcd(peers_gcd, abs(coeff))
+            if coeff > 0:
+                n_parts += 1
+                if fallback is not None:
+                    top = fallback
+                    if isinstance(vr.upper, (int, sympy.Integer)):
+                        top = min(top, int(vr.upper))
+                    parts_fallback += coeff * max(0, top - int(bound))
         else:
             return None
-    return c, k
+    return _LinearBound(c, k, n_parts, peers_gcd, parts_fallback)
+
+
+def _round_for_integer_leftover(x: int, c: int, k: int, g: int, lo: int) -> int:
+    """Largest s <= x with s >= lo such that ``c*s + k`` is a multiple of g, so
+    the remaining parts of an Eq can still add up exactly (e.g. leave a
+    multiple of 96 for a part with coefficient 96); x if there is none."""
+    if g <= 1:
+        return x
+    d = math.gcd(c, g)
+    if k % d:
+        return x
+    m = g // d
+    r = (-k // d) * pow(c // d, -1, m) % m
+    s = x - (x - r) % m
+    return s if s >= lo else x
 
 
 def _unbacked_hint_bounds_from_runtime_asserts(
     shape_env: ShapeEnv,
     s: sympy.Symbol,
     state: ConsistentHintState | None = None,
+    fallback: int | None = None,
 ) -> tuple[int | None, int | None]:
     """Concrete ``(lower, upper)`` bounds for an unbacked symbol derived from the
     runtime asserts, with backed symbols replaced by their hint values.
@@ -555,18 +605,52 @@ def _unbacked_hint_bounds_from_runtime_asserts(
                 relations = [(ax.lhs - ax.rhs, False), (ax.rhs - ax.lhs, False)]
             else:
                 continue
+            is_eq = isinstance(ax, sympy.Equality)
             for g, strict in relations:
-                linear = _implied_linear_bound(shape_env, g, s)
+                linear = _implied_linear_bound(shape_env, g, s, fallback)
                 if linear is None:
                     continue
-                c, k = linear
+                c, k = linear.c, linear.k
                 if c == 0:
                     continue
+                # The parts of an Eq share a fixed budget; inside the context,
+                # spread it over the parts that are still unknown.
+                fair = state is not None and is_eq and linear.n_parts > 0
+                if fair and c < 0:
+                    # s is the total and some parts are still unknown: leave
+                    # each its fallback, so they are not squeezed to 0. E.g.
+                    # Eq(96*u0 + 64*u1, u2) with u0 known gives
+                    # u2 = 96*u0 + 64*fallback instead of 96*u0 and u1 = 0.
+                    k += linear.parts_fallback
                 thr = sympy.Rational(-k, c)  # c*s + k (<|<=) 0  ->  s (<|<=) thr, c>0
                 if c > 0:
                     bnd = (
                         int(sympy.ceiling(thr) - 1) if strict else int(sympy.floor(thr))
                     )
+                    if fair:
+                        # s is a part: take an equal share of the slack,
+                        # rounded down to a multiple of _FAIR_SHARE_ALIGNMENT
+                        # so common alignment checks (% 8) still hold, and so
+                        # the remaining parts can still add up exactly; the
+                        # last part takes the remainder. E.g. Eq(u0 + u1 + u2 +
+                        # u3, 100) gives 24, 24, 24, 28 instead of 100 for the
+                        # first part hinted and 0 for the rest.
+                        vr = shape_env.var_to_range.get(s)
+                        s_min = (
+                            int(vr.lower)
+                            if vr is not None
+                            and isinstance(vr.lower, (int, sympy.Integer))
+                            else 0
+                        )
+                        share = s_min + max(0, bnd - s_min) // (linear.n_parts + 1)
+                        aligned = share - share % _FAIR_SHARE_ALIGNMENT
+                        target = aligned if aligned >= max(s_min, 1) else share
+                        if fallback is not None:
+                            # s gets min(fallback, its bound), so round that.
+                            target = min(target, fallback)
+                        bnd = _round_for_integer_leftover(
+                            target, c, k, linear.peers_gcd, s_min
+                        )
                     upper = bnd if upper is None else min(upper, bnd)
                 else:  # dividing by c<0 flips the inequality: s (>|>=) thr
                     bnd = (
@@ -594,7 +678,9 @@ def _bounded_symbol_hint(
             lower = int(vr.lower)
         if isinstance(vr.upper, (int, sympy.Integer)):
             upper = int(vr.upper)
-    ra_lower, ra_upper = _unbacked_hint_bounds_from_runtime_asserts(shape_env, s, state)
+    ra_lower, ra_upper = _unbacked_hint_bounds_from_runtime_asserts(
+        shape_env, s, state, fallback
+    )
     if ra_lower is not None:
         lower = ra_lower if lower is None else max(lower, ra_lower)
     if ra_upper is not None:

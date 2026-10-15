@@ -6105,6 +6105,74 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
                     }
                 self.assertTrue(all(v >= 1 for v in hints.values()), hints)
                 self.assertEqual(sum(hints.values()), 100, hints)
+                if fallback >= 24:
+                    # The slack is split evenly in multiples of 8, whatever the
+                    # hint order; the last part takes the remainder.
+                    self.assertEqual(list(hints.values()), [24, 24, 24, 28], hints)
+
+    def test_consistent_hints_eq_split_evenly(self):
+        # Inside the context the parts of an Eq split its slack evenly, in
+        # multiples of 8; the last part absorbs the remainder. Outside the context each part is hinted
+        # on its own; checking the Eq last narrowed each range to [0, 100].
+        shape_env, syms = self._make_unbacked_symints(3)
+        torch._check(sum(syms) == 100)
+        sizevars = SizeVarAllocator(shape_env)
+        u0, u1, u2 = (u.node.expr for u in syms)
+        self.assertEqual(sizevars.optimization_hint(u0), 100)
+        state = ConsistentHintState(shape_env)
+        with consistent_hints(state):
+            hints = [sizevars.optimization_hint(u) for u in (u0, u1, u2)]
+        self.assertEqual(hints, [32, 32, 36])
+        self.assertEqual(sizevars.optimization_hint(u0), 100)
+
+    def test_consistent_hints_eq_scaled_parts(self):
+        # Packed values of two embedding tables with dims 96 and 64, e.g.
+        # values.split([u0 * 96, u1 * 64]) on a buffer of u2 elements, give
+        # Eq(96*u0 + 64*u1, u2). In every hint order both parts are non-empty
+        # and add up exactly.
+        cases = [
+            # (hint order, hinted (u0, u1, u2))
+            (("u0", "u1", "u2"), (8192, 8192, 1310720)),
+            (("u0", "u2", "u1"), (8192, 8192, 1310720)),
+            (("u1", "u0", "u2"), (8192, 8192, 1310720)),
+            (("u1", "u2", "u0"), (8192, 8192, 1310720)),
+            (("u2", "u0", "u1"), (6824, 10244, 1310720)),
+            (("u2", "u1", "u0"), (8192, 8192, 1310720)),
+        ]
+        for hint_order, expected in cases:
+            with self.subTest(hint_order=hint_order):
+                shape_env, (u0, u1, u2) = self._make_unbacked_symints(3)
+                torch._check(96 * u0 + 64 * u1 == u2)
+                sizevars = SizeVarAllocator(shape_env)
+                exprs = {"u0": u0.node.expr, "u1": u1.node.expr, "u2": u2.node.expr}
+                state = ConsistentHintState(shape_env)
+                with consistent_hints(state):
+                    hints = {
+                        name: sizevars.optimization_hint(exprs[name])
+                        for name in hint_order
+                    }
+                h0, h1, h2 = hints["u0"], hints["u1"], hints["u2"]
+                self.assertEqual((h0, h1, h2), expected)
+                self.assertEqual(96 * h0 + 64 * h1, h2)
+
+        # With a large backed total the fair share exceeds the fallback, so the
+        # part hinted first gets about the fallback; it must still leave a
+        # multiple of the other part's dim.
+        for hint_order in [("u0", "u1"), ("u1", "u0")]:
+            with self.subTest(hint_order=hint_order, total=10_000_000):
+                shape_env, (u0, u1) = self._make_unbacked_symints(2)
+                torch._check(96 * u0 + 64 * u1 == 10_000_000)
+                sizevars = SizeVarAllocator(shape_env)
+                exprs = {"u0": u0.node.expr, "u1": u1.node.expr}
+                state = ConsistentHintState(shape_env)
+                with consistent_hints(state):
+                    hints = {
+                        name: sizevars.optimization_hint(exprs[name])
+                        for name in hint_order
+                    }
+                self.assertEqual(96 * hints["u0"] + 64 * hints["u1"], 10_000_000)
+                self.assertGreater(hints["u0"], 0)
+                self.assertGreater(hints["u1"], 0)
 
     def test_consistent_hints_eq_product(self):
         # Per-symbol bounds skip the non-linear Eq, but the existing Eq
