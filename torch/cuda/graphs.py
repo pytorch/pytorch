@@ -1448,14 +1448,14 @@ class graph:
                 backend = "edge_walk"
             _set_annotation_backend(backend)
             if self._enable_annotations and torch.distributed.is_available():
-                from torch.distributed._collective_annotations import (
+                from torch.distributed._hooks.collective_annotations import (
                     register_graph_capture_annotation_hooks,
                 )
 
                 register_graph_capture_annotation_hooks(self)
         except BaseException:
             if self._enable_annotations and torch.distributed.is_available():
-                from torch.distributed._collective_annotations import (
+                from torch.distributed._hooks.collective_annotations import (
                     unregister_collective_annotation_hooks,
                 )
 
@@ -1508,7 +1508,7 @@ class graph:
             # idempotent, so repeating it here just covers a capture that raised before the
             # call above (it must not stay armed past this context either way).
             if self._enable_annotations and torch.distributed.is_available():
-                from torch.distributed._collective_annotations import (
+                from torch.distributed._hooks.collective_annotations import (
                     unregister_collective_annotation_hooks,
                 )
 

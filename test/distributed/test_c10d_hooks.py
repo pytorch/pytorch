@@ -5,7 +5,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import HookOpName
-from torch.distributed._collective_annotations import (
+from torch.distributed._hooks.collective_annotations import (
     register_collective_annotation_hooks,
     unregister_collective_annotation_hooks,
 )
@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import HardwareClassification, run_tes
 
 
 # The annotation hooks only register on NCCL groups; let them hook these Gloo groups.
-_PGS_TO_ANNOTATE = "torch.distributed._collective_annotations._pgs_to_annotate"
+_PGS_TO_ANNOTATE = "torch.distributed._hooks.collective_annotations._pgs_to_annotate"
 
 
 class TestProcessGroupHooks(MultiProcContinuousTest):
@@ -178,7 +178,7 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         self.assertEqual(
             allreduce,
             {
-                "Collective name": "allreduce",
+                "Collective name": "all_reduce",
                 "In msg nelems": 3,
                 "Out msg nelems": 3,
                 "Group size": ws,
@@ -191,7 +191,7 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
                 "Seq": seq + 1,
             },
         )
-        self.assertEqual(allgather["Collective name"], "_allgather_base")
+        self.assertEqual(allgather["Collective name"], "all_gather")
         self.assertEqual(allgather["In msg nelems"], 2)
         self.assertEqual(allgather["Out msg nelems"], 2 * ws)
         self.assertEqual(allgather["Seq"], seq + 2)
