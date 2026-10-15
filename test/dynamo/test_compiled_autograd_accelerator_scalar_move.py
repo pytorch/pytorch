@@ -133,37 +133,6 @@ class TestCompiledAutogradAcceleratorScalarMove(TestCase):
     @mock.patch.object(
         torch._C, "_get_privateuse1_backend_name", return_value=OOT_DEVICE
     )
-    def test_mixed_oot_cpu_vector_and_scalar_skip(self, _mock_name: mock.Mock) -> None:
-        graph = _build_compiled_autograd_inputs_graph(
-            [
-                _MetaVal(_DeviceStub(OOT_DEVICE, 0), (2,)),
-                _MetaVal(torch.device("cpu"), (2,)),
-                _MetaVal(torch.device("cpu")),
-            ]
-        )
-        inputs = next(n for n in graph.nodes if n.target == "inputs")
-        getitems = list(inputs.users.keys())
-        graph.create_node(
-            "call_function",
-            torch.ops.aten.mul.Tensor,
-            (getitems[1], getitems[2]),
-            {},
-        )
-
-        inst = object.__new__(AutogradCompilerInstance)
-        with mock.patch(
-            "torch._dynamo.compiled_autograd._move_cpu_scalar_to_device",
-            side_effect=lambda val, device, **kwargs: _MetaVal(device),
-        ) as move_mock:
-            indices, target = inst.move_graph_nodes_to_cuda(graph)
-
-        self.assertEqual(indices, [])
-        self.assertIsNone(target)
-        move_mock.assert_not_called()
-
-    @mock.patch.object(
-        torch._C, "_get_privateuse1_backend_name", return_value=OOT_DEVICE
-    )
     def test_mixed_oot_and_xpu_skip(self, _mock_name: mock.Mock) -> None:
         indices, target, _ = _run_move_graph_nodes_to_cuda(
             [
@@ -237,7 +206,7 @@ class TestCompiledAutogradAcceleratorScalarMove(TestCase):
         self.assertEqual(indices, [])
         self.assertIsNone(target)
 
-    def test_cuda_cpu_vector_and_scalar_skip(self) -> None:
+    def test_cpu_vector_does_not_block_scalar_move(self) -> None:
         graph = _build_compiled_autograd_inputs_graph(
             [
                 _MetaVal(torch.device("cuda", 0), (2,)),
@@ -261,9 +230,9 @@ class TestCompiledAutogradAcceleratorScalarMove(TestCase):
         ) as move_mock:
             indices, target = inst.move_graph_nodes_to_cuda(graph)
 
-        self.assertEqual(indices, [])
-        self.assertIsNone(target)
-        move_mock.assert_not_called()
+        self.assertEqual(indices, [2])
+        self.assertEqual(target, torch.device("cuda", 0))
+        move_mock.assert_called_once()
 
     @requires_cuda
     def test_move_cpu_scalar_to_device_preserves_cuda_index(self) -> None:
