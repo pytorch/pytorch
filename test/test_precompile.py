@@ -4809,6 +4809,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
     @skipIfCrossRef
     @parametrize("compiled", ["calls_breaking_helper", "breaking_helper"])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_refuses_frames_compiled_before_load(self, compiled):
         # A fresh process that torch.compile'd the entry, or only a frame the
         # entry calls, holds live entries that would serve uncovered calls.
