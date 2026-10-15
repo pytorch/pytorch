@@ -191,10 +191,12 @@ class <lambda>(torch.nn.Module):
             self.assertEqual(e, c)
 
     @parametrize("proxy", [False, True])
-    def test_autograd_grad_mapping_items_override(self, proxy):
+    @parametrize("iterator_items", [False, True])
+    def test_autograd_grad_mapping_items_override(self, proxy, iterator_items):
         class Inputs(OrderedDict):
             def items(self):
-                return [("x", self["y"]), ("y", self["x"])]
+                items = [("x", self["y"]), ("y", self["x"])]
+                return [iter(item) for item in items] if iterator_items else items
 
         def fn(x, y):
             inputs = Inputs(x=x, y=y)

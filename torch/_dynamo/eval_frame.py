@@ -303,6 +303,14 @@ class _FailOnRecompileCallback:
         if not convert_frame.has_tensor_in_frame(frame):
             return ConvertFrameReturn()
 
+        # convert_frame would skip a disable(recursive=False) frame rather than
+        # compile it, so a cache miss there is not a recompile. The eval-frame
+        # hook calls this method directly, so its caller is the missed frame's.
+        if (
+            disabled := convert_frame.nonrecursive_disable_skip(sys._getframe(1))
+        ) is not None:
+            return disabled
+
         from torch._C._dynamo.eval_frame import (
             _debug_get_cache_entry_list,
             _debug_get_precompile_entries,
@@ -557,6 +565,11 @@ class OptimizedModule(torch.nn.Module):
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
         self.training = self._orig_mod.training
+
+    def __bool__(self) -> bool:
+        # Proxy the bool call to the original module
+        # pyrefly: ignore [unsafe-overlap]
+        return bool(self._orig_mod)
 
     def __len__(self) -> int:
         # Proxy the len call to the original module
