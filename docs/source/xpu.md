@@ -127,7 +127,7 @@
     :toctree: generated
     :nosignatures:
 
-     available_metrics
+     available_scope_profiler_metrics
 ```
 
 ```{eval-rst}

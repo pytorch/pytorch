@@ -730,7 +730,7 @@ void initPythonBindings(PyObject* module) {
       .def("to_unix_ns", &ApproximateClockPyConverter::to_unix_ns);
   m.def("_get_approximate_time", []() { return c10::getApproximateTime(); });
 #if defined(USE_KINETO) && defined(HAS_XPUPTI)
-  m.def("_xpu_available_metrics", [](const py::bytes& device_uuid) {
+  m.def("_xpu_available_scope_profiler_metrics", [](const py::bytes& device_uuid) {
     const std::string uuid_str = device_uuid;
     libkineto::XpuDeviceUuid uuid{};
     TORCH_CHECK(

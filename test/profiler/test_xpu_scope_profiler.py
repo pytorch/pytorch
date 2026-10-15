@@ -198,13 +198,16 @@ class XpuScopeProfilerTest(TestCase):
         self.assertEqual(count_metrics, 0)
 
     @unittest.skipIf(not TEST_XPU, "test requires XPU")
-    def test_available_metrics(self):
+    def test_available_scope_profiler_metrics(self):
         if not self.required_env_setting():
             self.skipTest("ZET_ENABLE_METRICS not set")
 
-        groups = torch.xpu.profiler.available_metrics()
+        groups = torch.xpu.profiler.available_scope_profiler_metrics()
         self.assertEqual(
-            groups, torch.xpu.profiler.available_metrics(torch.xpu.current_device())
+            groups,
+            torch.xpu.profiler.available_scope_profiler_metrics(
+                torch.xpu.current_device()
+            ),
         )
         with self.assertRaises(TypeError):
             groups[""] = ()  # type: ignore[index]
@@ -217,7 +220,7 @@ class XpuScopeProfilerTest(TestCase):
                 self.assertTrue(name)
 
         with self.assertRaisesRegex(RuntimeError, "does not support metrics"):
-            torch._C._profiler._xpu_available_metrics(bytes(16))
+            torch._C._profiler._xpu_available_scope_profiler_metrics(bytes(16))
 
         if not self.required_paranoid_settings():
             self.skipTest("paranoid settings missing")
