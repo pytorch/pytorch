@@ -54,12 +54,12 @@ class PreservesZeros(SymPyOps, DefaultHandler):
 
     def to_dtype(
         self,
-        x: TypedExpr,
+        value: TypedExpr,
         dtype: torch.dtype,
         src_dtype: torch.dtype | None = None,
         use_compute_types: bool = True,
     ) -> TypedExpr:
-        result = SymPyOps.to_dtype(x, dtype, src_dtype, use_compute_types)
+        result = SymPyOps.to_dtype(value, dtype, src_dtype, use_compute_types)
         if result is NotImplemented:
             # SymPyOps does not fold a rounding cast; stay conservative.
             return TypedExpr(construct_symbol(next(self.count), dtype), dtype)
