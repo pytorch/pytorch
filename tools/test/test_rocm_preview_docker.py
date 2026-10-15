@@ -96,6 +96,39 @@ printf '%s\\n' "$@" >> "$DOCKER_LOG"
             build_args,
         )
 
+    def test_manywheel_builder_arguments_preserve_argv_boundaries(self) -> None:
+        cases = {
+            "manylinux2_28-builder:cpu": {"DEVTOOLSET_VERSION=13"},
+            "manylinux2_28_aarch64-builder:cpu-aarch64": {
+                "DEVTOOLSET_VERSION=13"
+            },
+            "manylinux2_28-builder:cuda11.8": {
+                "BASE_CUDA_VERSION=11.8",
+                "DEVTOOLSET_VERSION=11",
+            },
+            "manylinux2_28-builder:cuda12.6": {
+                "BASE_CUDA_VERSION=12.6",
+                "DEVTOOLSET_VERSION=13",
+            },
+            "manylinux2_28-builder:cuda13.4": {
+                "BASE_CUDA_VERSION=13.4",
+                "DEVTOOLSET_VERSION=13",
+            },
+            "manylinuxaarch64-builder:cuda13.4": {
+                "BASE_CUDA_VERSION=13.4",
+                "DEVTOOLSET_VERSION=13",
+            },
+            "manylinux2_28-builder:xpu": {"DEVTOOLSET_VERSION=13"},
+        }
+        script = REPO_ROOT / ".ci/docker/manywheel/build.sh"
+        for image, expected_values in cases.items():
+            with self.subTest(image=image):
+                result, docker_args = self.run_builder(script, image)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                build_args = set(itertools.pairwise(docker_args))
+                for expected in expected_values:
+                    self.assertIn(("--build-arg", expected), build_args)
+
 
 if __name__ == "__main__":
     unittest.main()
