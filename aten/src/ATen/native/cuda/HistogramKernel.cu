@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <functional>
 #include <numeric>
+#include <type_traits>
 #include <vector>
 
 namespace at::native {
@@ -31,6 +32,18 @@ namespace {
 constexpr int histogram_threads = 256;
 constexpr int histogram_blocks_per_sm = 4;
 constexpr int histogram_shared_bins_per_sample = 8;
+constexpr int histogram_inline_dimensions = 8;
+#if defined(__CUDACC__) && !defined(USE_ROCM) && CUDART_VERSION >= 11070
+constexpr bool histogram_inline_parameters = true;
+#else
+constexpr bool histogram_inline_parameters = false;
+#endif
+
+template <typename scalar_t>
+struct HistogramBinEdges {
+  const scalar_t* data[histogram_inline_dimensions];
+  int64_t size[histogram_inline_dimensions];
+};
 
 template <typename scalar_t, typename index_t, bool linear_bins>
 __device__ index_t histogram_bin(
@@ -81,6 +94,7 @@ template <
     typename index_t,
     bool linear_bins,
     bool one_dimensional,
+    bool inline_bin_edges,
     bool weighted,
     bool shared_histogram>
 __global__ C10_LAUNCH_BOUNDS_1(histogram_threads) void histogramdd_cuda_kernel(
@@ -91,7 +105,11 @@ __global__ C10_LAUNCH_BOUNDS_1(histogram_threads) void histogramdd_cuda_kernel(
     index_t dimension_stride,
     const scalar_t* weight,
     index_t weight_stride,
-    const scalar_t* edges,
+    // Dynamic indexing must read kernel parameters without a per-thread local copy.
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700 && !defined(USE_ROCM) && CUDART_VERSION >= 11070
+    __grid_constant__
+#endif
+    const std::conditional_t<inline_bin_edges, HistogramBinEdges<scalar_t>, const scalar_t*> edges,
     const int64_t* edge_offsets,
     scalar_t* histogram,
     index_t num_bins,
@@ -118,6 +136,9 @@ __global__ C10_LAUNCH_BOUNDS_1(histogram_threads) void histogramdd_cuda_kernel(
       if constexpr (one_dimensional) {
         dim_edges = edges;
         num_edges = num_bins + 1;
+      } else if constexpr (inline_bin_edges) {
+        dim_edges = edges.data[dim];
+        num_edges = static_cast<index_t>(edges.size[dim]);
       } else {
         dim_edges = edges + static_cast<index_t>(edge_offsets[dim]);
         num_edges = static_cast<index_t>(edge_offsets[dim + 1] - edge_offsets[dim]);
@@ -196,11 +217,27 @@ void histogramdd_out_cuda_template(
 
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "histogram_cuda", [&]() {
     if (dimensions > 0 && num_samples > 0) {
+      const auto* properties = at::cuda::getCurrentDeviceProperties();
+      const bool use_inline_edges = histogram_inline_parameters && properties->major >= 7 &&
+          dimensions > 1 && dimensions <= histogram_inline_dimensions;
       Tensor edges;
       Tensor edge_offsets;
       Tensor host_offsets; // Keep pinned metadata alive through the kernel launch.
+      std::vector<Tensor> contiguous_edges;
+      HistogramBinEdges<scalar_t> inline_edges{};
+      bool edges_use_32bit = true;
       if (dimensions == 1) {
         edges = bin_edges[0].contiguous();
+      } else if (use_inline_edges) {
+        // Kernel parameters avoid a concatenation and a metadata copy for small dimension counts.
+        contiguous_edges.reserve(dimensions);
+        for (const auto dim : c10::irange(dimensions)) {
+          contiguous_edges.push_back(bin_edges[dim].contiguous());
+          const auto& edge = contiguous_edges.back();
+          inline_edges.data[dim] = edge.const_data_ptr<scalar_t>();
+          inline_edges.size[dim] = edge.numel();
+          edges_use_32bit = edges_use_32bit && canUse32BitIndexMath(edge);
+        }
       } else {
         host_offsets = at::empty(
             {dimensions + 1}, at::TensorOptions().device(kCPU).dtype(kLong).pinned_memory(true));
@@ -212,7 +249,6 @@ void histogramdd_out_cuda_template(
         edges = at::cat(bin_edges);
         edge_offsets = host_offsets.to(self.device(), /*non_blocking=*/true);
       }
-      const auto* properties = at::cuda::getCurrentDeviceProperties();
       const int blocks = static_cast<int>(std::min<int64_t>(
           (num_samples - 1) / histogram_threads + 1, properties->multiProcessorCount * histogram_blocks_per_sm));
       const auto stream = at::cuda::getCurrentCUDAStream();
@@ -234,34 +270,47 @@ void histogramdd_out_cuda_template(
       const int64_t weight_stride = weights.defined() ? weights.stride(0) : 0;
       const int64_t* offsets = edge_offsets.defined() ? edge_offsets.const_data_ptr<int64_t>() : nullptr;
       const bool use_32bit = canUse32BitIndexMath(input) && canUse32BitIndexMath(histogram) &&
-          canUse32BitIndexMath(edges) && (!weights.defined() || canUse32BitIndexMath(weights));
+          edges_use_32bit && (!edges.defined() || canUse32BitIndexMath(edges)) &&
+          (!weights.defined() || canUse32BitIndexMath(weights));
       AT_DISPATCH_INDEX_TYPES(use_32bit ? kInt : kLong, "histogram_cuda_index", [&]() {
-        auto launch = [&]<bool one_dimensional, bool weighted>() {
+        auto launch = [&]<bool one_dimensional, bool inline_bin_edges, bool weighted>() {
+          std::conditional_t<inline_bin_edges, HistogramBinEdges<scalar_t>, const scalar_t*> edge_data;
+          if constexpr (inline_bin_edges) {
+            edge_data = inline_edges;
+          } else {
+            edge_data = edges.const_data_ptr<scalar_t>();
+          }
           if (use_shared) {
-            histogramdd_cuda_kernel<scalar_t, index_t, linear_bins, one_dimensional, weighted, true>
+            histogramdd_cuda_kernel<scalar_t, index_t, linear_bins, one_dimensional, inline_bin_edges, weighted, true>
                 <<<blocks, histogram_threads, shared_bytes * replicas, stream>>>(
                     input.const_data_ptr<scalar_t>(), num_samples, dimensions, input.stride(0), input.stride(1),
-                    weight_data, weight_stride, edges.const_data_ptr<scalar_t>(), offsets,
+                    weight_data, weight_stride, edge_data, offsets,
                     histogram.mutable_data_ptr<scalar_t>(), histogram.numel(), replicas);
           } else {
-            histogramdd_cuda_kernel<scalar_t, index_t, linear_bins, one_dimensional, weighted, false>
+            histogramdd_cuda_kernel<scalar_t, index_t, linear_bins, one_dimensional, inline_bin_edges, weighted, false>
                 <<<blocks, histogram_threads, 0, stream>>>(
                     input.const_data_ptr<scalar_t>(), num_samples, dimensions, input.stride(0), input.stride(1),
-                    weight_data, weight_stride, edges.const_data_ptr<scalar_t>(), offsets,
+                    weight_data, weight_stride, edge_data, offsets,
                     histogram.mutable_data_ptr<scalar_t>(), histogram.numel(), 1);
           }
         };
         if (dimensions == 1) {
           if (weights.defined()) {
-            launch.template operator()<true, true>();
+            launch.template operator()<true, false, true>();
           } else {
-            launch.template operator()<true, false>();
+            launch.template operator()<true, false, false>();
+          }
+        } else if (use_inline_edges) {
+          if (weights.defined()) {
+            launch.template operator()<false, true, true>();
+          } else {
+            launch.template operator()<false, true, false>();
           }
         } else {
           if (weights.defined()) {
-            launch.template operator()<false, true>();
+            launch.template operator()<false, false, true>();
           } else {
-            launch.template operator()<false, false>();
+            launch.template operator()<false, false, false>();
           }
         }
       });

@@ -4148,6 +4148,8 @@ class TestReductions(TestCase):
         (3, 7, "counts", False, False, 262145),
         (3, 32, "edges", False, True, 257),
         (3, 32, "counts", True, False, 257),
+        (8, 1, "edges", True, False, 257),
+        (9, 1, "counts", False, True, 257),
         (1, 7, "inferred", False, False, 0),
         (3, 7, "inferred", True, True, 0),
     ])
