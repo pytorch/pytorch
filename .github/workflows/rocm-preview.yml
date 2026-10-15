@@ -89,25 +89,3 @@ jobs:
         inductor/test_aot_inductor
         inductor/test_cpu_select_algorithm
     secrets: inherit
-
-  linux-noble-rocm-preview-py3_12-test-dind:
-    permissions:
-      id-token: write
-      contents: read
-    name: linux-noble-rocm-preview-py3.12-mi350-dind
-    if: needs.linux-noble-rocm-preview-py3_12-test.outputs.image-mirrored == 'false'
-    uses: ./.github/workflows/_rocm-test.yml
-    needs:
-      - linux-noble-rocm-preview-py3_12-build
-      - linux-noble-rocm-preview-py3_12-test
-      - target-determination
-    with:
-      build-environment: ${{ needs.linux-noble-rocm-preview-py3_12-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-noble-rocm-preview-py3_12-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-noble-rocm-preview-py3_12-test.outputs.dind-test-matrix }}
-      tests-to-exclude: >-
-        inductor/test_torchinductor
-        inductor/test_torchinductor_opinfo
-        inductor/test_aot_inductor
-        inductor/test_cpu_select_algorithm
-    secrets: inherit

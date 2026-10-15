@@ -144,17 +144,3 @@ jobs:
       docker-image: ${{ needs.opmicrobenchmark-build-rocm.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build-rocm.outputs.test-matrix }}
     secrets: inherit
-
-  opmicrobenchmark-test-rocm-dind:
-    name: opmicrobenchmark-test-rocm-dind
-    if: needs.opmicrobenchmark-test-rocm.outputs.image-mirrored == 'false'
-    uses: ./.github/workflows/_rocm-test.yml
-    needs:
-      - opmicrobenchmark-build-rocm
-      - opmicrobenchmark-test-rocm
-    with:
-      timeout-minutes: 900
-      build-environment: ${{ needs.opmicrobenchmark-build-rocm.outputs.build-environment }}
-      docker-image: ${{ needs.opmicrobenchmark-build-rocm.outputs.docker-image }}
-      test-matrix: ${{ needs.opmicrobenchmark-test-rocm.outputs.dind-test-matrix }}
-    secrets: inherit

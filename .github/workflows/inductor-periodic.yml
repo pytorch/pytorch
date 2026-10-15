@@ -117,19 +117,6 @@ jobs:
       test-matrix: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
     secrets: inherit
 
-  rocm-periodic-dynamo-benchmarks-test-dind:
-    name: rocm-periodic-dynamo-benchmarks-test-dind
-    if: needs.rocm-periodic-dynamo-benchmarks-test.outputs.image-mirrored == 'false'
-    uses: ./.github/workflows/_rocm-test.yml
-    needs:
-      - rocm-periodic-dynamo-benchmarks-build
-      - rocm-periodic-dynamo-benchmarks-test
-    with:
-      build-environment: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.build-environment }}
-      docker-image: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.docker-image }}
-      test-matrix: ${{ needs.rocm-periodic-dynamo-benchmarks-test.outputs.dind-test-matrix }}
-    secrets: inherit
-
   inductor-smoke-build:
     name: inductor-smoke-build
     uses: ./.github/workflows/_linux-build.yml

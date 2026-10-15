@@ -74,17 +74,3 @@ jobs:
       docker-image: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_11-build.outputs.test-matrix }}
     secrets: inherit
-
-  linux-noble-rocm-py3_11-test-dind:
-    name: linux-noble-rocm-py3.11-mi350-dind
-    if: needs.linux-noble-rocm-py3_11-test.outputs.image-mirrored == 'false'
-    uses: ./.github/workflows/_rocm-test.yml
-    needs:
-      - linux-noble-rocm-py3_11-build
-      - linux-noble-rocm-py3_11-test
-      - target-determination
-    with:
-      build-environment: ${{ needs.linux-noble-rocm-py3_11-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-noble-rocm-py3_11-test.outputs.dind-test-matrix }}
-    secrets: inherit
