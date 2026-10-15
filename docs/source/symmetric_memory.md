@@ -997,11 +997,46 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 
     Performs an all-to-all-v operation using NVSHMEM, with split information provided on device.
 
-    :param Tensor input: Input tensor to perform all-to-all on. Must be symmetric.
-    :param Tensor out: Output tensor to store the result of the all-to-all operation. Must be symmetric.
-    :param Tensor in_splits: Tensor containing splits of data to send to each peer. Must be symmetric. Must be of size (group_size,). The splits are in the unit of elements in the 1st dimension.
-    :param Tensor out_splits_offsets: Tensor containing the splits and offsets of data received from each peer. Must be symmetric. Must be of size (2, group_size). The rows are (in order): output splits and output offsets.
+    :param Tensor input: Input tensor to perform all-to-all on. Must be symmetric and contiguous, and at least 1-dimensional.
+    :param Tensor out: Output tensor to store the result of the all-to-all operation. Must be symmetric and contiguous, at least 1-dimensional, and have the same dtype and the same dim-0 stride (i.e. the same per-row/inner shape) as `input`.
+    :param Tensor in_splits: Tensor containing splits of data to send to each peer. Must be symmetric, contiguous, and of dtype `torch.int64`. Must be of size (group_size,). The splits are in the unit of elements in the 1st dimension. Each split must be non-negative and the splits must sum to at most ``input.size(0)``; violating this is a fatal device-side assertion (it aborts the process), not a catchable error.
+    :param Tensor out_splits_offsets: Tensor containing the splits and offsets of data received from each peer. Must be symmetric, contiguous, and of dtype `torch.int64`. Must be of size (2, group_size). The rows are (in order): output splits and output offsets.
     :param str group_name: Name of the group to perform all-to-all on.
+
+    .. warning::
+
+        The operation's completion barrier orders only the received data buffer
+        in `out`, not a peer's subsequent write into row 0 (the output splits) of
+        `out_splits_offsets`. A caller that reads `out_splits_offsets` must
+        consume or copy it out (e.g. via a D2H copy, or an intervening
+        collective) before issuing the next `all_to_all_vdev` on the same handle;
+        otherwise, when reading `out_splits_offsets` across back-to-back calls, it
+        may observe torn or next-call split metadata.
+
+    .. warning::
+
+        This operation uses the signal pad of the `out_splits_offsets` handle as
+        per-peer signaling scratch. Do not share that handle with another
+        concurrent symmetric-memory operation, or the two will corrupt each
+        other's signaling.
+
+    .. note::
+
+        All tensor arguments must be on the same device. The op carves its
+        signaling region from the ``out_splits_offsets`` handle's signal pad; for
+        large ``world_size`` the default pad can be too small, in which case the op
+        raises -- enlarge it beforehand via
+        :func:`torch.distributed._symmetric_memory.set_signal_pad_size`.
+
+    .. note::
+
+        On an intra-node (direct peer-to-peer / IPC) group, `all_to_all_vdev`
+        runs a fully device-driven fast path (no host barrier, CUDA-graph
+        capturable). On an inter-node / reverse-offload group it falls back to a
+        host-barrier path with host synchronization points, not CUDA-graph
+        capturable. This fallback is logic-validated on single-node (direct-access)
+        hardware via a test-only override; its behaviour on real multi-node
+        transports (reverse-offload / GPU-direct) has not yet been exercised in CI.
 
 
 .. py:function:: all_to_all_vdev_2d(input: Tensor, out: Tensor, in_splits: Tensor, out_splits_offsets: Tensor, group_name: str, [major_align: int = None]) -> None
