@@ -18100,8 +18100,6 @@ op_db: list[OpInfo] = [
                    dtypes=(torch.float32,),
                    device_type="cuda",
                ),
-               # The operator 'aten::mode' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
            ),
            sample_inputs_func=sample_inputs_mode,),
     make_mvlgamma_opinfo(variant_test_name='mvlgamma_p_1',
