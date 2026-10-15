@@ -20,6 +20,7 @@ from torch.utils._sympy.functions import Min
 from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
+from ..runtime.runtime_utils import metal_include
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
 from ..virtualized import ops, OpsWrapper, V
 from .common import (
@@ -543,6 +544,14 @@ class MetalOverrides(OpOverrides):
     def _special_binary(self, a: CSEVariable, b: CSEVariable, name: str) -> str:
         V.kernel.headers.add("special_math")
         return f"c10::metal::{name}({a}, {b})"
+
+    @staticmethod
+    def ndtri(a: CSEVariable) -> str:
+        # calc_ndtri is shared with the CPU through ATen/native/Math.h, which
+        # also compiles as Metal. Evaluate it in float: the Cephes coefficients
+        # carry more significant digits than half or bfloat can hold.
+        V.kernel.headers.add("ATen/native/Math.h")
+        return f"calc_ndtri(static_cast<float>({a}))"
 
     @classmethod
     def _initialize_special_ops(cls) -> None:
@@ -1079,11 +1088,9 @@ class MetalKernel(SIMDKernel):
         with code.indent():
             if not V.graph.cpp_wrapper:
                 for header in self.headers:
-                    code.writeline(f"#include <c10/metal/{header}.h>")
+                    code.writeline(metal_include(header))
             else:
-                headers = [
-                    f"#include <c10/metal/{header}.h>" for header in self.headers
-                ]
+                headers = [metal_include(header) for header in self.headers]
                 header_contents = _embed_headers(
                     headers,
                     [Path(get_file_path("torch")) / "include"],
