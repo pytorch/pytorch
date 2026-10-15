@@ -35,7 +35,7 @@ from .graph_view import get_subgraph_by_path, GraphView, make_graph_view
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 import logging
 
@@ -138,14 +138,20 @@ def _collect_nodes_must_be_after(node: fx.Node) -> list[fx.Node]:
 
 
 def _collect_nodes_must_be_before(
-    node: fx.Node, node_positions: dict[fx.Node, int]
+    node: fx.Node,
+    node_positions: dict[fx.Node, int],
+    earliest_position: int,
 ) -> list[fx.Node]:
-    """BFS backward collecting node and its non-placeholder dependencies, topo-sorted."""
+    """Collect non-placeholder dependencies at or after ``earliest_position``."""
     visited: OrderedSet[fx.Node] = OrderedSet()
     queue = [node]
     while queue:
         cur = queue.pop()
-        if cur in visited or cur.op == "placeholder":
+        if (
+            cur in visited
+            or cur.op == "placeholder"
+            or node_positions[cur] < earliest_position
+        ):
             continue
         visited.add(cur)
         queue.extend(cur.all_input_nodes)
@@ -187,28 +193,44 @@ def _all_reduce_bucket_trace_inputs(coll_node: fx.Node) -> list[fx.Node]:
     return _bucket_trace_inputs(coll_node, coll_node.args[0], group_name_arg=2)
 
 
+def _do_stable_topological_sort_if_needed(
+    graph: fx.Graph, changed_nodes: Iterable[fx.Node]
+) -> None:
+    """Restore stable topological order if a changed node crosses an edge.
+
+    Callers must include every node moved relative to its neighbors and every
+    endpoint rewired to a node at an independently chosen position. Any newly
+    backward edge is then incident to ``changed_nodes``.
+    """
+    node_positions = {n: i for i, n in enumerate(graph.nodes)}
+    for node in changed_nodes:
+        if node not in node_positions:
+            continue
+        node_pos = node_positions[node]
+        has_late_input = any(
+            inp in node_positions and node_positions[inp] > node_pos
+            for inp in node.all_input_nodes
+        )
+        has_early_user = any(
+            user in node_positions and node_positions[user] < node_pos
+            for user in node.users
+        )
+        if has_late_input or has_early_user:
+            from torch._dynamo.graph_deduplication import _stable_topological_sort
+
+            _stable_topological_sort(graph, {})
+            return
+
+
 def _move_wait_users_after_latest_inputs(
     graph: fx.Graph,
     replacements: dict[fx.Node, fx.Node],
     replaced_users: dict[fx.Node, list[fx.Node]],
 ) -> None:
-    node_positions = {n: i for i, n in enumerate(graph.nodes)}
-    initial_users: OrderedSet[fx.Node] = OrderedSet()
-    for old_out, new_out in replacements.items():
-        if new_out not in node_positions:
-            continue
-        for user in replaced_users.get(old_out, []):
-            if (
-                user in node_positions
-                and user.op != "output"
-                and node_positions[user] < node_positions[new_out]
-            ):
-                initial_users.add(user)
-
-    if initial_users:
-        from torch._dynamo.graph_deduplication import _stable_topological_sort
-
-        _stable_topological_sort(graph, {})
+    changed_nodes: OrderedSet[fx.Node] = OrderedSet(replacements.values())
+    for old_out in replacements:
+        changed_nodes.update(replaced_users.get(old_out, ()))
+    _do_stable_topological_sort_if_needed(graph, changed_nodes)
 
 
 def _move_overlap_nodes(
@@ -221,6 +243,7 @@ def _move_overlap_nodes(
 
     rs_defer: dict[fx.Node, list[fx.Node]] = defaultdict(list)
     ag_prefetch: dict[fx.Node, list[fx.Node]] = defaultdict(list)
+    moved_nodes: OrderedSet[fx.Node] = OrderedSet()
 
     for target, sources in overlap_deps.items():
         for source in sources:
@@ -238,6 +261,7 @@ def _move_overlap_nodes(
         latest_rs_start = max(rs_starts, key=lambda n: node_positions[n])
         node_insert_after = latest_rs_start
         for node in _collect_nodes_must_be_after(rs_wait):
+            moved_nodes.add(node)
             node_insert_after.append(node)
             node_insert_after = node
 
@@ -250,8 +274,17 @@ def _move_overlap_nodes(
         for ag_start in sorted_starts:
             if node_positions[ag_start] < ag_wait_pos:
                 continue
-            for node in _collect_nodes_must_be_before(ag_start, node_positions):
+            # Dependencies already before the wait are early enough and should
+            # stay in place rather than moving past their existing users.
+            for node in _collect_nodes_must_be_before(
+                ag_start, node_positions, ag_wait_pos
+            ):
+                moved_nodes.add(node)
                 ag_wait.prepend(node)
+
+    # Moving only the closed part of a chain can leave a boundary edge pointing
+    # backward. Repair once after all requested overlap moves have been applied.
+    _do_stable_topological_sort_if_needed(graph, moved_nodes)
 
 
 class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):

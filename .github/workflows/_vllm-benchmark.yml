@@ -62,14 +62,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git unzip
 
-      # OSDC runner pods reuse the workspace across jobs, leaving root-owned
-      # content that actions/checkout can't delete (uid mismatch: GH hook 1001 vs
-      # CI image 1000). Same fix as setup-linux's "Fix workspace permissions".
-      - name: Fix workspace permissions
-        if: ${{ !contains(inputs.runner, 'dgx') }}
+      - name: Ack Git cache ownership
         shell: bash
         run: |
-          sudo chmod -R 777 "$GITHUB_WORKSPACE"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout PyTorch

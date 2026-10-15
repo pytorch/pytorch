@@ -15,28 +15,27 @@ constexpr inline integer ceil_div(integer n, integer m) {
   return (n + m - 1) / m;
 }
 
-template <typename integer>
-constexpr inline integer get_log_num_threads_x_inner_scan(integer num_rows, integer row_size) {
-  integer log_num_threads_x = 0;
-  integer log_num_threads_y = 0;
-  while (((integer)1 << log_num_threads_x) < row_size) {
+constexpr inline uint32_t get_log_num_threads_x_inner_scan(int64_t num_rows, int64_t row_size) {
+  int64_t log_num_threads_x = 0;
+  int64_t log_num_threads_y = 0;
+  while ((int64_t{1} << log_num_threads_x) < row_size) {
     ++log_num_threads_x;
   }
-  while (((integer)1 << log_num_threads_y) < num_rows) {
+  while ((int64_t{1} << log_num_threads_y) < num_rows) {
     ++log_num_threads_y;
   }
   // we want to keep the ratio between the x-threads and y-threads about the same as
   // the ratio between the row_size and num_rows, but the total number of threads in
   // a block should be about 512
-  integer diff = log_num_threads_x - log_num_threads_y;
+  const int64_t diff = log_num_threads_x - log_num_threads_y;
   // 9 is from log2(512)
-  log_num_threads_x = ((integer)9 + diff) / (integer)2;
+  log_num_threads_x = (int64_t{9} + diff) / int64_t{2};
   // I found that in having larger log_num_threads_x can give significant speed up in some cases,
   // but detrimental in another case, so just keep the lower bound to be log2(16) == 4 to make it
   // similar to the previous implementation
   // Keeping the upper bound to be log2(512) == 9 as the maximum number of threads in a block.
-  log_num_threads_x = std::clamp(log_num_threads_x, (integer)4, (integer)9);
-  return log_num_threads_x;
+  log_num_threads_x = std::clamp(log_num_threads_x, int64_t{4}, int64_t{9});
+  return static_cast<uint32_t>(log_num_threads_x);
 }
 
 template<typename scalar_t, typename idx_t, typename BinaryOperation>
@@ -223,7 +222,7 @@ __host__ void scan_innermost_dim_with_indices(
 
   // assuming max_num_threads per block is 512
   const uint32_t num_threads = 512;
-  const uint32_t log_num_threads_x = get_log_num_threads_x_inner_scan<uint32_t>(num_rows, row_size);
+  const uint32_t log_num_threads_x = get_log_num_threads_x_inner_scan(num_rows, row_size);
   const uint32_t num_threads_x = (1 << log_num_threads_x);
   const uint32_t num_threads_y = num_threads / num_threads_x;
   dim3 threads(num_threads_x, num_threads_y);
@@ -431,7 +430,7 @@ void scan_innermost_dim(const TensorBase& self, const TensorBase& result,
 
   // assuming max_num_threads per block is 512
   const uint32_t num_threads = 512;
-  const uint32_t log_num_threads_x = get_log_num_threads_x_inner_scan<uint32_t>(num_rows, row_size);
+  const uint32_t log_num_threads_x = get_log_num_threads_x_inner_scan(num_rows, row_size);
   const uint32_t num_threads_x = (1 << log_num_threads_x);
   const uint32_t num_threads_y = num_threads / num_threads_x;
   dim3 threads(num_threads_x, num_threads_y);

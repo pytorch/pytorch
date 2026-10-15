@@ -725,6 +725,25 @@ if HAS_CUDA_AND_TRITON:
         def test_rng_non_trees(self):
             self.check_rng()
 
+            from torch._inductor.compile_fx import cudagraphify_impl
+
+            def fn(args):
+                x, *states = args
+                args.clear()
+                noise = sum(torch.rand(1, device=x.device, generator=g) for g in states)
+                return [x + noise]
+
+            x = torch.ones(1, device="cuda")
+            generators = [torch.Generator(device="cuda") for _ in range(9)]
+            with config.patch("size_asserts", True):
+                graphed = cudagraphify_impl(fn, [x, *generators], ())
+            for generator in generators:
+                generator.manual_seed(0)
+            expected = fn([x, *generators])
+            for generator in generators:
+                generator.manual_seed(0)
+            self.assertEqual(graphed([x, *generators]), expected)
+
         def test_mutation_reinplaced(self):
             import torch.nn as nn
 
@@ -2091,9 +2110,10 @@ if HAS_CUDA_AND_TRITON:
             def foo(args):
                 x = args[0]
                 args.clear()
-                return x + 1, x + 2
+                return x + torch.rand_like(x), x + 2
 
             inp = torch.rand([4], device="cuda")
+            original_input = inp
             inp_list = [inp]
             foo_cg = self.cudagraphify_impl(foo, inp_list, ())
             foo_cg(inp_list)
@@ -2121,6 +2141,13 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(all_live_block_count(), 1)
             del x
             self.assertEqual(all_live_block_count(), 0)
+
+            # Replay the original RNG graph after restoring its pool checkpoint.
+            torch.cuda.manual_seed(123)
+            expected = original_input + torch.rand_like(original_input)
+            torch.cuda.manual_seed(123)
+            actual, _ = self.replay_next_generation(foo_cg, [original_input])
+            self.assertEqual(actual, expected)
 
         def test_aliased_storage_single_weakref(self):
             @torch.compile(mode="reduce-overhead")
@@ -5380,6 +5407,31 @@ if HAS_CUDA_AND_TRITON:
             # index_put reads CPU indices, so it runs between two graphs.
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @config.patch("graph_partition", True)
+        @parametrize("dtype", (torch.complex64, torch.complex128))
+        @parametrize("copy_to_cpu", (False, True))
+        def test_graph_partition_index_put_output(self, dtype, copy_to_cpu):
+            def fn(x, index):
+                out = torch.zeros_like(x)
+                out[:, index] = x
+                return out.cpu() if copy_to_cpu else out
+
+            fn_c = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+            index = torch.arange(16, device="cuda").flip(0)
+            for i in range(3):
+                x = torch.randn(4, 16, device="cuda", dtype=dtype)
+                if i == 0:
+                    actual, code = run_and_get_code(fn_c, x, index)
+                    self.assertIn(
+                        "= torch.ops.aten.index_put_.default(", "\n".join(code)
+                    )
+                    self.assertEqual(get_num_partitions(code), 1)
+                else:
+                    actual = fn_c(x, index)
+                self.assertEqual(actual, fn(x, index), exact_device=True)
+                del actual
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
         @torch._inductor.config.patch("graph_partition", True)
         @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "needs flash attention")
         def test_graph_partition_sdpa_dropout_not_split(self):
@@ -7632,7 +7684,10 @@ if HAS_CUDA_AND_TRITON:
         @config.patch("test_configs.graphsafe_rng_func_ignores_fallback_random", True)
         def _test_cudagraphs_aot_eager_compat_equal(self, device):
             def gn(x, y):
-                return torch.sigmoid(torch.rand_like(x) * y) * x
+                # Graphsafe RNG functionalization gives each recomputed RNG op its own state.
+                for _ in range(9):
+                    x = torch.sigmoid(torch.rand_like(x) * y) * x
+                return x
 
             def fn(x, y):
                 x = torch.sin(x)

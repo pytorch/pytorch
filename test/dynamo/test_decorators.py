@@ -37,6 +37,10 @@ def tensor_constant_result():
     return torch.tensor([4.0])
 
 
+class CodelessCallPartial(functools.partial):
+    pass
+
+
 class DecoratorTests(PytreeRegisteringTestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1270,6 +1274,41 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(y, torch.ones(3) + 3)
 
+    @parametrize("attr", ["__torch_dynamo_polyfill__", "__wrapped__"])
+    @parametrize("registered", [False, True])
+    def test_substitute_in_graph_callable_attribute(self, attr, registered):
+        def original(x):
+            return x + 1
+
+        def polyfill(x):
+            return x + 2
+
+        if registered:
+
+            def replacement(x):
+                return x + 3
+
+            self.addCleanup(
+                torch._dynamo.decorators._unregister_substitute_in_graph, polyfill
+            )
+            polyfill = torch.compiler.substitute_in_graph(polyfill)(replacement)
+
+        wrapped = torch.compiler.substitute_in_graph(original)(polyfill)
+        self.addCleanup(
+            torch._dynamo.decorators._unregister_substitute_in_graph, original
+        )
+
+        def fn(x):
+            return getattr(wrapped, attr)(x)
+
+        x = torch.randn(3)
+        self.assertEqual(wrapped(x), x + 1)
+        self.assertEqual(fn(x), x + 2)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x), x + (3 if registered else 2))
+        self.assertEqual(counter.frame_count, 1)
+
     def test_substitute_in_graph(self):
         counters.clear()
 
@@ -1584,6 +1623,32 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(Foo.bar(x), expected)
         self.assertEqual(Foo().bar(x), expected)
         self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_compile_class_caching_precompile(self):
+        # Regression: @torch.compile on a class under caching_precompile=True
+        # crashed in _TorchDynamoContext.__call__ before reaching the isclass
+        # branch — the caching_precompile block accessed fn.__code__ on the
+        # class and raised `AttributeError: type object 'Foo' has no attribute
+        # '__code__'` at decoration time. Third-party libs decorate autograd
+        # Function subclasses this way at import.
+        from torch._dynamo.package import DynamoCache
+
+        DynamoCache.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        class Foo:
+            def __call__(self, x):
+                return x.sin()
+
+        x = torch.randn(4)
+        expected = x.sin()
+        self.assertEqual(Foo()(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+        CompiledPartial = torch.compile(backend="eager")(CodelessCallPartial)
+        self.assertEqual(CompiledPartial(torch.sin)(x), expected)
 
     def test_class_methods(self):
         class A:
@@ -2050,6 +2115,57 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         # should not raise error
         with torch.compiler.set_stance("fail_on_recompile"):
             f(torch.randn(3, 3))
+
+    def test_set_stance_fail_on_recompile_with_nonrecursive_disable(self):
+        scale = [1]
+
+        def inner(x):
+            return x * scale[0]
+
+        @torch._dynamo.disable(recursive=False)
+        def skipped(x):
+            return inner(x.cos())
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return skipped(x.sin())
+
+        x = torch.randn(3)
+        f(x)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(f(x), x.sin().cos())
+            scale[0] = 2
+            with self.assertRaisesRegex(RuntimeError, "function name: 'inner'"):
+                f(x)
+
+    def test_refuse_recompile_with_nonrecursive_disable(self):
+        # An installed precompile artifact binds this callback into its context.
+        from torch._dynamo.eval_frame import (
+            _RecompileRefusedError,
+            _RefuseRecompileCallback,
+        )
+
+        scale = [1]
+
+        def inner(x):
+            return x * scale[0]
+
+        @torch._dynamo.disable(recursive=False)
+        def skipped(x):
+            return inner(x.cos())
+
+        def f(x):
+            return skipped(x.sin())
+
+        x = torch.randn(3)
+        context = torch._dynamo.optimize(backend="eager")
+        context(f)(x)
+        context.callback = _RefuseRecompileCallback(context.callback)
+        refusing = context(f)
+        self.assertEqual(refusing(x), x.sin().cos())
+        scale[0] = 2
+        with self.assertRaisesRegex(_RecompileRefusedError, "function name: 'inner'"):
+            refusing(x)
 
     def test_set_stance_forbid_in_graph(self):
         @torch.compiler.set_stance("force_eager")
