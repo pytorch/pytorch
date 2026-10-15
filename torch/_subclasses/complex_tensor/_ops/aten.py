@@ -17,6 +17,7 @@ from .common import (
     register_complex,
     register_error,
     register_force_test,
+    register_inductor,
     register_simple,
     split_complex_arg,
     split_complex_tensor,
@@ -139,6 +140,21 @@ for simple_op in SIMPLE_FORCE_TESTED_OPS:
     )
 
 del simple_op
+
+INDUCTOR_OPS = [
+    aten.stft,
+    aten.istft,
+]
+INDUCTOR_OPS.extend(
+    getattr(aten, op) for op in aten if op.startswith(("fft_", "_fft_"))
+)
+
+for inductor_op in INDUCTOR_OPS:
+    globals()[_get_func_name(inductor_op)] = register_force_test(
+        inductor_op, register_inductor(inductor_op)
+    )
+
+del inductor_op
 
 # some binary ops which we can stamp out
 mul_impl = register_binary_nonlinear(aten.mul)
