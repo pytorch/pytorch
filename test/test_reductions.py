@@ -4149,7 +4149,10 @@ class TestReductions(TestCase):
         (3, 32, "edges", False, True, 257),
         (3, 32, "counts", True, False, 257),
         (8, 1, "edges", True, False, 257),
+        (8, 1, "counts", False, False, 257),
         (9, 1, "counts", False, True, 257),
+        (1, 6144, "edges", False, False, 1000000),
+        (1, 6145, "counts", True, True, 1000000),
         (1, 7, "inferred", False, False, 0),
         (3, 7, "inferred", True, True, 0),
     ])
@@ -4345,12 +4348,30 @@ class TestReductions(TestCase):
 
     @onlyCUDA
     @dtypes(torch.float32, torch.float64)
+    @parametrize("dimensions, bin_kind", [(1, "counts"), (3, "edges"), (8, "counts"), (9, "edges")])
+    @parametrize("num_samples", [2**24 - 1, 2**24 + 2, 2**31 - 2, 2**31 - 1, 2**31, 2**31 + 1])
+    def test_histogram_large_counts(self, device, dtype, dimensions, bin_kind, num_samples):
+        # Expanded inputs exercise large counts without allocating billions of samples.
+        values = torch.full((dimensions,), 0.5, device=device, dtype=dtype).expand(num_samples, dimensions)
+        edges = torch.tensor([0., 1.], device=device, dtype=dtype)
+        bins = [edges] * dimensions if bin_kind == "edges" else [1] * dimensions
+        kwargs = {"range": (0., 1.) * dimensions} if bin_kind == "counts" else {}
+        op = torch.histogramdd
+        if dimensions == 1:
+            op, values, bins = torch.histogram, values[:, 0], bins[0]
+        result, _ = op(values, bins, **kwargs)
+        expected = torch.full((1,) * dimensions, num_samples, device=device, dtype=dtype)
+        self.assertEqual(result, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float64)
     @parametrize("dimensions, weighted, bin_kind", [
         (1, False, "counts"), (1, True, "edges"),
         (3, False, "edges"), (3, True, "counts"),
     ])
     @parametrize("bin_count, num_samples", [
         (512, 4097), (2048, 257), (4096, 4097), (8192, 65537),
+        (6143, 1000000), (6144, 1000000), (6145, 1000000),
         (-1, 1000000), (0, 1000000), (1, 1000000),
     ])
     def test_histogram_shared_memory_boundary(self, device, dtype, dimensions, weighted, bin_kind, bin_count, num_samples):
