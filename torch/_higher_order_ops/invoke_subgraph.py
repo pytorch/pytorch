@@ -342,9 +342,19 @@ class InvokeSubgraphHOP(HigherOrderOperator):
                 f"identifier must be None or a string, got {type(identifier)}"
             )
 
+        # Proxy: symbolic re-tracing replays calls with proxies, e.g. when a
+        # cached GraphModule is unpickled (_deserialize_graph_module).
         if not all(
             isinstance(
-                o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
+                o,
+                (
+                    torch.Tensor,
+                    int,
+                    torch.SymInt,
+                    torch.Generator,
+                    FakeScriptObject,
+                    torch.fx.Proxy,
+                ),
             )
             or is_custom_class(type(o))
             for o in operands
