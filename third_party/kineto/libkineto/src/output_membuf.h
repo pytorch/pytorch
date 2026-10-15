@@ -80,7 +80,9 @@ class MemoryTraceLogger : public ActivityLogger {
     endTime_ = endTime;
   }
 
-  void finalizeMemoryTrace(const std::string&, const Config&) override {
+  void finalizeMemoryTrace(
+      const std::string& /*unused*/,
+      const Config& /*unused*/) override {
     LOG(INFO) << "finalizeMemoryTrace not implemented for MemLogger";
   }
 
