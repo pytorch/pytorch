@@ -550,7 +550,9 @@ def _own_triton_cache(settings: contextlib.ExitStack) -> str | None:
     use. When the scope closes, a JIT function gets back the compiled
     specializations and an autotuner the decisions the scope did not produce
     again, so those keep their state. Autotuners fix cache_results when they
-    are decorated, so existing ones are switched on for the scope too.
+    are decorated, so existing ones are switched on for the scope too. One
+    decorated inside the scope keeps it on afterwards: Triton does not record
+    whether its decorator asked for it.
     """
     if _triton_runtime_cache() is None:
         return None
@@ -601,9 +603,12 @@ def _own_triton_cache(settings: contextlib.ExitStack) -> str | None:
         for fn, caches in compiled:
             for device, saved in caches.items():
                 current = fn.device_caches.setdefault(device, saved)
-                if current is not saved:
-                    # kernel_cache and kernel_key_cache, keyed by specialization.
-                    for fresh, earlier in zip(current[:2], saved[:2]):
+                # Triton 3.8's (kernel_cache, kernel_key_cache, target, backend,
+                # binder); under another layout the block's entry alone stays.
+                if current is saved or not isinstance(current, tuple):
+                    continue
+                for fresh, earlier in zip(current[:2], saved[:2]):
+                    if isinstance(fresh, dict) and isinstance(earlier, dict):
                         for key, value in earlier.items():
                             fresh.setdefault(key, value)
         for tuner, cache_results, decisions in tuned:
@@ -632,14 +637,16 @@ def capture_scope() -> Iterator[None]:
     finally:
         with _capture_lock:
             owner.captures -= 1
-            last = owner.captures == 0
-            if last:
+            if owner.captures == 0:
                 owner.triton_kernels.clear()
                 owner.cpp_kernels.clear()
                 owner.inductor_triton_keys.clear()
-                _capture = None
-        if last:
-            owner.triton_settings.close()
+                # Under the lock, or a capture opening meanwhile would save
+                # this scope's directory as the settings to restore.
+                try:
+                    owner.triton_settings.close()
+                finally:
+                    _capture = None
 
 
 def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
