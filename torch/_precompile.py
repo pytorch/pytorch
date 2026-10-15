@@ -2277,9 +2277,6 @@ def _build_multigraph_python_source(
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. What was captured (readable)")
     buf.writeline("# " + "=" * 70)
-    # _read_runtime_cache_envelope reads these two lines without executing the
-    # artifact: they must stay the first statements, one line each, preceded only
-    # by comments and blank lines.
     buf.writeline(f"BACKEND = {backend!r}")
     buf.writeline('TRACER = "dynamo"')
     buf.writeline(f'SERVING_MODE = "{mode}"')
@@ -3063,7 +3060,6 @@ def _verified_cache_envelope(
     tracer: str,
     code_hash: str,
     strict: bool,
-    caller: str | None = None,
 ) -> dict[str, Any] | None:
     # weights_only=True is safe (plain str/int/bytes dict). Outside strict mode the
     # cache is acceleration only, so an unreadable envelope or a FORMAT / VERSION
@@ -3071,14 +3067,12 @@ def _verified_cache_envelope(
     # is forbidden, so the same conditions raise instead. A BACKEND, TRACER or
     # CODE_HASH mismatch signals a wrong (python_code, cache) pairing and always
     # raises; see Note [precompile programming model], invariant 7.
-    mismatch = f"{caller}: " if caller else ""
-    caller = caller or "strict precompile.load"
     try:
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         if blob.get("format") != _CACHE_FORMAT or blob.get("version") != _CACHE_VERSION:
             if strict:
                 raise PrecompileError(
-                    f"{caller} requires a compatible cache envelope; "
+                    "strict precompile.load requires a compatible cache envelope; "
                     f"got format={blob.get('format')!r}, "
                     f"version={blob.get('version')!r}, "
                     f"expected {_CACHE_FORMAT!r}, {_CACHE_VERSION!r}."
@@ -3095,19 +3089,19 @@ def _verified_cache_envelope(
             return None
         if blob.get("backend") != backend:
             raise PrecompileError(
-                f"{mismatch}cache backend {blob.get('backend')!r} does not match the "
+                f"cache backend {blob.get('backend')!r} does not match the "
                 f"python_code backend {backend!r}; the cache and python_code "
                 "came from different precompile captures."
             )
         if blob.get("tracer", "make_fx") != tracer:
             raise PrecompileError(
-                f"{mismatch}cache tracer {blob.get('tracer', 'make_fx')!r} does not match "
+                f"cache tracer {blob.get('tracer', 'make_fx')!r} does not match "
                 f"the python_code tracer {tracer!r}; the cache and python_code "
                 "came from different precompile captures."
             )
         if blob.get("code_hash") != code_hash:
             raise PrecompileError(
-                f"{mismatch}cache does not match python_code (its code_hash "
+                "cache does not match python_code (its code_hash "
                 f"{blob.get('code_hash')!r} != sha256(python_code) "
                 f"{code_hash!r}); the cache and python_code came from "
                 "different precompile captures. Pair each cache with the "
@@ -3118,7 +3112,9 @@ def _verified_cache_envelope(
         raise
     except Exception as e:
         if strict:
-            raise PrecompileError(f"{caller} could not read the cache envelope") from e
+            raise PrecompileError(
+                "strict precompile.load could not read the cache envelope"
+            ) from e
         log.warning(
             "torch.compiler.precompile could not read the cache envelope (%s: %s); the "
             "cache is likely corrupt or from a different torch build. Falling back "
@@ -3127,96 +3123,6 @@ def _verified_cache_envelope(
             e,
         )
         return None
-
-
-def _runtime_cache_pair(
-    artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
-) -> str:
-    return (
-        f"(artifact_path={os.fspath(artifact_path)!r}, "
-        f"cache_path={os.fspath(cache_path)!r})"
-    )
-
-
-def _read_runtime_cache_envelope(
-    artifact_path: str | os.PathLike[str],
-    cache_path: str | os.PathLike[str],
-    operation: str,
-) -> dict[str, Any]:
-    """Verify a Dynamo pair's identity without materializing or executing the program.
-
-    Only the BACKEND / TRACER header lines that _emit_multigraph_driver_source
-    writes are parsed; the rest of the source is streamed into the code hash.
-    """
-    import ast
-
-    pair = _runtime_cache_pair(artifact_path, cache_path)
-
-    def unsupported() -> PrecompileError:
-        return PrecompileError(
-            f"precompile.{operation} {pair} supports only Dynamo captures (make_fx "
-            "captures are not supported), and the artifact has no generated Dynamo "
-            "artifact header"
-        )
-
-    digest = hashlib.sha256()
-    metadata = {}
-    header_size = 0
-    try:
-        with open(artifact_path, "rb") as source:
-            for expected in ("BACKEND", "TRACER"):
-                while True:
-                    line = source.readline(65537)
-                    header_size += len(line)
-                    if not line or header_size > 65536:
-                        raise unsupported()
-                    digest.update(line)
-                    if line.strip() and not line.lstrip().startswith(b"#"):
-                        break
-                try:
-                    statements = ast.parse(line.decode("utf-8")).body
-                    if len(statements) != 1 or not isinstance(
-                        statements[0], ast.Assign
-                    ):
-                        raise ValueError("Expected an artifact metadata assignment")
-                    assignment = statements[0]
-                    if len(assignment.targets) != 1 or not isinstance(
-                        assignment.targets[0], ast.Name
-                    ):
-                        raise ValueError("Expected one metadata name")
-                    if assignment.targets[0].id != expected:
-                        raise ValueError(f"Expected {expected}")
-                    value = ast.literal_eval(assignment.value)
-                    if not isinstance(value, str):
-                        raise ValueError("Expected string metadata")
-                    metadata[expected] = value
-                except (SyntaxError, ValueError) as exc:
-                    raise unsupported() from exc
-            if metadata["TRACER"] != "dynamo":
-                raise PrecompileError(
-                    f"precompile.{operation} {pair} supports only Dynamo captures, "
-                    f"and the artifact was captured with the {metadata['TRACER']!r} "
-                    "tracer"
-                )
-            while chunk := source.read(1024 * 1024):
-                digest.update(chunk)
-        with open(cache_path, "rb") as f:
-            cache = f.read()
-    except OSError as e:
-        raise PrecompileError(
-            f"precompile.{operation} could not read the artifact pair {pair}: {e}"
-        ) from e
-    blob = _verified_cache_envelope(
-        cache,
-        backend=metadata["BACKEND"],
-        tracer=metadata["TRACER"],
-        code_hash=digest.hexdigest(),
-        strict=True,
-        caller=f"precompile.{operation} {pair}",
-    )
-    if blob is None:
-        raise AssertionError("a strict envelope read returns the envelope or raises")
-    return blob
 
 
 def no_compilation() -> contextlib.AbstractContextManager[None]:
@@ -3245,65 +3151,6 @@ def no_compilation() -> contextlib.AbstractContextManager[None]:
     from torch.compiler._no_compile import no_compilation as _no_compilation
 
     return _no_compilation()
-
-
-def prepare_runtime(
-    *, artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
-) -> None:
-    """
-    Verify a capture's runtime dependencies before the application starts.
-
-    :func:`load` installs them itself, so call this only when the serving worker
-    compiles before it loads the pair: early, before the application imports
-    anything that compiles::
-
-        torch.compiler.precompile.prepare_runtime(
-            artifact_path="m.py", cache_path="m.cache"
-        )
-        import application  # compiles against the installed dependencies
-
-        runnable = torch.compiler.precompile.load("m.py", "m.cache")
-
-    It verifies that the pair matches by streaming the artifact's bytes into its
-    hash, without executing the artifact or initializing CUDA. It runs under
-    :func:`no_compilation`. Only Dynamo captures are supported.
-
-    It also checks the cache's frozen Triton kernels, which :func:`load` then
-    installs process-wide: from then on, any compile in this process that
-    generates the same Triton source is served the frozen kernel and its
-    selected config, until ``torch._inductor.utils.fresh_cache()`` or
-    ``clear_caches()`` resets Inductor's caches.
-    Frozen C++ kernels likewise, but a C++ kernel is keyed by its full build
-    command, which includes absolute include and library paths: the serving host
-    must install PyTorch and its toolchain at the producer's paths, or the kernel
-    misses and is compiled on the serving host.
-
-    A cache that carries Triton's JIT cache has it imported here, and :func:`load`
-    does not import it again. Triton's autotuning cache is turned on for the rest
-    of the process, so the captured autotuning decisions are reused instead of
-    re-benchmarked. The import goes into ``TRITON_CACHE_DIR`` if it is empty or
-    already holds this cache, and otherwise into a fresh directory that Triton
-    uses from then on. A process holds one imported cache, so a different one
-    imported later raises here; :func:`load` outside :func:`no_compilation`
-    warns instead, and Triton compiles or autotunes those kernels on first use.
-
-    Raises :class:`~torch.compiler.PrecompileError` for a make_fx capture, a
-    mismatched or unreadable pair, a cache whose capture did not freeze its
-    runtime dependencies, or a Triton JIT cache that cannot be imported.
-    """
-    from torch.compiler._runtime_cache import prepare_runtime_cache
-
-    with no_compilation():
-        blob = _read_runtime_cache_envelope(
-            artifact_path, cache_path, "prepare_runtime"
-        )
-        try:
-            prepare_runtime_cache(blob.get("artifact"))
-        except Exception as exc:
-            raise PrecompileError(
-                "precompile.prepare_runtime: Could not prepare precompile runtime "
-                f"dependencies for cache_path={os.fspath(cache_path)!r}: {exc}"
-            ) from exc
 
 
 def _runnable_from_pair(
