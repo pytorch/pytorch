@@ -550,7 +550,7 @@ class Barrier:
 
             if time.time() - start_time > timeout:
                 raise RuntimeError("barrier timeout")
-            time.sleep(0.1)
+            time.sleep(0.01)
 
 
 class TestDistBackend(MultiProcessTestCase):
@@ -561,6 +561,12 @@ class TestDistBackend(MultiProcessTestCase):
         super().setUpClass()
 
     def setUp(self):
+        # Decorators set `_skipped_reason` when every rank would skip; skip here
+        # to avoid spawning ranks. Sandcastle reports rank skips as passes, so
+        # leave those to the ranks.
+        reason = getattr(getattr(self, self._testMethodName), "_skipped_reason", None)
+        if reason is not None and not IS_SANDCASTLE:
+            self.skipTest(reason)
         super().setUp()
         # initialize temp directories
         initialize_temp_directories()
@@ -8930,6 +8936,11 @@ class DistributedTest:
                         monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks
                     )
 
+            # The timed-out wait aborted nccl_pg's communicator on ranks != 0,
+            # so abort it on every rank. Finalizing it on rank 0 in
+            # destroy_process_group() runs an intra-node barrier with the
+            # aborted peers (NCCL >= 2.31), which fails.
+            dist.distributed_c10d._abort_process_group(nccl_pg)
             self._barrier(timeout=30)
 
         @with_nccl_blocking_wait

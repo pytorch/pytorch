@@ -225,14 +225,6 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.int16,
             ],
-            "nn.functional.nll_loss": [
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.bool,
-                torch.int8,
-            ],
             "nn.functional.pdist": None,
             "nn.functional.rrelu": None,
             "nn.functional.silu": [
@@ -259,7 +251,7 @@ if torch.backends.mps.is_available():
             # int64 lacks atomic_binary_op in Metal; the old MPSGraph path cast
             # to int32 (silently lossy). amin/amax for int64 go through the
             # sign-flip encode + ulong atomic_min/max bracket and work fine.
-            # bool prod/mean are excluded via dtypesIfMPS in the OpInfo itself.
+            # bool prod is excluded via dtypesIfMPS in the OpInfo, and mean doesn't list bool.
             "scatter_reduceprod": [torch.int64],
             "_segment_reducelengths": None,
             "_segment_reduceoffsets": None,
