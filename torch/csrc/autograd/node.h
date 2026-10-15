@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/utils/python_stub.h>
 
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/SequenceNumber.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/record_function.h>
@@ -14,6 +15,11 @@
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
+
+#ifdef USE_ROCM
+// For at::ROCmBackwardPassGuard
+#include <ATen/Context.h>
+#endif
 
 #include <algorithm>
 #include <cstdint>
