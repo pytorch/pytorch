@@ -1030,14 +1030,14 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         ):
             rank = mesh.get_local_rank()
             tags = torch.arange(num_tags, device=local_tensor.device) + 10.0 * rank
-            return (local_tensor, tags.bfloat16()), (outer_size, num_tags)
+            return (tags.bfloat16(), local_tensor), (outer_size, num_tags)
 
         @torch.no_grad()
         def fsdp_post_all_gather(
             local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
         ):
             outer_size, num_rank_tags = metadata
-            weight, tags = all_gather_outputs
+            tags, weight = all_gather_outputs
             expected_tags = [
                 torch.arange(num_rank_tags, device=tags.device) + 10.0 * rank
                 for rank in range(shard_world_size)
@@ -1052,13 +1052,39 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         # Seeding is per process, not per thread
         dist.broadcast(model.weight.detach(), src=0)
         ref_model = copy.deepcopy(model)
-        fully_shard(model, mesh=mesh)
+        fully_shard(model, mesh=mesh, reshard_after_forward=True)
         self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
-        inp = torch.randn((2, 8), device=device_type)
+        inp = torch.randn((2, 8), device=device_type, requires_grad=True)
         for num_tags in (4, 2):
             output = model(inp)
             self.assertEqual(output, ref_model(inp))
             output.sum().backward()
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_single_rank_no_payloads(self):
+        # A size-1 shard mesh copies no payloads for an extension without any
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        weight = torch.ones((8, 8), device=device_type)
+
+        def fsdp_pre_all_gather(local_tensor, mesh):
+            return (), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            return _finish_post_all_gather(weight, out)
+
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model, mesh=mesh)
+        self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+        inp = torch.randn((2, 8), device=device_type)
+        for _ in range(2):
+            self.assertEqual(model(inp), inp @ weight.T)
 
 
 class TestAllGatherInputValidation(TestCase):

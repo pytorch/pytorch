@@ -547,7 +547,7 @@ class FSDPParamGroup:
                         self.device,
                     )
                 for tensor, all_gather_input in zip(
-                    fsdp_param.all_gather_outputs, all_gather_inputs
+                    fsdp_param.all_gather_outputs, all_gather_inputs, strict=True
                 ):
                     alloc_storage(tensor)
                     with (
@@ -556,10 +556,13 @@ class FSDPParamGroup:
                         else contextlib.nullcontext()
                     ):
                         # Like the multi-rank path, copy byte payloads bytewise
-                        # and smaller payloads into a prefix
+                        # and smaller payloads of the same dtype into a prefix
                         if all_gather_input.dtype == torch.uint8:
                             tensor = tensor.view(torch.uint8)
-                        if tensor.numel() != all_gather_input.numel():
+                        if (
+                            tensor.dtype == all_gather_input.dtype
+                            and tensor.numel() != all_gather_input.numel()
+                        ):
                             tensor = tensor[: all_gather_input.numel()]
                         tensor.copy_(all_gather_input)
 
@@ -1251,8 +1254,9 @@ class FSDPParamGroup:
 
     @property
     def _all_gather_process_group(self) -> dist.ProcessGroup:
+        # Overrides of _to_sharded_post_forward may not record their mesh
         mesh_info = (
-            self._sharded_post_forward_mesh_info
+            (self._sharded_post_forward_mesh_info or self.post_forward_mesh_info)
             if self.is_sharded_post_forward
             else self.mesh_info
         )
