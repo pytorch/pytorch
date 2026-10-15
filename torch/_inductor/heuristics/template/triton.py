@@ -446,6 +446,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(64, 64, 32, 2, 4),
             GemmConfig(64, 64, 64, 3, 8),
             GemmConfig(64, 64, 128, 5, 4),
+            GemmConfig(64, 128, 32, 2, 4),
             GemmConfig(64, 128, 32, 3, 4),
             GemmConfig(64, 128, 32, 4, 8),
             GemmConfig(64, 128, 64, 3, 4),
