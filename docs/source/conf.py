@@ -558,8 +558,6 @@ coverage_ignore_functions = [
     # torch.distributed.rpc.internal
     "deserialize",
     "serialize",
-    # torch.distributed.tensor.parallel.style
-    "make_sharded_output_tensor",
     # torch.fx.passes.dialect.common.cse_pass
     "get_CSE_banned_ops",
     # torch.fx.passes.graph_manipulation
@@ -1515,16 +1513,8 @@ coverage_ignore_classes = [
     "CyclingIterator",
     # torch.distributed.elastic.utils.data.elastic_distributed_sampler
     "ElasticDistributedSampler",
-    # torch.distributed.fsdp.api
-    "StateDictType",
     # torch.distributed.fsdp.fully_sharded_data_parallel
     "FullyShardedDataParallel",
-    "OptimStateKeyType",
-    # torch.distributed.fsdp.sharded_grad_scaler
-    "ShardedGradScaler",
-    # torch.distributed.fsdp.wrap
-    "CustomPolicy",
-    "ModuleWrapPolicy",
     # torch.distributed.launcher.api
     "LaunchConfig",
     "elastic_launch",
@@ -1547,8 +1537,6 @@ coverage_ignore_classes = [
     "RRefProxy",
     # torch.distributed.tensor.parallel.fsdp
     "DTensorExtensions",
-    # torch.distributed.tensor.parallel.style
-    "ParallelStyle",
     # torch.distributions.logistic_normal
     "LogisticNormal",
     # torch.distributions.one_hot_categorical

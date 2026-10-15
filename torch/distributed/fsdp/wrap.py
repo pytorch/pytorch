@@ -216,6 +216,7 @@ class CustomPolicy(_Policy):
     """
     This policy takes in a lambda function that maps a given ``nn.Module`` to
     either ``False``, ``True``, or a kwarg dictionary.
+
     - If the function returns ``False`` or an empty dictionary, then the module
       does not have the API applied.
     - If the function returns ``True``, then the module has the API applied
