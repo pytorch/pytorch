@@ -793,18 +793,19 @@ class _DynamoCapture(Capture[_P, _R]):
         def write(artifact: bytes | None) -> None:
             buf = io.BytesIO()
             torch.save({**blob, "artifact": artifact}, buf)
-            _write_artifact(
-                self._artifact_path, self._cache_path, python_code, buf.getvalue()
-            )
+            try:
+                _write_artifact(
+                    self._artifact_path, self._cache_path, python_code, buf.getvalue()
+                )
+            except OSError as e:
+                # Only the on-disk rewrite failed; _write_artifact leaves
+                # whatever pair was already at these paths in place.
+                raise PrecompileError(
+                    f"precompile could not write the artifact: {e}"
+                ) from e
 
         try:
             freeze_runtime_cache(snapshot, write)
-        except OSError as e:
-            # Only the on-disk rewrite failed; _write_artifact leaves whatever
-            # pair was already at these paths in place.
-            raise PrecompileError(
-                f"precompile could not write the artifact: {e}"
-            ) from e
         except PrecompileError:
             raise
         except Exception as e:
@@ -3293,11 +3294,15 @@ def capture(
     needs, and raises :class:`~torch.compiler.PrecompileError` for one it cannot
     freeze. That includes kernels launched directly through ``@triton.jit`` and
     ``@triton.autotune`` inside the block: Triton compiles into a fresh cache
-    directory there, with its autotuning cache on, and a JIT kernel or
-    autotuner already used before the block compiles or tunes again on its
-    first launch inside it. Triton does not cache the decision of an autotuner
-    with ``pre_hook`` configs, so such a kernel is benchmarked again on first
-    use in the serving process.
+    directory there, with its autotuning cache on, so a ``TRITON_CACHE_DIR``
+    you set is not used inside the block, and a JIT kernel or autotuner already
+    used before the block compiles and tunes again on its first launch inside
+    it. That retune benchmarks on the block's real inputs, and the config it
+    picks, which is what ships and what the process keeps using afterwards, may
+    differ from the one picked before the block. Triton does not cache the
+    decision of an autotuner with ``pre_hook`` configs, so one that does not
+    prune its configs keeps its earlier decision in the block and is benchmarked
+    again on first use in the serving process.
 
     ``tracer`` picks the capture front-end and carries its tracer-specific
     configuration. :class:`DynamoTracer` (the default) is an execution-driven
