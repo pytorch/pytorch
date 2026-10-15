@@ -55,7 +55,7 @@ int32_t pidNamespace(ino_t& ns) {
     return -1;
   }
 
-  struct stat self_stat;
+  struct stat self_stat{};
   int rc = fstat(fd, &self_stat);
   close(fd);
   if (rc == -1) {
@@ -222,10 +222,12 @@ std::string processName([[maybe_unused]] int32_t pid) {
     fclose(cmdfile);
     if (scanned > 0 && command) {
       std::string ret(basename(command));
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       free(command);
       return ret;
     }
   }
+  // NOLINTNEXTLINE(performance-avoid-endl)
   std::cerr << "Failed to read process name for pid " << pid << std::endl;
 #endif
   return "";
@@ -255,10 +257,12 @@ static std::pair<int32_t, std::string> parentPidAndCommand(
   if (scanned == 2) {
     ret = std::make_pair(parent_pid, std::string(command));
   } else {
+    // NOLINTNEXTLINE(performance-avoid-endl)
     std::cerr << "Failed to parse /proc/" << pid << "/stat" << std::endl;
     ret = std::make_pair(0, "");
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(command);
   return ret;
 #else
