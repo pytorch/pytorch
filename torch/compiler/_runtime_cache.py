@@ -172,8 +172,11 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
             try:
                 if hashlib.sha256(self.content).hexdigest() != self.key:
                     raise RuntimeError("Corrupt Triton runtime-cache artifact")
-                cache._decode(self.content, context)
-            except Exception as exc:
+                try:
+                    cache._decode(self.content, context)
+                except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                    raise RuntimeError("Malformed Triton runtime-cache bundle") from exc
+            except RuntimeError as exc:
                 problem = f"it was rejected ({exc})"
                 cause = exc
             else:
