@@ -870,7 +870,10 @@ def compile_to_python(
     swap process-global cache state (``CacheArtifactManager.with_fresh_cache()``); a
     concurrent compile on another thread would corrupt the captured wrappers or cache
     artifacts, so concurrent calls (including via ``torch.compiler.precompile``) are
-    serialized rather than run in parallel.
+    serialized rather than run in parallel. When both this lock and precompile's
+    capture lock are held, the capture lock is taken first (a nested precompile), never
+    the reverse: code run during this lowering must not call
+    ``torch.compiler.precompile``, or two threads can deadlock.
     """
     import copy
 
