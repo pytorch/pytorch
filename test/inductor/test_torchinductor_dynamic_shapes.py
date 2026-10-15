@@ -240,54 +240,65 @@ if not TEST_WITH_ASAN:
     # inheritance under their original (unsuffixed) names; wrapping a
     # variant's attribute only affects that variant, not the shared template
     # method used by the other device variants.
-    for _name, _failure in test_failures.items():
-        for _suffix in _failure.suffixes:
-            if _suffix == "cpu":
-                # CPU entries are still applied by copy_tests above.
-                continue
-            _variant_cls = globals().get(f"DynamicShapesGPUTests{_suffix.upper()}")
-            _test = getattr(_variant_cls, _name, None)
-            if _test is None:
-                # Variant class not generated on this machine (e.g. no XPU).
-                continue
+    #
+    # NB: the fixups below run inside a function on purpose. pytest collects
+    # unittest.TestCase subclasses under *any* module-level name, so a loop
+    # variable left bound to a variant class in globals() (e.g. `_cls`) would
+    # be re-collected as a duplicate test node whose unittest setUpClass
+    # fixture does not run when a CI test shard selects that node standalone,
+    # failing with "AttributeError: type object 'DynamicShapesGPUTestsMPS'
+    # has no attribute 'primary_device'".
+    def _reattach_markers_and_guards():
+        for _name, _failure in test_failures.items():
+            for _suffix in _failure.suffixes:
+                if _suffix == "cpu":
+                    # CPU entries are still applied by copy_tests above.
+                    continue
+                _variant_cls = globals().get(f"DynamicShapesGPUTests{_suffix.upper()}")
+                _test = getattr(_variant_cls, _name, None)
+                if _test is None:
+                    # Variant class not generated on this machine (e.g. no XPU).
+                    continue
 
-            # unittest.expectedFailure mutates the test item in place on
-            # Python >= 3.12, which would mark the shared template method for
-            # every device variant. Bind the method into a per-variant copy
-            # first (same technique as copy_tests) so the marker only applies
-            # to this variant.
-            @functools.wraps(_test)
-            def _copy(self, _test=_test):
-                return _test(self)
+                # unittest.expectedFailure mutates the test item in place on
+                # Python >= 3.12, which would mark the shared template method for
+                # every device variant. Bind the method into a per-variant copy
+                # first (same technique as copy_tests) so the marker only applies
+                # to this variant.
+                @functools.wraps(_test)
+                def _copy(self, _test=_test):
+                    return _test(self)
 
-            _marker = (
-                unittest.skip("Skipped!")
-                if _failure.is_skip
-                else unittest.expectedFailure
-            )
-            setattr(_variant_cls, _name, _marker(_copy))
-
-    # gfx950 shows deterministic mismatches for these two generated tests
-    # (conv_with_as_strided numerical mismatch, randint64 distribution for
-    # high bounds). The guards are applied per variant after instantiation:
-    # doing it before would put the guarded methods into the generic class's
-    # own __dict__, and instantiate_device_type_tests would then generate
-    # per-device suffixed copies on top of the unguarded MRO-exposed
-    # template methods (duplicated tests, unguarded copy reachable).
-    for _name in list(globals().keys()):
-        if not _name.startswith("DynamicShapesGPUTests"):
-            continue
-        _cls = globals()[_name]
-        for _gfx_name in (
-            "test_conv_with_as_strided_dynamic_shapes",
-            "test_randint_distribution_dynamic_shapes",
-        ):
-            if hasattr(_cls, _gfx_name):
-                setattr(
-                    _cls,
-                    _gfx_name,
-                    skipIfRocmArch(MI350_ARCH)(getattr(_cls, _gfx_name)),
+                _marker = (
+                    unittest.skip("Skipped!")
+                    if _failure.is_skip
+                    else unittest.expectedFailure
                 )
+                setattr(_variant_cls, _name, _marker(_copy))
+
+        # gfx950 shows deterministic mismatches for these two generated tests
+        # (conv_with_as_strided numerical mismatch, randint64 distribution for
+        # high bounds). The guards are applied per variant after instantiation:
+        # doing it before would put the guarded methods into the generic class's
+        # own __dict__, and instantiate_device_type_tests would then generate
+        # per-device suffixed copies on top of the unguarded MRO-exposed
+        # template methods (duplicated tests, unguarded copy reachable).
+        for _name in list(globals().keys()):
+            if not _name.startswith("DynamicShapesGPUTests"):
+                continue
+            _cls = globals()[_name]
+            for _gfx_name in (
+                "test_conv_with_as_strided_dynamic_shapes",
+                "test_randint_distribution_dynamic_shapes",
+            ):
+                if hasattr(_cls, _gfx_name):
+                    setattr(
+                        _cls,
+                        _gfx_name,
+                        skipIfRocmArch(MI350_ARCH)(getattr(_cls, _gfx_name)),
+                    )
+
+    _reattach_markers_and_guards()
 
 
 class TestInductorDynamic(DynamicShapesTestCase):
