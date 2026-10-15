@@ -137,7 +137,7 @@ __all__ = [
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
-_Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"]
+_Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE"]
 _R = TypeVar("_R")
 
 
@@ -224,10 +224,25 @@ class FlexKernelOptions(TypedDict, total=False):
     may have more numerical error. Default: False."""
 
     ROWS_GUARANTEED_SAFE: NotRequired[bool]
-    """If True, guarantees that at least one value in each row is not masked out.
-    Allows skipping safety checks for better performance. Only set this if you are certain
-    your mask guarantees this property. For example, causal attention is guaranteed safe
-    because each query has at least 1 key-value to attend to. Default: False."""
+    """If True, skips the guard that sanitizes the softmax row maximum.
+
+    The condition this requires is stronger than "every row attends to at least one key".
+    The kernel carries a running row maximum across the KV blocks the block mask schedules,
+    starting from ``-inf``, and this option removes the only thing keeping it finite. Each
+    row must therefore have an unmasked key in the *first* block scheduled for it: if a
+    row's keys all fall in later blocks, the running maximum is still ``-inf`` when the
+    rescaling runs, and ``exp2`` overflows to NaN. Block metadata can mark a block live
+    because *other* rows in the query block need it, so a mask can look valid at block
+    granularity while individual rows are empty in their first block.
+
+    Causal attention satisfies this. Local or windowed masks often do not, since the
+    earliest key a late row attends to can sit beyond the first scheduled block. Eager
+    execution materializes the full row and is unaffected, so the NaN appears only under
+    ``torch.compile``.
+
+    Only set this if you are certain your mask satisfies the stronger condition; see the
+    ``ROWS_GUARANTEED_SAFE`` demo in attention-gym for a worked example of a mask that
+    looks safe and is not. Default: False."""
 
     BLOCKS_ARE_CONTIGUOUS: NotRequired[bool]
     """If True, guarantees that all blocks in the mask are contiguous.
@@ -245,9 +260,27 @@ class FlexKernelOptions(TypedDict, total=False):
     option for debugging. Default: False."""
 
     USE_TMA: NotRequired[bool]
-    """Whether to use Tensor Memory Accelerator (TMA) on supported hardware.
-    This is experimental and may not work on all hardware, currently specific
-    to NVIDIA GPUs Hopper+. Default: False."""
+    """Whether to use hardware tensor descriptors for the attention operands.
+    This is experimental and may not work on all hardware. It is supported on
+    NVIDIA Hopper+ (TMA), Intel GPUs, and AMD gfx1250 (TDM); the AMD path covers
+    the forward and decode kernels only, not the backward pass. The default is
+    backend-dependent: Intel GPUs and eligible AMD gfx1250 inputs select
+    descriptors automatically, and everything else defaults to False. Setting
+    False forces the pointer path. Setting True requests descriptors but remains
+    subject to the dtype and layout checks, falling back to the pointer path
+    when the operands are ineligible. On AMD gfx1250, setting
+    ``torch._inductor.config.triton.enable_flex_tdm = False`` at compile time
+    disables the forward and decode descriptors even for ``USE_TMA=True``; it is
+    the control for callers that cannot reach this option, and it does not
+    affect NVIDIA or Intel selection."""
+
+    FLYDSL_DQ_ACCUM_FP32: NotRequired[bool]
+    """Use FP32 for the private dQ accumulation workspace in FlyDSL backward.
+    Specify as ``bwd_FLYDSL_DQ_ACCUM_FP32`` with ``BACKEND="FLYDSL"``.
+    Default: True. False uses BF16 intermediate storage to reduce workspace
+    traffic, rounding after each KV owner and potentially increasing gradient
+    error for long sequences. Both modes use fixed-order, non-atomic accumulation
+    and return gradients in the input dtype. This option does not affect forward."""
 
     # ROCm-specific options
 
@@ -269,9 +302,13 @@ class FlexKernelOptions(TypedDict, total=False):
         - "TRITON": Standard Triton flex_attention kernel
         - "TRITON_DECODE": Triton flex_decoding kernel, only available for short sequence lengths with specific configurations
         - "FLASH": Experimental: Flash Attention kernel (cute-dsl), user needs to have flash installed
+        - "FLYDSL": Experimental FlyDSL FlexAttention forward and backward kernels
+          for BF16 on ROCm gfx950, requiring the optional FlyDSL dependency.
+          Unsupported backward configurations fall back to Triton, including GQA,
+          decode, gradients through LSE, and shapes exceeding the dQ workspace limit.
 
     This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
-    Raises an error if the requested backend cannot be used. Default: "AUTO"
+    Raises an error if the requested forward backend cannot be used. Default: "AUTO"
     """
 
 

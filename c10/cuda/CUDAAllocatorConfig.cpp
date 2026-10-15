@@ -9,7 +9,23 @@
 #include <c10/cuda/driver_api.h>
 #endif
 
+#include <bit>
+
 namespace c10::cuda::CUDACachingAllocator {
+
+bool CUDAAllocatorConfig::expandable_segments() {
+  bool enabled = c10::CachingAllocator::AcceleratorAllocatorConfig::
+      use_expandable_segments();
+#if !defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && \
+    (!defined(USE_ROCM) || (ROCM_VERSION < 70000))
+  if (enabled) {
+    TORCH_WARN_ONCE("expandable_segments not supported on this platform")
+  }
+  return false;
+#else
+  return enabled;
+#endif
+}
 
 size_t CUDAAllocatorConfig::parseAllocatorConfig(
     const c10::CachingAllocator::ConfigTokenizer& tokenizer,
@@ -166,7 +182,7 @@ size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
   tokenizer.checkToken(++i, ":");
   size_t val2 = tokenizer.toSizeT(++i);
   TORCH_CHECK_VALUE(
-      llvm::isPowerOf2_64(val2),
+      std::has_single_bit(val2),
       "Number of register threads has to be power of 2, got ",
       val2);
   auto maxThreads = CUDAAllocatorConfig::pinned_max_register_threads();

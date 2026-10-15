@@ -69,6 +69,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                                           const at::Tensor v,
                                           const at::Tensor seqlens_q,
                                           const at::Tensor seqlens_k,
+                                          const std::optional<at::Tensor> &seqused_k,
                                           std::optional<at::Tensor> &attn_bias_,
                                           at::Tensor out,
                                           at::Tensor softmax_lse,
@@ -136,6 +137,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
     args.o_ptr = out.data_ptr();
     args.seqstart_q_ptr = seqlens_q.data_ptr();
     args.seqstart_k_ptr = seqlens_k.data_ptr();
+    args.seqlen_k_ptr = seqused_k.has_value() ? seqused_k->data_ptr() : nullptr;
     args.sink_ptr = nullptr;
     args.seqlen_q = total_q;
     args.seqlen_k = total_k;
@@ -186,7 +188,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
                   std::optional<at::Tensor> &out_, // total_q x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
                   const at::Tensor &cu_seqlens_q,  // b+1
                   const at::Tensor &cu_seqlens_k,  // b+1
-                  std::optional<at::Tensor> & /*seqused_k*/,
+                  std::optional<at::Tensor> &seqused_k,
                   int max_seqlen_q,
                   const int max_seqlen_k,
                   const float p_dropout,
@@ -243,7 +245,8 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
     const int total_q = q.size(0);
     const int total_k = k.size(0);
 
-    TORCH_CHECK(batch_size > 0, "batch size must be positive");
+    // batch_size is cu_seqlens_q.numel() - 1, so an empty cu_seqlens makes it negative.
+    TORCH_CHECK(batch_size >= 0, "cu_seqlens_q must have at least one element");
     TORCH_CHECK(head_size_og <= 256, "CK only supports head dimension at most 256");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
@@ -272,6 +275,13 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
     CHECK_SHAPE(v, total_k, num_heads_k, head_size_og);
     CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
     CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
+    if (seqused_k.has_value()) {
+        const auto& seqused = seqused_k.value();
+        TORCH_CHECK(seqused.dtype() == at::kInt, "seqused_k must have dtype int32");
+        CHECK_DEVICE(seqused);
+        CHECK_CONTIGUOUS(seqused);
+        CHECK_SHAPE(seqused, batch_size);
+    }
 
     at::Tensor q_padded, k_padded, v_padded;
     if (head_size_og % 8 != 0) {
@@ -348,7 +358,9 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
     }
 
 
-    if (max_seqlen_k > 0) {
+    // An empty batch or key sequence has no work: the tensors allocated above are
+    // already the correct empty result, so skip the launch rather than reject it.
+    if (batch_size > 0 && max_seqlen_k > 0) {
         auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
         auto stream = at::cuda::getCurrentCUDAStream().stream();
         ck_tile::stream_config stream_config{stream};
@@ -371,6 +383,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
                 v_padded,
                 cu_seqlens_q,
                 cu_seqlens_k,
+                seqused_k,
                 attn_bias,
                 out,
                 softmax_lse,
@@ -382,7 +395,8 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
     }
     else {
-        // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
+        // No kernel ran. Both are empty when batch_size == 0; when only max_seqlen_k is 0
+        // they are not, and attention over no keys is defined as zeros with an lse of inf.
         out.zero_();
         softmax_lse.fill_(std::numeric_limits<float>::infinity());
     }

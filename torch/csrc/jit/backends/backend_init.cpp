@@ -59,9 +59,7 @@ static void toBackendSelectiveImpl(
         }
         current = submodule.toModule();
       } else {
-        std::stringstream err;
-        err << "Attribute named " << atoms[i] << " is not a Module";
-        throw std::runtime_error(std::move(err).str());
+        TORCH_CHECK(false, "Attribute named ", atoms[i], " is not a Module");
       }
     }
 
