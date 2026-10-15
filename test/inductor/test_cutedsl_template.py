@@ -876,8 +876,7 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
         )
 
     def test_cutedsl_constant_division_lowers_to_multiply(self):
-        # Performance contract: IEEE division is a long instruction sequence in
-        # math-heavy GEMM epilogues; constant divisors become reciprocal multiplies.
+        # Reciprocal multiplication avoids costly division in GEMM epilogues.
         from torch._inductor.codegen.common import CSEVariable
         from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
             CuteDSLOpOverrides,
@@ -900,7 +899,7 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
             return kernel.body.getvalue()
 
         with V.set_graph_handler(MockGraphHandler()):
-            # Power-of-two reciprocals are exact, so they apply without fast math.
+            # 1 / 4 is exactly representable as a normal fp32; no fast math needed.
             self.assertIn("x * cute.full_like(x, 0.25)", lowered(4.0, False))
             self.assertIn("x / ", lowered(25.0, False))
             self.assertIn("x * cute.full_like(x, 0.04)", lowered(25.0, True))
