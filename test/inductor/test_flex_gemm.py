@@ -1576,9 +1576,12 @@ class FlexGemmTestCase(TestCase):
 
     def assertNvfp4ScaleCode(self, code, max_value=6.0):
         """Check direct E4M3 scale rounding in generated code."""
+        # A power-of-two divisor lowers to an exact reciprocal multiply.
+        power_of_two = math.frexp(max_value)[0] == 0.5
+        op, value = ("*", 1 / max_value) if power_of_two else ("/", max_value)
         precise_division = (
-            f"(value / cute.full_like(value, {max_value!r}))",
-            f"/ cute.full_like(local_reduce0, {max_value!r})",
+            f"(value {op} cute.full_like(value, {value!r}))",
+            f"{op} cute.full_like(local_reduce0, {value!r})",
         )
         self.assertTrue(any(expression in code for expression in precise_division))
         self.assertTrue("torch.float8_e4m3fn" in code or "cutlass.Float8E4M3FN" in code)
@@ -8963,6 +8966,37 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
 
         self.assertGroupedMmQuackCode(code)
         self.assertGroupedMmMatches(actual, x, w_t, offs, F.silu)
+
+    @parametrize("layout", ("chunked", "interleaved"))
+    def test_grouped_mm_strided_tile_captures_match_reference(self, device, layout):
+        # Both lanes of a saved [M, 2N] tensor: chunked views have a unit inner
+        # stride and load in place; interleaved views have no unit-stride dim, so
+        # QuACK's TMA tile load cannot read them and lowering must copy them.
+        x, w_t, offs = self.makeGroupedMm((201, 0, 129, 182), device)
+        h = torch.randn(x.shape[0], 2 * self.N, device=device, dtype=torch.bfloat16)
+        if layout == "chunked":
+            gate, up = h.chunk(2, dim=-1)
+        else:
+            gate, up = h.view(x.shape[0], self.N, 2).unbind(-1)
+
+        def epilogue_fn(acc):
+            return (acc * gate + up).to(acc.dtype)
+
+        def fn(x, w_t, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x, w_t),
+                epilogue_fn,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), x, w_t, offs
+        )
+
+        self.assertGroupedMmQuackCode(code)
+        self.assertGroupedMmMatches(actual, x, w_t, offs, epilogue_fn)
 
     @parametrize("capture_dtype", (torch.float32, torch.bfloat16, torch.float16))
     def test_grouped_mm_captures_and_aux_match_reference(self, device, capture_dtype):
