@@ -209,6 +209,7 @@ inline void convolution_shape_check(
     const TensorGeometryArg& input, const TensorGeometryArg& weight, const TensorGeometryArg& output,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
 {
+  checkDimRange(c, input, 3, 6 /* exclusive */);
   check_args(c, padding, input->dim() - 2, "padding");
   check_args(c, stride, padding.size(), "stride");
   check_args(c, dilation, padding.size(), "dilation");
@@ -223,7 +224,6 @@ inline void convolution_shape_check(
   }
 
   // Input
-  checkDimRange(c, input, 3, 6 /* exclusive */);
   checkSize_symint(c, input, input_channels_dim, weight->size(1) * groups);
 
   // Weight
@@ -243,8 +243,10 @@ inline std::vector<T> _conv_output_size(
     ArrayRef<T> input_size, ArrayRef<T> weight_size,
     ArrayRef<T> padding, ArrayRef<T> stride, ArrayRef<T> dilation = ArrayRef<T>()
 ) {
-  // ASSERT(input_size.size() > 2)
-  // ASSERT(input_size.size() == weight_size.size())
+  TORCH_CHECK(input_size.size() > 2, "Expected input to have at least 3 dimensions, but got ", input_size.size());
+  TORCH_CHECK(input_size.size() == weight_size.size(),
+      "Expected input and weight to have the same number of dimensions, but got ",
+      input_size.size(), " and ", weight_size.size());
   bool has_dilation = !dilation.empty();
   auto dim = input_size.size();
   std::vector<T> output_size(dim);
@@ -277,8 +279,10 @@ std::vector<T> _conv_input_size(
     ArrayRef<T> output_size, ArrayRef<T> weight_size,
     ArrayRef<T> padding, ArrayRef<T> output_padding, ArrayRef<T> stride, ArrayRef<T> dilation, T groups
 ) {
-  // ASSERT(output_size.size() > 2)
-  // ASSERT(output_size.size() == weight_size.size())
+  TORCH_CHECK(output_size.size() > 2, "Expected output to have at least 3 dimensions, but got ", output_size.size());
+  TORCH_CHECK(output_size.size() == weight_size.size(),
+      "Expected output and weight to have the same number of dimensions, but got ",
+      output_size.size(), " and ", weight_size.size());
   auto dim = output_size.size();
   std::vector<T> input_size(dim);
   input_size[0] = output_size[output_batch_size_dim];
