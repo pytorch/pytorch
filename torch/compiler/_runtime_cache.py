@@ -223,14 +223,15 @@ def _triton_export_diagnostic(
     compile_id = getattr(kernel, "compile_id", None)
     # CachingAutotuner.precompile drops configs once it has compile_results.
     configs = getattr(kernel, "configs", None)
+    direction = None
+    if compile_id is not None:
+        direction = "backward" if kernel.is_backward else "forward"
     return {
         "reason": reason,
         "kernel_name": kernel.inductor_meta.get("kernel_name"),
         "filename": getattr(kernel, "filename", None),
         "compile_id": str(compile_id) if compile_id is not None else None,
-        "direction": None
-        if compile_id is None
-        else ("backward" if kernel.is_backward else "forward"),
+        "direction": direction,
         "heuristic": getattr(getattr(kernel, "heuristic_type", None), "name", None),
         "config_count": len(kernel.compile_results if configs is None else configs),
         "launcher_count": len(kernel.launchers),
