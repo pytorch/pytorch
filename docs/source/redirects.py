@@ -165,6 +165,7 @@ redirects = {
     "distributed.algorithms.join": "distributed/algorithms.join.html",
     "distributed.checkpoint": "distributed/checkpoint.html",
     "distributed.elastic": "distributed/elastic.html",
+    "distributed.functional_collectives": "distributed/functional_collectives.html",
     "distributed.fsdp.fully_shard": "distributed/fsdp.fully_shard.html",
     "distributed.optim": "distributed/optim.html",
     "distributed.pipelining": "distributed/pipelining.html",
