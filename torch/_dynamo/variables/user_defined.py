@@ -62,7 +62,7 @@ from ..exc import (
     unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
-from ..guards import GuardBuilder, install_guard
+from ..guards import GuardBuilder, install_guard, install_not_in_instance_dict_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
@@ -772,6 +772,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Handle descriptors found in cls.__mro__."""
+        if (
+            source is not None
+            and name == "from_tensor"
+            and isinstance(cls_attr, (staticmethod, classmethod))
+        ):
+            from torch.utils._triton import has_triton_tensor_descriptor_host_tma
+
+            if has_triton_tensor_descriptor_host_tma():
+                from triton.tools.tensor_descriptor import TensorDescriptor
+
+                if issubclass(self.value, TensorDescriptor):
+                    factory = cls_attr.__get__(None, self.value)
+                    return VariableTracker.build(tx, factory, source)
+
         if isinstance(cls_attr, staticmethod):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
@@ -3832,6 +3846,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # Step 6: __getattr__ fallback.
         result = self.call_getattr_fallback(tx, name)
         if result is not None:
+            if (
+                self.source
+                and isinstance(self, variables.UnspecializedNNModuleVariable)
+                and hasattr(self.value, "__dict__")
+                and name not in self.value.__dict__
+            ):
+                # A pending deletion in the traced code can reach here with the
+                # name still in the live dict; guarding absence then would fail
+                # on the frame it was created.
+                install_not_in_instance_dict_guard(self.source, name)
             return result
 
         # Step 7: AttributeError.
@@ -4368,6 +4392,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9421-L9468
         """
         from .constant import ConstantVariable
+        from .object_protocol import object_richcompare
 
         obj_type = type(self.value)
 
@@ -4439,7 +4464,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if self._base_methods is not None:
             return super().tp_richcompare_impl(tx, other, op)
 
-        return VariableTracker.tp_richcompare_impl(self, tx, other, op)
+        return object_richcompare(self, tx, other, op)
 
     def call_tree_map_branch(
         self,

@@ -1461,7 +1461,9 @@ class DictValuesVariable(DictViewVariable):
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         # dict_values has no tp_richcompare (inherits object's).
-        return VariableTracker.tp_richcompare_impl(self, tx, other, op)
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def debug_repr(self) -> str:
         if not self.view_items:
