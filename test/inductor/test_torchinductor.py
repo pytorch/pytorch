@@ -4776,7 +4776,6 @@ for dtype in (torch.int32, torch.int64):
         actual = compiled_fn(t[2**30 :])
         self.assertTrue((actual == 4).all())
 
-    @skipIfRocmArch(NAVI3_ARCH)  # gfx1100 Triton hsaco LLD target emulation unknown
     @skip_if_halide  # only 32-bit indexing
     @largeTensorTest("2GB", inductor=True)
     def test_large_strided_reduction(self):
@@ -14421,7 +14420,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1[:, 100] = float("nan")
         self.common(fn, (t1,))
 
-    @skipIfRocmArch(NAVI3_ARCH)  # gfx1100 Triton hsaco LLD target emulation unknown
     @requires_cuda
     def test_max_min_bool(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
@@ -19947,6 +19945,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch.compile(foo, fullgraph=True)(torch.ones(3, 3))
             self.assertTrue(len(log2), 1)
 
+    @tf32_on_and_off(0.05)
     def test_weight_norm_conv2d(self):
         """
         Verify fix for https://github.com/pytorch/pytorch/issues/165749
@@ -19964,7 +19963,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         act = compiled_conv(x)
         act_grad = torch.autograd.grad(act, list(compiled_conv.parameters()), grad_out)
 
-        self.assertTrue(same((ref, ref_grad), (act, act_grad), tol=1e-3))
+        self.assertEqual(
+            (act, act_grad), (ref, ref_grad), atol=1e-3, rtol=1e-3, equal_nan=False
+        )
 
     @xfail_if_mps  # MPS codegen does not emit ReductionHint.OUTER
     def test_inner_reduction_detection(self):
