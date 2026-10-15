@@ -737,10 +737,6 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 ```
 
 ```{eval-rst}
-.. autofunction:: all_to_all_nd
-```
-
-```{eval-rst}
 .. currentmodule:: torch.ops.symm_mem
 ```
 
