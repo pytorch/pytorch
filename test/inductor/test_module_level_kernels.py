@@ -131,6 +131,19 @@ def doc_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
 '''
 
 
+_TAG_MODULE = r"""
+import triton
+import triton.language as tl
+
+
+@triton.jit
+def tag_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr, TAG: tl.constexpr):
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n
+    tl.store(out_ptr + offs, tl.load(in_ptr + offs, mask=mask) + 1, mask=mask)
+"""
+
+
 def _import_kernels(d, template, kernels):
     for name, fields in kernels.items():
         with open(os.path.join(d, f"{name}.py"), "w") as f:
@@ -661,6 +674,31 @@ class TestModuleLevelKernels(TestCase):
             result, code = _code_for(fn, x)
             self.assertEqual(result, x + 1)
             self.assertIn(r'"""Adds one.\n"""', code)
+
+    @requires_cuda_and_triton
+    @parametrize("as_code", [False, True])
+    def test_user_defined_kernel_meta_with_backslashes(self, as_code):
+        # A string constexpr lands in the decorator's triton_meta repr, which the
+        # string form's literal and the module-level decode both read back.
+        with tempfile.TemporaryDirectory() as d:
+            (mod,) = _import_kernels(d, _TAG_MODULE, {f"_kd_tag_{as_code}": {}})
+
+            def fn(x):
+                out = torch.empty_like(x)
+                mod.tag_kernel[(4,)](x, out, x.numel(), BLOCK=64, TAG="a\\nb")
+                return out
+
+            x = torch.randn(256, device="cuda")
+            with mock.patch.object(
+                PythonWrapperCodegen,
+                "defines_triton_kernels_as_code",
+                lambda self: as_code,
+            ):
+                result, code = _code_for(fn, x, fx_graph_cache=False)
+            self.assertEqual(result, x + 1)
+            # The string form holds the decorator escaped for its literal.
+            meta = r"'TAG': 'a\\nb'"
+            self.assertIn(meta if as_code else meta.replace("\\", "\\\\"), code)
 
     @requires_cuda_and_triton
     @parametrize("autotune_at_compile_time", [False, True])
