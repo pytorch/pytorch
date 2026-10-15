@@ -15,18 +15,18 @@ variable_list Error::apply(variable_list&& inputs) {
   return static_cast<const Error*>(this)->apply(std::move(inputs));
 }
 
-variable_list Error::apply(variable_list&& inputs) const {
+variable_list Error::apply(variable_list&& /*inputs*/) const {
   TORCH_CHECK(false, msg);
 }
 
-void Error::compiled_args(CompiledNodeArgs& args) const {
+void Error::compiled_args(CompiledNodeArgs& /*args*/) const {
   // throw the error during collect, the graph won't get compiled
   apply(variable_list());
 }
 
 variable_list Error::apply_with_saved(
-    const variable_list& inputs,
-    SwapSavedVariables& saved) {
+    const variable_list& /*inputs*/,
+    SwapSavedVariables& /*saved*/) {
   TORCH_INTERNAL_ASSERT(false, "unreachable");
 }
 
@@ -67,7 +67,7 @@ void GraphRoot::compiled_args(CompiledNodeArgs& args) const {
   args.collect(outputs);
 }
 variable_list GraphRoot::apply_with_saved(
-    const variable_list& inputs,
+    const variable_list& /*inputs*/,
     SwapSavedVariables& saved) {
   saved.before(outputs);
   variable_list result(outputs);
