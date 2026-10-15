@@ -764,6 +764,19 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
         )
         yield SampleInput(a, b, driver=driver)
 
+    # Empty systems, which have no singular values, and systems without right-hand sides
+    empty_shapes = ((0, 0, 2), (3, 3, 0))
+    if len(deltas) > 1:
+        empty_shapes += ((0, 3, 2), (3, 0, 2), (4, 3, 0), (3, 4, 0))
+    for batch, driver, (m, n, k) in product(((), (3,)), drivers, empty_shapes):
+        a = make_tensor(
+            batch + (m, n), dtype=dtype, device=device, requires_grad=requires_grad
+        )
+        b = make_tensor(
+            batch + (m, k), dtype=dtype, device=device, requires_grad=requires_grad
+        )
+        yield SampleInput(a, b, driver=driver)
+
 
 def error_inputs_lstsq(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
@@ -1974,14 +1987,6 @@ op_db: list[OpInfo] = [
             # nvmath on CUDA so coverage is meaningful (CPU still runs the SVD
             # kernel, hence the skip is scoped to CUDA only).
             DecorateInfo(skipIfNoNvmath, device_type="cuda"),
-            # The gradient goes through SVD/eigh, whose MPS results differ
-            # slightly between contiguous and non-contiguous inputs.
-            DecorateInfo(
-                toleranceOverride({torch.float32: tol(atol=3e-4, rtol=2e-3)}),
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
         ],
     ),
     OpInfo(
@@ -2633,14 +2638,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 device_type="mps",
                 dtypes=(torch.complex64,),
-            ),
-            # torch-xpu-ops/issues/4313
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_numpy_ref",
-                device_type="xpu",
-                dtypes=(torch.float64,),
             ),
             # The test is flaky on AMX with Inductor
             DecorateInfo(
