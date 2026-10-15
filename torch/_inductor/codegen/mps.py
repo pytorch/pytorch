@@ -225,9 +225,6 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def constant(val: bool | float | int, dtype: torch.dtype) -> str:
-        # A bare integer literal deduces to a 32-bit int, which would narrow 64-bit results
-        if dtype in (torch.int64, torch.uint64):
-            return f"static_cast<{DTYPE_TO_METAL[dtype]}>({value_to_metal(val)})"
         return value_to_metal(val)
 
     @staticmethod
@@ -282,7 +279,9 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
-        return f"{a} ? {b} : static_cast<decltype({b})>({value_to_metal(c)})"
+        typecast_b = f"static_cast<decltype({b}+{c})>({b})"
+        typecast_c = f"static_cast<decltype({b}+{c})>({c})"
+        return f"{a} ? {typecast_b} : {typecast_c}"
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> str:
