@@ -78,6 +78,8 @@ for a brief introduction to all features related to distributed training.
 .. currentmodule:: torch.distributed
 ```
 
+(distributed-backends)=
+
 ## Backends
 
 `torch.distributed` ships the following backends. Backends are registered
@@ -952,27 +954,11 @@ Unpickling a tensor will implicitly activate a CUDA context if it is the first
 time a GPU is used by the process, which can waste significant amounts of GPU memory. This issue can be avoided by
 moving tensors to CPU before passing them as inputs to an object collective.
 
-## Third-party backends
+## Custom backends
 
-Besides the built-in backends listed under Backends, PyTorch distributed supports
-third-party backends through a run-time register mechanism.
-For references on how to develop a third-party backend through C++ Extension,
-please refer to [Tutorials - Custom C++ and CUDA Extensions](https://pytorch.org/tutorials/advanced/cpp_extension.html) and
-`test/cpp_extensions/cpp_c10d_extension.cpp`. The capability of third-party
-backends are decided by their own implementations.
-
-The new backend derives from `c10d::Backend` (the example above uses the older
-`c10d::ProcessGroup` base) and registers the backend
-name and the instantiating interface through {func}`torch.distributed.Backend.register_backend`
-when imported.
-
-When manually importing this backend and invoking {func}`torch.distributed.init_process_group`
-with the corresponding backend name, the `torch.distributed` package runs on
-the new backend.
-
-:::{warning}
-The support of third-party backend is experimental and subject to change.
-:::
+Besides the built-in backends listed under Backends, `torch.distributed` supports
+backends registered at run time, written in C++ or Python. See
+{doc}`distributed/custom_backends`.
 
 ## TorchComms backend
 
