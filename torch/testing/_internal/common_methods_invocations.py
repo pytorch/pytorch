@@ -14749,7 +14749,12 @@ op_db: list[OpInfo] = [
            error_inputs_func=error_inputs_attn,
            supports_out=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True),
+           supports_fwgrad_bwgrad=True,
+           skips=(
+               # Under autocast, eager runs the inner matmuls in lower precision, but fake
+               # tensor runs attn's CompositeExplicitAutograd kernel without autocast.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
+           )),
     OpInfo('matmul',
            aliases=('linalg.matmul',),
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
