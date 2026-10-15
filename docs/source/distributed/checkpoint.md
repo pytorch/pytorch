@@ -19,8 +19,8 @@ The entrypoints to load and save a checkpoint are the following:
 
 - [Getting Started with Distributed Checkpoint (DCP)](https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html)
 - [Asynchronous Saving with Distributed Checkpoint (DCP)](https://pytorch.org/tutorials/recipes/distributed_async_checkpoint_recipe.html)
-- [TorchTitan Checkpointing Docs](https://github.com/pytorch/torchtitan/blob/main/docs/checkpoint.md)
-- [TorchTitan DCP Implementation](https://github.com/pytorch/torchtitan/blob/main/torchtitan/components/checkpoint.py)
+- [TorchTitan Checkpointing Docs](https://github.com/pytorch/torchtitan/blob/main/torchtitan/components/checkpointer/README.md)
+- [TorchTitan DCP Implementation](https://github.com/pytorch/torchtitan/blob/main/torchtitan/components/checkpointer/dcp.py)
 
 ```{eval-rst}
 .. automodule:: torch.distributed.checkpoint
