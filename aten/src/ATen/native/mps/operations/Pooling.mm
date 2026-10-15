@@ -543,6 +543,10 @@ static AdaptiveAvgPool3dParams make_adaptive_avg_pool3d_params(const Tensor& inp
 static void adaptive_avg_pool3d_out_mps_template(const Tensor& output, const Tensor& input, IntArrayRef output_size) {
   const auto ndims = input.dim();
   TORCH_CHECK(ndims == 4 || ndims == 5, "adaptive_avg_pool3d(): expected 4D or 5D tensor, but got ", input.sizes());
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(input.scalar_type()),
+                              "adaptive_avg_pool3d(): not implemented for '",
+                              input.scalar_type(),
+                              "' on MPS");
   for (const auto i : c10::irange(1, ndims)) {
     TORCH_CHECK(input.size(i) > 0,
                 "adaptive_avg_pool3d(): Expected input to have non-zero size for non-batch dimensions, but input has "
