@@ -15735,6 +15735,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn(32), torch.randn(32)),
         )
 
+    def test_where_int64_scalar(self):
+        # The scalar must not narrow the int64 result to 32 bits
+        def fn(x):
+            return torch.where(x < 0, 0, x)
+
+        self.common(fn, (torch.tensor([2**40 + 7, -5, 3_000_000_000]),))
+
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self) -> None:
