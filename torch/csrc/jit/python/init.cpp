@@ -1261,11 +1261,6 @@ void initJITBindings(PyObject* module) {
             return a->expect_true(file, line);
           })
       .def(
-          "guard_size_oblivious",
-          [](const c10::SymNode& a, const char* file, int64_t line) {
-            return a->guard_size_oblivious(file, line);
-          })
-      .def(
             "guard_or_false",
             [](const c10::SymNode& a, const char* file, int64_t line) {
               return a->guard_or_false(file, line);

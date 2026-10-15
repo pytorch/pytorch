@@ -11248,7 +11248,7 @@ def forward(self, b_a_buffer, x):
             )
 
     @testing.expectedFailureStrictV2
-    def test_no_check_is_size_error(self):
+    def test_unbacked_view_nonnegative_size(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 a = x.item()
