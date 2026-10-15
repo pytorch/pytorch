@@ -760,8 +760,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         def fsdp_pre_all_gather(
             local_tensor, mesh, outer_size, outer_stride, module, mp_policy
         ):
-            tags = torch.arange(num_tags, device=local_tensor.device).to(tags_dtype)
-            payloads = (tags, local_tensor) if num_tags else (tags,)
+            tags = torch.arange(num_tags, device=local_tensor.device).bfloat16()
+            payloads = (tags.view(tags_dtype), local_tensor) if num_tags else (tags,)
             return payloads, (outer_size, num_tags)
 
         @torch.no_grad()
@@ -785,6 +785,9 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             output = model(inp)
             self.assertEqual(output, ref_model(inp))
             output.sum().backward()
+        # A smaller byte payload fills a byte prefix
+        tags_dtype = torch.uint8
+        model(inp)
         # A payload whose dtype and size change, or a dropped payload, raises
         tags_dtype = torch.float16
         with self.assertRaisesRegex(RuntimeError, "must match the size"):
