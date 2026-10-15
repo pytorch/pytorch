@@ -56,6 +56,7 @@ struct MagmaInitializer {
 namespace at::native {
 
 void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots);
+void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool hermitian);
 
 #if defined(BUILD_LAZY_CUDA_LINALG)
 // All registrations with PyTorch runtime should be done dynamically
@@ -419,7 +420,13 @@ void ldl_factor_kernel(
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
-       { ldl_factor_cusolver(
+       {
+#ifndef USE_ROCM
+         if (hermitian) {
+           return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
+         }
+#endif
+         ldl_factor_cusolver(
           LD, pivots, info, upper, hermitian);
         return;
 }
@@ -428,8 +435,14 @@ void ldl_factor_kernel(
         return;
 }
     default:
-    // By default use cusolver if available and magma otherwise.
-    // If cusolver and magma 2.5.4+ are both available and hermitian=true,
+#ifndef USE_ROCM
+    // By default the custom kernel takes hermitian=true.
+      if (hermitian) {
+        return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
+      }
+#endif
+    // Otherwise use cusolver if available and magma otherwise.
+    // If cusolver and magma 2.5.4+ are both available and hermitian=true (on ROCm),
     // call magma for complex inputs
 #ifdef USE_LINALG_SOLVER
 #if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 20504)
