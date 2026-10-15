@@ -226,7 +226,7 @@ def flex_gemm_epimod(
     epilogue_arg_kinds: tuple[str, ...],
     aux_output_count: int,
     local_reduce: FlexGemmRuntimeLocalReducePlan | None,
-    output_contraction: FlexGemmOutputTransform | None,
+    output_transform: FlexGemmOutputTransform | None,
     *,
     varlen_m: bool,
 ):
@@ -241,7 +241,7 @@ def flex_gemm_epimod(
         epilogue_arg_dtypes,
         aux_output_count,
         None if local_reduce is None else local_reduce.cache_key,
-        output_contraction,
+        output_transform,
         varlen_m,
     )
     epimod = _EPIMOD_CACHE.get(key)
@@ -274,7 +274,7 @@ def flex_gemm_epimod(
             op_type = ScalarColVecLoad
         ops[name] = op_type(name, dtype=dtype)
     aux_output_names = tuple(f"output{index}" for index in range(aux_output_count))
-    if isinstance(output_contraction, FlexGemmOutputContraction):
+    if isinstance(output_transform, FlexGemmOutputContraction):
         from torch._inductor.kernel.flex_gemm.quack_ops.main_store import (
             GroupedMainStore,
         )
@@ -289,12 +289,12 @@ def flex_gemm_epimod(
         outputs: tuple[Any, ...] = (
             GroupedMainStore(
                 "main",
-                output_contraction.group,
+                output_transform.group,
                 min_fragment_n=min_fragment_n,
             ),
             *aux_output_names,
         )
-    elif isinstance(output_contraction, FlexGemmOutputExpansion):
+    elif isinstance(output_transform, FlexGemmOutputExpansion):
         outputs = (InterleavedMainStore("main"), *aux_output_names)
     else:
         outputs = aux_output_names
@@ -401,7 +401,7 @@ def gemm_epilogue(
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
-    output_contraction: FlexGemmOutputTransform | None = None,
+    output_transform: FlexGemmOutputTransform | None = None,
     cu_seqlens_m: torch.Tensor | None = None,
     cu_seqlens_k: torch.Tensor | None = None,
     config: QuackConfigKey,
@@ -428,8 +428,8 @@ def gemm_epilogue(
             SFB, b.shape[1], b.shape[0], blockscaled_format
         )
     if (
-        isinstance(output_contraction, FlexGemmOutputContraction)
-        and output_contraction.chunked
+        isinstance(output_transform, FlexGemmOutputContraction)
+        and output_transform.chunked
         and b.stride(-1) == 1
     ):
         raise NotImplementedError(
@@ -442,10 +442,10 @@ def gemm_epilogue(
         epilogue_arg_kinds,
         len(aux_outs),
         local_reduce,
-        output_contraction,
+        output_transform,
         varlen_m=cu_seqlens_m is not None,
     )
-    effective_C = normalize_c(C, tuple(out.shape), beta)
+    effective_C = normalize_c(C, (*a.shape[:-1], b.shape[-1]), beta)
     operands: dict[str, Any] = {}
     if "alpha" in epimod.operand_names:
         operands["alpha"] = alpha
@@ -490,7 +490,7 @@ def gemm_epilogue(
 
     from torch._vendor.quack.cache import cache_dir_override
 
-    main_name = "main" if output_contraction is not None else "D"
+    main_name = "main" if output_transform is not None else "D"
     output_names = (main_name, *(f"output{index}" for index in range(len(aux_outs))))
     output_buffers = dict(
         zip(
@@ -499,9 +499,7 @@ def gemm_epilogue(
             strict=True,
         )
     )
-    concat_layout = (
-        None if output_contraction is None else output_contraction.concat_layout
-    )
+    concat_layout = None if output_transform is None else output_transform.concat_layout
     # Generated wrappers pass the current stream; switching streams costs ~20us.
     stream_context = (
         torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
@@ -523,7 +521,7 @@ def gemm_epilogue(
             bs_format_b=blockscaled_format,
             out=output_buffers,
             out_dtype=out.dtype,
-            store_d=output_contraction is None,
+            store_d=output_transform is None,
             config=_quack_gemm_config(config),
             tuned=False,
             concat_layout=concat_layout,

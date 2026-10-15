@@ -96,6 +96,10 @@ FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
     "FlexGEMM grouped main outputs compose only with the unchanged physical "
     "GEMM output as an auxiliary"
 )
+FLEX_GEMM_OUTPUT_EXPANSION_COMPOSITION_ERROR = (
+    "FlexGEMM interleaved main outputs compose only with GEMM-shaped auxiliaries "
+    "computed before the lanes are packed"
+)
 FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: contracted output shape must equal the "
     "physical GEMM output shape with N divided by the contraction group"

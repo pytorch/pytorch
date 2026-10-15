@@ -19,6 +19,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     FlexGemmStructuralInt,
+    is_pointwise_node,
     tensor_meta_shape,
     view_or_reshape_args,
 )
@@ -34,6 +35,7 @@ from torch._inductor.kernel.gemm_epilogue_utils import (
     statically_known_equal,
     statically_known_shape_equal,
 )
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -314,16 +316,32 @@ def build_output_contraction_plan(
 
 @dataclasses.dataclass(frozen=True)
 class OutputExpansionPlan:
-    """Describe a main output that packs two lanes interleaved along N.
-
-    ``pack`` is the stack (or cat of unsqueezed lanes) and ``alias_nodes`` are the
-    reshapes between the lanes and the returned ``[..., 2N]`` value.
-    """
+    """A main output packing two lanes interleaved along N: ``pack`` is the stack
+    (or cat of unsqueezed lanes), ``alias_nodes`` the reshapes to ``[..., 2N]``."""
 
     transform: FlexGemmOutputExpansion
     pack: torch.fx.Node
     lanes: tuple[torch.fx.Node, torch.fx.Node]
     alias_nodes: frozenset[torch.fx.Node]
+
+
+def unary_pointwise_source(node: torch.fx.Node) -> torch.fx.Node | None:
+    """Return the tensor input of a shape-preserving pointwise node whose other
+    operands are literals or a dtype (``x + 1``, ``x.to(dtype)``, not broadcasts)."""
+    operands = (*node.args, *node.kwargs.values())
+    inputs = OrderedSet(arg for arg in operands if isinstance(arg, torch.fx.Node))
+    literals = (torch.fx.Node, bool, int, float, torch.dtype, type(None))
+    if (
+        not is_pointwise_node(node)
+        or len(inputs) != 1
+        or not all(isinstance(arg, literals) for arg in operands)
+    ):
+        return None
+    source = next(iter(inputs))
+    shape, source_shape = tensor_meta_shape(node) or (), tensor_meta_shape(source)
+    if source_shape is None or not statically_known_shape_equal(shape, source_shape):
+        return None
+    return source
 
 
 def match_output_expansion(
@@ -332,19 +350,16 @@ def match_output_expansion(
     """Match a main output ``stack([a, b], -1).view(..., 2N)`` of GEMM-shaped lanes.
 
     ``torch.stack`` reaches the body decomposed as ``cat([a.unsqueeze(-1),
-    b.unsqueeze(-1)], -1)``; a trailing dtype conversion lowers generically.
+    b.unsqueeze(-1)], -1)``; literal pointwise ops after the view lower generically.
     """
     aten = torch.ops.aten
     value = outputs.output
-    if value.target in (
-        torch.ops.prims.convert_element_type.default,
-        aten._to_copy.default,
-    ):
-        value = value.args[0]
-    if not isinstance(value, torch.fx.Node):
-        return None
-    view_args = view_or_reshape_args(value)
-    if view_args is None or not isinstance(view_args[0], torch.fx.Node):
+    while (view_args := view_or_reshape_args(value)) is None:
+        source = unary_pointwise_source(value)
+        if source is None:
+            return None
+        value = source
+    if not isinstance(view_args[0], torch.fx.Node):
         return None
     pack = view_args[0]
     gemm_shape = tensor_meta_shape(gemm)
@@ -386,10 +401,6 @@ def match_output_expansion(
         )
     ):
         return None
-    if outputs.aux_outputs or outputs.local_reduce is not None:
-        raise NotImplementedError(
-            "FlexGEMM interleaved outputs support only two plain epilogue lanes"
-        )
     return OutputExpansionPlan(
         FlexGemmOutputExpansion(), pack, lane_nodes, frozenset(aliases)
     )
