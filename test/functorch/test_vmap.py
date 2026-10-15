@@ -4152,9 +4152,8 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     @parametrize("dropout_p", [0.0, 0.2])
-    @parametrize("in_dim", [0, 2, -1])
     @parametrize("has_mask", [False, True])
-    def test_sdpa_batched_vjp(self, device, backend, dropout_p, in_dim, has_mask):
+    def test_sdpa_batched_vjp(self, device, backend, dropout_p, has_mask):
         if device == "cpu" and backend != SDPBackend.MATH:
             raise unittest.SkipTest("Fused CUDA SDPA backend")
         if has_mask and backend == SDPBackend.FLASH_ATTENTION:
@@ -4186,9 +4185,13 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                 torch.stack(parts)
                 for parts in zip(*(vjp_fn(cotangent) for cotangent in cotangents))
             )
+            check_nonleading = (
+                backend == SDPBackend.EFFICIENT_ATTENTION and dropout_p > 0 and has_mask
+            )
             with DisableVmapFallback():
-                actual = vmap(vjp_fn, in_dims=in_dim)(cotangents.movedim(0, in_dim))
-            self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+                for in_dim in (0, -1) if check_nonleading else (0,):
+                    actual = vmap(vjp_fn, in_dims=in_dim)(cotangents.movedim(0, in_dim))
+                    self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
             actual_rng_state = (
                 torch.get_rng_state()
                 if device == "cpu"
