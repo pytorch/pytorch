@@ -1186,6 +1186,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         "proxy",
         "inference",
         "saved_tensors",
+        "output_grad_dtypes",
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
@@ -1197,6 +1198,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         saved_tensors: Any | None = None,
         non_differentiable: Any | None = None,
         dirty_tensors: list[VariableTracker] | None = None,
+        output_grad_dtypes: tuple[torch.dtype | None, ...] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
@@ -1204,6 +1206,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.saved_tensors = saved_tensors
         self.non_differentiable = non_differentiable
         self.dirty_tensors = dirty_tensors
+        self.output_grad_dtypes = output_grad_dtypes
 
     @staticmethod
     def create(
@@ -1273,6 +1276,35 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.dirty_tensors = args
         return variables.ConstantVariable.create(None)
 
+    def set_output_grad_dtype(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        no_keywords(tx, "set_output_grad_dtype", kwargs)
+        dtypes = (
+            tuple(arg.as_python_constant() for arg in args)
+            if all(arg.is_python_constant() for arg in args)
+            else None
+        )
+        if (
+            getattr(self, "proxy", None) is None
+            or self.output_grad_dtypes is not None
+            or dtypes is None
+            or not all(d is None or isinstance(d, torch.dtype) for d in dtypes)
+        ):
+            unimplemented(
+                gb_type="Unsupported autograd.Function context `set_output_grad_dtype`",
+                context=f"call_method {self} set_output_grad_dtype {args}",
+                explanation="Dynamo only supports tracing a single "
+                "ctx.set_output_grad_dtype call with constant torch.dtype or "
+                "None arguments inside autograd.Function.apply.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        self.output_grad_dtypes = dtypes
+        return variables.ConstantVariable.create(None)
+
     def save_for_backward(
         self,
         tx: "InstructionTranslatorBase",
@@ -1314,12 +1346,18 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         "mark_non_differentiable": Method(mark_non_differentiable),
         "mark_dirty": Method(mark_dirty),
         "save_for_backward": Method(save_for_backward),
+        "set_output_grad_dtype": Method(set_output_grad_dtype),
     }
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        if name in ["save_for_backward", "mark_dirty", "mark_non_differentiable"]:
+        if name in [
+            "save_for_backward",
+            "mark_dirty",
+            "mark_non_differentiable",
+            "set_output_grad_dtype",
+        ]:
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, list(args), kwargs)
             )
@@ -1555,6 +1593,16 @@ class CallMethodVariable(VariableTracker):
         except AsPythonConstantNotImplementedError:
             return id(self), True
 
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
@@ -1625,6 +1673,13 @@ class PythonModuleVariable(VariableTracker):
 
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, attr_value, source)
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
 
 class TypingVariable(VariableTracker):
@@ -2097,6 +2152,13 @@ class ObjectVariable(VariableTracker):
 
     def python_type(self) -> type[object]:
         return object
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
 
 if sys.version_info >= (3, 15):
