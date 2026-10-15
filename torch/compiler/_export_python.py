@@ -24,6 +24,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
+from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
@@ -126,6 +127,196 @@ def _atomic_publish(path: str, data: bytes) -> bool:
             os.remove(tmp)
         except FileNotFoundError:
             pass
+
+
+_CHECK_ENV = "COMPILER_EXPORT_PYTHON_CHECK"
+
+# Elements below this fraction of the reference's peak are too small for a relative diff
+# to say anything; they are covered by the absolute term instead.
+_REL_REPORT_FLOOR = 1e-6
+
+
+def _check_enabled() -> bool:
+    return os.environ.get(_CHECK_ENV, "") not in ("", "0")
+
+
+def _check_tolerances(dtype: torch.dtype) -> tuple[float, float, float | None]:
+    """Tolerances ``(rtol, atol, atol_frac)`` for comparing an artifact against eager.
+
+    Looser than torch.testing's eager-vs-eager defaults: inductor fuses and reassociates
+    reductions, so an unedited artifact differs from eager by more than those allow, as
+    torch.compile does on the same graph. ``atol_frac`` caps the absolute tolerance at
+    that fraction of the reference's own magnitude, so a tensor whose every element is
+    below ``atol`` (a softmax over 4096 columns) is still checked; the cap only ever
+    tightens, and an all-zero reference, which has no magnitude to scale by, keeps the
+    full ``atol``. Integer and bool results are compared exactly.
+    ``COMPILER_EXPORT_PYTHON_CHECK_RTOL`` and ``_ATOL`` override the per-dtype values;
+    an explicit ``_ATOL`` is not capped.
+    """
+    if not (dtype.is_floating_point or dtype.is_complex):
+        return 0.0, 0.0, None
+    # Calibrated against freshly exported, unedited artifacts for softmax, layernorm+gelu,
+    # gemm+bias+gelu, silu(linear) and a fused fp32 reduction. The worst of them (an fp16
+    # softmax) sits at 2.9e-3 relative and 2.3e-3 of its own magnitude; these leave
+    # roughly 2-4x headroom over that.
+    per_dtype = {
+        torch.float64: (1e-7, 1e-9, 1e-7),
+        torch.float32: (1e-3, 1e-4, 1e-4),
+        torch.float16: (6e-3, 1e-3, 8e-3),
+        torch.bfloat16: (2e-2, 5e-3, 5e-3),
+    }
+    real = dtype.to_real()
+    # Off the table (float8): one rounding flip is a whole ulp, which is eps relative.
+    eps = torch.finfo(real).eps
+    rtol, atol, atol_frac = per_dtype.get(real, (eps, eps, eps))
+    overrides: list[float | None] = []
+    for suffix in ("RTOL", "ATOL"):
+        name = f"{_CHECK_ENV}_{suffix}"
+        raw = os.environ.get(name)
+        try:
+            overrides.append(float(raw) if raw else None)
+        except ValueError:
+            raise _precompile_error(f"{name}={raw!r} is not a number.") from None
+    override_rtol, override_atol = overrides
+    if override_rtol is not None:
+        rtol = override_rtol
+    # An explicit atol is taken at face value: atol_frac None leaves it uncapped.
+    if override_atol is not None:
+        return rtol, override_atol, None
+    return rtol, atol, atol_frac
+
+
+def _allclose(a: torch.Tensor, b: torch.Tensor, rtol: float, atol: float) -> bool:
+    """torch.allclose, but tolerant of dtypes that have no comparison kernel.
+
+    float8 reaches allclose and dies inside it on a missing mul (as NotImplementedError,
+    which is a RuntimeError); promote and compare there rather than failing an artifact
+    that is perfectly honest.
+    """
+    try:
+        return bool(torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=True))
+    except RuntimeError:
+        return bool(
+            torch.allclose(a.double(), b.double(), rtol=rtol, atol=atol, equal_nan=True)
+        )
+
+
+def _finite_mask(t: torch.Tensor) -> torch.Tensor | None:
+    """Where ``t`` is finite, or None for a dtype that cannot answer.
+
+    float8 is is_floating_point() but has no isfinite kernel, so asking crashes the
+    check on an artifact that is perfectly honest.
+    """
+    if not (t.is_floating_point() or t.is_complex()):
+        return None
+    try:
+        return torch.isfinite(t)
+    except RuntimeError:
+        return None
+
+
+def _verify_against_eager(
+    fn: Callable[..., Any],
+    reference_args: tuple[Any, ...],
+    produced: Any,
+    path: str,
+) -> None:
+    """Re-run fn eagerly on a pre-call copy of the inputs and compare the results.
+
+    The artifact is frozen at capture and stays frozen through every hand-edit -- that is
+    the point of it -- so the way to know an edit is still correct is to ask the original
+    function. Under COMPILER_EXPORT_PYTHON_CHECK every call does exactly that.
+    """
+    # Under the ambient grad mode, not no_grad: fn may run a backward of its own.
+    expected = fn(*reference_args)
+    name = getattr(fn, "__name__", "fn")
+    got_flat, got_spec = pytree.tree_flatten(produced)
+    want_flat, want_spec = pytree.tree_flatten(expected)
+    if got_spec != want_spec:
+        raise _precompile_error(
+            f"{_CHECK_ENV}: the artifact at {path} returns {got_spec} but {name} "
+            f"returns {want_spec}."
+        )
+    # Non-tensor leaves compare exactly: they are ints, bools and None (inductor cannot
+    # lower a float output) or, under backend="eager", constants baked at capture.
+    for got, want in zip(got_flat, want_flat):
+        is_tensor = isinstance(want, torch.Tensor)
+        same_kind = isinstance(got, torch.Tensor) == is_tensor
+        if not same_kind or (not is_tensor and got != want):
+            raise _precompile_error(
+                f"{_CHECK_ENV}: the artifact at {path} returns {got!r} where {name} "
+                f"returns {want!r}. If you have hand-edited the artifact, the edit changed "
+                f"its result; otherwise delete {path} to recapture."
+            )
+    got_leaves = [t for t in got_flat if isinstance(t, torch.Tensor)]
+    want_leaves = [t for t in want_flat if isinstance(t, torch.Tensor)]
+    for i, (got, want) in enumerate(zip(got_leaves, want_leaves)):
+        rtol, atol, atol_frac = _check_tolerances(got.dtype)
+        if (got.shape, got.dtype, got.device) != (want.shape, want.dtype, want.device):
+            raise _precompile_error(
+                f"{_CHECK_ENV}: output {i} of the artifact at {path} is "
+                f"{tuple(got.shape)}/{got.dtype}/{got.device} but eager gives "
+                f"{tuple(want.shape)}/{want.dtype}/{want.device}."
+            )
+        # Where each is finite has to agree before any tolerance is meaningful: an edit
+        # that leaves part of the output unwritten reads back uninitialized memory.
+        finite_want, finite_got = _finite_mask(want), _finite_mask(got)
+        if (
+            finite_want is not None
+            and finite_got is not None
+            and not torch.equal(finite_got, finite_want)
+        ):
+            bad = int((finite_got != finite_want).sum())
+            raise _precompile_error(
+                f"{_CHECK_ENV}: output {i} of the artifact at {path} disagrees with "
+                f"{name} about where the result is finite "
+                f"({bad} of {got.numel()} elements). A kernel that leaves part of its "
+                "output unwritten reads back uninitialized memory, which looks like "
+                "this. If you have hand-edited the artifact, check the store and its "
+                f"bounds; otherwise delete {path} to recapture."
+            )
+        wide = torch.complex128 if want.is_complex() else torch.float64
+        if finite_want is not None:
+            # Agreeing on where is not enough: inf, -inf and nan must match too.
+            g, w = got[~finite_want].to(wide), want[~finite_want].to(wide)
+            same_nan = torch.equal(g.isnan(), w.isnan())
+            if not same_nan or not torch.equal(g.nan_to_num(), w.nan_to_num()):
+                raise _precompile_error(
+                    f"{_CHECK_ENV}: output {i} of the artifact at {path} disagrees with "
+                    f"{name} about which non-finite value (inf, -inf or nan) it holds. "
+                    "If you have hand-edited the artifact, the edit changed its result; "
+                    f"otherwise delete {path} to recapture."
+                )
+        # Cap the absolute tolerance at a fraction of how big the reference actually is,
+        # so a tensor whose every element is smaller than atol is still checked.
+        flat_got = got[finite_want] if finite_want is not None else got.flatten()
+        flat_want = want[finite_want] if finite_want is not None else want.flatten()
+        values = flat_want.to(wide)
+        magnitude = values.abs().max().item() if values.numel() else 0.0
+        if atol_frac is not None and magnitude > 0:
+            atol = min(atol, atol_frac * magnitude)
+        if _allclose(got, want, rtol, atol):
+            continue
+        # Finite positions only: inf/nan positions already agreed, and inf - inf is nan.
+        diff = (flat_got.to(wide) - values).abs()
+        max_abs = diff.max().item() if diff.numel() else 0.0
+        # A ratio is only informative where the reference is big enough to divide by;
+        # exact zeros (relu, gelu) would otherwise dominate it.
+        reference = values.abs()
+        floor = _REL_REPORT_FLOOR * magnitude
+        significant = reference > floor if floor > 0 else reference != 0
+        if significant.any():
+            rel = f"{(diff[significant] / reference[significant]).max().item():.3e}"
+        else:
+            rel = "n/a (reference is all near-zero)"
+        raise _precompile_error(
+            f"{_CHECK_ENV}: output {i} of the artifact at {path} does not match "
+            f"{name} run eagerly on the same inputs "
+            f"(max abs diff {max_abs:.3e}, max rel diff {rel}, reference "
+            f"magnitude {magnitude:.3e}, tolerances rtol={rtol} atol={atol:.3e}). "
+            "If you have hand-edited the artifact, the edit changed its numerics; "
+            f"otherwise delete {path} to recapture."
+        )
 
 
 def _precompile_error(msg: str) -> Exception:
@@ -1061,7 +1252,26 @@ class ExportedPythonArtifact:
             loaded = self._materialize_once(args)
         self._check_capture_environment(args)
         self._check_module_training(args)
-        return loaded(*args)
+        if not _check_enabled():
+            return loaded(*args)
+        # Copy BEFORE the call: the graph may mutate its inputs in place, and the eager
+        # reference has to see what the artifact saw rather than what it left behind.
+        # The args are all of it: capture refuses any tensor fn closes over.
+        try:
+            reference = copy.deepcopy(args)
+        except Exception:
+            warning_once(
+                log,
+                "%s is set but the arguments to %s could not be deep-copied, so an "
+                "eager comparison would see whatever the artifact mutated. Skipping "
+                "the check for calls with such arguments.",
+                _CHECK_ENV,
+                self._path,
+            )
+            return loaded(*args)
+        produced = loaded(*args)
+        _verify_against_eager(self._fn, reference, produced, self._path)
+        return produced
 
 
 def export_python(
