@@ -13,8 +13,8 @@ unsharded storage, and re-allocates it to its recorded size before each later
 finalize, which must refill the same outputs in place. Outputs that view these
 buffers stay allocated until reshard even if an all-gather extension asks to
 release its outputs after ``fsdp_post_all_gather``.
-``DefaultAllGatherLayout`` copies with its ``output_fn`` into one buffer per
-output, which its parameter frees unless a delegating custom layout adopted it.
+``DefaultAllGatherLayout`` copies with its ``output_fn`` into the parameters' outputs:
+one buffer per output, freed by its parameter, unless a custom layout adopted them.
 
 A layout that needs a specific collective holds it as ``comm``.
 ``FSDPModule.set_all_gather_layout`` is the only way to install a layout, and
@@ -202,7 +202,7 @@ class AllGatherLayout(ABC):
 
         On the group's first unshard ``metadata.buffers`` is empty: allocate the
         persistent buffers and return outputs that view them, laid out as
-        ``AllGatherOutputs`` describes. Later calls pass those buffers, with
+        ``AllGatherOutputs`` describes. Later calls pass the group's buffers, with
         storage re-allocated, and the outputs in ``metadata.param_metadata``,
         which are FSDP's if the first unshard used the default layout and must
         be refilled in place and returned, under preserved version counters.
@@ -283,7 +283,7 @@ class DefaultAllGatherLayout(AllGatherLayout):
     ) -> None:
         if all_gather_output.numel() == 0:
             return  # nothing was gathered
-        output_fn = self.output_fn or default_output_fn
+        output_fn = default_output_fn if self.output_fn is None else self.output_fn
         outputs = [output for param_outputs in plan.outputs for output in param_outputs]
         non_inference_outputs = tuple([t for t in outputs if not t.is_inference()])
         # Views share their base's version counter
@@ -353,7 +353,8 @@ def _adopt_layout_outputs(
             if t.dim() != 1 or not t.is_contiguous() or t.numel() != numel * world_size:
                 raise ValueError(
                     f"all-gather output of {name} must be a contiguous 1-D tensor of "
-                    f"{numel * world_size} elements, but has size {tuple(t.shape)}"
+                    f"{numel * world_size} elements, but has size {tuple(t.shape)} "
+                    f"and stride {t.stride()}"
                 )
             if t.dtype != dtype:
                 raise ValueError(

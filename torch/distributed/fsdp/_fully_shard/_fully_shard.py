@@ -943,9 +943,9 @@ class FSDPModule:
         which installs ``DefaultAllGather`` unless it has its own comm, so
         re-apply that setter, :meth:`set_symm_mem_for_comm` or
         :meth:`set_allocate_memory_from_process_group_for_comm` afterwards. Such
-        a layout must be installed on a single parameter group, e.g. on each
-        module with ``recurse=False``. Set layouts, and those comms, before the
-        first unshard. FSDP checks every parameter group before changing any.
+        a layout is rejected for several parameter groups in one call; install a
+        separate instance on each module with ``recurse=False``. Set layouts and
+        those comms before the first unshard; FSDP checks every group first.
 
         Args:
             layout (Optional[AllGatherLayout]): Layout, or ``None`` to restore

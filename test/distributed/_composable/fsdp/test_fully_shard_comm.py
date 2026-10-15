@@ -3150,7 +3150,7 @@ class TestAllGatherLayouts(TestCase):
 
         source = torch.arange(8.0)
         errors = {
-            "no_buffers": "does not view the persistent",
+            "no_buffers": "of lin.weight does not view the persistent",
             "not_viewing": "does not view the persistent",
             "strided_output": "contiguous 1-D tensor of 4 elements, but has size \\(4,\\)",
             "wrong_dtype": "must have dtype torch.float32, but has torch.float64",
@@ -3344,7 +3344,7 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
             fully_shard(module, mesh=mesh)
         groups = [module._get_fsdp_state()._fsdp_param_group for module in model]
         native = DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
-        with self.assertRaisesRegex(ValueError, "one parameter group"):
+        with self.assertRaisesRegex(ValueError, "one parameter group"):  # two blocks
             model.set_all_gather_layout(_ParamContiguousAllGather("custom").layout)
         # FSDP checks every group before replacing any layout
         model[1].unshard()
@@ -3356,7 +3356,7 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         model[1].set_custom_all_gather(comm)
         self.assertIs(groups[1]._all_gather_comm, comm)
         model[1].reshard()
-        # A custom layout's do, while an all-gather is pending or params are unsharded
+        # With a custom layout, replacing the comm waits for pending work and reshard
         model[0].set_all_gather_layout(
             _ParamContiguousLayout("rank_major", None), recurse=False
         )
@@ -3513,6 +3513,7 @@ def _check_fsdp_owned_layout_training(
         if mode == "custom":
             test.assertGreater(comm.layout.single_copy_refills, 0)
             block.set_custom_all_gather(comm)  # the installed comm stays allowed
+            block.set_all_gather_layout(comm.layout, recurse=False)  # a no-op
             with test.assertRaisesRegex(ValueError, "bound to its comm"):
                 block.set_custom_all_gather(DefaultAllGather())
             with test.assertRaisesRegex(ValueError, "cannot replace"):
@@ -3543,7 +3544,7 @@ class TestFullyShardLayoutParity(FSDPTestMultiThread):
 
         class Delegating(AllGatherLayout):
             def prepare_output(self, metadata):
-                test.assertGreater(max(metadata.input_outer_sizes), 1)  # Shard(1) rows
+                test.assertEqual(metadata.input_outer_sizes, [64, 1, 16, 1])
                 return metadata.input_outer_sizes
 
             def finalize_outputs(self, metadata):

@@ -1071,7 +1071,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         dist.broadcast(model.weight.detach(), src=0)
         ref_model = copy.deepcopy(model)
         fully_shard(model, mesh=mesh, reshard_after_forward=True)
-        if native_copy:  # smaller payloads take its fallback
+        if native_copy:  # on two shard ranks, smaller payloads take its fallback
             self._set_native_all_gather(model)
         self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
         # An input that requires grad saves the weight for backward, which all-gathers
