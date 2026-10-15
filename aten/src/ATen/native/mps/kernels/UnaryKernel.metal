@@ -56,7 +56,7 @@ struct exp_functor {
 struct expm1_functor {
   template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
   inline T operator()(const T x) {
-    if (::metal::fabs(x) < 1e-5f) {
+    if (::metal::fabs(x) < 1e-1f) {
       return static_cast<T>(c10::metal::expm1f(static_cast<float>(x)));
     } else {
       return static_cast<T>(exp_(static_cast<float>(x)) - 1.0f);
@@ -232,118 +232,253 @@ struct tanh_functor {
   }
 };
 
-struct asin_functor {
-  template <typename T>
-  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
-    return T(precise::asin(x));
+// Complex inverse trigonometric/hyperbolic functions, ported from FreeBSD's
+// catrigf.c, which implements Hull, Fairgrieve and Tang, "Implementing the
+// complex arcsine and arccosine functions using exception handling" (1997).
+// thrust (and therefore CUDA) uses the same algorithm. casin/cacosh/catan are
+// derived from casinh/cacos/catanh.
+namespace catrig {
+constant constexpr float RECIP_EPSILON = 1 / FLT_EPSILON;
+constant constexpr float A_CROSSOVER = 10;
+constant constexpr float B_CROSSOVER = 0.6417;
+constant constexpr float FOUR_SQRT_MIN = 0x1p-61;
+constant constexpr float SQRT_6_EPSILON = 8.4572793338e-4;
+constant constexpr float SQRT_3_EPSILON = 5.9801995673e-4;
+constant constexpr float SQRT_MIN = 0x1p-63;
+
+// (hypot(a, b) - b) / 2 computed without cancellation
+inline float f(float a, float b, float hypot_a_b) {
+  if (b < 0) {
+    return (hypot_a_b - b) / 2;
   }
-  template <typename T>
-  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
-    return precise::asin(static_cast<float>(x));
+  if (b == 0) {
+    return a / 2;
   }
-  template <typename T>
-  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // asin(z) = atan(z/sqrt(1-z^2)) if z != ±1
-    if (x.x == 1 && x.y == 0)
-      return T(M_PI_F / 2, 0);
-    else if (x.x == -1 && x.y == 0)
-      return T(M_PI_F / -2, 0);
-    auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
-    // calculate sqrt
-    // modulus
-    auto m = precise::sqrt(sqrt_val.x * sqrt_val.x + sqrt_val.y * sqrt_val.y);
-    // real part: sqrt((m + a)/2)
-    auto real_part = precise::sqrt((m + sqrt_val.x) * .5);
-    // imaginary part: sign(b) * sqrt((m - a)/2)
-    auto imag_part = copysign(
-        static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
-        sqrt_val.y);
-    auto atan_val = div(x, T(real_part, imag_part));
-    // calculate atan (see atan_functor)
-    auto coef = div(T(1, 0), T(0, 2));
-    auto log_arg =
-        div(T(-1 * atan_val.x, 1 - atan_val.y), T(atan_val.x, 1 + atan_val.y));
-    // Calculate log using method from log_functor
-    auto magnitude =
-        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (log_arg.x == 0 && log_arg.y == 0)
-        ? 0
-        : ::precise::atan2(log_arg.y, log_arg.x);
-    // return coefficient * log value
-    return c10::metal::mul(coef, T(real, imag));
-  }
+  return a * a / (hypot_a_b + b) / 2;
+}
+
+struct hard_work_result {
+  float rx; // acosh(A)
+  bool B_is_usable;
+  float B; // y / A
+  float sqrt_A2my2; // when !B_is_usable, asin(B) == atan2(new_y, sqrt_A2my2)
+  float new_y;
 };
 
-struct acos_functor {
-  template <typename T>
-  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
-    return T(precise::acos(x));
+// For x, y >= 0 and A = (|x + i(y + 1)| + |x + i(y - 1)|) / 2
+inline hard_work_result do_hard_work(float x, float y) {
+  hard_work_result r;
+  const float R = c10::metal::hypot(x, y + 1);
+  const float S = c10::metal::hypot(x, ::metal::fabs(y - 1));
+  const float A = ::metal::max((R + S) / 2, 1.0f);
+  if (A < A_CROSSOVER) {
+    if (y == 1 && x < FLT_EPSILON * FLT_EPSILON / 128) {
+      r.rx = precise::sqrt(x);
+    } else if (x >= FLT_EPSILON * ::metal::fabs(y - 1)) {
+      const float Am1 = f(x, 1 + y, R) + f(x, 1 - y, S);
+      r.rx = c10::metal::log1p(Am1 + precise::sqrt(Am1 * (A + 1)));
+    } else if (y < 1) {
+      r.rx = x * precise::rsqrt((1 - y) * (1 + y));
+    } else {
+      r.rx = c10::metal::log1p((y - 1) + precise::sqrt((y - 1) * (y + 1)));
+    }
+  } else {
+    r.rx = precise::log(A + precise::sqrt(A * A - 1));
   }
-  template <typename T>
-  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
-    return precise::acos(static_cast<float>(x));
+  r.new_y = y;
+  if (y < FOUR_SQRT_MIN) {
+    r.B_is_usable = false;
+    r.sqrt_A2my2 = A * (2 / FLT_EPSILON);
+    r.new_y = y * (2 / FLT_EPSILON);
+    return r;
   }
-  template <typename T>
-  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // acos(z) = pi/2 - asin(z) if z != ±1
-    // calculate asin
-    if (x.x == 1 && x.y == 0)
-      return T(M_PI_F, 0);
-    else if (x.x == -1 && x.y == 0)
-      return T(-M_PI_F, 0);
-    auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
-    // calculate sqrt
-    // modulus
-    auto m = precise::sqrt(sqrt_val.x * sqrt_val.x + sqrt_val.y * sqrt_val.y);
-    // real part: sqrt((m + a)/2)
-    auto real_part = precise::sqrt((m + sqrt_val.x) * .5);
-    // imaginary part: sign(b) * sqrt((m - a)/2)
-    auto imag_part = copysign(
-        static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
-        sqrt_val.y);
-    auto atan_val = div(x, T(real_part, imag_part));
-    // calculate atan (see atan_functor)
-    auto coef = div(T(1, 0), T(0, 2));
-    auto log_arg =
-        div(T(-1 * atan_val.x, 1 - atan_val.y), T(atan_val.x, 1 + atan_val.y));
-    // Calculate log using method from log_functor
-    auto magnitude =
-        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (log_arg.x == 0 && log_arg.y == 0)
-        ? 0
-        : ::precise::atan2(log_arg.y, log_arg.x);
-    // return coefficient * log value
-    return T(M_PI_F / 2, 0) - c10::metal::mul(coef, T(real, imag));
+  r.B = y / A;
+  r.B_is_usable = r.B <= B_CROSSOVER;
+  if (!r.B_is_usable) {
+    if (y == 1 && x < FLT_EPSILON / 128) {
+      r.sqrt_A2my2 = precise::sqrt(x) * precise::sqrt((A + y) / 2);
+    } else if (x >= FLT_EPSILON * ::metal::fabs(y - 1)) {
+      const float Amy = f(x, y + 1, R) + f(x, y - 1, S);
+      r.sqrt_A2my2 = precise::sqrt(Amy * (A + y));
+    } else if (y > 1) {
+      r.sqrt_A2my2 = x * (4 / FLT_EPSILON / FLT_EPSILON) * y /
+          precise::sqrt((y + 1) * (y - 1));
+      r.new_y = y * (4 / FLT_EPSILON / FLT_EPSILON);
+    } else {
+      r.sqrt_A2my2 = precise::sqrt((1 - y) * (1 + y));
+    }
   }
-};
+  return r;
+}
 
-struct atan_functor {
-  template <typename T>
-  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
-    return T(precise::atan(x));
+inline float2 clog_for_large_values(float2 z) {
+  const auto a = ::metal::fabs(z);
+  const float re = ::metal::max(a.x, a.y) > FLT_MAX / 2
+      ? precise::log(c10::metal::hypot(a.x / M_E_F, a.y / M_E_F)) + 1
+      : precise::log(c10::metal::hypot(a.x, a.y));
+  return float2(re, precise::atan2(z.y, z.x));
+}
+
+inline float2 casinh(float2 z) {
+  const float x = z.x, y = z.y;
+  const float ax = ::metal::fabs(x), ay = ::metal::fabs(y);
+  if (::metal::isnan(x) || ::metal::isnan(y)) {
+    if (::metal::isinf(x)) {
+      return float2(x, y + y);
+    }
+    if (::metal::isinf(y)) {
+      return float2(y, x + x);
+    }
+    if (y == 0) {
+      return float2(x + x, y);
+    }
+    return float2(NAN, NAN);
   }
-  template <typename T>
-  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
-    return precise::atan(static_cast<float>(x));
+  if (ax > RECIP_EPSILON || ay > RECIP_EPSILON) {
+    const auto w = clog_for_large_values(::metal::signbit(x) ? -z : z);
+    return float2(
+        ::metal::copysign(w.x + M_LN2_F, x), ::metal::copysign(w.y, y));
   }
-  template <typename T>
-  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // atan(z) = (1/2i)ln((i-z)/(i+z))
-    auto coef = div(T(1, 0), T(0, 2));
-    auto log_arg = div(T(-1 * x.x, 1 - x.y), T(x.x, 1 + x.y));
-    // Calculate log using method from log_functor
-    auto magnitude =
-        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (log_arg.x == 0 && log_arg.y == 0)
-        ? 0
-        : ::precise::atan2(log_arg.y, log_arg.x);
-    // return coefficient * log value
-    return c10::metal::mul(coef, T(real, imag));
+  if (ax < SQRT_6_EPSILON / 4 && ay < SQRT_6_EPSILON / 4) {
+    return z;
   }
-};
+  const auto r = do_hard_work(ax, ay);
+  const float ry = r.B_is_usable ? precise::asin(r.B)
+                                 : precise::atan2(r.new_y, r.sqrt_A2my2);
+  return float2(::metal::copysign(r.rx, x), ::metal::copysign(ry, y));
+}
+
+inline float2 casin(float2 z) {
+  const auto w = casinh(float2(z.y, z.x));
+  return float2(w.y, w.x);
+}
+
+inline float2 cacos(float2 z) {
+  const float x = z.x, y = z.y;
+  const float ax = ::metal::fabs(x), ay = ::metal::fabs(y);
+  const bool sx = ::metal::signbit(x), sy = ::metal::signbit(y);
+  if (::metal::isnan(x) || ::metal::isnan(y)) {
+    if (::metal::isinf(x)) {
+      return float2(y + y, -INFINITY);
+    }
+    if (::metal::isinf(y)) {
+      return float2(x + x, -y);
+    }
+    if (x == 0) {
+      return float2(M_PI_2_F, y + y);
+    }
+    return float2(NAN, NAN);
+  }
+  if (ax > RECIP_EPSILON || ay > RECIP_EPSILON) {
+    const auto w = clog_for_large_values(z);
+    const float ry = w.x + M_LN2_F;
+    return float2(::metal::fabs(w.y), sy ? ry : -ry);
+  }
+  if (x == 1 && y == 0) {
+    return float2(0, -y);
+  }
+  if (ax < SQRT_6_EPSILON / 4 && ay < SQRT_6_EPSILON / 4) {
+    return float2(M_PI_2_F - x, -y);
+  }
+  // Same decomposition as casinh with the roles of x and y swapped
+  const auto r = do_hard_work(ay, ax);
+  const float new_x = sx ? -r.new_y : r.new_y;
+  const float rx = r.B_is_usable ? precise::acos(sx ? -r.B : r.B)
+                                 : precise::atan2(r.sqrt_A2my2, new_x);
+  return float2(rx, sy ? r.rx : -r.rx);
+}
+
+inline float2 cacosh(float2 z) {
+  const auto w = cacos(z);
+  if (::metal::isnan(w.x) && ::metal::isnan(w.y)) {
+    return float2(w.y, w.x);
+  }
+  if (::metal::isnan(w.x)) {
+    return float2(::metal::fabs(w.y), w.x);
+  }
+  if (::metal::isnan(w.y)) {
+    return float2(w.y, w.y);
+  }
+  return float2(::metal::fabs(w.y), ::metal::copysign(w.x, z.y));
+}
+// x * x + y * y for x, y >= 0, avoiding underflow when y is small
+inline float sum_squares(float x, float y) {
+  return y < SQRT_MIN ? x * x : x * x + y * y;
+}
+
+// Re(1 / (x + iy)) = x / (x^2 + y^2), without overflow
+inline float real_part_reciprocal(float x, float y) {
+  const float h = c10::metal::hypot(::metal::fabs(x), ::metal::fabs(y));
+  return ::metal::isinf(h) ? ::metal::copysign(0.0f, x) : x / h / h;
+}
+
+inline float2 catanh(float2 z) {
+  const float x = z.x, y = z.y;
+  const float ax = ::metal::fabs(x), ay = ::metal::fabs(y);
+  if (y == 0 && ax <= 1) {
+    return float2(precise::atanh(x), y);
+  }
+  if (x == 0) {
+    return float2(x, precise::atan(y));
+  }
+  if (::metal::isnan(x) || ::metal::isnan(y)) {
+    if (::metal::isinf(x)) {
+      return float2(::metal::copysign(0.0f, x), y + y);
+    }
+    if (::metal::isinf(y)) {
+      return float2(::metal::copysign(0.0f, x), ::metal::copysign(M_PI_2_F, y));
+    }
+    return float2(NAN, NAN);
+  }
+  if (ax > RECIP_EPSILON || ay > RECIP_EPSILON) {
+    return float2(real_part_reciprocal(x, y), ::metal::copysign(M_PI_2_F, y));
+  }
+  if (ax < SQRT_3_EPSILON / 2 && ay < SQRT_3_EPSILON / 2) {
+    return z;
+  }
+  const float rx = ax == 1 && ay < FLT_EPSILON
+      ? (M_LN2_F - precise::log(ay)) / 2
+      : c10::metal::log1p(4 * ax / sum_squares(ax - 1, ay)) / 4;
+  float ry;
+  if (ax == 1) {
+    ry = precise::atan2(2.0f, -ay) / 2;
+  } else if (ay < FLT_EPSILON) {
+    ry = precise::atan2(2 * ay, (1 - ax) * (1 + ax)) / 2;
+  } else {
+    ry = precise::atan2(2 * ay, (1 - ax) * (1 + ax) - ay * ay) / 2;
+  }
+  return float2(::metal::copysign(rx, x), ::metal::copysign(ry, y));
+}
+
+inline float2 catan(float2 z) {
+  const auto w = catanh(float2(z.y, z.x));
+  return float2(w.y, w.x);
+}
+} // namespace catrig
+
+#define DEFINE_INVERSE_TRIG_FUNCTOR(NAME)                                      \
+  struct NAME##_functor {                                                      \
+    template <typename T>                                                      \
+    inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(           \
+        const T x) {                                                           \
+      return T(precise::NAME(float(x)));                                       \
+    }                                                                          \
+    template <typename T>                                                      \
+    inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) { \
+      return precise::NAME(static_cast<float>(x));                             \
+    }                                                                          \
+    template <typename T>                                                      \
+    inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {             \
+      return T(catrig::c##NAME(float2(x)));                                    \
+    }                                                                          \
+  }
+
+DEFINE_INVERSE_TRIG_FUNCTOR(asin);
+DEFINE_INVERSE_TRIG_FUNCTOR(acos);
+DEFINE_INVERSE_TRIG_FUNCTOR(asinh);
+DEFINE_INVERSE_TRIG_FUNCTOR(acosh);
+DEFINE_INVERSE_TRIG_FUNCTOR(atan);
+DEFINE_INVERSE_TRIG_FUNCTOR(atanh);
 
 // Bool specialization is need to workaround compiler crashes on MacOS-13
 // Otherwise attempts to invoke will fail to create state object with error
@@ -535,14 +670,7 @@ struct sqrt_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // modulus
-    auto m = precise::sqrt(x.x * x.x + x.y * x.y);
-    // real part: sqrt((m + a)/2)
-    auto real_part = precise::sqrt((m + x.x) * .5);
-    // imaginary part: sign(b) * sqrt((m - a)/2)
-    auto imag_part = copysign(
-        static_cast<decltype(x.y)>(precise::sqrt((m - x.x) * .5)), x.y);
-    return T(real_part, imag_part);
+    return c10::metal::sqrt(x);
   }
 };
 
@@ -744,7 +872,10 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(tan, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(asin, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(acos, DTYPE1, DTYPE0);         \
-  REGISTER_UNARY_OP(atan, DTYPE1, DTYPE0)
+  REGISTER_UNARY_OP(asinh, DTYPE1, DTYPE0);        \
+  REGISTER_UNARY_OP(acosh, DTYPE1, DTYPE0);        \
+  REGISTER_UNARY_OP(atan, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(atanh, DTYPE1, DTYPE0)
 
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
 REGISTER_UNARY_OP(neg, bfloat, bfloat);
@@ -784,7 +915,10 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2);        \
   REGISTER_UNARY_OP(asin, DTYPE##2, DTYPE##2);       \
   REGISTER_UNARY_OP(acos, DTYPE##2, DTYPE##2);       \
-  REGISTER_UNARY_OP(atan, DTYPE##2, DTYPE##2)
+  REGISTER_UNARY_OP(asinh, DTYPE##2, DTYPE##2);      \
+  REGISTER_UNARY_OP(acosh, DTYPE##2, DTYPE##2);      \
+  REGISTER_UNARY_OP(atan, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(atanh, DTYPE##2, DTYPE##2)
 
 INSTANTIATE_UNARY_KERNELS_VEC2(half);
 INSTANTIATE_UNARY_KERNELS_VEC2(float);
@@ -904,7 +1038,7 @@ template <typename T>
 kernel void frexp_dense(
     device T* mantissa [[buffer(0)]],
     device int* exponent [[buffer(1)]],
-    constant T* input [[buffer(2)]],
+    device const T* input [[buffer(2)]],
     uint index [[thread_position_in_grid]]) {
   int exp = 0;
   mantissa[index] = frexp_(input[index], exp);
@@ -918,7 +1052,7 @@ template <typename T>
 kernel void frexp_strided(
     device void* mantissa [[buffer(0)]],
     device void* exponent [[buffer(1)]],
-    constant void* input [[buffer(2)]],
+    device const char* input [[buffer(2)]],
     constant long* sizes [[buffer(3)]],
     constant long* mantissa_strides [[buffer(4)]],
     constant long* exponent_strides [[buffer(5)]],
@@ -937,11 +1071,11 @@ kernel void frexp_strided(
 
 #define REGISTER_FREXP_OP(T)                                                \
   template [[host_name("frexp_dense_" #T)]] kernel void frexp_dense<T>(     \
-      device T*, device int*, constant T*, uint);                           \
+      device T*, device int*, device const T*, uint);                       \
   template [[host_name("frexp_strided_" #T)]] kernel void frexp_strided<T>( \
       device void*,                                                         \
       device void*,                                                         \
-      constant void*,                                                       \
+      device const char*,                                                   \
       constant long*,                                                       \
       constant long*,                                                       \
       constant long*,                                                       \

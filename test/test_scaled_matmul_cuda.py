@@ -54,7 +54,10 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
+    isRocmArchAnyOf,
     MI350_ARCH,
+    NAVI4_ARCH,
+    NAVI_ARCH,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     run_tests,
@@ -1417,7 +1420,6 @@ class TestFP8Matmul(TestCase):
                     )
 
     @onlyOn(["cpu", "cuda", "xpu"])
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("fake", [False, True])
     @parametrize("use_out", [False, True])
@@ -2513,7 +2515,7 @@ class TestFP8Matmul(TestCase):
         not torch.version.hip and _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
     )
-    @runOnRocmArch(MI350_ARCH)
+    @runOnRocmArch(MI350_ARCH + NAVI4_ARCH)
     @parametrize("output_dtype", [torch.bfloat16, ])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
     @parametrize("M,N,K", [(256, 256, 256), (256, 256, 512)])
@@ -3563,7 +3565,9 @@ class TestFP8Matmul(TestCase):
             )
 
     @onlyAccelerator
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MX_GEMM and not isRocmArchAnyOf(NAVI_ARCH), mx_skip_msg
+    )
     @unittest.skipIf(not torch.version.hip, "The MX scale layout is fixed by arch and ROCm version only on ROCm")
     def test_rocm_mx_swizzle_size_error_names_arch(self, device) -> None:
         # This size check runs before the kernel's arch gate, so on an arch

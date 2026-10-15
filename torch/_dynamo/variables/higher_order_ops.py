@@ -1146,7 +1146,12 @@ def validate_args_and_maybe_create_graph_inputs(
     set_subgraph_inputs: SetSubgraphInputs,
     description: str,
     sub_args_names: Sequence[str] | None = None,
+    overridden_bwd_args_dtypes: Sequence[torch.dtype | None] | None = None,
 ) -> list[Any]:
+    """``overridden_bwd_args_dtypes`` overrides the dtype of forced tensor
+    inputs: the gradients an autograd.Function declares via
+    ``ctx.set_output_grad_dtype``.
+    """
     from . import AutogradFunctionContextVariable
     from .builder import SourcelessBuilder, wrap_fx_proxy_cls
 
@@ -1200,6 +1205,13 @@ def validate_args_and_maybe_create_graph_inputs(
                             "Expected TensorVariable to have an fx node"
                         )
                     example_value = node.meta["example_value"]
+                    if (
+                        overridden_bwd_args_dtypes is not None
+                        and overridden_bwd_args_dtypes[idx] is not None
+                    ):
+                        example_value = example_value.to(
+                            overridden_bwd_args_dtypes[idx]
+                        )
                     arg_name = (
                         a.as_proxy().node.name
                         if sub_args_names is None
@@ -1208,7 +1220,6 @@ def validate_args_and_maybe_create_graph_inputs(
                     new_proxy = tracer.create_graph_input(
                         arg_name, a.python_type(), example_value
                     )
-                    example_value = node.meta.get("example_value", None)
                     a = wrap_fx_proxy_cls(
                         target_cls=type(a),
                         tx=tx,
@@ -1487,6 +1498,21 @@ def check_aliasing_and_input_mutation(
                 ],
             )
 
+    if supports_input_input_aliasing:
+        aliased_mutation_info = subtracer.has_aliased_input_mutation()
+        if aliased_mutation_info.has_mutation:
+            context = f"{aliased_mutation_info.msg} in\n {graph}"
+            unimplemented(
+                gb_type="Encountered mutation of an aliased input during higher order op tracing",
+                context=context,
+                explanation=f"Higher order ops do not support mutating an input that shares "
+                f"storage with another input. Found in {name}",
+                hints=[
+                    "Clone one of the aliased inputs before the call, or stop mutating it.",
+                    "Please open an issue.",
+                ],
+            )
+
     if not supports_aliasing:
         aliasing_info = subtracer.has_aliasing(
             allow_input_input_aliasing=supports_input_input_aliasing
@@ -1616,6 +1642,7 @@ def get_hop_args(
     sub_kwargs: dict[str, VariableTracker],
     set_subgraph_inputs: SetSubgraphInputs,
     description: str,
+    overridden_bwd_args_dtypes: Sequence[torch.dtype | None] | None = None,
 ) -> list[VariableTracker]:
     sub_args_names = maybe_positional_arg_names(f)
     # User mismatch in the number of args. Will eventually lead to an error.
@@ -1628,6 +1655,7 @@ def get_hop_args(
         set_subgraph_inputs,
         description,
         sub_args_names,
+        overridden_bwd_args_dtypes,
     )
 
     validate_args_and_maybe_create_graph_inputs(
@@ -1719,6 +1747,9 @@ def speculate_subgraph_with_auto_output_flattening(
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer: Optional["SubgraphTracer"] = None,
+    # Dtype overrides for forced tensor inputs; see
+    # validate_args_and_maybe_create_graph_inputs.
+    overridden_bwd_args_dtypes: Sequence[torch.dtype | None] | None = None,
 ) -> tuple[
     VariableTracker,  # output: The VT that Dynamo continues tracing with
     torch.fx.Graph,  # graph: The FX graph representing the subgraph computation
@@ -1825,6 +1856,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 sub_kwargs,
                 set_subgraph_inputs,
                 description,
+                overridden_bwd_args_dtypes,
             )
 
             # Special case - if users uses
@@ -3342,6 +3374,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
+            supports_input_input_aliasing=True,
         )
 
         combine_mutated_inputs = set(
@@ -5400,13 +5433,18 @@ class AutogradFunctionApplyVariable(VariableTracker):
             bwd_node,
             *list(fwd_freevars.keys()),
         )
-        kwargs_for_fn = {
+        kwargs_for_fn: dict[str, list[int] | tuple[torch.dtype | None, ...]] = {
             "non_differentiable_idx": non_differentiable_idx,
             "saved_for_backward_idx": saved_for_backward_idx,
         }
         # Preserve the existing HOP call shape for the common no-mark_dirty case.
         if dirty_idx:
             kwargs_for_fn["dirty_idx"] = dirty_idx
+        # Likewise, only pass gradient dtypes declared via ctx.set_output_grad_dtype.
+        if ctx.output_grad_dtypes is not None:
+            kwargs_for_fn["output_grad_dtypes"] = self.remap_output_grad_dtypes(
+                ctx, fwd_out, fwd_graph_output_vts
+            )
 
         # Store the invocation as a call
         from torch._functorch.autograd_function import autograd_function_apply
@@ -5435,6 +5473,38 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # type: ignore[arg-type]
         overwrite_tensor_vt_requires_grad(fwd_graph_output_vts, flat_variable)
         return fwd_out
+
+    def remap_output_grad_dtypes(
+        self,
+        ctx: "AutogradFunctionContextVariable",
+        fwd_out: VariableTracker,
+        fwd_graph_output_vts: VariableTracker | tuple[VariableTracker, ...],
+    ) -> tuple[torch.dtype | None, ...]:
+        """Map ctx.set_output_grad_dtype declarations to the traced fwd outputs.
+
+        The declarations follow the original forward's outputs (``fwd_out``),
+        but the emitted autograd.Function returns ``fwd_graph_output_vts``:
+        only tensor/symint outputs, flattened, plus any intermediates. Match
+        them by VariableTracker identity, as handle_saved_tensors_wiring does
+        for the backward inputs. Traced outputs with no original counterpart
+        get no gradient and declare None. trace_backward_graph has already
+        validated the declarations.
+        """
+        if ctx.output_grad_dtypes is None:
+            raise AssertionError("Expected ctx.output_grad_dtypes to be set")
+        fwd_out_vts = (
+            fwd_out.items
+            if isinstance(fwd_out, variables.BaseListVariable)
+            else [fwd_out]
+        )
+        fwd_vt_to_grad_dtype = {
+            fwd_vt: grad_dtype
+            for fwd_vt, grad_dtype in zip(fwd_out_vts, ctx.output_grad_dtypes)
+            if fwd_vt.is_tensor()
+        }
+        if not isinstance(fwd_graph_output_vts, (list, tuple)):
+            fwd_graph_output_vts = (fwd_graph_output_vts,)
+        return tuple(fwd_vt_to_grad_dtype.get(vt) for vt in fwd_graph_output_vts)
 
     def prepare_ctx_vt(
         self, tx: "InstructionTranslatorBase", args: Any, kwargs: Any
@@ -5572,7 +5642,35 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 else:
                     bwd_args.append(ConstantVariable.create(None))
 
+        num_grad_args = len(bwd_args)
+        # Validate ctx.set_output_grad_dtype before it shapes the backward
+        # trace: invalid declarations graph break, so eager raises its error.
+        if ctx.output_grad_dtypes is not None and (
+            len(ctx.output_grad_dtypes) != num_grad_args
+            or any(
+                grad_dtype is not None and not grad_arg.is_tensor()
+                for grad_arg, grad_dtype in zip(bwd_args, ctx.output_grad_dtypes)
+            )
+        ):
+            unimplemented(
+                gb_type="autograd.Function.apply: invalid set_output_grad_dtype",
+                context=f"declarations {ctx.output_grad_dtypes} for "
+                f"{num_grad_args} outputs",
+                explanation="ctx.set_output_grad_dtype must declare one dtype per "
+                "forward output, and None for non-tensor outputs.",
+                hints=[
+                    "Pass one torch.dtype or None per forward output, and None "
+                    "for non-tensor outputs."
+                ],
+            )
         bwd_fn, bwd_args = self.prepare_fn_vt(tx, ctx, "backward", bwd_args)
+        # Gradients declared via ctx.set_output_grad_dtype reach backward in
+        # the declared dtype, not the forward output's dtype.
+        overridden_bwd_args_dtypes = None
+        if ctx.output_grad_dtypes is not None:
+            overridden_bwd_args_dtypes = [None] * (
+                len(bwd_args) - num_grad_args
+            ) + list(ctx.output_grad_dtypes)
 
         def is_strict_for(v: VariableTracker) -> bool:
             if v.is_tensor():
@@ -5603,6 +5701,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         supports_input_mutation=True,
                         supports_aliasing=True,
                         tracer=bwd_tracer,
+                        overridden_bwd_args_dtypes=overridden_bwd_args_dtypes,
                     )
                 )
             except torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace as e:
@@ -5658,6 +5757,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                             supports_input_mutation=True,
                             supports_aliasing=True,
                             tracer=bwd_tracer,
+                            overridden_bwd_args_dtypes=overridden_bwd_args_dtypes,
                         )
                     )
 
@@ -6235,6 +6335,9 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             enable_spmd_types,
             *user_args,
         ) = args
+        in_placements = in_placements.as_python_constant()
+        out_placements = out_placements.as_python_constant()
+        in_grad_placements = in_grad_placements.as_python_constant()
 
         # None placements are used to pass non-Tensors into the local_map function.
         # Containers passed this way can not hold tensors. Thus, Dynamo would have inlined
@@ -6252,14 +6355,14 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
                         )
             return seen_none
 
-        inputs_none_placements = check_none_last(in_placements.value)  # type: ignore[attr-defined]
-        output_none_placements = check_none_last(out_placements.value)  # type: ignore[attr-defined]
+        inputs_none_placements = check_none_last(in_placements)
+        output_none_placements = check_none_last(out_placements)
 
         local_map_kwargs = {
-            "out_placements": out_placements.value,  # type: ignore[attr-defined]
-            "in_placements": in_placements.value,  # type: ignore[attr-defined]
+            "out_placements": out_placements,
+            "in_placements": in_placements,
             "redistribute_inputs": redistribute_inputs.value,  # type: ignore[attr-defined]
-            "in_grad_placements": in_grad_placements.value,  # type: ignore[attr-defined]
+            "in_grad_placements": in_grad_placements,
             "device_mesh": device_mesh.value,  # type: ignore[attr-defined]
         }
         if local_map_kwargs["device_mesh"] is None:
@@ -6277,10 +6380,10 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             "Expecting {expected} {inputs_or_outputs} to local_map function based on placements"
             ", but found {actual}. Please ensure the count matches for eager. "
         )
-        if len(in_placements.value) != len(user_args):  # type: ignore[attr-defined]
+        if len(in_placements) != len(user_args):
             raise AssertionError(
                 template.format(
-                    expected=len(in_placements.value),  # type: ignore[attr-defined]
+                    expected=len(in_placements),
                     inputs_or_outputs="inputs",
                     actual=len(user_args),
                 )
@@ -6293,7 +6396,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
         # Step 2: Convert inputs to local shapes
         priors = {}
-        for placements, vt in zip(in_placements.value, user_args):  # type: ignore[attr-defined]
+        for placements, vt in zip(in_placements, user_args):
             if isinstance(vt, variables.lazy.LazyVariableTracker):
                 vt = variables.lazy.LazyVariableTracker.realize_all(vt)
 
@@ -6347,9 +6450,9 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         )
 
         # Step 4: Validate traced graph signature still matches placement information
-        expected_num_inputs = len(in_placements.value) - inputs_none_placements  # type: ignore[attr-defined]
+        expected_num_inputs = len(in_placements) - inputs_none_placements
         actual_num_inputs = len(body_gmod.graph.find_nodes(op="placeholder"))
-        expected_num_outputs = len(out_placements.value) - output_none_placements  # type: ignore[attr-defined]
+        expected_num_outputs = len(out_placements) - output_none_placements
         if len(body_gmod.graph.find_nodes(op="output")) != 1:
             raise AssertionError("Expected exactly one output node in body graph")
         actual_num_outputs = len(body_gmod.graph.find_nodes(op="output")[0].args[0])
@@ -6424,11 +6527,11 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             vt.synchronize_attributes(tx)
 
         outs = out.items if isinstance(out, TupleVariable) else [out]
-        if len(outs) != len(out_placements.value):  # type: ignore[attr-defined]
+        if len(outs) != len(out_placements):
             raise AssertionError(
                 "Number of outputs must match number of out_placements"
             )
-        for placements, vt in zip(out_placements.value, outs):  # type: ignore[attr-defined]
+        for placements, vt in zip(out_placements, outs):
             if not vt.is_tensor():  # type: ignore[attr-defined]
                 if placements is not None:
                     raise AssertionError(
@@ -6456,10 +6559,10 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         # Treat as const, so we don't have to deal with Placement types in fx IR
         # Guarded with EQUALS_MATCH on local_map call's arguments
         body_gmod.meta["local_map_kwargs"] = {
-            "out_placements": out_placements.value[:expected_num_outputs],  # type: ignore[attr-defined]
-            "in_placements": in_placements.value[:expected_num_inputs],  # type: ignore[attr-defined]
+            "out_placements": out_placements[:expected_num_outputs],
+            "in_placements": in_placements[:expected_num_inputs],
             "redistribute_inputs": redistribute_inputs.value,  # type: ignore[attr-defined]
-            "in_grad_placements": in_grad_placements.value,  # type: ignore[attr-defined]
+            "in_grad_placements": in_grad_placements,
             "device_mesh": device_mesh.value,  # type: ignore[attr-defined]
         }
         if out is None:
