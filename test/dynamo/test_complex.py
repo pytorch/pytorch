@@ -1,11 +1,10 @@
 # Owner(s): ["module: dynamo"]
-import unittest
-
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
+    parametrize,
 )
 
 
@@ -71,21 +70,7 @@ class ComplexTests(ComplexDynamoTestCase):
         x = torch.randn(2, 2)
         self.assertEqual(fn_c(a, b, x), f(a, b, x))
 
-    def test_incorrect_aliasing_semantics_raises(self):
-        # view_as_real decomposes to stack (a copy), so mutation of the
-        # original complex tensor does not propagate through the view.
-        def f(a):
-            out = torch.view_as_real(a)
-            a[...] = torch.zeros_like(a)
-            return out
-
-        a = torch.randn(2, 2, dtype=torch.complex64)
-        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
-        self.assertRaises(RuntimeError, fn_c, a)
-
-    @unittest.expectedFailure
     def test_incorrect_aliasing_semantics(self):
-        # Once this succeeds, remove the xfail and the test above
         def f(a):
             out = torch.view_as_real(a)
             a[...] = torch.zeros_like(a)
@@ -118,7 +103,6 @@ class ComplexTests(ComplexDynamoTestCase):
         self.assertEqual(f(), fn_c())
 
     def test_complex_output_aliases_input(self):
-        # Once this succeeds, remove the xfail and the test above
         def f(a):
             return a[...]
 
@@ -130,20 +114,7 @@ class ComplexTests(ComplexDynamoTestCase):
         a[...] = torch.zeros_like(a)
         self.assertEqual(ref, test)
 
-    def test_complex_input_mutation_raises(self):
-        def f(a, b):
-            a.mul_(b)
-            return a.abs()
-
-        a = torch.randn(2, 2, dtype=torch.complex64)
-        b = torch.randn(2, 2, dtype=torch.complex64)
-
-        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
-        self.assertRaises(RuntimeError, fn_c, a, b)
-
-    @unittest.expectedFailure
     def test_complex_input_mutation(self):
-        # Once this succeeds, remove the xfail and the test above
         def f(a, b):
             a.mul_(b)
             return a.abs()
@@ -157,6 +128,39 @@ class ComplexTests(ComplexDynamoTestCase):
         a_test = a.clone()
         self.assertEqual(f(a_test, b), fn_c(a_ref, b))
         self.assertEqual(a_test, a_ref)
+
+    def _check_input_mutation(self, f, backend):
+        a = torch.randn(2, 3, dtype=torch.complex64)
+        b = torch.randn(2, 3, dtype=torch.complex64)
+        a_ref = a.clone()
+        a_test = a.clone()
+        fn_c = torch.compile(f, backend=backend, fullgraph=True)
+        self.assertEqual(fn_c(a_test, b), f(a_ref, b))
+        self.assertEqual(a_test, a_ref)
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_complex_input_mutation_through_view(self, backend):
+        def f(a, b):
+            a[0].mul_(b[0])
+            return a.abs()
+
+        self._check_input_mutation(f, backend)
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_complex_input_mutation_through_view_as_real(self, backend):
+        def f(a, b):
+            torch.view_as_real(a).mul_(3)
+            return a * b
+
+        self._check_input_mutation(f, backend)
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_complex_input_mutation_returns_view(self, backend):
+        def f(a, b):
+            a.mul_(b)
+            return a[0]
+
+        self._check_input_mutation(f, backend)
 
     def test_aliasing_semantics(self):
         def mutate():

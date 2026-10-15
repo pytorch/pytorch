@@ -11,7 +11,7 @@ from torch.types import Number
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
-from .._core import ComplexTensor
+from .._core import ComplexTensor, InterleavedComplexTensor
 
 
 _P = ParamSpec("_P")
@@ -296,7 +296,7 @@ def register_simple(
 def _as_complex_tensor(arg: Tensor | Any) -> Tensor | ComplexTensor | Any:
     """Convert a Tensor with complex dtypes to a ComplexTensor. Pass along other args as-is."""
     if (
-        not isinstance(arg, ComplexTensor)
+        not isinstance(arg, ComplexTensor | InterleavedComplexTensor)
         and isinstance(arg, Tensor)
         and arg.dtype in COMPLEX_TO_REAL
     ):
