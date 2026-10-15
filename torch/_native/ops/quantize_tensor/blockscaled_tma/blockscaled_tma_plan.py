@@ -33,15 +33,13 @@ def select_blockscaled_tma_plan(
     K: int,
     *,
     input_dtype: torch.dtype,
-    quant_orientation: str,
+    do_dim_k: bool,
+    do_dim_m: bool,
     is_square_scaling: bool,
 ) -> BlockscaledTmaPlan:
     """Select the existing B200-tuned tile, cluster, masking, and grid policy."""
-    if quant_orientation not in ("dim_k", "dim_m", "dim_km"):
-        raise ValueError(f"unsupported quant_orientation: {quant_orientation}")
-
-    do_dim_k = quant_orientation != "dim_m"
-    do_dim_m = quant_orientation != "dim_k"
+    if not (do_dim_k or do_dim_m):
+        raise ValueError("at least one quantization axis is required")
     scale_group_size = 32
 
     s_num_row_blk_k = s_num_col_blk_k = None
@@ -54,7 +52,7 @@ def select_blockscaled_tma_plan(
         s_num_row_blk_m = _ceil_div(K, 128)
         s_num_col_blk_m = _ceil_div(M // scale_group_size, 4)
 
-    if quant_orientation == "dim_k":
+    if do_dim_k and not do_dim_m:
         if s_num_row_blk_k is None:
             raise AssertionError(f"expected s_num_row_blk_k, got {s_num_row_blk_k}")
         if s_num_col_blk_k is None:
@@ -96,7 +94,7 @@ def select_blockscaled_tma_plan(
         needs_boundary_masking = (
             M != s_num_row_blk_k * 128 or K != s_num_col_blk_k * 128
         )
-    elif quant_orientation == "dim_m":
+    elif do_dim_m and not do_dim_k:
         if s_num_row_blk_m is None:
             raise AssertionError(f"expected s_num_row_blk_m, got {s_num_row_blk_m}")
         if s_num_col_blk_m is None:
