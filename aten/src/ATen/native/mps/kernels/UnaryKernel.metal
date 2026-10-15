@@ -724,7 +724,7 @@ struct rsqrt_functor {
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // rsqrt(z) = conj(sqrt(z)) / |z|, as |sqrt(z)|^2 = |z|
     const auto s = c10::metal::sqrt(float2(x));
-    const auto m = c10::metal::hypot(x.x, x.y);
+    const auto m = ::metal::dot(s, s);
     return T(s.x / m, -s.y / m);
   }
 };
