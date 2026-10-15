@@ -64,6 +64,7 @@ void TracingGuard::initializeTracingCommon(
     int comm_size,
     std::string_view collective_name,
     int collective_rank,
+    uint64_t sequence_number,
     const std::vector<at::Tensor>& input_tensor_list,
     const std::vector<at::Tensor>& output_tensor_list) {
   std::vector<int64_t> in_split_sizes;
@@ -75,23 +76,28 @@ void TracingGuard::initializeTracingCommon(
     out_split_sizes.push_back(output_tensor_list[r].numel());
   }
 
+  auto debug_info = getDebugInfo(
+      comm_name,
+      comm_id,
+      comm_size,
+      collective_name,
+      collective_rank,
+      input_tensor_list,
+      output_tensor_list,
+      in_split_sizes,
+      out_split_sizes);
+  // Where the profiler reads the sequence number from to build its cross-rank
+  // "Comms Id" (torch/csrc/profiler/util.cpp); it stays at -1 unless set here.
+  // isP2P is false throughout: xccl2 counts p2p and collectives in the one
+  // per-PG sequence_number_, so there is no separate p2p sequence space.
+  debug_info->setSequenceInfo(static_cast<int64_t>(sequence_number), false);
   debug_info_guard_ = std::make_unique<c10::DebugInfoGuard>(
-      c10::DebugInfoKind::PARAM_COMMS_INFO,
-      getDebugInfo(
-          comm_name,
-          comm_id,
-          comm_size,
-          collective_name,
-          collective_rank,
-          input_tensor_list,
-          output_tensor_list,
-          in_split_sizes,
-          out_split_sizes));
+  c10::DebugInfoKind::PARAM_COMMS_INFO, std::move(debug_info));
 
   if (record_function_guard_->needsInputs()) {
     std::initializer_list<const c10::IValue> paramList = {
         c10::IValue(input_tensor_list),
-        std::make_tuple(++sequence_number_, false),
+        std::make_tuple(static_cast<int64_t>(sequence_number), false),
         std::make_tuple(std::string(comm_name), std::string(comm_id)),
         collective_rank,
         std::string(collective_name),
@@ -117,6 +123,7 @@ TracingGuard::TracingGuard(
     int comm_size,
     std::string_view collective_name,
     int collective_rank,
+    uint64_t sequence_number,
     const at::Tensor& input_tensor,
     const at::Tensor& output_tensor) {
   record_function_guard_.emplace(at::RecordScope::FUNCTION);
@@ -129,6 +136,7 @@ TracingGuard::TracingGuard(
       comm_size,
       collective_name,
       collective_rank,
+      sequence_number,
       {input_tensor},
       {output_tensor});
 }
@@ -138,6 +146,7 @@ TracingGuard::TracingGuard(
     int comm_size,
     std::string_view collective_name,
     int collective_rank,
+    uint64_t sequence_number,
     const std::vector<at::Tensor>& input_tensor_list,
     const std::vector<at::Tensor>& output_tensor_list) {
   record_function_guard_.emplace(at::RecordScope::FUNCTION);
@@ -150,6 +159,7 @@ TracingGuard::TracingGuard(
       comm_size,
       collective_name,
       collective_rank,
+      sequence_number,
       input_tensor_list,
       output_tensor_list);
 }
@@ -157,6 +167,7 @@ TracingGuard::TracingGuard(
 TracingGuard::TracingGuard(
     const TracingGuardInfo& info,
     std::string_view collective_name,
+    uint64_t sequence_number,
     const std::vector<at::Tensor>& input_tensor_list,
     const std::vector<at::Tensor>& output_tensor_list) {
   record_function_guard_.emplace(at::RecordScope::FUNCTION);
@@ -169,6 +180,7 @@ TracingGuard::TracingGuard(
       info.commSize,
       collective_name,
       info.rank,
+      sequence_number,
       input_tensor_list,
       output_tensor_list);
 }
@@ -176,6 +188,7 @@ TracingGuard::TracingGuard(
 TracingGuard::TracingGuard(
     const TracingGuardInfo& info,
     std::string_view collective_name,
+    uint64_t sequence_number,
     const at::Tensor& input_tensor,
     const at::Tensor& output_tensor) {
   record_function_guard_.emplace(at::RecordScope::FUNCTION);
@@ -188,6 +201,7 @@ TracingGuard::TracingGuard(
       info.commSize,
       collective_name,
       info.rank,
+      sequence_number,
       {input_tensor},
       {output_tensor});
 }

@@ -9,11 +9,11 @@ namespace c10d::xccl2 {
 
 /**
  * BatchSendRecv accumulates point-to-point operations (sends and receives) so
- * they can be issued as a single grouped (ncclGroupStart/End) collective.
+ * they can be issued as a single grouped (onecclGroupStart/End) collective.
  *
  * In upstream torchcomms this held a shared_ptr<TorchComm> and issued through
  * it. With the c10d collapse there is no TorchComm: this is a plain op
- * container, and ProcessGroupNCCL owns issuing via batch_op_issue(ops, ...).
+ * container, and ProcessGroupXCCL owns issuing via batch_op_issue(ops, ...).
  */
 class BatchSendRecv {
  public:

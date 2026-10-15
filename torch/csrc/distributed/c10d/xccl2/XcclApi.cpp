@@ -39,7 +39,8 @@ onecclResult_t DefaultXcclApi::commDestroy(onecclComm_t comm) {
   return onecclCommDestroy(comm);
 }
 
-// onecclCommAbort and onecclCommGetAsyncError are declared
+// onecclCommAbort, onecclCommRevoke, onecclCommGrow, onecclCommShrink
+// and onecclCommGetAsyncError are declared
 // CCL_C_NOT_IMPLEMENTED in <oneapi/ccl.h>, which expands to
 // __attribute__((error(...))) -- i.e. referencing them is a *compile-time*
 // error, not a runtime failure. So these cannot simply forward, and the
@@ -48,6 +49,32 @@ onecclResult_t DefaultXcclApi::commDestroy(onecclComm_t comm) {
 // once it does.
 onecclResult_t DefaultXcclApi::commAbort([[maybe_unused]] onecclComm_t comm) {
   // return onecclCommAbort(comm);
+  return onecclNotImplemented;
+}
+
+onecclResult_t DefaultXcclApi::commRevoke([[maybe_unused]] onecclComm_t comm) {
+  // return onecclCommRevoke(comm);
+  return onecclNotImplemented;
+}
+
+onecclResult_t DefaultXcclApi::commGrow([[maybe_unused]] onecclComm_t comm,
+    [[maybe_unused]] int nRanks,
+    [[maybe_unused]] const onecclUniqueId* uniqueId,
+    [[maybe_unused]] int rank,
+    [[maybe_unused]] onecclComm_t* newcomm,
+    [[maybe_unused]] onecclConfig_t* config) {
+  // return onecclCommGrow(comm, nRanks, uniqueId, rank, newcomm, config);
+  return onecclNotImplemented;
+}
+
+onecclResult_t DefaultXcclApi::commShrink([[maybe_unused]] onecclComm_t comm,
+    [[maybe_unused]] int* excludeRanksList,
+    [[maybe_unused]] int excludeRanksCount,
+    [[maybe_unused]] onecclComm_t* newcomm,
+    [[maybe_unused]] onecclConfig_t* config,
+    [[maybe_unused]] int shrinkFlags) {
+  // return onecclCommShrink(
+  // comm, excludeRanksList, excludeRanksCount, newcomm, config, shrinkFlags);
   return onecclNotImplemented;
 }
 
