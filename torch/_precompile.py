@@ -583,15 +583,6 @@ class _MakeFxCapture(Capture[_P, _R]):
         self._rendered: tuple[str, bytes] | None = None
         self._called = False
 
-    def _start(self) -> None:
-        from torch.compiler._runtime_cache import in_capture_runtime
-
-        if in_capture_runtime():
-            raise PrecompileError(
-                "precompile.capture_runtime supports only DynamoTracer captures: "
-                "a make_fx capture neither freezes nor seals runtime dependencies."
-            )
-
     def _finish(self, exc: tuple[object, ...]) -> None:
         # Write only on a clean exit that captured a call; a block that raised,
         # or one that never called the capture, leaves the files untouched. The
@@ -778,7 +769,7 @@ class _DynamoCapture(Capture[_P, _R]):
         finally:
             self._in_call = False
 
-    def _write(self, *, final: bool = False) -> None:
+    def _write(self) -> None:
         from torch.compiler._runtime_cache import freeze_runtime_cache
 
         python_code, cache = self._map(self._session.snapshot_artifact, **self._gates)
@@ -793,10 +784,7 @@ class _DynamoCapture(Capture[_P, _R]):
 
         try:
             freeze_runtime_cache(
-                blob["artifact"],
-                write,
-                final=final,
-                compiled=blob["backend"] != "eager",
+                blob["artifact"], write, compiled=blob["backend"] != "eager"
             )
         except OSError as e:
             # Only the on-disk rewrite failed; _write_artifact leaves whatever
@@ -841,13 +829,9 @@ class _DynamoCapture(Capture[_P, _R]):
                             "nothing was captured: call the capture with your "
                             "example arguments inside the `with` block."
                         )
-                    self._write(final=True)
+                    self._write()
                 except BaseException as e:
                     error = e
-            elif exc[0] is None:
-                from torch.compiler._runtime_cache import seal_runtime_scope
-
-                seal_runtime_scope()
             try:
                 self._map(self._session.__exit__, *exc)
             except BaseException as e:
@@ -3263,58 +3247,6 @@ def no_compilation() -> contextlib.AbstractContextManager[None]:
     return _no_compilation()
 
 
-def capture_runtime() -> contextlib.AbstractContextManager[None]:
-    """
-    Record runtime dependencies from earlier than :func:`capture`, and seal after it.
-
-    A :class:`DynamoTracer` capture freezes the runtime dependencies compiled
-    while its block is open into ``cache_path`` on its own. Wrap the producer in
-    ``capture_runtime()`` when the application compiles before the block, or to
-    check that nothing compiles once the cache is written. Enter it before the
-    application imports and compiles anything, and exit it only after the
-    application's own cleanup has returned::
-
-        with torch.compiler.precompile.capture_runtime():
-            warm_up_application()  # recorded too
-            with torch.compiler.precompile.capture(
-                fn, artifact_path="m.py", cache_path="m.cache"
-            ) as cap:
-                cap(model, x)
-            shutdown_application()  # raises if it would still compile
-
-    The scope records from its entry, and the capture inside it seals it once
-    the capture's final write succeeds: from then until the scope exits,
-    compilation is forbidden as under :func:`no_compilation`, so any compile the
-    written cache would not cover raises :class:`~torch.compiler.PrecompileError`
-    instead of passing silently. A sealed scope takes no second capture, and a
-    make_fx capture inside it raises.
-
-    When Triton is installed, set a ``TRITON_CACHE_DIR`` dedicated to this capture
-    and ``TRITON_CACHE_AUTOTUNING=1`` before entering, so the capture can carry
-    kernels launched directly through ``@triton.jit`` / ``@triton.autotune`` and
-    their autotuning decisions. Everything in that directory is shipped, so do
-    not share it with unrelated work. A capture that never starts a GPU runtime
-    (CUDA or XPU) needs neither setting. Only this scope carries Triton's JIT
-    cache: a plain :func:`capture` leaves it out, so those kernels compile again
-    on first use in the serving process.
-    Triton does not cache the decision of an autotuner with ``pre_hook``
-    configs, so such a kernel is benchmarked again on first use.
-
-    Raises :class:`~torch.compiler.PrecompileError` if entered while compilation
-    is already forbidden, while this process already has an active scope or an
-    open capture, or, with Triton installed, for an invalid ``TRITON_CACHE_DIR``,
-    for a missing one once a GPU runtime has started, or with Triton's
-    autotuning cache disabled while ``TRITON_CACHE_DIR`` is set. The capture
-    inside it raises when ``TRITON_CACHE_DIR`` changed since the scope was
-    entered, or when it started a GPU runtime although the scope was entered
-    without ``TRITON_CACHE_DIR``. A scope inherited across ``fork`` belongs to
-    the parent and does not block the child.
-    """
-    from torch.compiler._runtime_cache import capture_runtime as _capture_runtime
-
-    return _capture_runtime()
-
-
 def prepare_runtime(
     *, artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
 ) -> None:
@@ -3346,23 +3278,18 @@ def prepare_runtime(
     must install PyTorch and its toolchain at the producer's paths, or the kernel
     misses and is compiled on the serving host.
 
-    A cache that carries Triton's runtime cache has it imported here, into this
-    process's ``TRITON_CACHE_DIR``; :func:`load` does not import it again. Enable
-    Triton's autotuning cache (``TRITON_CACHE_AUTOTUNING=1``) before calling it,
-    so the captured autotuning decisions are reused instead of re-benchmarked.
-    ``prepare_runtime`` is for strict serving, so it raises when that cache
-    cannot be imported or Triton's autotuning cache is disabled. A worker
-    that serves without :func:`no_compilation` can skip it: :func:`load` then
-    logs a warning and Triton compiles or autotunes those kernels on first use.
-    Give each captured cache its own ``TRITON_CACHE_DIR``, empty before its first
-    import: a directory that already holds a different Triton runtime cache is
-    rejected, so a second cache imported into it raises here and warns in
-    :func:`load`.
+    A cache that carries Triton's JIT cache has it imported here, and :func:`load`
+    does not import it again. Triton's autotuning cache is turned on for the rest
+    of the process, so the captured autotuning decisions are reused instead of
+    re-benchmarked. The import goes into ``TRITON_CACHE_DIR`` if it is empty or
+    already holds this cache, and otherwise into a fresh directory that Triton
+    uses from then on. A process holds one imported cache, so a different one
+    imported later raises here; :func:`load` outside :func:`no_compilation`
+    warns instead, and Triton compiles or autotunes those kernels on first use.
 
     Raises :class:`~torch.compiler.PrecompileError` for a make_fx capture, a
     mismatched or unreadable pair, a cache whose capture did not freeze its
-    runtime dependencies, or a cache carrying a Triton runtime cache that cannot
-    be imported or that Triton's disabled autotuning cache would ignore.
+    runtime dependencies, or a Triton JIT cache that cannot be imported.
     """
     from torch.compiler._runtime_cache import prepare_runtime_cache
 
@@ -3499,9 +3426,18 @@ def capture(
     that made no call raises ``PrecompileError`` on exit. A capture is single-use:
     to capture again, call ``capture()`` again. A :class:`DynamoTracer` capture
     records the kernel-cache artifacts of everything compiled inside the block,
-    so compile nothing else there, and do not overlap two such captures. Kernels
-    launched directly through ``@triton.jit`` are carried only inside
-    :func:`capture_runtime`.
+    so compile nothing else there, and do not overlap two such captures. Only
+    what runs inside the block is carried: run every kernel the serving process
+    needs there, since one compiled or launched only before the block is not in
+    the cache. Each write also freezes the compiled kernels the serving process
+    needs, and raises :class:`~torch.compiler.PrecompileError` for one it cannot
+    freeze. That includes kernels launched directly through ``@triton.jit`` and
+    ``@triton.autotune`` inside the block: Triton compiles into a fresh cache
+    directory there, with its autotuning cache on, and a JIT kernel or
+    autotuner already used before the block compiles or tunes again on its
+    first launch inside it. Triton does not cache the decision of an autotuner
+    with ``pre_hook`` configs, so such a kernel is benchmarked again on first
+    use in the serving process.
 
     ``tracer`` picks the capture front-end and carries its tracer-specific
     configuration. :class:`DynamoTracer` (the default) is an execution-driven
