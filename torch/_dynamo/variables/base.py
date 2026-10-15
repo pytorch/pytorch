@@ -2410,14 +2410,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 explanation=f"Dynamo does not know how to trace __new__ on `{self.debug_repr()}`.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        if len(args) != 1 or len(kwargs) != 0:
-            raise_type_error(
-                tx,
-                "object.__new__() takes exactly one argument (the type to instantiate)",
-            )
-
+        if not args:
+            raise_type_error(tx, "object.__new__(): not enough arguments")
+        # object_new: https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c
+        cls = args[0].as_python_constant()
+        if len(args) > 1 or kwargs:
+            if cls.__new__ is not object.__new__:
+                raise_type_error(
+                    tx,
+                    "object.__new__() takes exactly one argument (the type to instantiate)",
+                )
+            if cls.__init__ is object.__init__:
+                raise_type_error(tx, f"{cls.__name__}() takes no arguments")
+        # object_new ignores the excess args, so don't record them.
         return tx.output.side_effects.track_new_user_defined_object(
-            self, args[0], args[1:], tx=tx
+            self, args[0], [], tx=tx
         )
 
     def call_function(
