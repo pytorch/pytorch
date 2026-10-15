@@ -308,6 +308,37 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             time.sleep(0.1)
         self.fail("ephemeral timeout was not reset after collective completion")
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_all_gather_zero_sized(self) -> None:
+        # All zero-sized outputs
+        input_empty = torch.empty(0, device=self.device)
+        outputs_empty = [
+            torch.empty(0, device=self.device) for _ in range(self.world_size)
+        ]
+        dist.all_gather(outputs_empty, input_empty)
+        for out in outputs_empty:
+            self.assertEqual(out.numel(), 0)
+
+        # Uneven gather where the first rank(s) have zero-sized tensors.
+        # Catches #199579 where zero-sized outputs both had null data_ptr and were
+        # misclassified as aliased.
+        sizes = [0, 4] if self.world_size == 2 else [0, 0] + [4] * (self.world_size - 2)
+        input_tensor = (
+            torch.empty(0, device=self.device)
+            if sizes[self.rank] == 0
+            else torch.full((sizes[self.rank],), float(self.rank), device=self.device)
+        )
+        outputs = [torch.empty(s, device=self.device) for s in sizes]
+        dist.all_gather(outputs, input_tensor)
+        for r, s in enumerate(sizes):
+            if s == 0:
+                self.assertEqual(outputs[r].numel(), 0)
+            else:
+                self.assertEqual(
+                    outputs[r], torch.full((s,), float(r), device=self.device)
+                )
+
 
 class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
     @property
