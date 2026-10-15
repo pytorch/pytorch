@@ -108,26 +108,26 @@ case "$tag" in
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
-  pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11)
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc13)
     CUDA_VERSION=13.2.2
     ANACONDA_PYTHON_VERSION=3.11
-    GCC_VERSION=11
+    GCC_VERSION=13
     KATEX=yes
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
-  pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks)
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc13-inductor-benchmarks)
     CUDA_VERSION=13.2.2
     ANACONDA_PYTHON_VERSION=3.11
-    GCC_VERSION=11
+    GCC_VERSION=13
     KATEX=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11)
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc13)
     CUDA_VERSION=13.2.2
     ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
+    GCC_VERSION=13
     KATEX=yes
     TRITON=yes
     INSTALL_MINGW=yes
@@ -156,19 +156,26 @@ case "$tag" in
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
-  pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11-inductor-benchmarks)
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc13-inductor-benchmarks)
     CUDA_VERSION=13.2.2
     ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
+    GCC_VERSION=13
     KATEX=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11-vllm)
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc13-vllm)
     CUDA_VERSION=13.2.2
     ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
+    GCC_VERSION=13
     KATEX=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-cuda13.2-py3.12-pallas)
+    CUDA_VERSION=13.2.2
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=13
+    PALLAS=yes
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3.10-clang21)

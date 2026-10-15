@@ -80,13 +80,13 @@ jobs:
       opt_out_experiments: lf
 
   build:
-    name: cuda13.2-py3.11-gcc11-sm80
+    name: cuda13.2-py3.11-gcc13-sm80
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc13-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc13-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0'
       test-matrix: |
@@ -114,12 +114,12 @@ jobs:
       selected-test-configs: ${{ inputs.benchmark_configs }}
       build-additional-packages: "vision audio fbgemm torchao"
       python-version: "3.11"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
 
   test-nightly:
-    name: cuda13.2-py3.11-gcc11-sm80
+    name: cuda13.2-py3.11-gcc13-sm80
     uses: ./.github/workflows/_linux-test.yml
     needs:
       - build
@@ -135,14 +135,14 @@ jobs:
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
       python-version: "3.11"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
       export-profiler-trace: "1"
       enable-torch-trace: "1"
     secrets: inherit
 
   test-weekly:
-    name: cuda13.2-py3.11-gcc11-sm80
+    name: cuda13.2-py3.11-gcc13-sm80
     uses: ./.github/workflows/_linux-test.yml
     needs:
       - build
@@ -159,14 +159,14 @@ jobs:
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
       python-version: "3.11"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
       export-profiler-trace: "1"
       enable-torch-trace: "1"
     secrets: inherit
 
   test:
-    name: cuda13.2-py3.11-gcc11-sm80
+    name: cuda13.2-py3.11-gcc13-sm80
     uses: ./.github/workflows/_linux-test.yml
     needs:
       - build
@@ -182,7 +182,7 @@ jobs:
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
       python-version: "3.11"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
       export-profiler-trace: "1"
       enable-torch-trace: "1"
