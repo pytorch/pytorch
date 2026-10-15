@@ -5,8 +5,8 @@ import torch
 import torch.fx
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.symbolic_shapes import (
-    find_symbol_binding_fx_nodes,
-    free_symbols,
+    find_symbol_binding_fx_nodes as _find_symbol_binding_fx_nodes,
+    free_symbols as _free_symbols,
 )
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
@@ -194,8 +194,8 @@ def fuse_as_graphmodule(
         val = input_node.meta.get("val", input_node.meta.get("example_value"))
         if isinstance(val, (torch.Tensor, torch.SymInt)):
             input_vals.append(val)
-    if symbols := free_symbols(input_vals):
-        symbol_bindings = find_symbol_binding_fx_nodes(gm.graph)
+    if symbols := _free_symbols(input_vals):
+        symbol_bindings = _find_symbol_binding_fx_nodes(gm.graph)
         for symbol in sorted(symbols, key=str):
             binding = symbol_bindings.get(symbol)
             if (
