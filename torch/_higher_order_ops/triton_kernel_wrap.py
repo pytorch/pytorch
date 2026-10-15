@@ -2152,6 +2152,47 @@ triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
 redirect_to_mode(triton_kernel_wrapper_mutation, _CachingTorchDispatchMode)
 redirect_to_mode(triton_kernel_wrapper_mutation, _CachedTorchDispatchMode)
 
+
+def _rewrap_autotuner(
+    kernel: Any,
+    fn: Any,
+    configs: list["TritonConfig"],
+    prune_configs_by: dict[str, Any] | None = None,
+) -> "Autotuner":
+    """Rebuild ``kernel`` (a triton Autotuner) around ``fn`` with new configs,
+    keeping the user's restore_value/reset_to_zero args, hooks and do_bench."""
+    from triton.runtime.autotuner import autotune
+
+    # https://github.com/triton-lang/triton/pull/5083 renamed restore_idx/reset_idx
+    if hasattr(kernel, "restore_idx"):
+        restore_value = [kernel.arg_names[i] for i in kernel.restore_idx]
+    else:
+        restore_value = list(kernel.restore_value)
+    if hasattr(kernel, "reset_idx"):
+        reset_to_zero = [kernel.arg_names[i] for i in kernel.reset_idx]
+    else:
+        reset_to_zero = list(kernel.reset_to_zero)
+
+    # Only pass the optional args that are set, since older Triton versions
+    # don't accept all of them.
+    optional_kwargs: dict[str, Any] = {}
+    if getattr(kernel, "user_defined_pre_hook", False):
+        optional_kwargs["pre_hook"] = kernel.pre_hook
+    if getattr(kernel, "user_defined_post_hook", False):
+        optional_kwargs["post_hook"] = kernel.post_hook
+    if getattr(kernel, "_do_bench", None) is not None:
+        optional_kwargs["do_bench"] = kernel._do_bench
+
+    return autotune(
+        configs=configs,
+        key=[],
+        prune_configs_by=prune_configs_by,
+        reset_to_zero=reset_to_zero or None,
+        restore_value=restore_value or None,
+        **optional_kwargs,
+    )(fn)
+
+
 ###############################################################################
 # The "TritonHOPifier": a class that transforms a call to a triton kernel into
 # a call to the triton_kernel_wrapper_mutation HOP.
@@ -2523,9 +2564,9 @@ class TritonHOPifier:
                 "early_config_prune": variable.kernel.early_config_prune,
                 "configs_top_k": variable.kernel.configs_top_k,
             }
-            new_kernel = autotune(
-                configs=new_configs, key=[], prune_configs_by=prune_configs_by
-            )(iter_kernel)
+            new_kernel = _rewrap_autotuner(
+                variable.kernel, iter_kernel, new_configs, prune_configs_by
+            )
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
             new_var = self.recreate_variable(
@@ -2566,9 +2607,9 @@ class TritonHOPifier:
                     "configs_top_k": variable.kernel.configs_top_k,
                 }
 
-                new_kernel = autotune(
-                    configs=new_configs, key=[], prune_configs_by=prune_configs_by
-                )(variable.kernel.fn)
+                new_kernel = _rewrap_autotuner(
+                    variable.kernel, variable.kernel.fn, new_configs, prune_configs_by
+                )
             else:
                 # if there is no Autotuner, wrap the kernel into a
                 # new one with a single config with special kwargs
@@ -2620,9 +2661,12 @@ class TritonHOPifier:
                         "configs_top_k": variable.kernel.configs_top_k,
                     }
 
-                    new_kernel = autotune(
-                        configs=new_configs, prune_configs_by=prune_configs_by, key=[]
-                    )(variable.kernel.fn)
+                    new_kernel = _rewrap_autotuner(
+                        variable.kernel,
+                        variable.kernel.fn,
+                        new_configs,
+                        prune_configs_by,
+                    )
                     new_var = self.recreate_variable(
                         variable,
                         kernel=new_kernel,
@@ -2685,7 +2729,9 @@ class TritonHOPifier:
 
             # after pruning the configs, create a new autotuner object with
             # these configs and recurse.
-            new_kernel = autotune(configs=pruned_configs, key=[])(variable.kernel.fn)
+            new_kernel = _rewrap_autotuner(
+                variable.kernel, variable.kernel.fn, pruned_configs
+            )
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
             new_var = self.recreate_variable(
