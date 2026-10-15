@@ -92,10 +92,3 @@ def freeze_runtime_cache(
             serializer.extend(artifacts.items())
             frozen = serializer.to_bytes()
         write(frozen)
-
-
-def prepare_runtime_cache(artifact: bytes | None) -> None:
-    if artifact is not None and CacheArtifactManager.deserialize(artifact) is None:
-        raise RuntimeError(
-            "Cannot prepare runtime dependencies from an unreadable precompile cache"
-        )

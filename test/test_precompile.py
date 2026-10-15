@@ -2851,7 +2851,6 @@ class TestPrecompile(TestCase):
         exported = {
             "capture",
             "load",
-            "prepare_runtime",
             "Capture",
             "DynamoTracer",
             "MakeFxTracer",
@@ -5662,23 +5661,6 @@ class TestPrecompileNoCompilation(TestCase):
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
-    def test_prepare_runtime_skips_graph_and_cuda(self):
-        pc = torch.compiler.precompile
-        source, cache = _capture_files(
-            self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
-        )
-        with (
-            mock.patch(
-                "torch._precompile._make_inlined_forward",
-                side_effect=AssertionError("graph installed"),
-            ),
-            mock.patch(
-                "torch.cuda.init", side_effect=AssertionError("CUDA initialized")
-            ),
-        ):
-            pc.prepare_runtime(artifact_path=source, cache_path=cache)
-            pc.prepare_runtime(artifact_path=source, cache_path=cache)
-
     def test_overlapping_captures_share_one_scope(self):
         from torch.compiler import _runtime_cache
 
@@ -5705,10 +5687,8 @@ class TestPrecompileRuntimeCache(TestCase):
                 self.assertIs(_runtime_cache._capture, owner)
                 outer(torch.ones(4))
             self.assertIsNone(_runtime_cache._capture)
-            for source, cache in paths:
-                torch.compiler.precompile.prepare_runtime(
-                    artifact_path=source, cache_path=cache
-                )
+            for _, cache in paths:
+                self.assertIn("artifact", torch.load(cache, weights_only=True))
 
     def test_capture_scope_inherited_across_fork_is_not_the_childs(self):
         from torch.compiler import _runtime_cache
@@ -5771,9 +5751,7 @@ class TestPrecompileRuntimeCache(TestCase):
                 "eager",
                 paths=(source, cache),
             )
-            torch.compiler.precompile.prepare_runtime(
-                artifact_path=source, cache_path=cache
-            )
+            torch.compiler.precompile.load(source, cache)
 
     @parametrize("backend", ("eager", "inductor"))
     def test_strict_load_serves_captured_pair(self, backend):
@@ -5786,7 +5764,6 @@ class TestPrecompileRuntimeCache(TestCase):
         x = torch.ones(4)
         source, cache = _capture_files(self, fn, [(x,)], backend=backend)
         with pc.no_compilation():
-            pc.prepare_runtime(artifact_path=source, cache_path=cache)
             runnable = pc.load(source, cache)
             with torch.no_grad():
                 self.assertEqual(runnable(x), fn(x))
@@ -5810,116 +5787,6 @@ class TestPrecompileRuntimeCache(TestCase):
             ):
                 cap(torch.ones(4))
             self.assertEqual(os.listdir(directory), [])
-
-    def test_prepare_runtime_rejects_make_fx_capture(self):
-        from pathlib import Path
-
-        pc = torch.compiler.precompile
-        source, cache = _capture_files(
-            self,
-            _no_compilation_single_graph,
-            [(torch.ones(4),)],
-            backend="eager",
-            tracer=MakeFxTracer(),
-        )
-        with self.assertRaisesRegex(
-            PrecompileError, "supports only Dynamo captures"
-        ) as failure:
-            pc.prepare_runtime(artifact_path=Path(source), cache_path=Path(cache))
-        self.assertTrue(
-            str(failure.exception).startswith(
-                f"precompile.prepare_runtime (artifact_path={source!r}, "
-                f"cache_path={cache!r})"
-            )
-        )
-
-    @parametrize(
-        "damage", ("no_artifact", "no_cache", "corrupt", "format", "code_hash")
-    )
-    def test_prepare_runtime_errors_name_the_pair(self, damage):
-        pc = torch.compiler.precompile
-        source, cache = _capture_files(
-            self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
-        )
-        if damage == "no_artifact":
-            os.remove(source)
-        elif damage == "no_cache":
-            os.remove(cache)
-        elif damage == "corrupt":
-            with open(cache, "r+b") as f:
-                f.truncate(20)
-        else:
-            _rewrite_envelope(cache, **{damage: "incompatible"})
-        with self.assertRaisesRegex(
-            PrecompileError, "^precompile\\.prepare_runtime "
-        ) as failure:
-            pc.prepare_runtime(artifact_path=source, cache_path=cache)
-        self.assertIn(
-            f"(artifact_path={source!r}, cache_path={cache!r})", str(failure.exception)
-        )
-
-    def test_envelope_reader_parses_emitted_dynamo_header(self):
-        from torch._precompile import _read_runtime_cache_envelope
-
-        source, cache = _capture_files(
-            self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
-        )
-        blob = _read_runtime_cache_envelope(source, cache, "prepare_runtime")
-        self.assertEqual((blob["backend"], blob["tracer"]), ("eager", "dynamo"))
-
-    @parametrize(
-        "damage", ("none", "format", "version", "backend", "tracer", "code_hash")
-    )
-    def test_prepare_streams_and_verifies_before_hydration(self, damage):
-        import hashlib
-        from pathlib import Path
-
-        from torch._precompile import _CACHE_FORMAT, _CACHE_VERSION
-
-        with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / "artifact.py"
-            cache = Path(directory) / "artifact.cache"
-            code = (
-                'BACKEND = "eager"\nTRACER = "dynamo"\n'
-                + "# payload\n" * 200000
-                + "this is not valid Python ("
-            )
-            source.write_bytes(code.encode())
-            blob = {
-                "format": _CACHE_FORMAT,
-                "version": _CACHE_VERSION,
-                "backend": "eager",
-                "tracer": "dynamo",
-                "code_hash": hashlib.sha256(code.encode()).hexdigest(),
-                "artifact": b"runtime payload",
-            }
-            if damage != "none":
-                blob[damage] = "incompatible"
-            torch.save(blob, cache)
-            with (
-                mock.patch(
-                    "torch.compiler._runtime_cache.prepare_runtime_cache"
-                ) as hydrate,
-                mock.patch(
-                    "torch._precompile._parse_artifact_metadata",
-                    side_effect=AssertionError("parsed full program"),
-                ),
-                mock.patch(
-                    "torch._precompile._make_inlined_forward",
-                    side_effect=AssertionError("executed source"),
-                ),
-            ):
-                if damage == "none":
-                    torch.compiler.precompile.prepare_runtime(
-                        artifact_path=source, cache_path=cache
-                    )
-                    hydrate.assert_called_once_with(b"runtime payload")
-                else:
-                    with self.assertRaises(PrecompileError):
-                        torch.compiler.precompile.prepare_runtime(
-                            artifact_path=source, cache_path=cache
-                        )
-                    hydrate.assert_not_called()
 
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     @parametrize("device", (0, None))
