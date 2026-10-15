@@ -1,5 +1,4 @@
 #pragma once
-#include <c10/metal/common.h>
 
 template <typename T>
 struct ELUParams {
@@ -30,6 +29,6 @@ struct HardtanhParams {
 
 template <typename T>
 struct ThresholdParams {
-  c10::metal::opmath_t<T> threshold;
+  T threshold;
   T value;
 };
