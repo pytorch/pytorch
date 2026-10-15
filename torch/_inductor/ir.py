@@ -505,9 +505,15 @@ def is_cpu(x: IRNode | torch.device | None | str) -> bool:
 
 
 def is_aligned_realized_tensor(x: Buffer | TensorBox, alignment: int) -> bool:
+    if not isinstance(x, IRNode) or x.maybe_get_layout() is None:
+        return False
+    # A flexible layout has no settled strides to check. Report unaligned so
+    # the caller takes its require_* path, which freezes a flexible layout
+    # into the wanted order in place (no copy).
+    if isinstance(x.get_layout(), FlexibleLayout):
+        return False
     if (
-        not isinstance(x, IRNode)
-        or x.maybe_get_stride() is None
+        x.maybe_get_stride() is None
         or free_unbacked_symbols(x.get_stride())
         or free_unbacked_symbols(x.get_size())
     ):
@@ -563,6 +569,13 @@ def try_match_insignificant_strides(
     if not is_storage_and_layout(tensor):
         return tensor
 
+    if all(V.graph.sizevars.statically_known_gt(s, 1) for s in tensor.get_size()):
+        return tensor
+
+    # freeze first: the "already matches" early return below persists the
+    # decision, so it must be made against final strides
+    storage, old_layout = as_storage_and_layout(tensor)
+
     if all(
         V.graph.sizevars.statically_known_equals(s1, s2)
         for s1, s2 in zip(strides, tensor.get_stride())
@@ -571,8 +584,6 @@ def try_match_insignificant_strides(
 
     if not significant_strides_equal(strides, tensor.get_stride(), tensor.get_size()):
         return tensor
-
-    storage, old_layout = as_storage_and_layout(tensor)
     new_stride = [*old_layout.stride]
     is_empty = tensor.is_zero_elements()
     for i, s in enumerate(tensor.get_size()):
