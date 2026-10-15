@@ -578,7 +578,10 @@ class AsyncCompile:
             ]
             extra_env = {v: os.environ.get(v) for v in env_vars}
             extra_config = {
-                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher
+                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher,
+                "static_launch_user_defined_triton_kernels": (
+                    torch._inductor.config.static_launch_user_defined_triton_kernels
+                ),
             }
 
             if len(torch._inductor.config.autotune_lookup_table) > 0:
