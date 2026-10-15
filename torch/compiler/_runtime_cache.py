@@ -110,12 +110,14 @@ def _serving_triton_root(cache: ModuleType, digest: str, keys: set[str]) -> str:
     """Point Triton at a cache directory to import a runtime cache into, and turn
     its autotuning cache on, for the rest of the process.
 
-    That is TRITON_CACHE_DIR if the import accepts it, i.e. it holds only this
-    cache's entries, complete or partial, and a fresh directory otherwise, since
-    the import refuses to mix with unrelated entries (Inductor points
-    TRITON_CACHE_DIR at its shared cache once it compiles). Autotuners fix
-    cache_results when they are decorated, so existing ones are switched too,
-    or they would benchmark again instead of reading the imported decisions.
+    That is TRITON_CACHE_DIR if the import accepts it, i.e. its ready marker
+    carries this bundle's digest, whatever was compiled into it since, or,
+    unmarked, it holds only this cache's entries and marker-prefixed staging
+    entries. Otherwise it is a fresh directory, since the import refuses to mix
+    with unrelated entries (Inductor points TRITON_CACHE_DIR at its shared cache
+    once it compiles). Autotuners fix cache_results when they are decorated, so
+    existing ones are switched too, or they would benchmark again instead of
+    reading the imported decisions.
     """
     from triton import knobs
 
