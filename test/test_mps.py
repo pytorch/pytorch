@@ -7877,11 +7877,41 @@ class TestMPS(TestCaseMPS):
         # Small numerics: when |im| << |re|, computing the smaller component as
         # sqrt((|z| - |re|) / 2) cancels catastrophically and returns ~0. Compare
         # components separately, as a complex-magnitude check would hide the error.
-        for dtype in (torch.cfloat, torch.chalf):
+        for dtype, op in itertools.product((torch.cfloat, torch.chalf), (torch.sqrt, torch.rsqrt)):
             x = torch.tensor([1 + 1e-4j, -1 + 1e-4j, 1 - 1e-4j, -1 - 1e-4j], dtype=dtype)
-            rc = torch.view_as_real(x.to('mps').sqrt().cpu())
-            ref = torch.view_as_real(x.cfloat().sqrt().to(dtype))
+            rc = torch.view_as_real(op(x.to('mps')).cpu())
+            ref = torch.view_as_real(op(x.cfloat()).to(dtype))
             self.assertEqual(rc, ref)
+
+    def test_signed_zero_max_min(self):
+        # Like std::max/min (and CPU), max/min-based ops return the first argument on ties,
+        # so the sign of zero is preserved. TODO: remove once test_unary_ufuncs (which
+        # covers this in test_relu_signed_zero/test_clamp_signed_zero) runs on MPS.
+        x = torch.tensor([-0.0, 0.0, -0.0, 0.0])
+        y = torch.tensor([0.0, -0.0, -0.0, 0.0])
+        for dtype in (torch.float32, torch.float16, torch.bfloat16):
+            xc, yc = x.to(dtype), y.to(dtype)
+            xm, ym = xc.to('mps'), yc.to('mps')
+            for name, cpu, mps in (
+                ("relu", torch.relu(xc), torch.relu(xm)),
+                ("clamp_min", torch.clamp_min(xc, 0), torch.clamp_min(xm, 0)),
+                ("clamp_max", torch.clamp_max(xc, 0), torch.clamp_max(xm, 0)),
+                ("clamp", torch.clamp(xc, min=0, max=1), torch.clamp(xm, min=0, max=1)),
+                ("maximum", torch.maximum(xc, yc), torch.maximum(xm, ym)),
+                ("minimum", torch.minimum(xc, yc), torch.minimum(xm, ym)),
+            ):
+                self.assertEqual(torch.signbit(mps).cpu(), torch.signbit(cpu), msg=f"{name} {dtype}")
+
+    def test_complex_inverse_trig(self):
+        # Exact +-1, near-real, huge and infinite inputs, where the textbook formulas lose
+        # precision, overflow or return NaN. Compare against numpy, as CPU libc++ overflows
+        # for huge inputs.
+        x = torch.tensor([1, -1, 1 + 1e-4j, -1 + 1e-4j, 0.5 + 1e-4j, 1e30j, 1 + 1e30j, -1e30 + 1j,
+                          complex(math.inf, 0), complex(-math.inf, 1), complex(1, math.inf)], dtype=torch.cfloat)
+        for op, ref in ((torch.asin, np.arcsin), (torch.acos, np.arccos), (torch.asinh, np.arcsinh), (torch.acosh, np.arccosh)):
+            rc = torch.view_as_real(op(x.to('mps')).cpu())
+            expected = torch.view_as_real(torch.from_numpy(ref(x.numpy())))
+            self.assertEqual(rc, expected, msg=op.__name__)
 
     # Test selu, elu, celu
     def test_elu(self):
