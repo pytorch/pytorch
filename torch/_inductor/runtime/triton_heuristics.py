@@ -87,6 +87,7 @@ from .runtime_utils import (
     validate_triton_config,
 )
 from .static_triton_launcher import (
+    is_registered_static_launch_device,
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
@@ -1429,6 +1430,9 @@ class CachingAutotuner(KernelInterface):
         self, cfg: Config, *, cc_override: str | int | None = None
     ) -> _KernelCompileResult:
         """Ahead of time compile a given autotuner config."""
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("Triton kernel compilation")
         compile_meta = self._create_compile_meta(cfg)
         if cc_override is not None:
             compile_meta["cc"] = cc_override
@@ -1531,6 +1535,9 @@ class CachingAutotuner(KernelInterface):
 
     def bench(self, launcher, *args, with_profiler=False, **kwargs):
         """Measure the performance of a given launcher."""
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("Triton kernel benchmarking")
         # we don't skip configs with spilled registers when auto-tuning custom
         # (user-written) Triton kernels, as (i) we don't have any knowledge or
         # control over the kernel code; (ii) there is empirical evidence that
@@ -1937,6 +1944,9 @@ class CachingAutotuner(KernelInterface):
 
     def autotune_to_one_config(self, *args, **kwargs):
         """Execute autotuning to select the optimal kernel configuration."""
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("Triton kernel autotuning")
         if autotuning_inputs_log.isEnabledFor(logging.DEBUG):
             self._log_autotune_inputs(args, kwargs)
 
@@ -3100,8 +3110,13 @@ class StaticTritonCompileResult(CompileResult[_T]):
             return None
 
         def check_can_launch() -> _KernelType:
-            if triton_meta.get("device_type") not in ("cuda", "xpu", "hip"):
-                raise CannotStaticallyLaunchKernel("Non-cuda/XPU/ROCm device")
+            if not is_registered_static_launch_device(
+                triton_meta.get("device_type", "")
+            ):
+                raise CannotStaticallyLaunchKernel(
+                    "No static Triton kernel launcher registered for device type "
+                    f"{triton_meta.get('device_type')}",
+                )
 
             if triton_meta.get("device_type") == "xpu" and XPU_KERNEL_FORMAT == "spv":
                 raise CannotStaticallyLaunchKernel(
