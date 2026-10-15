@@ -6949,6 +6949,44 @@ for dtype in (torch.int32, torch.int64):
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    @parametrize(
+        "input_size,output_size,expected_kernels",
+        [
+            ((7, 9), (3, 4), 1),
+            ((1, 1), (1, 26), 0),
+            ((1, 1), (26, 1), 0),
+            ((1, 1), (16, 16), 0),
+        ],
+    )
+    def test_adaptive_avg_pool2d_backward(
+        self, input_size, output_size, expected_kernels
+    ):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            [
+                torch.randn(1, 1, *output_size),
+                torch.randn(1, 1, *input_size),
+            ],
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, expected_kernels)
+
+    @parametrize("input_size", [(1, 2, 0, 4), (1, 2, 3, 0), (0, 2, 3, 4)])
+    def test_adaptive_avg_pool2d_backward_empty_input(self, input_size):
+        if self.device != "cuda":
+            self.skipTest("CUDA eager supports empty spatial dimensions")
+
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        x = torch.empty(input_size, device=self.device)
+        grad_output = torch.empty(input_size[0], 2, 2, 3, device=self.device)
+        self.common(fn, (grad_output, x), check_lowp=False)
+
     @requires_gpu()
     @skip_if_gpu_halide  # slow
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
