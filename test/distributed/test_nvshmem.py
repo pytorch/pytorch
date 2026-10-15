@@ -260,8 +260,9 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
         hdl = symm_mem.rendezvous(tensor, group=group_name)
         # rank 0 writes into rank 1's buffer below, so rank 1's fill_ must land
-        # first.
-        hdl.barrier()
+        # first. Channel 0's barrier slots overlap the uint64 signal at offset 0
+        # that nvshmem_put_with_signal sets, so use channel 1.
+        hdl.barrier(channel=1)
         signal_pad = hdl.get_signal_pad(self.rank)
         signal_val = 5
 
