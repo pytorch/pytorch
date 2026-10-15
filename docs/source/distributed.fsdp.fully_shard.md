@@ -230,8 +230,9 @@ The frontend API is `fully_shard` that can be called on a `module`:
 
 A custom all-gather backend whose collective writes its own output layout, e.g.
 parameter-contiguous output, provides an all-gather layout bound to its comm and
-is installed per module with a single `set_all_gather_layout` call, which also
-installs the comm. Create a separate stateful backend instance for each FSDP
+is installed on each FSDP module with `set_all_gather_layout(layout,
+recurse=False)`, which also installs the comm; modules with several parameter
+groups reject such a layout. Create a separate stateful backend instance for each
 module and install it before the first unshard. FSDP owns the buffers behind the
 unsharded parameters, as with the default layout: it frees them on reshard,
 unless `set_keep_unsharded_storage` keeps them, and re-allocates them for the

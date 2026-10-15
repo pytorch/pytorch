@@ -10,11 +10,12 @@ on a fully sharded model::
     )
     model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
 
-The native CUDA copies can improve performance for wide contiguous tensors with
-small ``outer_size`` (the product of dimensions before the shard dimension),
-such as ``Shard(1)`` over ``[2, F, D]``. Large outer sizes, skinny tensors, and
-strided collective buffers can increase CPU time, GPU time, and metadata memory.
-Benchmark the callbacks on the target workload before enabling them.
+The native CUDA copies skip the intermediate buffers and can improve
+performance for wide contiguous tensors with small ``outer_size`` (the product of
+dimensions before the shard dimension), such as ``Shard(1)`` over ``[2, F, D]``.
+Their CPU time, GPU time, and metadata memory grow with the total outer size of a
+parameter group, and strided collective buffers take a slower path. Benchmark
+the callbacks on the target workload before enabling them.
 
 All-gather extensions can return ``AllGatherInput`` records from
 ``fsdp_pre_all_gather`` to declare each payload's concatenation dimension. FSDP
@@ -30,10 +31,12 @@ from collections.abc import Callable
 
 import torch
 from torch.distributed.fsdp._fully_shard._all_gather_layout import (
-    _default_all_gather_output_fn,
     DefaultAllGatherLayout,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
+from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _default_all_gather_output_fn,
+)
 
 
 __all__ = [
@@ -87,7 +90,7 @@ def reduce_scatter_input_fn_with_native_copy(
     *,
     shard_dims: list[int],
     world_size: int,
-) -> Callable:
+) -> Callable[[torch.Tensor], None]:
     r"""Prepare gradients for a native copy into the reduce-scatter buffer.
 
     Register with
@@ -95,7 +98,8 @@ def reduce_scatter_input_fn_with_native_copy(
     See the module documentation for the performance tradeoffs.
 
     Contiguous nonzero-dimension shards copy directly into the collective buffer.
-    Noncontiguous gradients use the existing chunk-and-concatenate reorder.
+    Noncontiguous gradients sharded on a nonzero dim use the existing
+    chunk-and-concatenate reorder.
     """
     num_leading_dims = [0] * len(unsharded_grads)
     if world_size > 1:

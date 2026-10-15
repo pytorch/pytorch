@@ -932,10 +932,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
     @skip_if_lt_x_gpu(1)
     def test_all_gather_input_layouts(self):
         self.run_subtests(
-            {
-                "shard_world_size": [2, 1],
-                "native_copy": [False, True],
-            },
+            {"shard_world_size": [2, 1], "native_copy": [False, True]},
             self._test_all_gather_input_layouts,
         )
 

@@ -566,12 +566,18 @@ class FSDPParamGroup:
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
-                self._all_gather_buffers = foreach_all_gather_copy_out(
-                    self._all_gather_result,
-                    self.fsdp_params,
-                    self._all_gather_process_group,
-                    self._all_gather_buffers,
-                )
+                try:
+                    self._all_gather_buffers = foreach_all_gather_copy_out(
+                        self._all_gather_result,
+                        self.fsdp_params,
+                        self._all_gather_process_group,
+                        self._all_gather_buffers,
+                    )
+                except ValueError:
+                    # A layout's rejected result adopted nothing; drop the completed
+                    # all-gather so that another layout can be installed
+                    self._all_gather_result = None
+                    raise
 
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_unsharded_param()

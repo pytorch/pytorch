@@ -350,10 +350,10 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             use_shard_placement_fn=use_shard_placement_fn,
         )
         if native_copy:
-            # Fresh bf16 gradients are widened into the fp32 buffer by the copy-in
             model.set_all_gather_layout(
                 DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
             )
+            # Fresh bf16 gradients are widened into the fp32 buffer by the copy-in
             model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
         orig_reduce_scatter = dist.reduce_scatter_single

@@ -519,6 +519,50 @@ def _prepare_default_all_gather_outputs(
     return plan
 
 
+# Note [All-gather output fn]
+# fn(all_gather_output, outputs, split_sizes=..., outer_sizes=..., world_size=...)
+# runs under no_grad on the current stream and copies the flat rank-major
+# all_gather_output into outputs, flat buffers that FSDP allocates. Each rank's
+# chunk has split_sizes[i] elements for outputs[i], and the ranks' chunks, viewed
+# as (outer_sizes[i], -1), are concatenated along dim 1 of outputs[i] viewed the
+# same way. Outputs with outer_sizes[i] == 1 may be larger and then fill only a
+# prefix. A uint8 all_gather_output has split_sizes in bytes, while outputs keep
+# their dtypes. Of its arguments, fn may only write outputs, whose version
+# counters FSDP preserves, and must keep none. FSDP skips it for a single rank or
+# an empty all-gather.
+def _default_all_gather_output_fn(
+    all_gather_output: torch.Tensor,
+    outputs: list[torch.Tensor],
+    *,
+    split_sizes: list[int],
+    outer_sizes: list[int],
+    world_size: int,
+) -> None:
+    """Copy outputs with outer_size > 1 via intermediate buffers, others directly."""
+    byte_views = all_gather_output.dtype == torch.uint8
+    split_outputs: list[torch.Tensor] = []
+    reassembled: list[tuple[torch.Tensor, torch.Tensor, int]] = []
+    for output, split_size, outer_size in zip(outputs, split_sizes, outer_sizes):
+        copy_output = output
+        if outer_size > 1:
+            copy_output = torch.empty_like(output)
+            reassembled.append((copy_output, output, outer_size))
+        if byte_views and copy_output.nbytes == world_size * split_size:
+            # View as bytes last: a view of a byte view keeps the byte view alive
+            split_outputs.append(copy_output.view(world_size, -1).view(torch.uint8))
+            continue
+        split_output = copy_output.view(torch.uint8) if byte_views else copy_output
+        if split_output.numel() != world_size * split_size:  # a smaller payload
+            split_output = split_output[: world_size * split_size]
+        split_outputs.append(split_output.view(world_size, split_size))
+    torch.ops.fsdp.split_with_sizes_copy(
+        all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs
+    )
+    for copy_output, output, outer_size in reassembled:
+        chunks = copy_output.view(world_size, outer_size, -1).unbind(0)
+        torch.cat(chunks, dim=1, out=output.view(outer_size, -1))
+
+
 def _wait_all_gather(all_gather_result: AllGatherResult) -> None:
     all_gather_work = all_gather_result.all_gather_work
     device = all_gather_result.all_gather_output.device
@@ -537,8 +581,9 @@ def foreach_all_gather_copy_out(
     persistent_buffers: _PersistentBuffers | None = None,
 ) -> _PersistentBuffers | None:
     """Finalizes the all-gather with the layout that prepared it and returns the
-    group's FSDP-owned persistent buffers, which a custom layout chooses on the
-    group's first unshard (None while each output is its own buffer)."""
+    group's FSDP-owned persistent buffers: those a custom layout returns on the
+    group's first unshard, else ``persistent_buffers`` (None if the default
+    layout allocated each output)."""
     _wait_all_gather(all_gather_result)
     world_size = group.size()
     layout = all_gather_result.layout
@@ -550,9 +595,7 @@ def foreach_all_gather_copy_out(
         plan = _prepare_default_all_gather_outputs(
             fsdp_params, all_gather_result, world_size
         )
-        layout.finalize_outputs(
-            AllGatherFinalizeMetadata(all_gather_output, [], world_size, plan, [])
-        )
+        layout._copy_out(all_gather_output, plan, world_size)
         return persistent_buffers
     first_unshard = not fsdp_params[0].all_gather_outputs
     buffers: list[torch.Tensor] = []
@@ -567,10 +610,10 @@ def foreach_all_gather_copy_out(
     outer_sizes = iter(all_gather_result.all_gather_input_outer_sizes)
     param_metadata = [
         AllGatherParamMetadata(
-            numels,
-            dtypes,
-            [next(outer_sizes) for _ in numels],
-            fsdp_param.all_gather_outputs,
+            input_numels=numels,
+            input_dtypes=dtypes,
+            outer_sizes=[next(outer_sizes) for _ in numels],
+            outputs=fsdp_param.all_gather_outputs,
         )
         for fsdp_param, numels, dtypes in zip(
             fsdp_params,
@@ -588,15 +631,15 @@ def foreach_all_gather_copy_out(
     with torch.autograd._unsafe_preserve_version_counter(preserved_outputs):
         outputs = layout.finalize_outputs(
             AllGatherFinalizeMetadata(
-                all_gather_output,
-                param_metadata,
-                world_size,
-                all_gather_result.output_metadata,
-                buffers,
+                all_gather_output=all_gather_output,
+                param_metadata=param_metadata,
+                world_size=world_size,
+                output_metadata=all_gather_result.output_metadata,
+                buffers=buffers,
             )
         )
     if first_unshard:
-        return _adopt_layout_outputs(fsdp_params, outputs)
+        return _adopt_layout_outputs(fsdp_params, param_metadata, outputs, world_size)
     _check_layout_refill(fsdp_params, outputs)
     return persistent_buffers
 

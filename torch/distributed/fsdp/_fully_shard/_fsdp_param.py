@@ -944,6 +944,14 @@ class FSDPParam:
                 self.param_dtype or self.orig_dtype,
             )
             self._all_gather_metadata = None
+            if self._keep_all_gather_output_storage:
+                # Inner tensors that view the group's buffers are the group's to free
+                ptrs = {o.untyped_storage().data_ptr() for o in self.all_gather_outputs}
+                self._unsharded_inner_tensors = [
+                    t
+                    for t in self._unsharded_inner_tensors
+                    if t.untyped_storage().data_ptr() not in ptrs
+                ]
         else:
             # For the default path (no post-all-gather), the all-gather output
             # gives the unsharded parameter data directly
