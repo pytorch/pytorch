@@ -334,7 +334,7 @@ class TestCheckpoint(TestCase):
 class TestCheckpointAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_tensor_only_gpu(self, device):
+    def test_tensor_for_accelerator(self, device):
         x = torch.randn(20, 100, device=f"{self.device_type}:0")
         net = ToyModel().to(f"{self.device_type}:0")
         check_tensor_only(self, net, x)
@@ -343,7 +343,7 @@ class TestCheckpointAccelerator(TestCase):
 instantiate_device_type_tests(
     TestCheckpointAccelerator,
     globals(),
-    only_for=["cuda", "xpu"],
+    except_for=["cpu"],
     allow_xpu=True,
 )
 
