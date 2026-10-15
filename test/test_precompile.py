@@ -6482,6 +6482,26 @@ def _producer_triton_cache(directory):
         yield
 
 
+@contextlib.contextmanager
+def _triton_settings_unchanged(test):
+    # A warm TRITON_CACHE_DIR no import could use, so repointing it is visible.
+    import triton
+
+    knobs = triton.knobs
+    with (
+        tempfile.TemporaryDirectory() as warm,
+        mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": warm}),
+        knobs.cache.scope(),
+        knobs.autotuning.scope(),
+    ):
+        pathlib.Path(warm, "kernel").mkdir()
+        knobs.autotuning.cache = False
+        yield
+        test.assertEqual(os.environ.get("TRITON_CACHE_DIR"), warm)
+        test.assertEqual(knobs.cache.dir, warm)
+        test.assertFalse(knobs.autotuning.cache)
+
+
 class _FakeTritonRuntimeCache:
     """Stands in for a triton.runtime.cache that can export its runtime cache."""
 
@@ -6496,6 +6516,9 @@ class _FakeTritonRuntimeCache:
     def export_runtime_cache(self, *, context, exclude=()):
         self.exclusions.append(frozenset(exclude))
         return f"runtime cache from {self.root}".encode()
+
+    def _decode(self, bundle, context):
+        return [], {}
 
     def import_runtime_cache(self, payload, *, context):
         self.imports.append((payload, self.root))
@@ -7902,12 +7925,38 @@ class TestPrecompileRuntimeCache(TestCase):
             key=["n"],
             restore_value=["x_ptr"],
         )(tuned_add_one.fn)
+        # ...unless it prunes its configs, so this one is dropped and tuned again.
+        keep_all = {"early_config_prune": lambda configs, nargs, **kw: configs}
+        pruned_add_one = triton.autotune(
+            configs=hooked_add_one.configs,
+            key=["n"],
+            restore_value=["x_ptr"],
+            prune_configs_by=keep_all,
+        )(tuned_add_one.fn)
+        # Tuned before the capture and not launched in it.
+        untouched_add_one = triton.autotune(
+            configs=tuned_add_one.configs, key=["n"], restore_value=["x_ptr"]
+        )(tuned_add_one.fn)
+
+        @triton.jit
+        def untouched_jit(x_ptr, n, BLOCK: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+            mask = offsets < n
+            tl.store(
+                x_ptr + offsets, tl.load(x_ptr + offsets, mask=mask) + 1, mask=mask
+            )
 
         hits = []
+        compiled = []
 
         def launch(kernel=tuned_add_one):
             x = torch.zeros(1000, device="cuda")
             kernel[lambda meta: (triton.cdiv(1000, meta["BLOCK"]),)](x, 1000)
+            self.assertEqual(x, torch.ones_like(x))
+
+        def launch_untouched_jit():
+            x = torch.zeros(1000, device="cuda")
+            untouched_jit[(triton.cdiv(1000, 128),)](x, 1000, BLOCK=128)
             self.assertEqual(x, torch.ones_like(x))
 
         roots = []
@@ -7918,17 +7967,28 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertTrue(knobs.autotuning.cache)
             launch()
             launch(hooked_add_one)
+            launch(pruned_add_one)
 
         with (
             mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
             knobs.autotuning.scope(),
+            knobs.runtime.scope(),
             tempfile.TemporaryDirectory() as elsewhere,
         ):
             knobs.autotuning.listener = lambda **kw: hits.append(kw["cache_hit"])
-            launch()  # tuned and kept in memory before the capture
-            launch(hooked_add_one)
-            self.assertEqual(hits, [False, False])
+            knobs.runtime.jit_post_compile_hook = lambda fn, **kw: compiled.append(
+                fn.jit_function
+            )
+            # Tuned and kept in memory before the capture.
+            for kernel in (tuned_add_one, hooked_add_one, pruned_add_one):
+                launch(kernel)
+            launch(untouched_add_one)
+            launch_untouched_jit()
+            self.assertEqual(hits, [False] * 4)
+            self.assertIn(untouched_jit, compiled)
             hooked = dict(hooked_add_one.cache)
+            untouched = dict(untouched_add_one.cache)
+            hooked_add_one.configs_timings = pruned_add_one.configs_timings = None
             # The capture starts from a directory the loaded driver module is not in.
             knobs.cache.dir = elsewhere
             previous = (knobs.cache.dir, os.environ["TRITON_CACHE_DIR"])
@@ -7940,9 +8000,19 @@ class TestPrecompileRuntimeCache(TestCase):
                 then=in_block,
             )
             # Tuned again in the block, so the decision is in the capture's cache;
-            # the pre_hook tuner kept its decision rather than benchmark again.
-            self.assertEqual(hits, [False, False, False])
+            # the non-pruning pre_hook tuner kept its decision rather than
+            # benchmark again, and the pruning one tuned again.
+            self.assertEqual(hits, [False] * 6)
             self.assertEqual(hooked_add_one.cache, hooked)
+            self.assertIsNone(hooked_add_one.configs_timings)
+            self.assertIsNotNone(pruned_add_one.configs_timings)
+            # What the block did not launch kept its decision and kernel.
+            compiled.clear()
+            launch(untouched_add_one)
+            launch_untouched_jit()
+            self.assertEqual(hits, [False] * 6)
+            self.assertEqual(untouched_add_one.cache, untouched)
+            self.assertNotIn(untouched_jit, compiled)
             [root] = roots
             self.assertTrue(list(root.glob("*/*.autotune.json")))
             # The driver utility module this process loaded before the capture.
@@ -7962,7 +8032,7 @@ class TestPrecompileRuntimeCache(TestCase):
                 self.assertNotIn(knobs.cache.dir, previous)
                 self.assertTrue(tuned_add_one.cache_results)
                 launch()
-            self.assertEqual(hits, [False, False, False, True])
+            self.assertEqual(hits, [False] * 6 + [True])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_capture_refuses_changed_triton_cache_dir(self):
@@ -7997,12 +8067,50 @@ class TestPrecompileRuntimeCache(TestCase):
             tempfile.TemporaryDirectory() as directory,
             _fake_triton_runtime_cache(Path(directory)) as fake,
         ):
+            with _triton_settings_unchanged(self):
+                with (
+                    torch.compiler.precompile.no_compilation(),
+                    self.assertRaisesRegex(RuntimeError, "Corrupt"),
+                ):
+                    runtime.populate_cache()
+            self.assertEqual(fake.imports, [])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_strict_import_rejects_incompatible_triton_runtime_cache(self):
+        import hashlib
+
+        from torch.compiler import _runtime_cache
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as directory:
+            with _triton_cache_namespace(directory):
+                _write_triton_runtime_entries()
+                bundle = export_runtime_cache(context={"torch_key": "other"})
+            runtime = _runtime_cache.TritonRuntimeCacheArtifact(
+                hashlib.sha256(bundle).hexdigest(), bundle
+            )
             with (
+                mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
+                _triton_settings_unchanged(self),
                 torch.compiler.precompile.no_compilation(),
-                self.assertRaisesRegex(RuntimeError, "Corrupt"),
+                self.assertRaisesRegex(RuntimeError, "Incompatible"),
             ):
                 runtime.populate_cache()
-            self.assertEqual(fake.imports, [])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_scope_leaves_triton_alone_without_active_backend(self):
+        from triton.backends import backends
+
+        from torch.compiler import _runtime_cache
+
+        with contextlib.ExitStack() as stack:
+            for backend in backends.values():
+                stack.enter_context(
+                    mock.patch.object(backend.driver, "is_active", return_value=False)
+                )
+            stack.enter_context(_triton_settings_unchanged(self))
+            with _runtime_cache.capture_scope():
+                self.assertIsNone(_runtime_cache._capture.cache_root)
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_corrupt_triton_runtime_cache_only_warns_when_not_strict(self):
@@ -8019,7 +8127,10 @@ class TestPrecompileRuntimeCache(TestCase):
             mock.patch.dict(os.environ),
             _fake_triton_runtime_cache(Path(directory)) as fake,
         ):
-            with self.assertLogs(_runtime_cache.log, "WARNING") as logs:
+            with (
+                _triton_settings_unchanged(self),
+                self.assertLogs(_runtime_cache.log, "WARNING") as logs,
+            ):
                 runtime.populate_cache()
             self.assertIn("Corrupt", logs.output[0])
             with (
