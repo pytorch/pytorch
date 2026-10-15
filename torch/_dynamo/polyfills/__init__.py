@@ -445,6 +445,19 @@ def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | No
         return value
 
 
+def unpack_mapping_keys_and_values(
+    mapping: Mapping[T, U],
+) -> tuple[tuple[T, ...], tuple[U, ...]]:
+    # Snapshot `items()` once to keep keys and values aligned, including overrides.
+    items = list(mapping.items())
+    keys: list[T] = []
+    values: list[U] = []
+    for key, value in items:
+        keys.append(key)
+        values.append(value)
+    return tuple(keys), tuple(values)
+
+
 def instantiate_user_defined_class_object(
     cls: type[T], /, *args: Any, **kwargs: Any
 ) -> T:
