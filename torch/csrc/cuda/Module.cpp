@@ -1012,7 +1012,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       segmentDict[total_size_s] = seg.size;
       segmentDict[allocated_size_s] = seg.allocated ? seg.size : 0;
       segmentDict[active_size_s] = seg.active ? seg.size : 0;
-      segmentDict[requested_size_s] = seg.size;
+      segmentDict[requested_size_s] = seg.active ? seg.requested_size : 0;
       segmentDict[stream_s] = int64_t(0);
       segmentDict[segment_type_s] = small_s;
       segmentDict[segment_pool_id] = seg.owner_private_pool_id;
@@ -1026,7 +1026,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       py::dict blockDict;
       blockDict[address_s] = seg.address;
       blockDict[size_s] = seg.size;
-      blockDict[requested_size_s] = seg.size;
+      blockDict[requested_size_s] = seg.requested_size;
       blockDict[state_s] =
           (seg.allocated ? active_allocated_s
                          : (seg.active ? active_pending_free_s : inactive_s));

@@ -48,6 +48,16 @@ def has_triton_package() -> bool:
 
 
 @functools.cache
+def get_triton_constexpr_function_type() -> type | None:
+    """Check if Triton is installed and has constexpr_function, introduced in v3.5."""
+    if not has_triton_package():
+        return None
+    import triton
+
+    return getattr(triton.runtime.jit, "ConstexprFunction", None)
+
+
+@functools.cache
 def has_triton_block_ptr() -> bool:
     """Whether the installed Triton still provides the block-pointer frontend API.
 
