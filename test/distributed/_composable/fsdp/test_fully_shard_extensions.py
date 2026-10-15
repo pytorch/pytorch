@@ -21,7 +21,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_param import (
     _get_all_gather_output_layouts,
     ShardedState,
 )
-from torch.distributed.fsdp.experimental import AllGatherInput
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_native_copy,
+    AllGatherInput,
+)
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -928,11 +931,11 @@ class TestFullyShardAllGatherExtensionsMultiThread(
     @skip_if_lt_x_gpu(1)
     def test_all_gather_input_layouts(self):
         self.run_subtests(
-            {"shard_world_size": [2, 1]},
+            {"shard_world_size": [2, 1], "native_copy": [False, True]},
             self._test_all_gather_input_layouts,
         )
 
-    def _test_all_gather_input_layouts(self, shard_world_size: int):
+    def _test_all_gather_input_layouts(self, shard_world_size: int, native_copy: bool):
         mesh = self._init_hsdp_mesh(shard_world_size)
         expected_weight = torch.arange(64, device=device_type).float().view(8, 8) / 64
         tags = torch.arange(12, dtype=torch.bfloat16, device=device_type).view(2, 3, 2)
@@ -982,6 +985,10 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             shard_placement_fn=lambda _: Shard(1),
             reshard_after_forward=True,
         )
+        if native_copy:
+            # FSDPModule has no setter for the all-gather copy-out yet
+            group = fully_shard.state(model)._fsdp_param_group
+            group._all_gather_output_fn = all_gather_output_fn_with_native_copy
         self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
         inp = torch.arange(16, device=device_type).float().view(2, 8) / 16
         for _ in range(2):

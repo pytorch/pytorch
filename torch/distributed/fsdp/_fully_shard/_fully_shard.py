@@ -894,7 +894,8 @@ class FSDPModule:
         ``copy_in(reduce_scatter_input)`` then fills that flat buffer so that,
         viewed as ``(world_size, -1)``, row ``r`` holds each gradient's padded
         shard ``r`` in order, cast from any gradient dtype to the buffer's. Both
-        run on the current stream, also when ``world_size`` is 1. FSDP frees
+        run under ``torch.no_grad()`` on the current stream, also when
+        ``world_size`` is 1. FSDP frees
         ``copy_in`` and the gradients afterward, so keep neither. See
         :mod:`torch.distributed.fsdp.experimental` for a native implementation.
 

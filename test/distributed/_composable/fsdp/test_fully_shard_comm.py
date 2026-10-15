@@ -52,7 +52,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     FSDPCommContext,
     FSDPParamGroup,
 )
-from torch.distributed.fsdp.experimental import reduce_scatter_input_fn_with_native_copy
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_native_copy,
+    reduce_scatter_input_fn_with_native_copy,
+)
 from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
@@ -617,6 +620,27 @@ instantiate_device_type_tests(
 )
 
 
+class TestFullyShardNativeReduceScatterInputFn(TestCase):
+    def test_noncontiguous_grads_match_default(self, device):
+        # Noncontiguous gradients sharded on a nonzero dim take the default reorder
+        grads = [torch.randn(8, 4, device=device).t(), torch.randn(4, 6, device=device)]
+        outputs = []
+        for input_fn in (
+            _default_reduce_scatter_input_fn,
+            reduce_scatter_input_fn_with_native_copy,
+        ):
+            output = torch.empty(56, device=device)
+            unsharded_grads = [grad.clone() for grad in grads]
+            input_fn(unsharded_grads, shard_dims=[1, 1], world_size=2)(output)
+            outputs.append(output)
+        self.assertEqual(outputs[0], outputs[1])
+
+
+instantiate_device_type_tests(
+    TestFullyShardNativeReduceScatterInputFn, globals(), only_for=("cpu", "cuda", "xpu")
+)
+
+
 class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
@@ -825,6 +849,41 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         with self.assertRaisesRegex(NotImplementedError, "not supported for DTensor"):
             fsdp_param.to_sharded_post_forward()
 
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter_input_fn_setter(self):
+        # The native copy-in passes num_leading_dims and the default one does not
+        num_leading_dims: list[list[int] | None] = []
+
+        class RecordCopyIns(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func == torch.ops.fsdp.chunk_cat_mixed_dtype.default:
+                    num_leading_dims.append(kwargs.get("num_leading_dims"))
+                return func(*args, **kwargs)
+
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False, device=device_type),
+            nn.Linear(8, 8, bias=False, device=device_type),
+        )
+        for module in (model[0], model):
+            fully_shard(module, shard_placement_fn=lambda param: Shard(1))
+        inp = torch.randn((2, 8), device=device_type)
+
+        def record_copy_ins():
+            num_leading_dims.clear()
+            loss = model(inp).sum()
+            with RecordCopyIns():
+                loss.backward()
+            return num_leading_dims
+
+        # Backward reduce-scatters the root's weight before model[0]'s
+        model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
+        self.assertEqual(record_copy_ins(), [[1], [1]])
+        model.set_reduce_scatter_input_fn(None, recurse=False)
+        self.assertEqual(record_copy_ins(), [None, [1]])
+        model.set_reduce_scatter_input_fn(None)
+        self.assertEqual(record_copy_ins(), [None, None])
+
 
 class TestFullyShardCustomAllocation(FSDPTestMultiThread):
     @property
@@ -834,7 +893,12 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
     @parametrize("shard_dim", [0, 1])
     @parametrize(
         "collective,native_copy",
-        [("all_gather", False), ("reduce_scatter", False), ("reduce_scatter", True)],
+        [
+            ("all_gather", False),
+            ("all_gather", True),
+            ("reduce_scatter", False),
+            ("reduce_scatter", True),
+        ],
     )
     def test_strided_allocation(self, device, shard_dim, collective, native_copy):
         test_case = self
@@ -874,6 +938,10 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
         )
         if collective == "all_gather":
             model.set_custom_all_gather(StridedAllGather())
+            if native_copy:
+                # FSDPModule has no setter for the all-gather copy-out yet
+                group = fully_shard.state(model)._fsdp_param_group
+                group._all_gather_output_fn = all_gather_output_fn_with_native_copy
         else:
             model.set_custom_reduce_scatter(StridedReduceScatter())
             if native_copy:
@@ -901,7 +969,8 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
         optim = torch.optim.SGD(model.parameters(), lr=0.1)
         reference_optim = torch.optim.SGD(reference.parameters(), lr=0.1)
         for iteration in range(2):
-            inp = torch.full((2, 8), float(self.rank + iteration + 1), device=device)
+            # Distinct values make a reordered copy change the results
+            inp = torch.arange(16.0, device=device).view(2, 8) + self.rank + iteration
             expected = reference(inp)
             expected.sum().backward()
             native_counts = dict.fromkeys(native_ops.values(), 0)
