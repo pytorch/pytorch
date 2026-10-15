@@ -23112,7 +23112,11 @@ if RUN_GPU:
                 (values, indices), code = run_and_get_code(
                     torch.compile(lambda t: torch.topk(t, k, dim=dim)), x
                 )
-                self.assertNotIn("aten.topk.default(", " ".join(code))
+                # Only the last dim decomposes; other dims keep the ATen fallback.
+                if dim in (-1, x.dim() - 1):
+                    self.assertNotIn("aten.topk.default(", " ".join(code))
+                else:
+                    self.assertIn("aten.topk.default(", " ".join(code))
                 ref_values, ref_indices = reference(x, k, dim)
                 self.assertEqual(indices, ref_indices)
                 self.assertTrue(
