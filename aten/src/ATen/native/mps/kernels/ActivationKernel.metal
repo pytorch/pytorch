@@ -235,6 +235,41 @@ REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, float, float, float);
 REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, half, half, half);
 REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, bfloat, bfloat, bfloat);
 
+// `x <= threshold ? value : other`, so that NaN inputs propagate through
+// `other`. Forward passes (self, self), backward passes (self, grad_output)
+// with value 0.
+struct threshold_functor {
+  template <typename T>
+  inline T operator()(const T x, const T other, const ThresholdParams<T> p) {
+    return x <= p.threshold ? p.value : other;
+  }
+};
+
+#define REGISTER_THRESHOLD_OP(T)                  \
+  typedef ThresholdParams<T> ThresholdParams_##T; \
+  REGISTER_BINARY_ALPHA_OP(threshold, T, ThresholdParams_##T, T)
+
+REGISTER_THRESHOLD_OP(float);
+REGISTER_THRESHOLD_OP(half);
+REGISTER_THRESHOLD_OP(bfloat);
+REGISTER_THRESHOLD_OP(long);
+REGISTER_THRESHOLD_OP(int);
+REGISTER_THRESHOLD_OP(short);
+REGISTER_THRESHOLD_OP(char);
+REGISTER_THRESHOLD_OP(uchar);
+REGISTER_THRESHOLD_OP(bool);
+
+struct prelu_functor {
+  template <typename T>
+  inline T operator()(const T x, const T weight) {
+    return float(x) > 0 ? x : static_cast<T>(float(weight) * float(x));
+  }
+};
+
+REGISTER_BINARY_OP(prelu, float, float);
+REGISTER_BINARY_OP(prelu, half, half);
+REGISTER_BINARY_OP(prelu, bfloat, bfloat);
+
 struct silu_functor {
   template <typename T>
   inline T operator()(const T x) {
