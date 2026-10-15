@@ -460,15 +460,13 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
 
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
   const bool gesm10x = properties->major >= 10;
-  int double_threads = 1024;
-  if (gesm10x) {
-    double_threads = 768;
-  }
+  // (don't exceed register usage limits on newer arches)
+  const int max_threads = gesm10x ? 768 : 1024;
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
     "avg_pool2d_backward_out_cuda_frame",
     [&] {
-      const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, std::is_same_v<scalar_t, double> ? double_threads : 1024);
+      const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, max_threads);
       const uint32_t num_blocks = ceil_div<uint32_t>(count, num_threads);
 
       using accscalar_t = acc_type<scalar_t, true>;

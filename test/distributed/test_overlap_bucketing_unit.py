@@ -3515,10 +3515,13 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
         from torch._inductor.comm_analysis import (
             compute_min_saturation_bytes,
             detect_interconnect,
+            get_gpu_type,
             INTERCONNECT_PROFILES,
             NCCL_COLL,
         )
 
+        if get_gpu_type() is None:
+            self.skipTest("no interconnect model for this GPU")
         _MB = 1024 * 1024
         sat = compute_min_saturation_bytes
 
