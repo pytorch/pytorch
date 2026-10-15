@@ -39,6 +39,7 @@
 #include <dnnl_types.h>
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/detail/Eltwise.h>
 #include <ideep.hpp>
 #endif
 
@@ -498,7 +499,7 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
 Tensor mkldnn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
   ideep::tensor& x = at::native::itensor_from_mkldnn(tensor);
   ideep::tensor& z = at::native::itensor_from_mkldnn(out);
-  ideep::eltwise_forward::compute(
+  at::native::mkldnn::eltwise_forward(
       x,
       z,
       dnnl::algorithm::eltwise_linear,
