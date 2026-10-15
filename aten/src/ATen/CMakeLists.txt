@@ -680,7 +680,7 @@ if(USE_ROCM)
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
     set(_ck_gemm_hip_arches ${PYTORCH_ROCM_ARCH})
-    list(REMOVE_ITEM _ck_gemm_hip_arches "gfx1250")
+    list(REMOVE_ITEM _ck_gemm_hip_arches "gfx1250" "gfx1250-strict")
     set_source_files_properties(${native_hip_bgemm} ${native_hip_ck} PROPERTIES LANGUAGE HIP)
     add_library(ck_gemm STATIC ${native_hip_bgemm} ${native_hip_ck})
     set_target_properties(ck_gemm PROPERTIES
