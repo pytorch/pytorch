@@ -533,15 +533,15 @@ class FSDPParamGroup:
                         if not tensor.is_inference()
                         else contextlib.nullcontext()
                     ):
-                        # Like the multi-rank path, copy byte payloads bytewise
-                        # and smaller payloads of the same dtype into a prefix
-                        if all_gather_input.dtype == torch.uint8:
-                            tensor = tensor.view(torch.uint8)
+                        # Copy smaller payloads of the same dtype into a prefix, and
+                        # byte payloads of typed outputs into all of their bytes
                         if (
                             tensor.dtype == all_gather_input.dtype
                             and tensor.numel() != all_gather_input.numel()
                         ):
                             tensor = tensor[: all_gather_input.numel()]
+                        elif all_gather_input.dtype == torch.uint8:
+                            tensor = tensor.view(torch.uint8)
                         tensor.copy_(all_gather_input)
 
         else:
