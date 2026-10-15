@@ -503,7 +503,10 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
     @parametrize("device", devices)
     @parametrize("scatter_dim", [0, 1])
     @parametrize("reduce_op", ["sum", "avg"])
-    def test_reduce_scatter_tensor_backward(self, device, scatter_dim, reduce_op):
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_reduce_scatter_tensor_backward(
+        self, device, scatter_dim, reduce_op, dtype
+    ):
         """Test reduce_scatter_tensor backward does all_gather.
 
         Both tensor AND gradients are VARYING (different across ranks).
@@ -514,11 +517,11 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         # Create input with appropriate size
         if scatter_dim == 0:
             input_tensor = torch.randn(
-                4 * self.world_size, 3, requires_grad=True, device=device
+                4 * self.world_size, 3, dtype=dtype, requires_grad=True, device=device
             )
         else:
             input_tensor = torch.randn(
-                3, 4 * self.world_size, requires_grad=True, device=device
+                3, 4 * self.world_size, dtype=dtype, requires_grad=True, device=device
             )
 
         output = fcols.reduce_scatter_single(
