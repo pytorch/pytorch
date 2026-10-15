@@ -142,8 +142,7 @@ void logInvariantViolation(
 } // namespace profiler
 
 namespace autograd::profiler {
-TORCH_API c10::DeviceType deviceTypeFromActivity(
-    libkineto::ActivityType activity_type);
+c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type);
 
 TORCH_API void addMetadataJson(
     const std::string& key,
