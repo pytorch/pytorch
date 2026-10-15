@@ -129,19 +129,6 @@ TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
   });
 }
 
-#define REGISTER_MPS_UNARY_STUB(func, mps_func)                                                                        \
-  static void mps_##func##_kernel(TensorIteratorBase& iter) {                                                          \
-    mps::unary_op(                                                                                                     \
-        iter.input(0), iter.output(0), __func__, ^MPSGraphTensor*(MPSGraph * mpsGraph, MPSGraphTensor * inputTensor) { \
-          return [mpsGraph mps_func##WithTensor:inputTensor name:nil];                                                 \
-        });                                                                                                            \
-  }                                                                                                                    \
-  REGISTER_DISPATCH(func##_stub, mps_##func##_kernel)
-
-REGISTER_MPS_UNARY_STUB(acosh, acosh);
-REGISTER_MPS_UNARY_STUB(asinh, asinh);
-REGISTER_MPS_UNARY_STUB(atanh, atanh);
-
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
   TORCH_CHECK(isFloatingType(self.scalar_type()), "frac_out_mps is only implemented for floating types");
   mps::unary_op(self, output, "frac_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
