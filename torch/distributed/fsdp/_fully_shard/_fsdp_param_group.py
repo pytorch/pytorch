@@ -1221,8 +1221,9 @@ class FSDPParamGroup:
 
     @property
     def _all_gather_process_group(self) -> dist.ProcessGroup:
+        # Overrides of _to_sharded_post_forward may not record their mesh
         mesh_info = (
-            self._sharded_post_forward_mesh_info
+            (self._sharded_post_forward_mesh_info or self.post_forward_mesh_info)
             if self.is_sharded_post_forward
             else self.mesh_info
         )
