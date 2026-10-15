@@ -2600,8 +2600,13 @@ class TestFP8Matmul(TestCase):
     def test_honor_sm_carveout(self, device) -> None:
         torch.manual_seed(42)
 
-        x = torch.randn(8192, 2048, device=device, dtype=torch.float32)
-        y = torch.randn(8192, 2048, device=device, dtype=torch.float32).t()
+        M = 8192
+        N = 8192
+        if torch.version.hip:
+            M = 2048
+            N = 2048
+        x = torch.randn(M, 2048, device=device, dtype=torch.float32)
+        y = torch.randn(N, 2048, device=device, dtype=torch.float32).t()
         x_scales = tensor_to_scale(x, e4m3_type, dim=1).reciprocal()
         y_scales = tensor_to_scale(y, e4m3_type, dim=0).reciprocal()
         x_fp8 = to_fp8_saturated(x / x_scales, e4m3_type)
@@ -2660,7 +2665,9 @@ class TestFP8Matmul(TestCase):
                 no_carveout, carveout_0, carveout_66, no_carveout_again = grids
                 self.assertEqual(no_carveout, no_carveout_again, info)
                 # The target does not guarantee that fewer workgroups will be launched.
-                # No assert that the carveout reduces grid size.
+                # On gfx950, this test size should launch fewer workgroups when carveout is set.
+                if torch.cuda.get_device_properties(device).gcnArchName.startswith("gfx950"):
+                    self.assertLess(carveout_66, no_carveout, info)
             else:
                 with open(f.name) as file:
                     no_carveout, carveout_0, carveout_66, no_carveout_again = [

@@ -120,7 +120,7 @@ void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
     *lda = std::max<int64_t>(m, 1);
 }
 
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+#if (!defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000) || (defined(USE_ROCM) && ROCM_VERSION >= 100000)
 class CuBlasSMCarveoutGuard {
  public:
   explicit CuBlasSMCarveoutGuard(cublasHandle_t handle) : handle_(handle) {
@@ -135,14 +135,23 @@ class CuBlasSMCarveoutGuard {
           smCount - 1,
           " (num_sms-1), got ",
           carveout);
+#ifndef USE_ROCM
       TORCH_CUDABLAS_CHECK(
           cublasSetSmCountTarget(handle_, smCount - carveout));
+#else
+      TORCH_CUDABLAS_CHECK(
+          hipblasLtSetSmCountTarget(handle_, smCount - carveout));
+#endif
       enabled_ = true;
     }
   }
   ~CuBlasSMCarveoutGuard() {
     if (enabled_) {
+#ifndef USE_ROCM
       cublasSetSmCountTarget(handle_, 0);
+#else
+      hipblasLtSetSmCountTarget(handle_, 0);
+#endif
     }
   }
   CuBlasSMCarveoutGuard(const CuBlasSMCarveoutGuard&) = delete;
