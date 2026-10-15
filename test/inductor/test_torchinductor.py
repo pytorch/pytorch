@@ -6947,9 +6947,10 @@ for dtype in (torch.int32, torch.int64):
         "input_size,output_size,expected_kernels",
         [
             ((7, 9), (3, 4), 1),
-            ((1, 1), (1, 26), 0),
-            ((1, 1), (26, 1), 0),
-            ((1, 1), (16, 16), 0),
+            # Fallbacks emit no kernel for the dynamic codegen suite to inspect.
+            subtest(((1, 1), (1, 26), 0), decorators=[expectedFailureCodegenDynamic]),
+            subtest(((1, 1), (26, 1), 0), decorators=[expectedFailureCodegenDynamic]),
+            subtest(((1, 1), (16, 16), 0), decorators=[expectedFailureCodegenDynamic]),
         ],
     )
     def test_adaptive_avg_pool2d_backward(
@@ -6969,6 +6970,7 @@ for dtype in (torch.int32, torch.int64):
         )
         assertGeneratedKernelCountEqual(self, expected_kernels)
 
+    @expectedFailureCodegenDynamic  # Empty outputs emit no kernel.
     @parametrize("input_size", [(1, 2, 0, 4), (1, 2, 3, 0), (0, 2, 3, 4)])
     def test_adaptive_avg_pool2d_backward_empty_input(self, input_size):
         if self.device != "cuda":
