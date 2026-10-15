@@ -35,9 +35,13 @@ inline bool has_torch_function(PyObject* obj) {
 bool has_torch_function(c10::ArrayRef<PyObject*> args);
 
 struct DisableTorchDispatch {
+  // no_dispatch() disables interception by dispatch modes and subclasses; the
+  // Fake fallback is one, so exclude Fake like Python.
   DisableTorchDispatch()
       : guard_(c10::DispatchKeySet(
-            {c10::DispatchKey::Python, c10::DispatchKey::PreDispatch})),
+            {c10::DispatchKey::Python,
+             c10::DispatchKey::PreDispatch,
+             c10::DispatchKey::Fake})),
         guard_tls_snapshot_(c10::DispatchKey::PythonTLSSnapshot) {}
   c10::impl::ExcludeDispatchKeyGuard guard_;
   c10::impl::ExcludeDispatchKeyGuard guard_tls_snapshot_;

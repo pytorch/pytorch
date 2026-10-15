@@ -69,8 +69,9 @@ uncoordinated race-closing reads to apply.
 
 ## Security model
 
-- `pull_request_target` runs only workflow and action code from the trusted
-  base commit, and the PR head is fetched as data, never checked out or run.
+- `pull_request_target` runs only workflow and action code from the default
+  branch, whatever the PR's base, and the PR head is fetched as data, never
+  checked out or run.
 - The LLM has no GitHub token and no file, shell, web, MCP, plugin, or subagent
   capability; its Bedrock session can only invoke the model.
 - The write-capable job runs only in live mode and receives only the bounded
@@ -126,7 +127,7 @@ input step logs each skipped line; a skipped line's owners get no provenance.
 
 ## Operating notes
 
-- **Prerequisites.** The base branch needs the workflow and composite action,
+- **Prerequisites.** The default branch needs the workflow and composite action,
   root `CODEOWNERS`, the two files in `.github/auto-pr-triage/`, and the
   `open source`, `actionable`, `triaged`, `bot-triaged`, `bot-triage-error`,
   and `missing actionable issue` labels. The workflow does not create labels.
@@ -135,10 +136,17 @@ input step logs each skipped line; a skipped line's owners get no provenance.
   earlier shadow runs are not handled state.
 - **Rerunning.** Later PR activity never triggers another run. To reevaluate a
   PR, remove its outcome labels (`triaged` and `bot-triaged`, with `missing
-  actionable issue` if present, or `bot-triage-error`) and rerun all jobs;
-  rerunning only the apply job is rejected because its plan may be stale. A
-  rerun never marks a PR as missing an actionable issue: only the first attempt
-  can, and a rerun leaves an unadmitted PR for a human.
+  actionable issue` if present, or `bot-triage-error`), then remove and re-add
+  `open source`. Every `open source` label event starts a new run; while an
+  outcome label is present, the run is a no-op. Rerunning all jobs of an
+  earlier run also works, but rerunning only the apply job is rejected because
+  its plan may be stale. A rerun never marks a PR as missing an actionable
+  issue: only the first attempt of a run can, and a rerun leaves an unadmitted
+  PR for a human.
+- **Opting out.** A PR labeled `no automated triage` is left as is: a run that
+  starts while the label is present is a no-op and the PR stays in the manual
+  triage queue. Adding the label mid-run does not cancel that run. To triage
+  the PR later, remove the label and follow the rerunning steps above.
 - **Failures in shadow mode** are visible only as a failed workflow run and its
   artifacts. In live mode the error-reporting job adds `bot-triage-error` on a
   best-effort basis.

@@ -17,6 +17,7 @@ from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
 from typing import Any, cast, TYPE_CHECKING, TypeVar
+from typing_extensions import override
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
@@ -130,6 +131,7 @@ from .simd import (
     PartialAccumulate,
     SIMDKernel,
     SIMDScheduling,
+    TRITON_MAX_TENSOR_DIMS,
 )
 from .simd_kernel_features import tiling_scores_suggest_inner_reduction
 from .triton_utils import (
@@ -272,7 +274,7 @@ class TritonSymbols:
     Stores sympy.Symbol instances and constants associated with triton codegen.
     """
 
-    reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX])
+    reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX, SymT.R2_INDEX])
     block_types = OrderedSet([SymT.XBLOCK, SymT.YBLOCK, SymT.ZBLOCK, *reduction_types])
 
     block_offsets = {
@@ -1338,6 +1340,15 @@ class TritonOverrides(OpOverrides):
     _LOG_2_E = math.log2(math.e)
 
     @staticmethod
+    def _strict_cuda_pointwise() -> bool:
+        return (
+            config.strict_pointwise
+            and torch.version.hip is None
+            and V.graph.get_current_device_or_throw().type == "cuda"
+        )
+
+    @staticmethod
+    @override
     def to_dtype(
         x,
         dtype: torch.dtype,
@@ -1389,6 +1400,15 @@ class TritonOverrides(OpOverrides):
         ):
             x = f"triton_helpers.fp8e4m3fn_to_float32({x})"
             src_dtype = torch.float32
+
+        if (
+            dtype in (torch.uint8, torch.int8, torch.int16)
+            and (src_dtype is None or src_dtype.is_floating_point)
+            and TritonOverrides._strict_cuda_pointwise()
+        ):
+            # CUDA narrows through int32; c10 routes uint8 through int64 instead.
+            intermediate = "tl.int64" if dtype == torch.uint8 else "tl.int32"
+            return f"{x}.to({intermediate}).to({triton_type(dtype)})"
 
         if dtype == torch.bool:
             return f"({x} != 0)"
@@ -1593,6 +1613,10 @@ class TritonOverrides(OpOverrides):
         elif bug == "accuracy":
             return f"{x} + 1"
         elif bug is None:
+            if TritonOverrides._strict_cuda_pointwise():
+                # Eager preserves the input's negative zero and NaN payload.
+                zero = ops.constant(0, torch.int32)
+                return ops.where(ops.lt(x, zero), zero, x)
             return ops.maximum(ops.constant(0, torch.int32), x)
         else:
             raise AssertionError(
@@ -2272,6 +2296,9 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sigmoid(x):
+        if TritonOverrides._strict_cuda_pointwise():
+            # CUDA eager uses exp and correctly rounded division at opmath precision.
+            return f"libdevice.rcp_rn(1.0 + libdevice.exp(-({x})))"
         return f"tl.sigmoid({x})"
 
     @staticmethod
@@ -2396,12 +2423,18 @@ class TritonOverrides(OpOverrides):
         b_zero = ops.eq(b, zero)
         b = ops.where(b_zero, one, b)
         b_neg = ops.lt(b, zero)
+        # 0 - a overflows when a is the minimum value. When both are negative,
+        # divide a - b instead, which can't overflow, and add 1:
+        # floor(a / b) == floor((a - b) / b) + 1.
+        shift = ops.logical_and(b_neg, ops.lt(a, zero))
+        a = ops.where(shift, ops.sub(a, b), a)
         a = ops.where(b_neg, ops.sub(zero, a), a)
         b = ops.where(b_neg, ops.sub(zero, b), b)
         a_neg = ops.lt(a, zero)
         a = ops.where(a_neg, ops.bitwise_not(a), a)
         quot = ops.truncdiv(a, b)
         quot = ops.where(a_neg, ops.bitwise_not(quot), quot)
+        quot = ops.where(shift, ops.add(quot, one), quot)
         return ops.where(b_zero, zero, quot)
 
     @staticmethod
@@ -3470,6 +3503,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
         self.is_combo_kernel: bool = is_combo_kernel
+        self._from_combo_codegen = False
+        self._is_first_combo_launch = False
+        self._in_multi_kernel = False
+        self._nvgemm_pdl_enabled = False
         self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
@@ -3662,6 +3699,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             SymT.ZBLOCK,
             SymT.R0_INDEX,
             SymT.R1_INDEX,
+            SymT.R2_INDEX,
         ):
             if symbol_is_type(symbol, symt):
                 return prefix_str[symt]
@@ -4403,6 +4441,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     stride_sorter_cls=stride_sorter_cls,
                 )
                 if isinstance(options, TensorDescriptorOptions):
+                    if len(options.params.block_shape) > TRITON_MAX_TENSOR_DIMS:
+                        return None
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )
@@ -4931,8 +4971,60 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
 
     @staticmethod
+    def _has_pdl_dependency(
+        previous_node: BaseSchedulerNode, current_node: BaseSchedulerNode
+    ) -> bool:
+        mutation_renames = getattr(current_node, "mutation_renames", {})
+        previous_writes = OrderedSet(
+            mutation_renames.get(dep.name, dep.name)
+            for dep in previous_node.read_writes.writes
+            if not isinstance(dep, dependencies.WeakDep)
+        )
+        return any(
+            not isinstance(dep, dependencies.WeakDep) and dep.name in previous_writes
+            for dep in current_node.read_writes.reads
+        )
+
+    @staticmethod
     def _enable_pdl_codegen():
-        if not torch._inductor.config.triton.enable_pdl:
+        enable_pdl = torch._inductor.config.triton.enable_pdl
+        selective_pdl = not enable_pdl and torch._inductor.config.nvgemm_pdl != "0"
+        if selective_pdl:
+            kernel = V.kernel
+            if not isinstance(kernel, TritonKernel):
+                return False
+            enable_pdl = kernel._nvgemm_pdl_enabled
+            current_node = getattr(kernel, "current_node", None)
+            is_single_launch_kernel = (
+                kernel.__class__ is TritonKernel
+                and not getattr(kernel, "is_combo_kernel", False)
+                and (not kernel._from_combo_codegen or kernel._is_first_combo_launch)
+                and not getattr(kernel, "_in_multi_kernel", False)
+                and not getattr(kernel, "cooperative_reduction", False)
+                and not getattr(kernel, "mix_order_reduction", False)
+            )
+            if current_node is not None and is_single_launch_kernel:
+                scheduler = V.graph.scheduler
+                previous_node = (
+                    scheduler.previous_node if scheduler is not None else None
+                )
+                if previous_node is not None:
+                    from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+                        NVUniversalGemmScheduling,
+                    )
+
+                    current_node_enables_pdl = (
+                        NVUniversalGemmScheduling.is_pdl_enabled_template(previous_node)
+                        and TritonKernel._has_pdl_dependency(
+                            previous_node, current_node
+                        )
+                    )
+                    enable_pdl = enable_pdl or current_node_enables_pdl
+                    kernel._nvgemm_pdl_enabled = enable_pdl
+            kernel_args = getattr(kernel, "args", None)
+            if getattr(kernel_args, "workspace_args", ()):
+                return False
+        if not enable_pdl:
             return False
         if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
             return False
@@ -5010,6 +5102,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 previous_launch = len(new_lines)
             new_lines.append(l)
         code._lines = new_lines
+        # gdc_wait only covers the direct predecessor, so a kernel that exits
+        # without waiting lets its dependents start before older kernels finish.
+        if not has_wait and self._enable_pdl_codegen():
+            code.writeline(self.GDC_WAIT)
 
     def _load_index_split_basis(
         self, index: sympy.Expr, tree: IterationRangesRoot
@@ -5713,7 +5809,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 else value
             )
 
-        do_upcast = pytree.tree_any(low_precision_fp_var, value)
+        # The value's tracked dtype can differ from src_dtype (e.g. it is already
+        # fp32 under codegen_upcast_to_fp32), so promote on src_dtype as well to
+        # keep the accumulator and the final cast consistent with the source.
+        do_upcast = low_precision_fp(src_dtype) or pytree.tree_any(
+            low_precision_fp_var, value
+        )
         original_dtype = dtype
         original_src_dtype = src_dtype
         if do_upcast:
@@ -5742,7 +5843,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         strict_op = "*" if reduction_type == "prod" else "+"
 
         # When we do native matmtul codegen,
-        # we don't want to keep the R0_BLOCK/R1_BLOCK in the accumulator.
+        # we don't want to keep reduction blocks in the accumulator.
         # so instead of naively calling dense_size_str(), we filter out
         # reduction block from accumulator and only keep (Y,X).
         # In bmm (Z,Y,R)x(Z,R,X) case, we also remove z dimension from accumulator
@@ -6362,11 +6463,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         shape=accumulator.shape,
                     )
 
+                # Cast the int8 result back to tl.int1, otherwise result_var is
+                # tracked as torch.bool but holds int8 (e.g. `~` yields -2, not 0)
                 final_reduction_define(
                     self.post_loop_combine,
                     cast(CSEVariable, result_var),
                     accumulator,
-                    None,
+                    torch.bool if src_dtype == torch.bool else None,
                 )
 
         if self.cooperative_reduction:
@@ -6484,11 +6587,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if not all(isinstance(x, TritonCSEVariable) for x in result_tuple):
             raise AssertionError("all result_tuple entries must be TritonCSEVariable")
 
-        # If BF16/F16 upcasting was done, ensure the output is downcast to the
-        # expected dtype.
+        # If BF16/F16 upcasting was done, ensure value outputs are downcast to
+        # the expected dtype. Index-only arg reductions must remain integers.
         if do_upcast:
             for i, result in enumerate(result_tuple):
-                if reduction_type in arg_with_value_reduction_types and i > 0:
+                if reduction_type in arg_index_reduction_types or (
+                    reduction_type in arg_with_value_reduction_types and i > 0
+                ):
                     continue
                 target_dtype = (
                     original_src_dtype
@@ -6496,10 +6601,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     in (arg_value_reduction_types + arg_with_value_reduction_types)
                     else original_dtype
                 )
-                if result.dtype != target_dtype:
+                compute_dtype = upcast_compute_type(target_dtype)
+                if result.dtype != compute_dtype:
                     self.post_loop_combine.writeline(
-                        f"{result} = {result}.to({triton_compute_type(target_dtype)})"
+                        f"{result} = {result}.to({triton_type(compute_dtype)})"
                     )
+                    result.dtype = compute_dtype
 
         return result_var
 
@@ -7667,6 +7774,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "dynamic_disable_pipelining": config.triton.dynamic_disable_pipelining,
         }
 
+        if config.incremental_autotune:
+            inductor_meta["incremental_autotune_max_dispatches"] = (
+                config.incremental_autotune_max_dispatches
+            )
+
         if config.write_are_deterministic_algorithms_enabled:
             inductor_meta["are_deterministic_algorithms_enabled"] = (
                 torch.are_deterministic_algorithms_enabled()
@@ -8795,6 +8907,7 @@ class TritonScheduling(SIMDScheduling):
         [
             BackendFeature.FOREACH,
             BackendFeature.BUCKETIZE,
+            BackendFeature.INDIRECT_INDEXING,
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
             BackendFeature.SCAN,
@@ -8879,24 +8992,21 @@ class TritonScheduling(SIMDScheduling):
         ):
             return  # External handler handled it
 
-        compile_wrapper = IndentedBuffer()
+        current_device = V.graph.get_current_device_or_throw()
 
-        # The wrapper literal below is the dedented, stripped source; the eager
-        # submission must be the same bytes so CompiledTritonKernels (keyed on the
-        # exact string) hits at wrapper time instead of compiling the kernel twice
-        # and overwriting the same cache file.
+        # The default wrapper's async_compile.triton literal is this dedented, stripped
+        # source; the eager submission must be the same bytes so CompiledTritonKernels
+        # (keyed on the exact string) hits at wrapper time instead of compiling the
+        # kernel twice and overwriting the same cache file.
         src_code = "\n" + textwrap.dedent(src_code).strip() + "\n"
-        if async_compile.use_process_pool():
+        if (
+            not wrapper.defines_triton_kernels_as_code()
+            and async_compile.use_process_pool()
+        ):
             # The process pool is warm, we can shell out to workers right away. This
             # allows us to save the result in async_compile.CompiledTritonKernels,
             # so that the second time we call async_compile.triton, we do no work.
             async_compile.triton(subs_name, src_code)
-
-        compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
-
-        compile_wrapper.splice(src_code, strip=True)
-        current_device = V.graph.get_current_device_or_throw()
-        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
 
         # compile-on-one-rank: the artifact may be built on one machine and run on
         # another, so the wrapper must not embed an absolute cache path (it carries the
@@ -8910,7 +9020,13 @@ class TritonScheduling(SIMDScheduling):
         metadata_comment = f"# kernel path: {kernel_path}"
         origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         metadata_comment += "\n" + origins + "\n" + detailed_origins
-        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), metadata_comment)
+        wrapper.emit_triton_kernel_definition(
+            kernel_name,
+            subs_name,
+            src_code,
+            current_device.type,
+            metadata=metadata_comment,
+        )
 
     def define_kernel(self, src_code, node_schedule, kernel):
         wrapper = V.graph.wrapper_code
@@ -8996,6 +9112,7 @@ class TritonScheduling(SIMDScheduling):
         with (
             preserve_rng_state(),
             device_interface.device(V.graph.get_current_device_or_throw()),  # type: ignore[attr-defined]
+            triton_heuristics.disable_caching_autotuner_plugins(),
         ):
             ms = None
 
@@ -9154,6 +9271,8 @@ class TritonScheduling(SIMDScheduling):
                     )
 
         if len(kernels) > 1:
+            for kernel2 in kernels:
+                kernel2._in_multi_kernel = True
             for kernel2 in kernels[1:]:
                 # Keep buffers needed by the non-persistent reduction so both kernels have the same arguments
                 kernel2.must_keep_buffers = kernel.must_keep_buffers
@@ -9161,6 +9280,7 @@ class TritonScheduling(SIMDScheduling):
             kernels.sort(key=lambda k: k.persistent_reduction)
         return kernels
 
+    @triton_heuristics.disable_caching_autotuner_plugins()
     def benchmark_combo_kernel(self, node_list, node_benchmark_results):
         """
         Benchmark combo kernel partitions and return total execution time.

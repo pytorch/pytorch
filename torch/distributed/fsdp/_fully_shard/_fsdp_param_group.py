@@ -25,6 +25,7 @@ from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
+    _wait_all_gather,
     AllGather,
     AllGatherResult,
     DefaultAllGather,
@@ -225,7 +226,7 @@ class FSDPParamGroup:
                 post_forward_mesh_info,
                 device,
                 shard_placement_fn,
-                mp_policy,
+                mp_policy._resolve_for_param(param),
                 offload_policy,
             )
             for param, module_info in zip(params, param_module_infos)
@@ -234,7 +235,6 @@ class FSDPParamGroup:
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self.device_handle = _get_device_handle(device.type)
-        self.mp_policy = mp_policy
         self.offload_policy = offload_policy
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
@@ -261,7 +261,7 @@ class FSDPParamGroup:
         self._all_gather_output_fn: Callable = _default_all_gather_output_fn
         self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
         self._reduce_scatter_param_indices: list[int] = []
-        self._fsdp_params_with_wider_grad_dtype: list[FSDPParam] = []
+        self._fsdp_params_deferring_grad_upcast: list[FSDPParam] = []
         self._param_group_index: int = 0
         self._num_param_groups: int = 1
         # Group's indices in the shared post-forward order
@@ -330,7 +330,7 @@ class FSDPParamGroup:
     # Initialization #
     def _init_mp_dtypes(self) -> None:
         for fsdp_param in self.fsdp_params:
-            fsdp_param.init_dtype_attrs(self.mp_policy)
+            fsdp_param.init_dtype_attrs(fsdp_param.mp_policy)
         trainable_params: list[FSDPParam] = [
             p for p in self.fsdp_params if p.sharded_param.requires_grad
         ]
@@ -355,18 +355,8 @@ class FSDPParamGroup:
         self._reduce_dtype = (
             next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
         )
-        # A larger floating-point dtype holds a smaller one exactly (e.g. fp32
-        # and bf16). Compare sizes since torch.promote_types rejects float8.
-        # Gradients reduced outside DP keep autograd's upcast so that reduction
-        # runs in the wider dtype too.
-        self._fsdp_params_with_wider_grad_dtype = [
-            p
-            for p in self.fsdp_params
-            if (grad_dtype := p.unsharded_grad_dtype) is not None
-            and (compute_dtype := p.param_dtype or p.orig_dtype).is_floating_point
-            and grad_dtype.is_floating_point
-            and grad_dtype.itemsize > compute_dtype.itemsize
-            and not p.may_reduce_grad_outside_dp
+        self._fsdp_params_deferring_grad_upcast = [
+            p for p in self.fsdp_params if p.defers_grad_upcast
         ]
 
     def _init_reduce_scatter_param_order(self) -> None:
@@ -546,6 +536,10 @@ class FSDPParamGroup:
                     if not tensor.is_inference()
                     else contextlib.nullcontext()
                 ):
+                    # Like the world_size > 1 path, copy a byte payload bytewise
+                    # into a cached output of another dtype
+                    if all_gather_input.dtype == torch.uint8:
+                        tensor = tensor.view(torch.uint8)
                     tensor.copy_(all_gather_input)
 
         else:
@@ -598,11 +592,7 @@ class FSDPParamGroup:
         # accumulated grad-reduction state, and restores sharded params.
         current_stream = self.device_handle.current_stream()
         if self._all_gather_result is not None:
-            if (event := self._all_gather_result.all_gather_event) is not None:
-                current_stream.wait_event(event)
-            work = self._all_gather_result.all_gather_work
-            if isinstance(work, dist.distributed_c10d.Work):
-                work.wait()
+            _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
         if self._post_reduce_event is not None:
             current_stream.wait_event(self._post_reduce_event)
@@ -623,7 +613,7 @@ class FSDPParamGroup:
             leaf = getattr(fsdp_param, "_unsharded_param", None)
             if leaf is not None:
                 leaf.grad = None
-        self._set_unsharded_grad_dtypes(defer_upcast=False)
+        self._restore_unsharded_grad_dtypes()
         self._partial_reduce_output = None
         self._post_backward_pending = False
         self._partial_reduce_output_layout.clear()
@@ -645,6 +635,10 @@ class FSDPParamGroup:
                 self._training_state = TrainingState.FORWARD
                 self.unshard(self.unshard_async_op)
                 self.wait_for_unshard()
+                # No-grad forwards have no backward, and recomputation keeps the
+                # choice of the forward it recomputes
+                if torch.is_grad_enabled() and not is_bw():
+                    self._set_unsharded_grad_dtypes()
             for fsdp_param in self.fsdp_params:
                 fsdp_param._restore_spmd_types(fsdp_param.unsharded_param)
             if entering_forward_pass:
@@ -684,7 +678,6 @@ class FSDPParamGroup:
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
-            self._set_unsharded_grad_dtypes(defer_upcast=True)
             if default_prefetch:
                 self._backward_prefetch()
 
@@ -708,7 +701,7 @@ class FSDPParamGroup:
             with record_function(self._with_fqn("FSDP::post_backward_reshard")):
                 if not self.reduce_grads:
                     self._post_backward_pending = True
-                    self._set_unsharded_grad_dtypes(defer_upcast=False)
+                    self._restore_unsharded_grad_dtypes()
                     if self.reshard_after_backward:
                         self.reshard()
                     return
@@ -719,7 +712,7 @@ class FSDPParamGroup:
                 fsdp_params_with_grad, unsharded_grads = (
                     self._take_unsharded_grads_to_reduce()
                 )
-                self._set_unsharded_grad_dtypes(defer_upcast=False)
+                self._restore_unsharded_grad_dtypes()
                 if self.reshard_after_backward:
                     self.reshard()
             # Recycle prior modules' reduce-scatter input buffers, keeping at most
@@ -894,11 +887,7 @@ class FSDPParamGroup:
         if self._all_gather_result is not None:
             # If there was a mistargeted unshard without a corresponding wait,
             # then we wait here and clear the unshard
-            if (event := self._all_gather_result.all_gather_event) is not None:
-                torch.accelerator.current_stream().wait_event(event)
-            work = self._all_gather_result.all_gather_work
-            if isinstance(work, dist.distributed_c10d.Work):
-                work.wait()
+            _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
         self._post_forward_indices.clear()
 
@@ -928,22 +917,31 @@ class FSDPParamGroup:
                     "Set reduce_dtype to the dtype its gradients already have."
                 )
 
-    def _set_unsharded_grad_dtypes(self, defer_upcast: bool) -> None:
+    def _set_unsharded_grad_dtypes(self) -> None:
         # Leave gradients in the dtype autograd produces, saving a cast per
         # parameter: AccumulateGrad adds them in place to existing wider
         # gradients, and the reduce-scatter copy-in upcasts the rest. Only a
         # gradient that starts accumulating across backwards needs the cast.
-        for fsdp_param in self._fsdp_params_with_wider_grad_dtype:
+        # Chosen in pre-forward and kept until post-backward so that a
+        # compiled backward can use the grad_dtype its forward was traced with.
+        for fsdp_param in self._fsdp_params_deferring_grad_upcast:
+            param = getattr(fsdp_param, "_unsharded_param", None)
+            if param is None or not param.requires_grad:
+                continue
+            defer = self.reduce_grads or param.grad is not None
+            param.grad_dtype = None if defer else fsdp_param.unsharded_grad_dtype
+
+    def _restore_unsharded_grad_dtypes(self) -> None:
+        # Gradients produced outside a forward and its backward, e.g. by a
+        # pipeline schedule's weight passes, get autograd's upcast. Widen a
+        # gradient created while deferred but not reduced, so later ones
+        # accumulate in the unsharded gradient dtype.
+        for fsdp_param in self._fsdp_params_deferring_grad_upcast:
             param = getattr(fsdp_param, "_unsharded_param", None)
             if param is None or not param.requires_grad:
                 continue
             grad, dtype = param.grad, fsdp_param.unsharded_grad_dtype
-            if defer_upcast:
-                if grad is not None or self.reduce_grads:
-                    param.grad_dtype = None
-                continue
             if grad is not None and grad.dtype != dtype:
-                # Created while deferred but not reduced
                 param.grad = grad.to(dtype)
             param.grad_dtype = dtype
 
@@ -1113,6 +1111,12 @@ class FSDPParamGroup:
     # Utilities #
     def _to_sharded(self):
         if not self.is_sharded:
+            if self._all_gather_result is not None:
+                # A backward prefetch of a group that backward did not use was
+                # gathered over the post-forward mesh, which a later forward
+                # cannot copy out, so wait for it and discard it
+                _wait_all_gather(self._all_gather_result)
+                self._all_gather_result = None
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded()
             self._sharded_state = ShardedState.SHARDED
