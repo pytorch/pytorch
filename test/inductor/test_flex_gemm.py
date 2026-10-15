@@ -1576,9 +1576,12 @@ class FlexGemmTestCase(TestCase):
 
     def assertNvfp4ScaleCode(self, code, max_value=6.0):
         """Check direct E4M3 scale rounding in generated code."""
+        # A power-of-two divisor lowers to an exact reciprocal multiply.
+        power_of_two = math.frexp(max_value)[0] == 0.5
+        op, value = ("*", 1 / max_value) if power_of_two else ("/", max_value)
         precise_division = (
-            f"(value / cute.full_like(value, {max_value!r}))",
-            f"/ cute.full_like(local_reduce0, {max_value!r})",
+            f"(value {op} cute.full_like(value, {value!r}))",
+            f"{op} cute.full_like(local_reduce0, {value!r})",
         )
         self.assertTrue(any(expression in code for expression in precise_division))
         self.assertTrue("torch.float8_e4m3fn" in code or "cutlass.Float8E4M3FN" in code)
