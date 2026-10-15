@@ -623,8 +623,12 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
             fully_shard(model, reshard_after_forward=2)
             with torch.no_grad():
                 model(inp)
-            model.set_reshard_after_forward(reshard_after_forward)
             group = fully_shard.state(model)._fsdp_param_group
+            # Overrides of _to_sharded_post_forward may record no mesh
+            group._sharded_post_forward_mesh_info = None
+            self.assertEqual(group._all_gather_process_group.size(), 2)
+            group._sharded_post_forward_mesh_info = group.post_forward_mesh_info
+            model.set_reshard_after_forward(reshard_after_forward)
             self.assertEqual(group._all_gather_process_group.size(), 2)
             self.assertEqual(model(inp), ref_model(inp))
 
