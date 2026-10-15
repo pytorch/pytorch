@@ -773,8 +773,7 @@ class _DynamoCapture(Capture[_P, _R]):
         python_code = ""
         blob: dict[str, Any] = {}
 
-        # Called by freeze_runtime_cache after it waits on pending compiles, so
-        # what they record is in the snapshot.
+        # Called by freeze_runtime_cache under its freeze lock.
         def snapshot() -> bytes | None:
             nonlocal python_code, blob
             python_code, cache = self._map(
