@@ -38,11 +38,13 @@ class GenericTraceActivity : public ITraceActivity {
   GenericTraceActivity()
       : activityType(ActivityType::ENUM_COUNT), traceSpan_(nullptr) {}
 
+  // NOLINTBEGIN(modernize-pass-by-value)
   GenericTraceActivity(
       const TraceSpan& trace,
       ActivityType type,
       const std::string& name)
       : activityType(type), activityName(name), traceSpan_(&trace) {}
+  // NOLINTEND(modernize-pass-by-value)
 
   int64_t deviceId() const override {
     return device;
@@ -169,7 +171,7 @@ class GenericTraceActivity : public ITraceActivity {
     }
   }
 
-  virtual ~GenericTraceActivity() override {}
+  ~GenericTraceActivity() override = default;
 
   int64_t startTime{0};
   int64_t endTime{0};
