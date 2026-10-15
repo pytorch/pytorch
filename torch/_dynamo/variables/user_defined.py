@@ -5207,7 +5207,7 @@ class DefaultDictVariable(ConstDictVariable):
                 variables.BaseBuiltinVariable,
                 variables.functions.BaseUserFunctionVariable,
                 variables.functions.PolyfilledFunctionVariable,
-                variables.functions.WrappedSkipFunctionVariable,
+                variables.functions._WrappedSkipFunctionMethodDescriptorCommonVariable,
                 variables.UserDefinedClassVariable,
             ),
         )
