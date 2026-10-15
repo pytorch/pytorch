@@ -102,7 +102,7 @@ class OpSpec:
     DTensorSpec; when the return value is a tuple of Optional[DTensor],
     output_specs is a tuple of Optional[DTensorSpec].
 
-    note: we MUST produce an DTensorSpec for every output that is a Tensor.  None
+    note: we MUST produce a DTensorSpec for every output that is a Tensor.  None
     entries only occur for non-Tensor outputs (e.g., operators that return Optional[Tensor],
     or non-Tensor outputs.)
 
@@ -706,7 +706,7 @@ class OpInfo:
     # mesh here to check if current rank should participate in computation or not.
     compute_mesh: DeviceMesh
 
-    # compete runtime operator infos
+    # complete runtime operator infos
     # NOTE: schema can be None due to C++ fast path optimization. When the C++
     # dispatch layer (dispatchDTensorOp in python_variable.cpp) finds a cached
     # sharding decision, it skips creating the full OpSchema to reduce CPU overhead.
