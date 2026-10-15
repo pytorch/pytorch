@@ -403,6 +403,23 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     return _fn
 
 
+def nonrecursive_disable_skip(
+    caller: types.FrameType | None,
+) -> ConvertFrameReturn | None:
+    """How to skip a frame whose caller is a disable(recursive=False) wrapper.
+
+    Only that frame is skipped; its callees are still offered to the callback.
+    """
+    if caller is not None and (
+        caller.f_code is decorators._nonrecursive_disable_wrapper_code
+    ):
+        return ConvertFrameReturn(
+            apply_to_code=False,
+            skip_reason="tracing is non-recursively disabled for this frame",
+        )
+    return None
+
+
 @TorchPatcher.suppress_torch_distributed_warnings
 def has_tensor_in_frame(frame: DynamoFrameType) -> bool:
     """Check if the frame has torch.* related bits"""
@@ -732,14 +749,8 @@ class ConvertFrameAssert:
             and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
         ):
             prev_frame = prev_frame.f_back  # type: ignore[assignment]
-        if (
-            prev_frame
-            and prev_frame.f_code is decorators._nonrecursive_disable_wrapper_code
-        ):
-            return ConvertFrameReturn(
-                apply_to_code=False,
-                skip_reason="tracing is non-recursively disabled for this frame",
-            )
+        if (disabled := nonrecursive_disable_skip(prev_frame)) is not None:
+            return disabled
 
         global initial_global_state
         # Save the previous initial_global_state to handle nested compilations
@@ -1725,10 +1736,13 @@ def _compile(
     # in the case of normal and exception code paths
     convert_frame_box: ConvertFrameBox | None = None,
 ) -> ConvertFrameReturn:
+    from torch.compiler._no_compile import check_compilation_allowed
     from torch.fx.experimental.validator import (
         BisectValidationException,
         ValidationException,
     )
+
+    check_compilation_allowed("Dynamo graph compilation")
 
     if isinstance(innermost_backend(compiler_fn), torch._TorchCompileInductorWrapper):
         # Overlap the one-time source hashing for Inductor's cache keys with
@@ -2022,7 +2036,9 @@ def _compile(
 
     metrics_context = get_metrics_context()
     package_code_context = (
-        package.code_context(code) if package is not None else contextlib.nullcontext()
+        package.code_context(code, globals)
+        if package is not None
+        else contextlib.nullcontext()
     )
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
@@ -2435,6 +2451,15 @@ class ConvertFrame:
                 # eval_frame.py. But re-raising seems to work for now because exceptions from tracing
                 # a nested call that results in a top-level frame compile will be handled by the caller
                 # as an observed exception - we don't expect that exception to be suppressed.
+                raise
+
+            from torch._precompile import PrecompileError
+
+            # no_compilation() violations must surface even under
+            # suppress_errors, including one Inductor raised inside a backend.
+            if isinstance(e, PrecompileError) or isinstance(
+                getattr(e, "inner_exception", None), PrecompileError
+            ):
                 raise
 
             # These two exception types are "soft" failure, in the sense that
