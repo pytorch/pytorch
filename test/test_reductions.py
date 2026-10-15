@@ -485,6 +485,10 @@ class TestReductions(TestCase):
         self.assertEqual(tensor.var(dim=0), 0.03125)
         self.assertEqual(tensor.var(), 0.03125)
 
+    def test_var_single_sample_nonfinite(self, device):
+        x = torch.tensor([[1.0], [nan], [inf], [-inf]], device=device)
+        self.assertEqual(x.var(1, correction=0), torch.tensor([0.0, nan, nan, nan], device=device))
+
     def test_sum_dim_reduction_uint8_overflow(self, device):
         example = [[-1, 2, 1], [5, 3, 6]]
         x = torch.tensor(example, dtype=torch.uint8, device=device)
@@ -2719,6 +2723,21 @@ class TestReductions(TestCase):
         self.assertEqual(a[:, ::2, :].median(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
+    # CUDA median with dim returns the first occurrence of the median value
+    @onlyCUDA
+    @dtypes(torch.int8, torch.int32, torch.half, torch.float)
+    def test_median_dim_index_is_first_occurrence(self, device, dtype):
+        for size in [(7, 1100), (5, 19999)]:
+            t = torch.randint(0, 4, size, device=device).to(dtype)
+            if dtype.is_floating_point:
+                t[0, 5::3] = float('nan')
+                t[1] = float('nan')
+            # dim=0 reduces strided slices
+            for op, dim in product([torch.median, torch.nanmedian], [0, 1]):
+                values, indices = op(t, dim)
+                is_median = (t == values.unsqueeze(dim)) | (t.isnan() & values.isnan().unsqueeze(dim))
+                self.assertEqual(indices, is_median.int().argmax(dim))
+
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/pull/138657 discovers a latent bug")
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
@@ -3709,8 +3728,6 @@ class TestReductions(TestCase):
     @largeMPSBufferTest(lambda self, device, dtype: 2**31 * dtype.itemsize)
     @largeTensorTest(lambda self, device, dtype: 2**31 * dtype.itemsize)
     @dtypes(torch.half, torch.chalf, torch.bfloat16)
-    # skip chalf and half when XPU, see issues https://github.com/intel/torch-xpu-ops/issues/1973
-    @dtypesIfXPU(torch.bfloat16)
     def test_reductions_large_half_tensors(self, device, dtype):
         t = torch.ones(2**31, device=device, dtype=dtype)
         t[2**30:] = -1

@@ -603,7 +603,7 @@ void ChromeTraceLogger::handleOverheadInfo(
   sanitizeStrForJSON(name);
   escapeQuotesForJSON(name);
 
-  // TOOD: reserve pid = -1 for overhead but we need to rethink how to scale
+  // TODO: reserve pid = -1 for overhead but we need to rethink how to scale
   // this for other metadata
   time = transToRelativeTime(time);
   writeMetadataEvent(
@@ -886,6 +886,7 @@ void ChromeTraceLogger::handleActivity(const libkineto::ITraceActivity& op) {
 
   int external_id = 0;
   if (op.linkedActivity()) {
+    // NOLINTNEXTLINE(*-narrowing-conversions)
     external_id = op.linkedActivity()->correlationId();
   } else {
     // Some runtime events and kernels may not have a linked activity,
@@ -902,6 +903,7 @@ void ChromeTraceLogger::handleActivity(const libkineto::ITraceActivity& op) {
         libkineto::ActivityType::PRIVATEUSE1_RUNTIME,
         libkineto::ActivityType::PRIVATEUSE1_DRIVER};
     if (!excludedTypes.contains(op.type())) {
+      // NOLINTNEXTLINE(*-narrowing-conversions)
       external_id = op.correlationId();
     }
   }
