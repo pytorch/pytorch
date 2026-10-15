@@ -540,7 +540,8 @@ def _own_triton_cache(settings: contextlib.ExitStack) -> str | None:
     kernels and autotuning decisions the scope used.
 
     Autotuners fix cache_results when they are decorated, so existing ones are
-    switched on for the scope too.
+    switched on for the scope too. One decorated inside the scope keeps it on
+    afterwards: Triton does not record whether its decorator asked for it.
     """
     if _triton_runtime_cache() is None:
         return None
@@ -601,14 +602,16 @@ def capture_scope() -> Iterator[None]:
     finally:
         with _capture_lock:
             owner.captures -= 1
-            last = owner.captures == 0
-            if last:
+            if owner.captures == 0:
                 owner.triton_kernels.clear()
                 owner.cpp_kernels.clear()
                 owner.inductor_triton_keys.clear()
-                _capture = None
-        if last:
-            owner.triton_settings.close()
+                # Under the lock, or a capture opening meanwhile would save
+                # this scope's directory as the settings to restore.
+                try:
+                    owner.triton_settings.close()
+                finally:
+                    _capture = None
 
 
 def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
