@@ -52,6 +52,41 @@ struct vectypes<long> {
   using type2 = long2;
 };
 
+template <typename T>
+struct OpMathType {
+  using type = T;
+};
+
+template <>
+struct OpMathType<half> {
+  using type = float;
+};
+
+template <>
+struct OpMathType<short> {
+  using type = int;
+};
+
+template <>
+struct OpMathType<char> {
+  using type = int;
+};
+
+template <>
+struct OpMathType<uchar> {
+  using type = int;
+};
+
+template <>
+struct OpMathType<bfloat> {
+  using type = float;
+};
+
+template <>
+struct OpMathType<half2> {
+  using type = float2;
+};
+
 // Type promotion structure for higher precision accumulation
 template <typename T>
 struct AccumulationType {
@@ -131,6 +166,9 @@ using vec2type_t = typename detail::vectypes<T>::type2;
 
 template <typename T>
 using vec4type_t = typename detail::vectypes<T>::type4;
+
+template <typename T>
+using opmath_t = typename detail::OpMathType<T>::type;
 
 template <typename T>
 using accum_t = typename detail::AccumulationType<T>::type;
@@ -545,8 +583,7 @@ inline float2 conj(float2 a) {
 // the square terms. If `a` or `b` are very large or very small floating point
 // numbers, then their squares will resolve to inf or 0.
 //
-// Inputs are replaced by their absolute values, so assume `a >= b >= 0`.
-// We can first change the formula to:
+// Assume `a >= b >= 0`. We can first change the formula to:
 // `h = a sqrt(1 + (b / a)^2)`
 // `h = a sqrt(1 + r)`
 // where `r = (b / a)^2`. Since `a >= b >= 0`, then `1 >= r >= 0`.
@@ -568,8 +605,6 @@ inline float hypot(float a_, float b_) {
   if (::metal::isinf(a_) || ::metal::isinf(b_)) {
     return INFINITY;
   }
-  a_ = ::metal::abs(a_);
-  b_ = ::metal::abs(b_);
   auto a = max(a_, b_);
   auto b = min(a_, b_);
 
