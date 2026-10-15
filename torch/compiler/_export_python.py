@@ -10,11 +10,15 @@ it directly instead of recompiling.
 
 import copy
 import functools
+import inspect
 import logging
 import os
 from collections.abc import Callable, Sequence
 from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
+
+import torch
+import torch.utils._pytree as pytree
 
 
 log = logging.getLogger(__name__)
@@ -45,6 +49,18 @@ class ExportedPythonArtifact:
         example_inputs: Sequence[object] | None,
     ) -> None:
         self._fn = fn
+        self._call_signature = inspect.signature(fn)
+        kw_only = [
+            p.name
+            for p in self._call_signature.parameters.values()
+            if p.kind == inspect.Parameter.KEYWORD_ONLY
+        ]
+        if kw_only:
+            raise TypeError(
+                "torch.compiler.export_python does not support functions that "
+                f"declare keyword-only parameters ({kw_only}); the precompile "
+                "calling convention is positional."
+            )
         self._path = path
         self._backend = backend
         self._tracer = tracer
@@ -70,6 +86,9 @@ class ExportedPythonArtifact:
                     "non-leaf tensor or a weight_norm module). Pass explicit "
                     "example_inputs=... to precompile against dedicated inputs."
                 ) from e
+        else:
+            example = self._bind_positional(example, {}, "example_inputs")
+            self._check_supported_args(example, "example_inputs")
         # Only the python_code is written: the emitted source is self-contained and
         # always exec'd, so export_python never builds precompile's acceleration cache.
         from torch._precompile import PrecompiledModule
@@ -115,12 +134,83 @@ class ExportedPythonArtifact:
         self._decompositions = None
         return entry
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        if kwargs:
+    def _bind_positional(
+        self,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        source: str = "the call arguments",
+    ) -> tuple[Any, ...]:
+        # The artifact's forward is positional (the precompile calling convention),
+        # so map any keyword call args onto fn's positional parameters -- this lets
+        # callers invoke the decorated fn naturally (e.g. rope(q=..., k=...)).
+        # Anything that cannot be laid out positionally is rejected below.
+        sig = self._call_signature
+        try:
+            bound = sig.bind(*args, **kwargs)
+        except TypeError as e:
             raise TypeError(
-                "torch.compiler.export_python: the precompile calling convention is "
-                f"positional; pass {sorted(kwargs)} positionally."
+                f"torch.compiler.export_python: could not bind {source} to "
+                f"{getattr(self._fn, '__name__', 'fn')}'s signature: {e}"
+            ) from e
+        bound.apply_defaults()
+        # After apply_defaults every positional-or-keyword parameter is placed and
+        # __init__ refused keyword-only ones, so bound.kwargs holds only **kwargs.
+        if bound.kwargs:
+            raise TypeError(
+                "torch.compiler.export_python does not support **kwargs parameters "
+                f"(got {sorted(bound.kwargs)}); the precompile calling convention is "
+                "positional."
             )
+        return bound.args
+
+    def _check_supported_args(
+        self, args: tuple[Any, ...], source: str = "the call arguments"
+    ) -> None:
+        # args is the bound positional layout: the named positional parameters in
+        # order, then any *args values.
+        P = inspect.Parameter
+        params = self._call_signature.parameters.values()
+        positional = (P.POSITIONAL_ONLY, P.POSITIONAL_OR_KEYWORD)
+        names = [p.name for p in params if p.kind in positional]
+        var = next((p.name for p in params if p.kind == P.VAR_POSITIONAL), None)
+        for pos, arg in enumerate(args):
+            if isinstance(arg, torch.nn.Module):
+                continue
+            unsupported = [
+                leaf
+                for leaf in pytree.tree_leaves(arg)
+                if not isinstance(leaf, torch.Tensor)
+            ]
+            if not unsupported:
+                continue
+            name = names[pos] if pos < len(names) else f"{var}[{pos - len(names)}]"
+            where = f"parameter {name!r} of {source}"
+            # These two land often enough that the generic "close the constant over"
+            # advice is actively wrong for them: a module must stay an argument, and an
+            # optional parameter has no constant to close over in the first place.
+            if any(isinstance(leaf, torch.nn.Module) for leaf in unsupported):
+                raise TypeError(
+                    "torch.compiler.export_python: nn.Module arguments must be passed "
+                    f"directly, not nested inside a container ({where}). "
+                    "Pass the module itself as its own positional argument."
+                )
+            if all(leaf is None for leaf in unsupported):
+                raise TypeError(
+                    "torch.compiler.export_python does not support None arguments "
+                    f"({where}); make_fx specializes the None branch without "
+                    "a runtime guard. Split the function, or pass a tensor."
+                )
+            raise TypeError(
+                "torch.compiler.export_python supports only Tensor pytrees and "
+                "nn.Module positional arguments; Python scalar/config values are "
+                "specialized by make_fx without runtime guards. Close constants "
+                f"over in the function instead of passing {unsupported[0]!r} as "
+                f"{where}."
+            )
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        args = self._bind_positional(args, kwargs)
+        self._check_supported_args(args)
         loaded = self._loaded
         if loaded is None:
             loaded = self._loaded = self._materialize(args)
