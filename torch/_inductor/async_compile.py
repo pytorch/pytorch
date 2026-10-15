@@ -304,7 +304,8 @@ class AsyncCompile:
     def drain_pending(
         cls, timeout: float | None = 600, *, shutdown: bool = True
     ) -> None:
-        """Wait for all submitted compile work, then shut down the compile workers.
+        """Wait for all submitted compile work, then, unless ``shutdown=False``,
+        shut down the compile workers.
 
         Call this only after submissions have stopped. It first waits on every
         cached Triton kernel future (running its result callback), the worker
