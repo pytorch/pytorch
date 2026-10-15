@@ -502,7 +502,10 @@ class RingBuffer {
 };
 
 static char SHAREABLE_HANDLE_VERSION = 1;
-enum ShareableHandleType : char { SHAREABLE_XPU_MALLOC = 'c' };
+enum ShareableHandleType : char {
+  SHAREABLE_XPU_MALLOC = 'c',
+  SHAREABLE_XPU_EXPANDABLE_SEGMENT = 'e'
+};
 
 struct BlockState {
   c10::DeviceIndex device = 0;
@@ -2169,27 +2172,32 @@ class DeviceCachingAllocator {
     std::ostringstream ss;
     ss.put(SHAREABLE_HANDLE_VERSION);
     ptrdiff_t offset = 0;
-    TORCH_CHECK(
-        !block->expandable_segment,
-        "expandable segments are not supported for IPC sharing.");
-    ss.put(SHAREABLE_XPU_MALLOC);
-    Block* base_block = block;
-    while (base_block->prev) {
-      base_block = base_block->prev;
+    if (!block->expandable_segment) {
+      ss.put(SHAREABLE_XPU_MALLOC);
+      Block* base_block = block;
+      while (base_block->prev) {
+        base_block = base_block->prev;
+      }
+      offset = static_cast<const char*>(block->ptr) -
+          static_cast<const char*>(base_block->ptr);
+      sycl::ext::oneapi::experimental::ipc_memory::handle handle =
+          sycl::ext::oneapi::experimental::ipc_memory::get(
+              base_block->ptr, c10::xpu::get_device_context());
+      sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data =
+          handle.data();
+      TORCH_INTERNAL_ASSERT(
+          handle_data.size() <= std::numeric_limits<char>::max(),
+          "IPC handle size exceeds maximum allowed size.");
+      ss.put(static_cast<char>(handle_data.size()));
+      ss.write(
+          reinterpret_cast<const char*>(handle_data.data()),
+          handle_data.size());
+    } else {
+      ss.put(SHAREABLE_XPU_EXPANDABLE_SEGMENT);
+      auto full_range = block->expandable_segment_->share(
+          SegmentRange(block->ptr, block->size), ss);
+      offset = static_cast<const char*>(block->ptr) - full_range.ptr;
     }
-    offset = static_cast<const char*>(block->ptr) -
-        static_cast<const char*>(base_block->ptr);
-    sycl::ext::oneapi::experimental::ipc_memory::handle handle =
-        sycl::ext::oneapi::experimental::ipc_memory::get(
-            base_block->ptr, c10::xpu::get_device_context());
-    sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data =
-        handle.data();
-    TORCH_INTERNAL_ASSERT(
-        handle_data.size() <= std::numeric_limits<char>::max(),
-        "IPC handle size exceeds maximum allowed size.");
-    ss.put(static_cast<char>(handle_data.size()));
-    ss.write(
-        reinterpret_cast<const char*>(handle_data.data()), handle_data.size());
     return ShareableHandle{.offset = offset, .handle = ss.str()};
   }
 
