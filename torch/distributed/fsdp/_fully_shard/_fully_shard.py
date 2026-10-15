@@ -895,9 +895,9 @@ class FSDPModule:
         viewed as ``(world_size, -1)``, row ``r`` holds each gradient's padded
         shard ``r`` in order, cast from any gradient dtype to the buffer's. Both
         run under ``torch.no_grad()`` on the current stream, also when
-        ``world_size`` is 1. FSDP frees
-        ``copy_in`` and the gradients afterward, so keep neither. See
-        :mod:`torch.distributed.fsdp.experimental` for a native implementation.
+        ``world_size`` is 1. FSDP frees ``copy_in`` and the gradients afterward,
+        so keep neither. See :mod:`torch.distributed.fsdp.experimental` for a
+        native implementation.
 
         Args:
             fn (Optional[Callable]): Function returning the copy-in function, or
