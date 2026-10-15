@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 """Distributed Collective Communication (c10d)."""
 
-import builtins
 import collections.abc
 import contextlib
 import ctypes
@@ -318,17 +317,6 @@ def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
-
-# Object collectives can serialize via torch.save/torch.load(weights_only=True)
-# by passing weights_only=True. Exceptions are commonly transmitted for error
-# propagation, so allowlist them.
-torch.serialization.add_safe_globals(
-    [
-        t
-        for t in vars(builtins).values()
-        if isinstance(t, type) and issubclass(t, BaseException)
-    ]
-)
 
 GroupName = NewType("GroupName", str)
 
