@@ -100,6 +100,16 @@ class BaseSetVariable(VariableTracker):
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+        # set_repr: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
+        name = self.python_type_name()
+        if not self.items:
+            return VariableTracker.build(tx, f"{name}()")
+        items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
+        if self.python_type() is set:
+            return VariableTracker.build(tx, f"{{{items}}}")
+        return VariableTracker.build(tx, f"{name}({{{items}}})")
+
     def __init__(
         self,
         items: Iterable[VariableTracker | HashableTracker],
@@ -581,13 +591,6 @@ class SetVariable(BaseSetVariable):
 
     def as_python_constant(self) -> Any:
         return {k.vt.as_python_constant() for k in self.set_items}
-
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
-        # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
-        if not self.items:
-            return VariableTracker.build(tx, f"{self.python_type_name()}()")
-        items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
-        return VariableTracker.build(tx, "{" + items + "}")
 
     def repr_recursive_sentinel(self) -> str:
         return f"{self.python_type_name()}(...)"
@@ -1161,13 +1164,6 @@ class FrozensetVariable(BaseSetVariable):
 
     def as_python_constant(self) -> Any:
         return frozenset({k.vt.as_python_constant() for k in self.set_items})
-
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
-        # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
-        if not self.items:
-            return VariableTracker.build(tx, f"{self.python_type_name()}()")
-        items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
-        return VariableTracker.build(tx, f"{self.python_type_name()}({{{items}}})")
 
     def repr_recursive_sentinel(self) -> str:
         return f"{self.python_type_name()}(...)"
