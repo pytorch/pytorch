@@ -475,7 +475,7 @@ coverage_ignore_functions = [
     "recv",
     "reduce",
     "reduce_scatter",
-    # deprecated aliases of all_gather_single / reduce_scatter_single /
+    # back-compat aliases of all_gather_single / reduce_scatter_single /
     # gather_single
     "all_gather_into_tensor",
     "gather_into_tensor",

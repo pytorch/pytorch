@@ -127,6 +127,9 @@ if is_available():
         Args:
             rank (int): Which rank to break on.  Default: ``0``
             skip (int): Skip the first ``skip`` calls to this breakpoint. Default: ``0``.
+            timeout_s (int, optional): Timeout in seconds applied to every process
+                group so waiting ranks don't time out during the debug session.
+                ``None`` leaves timeouts unchanged. Default: ``3600``.
         """
         if skip > 0:
             key = hash(str(traceback.format_exc()))
