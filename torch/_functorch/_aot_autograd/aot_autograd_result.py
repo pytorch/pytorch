@@ -720,6 +720,7 @@ def deserialize_bundled_cache_entry(
 ) -> Callable[..., Any]:
     from copy import deepcopy
 
+    from torch._dynamo.utils import dynamo_timed
     from torch._inductor.cudagraph_utils import BoxedDeviceIndex
     from torch._inductor.utils import BoxedBool
 
@@ -756,19 +757,26 @@ def deserialize_bundled_cache_entry(
     # Loading happens wherever the caller sets up, typically outside the
     # autocast and saved tensors hooks contexts the graph runs under, so the
     # runtime wrappers are built at the first call instead.
+    # The build re-enters the loader's compile context, so its timing and trace
+    # artifacts are attributed to the frame that loaded the graph.
+    compile_context = torch._guards.CompileContext.try_get()
     compiled_fn: SerializableCompiledFunction | None = None
     lock = threading.Lock()
 
     def build() -> SerializableCompiledFunction:
-        nonlocal compiled_fn, context
+        nonlocal compiled_fn, context, compile_context
         with lock:
             if compiled_fn is None:
-                with torch._guards.tracing(context):
+                with (
+                    torch._guards.compile_context(compile_context),
+                    torch._guards.tracing(context),
+                    dynamo_timed("AOTAutogradCache.apply_runtime_wrappers"),
+                ):
                     # Ensure the deserialized cache entry is still serializable
                     compiled_fn = SerializableCompiledFunction(
                         apply_runtime_wrappers(), lambda: serializable_copy
                     )
-                context = None
+                context = compile_context = None
             return compiled_fn
 
     # TODO: this ignores flat_params, which can exist

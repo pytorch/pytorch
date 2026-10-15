@@ -37,6 +37,7 @@ from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.aot_autograd_result import GenericAOTAutogradResult
+from torch._functorch._aot_autograd.runtime_wrappers import AOTDispatchAutograd
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -758,6 +759,37 @@ print(eval(f"bbmod.{name}.{path}") is code)
         with torch.compiler.set_stance("fail_on_recompile"):
             grads = self._hooked_grads(compiled_fn, under_hooks=True)
         self.assertEqual(grads, expected)
+
+    def test_a_loaded_graph_disables_the_autocast_it_was_compiled_under(self):
+        # disable_amp is read from the ambient autocast state when the runtime
+        # wrappers are built, and the graph is loaded outside autocast.
+        disable_amp = []
+        post_compile = AOTDispatchAutograd.post_compile
+
+        def recording_post_compile(spec):
+            disable_amp.append(spec.disable_amp)
+            return post_compile(spec)
+
+        def run(fn):
+            x = torch.linspace(0.1, 1.0, 4, requires_grad=True)
+            w = torch.linspace(1.0, 2.0, 4, requires_grad=True)
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                fn(x, w).backward()
+
+        ctx = DiskDynamoStore()
+        package = CompilePackage(hooked_forward)
+        run(torch._dynamo.optimize("inductor", package=package)(hooked_forward))
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        with patch.object(AOTDispatchAutograd, "post_compile", recording_post_compile):
+            package, backends = ctx.load_package(hooked_forward, self.path())
+            compiled_fn = torch._dynamo.optimize(package=package)(hooked_forward)
+            package.install(backends)
+            self.assertEqual(disable_amp, [])
+            with torch.compiler.set_stance("fail_on_recompile"):
+                run(compiled_fn)
+        self.assertEqual(disable_amp, [True, True])
 
     def test_installed_shape_guard_on_a_global_reads_the_live_module_dict(self):
         # install() roots the guards at sys.modules[...].__dict__, and a package
