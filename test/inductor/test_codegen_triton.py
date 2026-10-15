@@ -45,12 +45,15 @@ from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     get_importable_constexpr_types,
+    IndentedBuffer,
     is_triton_fp8_dtype_supported,
     run_and_get_code,
     run_and_get_kernels,
 )
 from torch._inductor.virtualized import ops, V
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -162,6 +165,25 @@ class TestCodegenTriton(InductorTestCase):
     def tearDown(self):
         self._stack.close()
         super().tearDown()
+
+    def test_dynamic_numel_alignment_does_not_specialize_shape(self):
+        batch = sympy.Symbol("batch", positive=True, integer=True)
+        width = sympy.Symbol("width", positive=True, integer=True)
+        kernel = SimpleNamespace(max_block=lambda prefix: 1024)
+        shape_env = V.graph.sizevars.shape_env
+        guards_before = list(shape_env.guards)
+        for numel, expected in (
+            (1536 * batch, "xnumel = tl.multiple_of(xnumel, 512)\n"),
+            (1536 * batch + 1, ""),
+            (batch * width, ""),
+            (sympy.Integer(1536), ""),
+        ):
+            with self.subTest(numel=numel):
+                code = IndentedBuffer()
+                tree = SimpleNamespace(numel=numel, prefix="x")
+                TritonKernel._codegen_numel_alignment(kernel, tree, code)
+                self.assertEqual(code.getvalue(), expected)
+                self.assertEqual(shape_env.guards, guards_before)
 
     def test_strict_signed_zero_reduction_function(self):
         for reduction_type in ("min", "max"):
@@ -2014,6 +2036,38 @@ def helper(x):
             repr(hints),
             "(AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ACCUMULATORS)",
         )
+
+
+class TestDynamicNumelAlignment(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @parametrize("width", (1536, 1537))
+    def test_dynamic_partial_block(self, device, width):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, width, device=device, dtype=torch.float16)
+        torch._dynamo.mark_dynamic(x, 0)
+        with inductor_config.patch(force_disable_caches=True):
+            compiled = torch.compile(fn, fullgraph=True)
+            actual, source = run_and_get_code(compiled, x)
+            self.assertEqual(actual, fn(x), atol=0, rtol=0)
+            code = "\n".join(source)
+            alignment = "xnumel = tl.multiple_of(xnumel, 512)"
+            if width == 1536:
+                self.assertIn(alignment, code)
+            else:
+                self.assertNotIn(alignment, code)
+            # Neither call has an integral number of 1024-element blocks.
+            # Reuse the compiled callable with a different dynamic extent.
+            other = torch.randn(5, width, device=device, dtype=torch.float16)
+            self.assertEqual(compiled(other), fn(other), atol=0, rtol=0)
+
+
+instantiate_device_type_tests(
+    TestDynamicNumelAlignment, globals(), except_for=("cpu", "mps")
+)
 
 
 if __name__ == "__main__":
