@@ -92,10 +92,29 @@ struct GpuActivity : public RocprofActivity<rocprofAsyncRow> {
         break;
       case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
       default:
-        type_ = ActivityType::CONCURRENT_KERNEL;
+        // Kernels dispatched to implement a HIP memset/memcpy API call are
+        // memsets/memcpies, not kernels.
+        switch (activity_.internalApi) {
+          case RocLogger::RuntimeInternalMemset:
+            type_ = ActivityType::GPU_MEMSET;
+            break;
+          case RocLogger::RuntimeInternalMemcpy:
+            type_ = ActivityType::GPU_MEMCPY;
+            break;
+          default:
+            type_ = ActivityType::CONCURRENT_KERNEL;
+            break;
+        }
         break;
     }
   }
+  // A dispatch retyped as a memcpy reports the copy direction strings.
+  uint32_t memcpyKindDomain() const {
+    return activity_.internalApi == RocLogger::RuntimeInternalMemcpy
+        ? static_cast<uint32_t>(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
+        : activity_.domain;
+  }
+
   int64_t correlationId() const override {
     return activity_.id;
   }
