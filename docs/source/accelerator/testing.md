@@ -53,9 +53,9 @@ Dynamic Test Configuration provides a set of configuration options that allow OO
 | `op_overrides` | Per-operator decorator overrides | Specific ops need special handling |
 | `bypass_device_restrictions` | Skip `@onlyCUDA` and similar guards | Temporary workaround |
 
-OOT backends configure all options except `bypass_device_restrictions` through `PrivateUse1TestBase.set_test_configs()` (inherited from [`DeviceTypeTestBase`](https://github.com/pytorch/pytorch/blob/main/torch/testing/_internal/common_device_type.py)). 
+OOT backends configure all options except `bypass_device_restrictions` through `PrivateUse1TestBase.set_test_configs()` (inherited from [`DeviceTypeTestBase`](https://github.com/pytorch/pytorch/blob/main/torch/testing/_internal/common_device_type.py)).
 
-Each call to `set_test_configs()` fully replaces the existing configuration: omitted keyword arguments are reset to `None`. Therefore, provide all desired configurations in a single call. 
+Each call to `set_test_configs()` fully replaces the existing configuration: omitted keyword arguments are reset to `None`. Therefore, provide all desired configurations in a single call.
 
 `bypass_device_restrictions` is configured separately as a class attribute on the test subclass.
 
