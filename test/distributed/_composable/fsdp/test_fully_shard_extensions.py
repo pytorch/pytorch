@@ -780,18 +780,18 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         ref_model = copy.deepcopy(model)
         fully_shard(model, mesh=mesh, reshard_after_forward=True)
         self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+        # An input that requires grad saves the weight for backward, which all-gathers
+        # it again in place, so this also checks every output's version counter
         inp = torch.randn((2, 8), device=device_type, requires_grad=True)
         for num_tags in (4, 2):
             output = model(inp)
             self.assertEqual(output, ref_model(inp))
             output.sum().backward()
-        # A smaller byte payload fills a byte prefix
-        tags_dtype = torch.uint8
-        model(inp)
-        # A payload whose dtype and size change, or a dropped payload, raises
-        tags_dtype = torch.float16
-        with self.assertRaisesRegex(RuntimeError, "must match the size"):
-            model(inp)
+        # A smaller byte payload of a typed output, a payload whose dtype and size
+        # change, or a dropped payload raises
+        for tags_dtype in (torch.uint8, torch.float16):
+            with self.assertRaisesRegex(RuntimeError, "must match the size"):
+                model(inp)
         num_tags, tags_dtype = 0, torch.bfloat16
         with self.assertRaisesRegex(ValueError, "zip"):
             model(inp)
