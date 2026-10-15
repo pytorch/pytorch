@@ -1019,8 +1019,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         ):
             rank = mesh.get_local_rank()
             tags = torch.arange(num_tags, device=local_tensor.device) + 10.0 * rank
-            tags = tags.to(tags_dtype)
-            payloads = (tags, local_tensor) if num_tags else (tags,)
+            tags = tags.bfloat16()
+            payloads = (tags.view(tags_dtype), local_tensor) if num_tags else (tags,)
             return payloads, (outer_size, num_tags)
 
         @torch.no_grad()
@@ -1050,6 +1050,10 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             output = model(inp)
             self.assertEqual(output, ref_model(inp))
             output.sum().backward()
+        # A smaller byte payload of a typed output raises
+        tags_dtype = torch.uint8
+        with self.assertRaisesRegex(ValueError, "must match the size"):
+            model(inp)
         # A payload whose dtype changes, or a dropped payload, raises
         tags_dtype = torch.float16
         with self.assertRaisesRegex(ValueError, "must keep the dtype"):
