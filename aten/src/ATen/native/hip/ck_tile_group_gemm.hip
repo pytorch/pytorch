@@ -1,6 +1,6 @@
 #include <ATen/native/hip/ck_tile_group_gemm.h>
 #include <ATen/native/hip/ck_tile_group_gemm/four_wave_tail_comp_v3.h>
-#include <ATen/native/hip/ck_tile_group_gemm/streaming_grouped_gemm_kernel.h>
+#include <ATen/native/hip/ck_tile_group_gemm/no_split_k_epilogue.h>
 #include <ATen/hip/HIPContext.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/GroupedMMUtils.h>
@@ -22,7 +22,7 @@ namespace at::hip::detail {
 		using ck_tile::index_t;
 		using ck_tile::core::arch::amdgcn_target_id;
 		using ck_tile_group_gemm::FourWaveTailCompV3;
-		using ck_tile_group_gemm::StreamingGroupedGemmKernel;
+		using ck_tile_group_gemm::NoSplitKEpilogue;
 		using RowMajor = ck_tile::tensor_layout::gemm::RowMajor;
 		using ColMajor = ck_tile::tensor_layout::gemm::ColumnMajor;
 
@@ -34,8 +34,7 @@ namespace at::hip::detail {
 				index_t M_Warp_, index_t N_Warp_, // waves per workgroup along M and N
 				bool PadM_ = false, bool PadN_ = false, bool PadK_ = false, // allow sizes that are not tile multiples
 				bool DoubleSmemBuffer_ = false,
-				index_t VectorSizeAB_ = 0, index_t VectorSizeC_ = 0,
-				bool Streaming_ = false> // StreamingGroupedGemmKernel instead of GroupedGemmKernel
+				index_t VectorSizeAB_ = 0, index_t VectorSizeC_ = 0>
 		struct CkTileGroupGemmConfig {
 			static constexpr index_t M_Tile = M_Tile_;
 			static constexpr index_t N_Tile = N_Tile_;
@@ -60,26 +59,13 @@ namespace at::hip::detail {
 			static constexpr index_t VectorSizeC = FixedVectorSizeC ? VectorSizeC_ : 1;
 			// Only a 16-bit C vector width of 1 needs NoSplitKEpilogue; every other config uses CShuffleEpilogue as is.
 			static constexpr bool UseNoSplitKEpilogue = FixedVectorSizeC && VectorSizeC == 1;
-			static constexpr bool Streaming = Streaming_;
 
 			// GemmSpatiallyLocalTilePartitioner: GroupNum matches the 8 XCDs of gfx942/gfx950.
 			static constexpr index_t TilePartitionerGroupNum = 8;
 			static constexpr index_t TilePartitionerM01 = 4;
 		};
 
-		// GroupedGemmKernel instantiates a split-K (k_batch > 1) atomic_add epilogue next to the plain store one.
-		// We always run k_batch == 1, so compile the atomic_add path out: 16-bit atomics reject a C vector width of 1.
-		template <typename Epilogue>
-		struct NoSplitKEpilogue : Epilogue {
-			template <typename OutWindow, typename... Args>
-			CK_TILE_DEVICE auto operator()(OutWindow& out_window, Args&&... args) {
-				if constexpr (OutWindow::BottomTensorView::DstInMemOp == ck_tile::memory_operation_enum::set) {
-					return Epilogue::operator()(out_window, std::forward<Args>(args)...);
-				}
-			}
-		};
-
-		template<typename DataType, typename ALayout, typename BLayout, typename Config>
+		template<typename InputType, typename OutputType, typename ALayout, typename BLayout, typename Config>
 		struct CkTileGroupGemm {
 			using CLayout = ck_tile::tensor_layout::gemm::RowMajor;
 			using AccDataType = float;
@@ -101,9 +87,9 @@ namespace at::hip::detail {
 			>;
 
 			using PipelineProblem = ck_tile::UniversalGemmPipelineProblem<
-				DataType, DataType, AccDataType, GemmShape, GemmTraits,
+				InputType, InputType, AccDataType, GemmShape, GemmTraits,
 				ck_tile::GemmPipelineScheduler::Intrawave,
-				PassThrough, PassThrough, DataType, DataType,
+				PassThrough, PassThrough, InputType, InputType,
 				Config::FixedVectorSizeAB, Config::VectorSizeAB, Config::VectorSizeAB
 			>;
 
@@ -116,15 +102,15 @@ namespace at::hip::detail {
 				FourWaveTailCompV3<PipelineProblem>, ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>>;
 
 			using DirectEpilogue = ck_tile::DefaultGemm2DEpilogue<ck_tile::DefaultGemm2DEpilogueProblem<
-				DataType, DataType, ck_tile::tuple<>, AccDataType,
-				DataType, ck_tile::tuple<>, CLayout, PassThrough,
+				InputType, InputType, ck_tile::tuple<>, AccDataType,
+				OutputType, ck_tile::tuple<>, CLayout, PassThrough,
 				TilePartitioner::MPerBlock, TilePartitioner::NPerBlock, Config::PadM, Config::PadN,
 				Config::M_Warp_Tile, Config::N_Warp_Tile, Config::K_Warp_Tile,
 				PipelineProblem::TransposeC>>;
 
 			using CShuffleEpilogue = ck_tile::CShuffleEpilogue<ck_tile::CShuffleEpilogueProblem<
-				DataType, DataType, ck_tile::tuple<>, AccDataType,
-				DataType, ck_tile::tuple<>, CLayout, PassThrough,
+				InputType, InputType, ck_tile::tuple<>, AccDataType,
+				OutputType, ck_tile::tuple<>, CLayout, PassThrough,
 				TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
 				Config::M_Warp, Config::N_Warp,
 				Config::M_Warp_Tile, Config::N_Warp_Tile, Config::K_Warp_Tile,
@@ -134,9 +120,7 @@ namespace at::hip::detail {
 			using GemmEpilogue = std::conditional_t<EightWaves, DirectEpilogue,
 				std::conditional_t<Config::UseNoSplitKEpilogue, NoSplitKEpilogue<CShuffleEpilogue>, CShuffleEpilogue>>;
 
-			using Kernel = std::conditional_t<Config::Streaming,
-				StreamingGroupedGemmKernel<TilePartitioner, PipelineProblem, GemmEpilogue, !EightWaves>,
-				ck_tile::GroupedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>>;
+			using Kernel = ck_tile::GroupedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 		};
 
 		// helper function to get the number of elements in one 16 byte load vector op
@@ -169,13 +153,14 @@ namespace at::hip::detail {
 				GemmTypeConfigs<typename T::GradWeight> && requires { typename T::Fallback; };
 
 		// Tile configs for one target. Deliberately undefined so an arch without configs fails to compile.
-		template <amdgcn_target_id Arch, typename AType, typename BType, typename OutputType>
-        struct CkTileGroupGemmConfigs;
+		// InputType is the type of both A and B: CK only has MFMAs for matching A and B types. The output type only
+		// changes the epilogue's store, which every config handles, so it does not select configs.
+		template <amdgcn_target_id Arch, typename InputType>
+		struct CkTileGroupGemmConfigs;
 
-		// configs for a=bf16, b=bf16, c=bf16 for gfx950
-		// this is re-used for any combo of a=bf16/fp16, b=bf16/fp16, c=bf16/fp16 on gfx950
+		// configs for bf16 inputs on gfx950
 		template <>
-		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t, ck_tile::bf16_t, ck_tile::bf16_t> {
+		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t> {
 			// Pads M, N and K with 1-element C vectors, so it accepts every shape.
 			using AnyShape = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 1>;
 
@@ -183,8 +168,8 @@ namespace at::hip::detail {
 			struct Forward {
 				static constexpr int64_t kFewTokensBelow = 0;
 				struct Main {
-					// 256x192 holds the 192 accumulators per lane this compiler keeps in VGPRs; streaming removes per-tile drains
-					using N256 = CkTileGroupGemmConfig<256, 192, 64, 32, 32, 16, 2, 2, false, true, false, false, 0, 0, true>;
+					// 256x192 holds the 192 accumulators per lane this compiler keeps in VGPRs
+					using N256 = CkTileGroupGemmConfig<256, 192, 64, 32, 32, 16, 2, 2, false, true, false>;
 					using N128 = N256;
 					using N64 = N256;
 					using Aligned = N256;
@@ -198,7 +183,7 @@ namespace at::hip::detail {
 				static constexpr int64_t kFewTokensBelow = 0;
 				struct Main {
 					// eight waves split 256x256 into 128 accumulators per lane
-					using N256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, false, false, 0, 0, true>;
+					using N256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, false>;
 					using N128 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, false, false>;
 					using N64 = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, true, false>;
 					using Aligned = N64;
@@ -226,11 +211,11 @@ namespace at::hip::detail {
 
 		// fp16 has the same element size and MFMA shapes as bf16
 		template <>
-		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::half_t, ck_tile::half_t, ck_tile::half_t>
-			: CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t, ck_tile::bf16_t, ck_tile::bf16_t> {};
+		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::half_t>
+			: CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t> {};
 
-		static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t, ck_tile::bf16_t, ck_tile::bf16_t>>);
-		static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::half_t, ck_tile::half_t, ck_tile::half_t>>);
+		static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t>>);
+		static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::half_t>>);
 
 		// Host-side view of one launch, for picking a config. -1 marks the jagged dim.
 		struct GemmProblem {
@@ -279,11 +264,11 @@ namespace at::hip::detail {
 		// Fills one ck_tile::GemmTransKernelArg per group on the device. 
 		// Basically extracts A, B, and output ptrs and strides for one GEMM and puts in in the corresponding entry in the group_args array.
 		// This is a kernel intended to be launched with one thread per group on the device so offs is never read on the host.
-		template <typename DataType>
+		template <typename InputType, typename OutputType>
 		__global__ void prepare_grouped_gemm_data(
-				const DataType* A,                          // base pointer of mat_a (2D (sumM, K) / (M, sumK), or 3D (G, M, K))
-				const DataType* B,                          // base pointer of mat_b (2D (K, sumN) / (sumK, N), or 3D (G, K, N))
-				DataType* output,                           // base pointer of out (2D (sumM, N) / (M, sumN), or 3D (G, M, N))
+				const InputType* A,                         // base pointer of mat_a (2D (sumM, K) / (M, sumK), or 3D (G, M, K))
+				const InputType* B,                         // base pointer of mat_b (2D (K, sumN) / (sumK, N), or 3D (G, K, N))
+				OutputType* output,                         // base pointer of out (2D (sumM, N) / (M, sumN), or 3D (G, M, N))
 				ck_tile::GemmTransKernelArg<>* group_args,  // output: one entry per group, read by GroupedGemmKernel
 				const int32_t* offs,                        // cumulative end offset of each group along the jagged dim; nullptr for 3D x 3D
 				int32_t M,                                  // rows of each group's A and C, or -1 if jagged (2D x 3D)
@@ -298,9 +283,9 @@ namespace at::hip::detail {
 				bool b_row_major) {                         // true if B is layed out in row-major order
 			const int32_t thread_id = threadIdx.x;
 
-			const DataType* a_ptr = nullptr; //pointer to the start of A[thread_id]
-			const DataType* b_ptr = nullptr; //pointer to the start of B[thread_id]
-			DataType* output_ptr = nullptr; //pointer to the start of output[thread_id]
+			const InputType* a_ptr = nullptr; //pointer to the start of A[thread_id]
+			const InputType* b_ptr = nullptr; //pointer to the start of B[thread_id]
+			OutputType* output_ptr = nullptr; //pointer to the start of output[thread_id]
 			int64_t lda = 0, ldb = 0, ldc = 0; //leading dimensions of A, B, and output
 
 			// Start of this group along the jagged dim and its size; offs holds cumulative end offsets.
@@ -376,12 +361,12 @@ namespace at::hip::detail {
 
 		// Launches the ck_tile grouped GEMM for one dtype / layout / config combination.
 		// group_args must already be filled by prepare_grouped_gemm_data on the same stream.
-		template <typename DataType, typename ALayout, typename BLayout, typename Config>
+		template <typename InputType, typename OutputType, typename ALayout, typename BLayout, typename Config>
 		void run_ck_tile_group_gemm(
 				const void* group_args,  // device array of group_count ck_tile::GemmTransKernelArg<>
 				int32_t group_count,     // number of groups (entries in group_args)
 				hipStream_t stream) {    // current HIP stream
-			using Kernel = typename CkTileGroupGemm<DataType, ALayout, BLayout, Config>::Kernel;
+			using Kernel = typename CkTileGroupGemm<InputType, OutputType, ALayout, BLayout, Config>::Kernel;
 
 			// Persistent kernel: one workgroup per CU, each loops over the tiles of all groups.
 			const dim3 grid(at::cuda::getCurrentDeviceProperties()->multiProcessorCount);
@@ -396,7 +381,7 @@ namespace at::hip::detail {
 
 		// Per-dtype and per-arch part of group_gemm_ck_tile: fills the per-group arguments on the device, then
 		// picks the layout and tile config and launches the kernel.
-		template <amdgcn_target_id Arch, typename DataType>
+		template <amdgcn_target_id Arch, typename InputType, typename OutputType>
 		void launch_ck_tile_group_gemm(
 				const at::Tensor& mat_a,             // A, already in a layout we instantiate
 				const at::Tensor& mat_b,             // B, already in a layout we instantiate
@@ -410,9 +395,6 @@ namespace at::hip::detail {
 				int32_t K,
 				int32_t group_count,
 				int64_t avg_tokens) {                // average tokens per expert, see group_gemm_ck_tile
-			//TODO: not a permanent restriction, will add support for mixed dtypes later
-			TORCH_CHECK(mat_a.scalar_type() == mat_b.scalar_type(), "ck_tile group gemm: mixed dtypes are not supported, got mat_a ", mat_a.scalar_type(), " and mat_b ", mat_b.scalar_type());
-			
 			const hipStream_t stream = c10::hip::getCurrentHIPStream().stream();
 
 			auto to_strides = [](at::IntArrayRef values) {
@@ -423,10 +405,10 @@ namespace at::hip::detail {
 
 			// extract A, B, and output ptrs and strides for one GEMM and puts in in the corresponding entry in the group_args array.
 			// we do this concurrently via the device launch, one thread per GEMM.
-			prepare_grouped_gemm_data<DataType><<<1, group_count, 0, stream>>>(
-					reinterpret_cast<const DataType*>(mat_a.const_data_ptr()),
-					reinterpret_cast<const DataType*>(mat_b.const_data_ptr()),
-					reinterpret_cast<DataType*>(out.data_ptr()),
+			prepare_grouped_gemm_data<InputType, OutputType><<<1, group_count, 0, stream>>>(
+					reinterpret_cast<const InputType*>(mat_a.const_data_ptr()),
+					reinterpret_cast<const InputType*>(mat_b.const_data_ptr()),
+					reinterpret_cast<OutputType*>(out.data_ptr()),
 					reinterpret_cast<ck_tile::GemmTransKernelArg<>*>(group_args.data_ptr()),
 					offs.has_value() ? offs->const_data_ptr<int32_t>() : nullptr,
 					M, N, K,
@@ -439,27 +421,24 @@ namespace at::hip::detail {
 			auto run_with_config = [&](auto config) {
 				using Config = decltype(config);
 				if (a_row_major && !b_row_major) {
-					run_ck_tile_group_gemm<DataType, RowMajor, ColMajor, Config>(group_args.const_data_ptr(), group_count, stream);
+					run_ck_tile_group_gemm<InputType, OutputType, RowMajor, ColMajor, Config>(group_args.const_data_ptr(), group_count, stream);
 				} else if (a_row_major && b_row_major) {
-					run_ck_tile_group_gemm<DataType, RowMajor, RowMajor, Config>(group_args.const_data_ptr(), group_count, stream);
+					run_ck_tile_group_gemm<InputType, OutputType, RowMajor, RowMajor, Config>(group_args.const_data_ptr(), group_count, stream);
 				} else if (!a_row_major && b_row_major) {
-					run_ck_tile_group_gemm<DataType, ColMajor, RowMajor, Config>(group_args.const_data_ptr(), group_count, stream);
+					run_ck_tile_group_gemm<InputType, OutputType, ColMajor, RowMajor, Config>(group_args.const_data_ptr(), group_count, stream);
 				} else {
 					TORCH_CHECK(false, "ck_tile group gemm: column-major A with column-major B is not instantiated; make one of them contiguous");
 				}
 			};
 
-			// TODO: add fp32 config
-			TORCH_CHECK((!std::is_same_v<DataType, float>), "ck_tile group gemm: no fp32 config yet");
-
-			using Configs = CkTileGroupGemmConfigs<Arch, DataType, DataType, DataType>;
+			using Configs = CkTileGroupGemmConfigs<Arch, InputType>;
 			// Contiguous dims: A's is K (row-major) or M, B's is N (row-major) or K, C's is N. A jagged dim (-1) is never contiguous.
 			const auto vectors_fit = [](int64_t extent, index_t elems) { return extent < 0 || extent % elems == 0; };
 			const GemmProblem problem{
 				M, N, K, avg_tokens,
-				vectors_fit(a_row_major ? K : M, vector16_elems<DataType>()) &&
-						vectors_fit(b_row_major ? N : K, vector16_elems<DataType>()) &&
-						vectors_fit(N, vector16_elems<DataType>()),
+				vectors_fit(a_row_major ? K : M, vector16_elems<InputType>()) &&
+						vectors_fit(b_row_major ? N : K, vector16_elems<InputType>()) &&
+						vectors_fit(N, vector16_elems<OutputType>()),
 				/*classes_test_m=*/K < 0};
 
 			if (K < 0) {
@@ -468,12 +447,12 @@ namespace at::hip::detail {
 			} else if (a_row_major && !b_row_major && N > 0) {
 				// Forward (2D x 3D, 3D x 3D)
 				run_gemm_type<typename Configs::Forward>(problem, [&](auto config) {
-					run_ck_tile_group_gemm<DataType, RowMajor, ColMajor, decltype(config)>(group_args.const_data_ptr(), group_count, stream);
+					run_ck_tile_group_gemm<InputType, OutputType, RowMajor, ColMajor, decltype(config)>(group_args.const_data_ptr(), group_count, stream);
 				});
 			} else if (a_row_major && b_row_major && N > 0) {
 				// dX (2D x 3D, 3D x 3D)
 				run_gemm_type<typename Configs::GradInput>(problem, [&](auto config) {
-					run_ck_tile_group_gemm<DataType, RowMajor, RowMajor, decltype(config)>(group_args.const_data_ptr(), group_count, stream);
+					run_ck_tile_group_gemm<InputType, OutputType, RowMajor, RowMajor, decltype(config)>(group_args.const_data_ptr(), group_count, stream);
 				});
 			} else {
 				run_with_config(typename Configs::Fallback{});
@@ -549,6 +528,8 @@ namespace at::hip::detail {
 			out.zero_(); return; 
 		}
 
+		TORCH_CHECK(mat_a.scalar_type() == mat_b.scalar_type(), "ck_tile group gemm: mat_a and mat_b must have the same dtype, got ",
+				mat_a.scalar_type(), " and ", mat_b.scalar_type());
 		TORCH_CHECK(group_count <= 1024, "ck_tile group gemm: at most 1024 groups are supported, got ", group_count);
 		if (a_is_2d != b_is_2d) {
 			TORCH_CHECK(offs->size(0) == group_count, "ck_tile group gemm: expected offs to have ", group_count,
@@ -576,31 +557,35 @@ namespace at::hip::detail {
 				out.options().dtype(at::kByte));
 
 		// 5. Arch and dtype dispatch. The arch is only known at runtime; integral_constant turns it into a template argument.
-		auto launch = [&](auto arch_tag, auto dtype_tag) {
-			using DataType = decltype(dtype_tag);
-			launch_ck_tile_group_gemm<decltype(arch_tag)::value, DataType>(
-					mat_a, mat_b, offs, out, group_args, a_row_major, b_row_major,
-					static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), static_cast<int32_t>(group_count), avg_tokens);
-		};
-		auto launch_for_arch = [&](auto dtype_tag) {
-			if (at::detail::getCUDAHooks().isGPUArch({"gfx950"})) {
-				launch(std::integral_constant<amdgcn_target_id, amdgcn_target_id::GFX950>{}, dtype_tag);
-			} else {
-				TORCH_CHECK_NOT_IMPLEMENTED(false, "ck_tile group gemm: no tile configs for ", at::cuda::getCurrentDeviceProperties()->gcnArchName);
+		// Only input types with a CkTileGroupGemmConfigs specialization are instantiated, each with every output type.
+		auto with_ck_type = [](at::ScalarType dtype, auto&& f) {
+			switch (dtype) {
+				case at::kBFloat16: return f(ck_tile::bf16_t{});
+				case at::kHalf: return f(ck_tile::half_t{});
+				case at::kFloat: return f(float{});
+				default: TORCH_CHECK(false, "ck_tile group gemm: unsupported dtype ", dtype);
 			}
 		};
-		switch (mat_a.scalar_type()) {
-			case at::kBFloat16:
-				launch_for_arch(ck_tile::bf16_t{});
-				break;
-			case at::kHalf:
-				launch_for_arch(ck_tile::half_t{});
-				break;
-			case at::kFloat:
-				TORCH_CHECK(false, "ck_tile group gemm: no fp32 config yet");
-				break;
-			default:
-				TORCH_CHECK(false, "ck_tile group gemm: unsupported dtype ", mat_a.scalar_type());
+		auto launch = [&](auto arch_tag) {
+			with_ck_type(mat_a.scalar_type(), [&](auto input_tag) {
+				constexpr amdgcn_target_id Arch = decltype(arch_tag)::value;
+				using InputType = decltype(input_tag);
+				if constexpr (GroupGemmConfigs<CkTileGroupGemmConfigs<Arch, InputType>>) {
+					with_ck_type(out.scalar_type(), [&](auto output_tag) {
+						launch_ck_tile_group_gemm<Arch, InputType, decltype(output_tag)>(
+								mat_a, mat_b, offs, out, group_args, a_row_major, b_row_major,
+								static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), static_cast<int32_t>(group_count), avg_tokens);
+					});
+				} else {
+					TORCH_CHECK_NOT_IMPLEMENTED(false, "ck_tile group gemm: no configs for ", mat_a.scalar_type(), " inputs on ",
+							at::cuda::getCurrentDeviceProperties()->gcnArchName);
+				}
+			});
+		};
+		if (at::detail::getCUDAHooks().isGPUArch({"gfx950"})) {
+			launch(std::integral_constant<amdgcn_target_id, amdgcn_target_id::GFX950>{});
+		} else {
+			TORCH_CHECK_NOT_IMPLEMENTED(false, "ck_tile group gemm: no tile configs for ", at::cuda::getCurrentDeviceProperties()->gcnArchName);
 		}
 	}
 }
