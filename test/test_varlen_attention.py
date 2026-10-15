@@ -1668,8 +1668,6 @@ class TestVarlenAttention(NNTestCase):
         self, device, dtype, actual_kv_lens, backend, sdpa_backend=None
     ):
         if TEST_WITH_ROCM:
-            if sdpa_backend == "ck":
-                self.skipTest("CK backend does not support seqused_k")
             torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
 
         torch.manual_seed(42)
