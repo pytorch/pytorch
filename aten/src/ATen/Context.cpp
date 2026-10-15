@@ -147,6 +147,7 @@ std::string cudnn_depthwise2str(CuDNNDepthwiseKernel k) {
 
 #ifdef USE_ROCM
 static constexpr const auto rocm_allow_group_gemm_ck = "ROCM_ALLOW_GROUP_GEMM_CK";
+static constexpr const auto rocm_allow_group_gemm_ck_tile = "ROCM_ALLOW_GROUP_GEMM_CK_TILE";
 #endif
 
 Context::Context() = default;
@@ -304,6 +305,10 @@ bool Context::allowTF32OneDNN() const {
 bool Context::rocmAllowGroupGemmCk() const {
     const auto allow_group_gemm_ck = c10::utils::check_env(rocm_allow_group_gemm_ck) == true;
     return allow_group_gemm_ck;
+}
+bool Context::rocmAllowGroupGemmCkTile() const {
+    const auto allow_group_gemm_ck_tile = c10::utils::check_env(rocm_allow_group_gemm_ck_tile) == true;
+    return allow_group_gemm_ck_tile;
 }
 #endif
 
@@ -750,7 +755,7 @@ CuBLASReductionOption Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
 
-CuBLASReductionOption inline get_reduction_option(bool allow_reduced_precision, bool allow_splitk) {
+static CuBLASReductionOption inline get_reduction_option(bool allow_reduced_precision, bool allow_splitk) {
   TORCH_CHECK(
       !(allow_reduced_precision && !allow_splitk),
       "allow_splitk=False is not supported when reduced precision reductions are enabled");

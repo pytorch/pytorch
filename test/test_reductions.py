@@ -485,6 +485,10 @@ class TestReductions(TestCase):
         self.assertEqual(tensor.var(dim=0), 0.03125)
         self.assertEqual(tensor.var(), 0.03125)
 
+    def test_var_single_sample_nonfinite(self, device):
+        x = torch.tensor([[1.0], [nan], [inf], [-inf]], device=device)
+        self.assertEqual(x.var(1, correction=0), torch.tensor([0.0, nan, nan, nan], device=device))
+
     def test_sum_dim_reduction_uint8_overflow(self, device):
         example = [[-1, 2, 1], [5, 3, 6]]
         x = torch.tensor(example, dtype=torch.uint8, device=device)

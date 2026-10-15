@@ -25,6 +25,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/Normalization.h>
+#include <c10/core/Contiguity.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/COW.h>
@@ -573,6 +574,17 @@ static PyObject* THPModule_showConfig(PyObject* module, PyObject* noargs) {
 static PyObject* THPModule_cxxFlags(PyObject* module, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(at::get_cxx_flags());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_cxxCompiler(PyObject* module, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto [name, version] = at::get_cxx_compiler();
+  auto tuple = PyTuple_New(2);
+  TORCH_CHECK_PYTHON(tuple);
+  PyTuple_SET_ITEM(tuple, 0, THPUtils_packString(name));
+  PyTuple_SET_ITEM(tuple, 1, THPUtils_packString(version));
+  return tuple;
   END_HANDLE_TH_ERRORS
 }
 
@@ -2080,6 +2092,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_show_config", THPModule_showConfig, METH_NOARGS, nullptr},
     {"_cxx_flags", THPModule_cxxFlags, METH_NOARGS, nullptr},
+    {"_cxx_compiler", THPModule_cxxCompiler, METH_NOARGS, nullptr},
     {"_parallel_info", THPModule_parallelInfo, METH_NOARGS, nullptr},
     {"_get_cpu_capability", THPModule_getCpuCapability, METH_NOARGS, nullptr},
     {"_set_backcompat_broadcast_warn",
@@ -2779,10 +2792,23 @@ PyObject* initModule() {
         "_fake_dispatch_register_prim_meta",
         add_for(FakeDispatchCategory::PrimMeta));
     py_module.def(
+        "_fake_dispatch_register_python_cia",
+        add_for(FakeDispatchCategory::PythonCIA));
+    py_module.def(
+        "_fake_dispatch_register_custom_op_impl",
+        add_for(FakeDispatchCategory::CustomOpImpl));
+    py_module.def(
         "_fake_dispatch_deregister_op_impl",
         [](const std::string& name, const std::string& overload) {
           at::impl::fakeDispatchTableRemove(
               FakeDispatchCategory::OpImpl, c10::OperatorName(name, overload));
+        });
+    py_module.def(
+        "_fake_dispatch_deregister_custom_op_impl",
+        [](const std::string& name, const std::string& overload) {
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::CustomOpImpl,
+              c10::OperatorName(name, overload));
         });
   }
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
@@ -2981,6 +3007,59 @@ Call this whenever a new thread is created in order to propagate values from
       TORCH_CHECK(false, "Valgrind is not supported.");
 #endif
   });
+
+  py_module.def(
+      "_is_contiguous_or_false",
+      [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "sizes and strides must have the same length");
+        return c10::_is_contiguous_or_false(sizes, strides);
+      });
+  py_module.def(
+      "_is_channels_last_contiguous_2d_or_false",
+      [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "sizes and strides must have the same length");
+        return c10::_is_channels_last_contiguous_2d_or_false(sizes, strides);
+      });
+  py_module.def(
+      "_is_channels_last_contiguous_3d_or_false",
+      [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "sizes and strides must have the same length");
+        return c10::_is_channels_last_contiguous_3d_or_false(sizes, strides);
+      });
+  py_module.def(
+      "_is_contiguous",
+      [](c10::SymIntArrayRef sizes,
+         c10::SymIntArrayRef strides,
+         const c10::SymInt& numel) {
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "sizes and strides must have the same length");
+        return c10::_compute_contiguous<c10::SymInt>(sizes, strides, numel);
+      });
+  py_module.def(
+      "_is_channels_last_contiguous_2d",
+      [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "sizes and strides must have the same length");
+        return c10::_compute_channels_last_contiguous_2d<c10::SymInt>(
+            sizes, strides);
+      });
+  py_module.def(
+      "_is_channels_last_contiguous_3d",
+      [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "sizes and strides must have the same length");
+        return c10::_compute_channels_last_contiguous_3d<c10::SymInt>(
+            sizes, strides);
+      });
 
   py::class_<WeakTensorRef>(py_module, "_WeakTensorRef")
       .def(py::init([](const py::object& tensor) {
@@ -3430,6 +3509,12 @@ Call this whenever a new thread is created in order to propagate values from
       static_cast<void (*)(
           const at::Tensor&, std::unordered_map<std::string, bool>)>(
           torch::jit::setTensorMetadata));
+  py_module.def(
+      "_copy_backend_meta",
+      &torch::jit::copyBackendMeta,
+      py::arg("src"),
+      py::arg("dst"),
+      py::arg("for_fake") = false);
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());
   });
@@ -3492,8 +3577,9 @@ Call this whenever a new thread is created in order to propagate values from
       "_is_cow_tensor",
       [](const at::Tensor& tensor) {
         TORCH_CHECK(
-            !tensor.key_set().has(c10::DispatchKey::Python),
-            "_is_cow_tensor is not defined for Python tensor subclasses");
+            !tensor.is_fake() &&
+                !tensor.key_set().has(c10::DispatchKey::Python),
+            "_is_cow_tensor is not defined for Python tensor subclasses or FakeTensors");
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");
