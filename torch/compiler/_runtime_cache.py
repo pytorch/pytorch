@@ -132,7 +132,7 @@ def _runtime_context() -> dict[str, str | None]:
 
 
 # (artifact key, runtime-cache root) pairs already imported by this process, so
-# precompile.load after prepare_runtime does not extract the same cache again.
+# a second precompile.load does not extract the same cache again.
 _imported_triton_runtime: set[tuple[str, str]] = set()
 _imported_triton_runtime_lock = threading.Lock()
 
@@ -681,24 +681,3 @@ def freeze_runtime_cache(
         serializer = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
         serializer.extend(artifacts.items())
         write(serializer.to_bytes())
-
-
-def prepare_runtime_cache(artifact: bytes | None) -> None:
-    if artifact is None:
-        artifacts = {}
-    elif (artifacts := CacheArtifactManager.deserialize(artifact)) is None:
-        raise RuntimeError(
-            "Cannot prepare runtime dependencies from an unreadable precompile cache"
-        )
-    if len(artifacts.get(InductorTritonCacheArtifact.type(), ())) != 1:
-        raise RuntimeError(
-            "precompile.prepare_runtime requires a cache whose capture froze its "
-            "runtime dependencies"
-        )
-    runtime = artifacts.get(TritonRuntimeCacheArtifact.type(), ())
-    if len(runtime) > 1:
-        raise RuntimeError(
-            "precompile.prepare_runtime found more than one Triton runtime cache"
-        )
-    for entry in runtime:
-        cast(TritonRuntimeCacheArtifact, entry).import_into_triton(strict=True)
