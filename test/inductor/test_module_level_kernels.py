@@ -466,6 +466,17 @@ class TestModuleLevelKernels(TestCase):
         for key in keys:
             self.assertRegex(out, rf"{key[:10]} .*GB/s")
 
+    @requires_cuda_and_triton
+    @parametrize("wrapper", ["cpp_wrapper", "fx_wrapper"])
+    @parametrize("fn", [_softmax, _cond_softmax])
+    def test_wrappers_that_keep_kernels_as_strings(self, wrapper, fn):
+        # Both consume each kernel's async_compile.triton(...) source themselves.
+        x = torch.randn(64, 128, device="cuda")
+        torch._dynamo.reset()
+        with config.patch({wrapper: True}):
+            result = torch.compile(fn)(x)
+        self.assertEqual(result, fn(x))
+
 
 class TestDefaultWrapper(TestCase):
     @requires_cuda_and_triton
