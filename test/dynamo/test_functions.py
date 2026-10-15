@@ -39,6 +39,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault, range_iterator, same
 from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
+from torch._dynamo.variables.functions import WrappedMethodDescriptorVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
@@ -2411,7 +2412,15 @@ partial_fn = functools.partial(fn, scale=2)
 
     @parametrize(
         "target",
-        (torch.fx.Node.__init__, os.getpid, str.join, int.__add__),
+        (
+            torch.fx.Node.__init__,
+            os.getpid,
+            str.join,
+            int.__add__,
+            dict.__dict__["fromkeys"],
+            slice.start,
+            int.real,
+        ),
         name_fn=lambda target: type(target).__name__,
     )
     def test_skip_function_missing_attr_error(self, target):
@@ -2423,9 +2432,18 @@ partial_fn = functools.partial(fn, scale=2)
 
         x = torch.ones(1)
         expected = fn(x)
-        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        actual = opt_fn(x)
         self.assertEqual(expected[:3], actual[:3])
         self.assertIs(expected[3], actual[3])
+
+        def replacement():
+            pass
+
+        replacement.__missing_attribute__ = 1
+        target = replacement
+        self.assertIsNone(fn(x))
+        self.assertIsNone(opt_fn(x))
 
     @parametrize(
         "target",
@@ -2469,6 +2487,78 @@ partial_fn = functools.partial(fn, scale=2)
 
         x = torch.ones(1)
         self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
+
+    @parametrize("kind", ("function", "method", "nested"))
+    def test_context_wrapped_function_families(self, kind):
+        def function(x):
+            return x.sin(), torch.is_grad_enabled()
+
+        class Object:
+            def method(self, x):
+                return function(x)
+
+        obj = Object()
+
+        def fn(x):
+            target = function
+            if kind == "method":
+                target = obj.method
+            elif kind == "nested":
+
+                def target(x):
+                    return function(x)
+
+            wrapped = torch.no_grad()(target)
+            return wrapped(x), torch.is_grad_enabled()
+
+        x = torch.ones(1, requires_grad=True)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertFalse(opt_fn(x)[0][0].requires_grad)
+        self.assertEqual(fn(x + 1), opt_fn(x + 1))
+
+    def test_wrapped_method_descriptor_call(self):
+        target = str.join
+
+        def fn(x):
+            value = x + 1
+            wrapped = torch.no_grad()(target)
+            other = torch.no_grad()(target)
+            nested = torch.no_grad()(wrapped)
+            result = wrapped("-", ("a", "b"))
+            missing = None
+            try:
+                wrapped.__missing_attribute__
+            except AttributeError as exc:
+                missing = exc.args, exc.name, exc.obj is wrapped
+            try:
+                wrapped(1, ())
+            except TypeError:
+                return (
+                    value,
+                    result,
+                    nested("-", ("a", "b")),
+                    missing,
+                    torch.is_grad_enabled(),
+                    (
+                        wrapped.__wrapped__ is target,
+                        wrapped is target,
+                        wrapped is other,
+                        nested.__wrapped__ is wrapped,
+                    ),
+                )
+
+        x = torch.ones(1, requires_grad=True)
+        with patch.object(
+            WrappedMethodDescriptorVariable,
+            "call_function",
+            autospec=True,
+            side_effect=WrappedMethodDescriptorVariable.call_function,
+        ) as call_function:
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(x), opt_fn(x))
+            self.assertEqual(fn(x + 1), opt_fn(x + 1))
+        call_function.assert_called()
 
     @parametrize("consumer", ("dict", "vars", "closure", "instancecheck"))
     def test_wrapped_skip_function_runtime_attributes(self, consumer):
