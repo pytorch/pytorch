@@ -1699,6 +1699,9 @@ class ReplacementPatternEntry(PatternEntry):
                     # look at the recompute tags of the original output node to
                     # propagate the tag from the output all the way to the input
                     args_set, _ = pytree.tree_flatten(args)
+                    args_set = [
+                        arg for arg in args_set if isinstance(arg, torch.fx.Node)
+                    ]
                     # args (named as args in the replace_with_graph).
                     # Note that this is best effort. Since patterns are from
                     # many to many, there is no easy way to correctly map the
