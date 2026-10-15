@@ -5979,6 +5979,19 @@ class TestPrecompileRuntimeCache(TestCase):
                 cap(torch.ones(4))
             self.assertEqual(os.listdir(directory), [])
 
+    def test_inductor_capture_without_fx_graph_cache_is_served(self):
+        # The capture saves its artifact through the bundled AOTAutograd cache,
+        # so it does not need Inductor's FX graph cache.
+        pc = torch.compiler.precompile
+        fn = _no_compilation_inductor_graph
+        x = torch.ones(4)
+        with torch._inductor.config.patch(fx_graph_cache=False):
+            source, cache = _capture_files(self, fn, [(x,)], backend="inductor")
+        with pc.no_compilation():
+            runnable = pc.load(source, cache)
+            with torch.no_grad():
+                self.assertEqual(runnable(x), fn(x))
+
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_capture_reports_all_unresolved_triton_sources(self):
         from pathlib import Path
