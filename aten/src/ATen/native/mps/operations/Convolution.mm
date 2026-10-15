@@ -490,6 +490,208 @@ static void conv3d_im2col_matmul(const Tensor& input,
                    .permute({0, 4, 1, 2, 3}));
 }
 
+enum class Conv1dKernel {
+  // kConv1dDepthwiseOutputsPerThread consecutive outputs per thread.
+  Depthwise,
+  // One matmul2d per tap over the NCL input.
+  MppNcl,
+  // One matmul2d per tap over a zero-padded NLC input.
+  MppNlc,
+  // One matmul2d over all taps of a zero-padded NLC input.
+  MppNlcMerged,
+  Im2colMatmul,
+  // conv3d_metal_forward with unit depth and height.
+  Conv3d,
+};
+
+static Conv1dKernel conv1d_pick_kernel(const Tensor& input,
+                                       const Tensor& weight,
+                                       const Tensor& output,
+                                       int64_t padding,
+                                       int64_t conv_stride,
+                                       int64_t dilation,
+                                       int64_t groups) {
+  using namespace mps;
+  constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
+  // matmul2d on M1/M2 misreads operands whose row stride exceeds this many elements.
+  constexpr int64_t kPreApple9MppMaxStride = std::numeric_limits<uint16_t>::max();
+  const auto channels = input.size(1);
+  const auto length = input.size(3);
+  const auto channels_per_group = weight.size(1);
+  const auto kernel_size = weight.size(3);
+  const auto out_channels = output.size(1);
+  const auto out_length = output.size(3);
+  // Conv2DParams sizes are int32, as are matmul2d offsets within a batch.
+  if ((length + 2 * padding) * channels > kInt32Max || out_channels * out_length > kInt32Max) {
+    return Conv1dKernel::Conv3d;
+  }
+  // Depthwise, or a single-channel conv whose output can't fill a 64x64 matmul2d tile.
+  if (channels_per_group == 1 && (groups > 1 || std::min(out_channels, out_length) < 64)) {
+    return Conv1dKernel::Depthwise;
+  }
+  // conv1d_mpp reduces over all of C_in * k inside each tile, so a short output with a large reduction leaves
+  // most of the GPU idle, im2col + addmm splits the reduction. Measured cutoffs: the im2col copy pays off from a
+  // 2048-element reduction and the tile shortage fades as L_out and N grow (N also adds addmm launches, hence N^2).
+  const auto reduction = channels_per_group * kernel_size;
+  if (groups == 1 && channels_per_group > 0 &&
+      (out_length == 1 || (reduction >= 2048 && input.size(0) * input.size(0) * out_length * 32 <= reduction))) {
+    return Conv1dKernel::Im2colMatmul;
+  }
+  // conv3d_metal_forward handles empty input channels.
+  if (channels_per_group == 0 || !has_mpp()) {
+    return Conv1dKernel::Conv3d;
+  }
+  // NLC is required for conv_stride > 1 and avoids a transpose for channels-last input.
+  // Dilation > 1 or groups > 1 leave gaps between taps. merging into one matmul would need im2col.
+  // With both 1, windows are contiguous and one matmul covers all taps, C_out >= 8 * C_in is the measured point
+  // where that saves more than the NCL to NLC transpose costs.
+  const bool nlc = conv_stride > 1 || input.is_contiguous(MemoryFormat::ChannelsLast) ||
+      (dilation == 1 && groups == 1 && out_channels >= 8 * channels);
+  const bool merged = nlc && dilation == 1 && groups == 1;
+  // Largest operand row stride: input (NCL row or NLC position step) versus weight row.
+  const auto operand_stride =
+      std::max(nlc ? conv_stride * channels : length + padding, (merged ? kernel_size : 1) * channels_per_group);
+  if (!is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS) && operand_stride > kPreApple9MppMaxStride) {
+    return Conv1dKernel::Conv3d;
+  }
+  return merged ? Conv1dKernel::MppNlcMerged : nlc ? Conv1dKernel::MppNlc : Conv1dKernel::MppNcl;
+}
+
+static void conv1d_metal_forward(const Tensor& input_t,
+                                 const Tensor& weight_t,
+                                 const std::optional<Tensor>& bias_opt,
+                                 int64_t padding,
+                                 int64_t stride,
+                                 int64_t dilation,
+                                 int64_t groups,
+                                 const Tensor& output_t) {
+  using namespace mps;
+  const int64_t length = input_t.size(3);
+  const int64_t kernel_size = weight_t.size(3);
+  const auto padded_nlc_input = [&] {
+    return padding > 0 ? at::constant_pad_nd(input_t.squeeze(2).transpose(1, 2), {0, 0, padding, padding})
+                       : conv3d_to_ndhwc(input_t.unsqueeze(2));
+  };
+  const auto tap_major_weight = [&] {
+    const auto tap_major = weight_t.permute({3, 0, 1, 2});
+    return tap_major.is_contiguous() ? tap_major : conv3d_weights_to_dhwio(weight_t.transpose(0, 1).unsqueeze(2));
+  };
+  const auto dtype = scalarToMetalTypeString(input_t);
+  const auto out_layout = output_t.is_contiguous() ? "ncl" : "nlc";
+  Tensor input, weight;
+  std::optional<Tensor> head;
+  auto input_length = length;
+  std::string kernel_name;
+  const auto kernel = conv1d_pick_kernel(input_t, weight_t, output_t, padding, stride, dilation, groups);
+  const auto out_channels_per_group = output_t.size(1) / groups;
+  // The smallest tile that covers C_out per group, a 64-wide tile wastes most of the matmul on C_out <= 32.
+  const auto small_tile = out_channels_per_group <= 16 ? 16 : 32;
+  const auto out_tile = kernel == Conv1dKernel::MppNcl && out_channels_per_group <= 32 ? small_tile : 64;
+  // Measured crossovers: a 16- or 32-channel tile is too little work to split 4 ways and from a 1536-element
+  // reduction (24 K steps of 64) 2 simdgroups already keep a tile busy while 4 only add synchronization.
+  const int simdgroups = out_tile < 64 || weight_t.size(1) * kernel_size >= 1536 ? 2 : 4;
+  switch (kernel) {
+    case Conv1dKernel::Depthwise:
+      input = input_t.contiguous();
+      weight = weight_t.contiguous();
+      kernel_name = fmt::format("conv1d_depthwise_{}_{}", out_layout, dtype);
+      break;
+    case Conv1dKernel::MppNcl:
+      input = input_t.contiguous();
+      weight = tap_major_weight();
+      if (padding > 0) {
+        // Covers every 64-position tile that starts inside the left padding plus the taps reaching past it.
+        const auto head_length =
+            std::min(length + padding, c10::metal::ceil_div(padding, int64_t(64)) * 64 + (kernel_size - 1) * dilation);
+        head = at::constant_pad_nd(input.narrow(3, 0, head_length - padding), {padding, 0});
+      }
+      kernel_name = fmt::format("conv1d_mpp_ncl_{}_b{}_s{}_{}", out_layout, out_tile, simdgroups, dtype);
+      break;
+    case Conv1dKernel::MppNlc:
+      input = padded_nlc_input();
+      input_length = length + 2 * padding;
+      weight = tap_major_weight();
+      kernel_name = fmt::format("conv1d_mpp_nlc_{}_b64_s{}_{}", out_layout, simdgroups, dtype);
+      break;
+    case Conv1dKernel::MppNlcMerged:
+      input = padded_nlc_input();
+      input_length = length + 2 * padding;
+      weight = weight_t.squeeze(2).transpose(1, 2).contiguous();
+      kernel_name = fmt::format("conv1d_mpp_nlc_{}_b64_s{}_{}", out_layout, simdgroups, dtype);
+      break;
+    case Conv1dKernel::Im2colMatmul: {
+      const auto x = padding > 0 ? at::constant_pad_nd(input_t.select(2, 0), {padding, padding}) : input_t.select(2, 0);
+      const auto batch = x.size(0);
+      const auto out_length = output_t.size(3);
+      const auto st = x.strides();
+      const auto windows =
+          x.as_strided({batch, out_length, x.size(1), kernel_size}, {st[0], stride * st[2], st[1], dilation * st[2]});
+      const auto weights = weight_t.reshape({weight_t.size(0), -1});
+      const bool has_bias = bias_opt && bias_opt->defined();
+      const auto bias = has_bias ? bias_opt->to(input_t.scalar_type()) : Tensor();
+      if (out_length == 1 || !output_t.is_contiguous()) {
+        auto rows = output_t.select(2, 0).transpose(1, 2).view({-1, weights.size(0)});
+        const auto columns = windows.reshape({rows.size(0), -1});
+        has_bias ? at::addmm_out(rows, bias, columns, weights.t()) : at::mm_out(rows, columns, weights.t());
+        return;
+      }
+      const auto columns = stride > 1 ? windows.flatten(2).mT() : windows.permute({0, 2, 3, 1}).flatten(1, 2);
+      for (const auto n : c10::irange(batch)) {
+        auto out = output_t.select(2, 0).select(0, n);
+        has_bias ? at::addmm_out(out, bias.view({-1, 1}), weights, columns[n]) : at::mm_out(out, weights, columns[n]);
+      }
+      return;
+    }
+    case Conv1dKernel::Conv3d:
+      conv3d_metal_forward(input_t.unsqueeze(2),
+                           weight_t.unsqueeze(2),
+                           bias_opt,
+                           {0, 0, padding},
+                           {1, 1, stride},
+                           {1, 1, dilation},
+                           groups,
+                           output_t.unsqueeze(2));
+      return;
+  }
+  const bool has_bias = bias_opt && bias_opt->defined();
+  const auto bias = has_bias ? bias_opt->to(input_t.scalar_type()).contiguous() : input;
+  const Conv2DParams params{
+      .C_in = static_cast<int32_t>(input_t.size(1)),
+      .C_out = static_cast<int32_t>(output_t.size(1)),
+      .W = static_cast<int32_t>(input_length),
+      .outW = static_cast<int32_t>(output_t.size(3)),
+      .kW = static_cast<int32_t>(kernel_size),
+      .sW = static_cast<int32_t>(stride),
+      .padW = static_cast<int32_t>(padding),
+      .dW = static_cast<int32_t>(dilation),
+      .C_in_per_group = static_cast<int32_t>(weight_t.size(1)),
+      .C_out_per_group = static_cast<int32_t>(output_t.size(1) / groups),
+      .has_bias = has_bias,
+  };
+  auto pipeline = lib.getPipelineStateForFunc(kernel_name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto encoder = stream->commandEncoder();
+      getMPSProfiler().beginProfileKernel(pipeline, "conv1d", {input, weight}, stream);
+      [encoder setComputePipelineState:pipeline];
+      mtl_setArgs(encoder, input, weight, output_t, params, bias, head);
+      if (kernel == Conv1dKernel::Depthwise) {
+        const auto threads = c10::metal::ceil_div(params.outW, kConv1dDepthwiseOutputsPerThread);
+        // 256-wide threadgroups, like the other flat kernels in this file.
+        [encoder dispatchThreads:MTLSizeMake(threads, params.C_out, input_t.size(0))
+            threadsPerThreadgroup:MTLSizeMake(std::min(threads, 256), 1, 1)];
+      } else {
+        [encoder dispatchThreadgroups:MTLSizeMake(c10::metal::ceil_div(params.C_out_per_group, out_tile) * groups,
+                                                  c10::metal::ceil_div(params.outW, 64),
+                                                  input_t.size(0))
+                threadsPerThreadgroup:MTLSizeMake(simdgroups * 32, 1, 1)];
+      }
+      getMPSProfiler().endProfileKernel(pipeline, stream);
+    }
+  });
+}
+
 static void fill_depthwise_conv_desc(MPSGraphDepthwiseConvolution3DOpDescriptor* descriptor_,
                                      NSUInteger strideInX,
                                      NSUInteger strideInY,
@@ -628,6 +830,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   constexpr auto kContiguous = MemoryFormat::Contiguous;
 
   const bool is3DConv = input_t.dim() == 5;
+  const bool is1DConv = input_t.dim() == 4 && input_t.size(2) == 1 && weight_t.size(2) == 1 && padding[0] == 0;
   const auto memory_format = input_t.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
   const bool is_cl_input = memory_format == kChannelsLast && !is3DConv;
   const auto input_suggested_layout = is_cl_input ? kChannelsLast : kContiguous;
@@ -656,7 +859,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   }
   TensorArg output{output_t, "result", 0};
 
-  if (!is_macos_at_least(MacOSVersion::MACOS_15_1) && !is3DConv) {
+  if (!is_macos_at_least(MacOSVersion::MACOS_15_1) && !is3DConv && !is1DConv) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
     for (auto elem : output_t.sizes()) {
       TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
@@ -673,6 +876,10 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     } else {
       conv3d_metal_forward(input_t, weight_t, bias_opt, padding, stride, dilation, groups, output_t);
     }
+    return output_t;
+  }
+  if (is1DConv) {
+    conv1d_metal_forward(input_t, weight_t, bias_opt, padding[1], stride[1], dilation[1], groups, output_t);
     return output_t;
   }
 

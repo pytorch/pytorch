@@ -12262,6 +12262,9 @@ get_out().sum().backward()
                 # On Windows, opening the subprocess with the default CWD makes `import torch`
                 # fail, so just set CWD to this script's directory
                 cwd=os.path.dirname(os.path.realpath(__file__)),
+                # Python 3.13+ colorizes tracebacks when FORCE_COLOR is set,
+                # which splits the error message checked below
+                env={**os.environ, "PYTHON_COLORS": "0"},
                 # It is ok to have an extra long timeout here as a timeout means the test failed
                 timeout=20,
             )
@@ -13858,7 +13861,6 @@ class TestAutogradDeviceType(TestCase):
             with self.assertRaises(RuntimeError):
                 x.grad = torch.randn(5, 5, device=devices[1])
 
-    @dtypesIfMPS(torch.float32)
     @deviceCountAtLeast(1)
     @dtypes(torch.float, torch.double)
     def test_requires_grad_factory(self, devices, dtype):
@@ -17838,19 +17840,34 @@ class TestSACAmbientSavedTensorsHooks(_TestSACAmbientSavedTensorsHooksBase):
     # a selective activation checkpoint (SAC) region interacts with the tensors
     # SAC decides to save. Historically SAC held those tensors outside the
     # autograd graph, so an ambient hook (e.g. save_on_cpu) never saw them.
-    # The respect_saved_tensors_hooks arg of checkpoint() opts into routing them
-    # through the hook; the default (legacy) leaves them untouched and warns.
-    # These tests pin both behaviors so the eventual default flip is explicit.
+    # The respect_saved_tensors_hooks arg of checkpoint() chooses whether to
+    # route them through the hook; leaving it unset while a user hook is in
+    # scope is an error until the default flips. These tests pin all three.
     hw_classification = HardwareClassification.GENERIC
 
-    def test_hook_outer_sac_inner_default_bypasses(self):
-        # Legacy default: the ambient hook is blind to the MUST_SAVE mm output.
-        # A FutureWarning fires because a user hook is in scope.
-        packed, fw = self._run(respects=None, capture_warning=True)
-        self.assertNotIn(self.MM_SHAPE, packed)
-        self.assertTrue(
-            any("selective activation checkpoint" in str(w.message) for w in fw)
+    def test_hook_outer_sac_inner_default_raises(self):
+        # Unset: SAC saving a tensor while a user hook is in scope is an error,
+        # forcing an explicit choice. There is no escape hatch.
+        with self.assertRaisesRegex(RuntimeError, "respect_saved_tensors_hooks=True"):
+            self._run(respects=None)
+
+    def test_default_no_error_without_sac_save(self):
+        # The error only fires when SAC actually saves a tensor under a user
+        # hook: a recompute-everything policy under a hook, or a saving policy
+        # with hooks only around backward, is fine with the arg unset.
+        x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+        recompute_all = functools.partial(
+            create_selective_checkpoint_contexts, lambda *a, **k: False
         )
+        with self.RecordingHooks():
+            out = checkpoint(self._fn, x, use_reentrant=False, context_fn=recompute_all)
+        out.backward()
+
+        out = checkpoint(
+            self._fn, x, use_reentrant=False, context_fn=self._mm_save_context_fn()
+        )
+        with self.RecordingHooks():
+            out.backward()
 
     def test_hook_outer_sac_inner_opt_in_routes(self):
         # Opt-in: the MUST_SAVE mm output now flows through the ambient hook.
@@ -17939,7 +17956,7 @@ class TestSACAmbientSavedTensorsHooks(_TestSACAmbientSavedTensorsHooksBase):
 
     def test_plain_checkpoint_no_warning(self):
         # Plain (non-selective) checkpoint caches nothing via SAC, so an ambient
-        # hook is unaffected and no FutureWarning about SAC should fire.
+        # hook is unaffected and no error or warning about SAC should fire.
         packed = []
 
         def pack(t):
