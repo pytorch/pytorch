@@ -741,6 +741,8 @@ class _DynamoCapture(Capture[_P, _R]):
         # capture's compiles; left in _finish. The swap spans the whole
         # block, so anything else compiled inside the block records here too,
         # as it does into the runtime scope whose dependencies _write freezes.
+        # Captures open at once share that scope, so each also freezes the
+        # kernels the others compiled.
         try:
             self._block.enter_context(capture_scope())
             self._block.enter_context(CacheArtifactManager.with_fresh_cache())
