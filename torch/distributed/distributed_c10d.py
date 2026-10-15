@@ -14,7 +14,6 @@ import os
 import pickle
 import sys
 import time
-import traceback
 import types
 import warnings
 from collections.abc import Callable, Sequence
@@ -321,16 +320,14 @@ _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
 # Object collectives can serialize via torch.save/torch.load(weights_only=True)
-# by passing weights_only=True. Exceptions and stack summaries are commonly
-# transmitted for error propagation (e.g. torch.distributed.checkpoint), so
-# allowlist them.
+# by passing weights_only=True. Exceptions are commonly transmitted for error
+# propagation, so allowlist them.
 torch.serialization.add_safe_globals(
     [
         t
         for t in vars(builtins).values()
         if isinstance(t, type) and issubclass(t, BaseException)
     ]
-    + [traceback.StackSummary, traceback.FrameSummary]
 )
 
 GroupName = NewType("GroupName", str)

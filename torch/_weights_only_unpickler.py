@@ -82,6 +82,9 @@ _blocklisted_modules = [
     "os",
     "posix",
     "nt",
+    # traceback.FrameSummary and linecache read arbitrary files
+    "traceback",
+    "linecache",
 ]
 
 _marked_safe_globals_set: set[Callable | tuple[Callable, str]] = set()
@@ -146,10 +149,12 @@ def _get_user_allowed_globals():
                     f"Expected second item in tuple to be str of callable full path, but got: {type(f[1])}"
                 )
             f, name = f
-            rc[name] = f
         else:
-            module, name = f.__module__, f.__qualname__
-            rc[f"{module}.{name}"] = f
+            name = f"{f.__module__}.{f.__qualname__}"
+        # Blocklisted modules can't be allowlisted, even under an alias.
+        if getattr(f, "__module__", None) in _blocklisted_modules:
+            continue
+        rc[name] = f
     return rc
 
 
