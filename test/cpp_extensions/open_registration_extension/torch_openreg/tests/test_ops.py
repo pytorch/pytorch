@@ -6,6 +6,7 @@ import unittest
 
 import torch
 from torch.nn.attention import SDPBackend
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
@@ -296,6 +297,39 @@ class TestSDPA(NNTestCase):
                 philox_offset=philox_offset,
             )
         )
+
+
+class TestFlexAttention(TestCase):
+    def test_flex_attention_forward_backward(self):
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        def rel_bias(score, b, h, q_idx, kv_idx):
+            return score + (q_idx - kv_idx)
+
+        seq_len = 128
+        shape = (2, 2, seq_len, 16)
+        q_ref, k_ref, v_ref = (torch.randn(shape, requires_grad=True) for _ in range(3))
+        q, k, v = (
+            t.detach().to("openreg").requires_grad_() for t in (q_ref, k_ref, v_ref)
+        )
+        grad_out = torch.randn(shape)
+
+        block_mask = create_block_mask(causal, 1, 1, seq_len, seq_len, device="openreg")
+        out = flex_attention(q, k, v, score_mod=rel_bias, block_mask=block_mask)
+        out.backward(grad_out.to("openreg"))
+
+        pos = torch.arange(seq_len)
+        scores = q_ref @ k_ref.transpose(-2, -1) * shape[-1] ** -0.5
+        scores = scores + (pos[:, None] - pos[None, :])
+        scores = scores.masked_fill(pos[:, None] < pos[None, :], float("-inf"))
+        out_ref = scores.softmax(dim=-1) @ v_ref
+        out_ref.backward(grad_out)
+
+        self.assertEqual(out.device.type, "openreg")
+        self.assertEqual(out.cpu(), out_ref, atol=1e-4, rtol=1e-4)
+        for t, t_ref in zip((q, k, v), (q_ref, k_ref, v_ref)):
+            self.assertEqual(t.grad.cpu(), t_ref.grad, atol=1e-4, rtol=1e-4)
 
 
 class TestFactoryExtended(TestCase):
