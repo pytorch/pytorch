@@ -5,125 +5,277 @@ import re
 import sys
 from pathlib import Path
 
+import tabulate
+import yaml
+
+
+# Safely load fast C Yaml loader/dumper if they are available
+try:
+    from yaml import CSafeLoader as Loader
+except ImportError:
+    from yaml import SafeLoader as Loader  # type: ignore[assignment, misc]
 
 _PROFILED_RE = re.compile(
-    r"BOLT-INFO: (\d+) out of (\d+) functions in the binary .*"
-    r"have non-empty execution profile"
+    r"BOLT-INFO: (?P<functions>\d+) out of (?P<binary_functions>\d+) "
+    r"functions in the binary .* have non-empty execution profile"
 )
 _STALE_FUNCTIONS_RE = re.compile(
-    r"BOLT-(?:WARNING|ERROR): (\d+) \([^)]*of all profiled\) functions? have invalid"
+    r"BOLT-(?:WARNING|ERROR): (?P<functions>\d+) "
+    r"\([^)]*of all profiled\) functions? have invalid"
 )
 _STALE_SAMPLES_RE = re.compile(
-    r"BOLT-(?:WARNING|ERROR): (\d+) out of (\d+) samples in the binary .*"
+    r"BOLT-(?:WARNING|ERROR): (?P<stale>\d+) out of "
+    r"(?P<matched>\d+) samples in the binary .*"
     r"belong to functions with invalid"
 )
-_INFERRED_RE = re.compile(r"BOLT-INFO: inferred profile for (\d+) ")
+_NON_SIMPLE_RE = re.compile(
+    r"BOLT-INFO: (?P<functions>\d+) functions? with profile could not be optimized"
+)
+_IGNORED_RE = re.compile(
+    r"BOLT-INFO: profile for (?P<functions>\d+) objects was ignored"
+)
+_INFERRED_RE = re.compile(
+    r"BOLT-INFO: inferred profile for (?P<functions>\d+) .* samples "
+    r"\((?P<samples>\d+) out of (?P<matched_samples>\d+)\)"
+)
 _MATCH_RE = re.compile(
-    r"BOLT-INFO: inference found an? (exact match|call match|loose match) "
+    r"BOLT-INFO: inference found an? (?P<kind>exact|call|loose) match "
     r"for [0-9.]+% of basic blocks "
-    r"\((\d+) out of (\d+) stale\) responsible for [0-9.]+% samples "
-    r"\((\d+) out of (\d+) stale\)"
+    r"\((?P<blocks>\d+) out of (?P<total_blocks>\d+) stale\) "
+    r"responsible for [0-9.]+% samples "
+    r"\((?P<block_execs>\d+) out of (?P<total_block_execs>\d+) stale\)"
 )
 
 
-_TABLE_HEADER = """\
-Library                      |  Functions |           Branches |     Blocks |        Block execs"""
-_TABLE_TEMPLATE = """\
------------------------------+------------+--------------------+------------+--------------------
-{library:<28} | {binary:>10} |                    |            |
-|_ With profiles             | {profiled:>10} | {total_edges:>18} |            |
-   |_ Fresh profiles         | {valid_funcs:>10} | {valid_edges:>18} |            |
-   |_ Stale profiles         | {stale_funcs:>10} | {stale_edges:>18} |            |
-      |_ Inferred Functions  | {recovered:>10} |                    | {total_blocks:>10} | {total_execs:>18}
-         |_ Exact match      |            |                    | {exact_blocks:>10} | {exact_execs:>18}
-         |_ Call match       |            |                    | {call_blocks:>10} | {call_execs:>18}
-         |_ Loose match      |            |                    | {loose_blocks:>10} | {loose_execs:>18}
-"""
+_HEADERS = (
+    "Profile",
+    "Functions",
+    "%",
+    "Samples",
+    "%",
+    "Blocks",
+    "%",
+    "Block execs",
+    "%",
+)
+TableRow = list[str | int | float | None]
 
 _REPORT_GUIDANCE = """\
-Percentages are relative to the parent value in the same column.
-
-"Inferred Functions" refers to the number of functions that received profiles after stale
-profile matching (inference). The "Blocks" count in that row represent the total number of basic
-blocks in inferred functions and NOT the number of successfully matched basic blocks. Block
-matching numbers are shown in the children rows and are used to judge the quality of inference.
-
-Exact and call matches are good indicators of correspondence with the current binary. Loose
-matches use weaker heuristics and give less confidence in the recovered profile. A high share of
-loose matches, especially in block execs, is a reason to consider refreshing the profiles.
 """
 
 
 def _counts(
     pattern: re.Pattern[str],
     text: str,
-    description: str,
-    default: tuple[int, ...] | None = None,
-) -> tuple[int, ...]:
-    match = pattern.search(text)
-    if match is None:
-        if default is not None:
-            return default
-        raise ValueError(f"BOLT log does not contain {description}")
-    return tuple(int(value) for value in match.groups())
+) -> dict[str, int]:
+    if match := pattern.search(text):
+        return {name: int(value) for name, value in match.groupdict().items()}
+    return {}
 
 
-def _percent(value: int, total: int) -> str:
-    return f"{value / total:.1%}" if total else "-"
+def _safediv(value: int, total: int) -> float | None:
+    return value / total if total > 0 else None
 
 
-def parse_bolt_log(path: Path) -> tuple[int, str]:
-    text = path.read_text(encoding="utf-8")
-    profiled, binary = _counts(_PROFILED_RE, text, "profiled function counts")
-    (stale,) = _counts(_STALE_FUNCTIONS_RE, text, "stale function counts", default=(0,))
-    # LLVM omits raw edge totals without staleness; -1 sorts unknown totals last.
-    stale_edges, total_edges = _counts(
-        _STALE_SAMPLES_RE, text, "edge counts", default=(0, -1)
+def read_profile_yaml(profile_path: Path) -> tuple[int, int]:
+    with profile_path.open(encoding="utf-8") as stream:
+        profile = yaml.load(stream, Loader=Loader)
+    functions = len(profile["functions"])
+    samples = sum(
+        edge.get("cnt", 0)
+        for function in profile["functions"]
+        for block in function.get("blocks", [])
+        for edge in block.get("succ", [])
     )
-    inferred = _INFERRED_RE.search(text)
-    recovered = int(inferred.group(1)) if inferred else 0
+    return functions, samples
+
+
+def read_profile_quality(profile_path: Path, log_path: Path) -> list[TableRow]:
+    # read the optimization log
+    text = log_path.read_text(encoding="utf-8")
+    profiled = _counts(_PROFILED_RE, text)
+    non_simple = _counts(_NON_SIMPLE_RE, text)
+    ignored = _counts(_IGNORED_RE, text)
+    stale = _counts(_STALE_FUNCTIONS_RE, text)
+    samples = _counts(_STALE_SAMPLES_RE, text)
+    inferred = _counts(_INFERRED_RE, text)
     matches = {
-        match.group(1): tuple(int(value) for value in match.groups()[1:])
+        match["kind"]: {
+            "blocks": int(match["blocks"]),
+            "total_blocks": int(match["total_blocks"]),
+            "block_execs": int(match["block_execs"]),
+            "total_block_execs": int(match["total_block_execs"]),
+        }
         for match in _MATCH_RE.finditer(text)
     }
-    total_blocks = max((counts[1] for counts in matches.values()), default=0)
-    total_execs = max((counts[3] for counts in matches.values()), default=0)
-    values = {
-        "library": path.stem.replace("llvm-bolt-", "", 1) + ".so",
-        "binary": f"{binary:,}",
-        "profiled": f"{profiled:,}",
-        "total_edges": f"{total_edges:,}" if total_edges >= 0 else "-",
-        "valid_funcs": _percent(profiled - stale, profiled),
-        "valid_edges": _percent(total_edges - stale_edges, total_edges)
-        if total_edges >= 0
-        else "-",
-        "stale_funcs": _percent(stale, profiled),
-        "stale_edges": _percent(stale_edges, total_edges) if total_edges >= 0 else "-",
-        "recovered": _percent(recovered, stale),
-        "total_blocks": f"{total_blocks:,}" if matches else "",
-        "total_execs": f"{total_execs:,}" if matches else "",
+    block_totals = {
+        (counts["total_blocks"], counts["total_block_execs"])
+        for counts in matches.values()
     }
-    for name in ("exact", "call", "loose"):
-        blocks, _, block_execs, _ = matches.get(f"{name} match", (0, 0, 0, 0))
-        values[f"{name}_blocks"] = _percent(blocks, total_blocks)
-        values[f"{name}_execs"] = _percent(block_execs, total_execs)
-    return total_edges, _TABLE_TEMPLATE.format(**values).rstrip()
+    if len(block_totals) != 1:
+        raise ValueError(f"{log_path}: inconsistent inference block totals")
+    total_blocks, total_execs = block_totals.pop()
+
+    # read the yaml profile and sanity check that bolt optimization log
+    # accounts for the same number of functions as present in the profile
+    yaml_functions, yaml_samples = read_profile_yaml(profile_path)
+    profiled_functions = profiled["functions"]
+    ignored_functions = ignored["functions"] + non_simple["functions"]
+    logged_functions = profiled_functions + ignored_functions
+    if yaml_functions != logged_functions:
+        print(
+            f"Warning: {profile_path}: {yaml_functions} profile entries do not match {log_path}: "
+            f"{profiled_functions} profiled + {non_simple['functions']} non-simple + "
+            f"{ignored['functions']} ignored",
+            file=sys.stderr,
+        )
+
+    # construct the table
+    rows: list[TableRow] = [[profile_path.name, yaml_functions, None, yaml_samples]]
+
+    matched_samples = samples["matched"]
+    ignored_samples = yaml_samples - matched_samples
+    rows.append(
+        [
+            "|_ Ignored + Non-Simple",
+            ignored_functions,
+            _safediv(ignored_functions, yaml_functions),
+            ignored_samples,
+            _safediv(ignored_samples, yaml_samples),
+        ]
+    )
+
+    rows.append(
+        [
+            "|_ Matched",
+            profiled_functions,
+            _safediv(profiled_functions, yaml_functions),
+            matched_samples,
+            _safediv(matched_samples, yaml_samples),
+        ]
+    )
+
+    stale_functions = stale["functions"]
+    stale_samples = samples["stale"]
+    fresh_functions = profiled_functions - stale_functions
+    fresh_samples = matched_samples - stale_samples
+    rows.append(
+        [
+            "   |_ Fresh profiles",
+            fresh_functions,
+            _safediv(fresh_functions, profiled_functions),
+            fresh_samples,
+            _safediv(fresh_samples, matched_samples),
+        ]
+    )
+    rows.append(
+        [
+            "   |_ Stale profiles",
+            stale_functions,
+            _safediv(stale_functions, profiled_functions),
+            stale_samples,
+            _safediv(stale_samples, matched_samples),
+        ]
+    )
+
+    rows.append(
+        [
+            "      |_ Inferred Functions",
+            inferred["functions"],
+            _safediv(inferred["functions"], stale_functions),
+            inferred["samples"],
+            _safediv(inferred["samples"], stale_samples),
+            total_blocks,
+            None,
+            total_execs,
+        ]
+    )
+
+    for name, counts in matches.items():
+        rows.append(
+            [
+                f"         |_ {name.capitalize()} match",
+                None,
+                None,
+                None,
+                None,
+                counts["blocks"],
+                _safediv(counts["blocks"], counts["total_blocks"]),
+                counts["block_execs"],
+                _safediv(counts["block_execs"], counts["total_block_execs"]),
+            ]
+        )
+    return rows
+
+
+_REPORT_GUIDANCE = """\
+Print BOLT profile quality by looking at the yaml profiles used for optimization and the optimization logs.
+
+=== EXAMPLE ===
+
+Profile                        Functions       %          Samples       %    Blocks      %     Block execs      %
+---------------------------  -----------  ------  ---------------  ------  --------  -----  --------------  -----
+libtorch_python.yaml               6,811          321,563,664,624
+|_ Ignored + Non-Simple            2,350   34.5%   20,789,057,795    6.5%
+|_ Matched                         4,461   65.5%  300,774,606,829   93.5%
+   |_ Fresh profiles                 814   18.2%   41,414,527,046   13.8%
+   |_ Stale profiles               3,647   81.8%  259,360,079,783   86.2%
+      |_ Inferred Functions        3,647  100.0%  259,360,079,783  100.0%    52,106         47,090,218,678
+         |_ Exact match                                                      13,928  26.7%   6,877,780,011  14.6%
+         |_ Call match                                                        3,568   6.8%   4,213,401,480   8.9%
+         |_ Loose match                                                      19,490  37.4%  35,983,392,509  76.4%
+
+=== GUIDANCE ===
+
+Percentages are relative to the parent value in the same column.
+
+"Non-Simple" functions cannot be optimized by bolt. Reasons include unsupported relocations, jump table handling,
+failed disassembly or control flow reconstruction. "Ignored" functions are profile entries that were not found
+in the binary, this happens when bolt's heuristics for function matching fails, eg function renames. "Matched"
+function are the ones that are candidates for optimization by bolt.
+
+"Inferred Functions" refers to the number of functions that received profiles after stale profile matching
+(inference). The "Blocks" count in that row represent the total number of basic blocks in inferred functions and
+NOT the number of successfully matched basic blocks. Block matching numbers are shown in the children rows and
+are used to judge the quality of inference.
+
+Exact and call matches are good indicators of correspondence with the current binary. Loose matches use weaker
+heuristics and give less confidence in the recovered profile.
+
+High values for the following can signal if the profiles need to be updated: "Ignored + Non-Simple" sample %,
+"Stale profile" sample %, and "Loose match" block exec %.
+"""
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Print BOLT profile quality by descending edge count"
+        description=_REPORT_GUIDANCE,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("log_dir", type=Path, help="BOLT log directory")
+    parser.add_argument(
+        "--profile",
+        nargs=2,
+        action="append",
+        required=True,
+        type=Path,
+        metavar=("YAML", "LOG"),
+        help="Profile and corresponding optimization log; repeat for additional profiles",
+    )
     args = parser.parse_args()
-    logs = sorted(args.log_dir.glob("llvm-bolt-*.txt"))
-    if not logs:
-        raise ValueError("No llvm-bolt-*.txt logs found")
-    libraries = [parse_bolt_log(path) for path in logs]
-    libraries.sort(key=lambda item: (-item[0], item[1]))
-    print(_TABLE_HEADER)
-    print("\n".join(table for _, table in libraries))
-    print("\n" + _REPORT_GUIDANCE.rstrip())
+
+    rows = []
+    for profile_path, log_path in args.profile:
+        try:
+            report_rows = read_profile_quality(profile_path, log_path)
+        except ValueError as error:
+            print(f"Warning: skipping {profile_path.name}: {error}", file=sys.stderr)
+            continue
+        rows.extend(report_rows)
+        rows.append([])  # empty row
+
+    tabulate.PRESERVE_WHITESPACE = True
+    print(tabulate.tabulate(rows, headers=_HEADERS, intfmt=",", floatfmt=".1%"))
+    print(f"Use `{Path(__file__).resolve()} --help` for guidance on using this report.")
 
 
 if __name__ == "__main__":
