@@ -118,6 +118,11 @@ _VALUE_REGEX = r"^[0123]$"
 
 
 class Std(IntFlag):
+    """
+    Bitmask of std streams to redirect or tee: ``NONE``, ``OUT`` (stdout),
+    ``ERR`` (stderr) or ``ALL`` (both).
+    """
+
     NONE = 0
     OUT = 1
     ERR = 2
