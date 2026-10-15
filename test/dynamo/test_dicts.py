@@ -1397,6 +1397,48 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, mp)
         self.assertEqual(ref, res)
 
+    def test_mapping_proxy_len_does_not_call_getitem(self):
+        class Data(dict):
+            reads = 0
+
+            def __getitem__(self, key):
+                self.reads += 1
+                return super().__getitem__(key)
+
+        def fn(x, proxy):
+            return x + len(proxy)
+
+        data = Data(a=1, b=2)
+        proxy = types.MappingProxyType(data)
+        x = torch.ones(2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, proxy), fn(x, proxy)
+        )
+        self.assertEqual(data.reads, 0)
+
+    @parametrize("override", ["iter", "keys"])
+    def test_mapping_proxy_items_order(self, override):
+        class Inputs(OrderedDict):
+            def __iter__(self):
+                if override == "iter":
+                    return reversed(super().keys())
+                return super().__iter__()
+
+            def keys(self):
+                if override == "keys":
+                    return reversed(super().keys())
+                return super().keys()
+
+        def fn(x, mapping):
+            return x + 1, tuple(mapping.items())
+
+        x = torch.randn(3)
+        mapping = types.MappingProxyType(Inputs(a=1, b=2))
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
+            fn(x, mapping),
+        )
+
     def test_dict_construction_from_mapping_proxy(self):
         d = {"a": 2, "b": 3, "c": 5}
 
