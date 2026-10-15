@@ -462,8 +462,6 @@ coverage_ignore_functions = [
     "unique_id",
     # torch.cuda.profiler
     "init",
-    # torch.distributed.checkpoint.default_planner
-    "create_default_local_load_plan",
     # torch.distributed.checkpoint.utils
     "find_state_dict_object",
     "find_tensor_shard",
@@ -1406,8 +1404,6 @@ coverage_ignore_classes = [
     # torch.distributed.argparse_util
     "check_env",
     "env",
-    # torch.distributed.checkpoint.api
-    "CheckpointException",
     # torch.distributed.checkpoint.default_planner
     "DefaultLoadPlanner",
     "DefaultSavePlanner",
@@ -1419,20 +1415,11 @@ coverage_ignore_classes = [
     "HuggingFaceStorageWriter",
     # torch.distributed.checkpoint.quantized_hf_storage
     "QuantizedHuggingFaceStorageReader",
-    # torch.distributed.checkpoint.metadata
-    "BytesStorageMetadata",
-    "ChunkStorageMetadata",
-    "Metadata",
-    "MetadataIndex",
     # torch.distributed.checkpoint.planner
-    "LoadItemType",
     "LoadPlanner",
     "SavePlanner",
-    "WriteItemType",
     # torch.distributed.checkpoint.state_dict
     "DistributedStateDictOptions",
-    # torch.distributed.checkpoint.storage
-    "WriteResult",
     # torch.distributed.collective_utils
     "SyncPayload",
     # torch.distributed.distributed_c10d
