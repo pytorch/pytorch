@@ -80,7 +80,9 @@ Logger::~Logger() {
   }
 
   // Finally, print to terminal or console.
-  out_ << buf_.str() << std::endl;
+  if (messageSeverity_ >= severityLevel_) {
+    out_ << buf_.str() << std::endl;
+  }
 }
 
 void Logger::setVerboseLogModules(const std::vector<std::string>& modules) {
