@@ -46,8 +46,10 @@ from torch.testing._internal.common_device_type import (
     E4M3_MAX_POS,
     E5M2_MAX_POS,
     expectedFailureCUDA,
+    expectedFailureXPU,
     skipXPU,
     skipCUDAIf,
+    skipXPUIf,
     skipCUDAIfNotRocm,
 )
 
@@ -893,7 +895,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
-    @onlyCUDA
+    @expectedFailureXPU  # Missing XPU support for scale_result; XPU still does not support scale_result in ScaledBlas.cpp
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_scale_result(self, device) -> None:
         torch.manual_seed(0)
@@ -932,7 +934,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         self.assertEqual(high_precision, unscaled)
 
 
-    @onlyCUDA
+    @expectedFailureXPU  # Missing XPU support for _scaled_grouped_mm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [2048, 2049])
@@ -1011,7 +1013,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         # Assert outputs are close
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
-    @onlyCUDA
+    @expectedFailureXPU  # Missing XPU support for _scaled_grouped_mm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [16640])
@@ -1224,7 +1226,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
+    @expectedFailureXPU  # Missing XPU support for _scaled_addmm
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
@@ -1249,7 +1252,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
         self.assert_scaled_addmm_inplace(input.clone(), actual, args, **kwargs)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
+    @expectedFailureXPU  # Missing XPU support for _scaled_addmm
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_wgrad_accumulation(self, device):
@@ -1269,7 +1273,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         )
         self.assert_scaled_addmm_inplace(grad, reference.to(grad.dtype), args_b)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
+    @expectedFailureXPU  # Missing XPU support for _scaled_addmm
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("inplace", [False, True])
@@ -1295,7 +1300,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             (mat1.float() @ mat2.float()).to(input.dtype),
         )
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
+    @expectedFailureXPU  # Missing XPU support for _scaled_addmm
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("inplace", [False, True])
@@ -1311,7 +1317,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
         self.assertEqual(op(input.clone(), *args, beta=2), input * 2)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
+    @skipXPUIf(True, "Missing XPU support for _scaled_addmm")
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("fake", [False, True])
@@ -1374,7 +1381,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
                 if not fake:
                     self.assertEqual(result, torch.ops.aten._scaled_mm_v2.default(*args))
 
-    @onlyCUDA
+    @expectedFailureXPU  # Missing XPU support for _scaled_addmm
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_validation(self, device):
@@ -1447,7 +1454,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
                     ScalingType.RowWise,
                 )
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
+    @expectedFailureXPU  # Missing XPU support for _scaled_addmm
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
@@ -1485,7 +1493,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
         self.assert_scaled_addmm_inplace(input.clone(), actual, args, **kwargs)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
+    @expectedFailureXPU  # Missing XPU support for _scaled_addmm
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("two_level", [False, True])
@@ -1567,7 +1576,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
             self.assertIs(scaled_addmm_(input, *args), input)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
+    @expectedFailureXPU  # Missing XPU support for _scaled_addmm
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_fullgraph(self, device):
@@ -3468,6 +3478,7 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
                     self.assertNotEqual(no_carveout, carveout_66)
                     self.assertNotEqual(carveout_66, carveout_0)
 
+    @expectedFailureXPU  # Missing XPU support for _scaled_addmm
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_inplace_tunableop(self, device):
