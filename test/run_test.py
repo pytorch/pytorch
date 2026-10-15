@@ -544,7 +544,8 @@ def _torchci_report_args(
 def _torchci_reports_default() -> str | None:
     # The CI jobs that write reports by default, widening until it's all of CI.
     # upload-test-artifacts uploads this folder.
-    if IS_CI and os.environ.get("GITHUB_WORKFLOW") in ("trunk", "pull"):
+    workflows = ("trunk", "pull", "slow", "inductor", "periodic-strict")
+    if IS_CI and os.environ.get("GITHUB_WORKFLOW") in workflows:
         return str(REPO_ROOT / "test/torchci-reports")
     return None
 
