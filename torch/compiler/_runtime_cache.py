@@ -475,10 +475,13 @@ class _RuntimeCapture:
         # captures are unsupported; counting them only keeps a misuse from
         # closing the scope under the other capture.
         self.captures = 0
-        # Restores Triton's cache settings when the scope closes.
-        self.triton_settings = contextlib.ExitStack()
-        # The fresh Triton cache directory whose JIT cache the scope ships.
-        self.cache_root = _own_triton_cache(self.triton_settings)
+        # The fresh Triton cache directory whose JIT cache the scope ships. The
+        # stack only becomes the scope's once that succeeds, so a failure
+        # partway restores the knobs it already overrode.
+        with contextlib.ExitStack() as settings:
+            self.cache_root = _own_triton_cache(settings)
+            # Restores Triton's cache settings when the scope closes.
+            self.triton_settings = settings.pop_all()
         self.freeze_lock = threading.Lock()
         self.triton_kernels: dict[str, list[CachingAutotuner]] = {}
         self.cpp_kernels: dict[str, tuple[str, Callable[[], object]]] = {}
@@ -629,8 +632,7 @@ def freeze_runtime_cache(
     with owner.freeze_lock:
         if cache is not None and _current_root(cache) != owner.cache_root:
             raise RuntimeError("Triton's cache directory changed during the capture")
-        # Keep the workers: a save() checkpoint is followed by more of the block.
-        AsyncCompile.drain_pending(shutdown=False)
+        AsyncCompile.drain_pending()
         with _capture_lock:
             cpp_loads = [load for _, load in owner.cpp_kernels.values()]
         # Finishes pending C++ builds and builds loads that were never forced, so
