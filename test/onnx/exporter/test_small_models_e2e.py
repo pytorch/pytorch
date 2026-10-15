@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import logging
 
+import onnx
+
 import onnx_ir as ir
 import pytest
 import transformers
 
 import torch
+import torch.ao.quantization.fx._decomposed
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import HardwareClassification
@@ -965,6 +968,256 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         x = torch.randn(1, 3, 4)
         onnx_program = self.export(Model(), (x,))
         onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_quantized_decomposed_quantize_per_tensor_int32(self):
+        # QuantizeLinear cannot output int32; the export lowers it to primitive ops.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.quantized_decomposed.quantize_per_tensor(
+                    x, 0.01, 3, -(2**31), 2**31 - 1, torch.int32
+                )
+
+        # Values around rounding ties.
+        x = torch.tensor([[-4.635, 4.635, -4.625, 4.625]])
+
+        onnx_program = self.export(Model(), (x,))
+
+        onnx_testing.assert_onnx_program(onnx_program)
+        onnx.checker.check_model(onnx_program.model_proto, full_check=True)
+        self.assertEqual(onnx_program.model.graph.outputs[0].dtype, ir.DataType.INT32)
+        self.assertEqual(
+            ["Mul", "Round", "Add", "Clip", "Cast"],
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_quantized_decomposed_quantize_per_tensor_int32_tensor(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.quantized_decomposed.quantize_per_tensor.tensor(
+                    x,
+                    torch.tensor(0.02, dtype=torch.double),
+                    torch.tensor(-5, dtype=torch.int64),
+                    -(2**31),
+                    2**31 - 1,
+                    torch.int32,
+                )
+
+        x = torch.randn(5, 3) * 50
+
+        onnx_program = self.export(Model(), (x,))
+
+        onnx_testing.assert_onnx_program(onnx_program)
+        onnx.checker.check_model(onnx_program.model_proto, full_check=True)
+        self.assertEqual(onnx_program.model.graph.outputs[0].dtype, ir.DataType.INT32)
+        self.assertNotIn(
+            "QuantizeLinear", [node.op_type for node in onnx_program.model.graph]
+        )
+
+    def test_quantized_decomposed_quantize_per_tensor_int32_tensor2(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.quantized_decomposed.quantize_per_tensor.tensor2(
+                    x,
+                    torch.tensor(0.05, dtype=torch.double),
+                    torch.tensor(7, dtype=torch.int64),
+                    torch.tensor(-(2**31), dtype=torch.int64),
+                    torch.tensor(2**31 - 1, dtype=torch.int64),
+                    torch.int32,
+                )
+
+        x = torch.randn(6) * 20
+
+        onnx_program = self.export(Model(), (x,))
+
+        onnx_testing.assert_onnx_program(onnx_program)
+        onnx.checker.check_model(onnx_program.model_proto, full_check=True)
+        self.assertEqual(onnx_program.model.graph.outputs[0].dtype, ir.DataType.INT32)
+        self.assertNotIn(
+            "QuantizeLinear", [node.op_type for node in onnx_program.model.graph]
+        )
+
+    def test_quantized_decomposed_quantize_per_channel_int32(self):
+        def model(axis, channels):
+            scales = [0.01 * (i + 1) for i in range(channels)]
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.quantized_decomposed.quantize_per_channel(
+                        x,
+                        torch.tensor(scales, dtype=torch.double),
+                        torch.tensor(
+                            [10 * (i + 1) for i in range(channels)], dtype=torch.int64
+                        ),
+                        axis,
+                        -(2**31),
+                        2**31 - 1,
+                        torch.int32,
+                    )
+
+            return Model()
+
+        # axis may also be negative, indexing from the last dimension.
+        for axis, shape, channels in (
+            (0, (3, 4, 5), 3),
+            (1, (2, 3, 4), 3),
+            (-1, (2, 3, 4), 4),
+        ):
+            with self.subTest(axis=axis):
+                x = torch.randn(*shape) * 100
+
+                onnx_program = self.export(model(axis, channels), (x,))
+
+                onnx_testing.assert_onnx_program(onnx_program)
+                onnx.checker.check_model(onnx_program.model_proto, full_check=True)
+                self.assertEqual(
+                    onnx_program.model.graph.outputs[0].dtype, ir.DataType.INT32
+                )
+                self.assertNotIn(
+                    "QuantizeLinear",
+                    [node.op_type for node in onnx_program.model.graph],
+                )
+
+    def test_quantized_decomposed_quantize_per_tensor_int32_reciprocal_precision(self):
+        # The reciprocal needs float64 precision; float32 flips rounding at ties.
+        scale = 0.09914471630264365
+
+        class ScalarModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.quantized_decomposed.quantize_per_tensor(
+                    x, scale, 0, -(2**31), 2**31 - 1, torch.int32
+                )
+
+        class TensorModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.quantized_decomposed.quantize_per_tensor.tensor(
+                    x,
+                    torch.tensor(scale, dtype=torch.double),
+                    torch.tensor(0, dtype=torch.int64),
+                    -(2**31),
+                    2**31 - 1,
+                    torch.int32,
+                )
+
+        class Tensor2Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.quantized_decomposed.quantize_per_tensor.tensor2(
+                    x,
+                    torch.tensor(scale, dtype=torch.double),
+                    torch.tensor(0, dtype=torch.int64),
+                    torch.tensor(-(2**31), dtype=torch.int64),
+                    torch.tensor(2**31 - 1, dtype=torch.int64),
+                    torch.int32,
+                )
+
+        x = torch.tensor([0.14871707558631897, -0.14871707558631897])
+
+        for name, model in (
+            ("default", ScalarModel()),
+            ("tensor", TensorModel()),
+            ("tensor2", Tensor2Model()),
+        ):
+            with self.subTest(overload=name):
+                onnx_program = self.export(model, (x,))
+
+                onnx_testing.assert_onnx_program(onnx_program)
+                onnx.checker.check_model(onnx_program.model_proto, full_check=True)
+
+    def test_quantized_decomposed_quantize_per_channel_int32_float16_scales(self):
+        # float16 scales divide in float32 and the reciprocal rounds back to float16.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.quantized_decomposed.quantize_per_channel(
+                    x,
+                    torch.tensor([0.01302337646484375], dtype=torch.float16),
+                    torch.tensor([0], dtype=torch.int64),
+                    0,
+                    -(2**31),
+                    2**31 - 1,
+                    torch.int32,
+                )
+
+        x = torch.tensor([[0.019528072327375412, -0.019528072327375412]])
+
+        onnx_program = self.export(Model(), (x,))
+
+        onnx_testing.assert_onnx_program(onnx_program)
+        onnx.checker.check_model(onnx_program.model_proto, full_check=True)
+
+    def test_quantized_decomposed_quantize_per_channel_int32_out_of_range(self):
+        # ONNX Cast float-to-int is undefined outside the int32 range, so the
+        # clamp must apply even at the full int32 range.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.quantized_decomposed.quantize_per_channel(
+                    x,
+                    torch.tensor([1.0], dtype=torch.double),
+                    torch.tensor([0], dtype=torch.int64),
+                    0,
+                    -(2**31),
+                    2**31 - 1,
+                    torch.int32,
+                )
+
+        x = torch.tensor([[3e9, -3e9]])
+
+        onnx_program = self.export(Model(), (x,))
+
+        onnx_testing.assert_onnx_program(onnx_program)
+        onnx.checker.check_model(onnx_program.model_proto, full_check=True)
+
+    def test_quantized_decomposed_quantize_per_tensor_int8_narrow_range(self):
+        # A range narrower than int8 clamps instead of saturating to full int8.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.quantized_decomposed.quantize_per_tensor(
+                    x, 0.05, 0, -7, 7, torch.int8
+                )
+
+        x = torch.randn(11) * 20
+
+        onnx_program = self.export(Model(), (x,))
+
+        onnx_testing.assert_onnx_program(onnx_program)
+        onnx.checker.check_model(onnx_program.model_proto, full_check=True)
+        self.assertEqual(
+            ["QuantizeLinear", "Clip"],
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_quantized_decomposed_quantize_per_tensor_uint8(self):
+        # uint8 stays a single QuantizeLinear.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.quantized_decomposed.quantize_per_tensor(
+                    x, 0.1, 128, 0, 255, torch.uint8
+                )
+
+        x = torch.randn(3, 5)
+
+        onnx_program = self.export(Model(), (x,))
+
+        onnx_testing.assert_onnx_program(onnx_program)
+        onnx.checker.check_model(onnx_program.model_proto, full_check=True)
+        self.assertEqual(
+            ["QuantizeLinear"], [node.op_type for node in onnx_program.model.graph]
+        )
+
+    def test_quantized_decomposed_quantize_per_tensor_int8(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.quantized_decomposed.quantize_per_tensor(
+                    x, 0.05, -3, -128, 127, torch.int8
+                )
+
+        x = torch.randn(7) * 10
+
+        onnx_program = self.export(Model(), (x,))
+
+        onnx_testing.assert_onnx_program(onnx_program)
+        onnx.checker.check_model(onnx_program.model_proto, full_check=True)
+        self.assertEqual(
+            ["QuantizeLinear"], [node.op_type for node in onnx_program.model.graph]
+        )
 
 
 @common_utils.instantiate_parametrized_tests
