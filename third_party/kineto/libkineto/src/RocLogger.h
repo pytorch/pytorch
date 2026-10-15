@@ -41,6 +41,14 @@ enum CorrelationDomain {
   end,
   size = end
 };
+
+// A kernel dispatch issued by the runtime to implement a HIP memset or
+// memcpy API call (rocclr fill/copy kernels).
+enum RuntimeInternalApi : uint32_t {
+  RuntimeInternalNone = 0,
+  RuntimeInternalMemset = 1,
+  RuntimeInternalMemcpy = 2,
+};
 } // namespace RocLogger
 
 class ApiIdList {
@@ -232,4 +240,18 @@ struct rocprofAsyncRow : public rocprofBase {
   uint64_t queue;
   uint64_t stream{0};
   std::string kernelName;
+  // Launch dimensions, captured from the kernel dispatch record itself.
+  // grid: number of workgroups, workgroup: threads per workgroup.
+  uint32_t gridX{0};
+  uint32_t gridY{0};
+  uint32_t gridZ{0};
+  uint32_t workgroupX{0};
+  uint32_t workgroupY{0};
+  uint32_t workgroupZ{0};
+  // Set when this dispatch was issued by the runtime to implement a HIP
+  // memset or memcpy API call.  The dispatch record is the GPU-side
+  // artifact for kernel-implemented fills/copies; report it under the API
+  // the user called (CUPTI parity) instead of as a user kernel.
+  uint32_t internalApi{0}; // 0=none, 1=memset, 2=memcpy
+  size_t internalBytes{0};
 };
