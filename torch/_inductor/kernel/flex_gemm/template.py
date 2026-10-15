@@ -143,7 +143,7 @@ class FlexGemmEpilogueConfig:
         aux_out_indices: Template input indices for same-shape aux outputs.
         indexed_output: Runtime input positions for one indexed auxiliary output.
         local_reduce: Concrete local-reduce consumer rendered into runtime kwargs.
-        output_contraction: Lane transform between the accumulator and the main
+        output_transform: Lane transform between the accumulator and the main
             output (``GroupedMainStore`` or ``InterleavedMainStore``), if any.
     """
 
@@ -160,7 +160,7 @@ class FlexGemmEpilogueConfig:
     aux_out_indices: tuple[int, ...]
     indexed_output: FlexGemmEpilogueIndexedOutputConfig | None
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
-    output_contraction: FlexGemmOutputTransform | None
+    output_transform: FlexGemmOutputTransform | None
 
     def epimod(
         self,
@@ -196,7 +196,7 @@ class FlexGemmEpilogueConfig:
             None
             if self.local_reduce is None
             else self.local_reduce.runtime_plan(resolve, self.epilogue_name),
-            self.output_contraction,
+            self.output_transform,
             varlen_m=self.varlen_axis == "m",
         )
 
@@ -383,8 +383,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                     input_args, config.local_reduce, config.epilogue_name
                 )
             )
-        if config.output_contraction is not None:
-            kwargs.append(f", output_contraction={config.output_contraction!r}")
+        if config.output_transform is not None:
+            kwargs.append(f", output_transform={config.output_transform!r}")
         return "".join(kwargs)
 
 
@@ -422,7 +422,7 @@ class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):
         sizevars = V.graph.sizevars
         if fields["swap_ab"]:
             sizevars.check(sympy.Eq(sympy.Mod(n, 8), 0))
-        if isinstance(config.output_contraction, FlexGemmOutputContraction):
+        if isinstance(config.output_transform, FlexGemmOutputContraction):
             sizevars.check_leq(fields["tile_n"], n)
         return super().output_node()
 

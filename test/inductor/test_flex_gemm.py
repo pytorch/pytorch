@@ -987,9 +987,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                     if node.target is torch.ops.aten.split.Tensor
                 ]
                 self.assertTrue(split_nodes)
-                self.assertEqual(
-                    analysis.outputs.output_contraction, expected_transform
-                )
+                self.assertEqual(analysis.outputs.output_transform, expected_transform)
                 registered = [
                     node
                     for node in split_nodes
@@ -1133,7 +1131,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         analysis = analyze_flex_gemm_epilogue(
             graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
         )
-        self.assertIsNone(analysis.outputs.output_contraction)
+        self.assertIsNone(analysis.outputs.output_transform)
         self.assertEqual(analysis.output_contraction_layouts, {})
         self.assertEqual(shape_env.guards, [])
 
@@ -1234,7 +1232,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 analysis = analyze_flex_gemm_epilogue(
                     graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
                 )
-                self.assertIsNone(analysis.outputs.output_contraction)
+                self.assertIsNone(analysis.outputs.output_transform)
 
     def test_output_expansion_matches_stacked_lanes(self):
         from torch._inductor.kernel.flex_gemm.constraints import FlexGemmOutputExpansion
@@ -1245,9 +1243,10 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
         from torch.fx.experimental.proxy_tensor import make_fx
 
-        def stacked_lanes(a, b):
+        def stacked_lanes_with_aux(a, b):
             acc = torch.mm(a, b)
-            return torch.stack([acc, acc * 2], dim=-1).view(4, 32).to(torch.bfloat16)
+            packed = torch.stack([acc, acc * 2], dim=-1).view(4, 32)
+            return (packed * 0.5 + 1).to(torch.bfloat16), acc.relu()
 
         def unsqueezed_lanes(a, b):
             acc = torch.mm(a, b)
@@ -1258,24 +1257,34 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             acc = torch.mm(a, b)
             return torch.stack([acc, acc, acc], dim=-1).view(4, 48)
 
-        for body, expansion in (
-            (stacked_lanes, True),
-            (unsqueezed_lanes, True),
-            (three_lanes, False),
+        def packed_aux(a, b):
+            acc = torch.mm(a, b)
+            packed = torch.stack([acc, acc * 2], dim=-1).view(4, 32)
+            return packed, packed.view(4, 16, 2)[..., 0]
+
+        def expanded_aux(a, b):
+            acc = torch.mm(a, b)
+            return torch.stack([acc, acc * 2], dim=-1).view(4, 32), acc.repeat(1, 2)
+
+        for body, error in (
+            (stacked_lanes_with_aux, None),
+            (unsqueezed_lanes, None),
+            (three_lanes, "output shape"),
+            (packed_aux, "before the lanes are packed"),
+            (expanded_aux, "GEMM-shaped auxiliaries"),
         ):
             with self.subTest(body=body.__name__):
                 graph_module = make_fx(body)(torch.randn(4, 8), torch.randn(8, 16))
                 gemm = gemm_node(graph_module, torch.ops.aten.mm.default)
-                if not expansion:
-                    with self.assertRaisesRegex(NotImplementedError, "output shape"):
+                if error is not None:
+                    with self.assertRaisesRegex(NotImplementedError, error):
                         analyze_flex_gemm_epilogue(graph_module, gemm)
                     continue
                 analysis = analyze_flex_gemm_epilogue(graph_module, gemm)
                 self.assertEqual(
-                    analysis.outputs.output_contraction, FlexGemmOutputExpansion()
+                    analysis.outputs.output_transform, FlexGemmOutputExpansion()
                 )
-                lanes = analysis.output_expansion.lanes
-                self.assertEqual(lanes[0], gemm)
+                self.assertEqual(analysis.output_expansion.lanes[0], gemm)
                 self.assertIn("expansion", format_flex_gemm_analysis(analysis))
 
     def test_indexed_output_accepts_gather_from_converted_main(self):
@@ -1449,7 +1458,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         details = format_flex_gemm_analysis_details(analysis)
         self.assertIn("outputs:\n  main: relu: shape=(4, 64)", report)
         self.assertIn("  auxiliary: (none)", report)
-        self.assertIn("output_contraction: none", report)
+        self.assertIn("output_transform: none", report)
         self.assertIn("geometry: axis=N, group=32", report)
         self.assertIn("consumers: returned", report)
         self.assertIn("output_layout: dense", report)
@@ -1483,7 +1492,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
         )
         self.assertIn(
-            "output_contraction: N-axis, group=2, layout=interleaved",
+            "output_transform: N-axis, group=2, layout=interleaved",
             format_flex_gemm_analysis(analysis),
         )
         details = format_flex_gemm_analysis_details(analysis)
@@ -1515,7 +1524,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
         )
         self.assertIn(
-            "output_contraction: N-axis, group=2, layout=interleaved",
+            "output_transform: N-axis, group=2, layout=interleaved",
             format_flex_gemm_analysis(analysis),
         )
         self.assertIn(
@@ -9991,7 +10000,7 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         self.assertGroupedMmQuackCode(code)
         kinds = "('tile', 'tile')" if layout == "chunked" else "('interleaved',)"
         FileCheck().check(f"epilogue_arg_kinds={kinds}").check(
-            "output_contraction=FlexGemmOutputExpansion()"
+            "output_transform=FlexGemmOutputExpansion()"
         ).run(code)
         # Only the GEMM kernel touches h and dh: a capture copy or a separate
         # interleaving pass would add a Triton kernel over floating-point data.
@@ -9999,8 +10008,6 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         valid = offs[-1].item()
         expected = self.groupedReference(x, w_t, offs, epilogue_fn)[:valid]
         eager = epilogue_fn(F.grouped_mm(x, w_t, offs=offs))[:valid]
-        self.assertEqual(actual.shape, (x.shape[0], 2 * self.N))
-        self.assertEqual(actual.dtype, eager.dtype)
         self.assertMatchesLowPrecisionEager(actual[:valid], eager, expected, self.K)
         self.assertWorstElementMatchesLowPrecisionEager(
             actual[:valid], eager, expected, self.K
@@ -10223,36 +10230,19 @@ class TestFlexGemmInterleavedDevice(FlexGemmTestCase):
 
     M, K, N = 333, 256, 136
 
-    def interleavedEpilogue(self, h, out_dtype, glu_vjp=True):
-        """Return two lanes of ``acc`` and ``h`` stored interleaved like ``h``."""
-
-        def glu(gate, up):
-            return F.silu(gate) * up
-
-        def epilogue_fn(acc):
-            gate, up = h.view(acc.shape[0], self.N, 2).unbind(-1)
-            if glu_vjp:
-                _, vjp = torch.func.vjp(glu, gate.float(), up.float())
-                lanes = vjp(acc.float())
-            else:
-                lanes = (acc * gate, acc * up)
-            dh = torch.stack(lanes, dim=-1).view(acc.shape[0], 2 * self.N)
-            return dh if out_dtype is torch.float32 else dh.to(out_dtype)
-
-        return epilogue_fn
-
-    def compileMm(self, epilogue_fn, a, b, **kernel_options):
-        def fn(a, b):
+    def compileMm(
+        self, epilogue_fn, *args, gemm_op=torch.mm, gemm_kwargs=None, **kernel_options
+    ):
+        def fn(*args):
             return flex_gemm(
-                torch.mm,
-                (a, b),
+                gemm_op,
+                args,
                 epilogue_fn,
+                gemm_kwargs=gemm_kwargs,
                 kernel_options={"backend": "QUACK", **kernel_options},
             )
 
-        return run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
+        return run_and_get_code(torch.compile(fn, fullgraph=True), *args)
 
     @parametrize(
         "case",
@@ -10272,16 +10262,27 @@ class TestFlexGemmInterleavedDevice(FlexGemmTestCase):
         h = torch.randn(self.M, 2 * self.N, device=device, dtype=torch.bfloat16)
         if m_major:
             h = h.t().contiguous().t()
-        epilogue_fn = self.interleavedEpilogue(h, out_dtype, glu_vjp=not m_major)
+
+        def glu(gate, up):
+            return F.silu(gate) * up
+
+        def epilogue_fn(acc):
+            gate, up = h.view(acc.shape[0], self.N, 2).unbind(-1)
+            if m_major:
+                lanes = (acc * gate, acc * up)
+            else:
+                _, vjp = torch.func.vjp(glu, gate.float(), up.float())
+                lanes = vjp(acc.float())
+            dh = torch.stack(lanes, dim=-1).view(acc.shape[0], 2 * self.N)
+            return dh if out_dtype is torch.float32 else dh.to(out_dtype)
 
         actual, (code,) = self.compileMm(epilogue_fn, a, b)
 
         FileCheck().check("epilogue_arg_kinds=('interleaved',)").check(
-            "output_contraction=FlexGemmOutputExpansion()"
+            "output_transform=FlexGemmOutputExpansion()"
         ).run(code)
         eager = epilogue_fn(a @ b)
         expected = epilogue_fn(a.double() @ b.double())
-        self.assertEqual(actual.shape, (self.M, 2 * self.N))
         self.assertEqual(actual.dtype, out_dtype)
         self.assertMatchesLowPrecisionEager(actual, eager, expected, self.K)
         self.assertWorstElementMatchesLowPrecisionEager(actual, eager, expected, self.K)
@@ -10289,37 +10290,49 @@ class TestFlexGemmInterleavedDevice(FlexGemmTestCase):
     @parametrize(
         "case",
         (
-            # tile_m=128 with cluster_m=2 runs 2-CTA MMA with 64-row CTA tiles,
-            # which the interleaved copies do not map.
+            ("suffix_add", torch.mm, {}, lambda acc, p: p(acc, acc * 2) + 1),
             (
-                "pinned_2cta_m128",
-                {"tile_m": 128, "cluster_m": 2},
-                "no supported GemmConfig",
+                "suffix_scaled_cast",
+                torch.mm,
+                {},
+                lambda acc, p: (p(acc.float(), acc.float() * 2) * 0.5).to(acc.dtype),
             ),
-            ("stack_also_returned", None, "two plain epilogue lanes"),
-            ("output_not_the_view", None, "GEMM output shape"),
+            ("aux_acc", torch.mm, {}, lambda acc, p: (p(acc, acc * 2), acc)),
+            ("aux_relu", torch.mm, {}, lambda acc, p: (p(acc, acc * 2), acc.relu())),
+            # C broadcasts against the accumulator, not the expanded output.
+            ("addmm", torch.addmm, {"beta": 0.5}, lambda acc, p: p(acc, acc * 2)),
+            ("addmm_beta0", torch.addmm, {"beta": 0.0}, lambda acc, p: p(acc, acc * 2)),
         ),
         name_fn=lambda case: case[0],
     )
-    def test_mm_interleaved_output_rejects_unsupported(self, device, case):
-        name, config, error = case
+    def test_mm_interleaved_output_composes(self, device, case):
+        _, op, kwargs, body = case
         a = self.makeTensor(self.M, self.K, device=device)
         b = self.makeTensor(self.K, self.N, device=device)
-        h = torch.randn(self.M, 2 * self.N, device=device, dtype=torch.bfloat16)
-        vjp = self.interleavedEpilogue(h, torch.bfloat16)
+        c = self.makeTensor(self.M, self.N, device=device)
+        args = (a, b) if op is torch.mm else (c, a, b)
 
         def epilogue_fn(acc):
-            dh = vjp(acc)
-            if name == "stack_also_returned":
-                return dh, dh * 2
-            if name == "output_not_the_view":
-                return dh + 1
-            return dh
+            return body(acc, lambda x, y: torch.stack([x, y], -1).view(self.M, -1))
 
-        with self.assertRaisesRegex(InductorError, error):
-            self.compileMm(
-                epilogue_fn, a, b, **({} if config is None else {"config": config})
-            )
+        actual, (code,) = self.compileMm(
+            epilogue_fn, *args, gemm_op=op, gemm_kwargs=kwargs
+        )
+
+        FileCheck().check("output_transform=FlexGemmOutputExpansion()").run(code)
+        torch.testing.assert_close(actual, epilogue_fn(op(*args, **kwargs)))
+
+    def test_mm_interleaved_output_rejects_2cta_m128_config(self, device):
+        # tile_m=128 with cluster_m=2 runs 2-CTA MMA with 64-row CTA tiles,
+        # which the interleaved copies do not map.
+        a = self.makeTensor(self.M, self.K, device=device)
+        b = self.makeTensor(self.K, self.N, device=device)
+
+        def epilogue_fn(acc):
+            return torch.stack([acc, acc * 2], -1).view(self.M, -1)
+
+        with self.assertRaisesRegex(InductorError, "no supported GemmConfig"):
+            self.compileMm(epilogue_fn, a, b, config={"tile_m": 128, "cluster_m": 2})
 
     @parametrize(
         "case",
@@ -10331,6 +10344,11 @@ class TestFlexGemmInterleavedDevice(FlexGemmTestCase):
             ),
             ("add_neg_inf", lambda acc, full: acc + full(float("-inf"))),
             ("minimum_finite", lambda acc, full: torch.minimum(acc, full(0.01))),
+            # Both branches are constants: neither may inherit the Boolean dtype.
+            (
+                "where_two_constants",
+                lambda acc, full: torch.where(acc > 0, full(0.25), full(0.5)),
+            ),
         ),
         name_fn=lambda case: case[0],
     )
@@ -10346,9 +10364,7 @@ class TestFlexGemmInterleavedDevice(FlexGemmTestCase):
         actual, (code,) = self.compileMm(epilogue_fn, a, b)
 
         self.assertIn("flex_gemm_epilogue(", code)
-        eager = epilogue_fn(a @ b)
-        self.assertEqual(actual.dtype, eager.dtype)
-        torch.testing.assert_close(actual, eager, equal_nan=True)
+        torch.testing.assert_close(actual, epilogue_fn(a @ b), equal_nan=True)
 
 
 instantiate_device_type_tests(TestFlexGemmInterleavedDevice, globals(), only_for="cuda")
