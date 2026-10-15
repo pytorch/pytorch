@@ -229,9 +229,8 @@ class ReportWriter:
         if _disabled:
             return
         with _guard():
-            # run_test.py runs C++ tests under xdist with -x, which stops right after
-            # the final failing report, so that run's teardown report never arrives;
-            # its outcome is already known.
+            # Under xdist, -x stops right after the final failing report, so that
+            # run's teardown report never arrives; its outcome is already known.
             for key, run in list(self.runs.items()):
                 if run.failed_phase:
                     self._finish(key, run)

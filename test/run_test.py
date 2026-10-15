@@ -534,9 +534,10 @@ def _torchci_report_args(
     if not is_cpp_test:
         return [f"--save-torchci-reports={reports_dir}"]
     # C++ tests run under pytest-cpp, not run_tests, so register the plugin here.
+    from torch.testing._internal.torchci import plugin
+
     prefix = Path(reports_dir) / sanitize_test_filename(test_file)
-    plugin = "torch.testing._internal.torchci.plugin"
-    return ["-p", plugin, f"--torchci-report-prefix={prefix}"]
+    return ["-p", plugin.__name__, f"--torchci-report-prefix={prefix}"]
 
 
 def _torchci_reports_default() -> str | None:
