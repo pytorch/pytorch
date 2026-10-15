@@ -417,8 +417,7 @@ def freeze_runtime_cache(
     if owner is None:
         raise RuntimeError("precompile.capture has no runtime capture scope")
     with owner.freeze_lock:
-        # Keep the workers: a save() checkpoint is followed by more of the block.
-        AsyncCompile.drain_pending(shutdown=False)
+        AsyncCompile.drain_pending()
         with _capture_lock:
             cpp_loads = [load for _, load in owner.cpp_kernels.values()]
         # Finishes pending C++ builds and builds loads that were never forced, so
