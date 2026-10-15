@@ -9515,6 +9515,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_cxx_flags(self):
         torch.__config__._cxx_flags()
 
+    def test_cxx_compiler(self):
+        name, version = torch.__config__._cxx_compiler()
+        label = {"gcc": "GCC", "clang": "clang", "msvc": "MSVC"}[name]
+        self.assertRegex(version, r"^\d+(\.\d+)*$")
+        # The line show() prints for the same compiler; for clang it also prints
+        # a GCC line, from clang's own __GNUC__.
+        self.assertIn(f"  - {label} {version}\n", torch.__config__.show())
+
     def test_parallel_info(self):
         torch.__config__.parallel_info()
 
