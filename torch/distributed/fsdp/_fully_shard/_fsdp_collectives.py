@@ -499,7 +499,7 @@ def _prepare_default_all_gather_outputs(
     all_gather_result: AllGatherResult,
     world_size: int,
 ) -> _DefaultAllGatherCopyPlan:
-    all_gather_output = all_gather_result.all_gather_output
+    device = all_gather_result.all_gather_output.device
     plan = _DefaultAllGatherCopyPlan(
         [],
         all_gather_result.all_gather_input_split_sizes,
@@ -510,9 +510,7 @@ def _prepare_default_all_gather_outputs(
         all_gather_result.param_all_gather_input_numels,
         all_gather_result.param_all_gather_input_dtypes,
     ):
-        fsdp_param.init_all_gather_outputs(
-            numels, dtypes, world_size, all_gather_output.device
-        )
+        fsdp_param.init_all_gather_outputs(numels, dtypes, world_size, device)
         # Skips outputs that view the group's buffers, which it re-allocated
         fsdp_param.alloc_all_gather_outputs()
         plan.outputs.append(fsdp_param.all_gather_outputs)
@@ -595,7 +593,8 @@ def foreach_all_gather_copy_out(
         plan = _prepare_default_all_gather_outputs(
             fsdp_params, all_gather_result, world_size
         )
-        layout._copy_out(all_gather_output, plan, world_size)
+        default_fn = _default_all_gather_output_fn
+        layout._copy_out(all_gather_output, plan, world_size, default_fn)
         return persistent_buffers
     first_unshard = not fsdp_params[0].all_gather_outputs
     buffers: list[torch.Tensor] = []

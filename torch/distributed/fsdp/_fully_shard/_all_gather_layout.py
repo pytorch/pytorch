@@ -13,14 +13,14 @@ unsharded storage, and re-allocates it to its recorded size before each later
 finalize, which must refill the same outputs in place. Outputs that view these
 buffers stay allocated until reshard even if an all-gather extension asks to
 release its outputs after ``fsdp_post_all_gather``.
-``DefaultAllGatherLayout`` gives each output its own buffer, which its
-parameter allocates and frees, and refills it with its ``output_fn``.
+``DefaultAllGatherLayout`` copies with its ``output_fn`` into one buffer per
+output, which its parameter frees unless a delegating custom layout adopted it.
 
 A layout that needs a specific collective holds it as ``comm``.
 ``FSDPModule.set_all_gather_layout`` is the only way to install a layout, and
 installing a layout with a ``comm`` installs that comm too; FSDP then rejects
 any other all-gather comm for the group until a different layout is installed,
-which also restores the default comm unless it brings its own.
+which installs ``DefaultAllGather`` unless it brings its own comm.
 
 ``AllGatherLayout`` and its metadata types are private authoring interfaces;
 out-of-tree backends must target a matching revision of them.
@@ -66,7 +66,7 @@ class AllGatherParamMetadata:
 
     ``input_numels`` counts each payload's elements of its own dtype
     ``input_dtypes[j]``. ``outputs`` is empty on the group's first unshard and
-    afterwards holds the outputs adopted then, which autograd may alias, so
+    afterwards holds the parameter's outputs, which autograd may alias, so
     finalize refills them in place. ``outer_sizes`` is
     ``AllGatherInputMetadata.input_outer_sizes`` for this parameter's payloads.
     """
@@ -103,9 +103,10 @@ class AllGatherFinalizeMetadata:
     object so that adding fields does not change the method's signature.
 
     ``all_gather_output`` is the completed collective output and
-    ``output_metadata`` is what ``prepare`` returned for this call. ``buffers``
-    is empty on the group's first unshard and afterwards holds the group's
-    persistent buffers with storage re-allocated.
+    ``output_metadata`` is the metadata that ``prepare`` returned for this call.
+    ``buffers`` is empty on the group's first unshard and afterwards holds the
+    group's persistent buffers with storage re-allocated, which are the
+    parameters' own outputs if the first unshard used the default layout.
     """
 
     all_gather_output: torch.Tensor
@@ -157,7 +158,7 @@ class AllGatherLayout(ABC):
     def prepare(
         self, input_metadata: AllGatherInputMetadata
     ) -> tuple[Callable, AllGatherLayout, object | None]:
-        """Select input packing and per-call metadata before allocating the output."""
+        """Return the copy-in, the layout that finalizes this call and its metadata."""
         metadata = self.prepare_output(input_metadata)
         if metadata is None:
             return DEFAULT_ALL_GATHER_LAYOUT.prepare(input_metadata)
@@ -201,10 +202,10 @@ class AllGatherLayout(ABC):
 
         On the group's first unshard ``metadata.buffers`` is empty: allocate the
         persistent buffers and return outputs that view them, laid out as
-        ``AllGatherOutputs`` describes. Later calls pass
-        those buffers, with storage re-allocated, and the adopted outputs in
-        ``metadata.param_metadata``, which must be refilled in place and
-        returned, under preserved version counters.
+        ``AllGatherOutputs`` describes. Later calls pass those buffers, with
+        storage re-allocated, and the outputs in ``metadata.param_metadata``,
+        which are FSDP's if the first unshard used the default layout and must
+        be refilled in place and returned, under preserved version counters.
         """
         ...
 
@@ -226,7 +227,7 @@ class DefaultAllGatherLayout(AllGatherLayout):
         output_fn (Optional[Callable]): Copy-out function, or ``None`` for FSDP's
             copy through intermediate buffers; see
             :func:`torch.distributed.fsdp.experimental.all_gather_output_fn_with_native_copy`
-            for a native implementation.
+            for its signature and a native implementation.
     """
 
     def __init__(self, output_fn: Callable | None = None):
@@ -262,11 +263,14 @@ class DefaultAllGatherLayout(AllGatherLayout):
     def finalize_outputs(self, metadata: AllGatherFinalizeMetadata) -> AllGatherOutputs:
         """Copy the rank-major output into per-parameter outputs for a custom layout
         that delegates to this one; FSDP's own all-gathers with it do not call it."""
+        # _fsdp_collectives imports this module
+        from ._fsdp_collectives import _default_all_gather_output_fn as default_fn
+
         all_gather_output, world_size = metadata.all_gather_output, metadata.world_size
         plan, new_buffers = _plan_rank_major_outputs(
             all_gather_output, metadata.param_metadata, world_size
         )
-        self._copy_out(all_gather_output, plan, world_size)
+        self._copy_out(all_gather_output, plan, world_size, default_fn)
         buffers = metadata.buffers or new_buffers
         return AllGatherOutputs(tensors=plan.outputs, buffers=buffers)
 
@@ -275,13 +279,11 @@ class DefaultAllGatherLayout(AllGatherLayout):
         all_gather_output: torch.Tensor,
         plan: _DefaultAllGatherCopyPlan,
         world_size: int,
+        default_output_fn: Callable,
     ) -> None:
         if all_gather_output.numel() == 0:
             return  # nothing was gathered
-        output_fn = self.output_fn
-        if output_fn is None:
-            # _fsdp_collectives imports this module
-            from ._fsdp_collectives import _default_all_gather_output_fn as output_fn
+        output_fn = self.output_fn or default_output_fn
         outputs = [output for param_outputs in plan.outputs for output in param_outputs]
         non_inference_outputs = tuple([t for t in outputs if not t.is_inference()])
         # Views share their base's version counter
@@ -341,7 +343,7 @@ def _adopt_layout_outputs(
         )
     buffer_storages = {buffer.untyped_storage().data_ptr() for buffer in result.buffers}
     for fsdp_param, param, outputs in zip(fsdp_params, param_metadata, result.tensors):
-        name = fsdp_param._param_fqn
+        name = fsdp_param._display_name
         if len(outputs) != len(param.input_numels):
             raise ValueError(
                 f"all-gather layout returned {len(outputs)} outputs for the "

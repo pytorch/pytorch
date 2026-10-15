@@ -574,7 +574,7 @@ class FSDPParamGroup:
                         self._all_gather_buffers,
                     )
                 except ValueError:
-                    # A layout's rejected result adopted nothing; drop the completed
+                    # A rejected first unshard adopted nothing; drop the completed
                     # all-gather so that another layout can be installed
                     self._all_gather_result = None
                     raise

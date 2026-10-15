@@ -37,6 +37,7 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 device_type = torch.device(get_devtype())
@@ -289,6 +290,16 @@ def _finish_post_all_gather(
     with _unsafe_preserve_version_counter(out):
         out.copy_(weight)
     return None
+
+
+class _CountOp(TorchDispatchMode):
+    def __init__(self, op):
+        super().__init__()
+        self.op, self.count = op, 0
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        self.count += func == self.op
+        return func(*args, **(kwargs or {}))
 
 
 class TestFullyShardAllGatherExtensionsMultiThread(
@@ -650,6 +661,10 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         local_weight.fsdp_pre_all_gather = pre_fn.__get__(local_weight)
         local_weight.fsdp_post_all_gather = post_fn.__get__(local_weight)
 
+    def _set_native_all_gather(self, model: nn.Module) -> None:
+        native = DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
+        model.set_all_gather_layout(native)
+
     def _init_hsdp_mesh(self, shard_world_size: int) -> DeviceMesh:
         return init_device_mesh(
             device_type.type,
@@ -987,9 +1002,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             reshard_after_forward=True,
         )
         if native_copy:
-            model.set_all_gather_layout(
-                DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
-            )
+            self._set_native_all_gather(model)
         self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
         inp = torch.arange(16, device=device_type).float().view(2, 8) / 16
         for _ in range(2):
@@ -1007,15 +1020,21 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         self.assertEqual(post_out_ids, [None] + [post_out_ids[1]] * 3)
         # FSDP keeps no references to the payloads of the 4 all-gathers
         self.assertEqual([ref() for ref in payload_refs], [None] * 8)
+        # The native op copies out unless a size-1 shard mesh skips the copy-out
+        with _CountOp(torch.ops.fsdp._all_gather_copy_out_.default) as copies:
+            model(inp)
+        self.assertEqual(copies.count > 0, native_copy and shard_world_size > 1)
 
     @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_smaller_payload(self):
         self.run_subtests(
-            {"shard_world_size": [2, 1]},
+            {"shard_world_size": [2, 1], "native_copy": [False, True]},
             self._test_all_gather_extension_smaller_payload,
         )
 
-    def _test_all_gather_extension_smaller_payload(self, shard_world_size: int):
+    def _test_all_gather_extension_smaller_payload(
+        self, shard_world_size: int, native_copy: bool
+    ):
         # Shard(0) Tensor payloads may shrink and fill a prefix of their output,
         # also on a size-1 shard mesh. On two shard ranks, the bf16 tags make the
         # group gather bytes.
@@ -1052,6 +1071,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         dist.broadcast(model.weight.detach(), src=0)
         ref_model = copy.deepcopy(model)
         fully_shard(model, mesh=mesh, reshard_after_forward=True)
+        if native_copy:  # smaller payloads take its fallback
+            self._set_native_all_gather(model)
         self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
         # An input that requires grad saves the weight for backward, which all-gathers
         # it again in place, so this also checks every output's version counter

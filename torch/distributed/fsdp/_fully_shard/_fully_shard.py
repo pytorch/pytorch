@@ -809,7 +809,6 @@ class FSDPModule:
             replaced = comm is not fsdp_param_group._all_gather_comm
             if replaced and not isinstance(layout, DefaultAllGatherLayout):
                 _check_all_gather_replaceable(fsdp_param_group)
-        for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._all_gather_comm = comm
 
     def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
@@ -941,12 +940,12 @@ class FSDPModule:
         output, requires that collective: installing the layout installs its
         comm too, and the parameter group then rejects any other comm, including
         from :meth:`set_custom_all_gather`, until another layout is installed,
-        which restores the default comm unless it has its own. Such a layout is
-        rejected on a module with several parameter groups, and a layout that
-        keeps per-call state must not be shared across parameter groups, so
-        install such a layout on each module with ``recurse=False``. Set layouts
-        before the first unshard. FSDP checks every parameter group before
-        changing any.
+        which installs ``DefaultAllGather`` unless it has its own comm, so
+        re-apply that setter, :meth:`set_symm_mem_for_comm` or
+        :meth:`set_allocate_memory_from_process_group_for_comm` afterwards. Such
+        a layout must be installed on a single parameter group, e.g. on each
+        module with ``recurse=False``. Set layouts, and those comms, before the
+        first unshard. FSDP checks every parameter group before changing any.
 
         Args:
             layout (Optional[AllGatherLayout]): Layout, or ``None`` to restore
@@ -962,22 +961,17 @@ class FSDPModule:
         for module in modules:
             if not isinstance(module, FSDPModule):
                 continue
-            groups = module._get_fsdp_state()._fsdp_param_groups
-            if layout.comm is not None and len(groups) > 1:
-                raise ValueError(
-                    "A layout bound to its comm would be ambiguous across groups "
-                    "with different meshes (from per-param mesh)"
-                )
-            for fsdp_param_group in groups:
+            for fsdp_param_group in module._get_fsdp_state()._fsdp_param_groups:
                 comm = layout.comm or fsdp_param_group._all_gather_comm
                 if layout.comm is None and fsdp_param_group._all_gather_layout.comm:
                     comm = DefaultAllGather()  # the replaced layout installed its comm
-                if (
-                    layout is not fsdp_param_group._all_gather_layout
-                    or comm is not fsdp_param_group._all_gather_comm
-                ):
+                if layout is not fsdp_param_group._all_gather_layout:
                     _check_all_gather_replaceable(fsdp_param_group)
                 updates.append((fsdp_param_group, comm))
+        if layout.comm is not None and len(updates) > 1:
+            raise ValueError(
+                "A layout bound to its comm must be installed on one parameter group"
+            )
         for fsdp_param_group, comm in updates:
             fsdp_param_group._all_gather_layout = layout
             fsdp_param_group._all_gather_comm = comm
@@ -999,9 +993,9 @@ class FSDPModule:
         viewed as ``(world_size, -1)``, row ``r`` holds each gradient's padded
         shard ``r`` in order, cast from any gradient dtype to the buffer's. Both
         run under ``torch.no_grad()`` on the current stream, also when
-        ``world_size`` is 1. FSDP frees
-        ``copy_in`` and the gradients afterward, so keep neither. See
-        :mod:`torch.distributed.fsdp.experimental` for a native implementation.
+        ``world_size`` is 1. FSDP frees ``copy_in`` and the gradients afterward,
+        so keep neither. See :mod:`torch.distributed.fsdp.experimental` for a
+        native implementation.
 
         Args:
             fn (Optional[Callable]): Function returning the copy-in function, or

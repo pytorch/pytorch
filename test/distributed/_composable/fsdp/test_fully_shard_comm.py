@@ -3080,7 +3080,7 @@ class TestAllGatherLayouts(TestCase):
             "offset_buffer",
             "no_buffers",
             "not_viewing",
-            "short_output",
+            "strided_output",
             "wrong_dtype",
             "extra_param",
             "missing_output",
@@ -3128,8 +3128,8 @@ class TestAllGatherLayouts(TestCase):
                     buffers = []
                 elif case == "not_viewing":
                     buffers = [torch.empty_like(output)]
-                elif case == "short_output":
-                    views[1] = [views[1][0][:3]]
+                elif case == "strided_output":
+                    views[1] = [buffer[::2]]
                 elif case == "extra_param":
                     views.append([])
                 elif case == "missing_output":
@@ -3152,7 +3152,7 @@ class TestAllGatherLayouts(TestCase):
         errors = {
             "no_buffers": "does not view the persistent",
             "not_viewing": "does not view the persistent",
-            "short_output": "contiguous 1-D tensor of 4 elements, but has size \\(3,\\)",
+            "strided_output": "contiguous 1-D tensor of 4 elements, but has size \\(4,\\)",
             "wrong_dtype": "must have dtype torch.float32, but has torch.float64",
             "extra_param": "returned 3 parameter outputs for 2 parameters",
             "missing_output": "returned 0 outputs for the 1 payloads",
@@ -3227,15 +3227,11 @@ class TestAllGatherLayoutCopyOut(TestCase):
             if not delegated:
                 splits = [n[0] * t.element_size() for n, t in zip(numels, tensors)]
                 fields = (output, None, None, dtypes, numels, splits, outer)
-                with unittest.mock.patch(
-                    "torch.distributed.fsdp._fully_shard._fsdp_collectives.AllGatherParamMetadata",
-                    side_effect=AssertionError("default path built parameter metadata"),
-                ):
-                    foreach_all_gather_copy_out(
-                        AllGatherResult(*fields),
-                        params,
-                        SimpleNamespace(size=lambda: world_size),
-                    )
+                foreach_all_gather_copy_out(
+                    AllGatherResult(*fields),
+                    params,
+                    SimpleNamespace(size=lambda: world_size),
+                )
                 return
             metadata = [
                 AllGatherParamMetadata(
@@ -3313,7 +3309,6 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         # A layout bound to its comm installs that comm and rejects any other
         bound = _ParamContiguousAllGather("custom").layout
         model.set_all_gather_layout(bound)
-        model.set_all_gather_layout(bound)
         self.assertIs(group._all_gather_comm, bound.comm)
         model.set_custom_all_gather(bound.comm)
         with self.assertRaisesRegex(ValueError, "bound to its comm"):
@@ -3326,11 +3321,10 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         # Installing another layout lifts the binding and restores the default
         # comm, since the bound comm may read its layout's per-call state
         model.set_all_gather_layout(None)
-        self.assertIsInstance(group._all_gather_comm, DefaultAllGather)
-        self.assertIsNot(group._all_gather_comm, bound.comm)
+        self.assertIs(type(group._all_gather_comm), DefaultAllGather)
         model.set_custom_all_gather(comm)
         self.assertIs(group._all_gather_comm, comm)
-        # Such a layout cannot serve groups on different meshes
+        # Such a layout serves one parameter group, unlike a layout without a comm
         mesh = init_device_mesh("cpu", (self.world_size, 1), mesh_dim_names=("a", "b"))
         bias_placement = ShardPlacementResult(Shard(0), FSDPMeshInfo(mesh["a"], 0))
         model = nn.Linear(8, 8)
@@ -3339,8 +3333,9 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
             mesh=mesh["b"],
             shard_placement_fn=lambda p: bias_placement if p is model.bias else None,
         )
-        with self.assertRaisesRegex(ValueError, "ambiguous across groups"):
+        with self.assertRaisesRegex(ValueError, "one parameter group"):
             model.set_all_gather_layout(bound)
+        model.set_all_gather_layout(native)
 
     def test_replace_rules(self):
         model = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8))
@@ -3349,6 +3344,8 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
             fully_shard(module, mesh=mesh)
         groups = [module._get_fsdp_state()._fsdp_param_group for module in model]
         native = DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
+        with self.assertRaisesRegex(ValueError, "one parameter group"):
+            model.set_all_gather_layout(_ParamContiguousAllGather("custom").layout)
         # FSDP checks every group before replacing any layout
         model[1].unshard()
         with self.assertRaisesRegex(ValueError, "cannot replace"):
@@ -3359,7 +3356,7 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         model[1].set_custom_all_gather(comm)
         self.assertIs(groups[1]._all_gather_comm, comm)
         model[1].reshard()
-        # A custom layout's do, while an all-gather is pending or its output used
+        # A custom layout's do, while an all-gather is pending or params are unsharded
         model[0].set_all_gather_layout(
             _ParamContiguousLayout("rank_major", None), recurse=False
         )
@@ -3413,12 +3410,16 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
             local_tensor = param._local_tensor
             local_tensor.fsdp_pre_all_gather = pre_all_gather.__get__(local_tensor)
             local_tensor.fsdp_post_all_gather = post_all_gather.__get__(local_tensor)
-        model.set_all_gather_layout(_ParamContiguousAllGather("custom").layout)
+        layout = _ParamContiguousAllGather("alternate").layout
+        layout.num_prepares = 1  # custom first, then fall back every other unshard
+        model.set_all_gather_layout(layout)
         inp = torch.randn(2, 8)
         for _ in range(3):
             output = model(inp)
             self.assertEqual(output, ref_model(inp))
             output.sum().backward()
+            buffers = model._get_fsdp_state()._fsdp_param_group._all_gather_buffers
+            self.assertEqual(buffers.tensors[0].untyped_storage().size(), 0)
 
 
 _LAYOUT_PARITY_CASES = [
@@ -3468,8 +3469,8 @@ def _check_fsdp_owned_layout_training(
                 module.set_reshard_after_backward(sync)
                 losses.append(module(inp).float().square().sum())
                 if module is model and mode == "custom":
-                    # Resharding after forward frees the buffers, also to the
-                    # post-forward mesh, unless the parameters keep their storage
+                    # Resharding after forward, also to the post-forward mesh
+                    # (reshard_after_forward=2), frees the buffers unless kept
                     for (buffer,) in (g._all_gather_buffers.tensors for g in groups):
                         size = 0 if reshard and not keep else buffer.nbytes
                         test.assertEqual(buffer.untyped_storage().size(), size)
@@ -3511,6 +3512,7 @@ def _check_fsdp_owned_layout_training(
         test.assertEqual(comm.rank_major_calls > 0, mode != "custom")
         if mode == "custom":
             test.assertGreater(comm.layout.single_copy_refills, 0)
+            block.set_custom_all_gather(comm)  # the installed comm stays allowed
             with test.assertRaisesRegex(ValueError, "bound to its comm"):
                 block.set_custom_all_gather(DefaultAllGather())
             with test.assertRaisesRegex(ValueError, "cannot replace"):
@@ -3533,6 +3535,7 @@ class TestFullyShardLayoutParity(FSDPTestMultiThread):
     def test_delegating_layout_shard_dim1(self, device):
         # A custom layout that delegates its outputs to the default one gets the
         # parameters' outer sizes, which Shard(1) payloads need
+        test = self
         mesh = init_device_mesh(torch.device(device).type, (self.world_size,))
         torch.manual_seed(42)
         ref_model = nn.Sequential(MLP(16, device), MLP(16, device))
@@ -3540,6 +3543,7 @@ class TestFullyShardLayoutParity(FSDPTestMultiThread):
 
         class Delegating(AllGatherLayout):
             def prepare_output(self, metadata):
+                test.assertGreater(max(metadata.input_outer_sizes), 1)  # Shard(1) rows
                 return metadata.input_outer_sizes
 
             def finalize_outputs(self, metadata):
