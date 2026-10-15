@@ -55,6 +55,7 @@ r"""An enum-like class that contains the different backends for scaled dot produ
 """
 SDPBackend.__module__ = __name__
 SDPBackend.__name__ = "SDPBackend"
+SDPBackend.__qualname__ = "SDPBackend"
 
 
 def _raise_kernel_warnings(params: SDPAParams) -> None:
