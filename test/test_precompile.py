@@ -7603,8 +7603,10 @@ class TestPrecompileRuntimeCache(TestCase):
             (root / _READY).write_text("other")
             self.assertFalse(_importable(root, "digest", {"key"}))
             (root / _READY).write_text("digest")
-            self.assertTrue(_importable(root, "digest", {"key"}))
+            # Kernels compiled into an imported directory since do not matter.
             (root / "unrelated").mkdir()
+            self.assertTrue(_importable(root, "digest", {"key"}))
+            (root / _READY).unlink()
             self.assertFalse(_importable(root, "digest", {"key"}))
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
