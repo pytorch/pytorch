@@ -67,6 +67,100 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
 
+if has_triton_package():
+    import triton
+    import triton as triton_alias
+    import triton.language as tl
+    from triton import jit as triton_jit
+
+    @triton.jit(
+        noinline=True,
+        debug=True,
+        do_not_specialize=["x"],
+    )
+    def noinline_helper_for_codegen(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = tl.load(x + offsets, mask=mask)
+        tl.store(out + offsets, values + 1, mask=mask)
+
+    @triton.jit
+    def root_for_noinline_helper(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        noinline_helper_for_codegen(x, out, n_elements, BLOCK_SIZE)
+
+    @triton.jit(noinline=True, debug=True)
+    def root_decorator_for_codegen(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        offsets = tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = tl.load(x + offsets, mask=mask)
+        tl.store(out + offsets, values + 1, mask=mask)
+
+    @triton.jit(
+        do_not_specialize=["specialization_value"],
+        do_not_specialize_on_alignment=["multiple_of_16"],
+    )
+    def root_specialization_for_codegen(
+        x,
+        out,
+        specialization_value,
+        multiple_of_16,
+        n_elements,
+        BLOCK_SIZE: tl.constexpr,
+    ):
+        offsets = tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = tl.load(x + offsets, mask=mask)
+        tl.store(
+            out + offsets,
+            values + specialization_value + multiple_of_16,
+            mask=mask,
+        )
+
+    NOINLINE_FOR_CODEGEN = True
+
+    @triton_jit(noinline=NOINLINE_FOR_CODEGEN, debug=True)
+    def aliased_jit_helper_for_codegen(x):
+        return x + 1
+
+    @triton.jit
+    def root_for_aliased_jit_helper(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = aliased_jit_helper_for_codegen(tl.load(x + offsets, mask=mask))
+        tl.store(out + offsets, values, mask=mask)
+
+    @triton_alias.jit(noinline=True, debug=True)
+    def module_aliased_jit_helper_for_codegen(x):
+        return x + 1
+
+    @triton.jit
+    def root_for_module_aliased_jit_helper(
+        x, out, n_elements, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = module_aliased_jit_helper_for_codegen(tl.load(x + offsets, mask=mask))
+        tl.store(out + offsets, values, mask=mask)
+
+    def repr_for_codegen(*args, **kwargs):
+        return "repr"
+
+    @triton.jit(repr=repr_for_codegen)
+    def global_option_jit_helper_for_codegen(x):
+        return x + 1
+
+    @triton.jit
+    def root_for_global_option_jit_helper(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = global_option_jit_helper_for_codegen(tl.load(x + offsets, mask=mask))
+        tl.store(out + offsets, values, mask=mask)
+
+
 try:
     from .triton_constexpr_configs import (
         tl as TritonLanguageShadowConfig,
@@ -1207,6 +1301,21 @@ def helper(x):
             ),
         )
 
+        _check_divisibility(
+            (0,),
+            triton_utils.config_of(
+                [SizeArg("A", sixteen), SizeArg("B", sixteen)],
+                divisible_by_16_exclusions=(1,),
+            ),
+        )
+        self.assertEqual(
+            triton_utils.equal_1_arg_indices(
+                [SizeArg("A", sympy.S.One), SizeArg("B", sympy.S.One)],
+                exclusions=(1,),
+            ),
+            (0,),
+        )
+
     def test_config_of_sizearg_with_check_constraint(self):
         from torch.utils._sympy.functions import Mod
 
@@ -1827,6 +1936,209 @@ def helper(x):
         _, code = run_and_get_code(torch.compile(fn), x, y)
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_omits_root_jit_decorator(self):
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        source = user_defined_triton_kernel_transitive_closure_source_code(
+            root_decorator_for_codegen
+        )
+        self.assertNotIn("@triton.jit", source)
+        self.assertIn("def root_decorator_for_codegen", source)
+        self.assertNotIn("noinline=True", source)
+        self.assertNotIn("debug=True", source)
+
+    @parametrize("specialization_value", (1, 16))
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
+        "requires CPU or GPU Triton",
+    )
+    def test_user_defined_triton_kernel_honors_root_specialization_options(
+        self, specialization_value
+    ):
+        from torch._inductor.codegen import wrapper
+
+        def fn(x):
+            out = torch.empty_like(x)
+            root_specialization_for_codegen[(1,)](
+                x,
+                out,
+                specialization_value,
+                16,
+                x.numel(),
+                BLOCK_SIZE=128,
+            )
+            return out
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(64, device=device)
+        with patch.object(wrapper, "config_of", wraps=wrapper.config_of) as config_of:
+            result, code = run_and_get_code(torch.compile(fn), x)
+
+        self.assertEqual(result, x + specialization_value + 16)
+        user_config_call = next(
+            call
+            for call in config_of.call_args_list
+            if call.kwargs.get("pointer_range_override") == ()
+        )
+        self.assertEqual(user_config_call.kwargs["equal_to_1_exclusions"], (2,))
+        self.assertEqual(user_config_call.kwargs["divisible_by_16_exclusions"], (2, 3))
+        if specialization_value == 1:
+            code_str = " ".join(code)
+            self.assertIn("'specialization_value': 'i32'", code_str)
+            self.assertNotIn("'specialization_value': 'constexpr'", code_str)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_cache_keys_include_root_specialization(self):
+        from torch._functorch._aot_autograd.autograd_cache import (
+            AOTAutogradCacheDetails,
+        )
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            kernel_side_table,
+            triton_kernel_wrapper_mutation,
+        )
+        from torch._inductor.codecache import FxGraphHashDetails
+
+        graph = torch.fx.Graph()
+        kernel_idx = kernel_side_table.add_kernel(root_specialization_for_codegen)
+        constant_args_idx = kernel_side_table.add_constant_args({})
+        graph.call_function(
+            triton_kernel_wrapper_mutation,
+            kwargs={
+                "kernel_idx": kernel_idx,
+                "constant_args_idx": constant_args_idx,
+                "grid": [(1,)],
+                "tma_descriptor_metadata": {},
+                "kwargs": {},
+            },
+        )
+        graph.output(None)
+        gm = torch.fx.GraphModule({}, graph)
+
+        fx_details = FxGraphHashDetails(gm, [], {}, [])
+        self.assertEqual(fx_details.user_defined_triton_source[0][1:3], ((2,), (2, 3)))
+
+        aot_details = object.__new__(AOTAutogradCacheDetails)
+        with patch.object(
+            AOTAutogradCacheDetails,
+            "_iter_triton_kernels_from_node",
+            return_value=[root_specialization_for_codegen],
+        ):
+            aot_sources = aot_details.get_triton_source_codes_from_gm(gm)
+        self.assertEqual(aot_sources[0][1:], ((2,), (2, 3)))
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
+        "requires CPU or GPU Triton",
+    )
+    def test_user_defined_triton_kernel_without_alignment_specialization_metadata(
+        self,
+    ):
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        def fn(x):
+            out = torch.empty_like(x)
+            root_decorator_for_codegen[(1,)](
+                x,
+                out,
+                x.numel(),
+                BLOCK_SIZE=128,
+            )
+            return out
+
+        define_kernel = PythonWrapperCodegen.define_user_defined_triton_kernel
+
+        def define_kernel_without_alignment_metadata(self, kernel, *args, **kwargs):
+            # Older Triton KernelParam instances predate this attribute. Remove
+            # it only during Inductor codegen so current Triton can capture the HOP.
+            alignment_options = [
+                getattr(param, "do_not_specialize_on_alignment", False)
+                for param in kernel.params
+            ]
+            try:
+                for param in kernel.params:
+                    del param.do_not_specialize_on_alignment
+                return define_kernel(self, kernel, *args, **kwargs)
+            finally:
+                for param, alignment_option in zip(kernel.params, alignment_options):
+                    param.do_not_specialize_on_alignment = alignment_option
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(64, device=device)
+        with patch.object(
+            PythonWrapperCodegen,
+            "define_user_defined_triton_kernel",
+            define_kernel_without_alignment_metadata,
+        ):
+            result, _ = run_and_get_code(torch.compile(fn), x)
+
+        self.assertEqual(result, x + 1)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
+        "requires CPU or GPU Triton",
+    )
+    def test_user_defined_triton_kernel_preserves_helper_noinline(self):
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        source = user_defined_triton_kernel_transitive_closure_source_code(
+            root_for_noinline_helper
+        )
+        decorator_idx = source.index("@triton.jit(")
+        helper_idx = source.index("def noinline_helper_for_codegen")
+        self.assertLess(decorator_idx, helper_idx)
+        self.assertIn("noinline=True", source)
+        self.assertNotIn("debug=True", source)
+        self.assertNotIn("do_not_specialize", source)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            root_for_noinline_helper[(1,)](x, out, n_elements, BLOCK_SIZE=128)
+            return out
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(64, device=device)
+        result, _ = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, x + 1)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_preserves_aliased_helper_noinline(self):
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        test_cases = (
+            (root_for_aliased_jit_helper, "def aliased_jit_helper_for_codegen"),
+            (
+                root_for_module_aliased_jit_helper,
+                "def module_aliased_jit_helper_for_codegen",
+            ),
+        )
+        for root, helper_def in test_cases:
+            source = user_defined_triton_kernel_transitive_closure_source_code(root)
+            decorator_idx = source.index("@triton.jit(")
+            helper_idx = source.index(helper_def)
+            self.assertLess(decorator_idx, helper_idx)
+            self.assertIn("noinline=True", source)
+            self.assertNotIn("debug=True", source)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_ignores_root_only_helper_option(self):
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        source = user_defined_triton_kernel_transitive_closure_source_code(
+            root_for_global_option_jit_helper
+        )
+        self.assertIn("@triton.jit\ndef global_option_jit_helper_for_codegen", source)
+        self.assertNotIn("repr=", source)
 
     @unittest.skipUnless(
         HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import atexit
 import functools
 import json
@@ -588,7 +589,24 @@ class AsyncCompile:
                 else:
                     size_hints_str = str(None)
 
-                triton_src = source_code.split("@triton.jit\n")[1]
+                # Match the worker-side JITFunction source without decorators or
+                # other helpers in the generated module.
+                kernel_node = next(
+                    (
+                        node
+                        for node in ast.parse(source_code).body
+                        if isinstance(node, ast.FunctionDef)
+                        and node.name == kernel_name
+                    ),
+                    None,
+                )
+                if kernel_node is None:
+                    triton_src = source_code
+                else:
+                    source_lines = source_code.splitlines(keepends=True)
+                    triton_src = "".join(
+                        source_lines[kernel_node.lineno - 1 : kernel_node.end_lineno]
+                    )
                 from torch._inductor.runtime.triton_heuristics import (
                     generate_lookup_hash_from_source_code,
                 )

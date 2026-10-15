@@ -607,6 +607,13 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
+def _triton_jit_decorator_for_helper(symbol) -> str:
+    # Triton helper calls only consume noinline from the callee; launch and
+    # specialization options belong to the root kernel compiled by Inductor.
+    noinline = getattr(symbol, "noinline", False)
+    return "@triton.jit(noinline=True)" if noinline else "@triton.jit"
+
+
 @dataclasses.dataclass(frozen=True)
 class TritonKernelSource:
     """A source fragment and the kernel-global names that refer to its symbols.
@@ -628,7 +635,6 @@ def user_defined_triton_kernel_transitive_closure(
 
     epilogue_fusion: Optional[(fused epilogue node, modified kernel src code)]
     """
-
     # Also include any possible kernel being called indirectly
     from triton import JITFunction  # type: ignore[name-defined, attr-defined]
     from triton.language import constexpr  # type: ignore[name-defined]
@@ -701,7 +707,7 @@ def user_defined_triton_kernel_transitive_closure(
                 if isinstance(symbol, JITFunction):
                     source = IndentedBuffer()
                     source.newline()
-                    source.writeline("@triton.jit")
+                    source.splice(_triton_jit_decorator_for_helper(symbol), strip=True)
                     source.splice(symbol.src, strip=True)
                     add_source_module(symbol, source, symbol_name)
                     symbols_included.add(symbol_name)
@@ -822,6 +828,28 @@ def user_defined_triton_kernel_transitive_closure_source_code(
         kernel, epilogue_fusion
     )
     return render_user_defined_triton_kernel_transitive_closure(source_modules)
+
+
+def user_defined_triton_kernel_specialization(
+    kernel,
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Return root specialization controls that affect Inductor codegen.
+
+    The generated closure source omits the root decorator, so cache-key callers
+    must record this metadata separately.
+    """
+    do_not_specialize = tuple(p.num for p in kernel.params if p.do_not_specialize)
+    # Older Triton KernelParam instances predate do_not_specialize_on_alignment.
+    do_not_specialize_on_alignment = tuple(
+        p.num
+        for p in kernel.params
+        if getattr(p, "do_not_specialize_on_alignment", False)
+    )
+    # do_not_specialize disables both value and alignment specialization.
+    alignment_exclusions = tuple(
+        OrderedSet(do_not_specialize + do_not_specialize_on_alignment)
+    )
+    return do_not_specialize, alignment_exclusions
 
 
 def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
@@ -4339,7 +4367,6 @@ class PythonWrapperCodegen(CodeGen):
         signature: list[KernelArgType] = []
         constants: dict[str, Any] = {}
         arg_indices: list[int] = []
-        equal_to_1_args: list[str] = []
 
         def add_to_signature(idx, arg):
             signature.append(arg)
@@ -4384,6 +4411,11 @@ class PythonWrapperCodegen(CodeGen):
 
         arg_names = [p.name for p in kernel.params]
         constexprs = [p.num for p in kernel.params if p.is_constexpr]
+        # Root decorator text is omitted from generated source, but the original
+        # JITFunction parameters still carry Triton's specialization controls.
+        do_not_specialize, alignment_exclusions = (
+            user_defined_triton_kernel_specialization(kernel)
+        )
         for idx, key in enumerate(arg_names):
             if idx in constexprs:
                 add_arg(idx, ConstexprArg(name=key), is_constexpr=True)
@@ -4435,11 +4467,13 @@ class PythonWrapperCodegen(CodeGen):
                         ),
                     )
                 else:
-                    equals_1 = isinstance(
-                        arg, (int, sympy.Integer)
-                    ) and V.graph.sizevars.statically_known_equals(
-                        arg,
-                        1,  # type: ignore[arg-type]
+                    equals_1 = (
+                        isinstance(arg, (int, sympy.Integer))
+                        and idx not in do_not_specialize
+                        and V.graph.sizevars.statically_known_equals(
+                            arg,
+                            1,  # type: ignore[arg-type]
+                        )
                     )
                     add_arg(idx, SizeArg(key, arg), equals_1=equals_1)
 
@@ -4449,6 +4483,7 @@ class PythonWrapperCodegen(CodeGen):
             indices=arg_indices,
             argdefs=[ArgName(x) for x in kernel.arg_names],
             use_fp64_for_python_float=False,
+            equal_to_1_exclusions=do_not_specialize,
         )
         device = V.graph.get_current_device_or_throw()
         device_props = triton_meta_device_props(device)
@@ -4462,15 +4497,14 @@ class PythonWrapperCodegen(CodeGen):
             # causes CUDA errors in test_aot_inductor.test_triton_kernel_with_none_input.
             # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
             # https://github.com/triton-lang/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
-            "constants": {
-                **constants,
-                **dict.fromkeys(equal_to_1_args, 1),
-            },
+            "constants": constants,
             "configs": [
                 config_of(
                     signature,
                     indices=arg_indices,
                     pointer_range_override=(),
+                    divisible_by_16_exclusions=alignment_exclusions,
+                    equal_to_1_exclusions=do_not_specialize,
                 )
             ],
         }
