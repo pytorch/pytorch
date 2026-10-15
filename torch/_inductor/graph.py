@@ -3180,7 +3180,12 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> CompiledModule:
         from .codecache import PyCodeCache
 
-        if config.triton.autotune_at_compile_time:
+        # A module that defines its kernels as code does not carry the string-form
+        # autotune block; generate_and_run_autotune_block logs it.
+        if (
+            config.triton.autotune_at_compile_time
+            and not self.wrapper_code.defines_triton_kernels_as_code()
+        ):
             # sanitize docstrings in kernel defs (#155006)
             kernel_autotune_defs = self.wrapper_code.kernel_autotune_defs.getvalue()
             kernel_autotune_defs = kernel_autotune_defs.replace('"""', '\\"\\"\\"')
