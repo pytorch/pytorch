@@ -172,6 +172,9 @@ class SuperVariable(VariableTracker):
         type_to_use_source: Source | None = (
             TypeSource(self.objvar.source) if self.objvar.source else None
         )
+        if isinstance(self.objvar, variables.TensorWithTFOverrideVariable):
+            # as_subclass preserves the input source but changes its runtime type.
+            type_to_use_source = self.objvar.class_type_var(tx).source
         if issubclass(type_to_use, type):
             # objvar itself is a type (e.g. `super(Base, cls)` or
             # `super(Base, list)`); as_python_constant() works uniformly here
