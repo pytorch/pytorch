@@ -16,19 +16,20 @@
 #endif
 
 #if defined(__i386__) || defined(__x86_64__) || defined(__amd64__)
-#define C10_RDTSC
-#if defined(_MSC_VER)
-#include <intrin.h>
-#elif defined(__CUDACC__) || defined(__HIPCC__)
-#undef C10_RDTSC
-#elif defined(__clang__)
-// `__rdtsc` is available by default.
-// NB: This has to be first, because Clang will also define `__GNUC__`
-#elif defined(__GNUC__)
-#include <x86intrin.h>
-#else
-#undef C10_RDTSC
+// Use the builtin rather than `__rdtsc`, whose headers (<x86intrin.h>,
+// <intrin.h>) pull in every x86 intrinsic header and add over a second of
+// parsing to each TU that includes this one.
+#if !defined(__CUDACC__) && !defined(__HIPCC__) && defined(__has_builtin)
+#if __has_builtin(__builtin_ia32_rdtsc)
+#define C10_RDTSC __builtin_ia32_rdtsc
 #endif
+#endif
+#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86)) && \
+    !defined(_M_ARM64EC) && !defined(__CUDACC__)
+// MSVC defines none of the macros above and has no __has_builtin. Declare the
+// intrinsic as <intrin.h> does instead of including it, for the same reason.
+extern "C" unsigned __int64 __rdtsc();
+#define C10_RDTSC __rdtsc
 #elif defined(__aarch64__) && !defined(__CUDACC__) && !defined(__HIPCC__)
 #define C10_ARMTSC
 #elif defined(__riscv) && (__riscv_xlen == 64) && !defined(__CUDACC__) && \
@@ -103,7 +104,7 @@ inline uint64_t getRiscvApproximateTime() {
 // `https://github.com/google/benchmark/blob/main/src/cycleclock.h`
 inline auto getApproximateTime() {
 #if defined(C10_RDTSC)
-  return static_cast<uint64_t>(__rdtsc());
+  return static_cast<uint64_t>(C10_RDTSC());
 #elif defined(C10_ARMTSC)
   return getArmApproximateTime();
 #elif defined(C10_RISCVTSC)
