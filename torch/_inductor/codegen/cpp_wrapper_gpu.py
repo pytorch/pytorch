@@ -1585,6 +1585,11 @@ class CppWrapperGpu(CppWrapperCpu):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        # Ignored: a C++ wrapper compiles each Triton kernel from its source string, not
+        # from a module-level def (see defines_triton_kernels_as_code). Accepted to keep
+        # one signature across _define_kernel_helper implementations.
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         if gpu:
             self._kernel_name_to_body[kernel_name] = kernel_body
@@ -1708,7 +1713,9 @@ static inline void ensure_triton_kernel_compiles_started() {{
         )
 
         desc_name = desc.name
-        self.writeline(f"alignas(64) CUtensorMap {desc_name};")
+        # No alignas: CUtensorMap carries its own (64 B on CUDA 12, 128 B on
+        # CUDA 13), and requesting less than that is ill-formed C++.
+        self.writeline(f"CUtensorMap {desc_name};")
 
         # `source` is in the form of `&var_x`, where `var_x` is the data pointer
         # (CUdeviceptr); we dereference `source` and cast to `void*` to pass to
@@ -1723,6 +1730,13 @@ static inline void ensure_triton_kernel_compiles_started() {{
         self.writeline(f"{fn}({args});")
 
     def _generate_stable_tma_descriptor(self, desc):
+        descriptor_path = f"{desc.descriptor_module}.{desc.descriptor_class}"
+        if descriptor_path != "triton.tools.tensor_descriptor.TensorDescriptor":
+            raise NotImplementedError(
+                "GPU cpp_wrapper does not support backend-specific stable "
+                f"TMA descriptors, got {descriptor_path}"
+            )
+
         source = self.generate_args_decl(
             code=self,
             call_args=[self.val_to_arg_str(desc.tensor)],
@@ -1735,7 +1749,8 @@ static inline void ensure_triton_kernel_compiles_started() {{
         desc_name = desc.name
         # Pack the relevant information into a StableTMADescriptor struct.
         # See [Note: AOTI TMA Stable handling] for more details.
-        self.writeline(f"alignas(64) StableTMADescriptor {desc_name}{{}};")
+        # Aligned by its CUtensorMap member; see _generate_experimental_tma_descriptor.
+        self.writeline(f"StableTMADescriptor {desc_name}{{}};")
 
         def fill_array(name, values):
             for i, val in enumerate(values):

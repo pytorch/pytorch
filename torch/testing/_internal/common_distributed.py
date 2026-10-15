@@ -615,9 +615,11 @@ def requires_accelerator_dist_backend(backends=None):
 
 
 def requires_multicast_support():
+    acc = torch.accelerator.current_accelerator(True)
+    device_type_enum = getattr(DeviceType, acc.type.upper(), None) if acc else None
     has_multicast_support = (
-        torch.cuda.is_available()
-        and _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0)
+        device_type_enum is not None
+        and _SymmetricMemory.has_multicast_support(device_type_enum, 0)
     )
     return skip_but_pass_in_sandcastle_if(
         not has_multicast_support,
@@ -635,6 +637,8 @@ def evaluate_platform_supports_symm_mem():
             return False
         else:
             return True
+    elif TEST_XPU:
+        return True
     else:
         return False
 
