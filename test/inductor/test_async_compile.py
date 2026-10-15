@@ -626,11 +626,9 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
                 "_cache",
                 {"pending": LambdaFuture(pending.result)},
             ),
-            patch("torch._inductor.async_compile.shutdown_compile_workers") as shutdown,
             self.assertRaisesRegex(RuntimeError, "producer compile failed"),
         ):
             AsyncCompile.drain_pending()
-        shutdown.assert_not_called()
 
     def test_drain_pending_times_out_on_unfinished_compiler_future(self):
         from concurrent.futures import TimeoutError as FuturesTimeoutError
@@ -645,11 +643,9 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
                 "_cache",
                 {"pending": LambdaFuture(pending.result, future=pending)},
             ),
-            patch("torch._inductor.async_compile.shutdown_compile_workers") as shutdown,
             self.assertRaises(FuturesTimeoutError),
         ):
             AsyncCompile.drain_pending(timeout=0.01)
-        shutdown.assert_not_called()
 
     def test_drain_pending_runs_each_kernel_callback_once(self):
         from torch._inductor.async_compile import CompiledTritonKernels
@@ -659,22 +655,20 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         done.set_result(None)
         get_result = Mock(return_value="kernel")
         future = LambdaFuture(get_result, future=done)
-        with (
-            patch.object(CompiledTritonKernels, "_cache", {"pending": future}),
-            patch("torch._inductor.async_compile.shutdown_compile_workers"),
-        ):
+        with patch.object(CompiledTritonKernels, "_cache", {"pending": future}):
             AsyncCompile.drain_pending()
         # The generated module holding the same future consumes it afterwards.
         self.assertEqual(future.result(), "kernel")
         get_result.assert_called_once()
 
     @skipIfWindows(msg="SubprocPool uses pass_fds, which is not supported on Windows.")
-    def test_drain_pending_finishes_subprocess_jobs_then_shuts_down(self):
+    def test_drain_pending_finishes_subprocess_jobs_and_keeps_the_workers(self):
         import time
 
         from torch._inductor.async_compile import _pool_set, CompiledTritonKernels
 
         shutdown_compile_workers()
+        self.addCleanup(shutdown_compile_workers)
         with (
             config.patch(worker_start_method="subprocess", compile_threads=2),
             patch.object(CompiledTritonKernels, "_cache", {}),
@@ -685,8 +679,7 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
             AsyncCompile.drain_pending()
         self.assertTrue(all(job.done() and not job.cancelled() for job in jobs))
         self.assertEqual([job.result() for job in jobs], [None] * 4)
-        self.assertNotIn(pool, _pool_set)
-        self.assertIsNone(AsyncCompile._ready_future)
+        self.assertIn(pool, _pool_set)
 
     def test_subproc_pool_drain_pending(self):
         import threading
