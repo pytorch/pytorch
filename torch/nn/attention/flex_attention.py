@@ -2305,7 +2305,8 @@ def _enforce_mem_layouts(
     gemm_precision = query.dtype
 
     should_enforce_mem_layout = (
-        gemm_precision in fp8_dtypes
+        query.device.type == "cuda"
+        and gemm_precision in fp8_dtypes
         and torch.version.cuda is not None
         and torch.cuda.get_device_capability("cuda") >= (8, 9)
         and torch.cuda.get_device_capability("cuda") < (10, 0)
