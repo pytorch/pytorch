@@ -766,6 +766,10 @@ if rank == 0:
 
 ```
 
+## Functional collectives
+
+Functional collectives return new tensors instead of mutating their inputs and are traceable by `torch.compile`. See {doc}`distributed.functional_collectives`.
+
 ## Distributed Key-Value Store
 
 The distributed package comes with a distributed key-value store, which can be
@@ -937,7 +941,7 @@ The support of third-party backend is experimental and subject to change.
 
 ### Python backends
 
-A backend can also be written in Python by subclassing `dist._Backend`. Each
+A backend can also be written in Python by subclassing `dist.BackendBase`. Each
 overridden method is called from C++ in place of the corresponding
 `c10d::Backend` virtual, so the backend plugs into `torch.distributed`,
 `ProcessGroup` and `DeviceMesh` like a C++ backend.
@@ -949,7 +953,7 @@ import torch
 import torch.distributed as dist
 
 
-class MyWork(dist._Work):
+class MyWork(dist.Work):
     def __init__(self, result):
         super().__init__()
         self._future = torch.futures.Future()
@@ -965,7 +969,7 @@ class MyWork(dist._Work):
         return True
 
 
-class MyBackend(dist._Backend):
+class MyBackend(dist.BackendBase):
     def __init__(self, store, rank, world_size, timeout):
         super().__init__(rank, world_size)
         self.num_allreduces = 0
@@ -1037,7 +1041,7 @@ objects such as `AllreduceOptions`:
 
 **Work.** Collectives return a `Work`, except `monitored_barrier`;
 `recv_anysource` and `end_coalescing` may return `None`. Subclass
-`dist._Work` and override `wait(timeout)` and `get_future()`, as with `MyWork`
+`dist.Work` and override `wait(timeout)` and `get_future()`, as with `MyWork`
 above. `is_completed()`, `synchronize()`, `source_rank()` (used by
 `recv(src=None)`), `result()` and `block_current_stream()` can also be
 overridden. Other `Work` methods can't be overridden from Python.
