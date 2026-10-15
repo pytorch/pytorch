@@ -1738,7 +1738,7 @@ class TensorVariable(VariableTracker):
                 )
             if issubclass(inputs.python_type(), Mapping):
                 values = inputs.call_method(tx, "values", [], {})
-                iterator = variables.IterBuiltinVariable().call_function(
+                iterator = VariableTracker.build(tx, iter).call_function(
                     tx, [values], {}
                 )
                 provided_vars = unpack_iterable(tx, iterator)
