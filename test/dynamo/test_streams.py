@@ -52,6 +52,27 @@ def strip_annotation_desc(gm_str: str) -> str:
     return re.sub(r"(# Annotation: \{[^}]*\}).*", r"\1", gm_str)
 
 
+def compile_and_get_synchronize_device_args(sync, x):
+    """Compile a fn calling ``sync()`` and return its synchronize_device args."""
+
+    def fn(x):
+        y = x + 1
+        sync()
+        return y * 2
+
+    torch._dynamo.reset()
+    backend = torch._dynamo.testing.EagerAndRecordGraphs()
+    out = torch.compile(fn, backend=backend, fullgraph=True)(x)
+    torch.testing.assert_close(out, (x + 1) * 2)
+    # fullgraph=True guarantees a single graph.
+    (graph,) = backend.graphs
+    return [
+        node.args
+        for node in graph.graph.nodes
+        if node.target is torch.ops.streams.synchronize_device
+    ]
+
+
 class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
     @unittest.skip("Needs graph break support with annotation context")
     def test_stream_enter_exit_graph_break(self):
@@ -338,6 +359,16 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
         self._assert_empty_sync_anchors_record(
             torch.ops.streams.synchronize_device.default, ()
         )
+
+    def test_cpu_synchronize_explicit_none(self) -> None:
+        # Eager treats device=None as the current device; Dynamo used to crash
+        # calling torch.device(None).
+        x = torch.ones(2, 2)
+        for sync in (
+            lambda: torch.cpu.synchronize(None),
+            lambda: torch.cpu.synchronize(device=None),
+        ):
+            self.assertEqual(compile_and_get_synchronize_device_args(sync, x), [])
 
     def test_empty_wait_stream_anchors_record(self) -> None:
         self._assert_empty_sync_anchors_record(
@@ -2342,6 +2373,28 @@ class GraphModule(torch.nn.Module):
         s = torch.Stream(device=device)
         e = device_mod.Event()
         s.record_event(e)
+
+    @parametrize("api", ["positional", "kwarg", "accelerator"])
+    def test_synchronize_explicit_none_matches_no_arg(self, device, api):
+        # Eager treats device=None as the current device, so it must trace to the
+        # same graph as the no-arg call instead of crashing in torch.device(None).
+        device_mod = getattr(torch, torch.device(device).type)
+        if api == "positional":
+            sync_default = device_mod.synchronize
+            sync_none = lambda: device_mod.synchronize(None)  # noqa: E731
+        elif api == "kwarg":
+            sync_default = device_mod.synchronize
+            sync_none = lambda: device_mod.synchronize(device=None)  # noqa: E731
+        else:
+            sync_default = torch.accelerator.synchronize
+            sync_none = lambda: torch.accelerator.synchronize(None)  # noqa: E731
+
+        x = torch.ones(2, 2, device=device)
+        expected = compile_and_get_synchronize_device_args(sync_default, x)
+        self.assertEqual(len(expected), 1)
+        self.assertEqual(
+            compile_and_get_synchronize_device_args(sync_none, x), expected
+        )
 
     def test_event_synchronize_tracing(self, device):
         def fn(x):
