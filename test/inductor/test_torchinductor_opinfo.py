@@ -27,8 +27,10 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipCPUIf,
+    skipCUDAIf,
     skipIf,
     skipOps,
+    skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
@@ -52,6 +54,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     HAS_CPU,
+    HAS_CUDA_AND_TRITON,
+    HAS_XPU_AND_TRITON,
     has_triton,
     maybe_skip_size_asserts,
 )
