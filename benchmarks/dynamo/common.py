@@ -4275,6 +4275,7 @@ def setup_batch_invariant(args):
     torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (False, False)
 
 
+@torch._dynamo.config.patch(nested_graph_breaks=True)
 def run(runner, args, original_dir=None):
     # Pass the parsed args object to benchmark runner object
     torch._dynamo.reset()
