@@ -318,6 +318,12 @@ class CacheKeyEquivalenceMixin:
         super().tearDown()
 
 
+# Module level so its name round-trips through the cache-key importer.
+@torch._dynamo.allow_in_graph
+def _scan_body_opaque(x):
+    return x.sin()
+
+
 @instantiate_parametrized_tests
 class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     def setUp(self):
@@ -944,6 +950,79 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         b = torch.randn(25)
 
         fn(a, b)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    @parametrize("requires_grad", (False, True))
+    def test_scan(self, requires_grad):
+        from torch._higher_order_ops.scan import scan
+
+        def fn(init, xs, w):
+            def combine_fn(carry, x):
+                next_carry = torch.sin(carry * w + x)
+                return next_carry, next_carry * 2
+
+            return scan(combine_fn, init, xs)
+
+        def fn2(init, xs, w):
+            def combine_fn(carry, x):
+                next_carry = torch.cos(carry * w + x)
+                return next_carry, next_carry * 2
+
+            return scan(combine_fn, init, xs)
+
+        def run(f):
+            torch.manual_seed(0)
+            inps = [
+                torch.randn(8, requires_grad=requires_grad),
+                torch.randn(4, 8, requires_grad=requires_grad),
+                torch.randn(8, requires_grad=requires_grad),
+            ]
+            outs = f(*inps)
+            if not requires_grad:
+                return outs
+            return outs, torch.autograd.grad(sum(o.sum() for o in outs), inps)
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        compiled_fn2 = torch.compile(fn2, backend="inductor", fullgraph=True)
+
+        self.assertEqual(run(fn), run(compiled_fn))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(run(fn), run(compiled_fn))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(run(fn2), run(compiled_fn2))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_scan_body_with_unsafe_call_bypasses(self):
+        from torch._higher_order_ops.scan import scan
+
+        def fn(xs):
+            def combine_fn(carry, x):
+                next_carry = carry + _scan_body_opaque(x)
+                return next_carry, next_carry.clone()
+
+            return scan(combine_fn, torch.zeros_like(xs[0]), xs)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            r"BypassAOTAutogradCache: Unsupported call_function target",
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(torch.randn(4, 8))
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)

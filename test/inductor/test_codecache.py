@@ -2201,6 +2201,50 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    @parametrize("dynamic", (False, True))
+    def test_scan_caching(self, device, dynamic):
+        from torch._higher_order_ops.scan import scan
+
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        def add(carry, x):
+            next_carry = carry + x
+            return next_carry, next_carry.clone()
+
+        def maximum(carry, x):
+            next_carry = torch.maximum(carry, x)
+            return next_carry, next_carry.clone()
+
+        def fn(xs):
+            return scan(add, torch.zeros_like(xs[0]), xs)
+
+        def fn2(xs):
+            return scan(maximum, torch.zeros_like(xs[0]), xs)
+
+        xs = torch.randn(4, 8, device=device)
+        compiled_fn = torch.compile(fn, dynamic=dynamic, fullgraph=True)
+        compiled_fn2 = torch.compile(fn2, dynamic=dynamic, fullgraph=True)
+
+        self.assertEqual(fn(xs), compiled_fn(xs))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+        self.reset()
+        self.assertEqual(fn(xs), compiled_fn(xs))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        # The combine_fn is part of the key, so a different one must miss.
+        self.reset()
+        self.assertEqual(fn2(xs), compiled_fn2(xs))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
     @requires_gpu()
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
