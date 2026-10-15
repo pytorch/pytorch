@@ -25,6 +25,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
+from torch.compiler._no_compile import is_compilation_forbidden
 from torch.utils._appending_byte_serializer import AppendingByteSerializer
 
 
@@ -148,28 +149,49 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
         return True
 
     def populate_cache(self) -> None:
-        self.import_into_triton()
+        self.import_into_triton(strict=is_compilation_forbidden())
 
-    def import_into_triton(self) -> None:
+    def import_into_triton(self, *, strict: bool) -> None:
         cache = _triton_runtime_cache()
-        message = "The precompile cache contains a Triton runtime cache, but"
+        problem = None
+        root = None
         if cache is None:
-            raise RuntimeError(
-                f"{message} Triton is not installed or too old to import one"
+            problem = "Triton is not installed or too old to import one"
+        else:
+            try:
+                root = _serving_triton_root(cache)
+            except Exception as exc:
+                problem = f"Triton has no cache directory to import it into ({exc})"
+        if problem is not None:
+            message = (
+                f"The precompile cache contains a Triton runtime cache, but {problem}"
             )
-        try:
-            root = _serving_triton_root(cache)
-        except Exception as exc:
-            raise RuntimeError(
-                f"{message} Triton has no cache directory to import it into ({exc})"
-            ) from exc
+            if strict:
+                raise RuntimeError(message)
+            log.warning(
+                "%s; Triton JIT kernels will compile or autotune on first use", message
+            )
+        if cache is None or root is None:
+            return
         imported = (self.key, root)
         with _imported_triton_runtime_lock:
             if imported in _imported_triton_runtime:
                 return
-            if hashlib.sha256(self.content).hexdigest() != self.key:
-                raise RuntimeError("Corrupt Triton runtime-cache artifact")
-            cache.import_runtime_cache(self.content, context=_runtime_context())
+            try:
+                if hashlib.sha256(self.content).hexdigest() != self.key:
+                    raise RuntimeError("Corrupt Triton runtime-cache artifact")
+                cache.import_runtime_cache(self.content, context=_runtime_context())
+            except Exception as exc:
+                if strict:
+                    raise
+                # Raising here would stop the artifacts populated after this one
+                # (populate_first), leaving the frozen Inductor kernels cold too.
+                log.warning(
+                    "Could not import the precompile cache's Triton runtime cache "
+                    "(%s); Triton JIT kernels will compile or autotune on first use",
+                    exc,
+                )
+                return
             _imported_triton_runtime.add(imported)
 
 
@@ -664,4 +686,4 @@ def prepare_runtime_cache(artifact: bytes | None) -> None:
             "precompile.prepare_runtime found more than one Triton runtime cache"
         )
     for entry in runtime:
-        cast(TritonRuntimeCacheArtifact, entry).import_into_triton()
+        cast(TritonRuntimeCacheArtifact, entry).import_into_triton(strict=True)

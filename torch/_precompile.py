@@ -3284,7 +3284,8 @@ def prepare_runtime(
     re-benchmarked. The import goes into ``TRITON_CACHE_DIR`` if it is empty or
     already holds this cache, and otherwise into a fresh directory that Triton
     uses from then on. A process holds one imported cache, so a different one
-    imported later raises here and in :func:`load`.
+    imported later raises here; :func:`load` outside :func:`no_compilation`
+    warns instead, and Triton compiles or autotunes those kernels on first use.
 
     Raises :class:`~torch.compiler.PrecompileError` for a make_fx capture, a
     mismatched or unreadable pair, a cache whose capture did not freeze its
