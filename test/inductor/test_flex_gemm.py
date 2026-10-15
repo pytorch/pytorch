@@ -1699,7 +1699,8 @@ class FlexGemmTestCase(TestCase):
 
 @instantiate_parametrized_tests
 class TestFlexGemmAnalysis(TestCase):
-    def test_nvgemm_backend_overrides_global_backend(self):
+    @parametrize("autotune", (False, True))
+    def test_nvgemm_backend_overrides_global_backend(self, autotune):
         graph = torch.fx.Graph()
         bias = graph.placeholder("bias")
         mat1 = graph.placeholder("mat1")
@@ -1722,6 +1723,10 @@ class TestFlexGemmAnalysis(TestCase):
             )
             self.assertTrue(inductor_config.max_autotune)
             self.assertEqual(inductor_config.max_autotune_gemm_backends, "NVGEMM")
+            # Without autotune, NVGEMM keeps only its top heuristic config.
+            self.assertEqual(
+                inductor_config.nvgemm_max_profiling_configs, None if autotune else 1
+            )
             return expected
 
         with (
@@ -1735,7 +1740,7 @@ class TestFlexGemmAnalysis(TestCase):
                 SimpleNamespace(graph_module=graph_module),
                 (object(), object(), object()),
                 {},
-                {"backend": "NVGEMM"},
+                {"backend": "NVGEMM", "autotune": autotune},
             )
         self.assertIs(actual, expected)
 
@@ -2449,7 +2454,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             "a = torch.randn(64, 32, device='cuda', dtype=torch.bfloat16)\n"
             "b = torch.randn(32, 64, device='cuda', dtype=torch.bfloat16)\n"
             "fn = torch.compile(lambda a, b: flex_gemm(torch.mm, (a, b), torch.relu,"
-            " kernel_options={'backend': 'QUACK', 'tuned': True}), fullgraph=True)\n"
+            " kernel_options={'backend': 'QUACK', 'autotune': True}), fullgraph=True)\n"
             "fn(a, b)\n"
             "assert 'quack' not in sys.modules, 'pip quack was imported'\n"
             "assert 'cloudpickle' not in sys.modules, 'cloudpickle was imported'\n"
@@ -2487,7 +2492,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 torch.relu,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             ),
             fullgraph=True,
         )
@@ -2501,7 +2506,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(len(set(digests)), 1)
 
     def _tuned_compile_with_worker_pool(self, fn, *args):
-        """Compile ``fn`` tuned on cold caches.
+        """Compile ``fn`` with autotuning on cold caches.
 
         Returns (submitted key -> worker state, in-process EpiMod compile count).
         """
@@ -2568,7 +2573,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 epilogue_fn,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
@@ -2594,7 +2599,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 torch.relu,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         if failure == "no_pool":
@@ -2645,7 +2650,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 torch.sigmoid,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         with (
@@ -2968,7 +2973,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         name_fn=lambda case: case[0],
     )
     def test_mm_output_contraction_matches_reference(self, case):
-        name, group, chunked, tuned, n, config = case
+        name, group, chunked, autotune, n, config = case
         if group == 4 and torch.cuda.get_device_capability()[0] != 10:
             self.skipTest("group-4 grouped main outputs are currently SM100-only")
         m, k = 128, 64
@@ -3001,12 +3006,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 epilogue_fn,
                 kernel_options={
                     "backend": "QUACK",
-                    "tuned": tuned,
+                    "autotune": autotune,
                     **({} if config is None else {"config": config}),
                 },
             )
 
-        tune_context = self.limitEpiModAutotune() if tuned else contextlib.nullcontext()
+        tune_context = (
+            self.limitEpiModAutotune() if autotune else contextlib.nullcontext()
+        )
         with tune_context:
             actual, (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True), a, b
@@ -3140,7 +3147,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 epilogue_fn,
                 kernel_options={
                     "backend": "QUACK",
-                    "tuned": True,
+                    "autotune": True,
                     "config": {"swap_ab": True},
                 },
             )
@@ -3204,11 +3211,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         name_fn=lambda case: case[0],
     )
     @parametrize(
-        "tuned",
+        "autotune",
         (False, True),
-        name_fn=lambda tuned: "tuned" if tuned else "untuned",
+        name_fn=lambda autotune: "autotune" if autotune else "default",
     )
-    def test_mm_dynamic_shapes_reads_captured_tensor_epilogue_arg(self, case, tuned):
+    def test_mm_dynamic_shapes_reads_captured_tensor_epilogue_arg(self, case, autotune):
         torch._dynamo.reset()
         _, shape_fn = case
 
@@ -3220,7 +3227,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 lambda acc: epilogue_fn(acc, scale),
-                kernel_options={"backend": "QUACK", "tuned": tuned},
+                kernel_options={"backend": "QUACK", "autotune": autotune},
             )
 
         compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
@@ -3450,11 +3457,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize(
-        "tuned",
+        "autotune",
         (False, True),
-        name_fn=lambda tuned: "tuned" if tuned else "untuned",
+        name_fn=lambda autotune: "autotune" if autotune else "default",
     )
-    def test_mm_scalar_captured_arg_fp8_quant_matches_reference(self, tuned):
+    def test_mm_scalar_captured_arg_fp8_quant_matches_reference(self, autotune):
         torch._dynamo.reset()
         m, k, n = 128, 64, 128
 
@@ -3466,7 +3473,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 lambda acc: epilogue_fn(acc.float(), scale).to(torch.float8_e4m3fn),
-                kernel_options={"backend": "QUACK", "tuned": tuned},
+                kernel_options={"backend": "QUACK", "autotune": autotune},
             )
 
         a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
@@ -5350,7 +5357,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 epilogue_fn,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
@@ -5377,7 +5384,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b.mT),
                 epilogue_fn,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
@@ -5591,7 +5598,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 epilogue_fn,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
@@ -7055,7 +7062,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 epilogue_fn,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
@@ -7186,7 +7193,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         name_fn=lambda case: case[0],
     )
     def test_mm_coda_rmsnorm_rewrite_e2e(self, case):
-        _, n, group, tuned = case
+        _, n, group, autotune = case
         m, k, p = 64, 32, 48
         eps = 1e-5
 
@@ -7197,8 +7204,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 partial_mean_square = x.square().mean(-1)
                 return h2, partial_mean_square
 
-            first_options = {"backend": "QUACK", "tuned": tuned}
-            if tuned:
+            first_options = {"backend": "QUACK", "autotune": autotune}
+            if autotune:
                 first_options["config"] = {
                     "tile_m": 128,
                     "tile_n": 128,
@@ -7467,7 +7474,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 epilogue_fn,
-                kernel_options={"backend": "QUACK", "tuned": False},
+                kernel_options={"backend": "QUACK", "autotune": False},
             )
 
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
@@ -7679,7 +7686,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 epilogue_fn,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
@@ -7712,7 +7719,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 epilogue_fn,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
@@ -7956,7 +7963,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.bmm,
                 (a, b),
                 epilogue_fn,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
@@ -8058,7 +8065,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 (bias, a, b),
                 epilogue_fn,
                 gemm_kwargs={"beta": 0.5, "alpha": 1.5},
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         bias = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
@@ -8095,7 +8102,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             (
                 "unknown_kernel_option",
                 lambda acc: acc.relu(),
-                {"backend": "QUACK", "split_k": 2},
+                {"backend": "QUACK", "tuned": True},
                 "unsupported FlexGEMM kernel options",
             ),
             (
@@ -8193,7 +8200,7 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
         name_fn=lambda case: f"{case[0]}_tuned_{case[1]}",
     )
     def test_scaled_mm_compiled_matches_reference(self, device, case):
-        format_name, tuned = case
+        format_name, autotune = case
         n = 256
         a, b, (scale_a,), (scale_b,), gemm_kwargs, base = self.makeBlockScaledMm(
             format_name, 256, n, 256, device=device
@@ -8209,12 +8216,14 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
                 (a_data, b_data, a_scale, b_scale),
                 lambda acc: epilogue_fn(acc, row),
                 gemm_kwargs=gemm_kwargs,
-                kernel_options={"backend": "QUACK", "tuned": tuned},
+                kernel_options={"backend": "QUACK", "autotune": autotune},
             )
 
         row = torch.randn(1, n, device=device, dtype=torch.bfloat16)
         expected = epilogue_fn(base, row)
-        tune_context = self.limitEpiModAutotune() if tuned else contextlib.nullcontext()
+        tune_context = (
+            self.limitEpiModAutotune() if autotune else contextlib.nullcontext()
+        )
         compiled = torch.compile(fn, backend="inductor", fullgraph=True)
         inputs = (a, b, scale_a, scale_b, row)
         with tune_context:
@@ -8235,7 +8244,7 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
     def test_nvfp4_scaled_mm_global_scales(self, device, case):
         from torch._inductor.kernel.flex_gemm.template import FlexGemmEpilogueCaller
 
-        shared_global_scale, shape, tuned = case
+        shared_global_scale, shape, autotune = case
         global_a = torch.full(shape, 0.5, device=device, dtype=torch.float32)
         global_b = (
             global_a
@@ -8257,7 +8266,7 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
                 (a_data, b_data, [a_scale, g], [b_scale, b_global]),
                 epilogue_fn,
                 gemm_kwargs=gemm_kwargs,
-                kernel_options={"backend": "QUACK", "tuned": tuned},
+                kernel_options={"backend": "QUACK", "autotune": autotune},
             )
 
         expected = epilogue_fn(base)
@@ -8279,7 +8288,7 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
                 scale_b[0],
                 *((global_a,) if shared_global_scale else (global_a, global_b)),
             )
-        if tuned:
+        if autotune:
             self.assertGreaterEqual(benchmark.call_count, 2)
 
         self.assertEqual(actual, expected, rtol=0.03, atol=0.3)
@@ -8673,7 +8682,7 @@ class TestFlexGemmTransposedOutputDevice(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 epilogue_fn,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         a = self.makeTensor(m, k, device=device)
@@ -9132,7 +9141,7 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
                 gemm_kwargs={"offs": offs},
                 kernel_options={
                     "backend": "QUACK",
-                    "tuned": capture_dtype is torch.float16,
+                    "autotune": capture_dtype is torch.float16,
                 },
             )
 
@@ -9209,7 +9218,7 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
                 (x, w_t),
                 lambda acc: acc.relu(),
                 gemm_kwargs={"offs": offs},
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         with self.limitEpiModAutotune():
@@ -9259,9 +9268,9 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         """MoE expert FFN SwiGLU as one grouped GEMM with the dense SwiGLU epilogues."""
         import torch.nn.functional as F
 
-        _, spelling, experts, tuned = case
+        _, spelling, experts, autotune = case
         hidden = 96
-        if tuned:
+        if autotune:
             seqlens = (200, 0, 130, 182, 64, 0, 33, 95)
         else:
             # Ragged groups with two empty ones and non-tile-multiple sizes.
@@ -9295,10 +9304,12 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
                 (x, w_t),
                 epilogue_fn,
                 gemm_kwargs={"offs": offs},
-                kernel_options={"backend": "QUACK", "tuned": tuned},
+                kernel_options={"backend": "QUACK", "autotune": autotune},
             )
 
-        tune_context = self.limitEpiModAutotune() if tuned else contextlib.nullcontext()
+        tune_context = (
+            self.limitEpiModAutotune() if autotune else contextlib.nullcontext()
+        )
         with tune_context:
             actual, (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True),
@@ -9308,7 +9319,7 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
             )
 
         self.assertGroupedMmQuackCode(code)
-        if tuned:
+        if autotune:
             self.assertIn("config=", code)
         self.assertIn(
             f"FlexGemmOutputContraction(group=2, chunked={spelling == 'chunked'})",
@@ -9498,7 +9509,7 @@ class TestFlexGemmGroupedWgradDevice(FlexGemmTestCase):
         name_fn=lambda case: case[0],
     )
     def test_grouped_mm_varlen_k_matches_reference(self, device, case):
-        _, dtype, tuned, scalar_epilogue = case
+        _, dtype, autotune, scalar_epilogue = case
         m, n, total_k = 64, 96, 1088
         lengths = (0, 37, 0, 1000, 5, 0)
         padding = 8 if scalar_epilogue else 0
@@ -9519,7 +9530,7 @@ class TestFlexGemmGroupedWgradDevice(FlexGemmTestCase):
                 (a, b),
                 epilogue_fn,
                 gemm_kwargs={"offs": offs},
-                kernel_options={"backend": "QUACK", "tuned": tuned},
+                kernel_options={"backend": "QUACK", "autotune": autotune},
             )
 
         prefixes = []
@@ -9542,7 +9553,7 @@ class TestFlexGemmGroupedWgradDevice(FlexGemmTestCase):
 
         self.assertFlexGemmGeneratedCode(code, "cu_seqlens_k=")
         self.assertNotIn("extern_kernels._grouped_mm(", code)
-        if tuned:
+        if autotune:
             self.assertTrue(prefixes)
             prefix = prefixes[0].cpu()
             self.assertEqual(prefix.dtype, torch.int32)
@@ -9720,8 +9731,8 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         self.assertIn("gemm_epilogue as flex_gemm_epilogue", code)
         self.assertIn(f"config={tuple(sorted(config_key))!r}", code)
 
-    @parametrize("tuned", (False, True))
-    def test_mm_partial_config_matches_reference(self, device, tuned):
+    @parametrize("autotune", (False, True))
+    def test_mm_partial_config_matches_reference(self, device, autotune):
         def epilogue_fn(acc):
             return (acc + 1).relu()
 
@@ -9741,7 +9752,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 kernel_options={
                     "backend": "QUACK",
                     "config": pinned,
-                    "tuned": tuned,
+                    "autotune": autotune,
                 },
             )
 
@@ -9762,9 +9773,11 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             self.assertIn(repr(item), code)
 
     @parametrize(
-        "tuned", (False, True), name_fn=lambda tuned: "tuned" if tuned else "untuned"
+        "autotune",
+        (False, True),
+        name_fn=lambda autotune: "autotune" if autotune else "default",
     )
-    def test_mm_emits_flex_gemm_debug_report(self, device, tuned):
+    def test_mm_emits_flex_gemm_debug_report(self, device, autotune):
         import logging
 
         from torch._inductor.kernel.flex_gemm.debug import flex_gemm_log
@@ -9774,7 +9787,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 torch.relu,
-                kernel_options={"backend": "QUACK", "tuned": tuned},
+                kernel_options={"backend": "QUACK", "autotune": autotune},
             )
 
         a = torch.randn(128, 64, device=device, dtype=torch.bfloat16)
@@ -9801,8 +9814,8 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         self.assertEqual(positions, tuple(sorted(positions)))
         self.assertIn("gemm_op: aten.mm.default", concise)
         self.assertIn("outputs:\n  main: relu", concise)
-        self.assertIn(f"mode: {'autotune' if tuned else 'default'}", concise)
-        self.assertIn(f"candidates: {2 if tuned else 1}", concise)
+        self.assertIn(f"mode: {'autotune' if autotune else 'default'}", concise)
+        self.assertIn(f"candidates: {2 if autotune else 1}", concise)
         self.assertNotIn("GENERATED EPILOGUE", concise)
 
         verbose = "\n".join(
@@ -9846,7 +9859,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 epilogue,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         a = self.makeTensor(32, 128, device=device, dtype=dtype)
@@ -10228,7 +10241,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             main = (values * partial).reshape(m, hidden)
             return (main, partial.squeeze(-1)) if store_partials else (main,)
 
-        options = {"backend": "QUACK", "tuned": spelling == "chunk"}
+        options = {"backend": "QUACK", "autotune": spelling == "chunk"}
         if not chunked and not store_partials:
             # Legal counterpart to the no-store tile_n=160 rejection.
             options["config"] = {"tile_n": 128}
@@ -10506,7 +10519,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 epilogue_fn,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         a = torch.zeros(m, k, device=device, dtype=torch.bfloat16)
@@ -10679,8 +10692,8 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
-    @parametrize("tuned", (False, True))
-    def test_mm_swap_ab_supports_local_n_reduce(self, device, tuned):
+    @parametrize("autotune", (False, True))
+    def test_mm_swap_ab_supports_local_n_reduce(self, device, autotune):
         m = n = 128
         group = 16
 
@@ -10696,7 +10709,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 kernel_options={
                     "backend": "QUACK",
                     "config": {"swap_ab": True},
-                    "tuned": tuned,
+                    "autotune": autotune,
                 },
             )
 
@@ -10838,7 +10851,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 lambda acc: epilogue_fn(acc, row, col),
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
 
         a = self.makeTensor(m, 64, device=device)
@@ -10922,7 +10935,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 epilogue_fn,
-                kernel_options={"backend": "QUACK", "tuned": True},
+                kernel_options={"backend": "QUACK", "autotune": True},
             )
             return actual, partials.sum(-1)
 

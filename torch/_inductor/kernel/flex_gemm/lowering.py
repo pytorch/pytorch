@@ -594,11 +594,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError(
             f"FlexGEMM QUACK backend currently supports only aten.{_SUPPORTED_FLEX_GEMM_OP_NAMES}"
         )
-    tuned = kernel_options.get("tuned", False)
+    autotune = kernel_options.get("autotune", False)
     fast_math = kernel_options.get("fast_math", False)
     explicit_config = kernel_options.get("config")
     unsupported_options = OrderedSet(kernel_options) - OrderedSet(
-        ["backend", "tuned", "fast_math", "config"]
+        ["backend", "autotune", "fast_math", "config"]
     )
     if unsupported_options:
         raise NotImplementedError(
@@ -729,7 +729,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             ),
             alpha=float(alpha),
             beta=float(beta),
-            tuned=tuned,
+            autotune=autotune,
             fast_math=fast_math,
             explicit_config=explicit_config,
         ),
@@ -1003,7 +1003,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     n_hint = sizevars.optimization_hint(mat2.get_size()[-1])
     # Block-scaled calls keep QuACK's shape-aware blockscaled default.
     dense_shape = None if blockscaled is not None else (m_hint, n_hint)
-    if tuned:
+    if autotune:
         quack_configs = flex_gemm_search_space(
             legal_configs,
             varlen=varlen_axis == "m",
@@ -1016,7 +1016,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         quack_configs = (default,)
     log_flex_gemm_artifact(
         "config_candidates",
-        lambda: format_flex_gemm_config_candidates(quack_configs, tuned=tuned),
+        lambda: format_flex_gemm_config_candidates(quack_configs, autotune=autotune),
         lowering_name=subgraph.name,
     )
     choices: list[Any] = []
@@ -1048,9 +1048,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         input_gen_fns=input_gen_fns or None,
         **({"return_multi_template": False} if mutated_input_nodes else {}),
     )
-    if tuned and len(choices) == 1:
-        # autotune_select_algorithm skips a lone tuned candidate; compile it now so
-        # tuned=True never defers compilation to the first call. Untuned calls keep
+    if autotune and len(choices) == 1:
+        # autotune_select_algorithm skips a lone candidate; compile it now so
+        # autotune=True never defers compilation to the first call. Other calls keep
         # lazy first-call compilation and allocate no example tensors.
         choices[0].precompile(use_workers=False)
     structural_outs = {}
@@ -1086,21 +1086,24 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             return process_subgraph_nodes(subgraph.graph_module, list(args))
     if backend == "NVGEMM":
         unsupported_options = OrderedSet(kernel_options) - OrderedSet(
-            ("backend", "tuned")
+            ("backend", "autotune")
         )
         if unsupported_options:
             raise NotImplementedError(
                 f"Unsupported NVGEMM FlexGEMM options: {unsupported_options}"
             )
-        tuned = kernel_options.get("tuned", False)
-        if not isinstance(tuned, bool):
-            raise NotImplementedError("NVGEMM FlexGEMM tuned must be a bool")
+        autotune = kernel_options.get("autotune", False)
+        if not isinstance(autotune, bool):
+            raise NotImplementedError("NVGEMM FlexGEMM autotune must be a bool")
         decompose_nvgemm_additive_gemm(subgraph.graph_module)
+        # NVGEMM templates are only generated under max_autotune. Without
+        # autotune, keep only the top heuristic-ranked config, as QUACK does.
         nvgemm_config: dict[str, Any] = {
             "max_autotune": True,
             "max_autotune_gemm_backends": "NVGEMM",
+            "nvgemm_max_profiling_configs": 1,
         }
-        if tuned:
+        if autotune:
             nvgemm_config.update(
                 nvgemm_max_profiling_configs=None,
                 nvgemm_supplement_configs=True,
