@@ -212,12 +212,9 @@ def _override_composite_implicit_decomp(cia_ops_to_callable):
         # See NOTE: Registering old CIA to Backend kernel
         # It is important that we cache this before we override py_kernels.
         orig_cia_callable = _get_decomp_for_cia(op_overload)
-        if torch._C.DispatchKey.CompositeImplicitAutograd in op_overload.py_kernels:
-            del op_overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
-
-        op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(
-            decomp_callable
-        )
+        cia_key = torch._C.DispatchKey.CompositeImplicitAutograd
+        op_overload.py_kernels[cia_key] = decomp_callable
+        op_overload._dispatch_cache.clear()
 
         # [NOTE] Directly registering fake tensor rule to CIA ops
         # The problem we are facing here is if your CIA custom rule

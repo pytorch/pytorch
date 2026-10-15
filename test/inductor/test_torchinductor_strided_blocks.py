@@ -2679,7 +2679,7 @@ class TritonHostSideTMAConfigTestCUDA(InductorTestCase):
             return x + 1
 
         x = torch.randn(1024, device=GPU_TYPE)
-        with self.assertWarnsRegex(UserWarning, "no effect"):
+        with self.assertWarnsRegex(UserWarning, "host-side TMA will be skipped"):
             result, code_list = run_and_get_code(torch.compile(fn), x)
         self.assertTrue(torch.allclose(result, fn(x)))
         self.assertNotIn("host_tma_descriptor_args", "\n".join(code_list))
