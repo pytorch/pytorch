@@ -394,7 +394,10 @@ def conv_layout(
     # convolution() above, but we guard all four here so conv_layout is
     # self-contained and doesn't rely on callers.
     guard = V.graph.sizevars.guard_int_seq
-    with V.graph.fake_mode:
+    # the fake run only decides the output memory format; callers require the
+    # inputs to the derived stride order right after, so provisional stride
+    # reads here are self-healing (see require_stride_order below)
+    with V.graph.fake_mode, ir.allow_layout_analysis():
         output = torch.ops.aten.convolution(
             ir.ir_node_to_tensor(x),
             ir.ir_node_to_tensor(weight),
@@ -1106,18 +1109,23 @@ def convolution_backward_lowering(
     dw = None
     choices_dw = []
     args_w = []
-    layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
+    layout_dw: ir.Layout | None = None
+    guard = V.graph.sizevars.guard_int_seq
     if output_mask[1]:
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
             input = ir.ExternKernel.require_channels_last(input)  # type: ignore[assignment]
             grad_out = ir.ExternKernel.require_channels_last(grad_out)  # type: ignore[assignment]
-            layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
         else:
-            guard = V.graph.sizevars.guard_int_seq
-            stride_order = ir.get_stride_order(guard(layout_dw.stride))
+            # provisional strides only pick the order input/grad_out are frozen into
+            with ir.allow_layout_analysis():
+                peek = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
+            stride_order = ir.get_stride_order(guard(peek.stride))
             input = ir.ExternKernel.require_stride_order(input, stride_order)  # type: ignore[assignment]
             grad_out = ir.ExternKernel.require_stride_order(grad_out, stride_order)  # type: ignore[assignment]
+        # dw's memory format also depends on weight's strides
+        ir.freeze_storage_layout(weight)
+        layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
 
         args_w = [input, grad_out]
 
@@ -1161,18 +1169,22 @@ def convolution_backward_lowering(
     dx = None
     choices_dx = []
     args_x = []
-    layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
+    layout_dx: ir.Layout | None = None
     if output_mask[0]:
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
             grad_out = ir.ExternKernel.require_channels_last(grad_out)  # type: ignore[assignment]
             weight = ir.ExternKernel.require_channels_last(weight)  # type: ignore[assignment]
-            layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
         else:
-            guard = V.graph.sizevars.guard_int_seq
-            stride_order = ir.get_stride_order(guard(layout_dx.stride))
+            # provisional strides only pick the order grad_out/weight are frozen into
+            with ir.allow_layout_analysis():
+                peek = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
+            stride_order = ir.get_stride_order(guard(peek.stride))
             grad_out = ir.ExternKernel.require_stride_order(grad_out, stride_order)  # type: ignore[assignment]
             weight = ir.ExternKernel.require_stride_order(weight, stride_order)  # type: ignore[assignment]
+        # dx's memory format also depends on input's strides
+        ir.freeze_storage_layout(input)
+        layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
 
         args_x = [grad_out, weight]
 
@@ -1229,7 +1241,7 @@ def convolution_backward_lowering(
             output_mask,
         )
 
-    if output_mask[1]:
+    if layout_dw is not None:
         if (
             torch._inductor.utils._use_conv_bwd_weight_autotune_backend("ATEN")
             or not has_triton_dw_choices
@@ -1263,7 +1275,7 @@ def convolution_backward_lowering(
             "convolution_bwd_weight", choices_dw, args_w, layout_dw
         )
 
-    if output_mask[0]:
+    if layout_dx is not None:
         if (
             torch._inductor.utils._use_conv_bwd_input_autotune_backend("ATEN")
             or not has_triton_dx_choices
