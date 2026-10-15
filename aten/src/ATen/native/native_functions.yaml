@@ -5125,10 +5125,9 @@
 
 - func: _prelu_kernel(Tensor self, Tensor weight) -> Tensor
   dispatch:
-    CPU, CUDA, XPU: _prelu_kernel
+    CPU, CUDA, MPS, XPU: _prelu_kernel
     QuantizedCPU: _prelu_kernel_quantized_cpu
     MkldnnCPU: mkldnn_prelu
-    MPS: prelu_mps
 
 - func: _prelu_kernel_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   dispatch:
@@ -6088,15 +6087,13 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: threshold_out
-    MPS: threshold_out_mps
+    CPU, CUDA, MPS, XPU: threshold_out
 
 - func: threshold_backward.grad_input(Tensor grad_output, Tensor self, Scalar threshold, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: threshold_backward_out
-    MPS: threshold_backward_out_mps
+    CPU, CUDA, MPS, XPU: threshold_backward_out
     SparseCPU, SparseCUDA, SparseXPU: threshold_backward_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: threshold_backward_sparse_compressed_out
 
