@@ -124,6 +124,8 @@ struct SegmentInfo {
 struct HostSegmentInfo {
   size_t address = 0;
   size_t size = 0;
+  // Unrounded size of the current, or for a cached block the last, allocation.
+  size_t requested_size = 0;
   bool allocated = false;
   bool active = false;
   MempoolId_t owner_private_pool_id = {0, 0};

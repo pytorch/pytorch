@@ -57,11 +57,13 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    DictGetItemSource,
     GetItemSource,
     GlobalSource,
     is_constant_source,
     LocalSource,
     Source,
+    TypeDictSource,
     TypeSource,
 )
 from ..utils import (
@@ -75,6 +77,7 @@ from ..utils import (
     get_fake_value,
     has_torch_function,
     is_tensor_getset_descriptor,
+    is_torch_class,
     istype,
     no_keywords,
     numpy_operator_wrapper,
@@ -505,6 +508,29 @@ class BaseBuiltinVariable(VariableTracker):
             attr = getattr(fn, name)
         except AttributeError as e:
             raise_observed_exception(AttributeError, tx, args=list(e.args))
+        if name == "__dict__":
+            # Each access allocates a fresh mappingproxy. Keep sources on its
+            # immutable builtin-type entries, not on the allocation itself.
+            dict_source = self.source and TypeDictSource(self.source)
+            items: dict[VariableTracker, VariableTracker] = {}
+            for key, value in attr.items():
+                value_source = dict_source and DictGetItemSource(dict_source, key)
+                value_vt = (
+                    variables.LazyVariableTracker.create(value, value_source, tx=tx)
+                    if value_source
+                    else VariableTracker.build(tx, value)
+                )
+                items[ConstantVariable.create(key)] = value_vt
+            return variables.MappingProxyVariable(variables.ConstDictVariable(items))
+        if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
+            # Unbound C method read off a builtin type, e.g. list.count. Torch
+            # types keep their trace-rule path through GetAttrVariable.
+            from .functions import MethodDescriptorVariable
+
+            owner: VariableTracker = self
+            if attr.__objclass__ is not fn:
+                owner = VariableTracker.build(tx, attr.__objclass__)
+            return MethodDescriptorVariable(attr, owner=owner, source=source)
         return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
 
     def call_obj_hasattr(
@@ -3045,24 +3071,23 @@ class BuiltinVariable(BaseBuiltinVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        # Declarative type-attribute dispatch (__name__, __bases__, __base__,
-        # __flags__), mirroring the consultation at the top of
-        # VariableTracker.getattro_impl. Inlined because this override keeps its
-        # own object / GetAttrVariable handling below instead of delegating.
+        # Mirror CPython getattr on a builtin function/type: raise AttributeError
+        # for a missing attribute, resolve literal introspection attributes
+        # (__doc__, __module__, __qualname__, __type_params__) to real guarded
+        # values so they are usable during tracing, and defer everything else
+        # (callables, complex objects) to a GetAttrVariable.
+        if name == "__dict__":
+            return super().tp_getattro_impl(tx, name)
         source = self.source and AttrSource(self.source, name)
-        if self.fn is object:
-            # for object, we can just directly read the attribute
-            try:
-                value = getattr(self.fn, name)
-            except AttributeError:
-                raise_observed_exception(AttributeError, tx)
-            if not callable(value):
-                return VariableTracker.build(tx, value, source)
         try:
-            attr = getattr(self.fn, name)
-        except AttributeError as e:
-            raise_observed_exception(AttributeError, tx, args=list(e.args))
-        return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
+            value = getattr(self.fn, name)
+        except AttributeError as exc:
+            raise_observed_exception(AttributeError, tx, args=list(exc.args))
+        if self.fn is object and not callable(value):
+            return VariableTracker.build(tx, value, source)
+        if ConstantVariable.is_literal(value):
+            return VariableTracker.build(tx, value, source)
+        return variables.GetAttrVariable(self, name, py_type=type(value), source=source)
 
     def call_delattr(
         self,
