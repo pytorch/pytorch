@@ -3446,6 +3446,12 @@ def load(
     frames after load adds live entries that serve the calls the installed
     ones miss.
 
+    Frozen C++ kernels are keyed by their full build command, which includes
+    the producer's absolute PyTorch include and library paths, so they serve
+    only a host whose PyTorch install and toolchain paths match the producer's.
+    Any other host rebuilds them, which needs a C++ compiler there:
+    :func:`no_compilation` does not gate C++ builds.
+
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
