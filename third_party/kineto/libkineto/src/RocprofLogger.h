@@ -99,6 +99,12 @@ class RocprofLogger {
   std::vector<rocprofBase*> rows_;
   std::mutex rowsMutex_;
 
+  // Correlation ids of HIP memset API calls mapped to the memset size in
+  // bytes.  Used to classify runtime-internal fill kernels dispatched by
+  // hipMemset* as GPU memsets instead of user kernels.
+  std::unordered_map<uint64_t, size_t> memsetOps_;
+  std::mutex memsetMutex_;
+
   // This vector collects pairs of correlationId and their respective
   // externalCorrelationId for each CorrelationDomain. This will be used
   // to populate the Correlation maps during post processing.
