@@ -559,6 +559,77 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    @parametrize("bound", [False, True])
+    @parametrize("external", [False, True])
+    def test_dict_copy_descriptor(self, mapping_type, bound, external):
+        def fn(x, mapping):
+            if not external:
+                mapping = mapping_type(a=x, b=x + 1)
+                if mapping_type is OrderedDict:
+                    mapping.move_to_end("a")
+            if bound:
+                result = dict.copy.__get__(mapping)()
+            else:
+                result = dict.copy(mapping)
+            return result, result is mapping, result["a"] is mapping["a"]
+
+        x = torch.ones(1)
+        mapping = mapping_type(a=x, b=x + 1)
+        if mapping_type is OrderedDict:
+            mapping.move_to_end("a")
+        expected = fn(x, mapping)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
+        self.assertEqual(actual, expected)
+        self.assertIs(type(actual[0]), dict)
+        self.assertEqual(
+            list(actual[0]), ["b", "a"] if mapping_type is OrderedDict else ["a", "b"]
+        )
+        self.assertEqual(actual[1:], (False, True))
+
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    @parametrize("empty", [False, True])
+    def test_dict_copy_descriptor_mapping_override(self, mapping_type, empty):
+        class Mapping(mapping_type):
+            def __iter__(self):
+                return super().__iter__()
+
+            def keys(self):
+                return ["other"]
+
+            def __getitem__(self, key):
+                return dict.__getitem__(self, "a") + 1
+
+            def copy(self):
+                raise AssertionError("dict.copy must bypass copy")
+
+        def fn(x):
+            mapping = Mapping() if empty else Mapping(a=x)
+            return dict.copy(mapping), x + 2
+
+        x = torch.ones(1)
+        expected = ({}, x + 2) if empty else ({"other": x + 1}, x + 2)
+        self.assertEqual(fn(x), expected)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertIs(type(actual[0]), dict)
+
+    @parametrize("bound", [False, True])
+    def test_dict_descriptor_arity_on_ordered_dict(self, bound):
+        def fn(x):
+            mapping = OrderedDict(a=x)
+            try:
+                if bound:
+                    dict.popitem.__get__(mapping)(False)
+                else:
+                    dict.popitem(mapping, False)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no error"
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_update_input_dict_with_custom_new(self):
         class Mapping(dict):
             def __new__(cls, *args, **kwargs):
