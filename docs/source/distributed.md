@@ -84,13 +84,10 @@ for a brief introduction to all features related to distributed training.
 through the `torch.distributed.backends` entry point group and loaded on first use.
 
 - `gloo`: CPU and CUDA.
-- `nccl`: CUDA. Defaults to the `nccl2` implementation (`ProcessGroupNCCL2`).
-  Set `TORCH_DIST_USE_NCCL2=0` to make `nccl` use the legacy `ProcessGroupNCCL`.
-- `nccl2`: CUDA. NCCL backend built on the TorchComms engine (`ProcessGroupNCCL2`).
-- `nccl-lazy`: CUDA. Variant of `nccl2` (`ProcessGroupNCCLLazy`) that runs collectives
-  on one communicator and creates a 2-rank communicator per point-to-point peer pair on
-  first use.
-- `nccl-legacy`: CUDA. The legacy `ProcessGroupNCCL`, regardless of `TORCH_DIST_USE_NCCL2`.
+- `nccl`: CUDA.
+- `nccl-lazy`: CUDA. Variant of `nccl` that runs collectives on one communicator and
+  creates a 2-rank communicator per point-to-point peer pair on first use.
+- `nccl-legacy`: CUDA. The legacy `ProcessGroupNCCL` implementation.
 - `nccl4py`: CUDA. Python backend built on [nccl4py](https://pypi.org/project/nccl4py/);
   requires the `nccl4py` package.
 - `mpi`: only when PyTorch is built with MPI.
@@ -230,23 +227,22 @@ You can tune NCCL communicators even further using `torch.distributed.ProcessGro
 set through the `config` attribute of `torch.distributed.ProcessGroupNCCL.Options`.
 Pass the `Options` to {func}`torch.distributed.init_process_group` or
 {func}`torch.distributed.new_group` as `pg_options`.
-`ProcessGroupNCCL2.Options` is the same type and is used by the default `nccl`,
-`nccl2` and `nccl-lazy` backends. Learn more about them using `help`
+The same `Options` type is used by the `nccl`, `nccl-lazy` and `nccl-legacy`
+backends. Learn more about them using `help`
 (e.g. `help(torch.distributed.ProcessGroupNCCL.NCCLConfig)`) in the interpreter.
 
 (nccl-collective-config)=
 
 ### Per-collective NCCL configuration
 
-The `nccl2` backend (the default for `nccl`) and `nccl-lazy`, which wraps it,
-accept a keyword-only `config` on supported collective functions. This requires NCCL 2.31 or later and
+The `nccl` and `nccl-lazy` backends accept a keyword-only `config` on supported collective functions. This requires NCCL 2.31 or later and
 [nccl4py](https://pypi.org/project/nccl4py/) 0.5.0 or later:
 
 ```python
 from nccl.core import NCCLCollConfig
 import torch.distributed as dist
 
-dist.init_process_group("nccl2")
+dist.init_process_group("nccl")
 config = NCCLCollConfig(max_ctas=4, alg_selection="ring")
 dist.all_reduce(tensor, config=config)
 ```
@@ -264,9 +260,8 @@ agree on `cga_cluster_size`. Passing `None` preserves existing behavior and does
 not require nccl4py.
 
 Backends receive `config` as its attribute dictionary (`vars(config)`); a plain
-`dict` with the same keys is equivalent. `nccl-legacy` (and `nccl` with
-`TORCH_DIST_USE_NCCL2=0`), `gloo` and the other built-in backends ignore it.
-NCCL2 rejects vendor options and unsupported operations. `all_to_all_single`
+`dict` with the same keys is equivalent. `nccl-legacy`, `gloo` and the other built-in backends ignore it.
+`nccl` rejects vendor options and unsupported operations. `all_to_all_single`
 with a config requires even splits on every rank. External NCCL group scopes are unsupported.
 
 Supported synchronous calls can use `torch.compile` and `torch.export`.
@@ -535,8 +530,7 @@ process-launcher level.
 
 if {func}`destroy_process_group` is not called by all ranks in a pg within the timeout duration,
 especially when there are multiple process-groups in the application e.g. for N-D parallelism,
-hangs on exit are possible. This is because the NCCL backends (`ProcessGroupNCCL` and
-`ProcessGroupNCCL2`) call ncclCommAbort in their destructor if the group was not shut down,
+hangs on exit are possible. This is because the NCCL backends call ncclCommAbort in their destructor if the group was not shut down,
 which must be called collectively, but the order of calling the destructors if called
 by python's GC is not deterministic. Calling {func}`destroy_process_group` helps by ensuring
 communicators are torn down in a consistent order across ranks, and avoids calling ncclCommAbort
@@ -817,6 +811,10 @@ if rank == 0:
     :class:`~torch.distributed.ReduceOp` is recommended to use instead.
 
 ```
+
+## Functional collectives
+
+Functional collectives return new tensors instead of mutating their inputs and are traceable by `torch.compile`. See {doc}`distributed/functional_collectives`.
 
 ## Distributed Key-Value Store
 
@@ -1452,9 +1450,9 @@ torchrun --nproc-per-node=2 train.py
 # Open http://localhost:25999
 ```
 
-For an end-to-end NCCL2 failure example, see
+For an end-to-end NCCL failure example, see
 {download}`verify_nccl2_flight_recorder.py <../../torch/distributed/examples/verify_nccl2_flight_recorder.py>`.
-The example deliberately hangs an NCCL2 collective and verifies that the c10d
+The example deliberately hangs an NCCL collective and verifies that the c10d
 health check causes the debug server to write a Flight Recorder dump for every
 rank. Run it on a host with at least two GPUs:
 
