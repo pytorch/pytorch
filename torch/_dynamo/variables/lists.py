@@ -2069,7 +2069,10 @@ class TupleVariable(BaseListVariable):
 
         if not 1 <= len(args) <= 2:
             return VariableTracker.tp_new_impl(self, tx, args, kwargs)
-        no_keywords(tx, "tuple", kwargs)
+        # tuple_new rejects keywords only when tuple's own tp_init would run.
+        cls = args[0].as_python_constant()
+        if cls is tuple or cls.__init__ is tuple.__init__:
+            no_keywords(tx, "tuple", kwargs)
         if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
             init_args = unpack_iterable(tx, args[1]) if len(args) == 2 else []
             return TupleVariable(init_args, mutation_type=ValueMutationNew())
