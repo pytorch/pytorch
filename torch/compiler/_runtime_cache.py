@@ -89,19 +89,22 @@ def _live_autotuners() -> list[Autotuner]:
     return [obj for obj in gc.get_objects() if issubclass(type(obj), Autotuner)]
 
 
-def _importable(root: Path) -> bool:
+def _importable(root: Path, digest: str) -> bool:
     from torch.compiler._triton_runtime_cache import _READY
 
     if not root.is_dir():
         return not root.exists()
-    return not any(root.iterdir()) or (root / _READY).is_file()
+    marker = root / _READY
+    return not any(root.iterdir()) or (
+        marker.is_file() and marker.read_text() == digest
+    )
 
 
-def _serving_triton_root(cache: ModuleType) -> str:
+def _serving_triton_root(cache: ModuleType, digest: str) -> str:
     """Point Triton at a cache directory to import a runtime cache into, and turn
     its autotuning cache on, for the rest of the process.
 
-    That is TRITON_CACHE_DIR if it is empty or holds an earlier import, and a
+    That is TRITON_CACHE_DIR if it is empty or already holds this cache, and a
     fresh directory otherwise, since the import refuses to mix with unrelated
     entries (Inductor points TRITON_CACHE_DIR at its shared cache once it
     compiles). Autotuners fix cache_results when they are decorated, so
@@ -111,7 +114,7 @@ def _serving_triton_root(cache: ModuleType) -> str:
     from triton import knobs
 
     configured = os.environ.get("TRITON_CACHE_DIR")
-    if configured is None or not _importable(Path(configured)):
+    if configured is None or not _importable(Path(configured), digest):
         os.environ["TRITON_CACHE_DIR"] = _private_directory(
             "torch_precompile_triton_load_"
         )
@@ -153,25 +156,31 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
 
     def import_into_triton(self, *, strict: bool) -> None:
         cache = _triton_runtime_cache()
-        problem = None
-        root = None
+        problem = cause = root = None
         if cache is None:
             problem = "Triton is not installed or too old to import one"
+        elif _active_capture() is not None:
+            problem = "it cannot be imported inside a precompile.capture block"
         else:
+            # A failing lookup is reported by _serving_triton_root below.
+            with contextlib.suppress(Exception), _imported_triton_runtime_lock:
+                served = (self.key, str(cache.runtime_cache_root()))
+                if served in _imported_triton_runtime:
+                    return
             try:
-                root = _serving_triton_root(cache)
+                root = _serving_triton_root(cache, self.key)
             except Exception as exc:
                 problem = f"Triton has no cache directory to import it into ({exc})"
-        if problem is not None:
+                cause = exc
+        if cache is None or root is None:
             message = (
                 f"The precompile cache contains a Triton runtime cache, but {problem}"
             )
             if strict:
-                raise RuntimeError(message)
+                raise RuntimeError(message) from cause
             log.warning(
                 "%s; Triton JIT kernels will compile or autotune on first use", message
             )
-        if cache is None or root is None:
             return
         imported = (self.key, root)
         with _imported_triton_runtime_lock:
@@ -186,6 +195,8 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
                     raise
                 # Raising here would stop the artifacts populated after this one
                 # (populate_first), leaving the frozen Inductor kernels cold too.
+                # The TRITON_CACHE_DIR and autotuning settings _serving_triton_root
+                # made persist, so later JIT compiles land in that directory.
                 log.warning(
                     "Could not import the precompile cache's Triton runtime cache "
                     "(%s); Triton JIT kernels will compile or autotune on first use",
@@ -348,7 +359,8 @@ class _UnresolvedTritonExport(RuntimeError):
         self.sources = sources
         self.report = {"sources": sources}
         super().__init__(
-            "Cannot export Triton sources: no fully resolved static launcher\n"
+            "Cannot export Triton sources: no fully resolved static launcher. Run "
+            "every Triton kernel the serving process needs inside the capture block.\n"
             + json.dumps(self.report, sort_keys=True)
         )
 
@@ -378,7 +390,7 @@ def _triton_export_diagnostic(
     kernel: CachingAutotuner, reason: str
 ) -> dict[str, object]:
     compile_id = getattr(kernel, "compile_id", None)
-    backward = getattr(kernel, "is_backward", None)
+    # CachingAutotuner.precompile drops configs once it has compile_results.
     configs = getattr(kernel, "configs", None)
     return {
         "reason": reason,
@@ -386,12 +398,10 @@ def _triton_export_diagnostic(
         "filename": getattr(kernel, "filename", None),
         "compile_id": str(compile_id) if compile_id is not None else None,
         "direction": None
-        if backward is None
-        else "backward"
-        if backward
-        else "forward",
+        if compile_id is None
+        else ("backward" if kernel.is_backward else "forward"),
         "heuristic": getattr(getattr(kernel, "heuristic_type", None), "name", None),
-        "config_count": len(configs) if configs is not None else None,
+        "config_count": len(kernel.compile_results if configs is None else configs),
         "launcher_count": len(kernel.launchers),
         "compile_result_count": len(kernel.compile_results),
         "launcher_types": [type(launcher).__name__ for launcher in kernel.launchers],
@@ -460,7 +470,8 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
         try:
             _retain_cubin(saved_result)
         except (OSError, RuntimeError) as exc:
-            diagnostic = _triton_export_diagnostic(kernel, "cubin_unavailable")
+            with kernel.lock:
+                diagnostic = _triton_export_diagnostic(kernel, "cubin_unavailable")
             diagnostic["error"] = str(exc)
             rejected.append(diagnostic)
             continue
@@ -469,8 +480,16 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
                 key, saved.inductor_meta.get("kernel_name", "unknown_kernel"), saved
             )
         )
+    kernel_name = instances[0].inductor_meta.get("kernel_name")
     raise _UnresolvedTritonExport(
-        [{"source_key": key, "instance_count": len(instances), "instances": rejected}]
+        [
+            {
+                "source_key": key,
+                "kernel_name": kernel_name,
+                "instance_count": len(instances),
+                "instances": rejected,
+            }
+        ]
     )
 
 
@@ -521,8 +540,10 @@ def _own_triton_cache(settings: contextlib.ExitStack) -> str | None:
     # build so the export carries it. _active, not active: that creates a driver.
     utils = getattr(driver._active or driver._default, "utils", None)
     loaded = getattr(getattr(utils, "load_binary", None), "__self__", None)
-    if (module := getattr(loaded, "__file__", None)) is not None:
-        module = Path(module)
+    # The module's directory may since have been deleted; a serving host then
+    # rebuilds it, as it does when this process never loaded one.
+    module = getattr(loaded, "__file__", None)
+    if module is not None and (module := Path(module)).is_file():
         entry = Path(root) / module.parent.name
         entry.mkdir(exist_ok=True)
         shutil.copy2(module, entry / module.name)
@@ -571,7 +592,7 @@ def capture_scope() -> Iterator[None]:
 
 
 def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
-    import torch
+    from torch._logging import trace_structured
 
     static_kernels: dict[str, bytes] = {}
     rejected_sources: list[dict[str, object]] = []
@@ -582,7 +603,7 @@ def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
             rejected_sources.extend(exc.sources)
     if rejected_sources:
         error = _UnresolvedTritonExport(rejected_sources)
-        torch._logging.trace_structured(
+        trace_structured(
             "artifact",
             metadata_fn=lambda: {
                 "name": "precompile_triton_export_failures",
