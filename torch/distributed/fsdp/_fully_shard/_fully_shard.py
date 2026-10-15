@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import functools
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, cast, Literal, NoReturn, overload, TYPE_CHECKING
 from typing_extensions import deprecated
 
@@ -314,17 +315,24 @@ def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     )
 
 
-_enable_fsdp_module_new_init: bool = True
+_fsdp_module_new_init_disabled: ContextVar[bool] = ContextVar(
+    "_fsdp_module_new_init_disabled", default=False
+)
 
 
 @contextmanager
 def disable_fsdp_module_new_init() -> Iterator[None]:
-    global _enable_fsdp_module_new_init
-    prev, _enable_fsdp_module_new_init = _enable_fsdp_module_new_init, False
+    """Make ``FSDPModule.__new__`` return an uninitialized instance of the
+    wrapper class itself, for rebuilding a module from saved state.
+
+    Do not call an FSDP class inside this context: Python would run the original
+    ``__init__`` on that instance, returning a wrapper with no FSDP state.
+    """
+    token = _fsdp_module_new_init_disabled.set(True)
     try:
         yield
     finally:
-        _enable_fsdp_module_new_init = prev
+        _fsdp_module_new_init_disabled.reset(token)
 
 
 class FSDPModule:
@@ -337,22 +345,51 @@ class FSDPModule:
         """
         Override ``__new__`` to remove the FSDP class and directly construct
         the original class for cases like indexing into a container module.
+        Under ``disable_fsdp_module_new_init``, return an uninitialized
+        instance of ``cls`` itself, so a module rebuilt from guard state keeps
+        the wrapper type its guards match.
         """
         orig_cls = cls.__mro__[cls._orig_cls_mro_index]
+        if _fsdp_module_new_init_disabled.get():
+            # pyrefly: ignore [no-matching-overload]
+            return orig_cls.__new__(cls)
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
-        if _enable_fsdp_module_new_init:
-            self.__init__(*args, **kwargs)
+        self.__init__(*args, **kwargs)
         return self
 
     def reshard(self) -> None:
         """
-        Reshards the module's parameters, freeing the unsharded parameters if
-        they are allocated and registering the sharded parameters to the
-        module. This method is *not* recursive.
+        Reshards the module's parameters and registers the sharded parameters
+        to the module. This method is *not* recursive. By default, this frees
+        the unsharded parameter storage; call :meth:`set_keep_unsharded_storage`
+        to preserve it.
         """
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.reshard()
+
+    def set_keep_unsharded_storage(self, keep: bool, *, recurse: bool = True) -> None:
+        """
+        Sets whether to keep the unsharded parameter storage after resharding.
+        Keeping the storage preserves its data pointers across reshard and
+        unshard, which is useful for CUDA graph capture, at the cost of higher
+        memory usage. By default, FSDP frees the unsharded parameter storage
+        when resharding.
+
+        Args:
+            keep (bool): Whether to keep the unsharded parameter storage after
+                resharding.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    for fsdp_param in fsdp_param_group.fsdp_params:
+                        fsdp_param.keep_unsharded_storage = keep
 
     def unshard(self, async_op: bool = False) -> UnshardHandle | None:
         """

@@ -46,12 +46,12 @@ class Config : public AbstractConfig {
         activitiesOnDemandTimestamp_.time_since_epoch().count() > 0;
   }
 
-  // Log activitiy trace to this file
+  // Log activity trace to this file
   [[nodiscard]] const std::string& activitiesLogFile() const {
     return activitiesLogFile_;
   }
 
-  // Log activitiy trace to this url
+  // Log activity trace to this url
   [[nodiscard]] const std::string& activitiesLogUrl() const {
     return activitiesLogUrl_;
   }
