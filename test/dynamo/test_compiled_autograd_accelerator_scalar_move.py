@@ -219,7 +219,13 @@ class TestCompiledAutogradAcceleratorScalarMove(TestCase):
         graph.create_node(
             "call_function",
             torch.ops.aten.mul.Tensor,
-            (getitems[1], getitems[2]),
+            (getitems[0], getitems[2]),
+            {},
+        )
+        graph.create_node(
+            "call_function",
+            torch.ops.aten.add.Tensor,
+            (getitems[1], 1),
             {},
         )
 
