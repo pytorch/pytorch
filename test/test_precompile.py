@@ -7119,29 +7119,6 @@ class TestPrecompileRuntimeCache(TestCase):
                 root = pathlib.Path(_runtime_cache._capture.cache_root)
                 self.assertFalse((root / "utils_key").exists())
 
-    def test_write_snapshots_after_waiting_on_compiles(self):
-        from torch._inductor.async_compile import AsyncCompile
-        from torch.compiler._cache import CacheArtifactManager
-
-        def record(**kw):
-            # A compile that finishes during the wait records its artifact then.
-            CacheArtifactManager.record_artifact("inductor", "late", b"late")
-
-        drain = mock.patch.object(AsyncCompile, "drain_pending", side_effect=record)
-        with tempfile.TemporaryDirectory() as directory, drain:
-            cache = os.path.join(directory, "m.cache")
-            with capture(
-                _no_compilation_single_graph,
-                artifact_path=os.path.join(directory, "m.py"),
-                cache_path=cache,
-                tracer=DynamoTracer(require_no_risky_drops=False),
-                backend="inductor",
-            ) as cap:
-                cap(torch.ones(4))
-            artifact = torch.load(cache, weights_only=True)["artifact"]
-        artifacts = CacheArtifactManager.deserialize(artifact)
-        self.assertIn("late", [a.key for a in artifacts["inductor"]])
-
     def test_failed_write_leaves_the_paths_and_a_new_capture_retries(self):
         with tempfile.TemporaryDirectory() as directory:
             source = os.path.join(directory, "m.py")
@@ -7179,9 +7156,7 @@ class TestPrecompileRuntimeCache(TestCase):
             )
             torch.compiler.precompile.load(source, cache)
 
-    def test_compile_wait_oserror_is_not_reported_as_a_write_failure(self):
-        from torch._inductor.async_compile import AsyncCompile
-
+    def test_snapshot_oserror_is_not_reported_as_a_write_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             source = os.path.join(directory, "m.py")
             cache = os.path.join(directory, "m.cache")
@@ -7201,7 +7176,9 @@ class TestPrecompileRuntimeCache(TestCase):
                 cap(torch.ones(4))
                 stack.enter_context(
                     mock.patch.object(
-                        AsyncCompile, "drain_pending", side_effect=BrokenPipeError()
+                        cap._session,
+                        "snapshot_artifact",
+                        side_effect=BrokenPipeError(),
                     )
                 )
             self.assertIsInstance(ctx.exception.__cause__, BrokenPipeError)
@@ -7609,6 +7586,26 @@ class TestPrecompileRuntimeCache(TestCase):
             finally:
                 CompiledTritonKernels.cache_clear()
                 clear_caches()
+
+    def test_triton_root_is_importable_under_the_import_rule(self):
+        from torch.compiler._runtime_cache import _importable
+        from torch.compiler._triton_runtime_cache import _READY
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory, "triton")
+            self.assertTrue(_importable(root, "digest", {"key"}))
+            root.mkdir()
+            # What a running or killed import leaves: its staging directory and
+            # an entry it renamed into place.
+            (root / f"{_READY}.hydrate-1-ab").mkdir()
+            (root / "key").mkdir()
+            self.assertTrue(_importable(root, "digest", {"key"}))
+            (root / _READY).write_text("other")
+            self.assertFalse(_importable(root, "digest", {"key"}))
+            (root / _READY).write_text("digest")
+            self.assertTrue(_importable(root, "digest", {"key"}))
+            (root / "unrelated").mkdir()
+            self.assertFalse(_importable(root, "digest", {"key"}))
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_capture_rejects_an_unresolved_triton_source(self):
