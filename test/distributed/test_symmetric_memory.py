@@ -3457,7 +3457,61 @@ class LoweringTest(MultiProcContinuousTest):
 
 @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 class SymmMemCleanupTest(TestCase):
-    def _run_cleanup(self, device, backend, body):
+    @parametrize("retain_handle", [False, True])
+    def test_cuda_peer_pointer_tables_cleanup(self, device, retain_handle):
+        if torch.cuda.memory.get_allocator_backend() != "native":
+            self.skipTest("allocation counts require the native caching allocator")
+        self._run_cleanup(
+            device,
+            "CUDA",
+            f"""
+            test.assertEqual(torch.cuda.memory.get_allocator_backend(), "native")
+            dist.init_process_group(
+                "gloo", store=dist.HashStore(), rank=0, world_size=1
+            )
+            group_name = dist.group.WORLD.group_name
+            warm_handle = _SymmetricMemory.rendezvous(tensor, group_name)
+            del warm_handle, tensor
+            torch.cuda.synchronize(device)
+            baseline = torch.cuda.memory_stats(device)["allocation.all.current"]
+            for _ in range(3):
+                tensor = _SymmetricMemory.empty_strided_p2p(
+                    (1024,), (1,), torch.float32, device
+                )
+                handles = [
+                    _SymmetricMemory.rendezvous(tensor, group_name),
+                    _SymmetricMemory.rendezvous(tensor, group_name),
+                ]
+                torch.cuda.synchronize(device)
+                test.assertEqual(
+                    torch.cuda.memory_stats(device)["allocation.all.current"],
+                    baseline + 2,
+                )
+                if {retain_handle!r}:
+                    del tensor
+                    del handles[0]
+                else:
+                    del handles
+                torch.cuda.synchronize(device)
+                test.assertEqual(
+                    torch.cuda.memory_stats(device)["allocation.all.current"],
+                    baseline + 2,
+                )
+                if {retain_handle!r}:
+                    del handles
+                else:
+                    del tensor
+                torch.cuda.synchronize(device)
+                test.assertEqual(
+                    torch.cuda.memory_stats(device)["allocation.all.current"],
+                    baseline,
+                )
+            dist.destroy_process_group()
+            """,
+            env_overrides={"TORCH_SYMM_MEM_DISABLE_MULTICAST": "1"},
+        )
+
+    def _run_cleanup(self, device, backend, body, env_overrides=None):
         if backend == "NCCL" and (
             not dist.is_nccl_available() or torch.cuda.nccl.version() < (2, 27, 0)
         ):
@@ -3477,7 +3531,12 @@ if {backend!r} == "NVSHMEM":
     dist.init_process_group("gloo", store=dist.HashStore(), rank=0, world_size=1)
 tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device)
 """
-        env = {**os.environ, "TORCH_SYMMMEM": backend, "CUDA_LAUNCH_BLOCKING": "0"}
+        env = {
+            **os.environ,
+            "TORCH_SYMMMEM": backend,
+            "CUDA_LAUNCH_BLOCKING": "0",
+            **(env_overrides or {}),
+        }
         result = subprocess.run(
             [sys.executable, "-c", script + textwrap.dedent(body)],
             env=env,
