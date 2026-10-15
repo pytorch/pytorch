@@ -384,7 +384,7 @@ class TestGetPRInfoForbiddenHeadRepository(TestCase):
 
 
 class TestFailureComment(TestCase):
-    run_url = "https://github.com/pytorch/pytorch/actions/runs/1"
+    run_url = "https://github.com/pytorch/pytorch/actions/runs/1"  # @lint-ignore
     errors = [
         {
             "message": "Something went wrong while executing your query. "
@@ -413,6 +413,21 @@ class TestFailureComment(TestCase):
             str(e), f"GitHub GraphQL query failed: {self.errors[0]['message']}"
         )
         self.assertEqual(e.variables, {"number": 200980, "cursor": "Y3Vyc29y"})
+
+    def test_graphql_details_reach_the_log(self) -> None:
+        with mock.patch("builtins.print") as mock_print:
+            e = self.graphql_error()
+        logged = mock_print.call_args.args[0]
+        self.assertIn(str(e), logged)
+        self.assertIn("```graphql\nquery ($number: Int!)", logged)
+        self.assertIn('"cursor": "Y3Vyc29y"', logged)
+        if hasattr(e, "add_note"):  # Python 3.11+
+            self.assertEqual(e.__notes__, [e.details_markdown()])
+
+    def test_graphql_empty_errors(self) -> None:
+        self.errors = []
+        e = self.graphql_error()
+        self.assertEqual(str(e), "GitHub GraphQL query failed: (no error message)")
 
     def test_graphql_details_are_collapsed(self) -> None:
         msg = format_failure_comment(self.graphql_error(), "Merge failed", self.run_url)

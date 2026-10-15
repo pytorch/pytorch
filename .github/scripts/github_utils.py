@@ -155,6 +155,9 @@ class GHGraphQLError(RuntimeError):
         self.response = response
         self.query = query
         self.variables = variables
+        if query is not None and hasattr(self, "add_note"):  # Python 3.11+
+            # Shown in tracebacks but not in str(e), which stays short for comments
+            self.add_note(self.details_markdown())
 
     def details_markdown(self) -> str:
         """The query, variables and raw errors, for a collapsed comment section.
@@ -190,12 +193,16 @@ def gh_graphql(query: str, **kwargs: Any) -> dict[str, Any]:
         )
         # One line, so a newline in the message can't open a markdown block
         messages = _truncate(" ".join(messages.split()), 2000)
-        raise GHGraphQLError(
-            f"GitHub GraphQL query failed: {messages}",
+        err = GHGraphQLError(
+            f"GitHub GraphQL query failed: {messages or '(no error message)'}",
             rc,
             query=query,
             variables=kwargs,
         )
+        # Keep the full context in the job log; mergebot runs on Python 3.10,
+        # where tracebacks don't show add_note()
+        print(f"{err}\n{err.details_markdown()}")
+        raise err
     return cast(dict[str, Any], rc)
 
 
