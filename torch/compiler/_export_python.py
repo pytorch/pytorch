@@ -58,6 +58,8 @@ _MODULE_TRAINING_TAG = "# torch.compiler.export_python module-training: "
 _INPUT_OVERLAP_TAG = "# torch.compiler.export_python input-overlap: "
 _INPUT_DUPLICATE_TAG = "# torch.compiler.export_python input-duplicates: "
 _AUTOCAST_TAG = "# torch.compiler.export_python autocast: "
+# Ambient state the generated code bakes that no other stamp covers; see _global_state.
+_GLOBAL_STATE_TAG = "# torch.compiler.export_python global-state: "
 
 # os.link failures that mean the filesystem cannot do hard links at all, as opposed to
 # a real I/O problem (a full disk, a bad permission) that must not be swallowed. EINVAL
@@ -421,6 +423,33 @@ def _autocast_state(
     ]
 
 
+def _global_state() -> list[list[str]]:
+    """Ambient globals the emitted code resolves against, as [key, value] pairs.
+
+    Recorded as strings so the stamp round-trips through ast.literal_eval. All four are
+    read at CAPTURE and baked: a factory op with no dtype= or device= takes the defaults
+    then, inductor (or a decomposition) picks a deterministic or an atomic-add lowering
+    from the determinism flag, and under determinism inductor's empty_strided lowering
+    bakes the fill_uninitialized_memory value. The artifact never re-consults them, so a
+    process that changes one and replays gets capture's answer with no error.
+
+    float32_matmul_precision is deliberately NOT here. torch.get_float32_matmul_precision
+    raises outright in a process that has used the per-backend fp32_precision API, so
+    stamping it would kill capture there; and on the default config the artifact reaches
+    extern_kernels.mm, which re-reads the setting at run time, so the check would refuse
+    calls the artifact serves correctly. Only a max_autotune Triton GEMM template bakes it
+    as a tl.constexpr.
+    """
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    fill = deterministic and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+    return [
+        ["default_dtype", str(torch.get_default_dtype())],
+        ["default_device", str(torch.get_default_device())],
+        ["deterministic", str(deterministic)],
+        ["fill_uninitialized_memory", str(fill)],
+    ]
+
+
 class ExportedPythonArtifact:
     """Materializes and disk-caches a ``torch.compiler.precompile`` artifact.
 
@@ -463,6 +492,7 @@ class ExportedPythonArtifact:
         self._module_training: list[tuple[int, list[tuple[str, bool]]]] | None = None
         self._input_overlaps: list[list[int]] | None = None
         self._input_duplicates: list[list[int]] | None = None
+        self._global_state: dict[str, str] | None = None
         self._code_devices: set[str] = set()
         self._autocast: list[list[Any]] | None = None
         self._loaded: Callable[..., Any] | None = None
@@ -536,7 +566,7 @@ class ExportedPythonArtifact:
             f"{_INPUT_DUPLICATE_TAG}{_input_duplicates(example, example_tensors)!r}\n"
             f"{_AUTOCAST_TAG}"
             f"{_autocast_state(example, example_tensors, _code_devices(code))!r}\n"
-            f"{code}"
+            f"{_GLOBAL_STATE_TAG}{_global_state()!r}\n{code}"
         )
         # os.link does not follow a symlink at its destination, so resolve one first: a
         # dangling symlink at path would otherwise read as a lost race forever.
@@ -644,6 +674,36 @@ class ExportedPythonArtifact:
                     "AOTAutograd folds arguments that are one object into a single "
                     "graph slot, so this call would compute against the wrong "
                     "assumption -- byte overlap alone cannot see the difference."
+                )
+        if self._global_state is None:
+            log.warning(
+                "torch.compiler.export_python: the artifact at %s carries no recorded "
+                "global-state stamp, so calling it under a different default dtype, "
+                "default device, determinism setting or fill_uninitialized_memory "
+                "than capture is unchecked. Delete %s to regenerate it.",
+                self._path,
+                self._path,
+            )
+        else:
+            actual_state = dict(_global_state())
+            for key, captured in self._global_state.items():
+                if key not in actual_state:
+                    continue  # a key this torch no longer records
+                live = actual_state[key]
+                if live == captured:
+                    continue
+                # Determinism and its fill are one-sided: capture with one OFF and replay
+                # with it ON means the artifact keeps a lowering the caller has asked not to
+                # run. ON at capture and OFF at replay is conservative, so it is not an error.
+                one_way = key in ("deterministic", "fill_uninitialized_memory")
+                if one_way and captured == "True":
+                    continue
+                raise _precompile_error(
+                    f"torch.compiler.export_python: {key} is {live} but the artifact "
+                    f"was captured with {key} {captured}. It is resolved when the code "
+                    "is generated and baked in, so this call would silently get "
+                    "capture's answer. Set it to the captured value, or delete "
+                    f"{self._path} to recapture."
                 )
         if self._autocast is None:
             log.warning(
@@ -792,6 +852,21 @@ class ExportedPythonArtifact:
         self._input_overlaps = self._read_stamp(code, _INPUT_OVERLAP_TAG)
         self._input_duplicates = self._read_stamp(code, _INPUT_DUPLICATE_TAG)
         self._autocast = self._read_stamp(code, _AUTOCAST_TAG)
+        pairs = self._read_stamp(code, _GLOBAL_STATE_TAG)
+        # Anything but a non-empty list of [str, str] pairs is a hand-edit, treated like a
+        # dropped stamp so the missing-stamp warning fires instead of every check silently
+        # turning off.
+        well_formed = (
+            isinstance(pairs, list)
+            and bool(pairs)
+            and all(
+                isinstance(p, list)
+                and len(p) == 2
+                and all(isinstance(s, str) for s in p)
+                for p in pairs
+            )
+        )
+        self._global_state = dict(pairs) if well_formed else None
         self._code_devices = _code_devices(code)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None
