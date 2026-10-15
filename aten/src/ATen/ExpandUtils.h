@@ -200,7 +200,7 @@ inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
 expand_outplace(const Tensor& to_expand1, const Tensor& to_expand2) {
   auto s1 = to_expand1.sym_sizes();
   auto s2 = to_expand2.sym_sizes();
-  if (s1.equals(s2)) {
+  if (TORCH_GUARD_OR_FALSE(c10::sym_equals(s1, s2))) {
     return std::make_tuple(
         c10::MaybeOwned<Tensor>::borrowed(to_expand1),
         c10::MaybeOwned<Tensor>::borrowed(to_expand2));
@@ -448,7 +448,8 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   for (const auto i : c10::irange(to_expand.size())) {
     if (!to_expand[i].defined()) {
       continue;
-    } else if (to_expand[i].sym_sizes().equals(sizes)) {
+    } else if (TORCH_GUARD_OR_FALSE(
+                   c10::sym_equals(to_expand[i].sym_sizes(), sizes))) {
       result[i] = to_expand[i];
     } else {
       result[i] = to_expand[i].expand_symint(sizes);

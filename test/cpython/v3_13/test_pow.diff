@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_pow.py b/test/cpython/v3_13/test_pow.py
-index eeb482ec4b27e2dba58483687c5478e665dc36b2..973cce1336b27f313c3ae4ad9a36b377cefb1816 100644
+index eeb482ec4b27e2dba58483687c5478e665dc36b2..2fcc307055b15feaf228d572c91a724b43935c1e 100644
 --- a/test/cpython/v3_13/test_pow.py
 +++ b/test/cpython/v3_13/test_pow.py
 @@ -1,7 +1,62 @@
@@ -17,7 +17,7 @@ index eeb482ec4b27e2dba58483687c5478e665dc36b2..973cce1336b27f313c3ae4ad9a36b377
 +import torch._dynamo.test_case
 +import unittest
 +from torch._dynamo.test_case import CPythonTestCase
-+from torch.testing._internal.common_utils import run_tests
++from torch.testing._internal.common_utils import run_tests, slowTest
 +
 +__TestCase = CPythonTestCase
 +
@@ -66,7 +66,15 @@ index eeb482ec4b27e2dba58483687c5478e665dc36b2..973cce1336b27f313c3ae4ad9a36b377
  
      def powtest(self, type):
          if type != float:
-@@ -167,4 +222,4 @@ class PowTest(unittest.TestCase):
+@@ -141,6 +196,7 @@ class PowTest(unittest.TestCase):
+             eq(pow(a, -fiveto), expected)
+         eq(expected, 1.0)   # else we didn't push fiveto to evenness
+ 
++    @slowTest
+     def test_negative_exponent(self):
+         for a in range(-50, 50):
+             for m in range(-50, 50):
+@@ -167,4 +223,4 @@ class PowTest(unittest.TestCase):
  
  
  if __name__ == "__main__":

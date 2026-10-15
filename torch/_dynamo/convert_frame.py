@@ -117,8 +117,10 @@ from .eval_frame import (
 from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
+    CompileOnOneRankUnsupported,
     FailOnRecompileLimitHit,
     format_error_msg,
+    format_user_stack,
     InternalTorchDynamoError,
     PackageError,
     ResumePrologueTracingError,
@@ -399,6 +401,23 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
 
     _fn._torchdynamo_orig_backend = fn  # type: ignore[attr-defined]
     return _fn
+
+
+def nonrecursive_disable_skip(
+    caller: types.FrameType | None,
+) -> ConvertFrameReturn | None:
+    """How to skip a frame whose caller is a disable(recursive=False) wrapper.
+
+    Only that frame is skipped; its callees are still offered to the callback.
+    """
+    if caller is not None and (
+        caller.f_code is decorators._nonrecursive_disable_wrapper_code
+    ):
+        return ConvertFrameReturn(
+            apply_to_code=False,
+            skip_reason="tracing is non-recursively disabled for this frame",
+        )
+    return None
 
 
 @TorchPatcher.suppress_torch_distributed_warnings
@@ -730,14 +749,8 @@ class ConvertFrameAssert:
             and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
         ):
             prev_frame = prev_frame.f_back  # type: ignore[assignment]
-        if (
-            prev_frame
-            and prev_frame.f_code is decorators._nonrecursive_disable_wrapper_code
-        ):
-            return ConvertFrameReturn(
-                apply_to_code=False,
-                skip_reason="tracing is non-recursively disabled for this frame",
-            )
+        if (disabled := nonrecursive_disable_skip(prev_frame)) is not None:
+            return disabled
 
         global initial_global_state
         # Save the previous initial_global_state to handle nested compilations
@@ -948,7 +961,20 @@ def trace_frame(
     def run_tracer() -> None:
         try:
             tracer.output.mark_bytecode_tracing_start()
-            with tracing(tracer.output.tracing_context), tracer.set_current_tx():
+            # An fx annotation active when this frame starts (e.g. an annotated
+            # caller that graph-broke into this frame) applies to every node it
+            # traces. OutputGraph guards on it, so the graph is not reused under
+            # a different annotation.
+            preserve_ambient_annotation = (
+                torch.fx.traceback.preserve_node_meta()
+                if tracer.output.fx_annotation
+                else contextlib.nullcontext()
+            )
+            with (
+                tracing(tracer.output.tracing_context),
+                tracer.set_current_tx(),
+                preserve_ambient_annotation,
+            ):
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()  # type: ignore[has-type]
@@ -1710,10 +1736,20 @@ def _compile(
     # in the case of normal and exception code paths
     convert_frame_box: ConvertFrameBox | None = None,
 ) -> ConvertFrameReturn:
+    from torch.compiler._no_compile import check_compilation_allowed
     from torch.fx.experimental.validator import (
         BisectValidationException,
         ValidationException,
     )
+
+    check_compilation_allowed("Dynamo graph compilation")
+
+    if isinstance(innermost_backend(compiler_fn), torch._TorchCompileInductorWrapper):
+        # Overlap the one-time source hashing for Inductor's cache keys with
+        # Dynamo and AOTAutograd tracing.
+        from torch._inductor.codecache import prefetch_cache_keys
+
+        prefetch_cache_keys()
 
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
@@ -2000,7 +2036,9 @@ def _compile(
 
     metrics_context = get_metrics_context()
     package_code_context = (
-        package.code_context(code) if package is not None else contextlib.nullcontext()
+        package.code_context(code, globals)
+        if package is not None
+        else contextlib.nullcontext()
     )
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
@@ -2234,6 +2272,7 @@ def _compile(
                     ShortenTraceback,
                     PackageError,
                     ResumePrologueTracingError,
+                    CompileOnOneRankUnsupported,
                     unittest.SkipTest,
                 ),
             ):
@@ -2414,6 +2453,15 @@ class ConvertFrame:
                 # as an observed exception - we don't expect that exception to be suppressed.
                 raise
 
+            from torch._precompile import PrecompileError
+
+            # no_compilation() violations must surface even under
+            # suppress_errors, including one Inductor raised inside a backend.
+            if isinstance(e, PrecompileError) or isinstance(
+                getattr(e, "inner_exception", None), PrecompileError
+            ):
+                raise
+
             # These two exception types are "soft" failure, in the sense that
             # we know this is due to something we didn't implement all the
             # way, scare the user less about it.  That being said, if you
@@ -2428,7 +2476,9 @@ class ConvertFrame:
             # need to make these exceptions not get wrapped
 
             # We intentionally don't want to suppress error here.
-            if isinstance(e, UncapturedHigherOrderOpError):
+            if isinstance(
+                e, (UncapturedHigherOrderOpError, CompileOnOneRankUnsupported)
+            ):
                 raise
 
             soft_fail = isinstance(e, (Unsupported, UserError))
@@ -2449,9 +2499,7 @@ class ConvertFrame:
                 if hasattr(e, "compile_id") and hasattr(e, "real_stack"):
                     with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
                         user_stack = e.real_stack
-                        user_stack_formatted = "".join(
-                            traceback.format_list(user_stack)
-                        )
+                        user_stack_formatted = format_user_stack(user_stack)
                         frame_info = exc.format_frame_info(code)
                         user_stack_trace = (
                             "Graph break: torch.compile cannot properly resume from this graph break, which results in a skip.\n"
@@ -2489,14 +2537,15 @@ class ConvertFrame:
             else:
                 log.warning(error_msg, exc_info=True)
 
-            # Check if the exception has a specific frame execution strategy
-            if (
-                isinstance(e, exc.TorchDynamoException)
-                and e.frame_exec_strategy is not None
+            # Check if the exception overrides the default frame execution behavior.
+            if isinstance(e, exc.TorchDynamoException) and (
+                e.frame_exec_strategy is not None or not e.apply_to_code
             ):
                 return ConvertFrameReturn(
-                    frame_exec_strategy=e.frame_exec_strategy,
-                    skip_reason="compilation failed with a custom frame execution strategy",
+                    frame_exec_strategy=e.frame_exec_strategy
+                    or FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT),
+                    apply_to_code=e.apply_to_code,
+                    skip_reason="compilation failed with exception-directed frame execution",
                 )
 
         return ConvertFrameReturn(

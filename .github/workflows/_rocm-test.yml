@@ -240,6 +240,13 @@ jobs:
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
+          # HSA_ENABLE_IPC_MODE_LEGACY=1 works around amdgpu KFD bugs in the default dmabuf IPC path:
+          # importing a same-GPU buffer reuses the exporter's GEM handle, so both processes free it
+          # (https://github.com/pytorch/pytorch/pull/198921), and concurrent export/attach races
+          # (https://github.com/ROCm/rocm-systems/issues/11892). While set, CI does not exercise the
+          # dmabuf IPC path users get by default. Remove once the driver fixes for both are on all runners.
+          # Legacy mode needs the out-of-tree amdgpu driver: AMDKFD_IOC_IPC_IMPORT_HANDLE/EXPORT_HANDLE
+          # are not in upstream kfd_ioctl.h, so every IPC call fails on runners with an upstream kernel.
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
@@ -278,6 +285,7 @@ jobs:
             -e HUGGING_FACE_HUB_TOKEN \
             -e DASHBOARD_TAG \
             -e USE_ARC \
+            -e HSA_ENABLE_IPC_MODE_LEGACY=1 \
             --env-file="${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --ulimit core=0 \

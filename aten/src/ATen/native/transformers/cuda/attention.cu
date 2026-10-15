@@ -1355,6 +1355,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     std::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
+#ifdef USE_ROCM
   constexpr int64_t MAX_BATCH_SIZE = (1LL << 16) - 1;
   int64_t batch_size = query.size(0);
 
@@ -1363,6 +1364,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
                 "Efficient attention cannot produce valid seed and offset outputs when "
                 "the batch size exceeds (", MAX_BATCH_SIZE, ").");
   }
+#endif
   auto process_chunk = [&](const Tensor& q_chunk,
                            const Tensor& k_chunk,
                            const Tensor& v_chunk,
@@ -1398,6 +1400,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
                            std::move(offset));
   };
 
+#ifdef USE_ROCM
   // when bs is larger than allowed maximum, process in chunks
   if (batch_size > MAX_BATCH_SIZE) {
     int64_t start = 0;
@@ -1457,10 +1460,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
               std::move(seed),
               std::move(offset));
   }
-  // when bs is within the allowed size, no need to chunk it
-  else {
-    return process_chunk(query, key, value, attn_bias);
-  }
+#endif
+  return process_chunk(query, key, value, attn_bias);
 }
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
@@ -1818,7 +1819,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       atomic_counter = at::zeros({1}, query.options().dtype(at::kInt));
     }
 
-    using sdp::aotriton_adapter::mk_aotensor;
+    using sdp::aotriton_adapter::mk_input_aotensor;
+    using sdp::aotriton_adapter::mk_output_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::mk_philoxtensor;
     using sdp::aotriton_adapter::mk_atomictensor;
@@ -1842,24 +1844,28 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.data_ptr<int64_t>() : nullptr);
     auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
     using aotriton::v3::flash::CausalType;
-    using aotriton::v3::flash::VarlenType;
     using aotriton::v3::flash::WindowValue;
+#if AOTRITON_VARLEN_BITS_API
+    using sdp::aotriton_adapter::mk_varlen_bits_packed;
+#else
+    using aotriton::v3::flash::VarlenType;
+#endif
     aotriton::v3::flash::attn_fwd_params params;
-    params.Q = mk_aotensor(q_t, "q");
-    params.K = mk_aotensor(k_t, "k");
-    params.V = mk_aotensor(v_t, "v");
+    params.Q = mk_input_aotensor(q_t, "q");
+    params.K = mk_input_aotensor(k_t, "k");
+    params.V = mk_input_aotensor(v_t, "v");
     params.Sm_scale = softmax_scale;
-    params.L = compute_logsumexp ? mk_aotensor<2>(softmax_lse, "M") : empty_t2;
-    params.Out = mk_aotensor(output_t, "Out");
-    params.Max_seqlen_q = max_seqlen_q;    // Unused if cu_seqlens_q is empty
-    params.Max_seqlen_k = max_seqlen_k;    // Unused if cu_seqlens_k is empty
+    params.L = compute_logsumexp ? mk_output_aotensor<2>(softmax_lse, "M") : empty_t2;
+    params.Out = mk_output_aotensor(output_t, "Out");
+    params.Max_seqlen_q = max_seqlen_q;    // Unused if seqinfo_q0 is empty
+    params.Max_seqlen_k = max_seqlen_k;    // Unused if seqinfo_k0 is empty
     params.dropout_p = dropout_p;
     params.philox_seed_ptr = seed;
     params.philox_offset1 = offset1;
     params.philox_offset2 = offset2;
     params.philox_seed_output = seed_output;
     params.philox_offset_output = offset_output;
-    params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
+    params.encoded_softmax = mk_output_aotensor(softmax_fa_t, "encoded_softmax");
     params.persistent_atomic_counter = persistent_counter;
     params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
     if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
@@ -1870,15 +1876,23 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       params.window_right = WindowValue::BottomRightAligned;
     }
     if (bias.has_value()) {
-      params.B = mk_aotensor(bias.value(), "bias");
+      params.B = mk_input_aotensor(bias.value(), "bias");
     }
+#if AOTRITON_VARLEN_BITS_API
+    if (seqstart_q.has_value()) {
+      params.varlen_bits = mk_varlen_bits_packed();
+      params.seqinfo_q0 = mk_input_aotensor<1>(seqstart_q.value(), "seqinfo_q0");
+      params.seqinfo_k0 = mk_input_aotensor<1>(seqstart_k.value(), "seqinfo_k0");
+    }
+#else
     if (seqstart_q.has_value()) {
       params.varlen_type = VarlenType::CompactVarlen;
-      params.cu_seqlens_q = mk_aotensor<1>(seqstart_q.value(), "cu_seqlens_q");
-      params.cu_seqlens_k = mk_aotensor<1>(seqstart_k.value(), "cu_seqlens_k");
+      params.cu_seqlens_q = mk_input_aotensor<1>(seqstart_q.value(), "cu_seqlens_q");
+      params.cu_seqlens_k = mk_input_aotensor<1>(seqstart_k.value(), "cu_seqlens_k");
     } else {
       params.varlen_type = VarlenType::None;
     }
+#endif
     AT_CUDA_CHECK(aotriton::v3::flash::attn_fwd(
         params, aotriton::v3::flash::attn_fwd_params::kVersion, stream));
 #else
@@ -2067,12 +2081,21 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       AT_CUDA_CHECK(err);
     }
     auto blocks = p.getBlocksGrid();
-    if (blocks.x * blocks.y * blocks.z == 0 || key.size(1) == 0) {
+    if (blocks.x == 0 || blocks.y == 0 || blocks.z == 0 || key.size(1) == 0) {
       res.zero_();
       return;
     }
     Kernel::check_supported(p);
-    kernel_fn<<<blocks, p.getThreadsGrid(), smem_bytes, stream>>>(p);
+    // Keep full tensor dimensions for strides, GQA, and dropout RNG indexing.
+    // Only the launch grid is chunked to fit CUDA's y/z limits.
+    for (p.batch_offset = 0; p.batch_offset < p.num_batches; p.batch_offset += blocks.z) {
+      blocks.z = std::min(65535, p.num_batches - p.batch_offset);
+      for (p.head_offset = 0; p.head_offset < p.num_heads; p.head_offset += blocks.y) {
+        blocks.y = std::min(65535, p.num_heads - p.head_offset);
+        kernel_fn<<<blocks, p.getThreadsGrid(), smem_bytes, stream>>>(p);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
+    }
   };
 
   // Dispatch to the right kernel
@@ -2175,7 +2198,7 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
 #ifdef USE_ROCM
 #ifndef DISABLE_AOTRITON
   using aotriton::v2::flash::debug_simulate_encoded_softmax;
-  using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::mk_output_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   at::cuda::CUDAGuard device_guard(self.device());
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -2185,7 +2208,7 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
   seed_t = at::scalar_tensor(at::Scalar(seed), options);
   offset_t = at::scalar_tensor(at::Scalar(offset), options);
   AT_CUDA_CHECK(debug_simulate_encoded_softmax(
-      mk_aotensor(self, "r"),
+      mk_output_aotensor(self, "r"),
       dropout_p,
       mk_aoscalartensor(seed_t),
       mk_aoscalartensor(offset_t),

@@ -250,6 +250,23 @@ class FxirTestCase(InductorTestCase):
         ) + self._count_ops(gm, torch.ops.aten.addbmm.default)
         self.assertEqual(num_fallback, 2)
 
+    def test_fallback_symbolic_kwarg(self):
+        def foo(x, repeats, y):
+            out = torch.repeat_interleave(x, repeats, dim=0, output_size=y.shape[0])
+            return out + y
+
+        args = (
+            torch.randn(4, 8, device=self.device),
+            torch.tensor([1, 2, 3, 4], device=self.device),
+            torch.randn(10, 8, device=self.device),
+        )
+        (gm,) = self._compile_and_check(foo, args, compile_kwargs={"dynamic": True})
+
+        (fallback,) = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.repeat_interleave.Tensor
+        )
+        self.assertIsInstance(fallback.kwargs["output_size"], torch.fx.Node)
+
     def test_cat_inputs(self):
         """
         Test concatenation of graph inputs.

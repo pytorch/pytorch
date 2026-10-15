@@ -135,9 +135,7 @@ static Variable sequenceToVariable(c10::TensorOptions options, PyObject* seq) {
       options, kLong, std::nullopt, seq);
 }
 
-static inline Scalar valueToScalar(
-    c10::TensorOptions options,
-    PyObject* value) {
+inline Scalar valueToScalar(c10::TensorOptions options, PyObject* value) {
   Scalar scalar;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     // uint64 values above INT64_MAX must not go through signed long long unpack
@@ -169,31 +167,13 @@ static inline Scalar valueToScalar(
   return scalar;
 }
 
-Variable valueToTensor(
-    c10::TensorOptions options,
-    PyObject* value,
-    const at::Device& device) {
-  if (THPVariable_Check(value)) {
-    return THPVariable_Unpack(value);
-  }
-  auto scalar = valueToScalar(options, value);
-  // lift_fresh is supposed to be used in situations where you are guaranteed to
-  // get a plain Tensor which is not true for cpu device but not for non cpu
-  // device
-  at::AutoDispatchBelowADInplaceOrView guard; // TODO: remove
-  at::tracer::impl::NoTracerDispatchMode tracer_guard;
-  if (device == at::kCPU && !scalar.isSymbolic()) {
-    return at::lift_fresh(
-        at::indexing::scalarToTensor(scalar, options, device));
-  } else {
-    return at::indexing::scalarToTensor(scalar, options, device);
-  }
-}
-
 static inline Tensor asTensor(const Tensor& value, const Tensor& target) {
   return value;
 }
 static inline Tensor asTensor(const Scalar& value, const Tensor& self) {
+  // lift_fresh is supposed to be used in situations where you are guaranteed to
+  // get a plain Tensor which is not true for cpu device but not for non cpu
+  // device
   at::AutoDispatchBelowADInplaceOrView guard;
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   Tensor tensor = at::indexing::asTensor(value, self);
@@ -240,7 +220,8 @@ static Variable applySlicing(
     bool is_tracing,
     const at::Device& self_device,
     const std::optional<int64_t>& self_ndim,
-    int64_t specified_dims) {
+    int64_t specified_dims,
+    bool allow_device_index_for_setitem = false) {
   int64_t size = PyTuple_GET_SIZE(index);
   int64_t dim = 0;
 
@@ -293,7 +274,10 @@ static Variable applySlicing(
               auto scalar_type = tensor.scalar_type();
               if (tensor.dim() == 0 &&
                   at::isIntegralType(scalar_type, /*includeBool=*/false) &&
-                  scalar_type != at::kByte) {
+                  scalar_type != at::kByte &&
+                  !(allow_device_index_for_setitem &&
+                    at::indexing::impl::canKeepScalarIndexOnDevice(
+                        tensor, self))) {
                 recordSelectTrace(tensor);
               }
             }
@@ -321,7 +305,8 @@ static Variable applySlicing(
         // tensor indexing functions from Python ]
         /*disable_slice_optimization=*/is_tracing,
         /*original_tensor_device=*/self_device,
-        /*prev_dim_result_sizes=*/result_sizes);
+        /*prev_dim_result_sizes=*/result_sizes,
+        /*allow_device_index_for_setitem=*/allow_device_index_for_setitem);
   }
   return result;
 }
@@ -591,7 +576,9 @@ static int THPVariable_setitem_impl(
       /*is_tracing=*/is_tracing,
       self_device,
       self_.ndimension(),
-      specified_dims);
+      specified_dims,
+      /*allow_device_index_for_setitem=*/
+      at::indexing::impl::allowsScalarIndexOnDevice(value, self_));
   if (variableIndices.empty()) {
     pybind11::gil_scoped_release no_gil;
     at::indexing::copy_to(sliced, value);

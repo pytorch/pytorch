@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
+    parametrize,
     requires_accelerator,
     requires_cuda,
     requires_xpu,
@@ -49,6 +50,27 @@ def strip_annotation_desc(gm_str: str) -> str:
     streams pass, so keep only the meaningful stream annotation.
     """
     return re.sub(r"(# Annotation: \{[^}]*\}).*", r"\1", gm_str)
+
+
+def compile_and_get_synchronize_device_args(sync, x):
+    """Compile a fn calling ``sync()`` and return its synchronize_device args."""
+
+    def fn(x):
+        y = x + 1
+        sync()
+        return y * 2
+
+    torch._dynamo.reset()
+    backend = torch._dynamo.testing.EagerAndRecordGraphs()
+    out = torch.compile(fn, backend=backend, fullgraph=True)(x)
+    torch.testing.assert_close(out, (x + 1) * 2)
+    # fullgraph=True guarantees a single graph.
+    (graph,) = backend.graphs
+    return [
+        node.args
+        for node in graph.graph.nodes
+        if node.target is torch.ops.streams.synchronize_device
+    ]
 
 
 class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
@@ -337,6 +359,16 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
         self._assert_empty_sync_anchors_record(
             torch.ops.streams.synchronize_device.default, ()
         )
+
+    def test_cpu_synchronize_explicit_none(self) -> None:
+        # Eager treats device=None as the current device; Dynamo used to crash
+        # calling torch.device(None).
+        x = torch.ones(2, 2)
+        for sync in (
+            lambda: torch.cpu.synchronize(None),
+            lambda: torch.cpu.synchronize(device=None),
+        ):
+            self.assertEqual(compile_and_get_synchronize_device_args(sync, x), [])
 
     def test_empty_wait_stream_anchors_record(self) -> None:
         self._assert_empty_sync_anchors_record(
@@ -1702,6 +1734,119 @@ class <lambda>(torch.nn.Module):
         )
         self.assertEqual(len(control_deps_nodes), 2)
 
+    def test_control_deps_multiple_waiters_thread_latest_passthrough(
+        self, device
+    ) -> None:
+        consumer1 = torch.Stream(device=device)
+        consumer2 = torch.Stream(device=device)
+        fork = torch.Event(device=device)
+        join1 = torch.Event(device=device)
+        join2 = torch.Event(device=device)
+
+        def fn(x) -> torch.Tensor:
+            default_stream = torch.accelerator.current_stream(device)
+            y = x + 1
+            fork.record(default_stream)
+
+            with consumer1:
+                fork.wait()
+                out1 = y * 2
+                join1.record()
+
+            with consumer2:
+                fork.wait()
+                out2 = y * 3
+                join2.record()
+
+            default_stream.wait_event(join1)
+            default_stream.wait_event(join2)
+            return out1 + out2
+
+        _, _, fw_graphs, _ = extract_graph(fn, torch.ones(2, 2, device=device))
+        gm = fw_graphs[0]
+
+        from torch._functorch._aot_autograd.streams import (
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        wrap_all_sync_nodes_with_control_deps(gm)
+
+        import operator
+
+        wait_ctrls = []
+        for ctrl in gm.graph.find_nodes(op="call_function", target=control_deps):
+            subgraph = getattr(gm, ctrl.args[1].target)
+            waits = subgraph.graph.find_nodes(
+                op="call_function", target=torch.ops.streams.wait_event.default
+            )
+            if waits:
+                wait_ctrls.append((waits[0].args[0], ctrl))
+
+        event_ids = [event_id for event_id, _ in wait_ctrls]
+        fork_waits = [
+            ctrl for event_id, ctrl in wait_ctrls if event_ids.count(event_id) == 2
+        ]
+        muls = gm.graph.find_nodes(op="call_function", target=torch.ops.aten.mul.Tensor)
+
+        self.assertEqual(len(fork_waits), 2)
+        self.assertEqual(len(muls), 2)
+        self.assertIs(muls[1].args[0].target, operator.getitem)
+        self.assertIs(muls[1].args[0].args[0], fork_waits[1])
+        gm.graph.lint()
+
+    @parametrize("sync_kind", ("wait_stream", "full_barrier"))
+    def test_intervening_sync_updates_event_passthrough(
+        self, device, sync_kind
+    ) -> None:
+        import operator
+
+        from torch._functorch._aot_autograd.streams import (
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        intervening_stream = torch.Stream(device=device)
+        consumer_stream = torch.Stream(device=device)
+        fork = torch.Event(device=device)
+        intervening_event = torch.Event(device=device)
+
+        def fn(x) -> torch.Tensor:
+            default_stream = torch.accelerator.current_stream(device)
+            y = x + 1
+            fork.record(default_stream)
+
+            if sync_kind == "wait_stream":
+                intervening_stream.wait_stream(default_stream)
+            else:
+                default_stream.synchronize()
+                intervening_event.record(intervening_stream)
+
+            with consumer_stream:
+                fork.wait()
+                return y * 2
+
+        _, _, fw_graphs, _ = extract_graph(fn, torch.ones(2, 2, device=device))
+        gm = fw_graphs[0]
+        wrap_all_sync_nodes_with_control_deps(gm)
+        event_waits = []
+        for ctrl in gm.graph.find_nodes(op="call_function", target=control_deps):
+            subgraph = getattr(gm, ctrl.args[1].target)
+            waits = subgraph.graph.find_nodes(
+                op="call_function", target=torch.ops.streams.wait_event.default
+            )
+            if waits:
+                event_waits.append(ctrl)
+
+        consumers = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mul.Tensor
+        )
+        self.assertEqual(len(event_waits), 1)
+        self.assertEqual(len(consumers), 1)
+        self.assertIs(consumers[0].args[0].target, operator.getitem)
+        self.assertIs(consumers[0].args[0].args[0], event_waits[0])
+        gm.graph.lint()
+
     def test_control_deps_prevents_invalid_reordering(self, device) -> None:
         """
         Test that control_deps creates proper data dependencies that prevent invalid reordering.
@@ -2228,6 +2373,28 @@ class GraphModule(torch.nn.Module):
         s = torch.Stream(device=device)
         e = device_mod.Event()
         s.record_event(e)
+
+    @parametrize("api", ["positional", "kwarg", "accelerator"])
+    def test_synchronize_explicit_none_matches_no_arg(self, device, api):
+        # Eager treats device=None as the current device, so it must trace to the
+        # same graph as the no-arg call instead of crashing in torch.device(None).
+        device_mod = getattr(torch, torch.device(device).type)
+        if api == "positional":
+            sync_default = device_mod.synchronize
+            sync_none = lambda: device_mod.synchronize(None)  # noqa: E731
+        elif api == "kwarg":
+            sync_default = device_mod.synchronize
+            sync_none = lambda: device_mod.synchronize(device=None)  # noqa: E731
+        else:
+            sync_default = torch.accelerator.synchronize
+            sync_none = lambda: torch.accelerator.synchronize(None)  # noqa: E731
+
+        x = torch.ones(2, 2, device=device)
+        expected = compile_and_get_synchronize_device_args(sync_default, x)
+        self.assertEqual(len(expected), 1)
+        self.assertEqual(
+            compile_and_get_synchronize_device_args(sync_none, x), expected
+        )
 
     def test_event_synchronize_tracing(self, device):
         def fn(x):
@@ -2797,7 +2964,9 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         # "guard satisfied", so vary the device and pin the unresolved index too.
         for index in range(torch.cuda.device_count()):
             with torch.cuda.device(index):
-                compiled(x)
+                # CooR requires an input to be on the current accelerator, so build
+                # one per iteration instead of reusing a cuda:0 tensor throughout.
+                compiled(torch.zeros(1, device="cuda"))
 
         self.assertEqual(len(backend.graphs), 1)
         self.assertEqual(
@@ -2995,9 +3164,9 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         del compiled
         gc.collect()
 
-        self.assertIn(
+        self.assertGreaterEqual(
+            len(index_to_external_object_weakref),
             CURRENT_STREAM_INDEX,
-            index_to_external_object_weakref,
             "torch.compile of a function referencing current_stream() must "
             "register a weakref under CURRENT_STREAM_INDEX",
         )
@@ -3087,9 +3256,9 @@ class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
         del compiled
         gc.collect()
 
-        self.assertIn(
+        self.assertGreaterEqual(
+            len(index_to_external_object_weakref),
             CURRENT_STREAM_INDEX,
-            index_to_external_object_weakref,
             "torch.compile of a function referencing current_stream() must "
             "register a weakref under CURRENT_STREAM_INDEX",
         )

@@ -18,6 +18,9 @@
 namespace c10d {
 namespace symmetric_memory {
 
+// Synchronize before cleanup, or skip it during shutdown or device failure.
+bool should_skip_cuda_cleanup(int device_idx);
+
 bool device_has_multicast_support(int device_idx);
 
 bool allow_overlapping_devices();
