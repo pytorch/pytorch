@@ -9574,6 +9574,23 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         residual = (A @ X).sub_(B)
         return [norm(residual) / (norm(A) * norm(X) * n * eps) for norm in norms]
 
+    def _check_ldl_factor_random(self, n, device, dtype):
+        A = torch.randn(n, n, device=device, dtype=dtype)
+        A = A + A.mH
+        B = torch.randn(n, 3, device=device, dtype=dtype)
+        norm = partial(torch.linalg.matrix_norm, ord='fro')
+        [scaled_residual] = self._ldl_scaled_residuals(A, B, (norm,))
+        # see test_linalg_ldl_factor_stability_large_inputs
+        K = 1.0
+        self.assertTrue(scaled_residual < K)
+
+        # The last pivot is only checked, not factored. A zero last row/col is never
+        # interchanged and gets only zero updates, so that pivot is exactly zero.
+        A[-1, :] = A[:, -1] = 0
+        _, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertEqual(pivots[-1].item(), n)
+        self.assertEqual(info.item(), n)
+
     @slowTest
     @skipIfRocm
     @skipIfNoLapack
@@ -9630,11 +9647,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipIfNoLapack
     @onlyCUDA
     @skipCUDAIfNoCusolver
-    @largeTensorTest("16GB", device="cuda")  # complex128 at n = 16385
     @dtypes(*floating_and_complex_types())
     def test_linalg_ldl_factor_edge_cases(self, device, dtype):
-        norm = partial(torch.linalg.matrix_norm, dim=(-2, -1), ord='fro')
-
         # Empty inputs, in the matrix, the batch, or both
         for shape in ((0, 0), (2, 0, 0), (0, 5, 5), (0, 2, 5, 5), (2, 0, 5, 5), (0, 0, 0), (2, 0, 0, 0)):
             A = torch.empty(shape, device=device, dtype=dtype)
@@ -9667,28 +9681,31 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         # The smallest shapes, and shapes around the widths of the panels. A panel
         # takes nb / 2 to nb + nb / 2 columns (see ldl::aligned_panel_width), where nb
-        # depends on the dtype, the GPU and n (see ldl::panel_width).
+        # depends on the dtype, the GPU and n (see ldl::panel_width and
+        # test_linalg_ldl_factor_panel_widths).
         panel_widths = (16, 24, 32, 48, 64, 96, 128)
         ns = {1, 2, 3}
         for nb in panel_widths:
             ns |= {w + i for w in (nb, nb + nb // 2) for i in (-1, 0, 1)}
-        # The first n with nb = 64, 96, 128 on H100
-        ns |= {4097, 8193, 16385}
         for n in sorted(ns):
-            t = torch.randn(n, n, device=device, dtype=dtype)
-            B = torch.randn(n, 3, device=device, dtype=dtype)
-            A = t + t.mH
-            [scaled_residual] = self._ldl_scaled_residuals(A, B, (norm,))
-            # see test_linalg_ldl_factor_stability_large_inputs
-            K = 1.0
-            self.assertTrue((scaled_residual < K).all())
+            self._check_ldl_factor_random(n, device, dtype)
 
-            # The last pivot is only checked, not factored. A zero last row/col is never
-            # interchanged and gets only zero updates, so that pivot is exactly zero.
-            A[-1, :] = A[:, -1] = 0
-            _, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
-            self.assertEqual(pivots[-1].item(), n)
-            self.assertEqual(info.item(), n)
+    @slowTest
+    @skipIfRocm
+    @skipIfNoLapack
+    @onlyCUDA
+    # nb grows with n (see ldl::panel_width). The first n with nb = 64, 96, 128 on H100.
+    # On GB200, 16385 reaches the widest nb of every dtype but complex128, which needs 20481.
+    @parametrize("n", (4097, 8193, 16385, 20481))
+    # A, LD and one temporary on the device
+    @largeTensorTest(lambda self, device, dtype, n: 3 * n * n * dtype.itemsize, device="cuda")
+    # A and LD in the CPU solve, in double precision
+    @largeTensorTest(lambda self, device, dtype, n: 2 * n * n * (16 if dtype.is_complex else 8), device="cpu")
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_ldl_factor_panel_widths(self, device, dtype, n):
+        if n == 20481 and dtype != torch.complex128:
+            self.skipTest("Reaches no new panel width")
+        self._check_ldl_factor_random(n, device, dtype)
 
     def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])
