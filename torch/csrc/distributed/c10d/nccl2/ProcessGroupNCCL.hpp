@@ -416,14 +416,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Applies the cleanup/process-teardown action selected by
   // TORCH_NCCL_ASYNC_ERROR_HANDLING. Reconfigurable communicators are revoked
   // instead, independent of the selected mode.
-  void handleWatchdogFailure(const std::string& reason);
+  void handleWatchdogFailure(
+      const std::string& reason,
+      bool from_watchdog = false);
+  bool checkRemoteFailure();
+  bool coordinateShutdown(std::chrono::steady_clock::time_point deadline);
   // Blocking wait has no watchdog, so the waiting thread tears down a failed
   // communicator before surfacing the exception.
   void handleBlockingWaitFailure(
       WorkNCCL::WorkStatus status,
       int64_t reconfigure_uuid);
-  // Terminates the process (after running the abort hooks) if requested by the
-  // async error mode. `reason` is logged after "Aborting process on rank N due
+  // Terminates the process if requested by the async error mode.
+  // `reason` is logged after "Aborting process on rank N due
   // to ", so it must describe the actual trigger.
   void abortProcess(const std::string& reason);
   // Signals the watchdog thread to exit and reaps it. Detaches instead of
@@ -437,6 +441,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     TIMEOUT,
   };
 
+  // Publish the first failure and run diagnostics once per communicator.
+  void recordFailure(CommState state);
   std::atomic<CommState> comm_state_{CommState::NORMAL};
   std::atomic<bool> revoked_{false};
 
@@ -623,7 +629,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Creates a lazy_init communicator and checks that it is ready.
   void checkInitialized();
   void checkAndAbortIfTimedOutOrError();
-  void checkWorkQueue();
+  WorkNCCL::WorkStatus checkWorkQueue();
   void drainRetiredGraphWork();
   std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
   applyEphemeralTimeout(std::chrono::milliseconds timeout);
@@ -667,12 +673,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   enum class InitializationState {
     UNINITIALIZED,
     INITIALIZED,
+    FINALIZING,
     FINALIZED,
-  } init_state_{InitializationState::UNINITIALIZED};
+  };
+  std::atomic<InitializationState> init_state_{
+      InitializationState::UNINITIALIZED};
   std::mutex reconfigure_mutex_;
 
   c10::intrusive_ptr<::c10d::Store> store_;
+  c10::intrusive_ptr<::c10d::Store> lifecycle_store_;
+  std::chrono::steady_clock::time_point next_remote_failure_check_{};
   uint64_t bootstrap_generation_{0};
+  std::unordered_map<std::string, uint64_t> shrink_generations_;
   uint64_t sequence_number_{0};
 
   std::shared_ptr<NcclApi> nccl_api_;
