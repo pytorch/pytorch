@@ -5,7 +5,7 @@ import itertools
 import json
 import math
 import os
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch
 import torch._dynamo
@@ -1238,6 +1238,28 @@ class TestStorageManifest(TestCase):
             os.unlink(os.path.join(legacy, "storages", legacy_h))
             (loaded,) = self.load(legacy, "\n".join(legacy_writer.lines()))
         self.assertEqual(loaded.shape, x.shape)
+
+    def test_deduplicated_storages_stay_independent(self):
+        first, second = torch.zeros(8), torch.zeros(8)
+        with TemporaryDirectoryName() as root:
+            bundle, source, writer = self.write_bundle(root, [first, second, first[2:]])
+            self.assertEqual(len(writer.storage_hashes), 1)
+            loaded_first, loaded_second, loaded_view = self.load(bundle, source)
+        first_ptr = loaded_first.untyped_storage().data_ptr()
+        self.assertNotEqual(first_ptr, loaded_second.untyped_storage().data_ptr())
+        self.assertEqual(first_ptr, loaded_view.untyped_storage().data_ptr())
+        self.assertEqual(loaded_view.storage_offset(), 2)
+
+    def test_storage_is_read_on_the_serialized_device(self):
+        device = torch.device("cuda:7")
+        reader = InputReader()
+        reader.store = Mock()
+        reader.store.read_storage.return_value = Mock(device=device)
+        self.assertIs(
+            reader.storage("hash", 4, device=device),
+            reader.store.read_storage.return_value,
+        )
+        reader.store.read_storage.assert_called_once_with("hash", device=device)
 
     def test_load_args_without_inputs(self):
         writer = InputWriter(None)
