@@ -165,6 +165,33 @@ namespace torch::distributed::c10d {
 
 namespace {
 
+template <typename Options>
+py::object getCollectiveConfig(const Options& options) {
+  if (!options.config.has_value()) {
+    return py::none();
+  }
+  return torch::jit::toPyObject(options.config.value());
+}
+
+template <typename Options>
+void setCollectiveConfig(Options& options, const py::object& config) {
+  if (config.is_none()) {
+    options.config = std::nullopt;
+    return;
+  }
+  // Generic Python configs are passed as their attribute dictionaries.
+  TORCH_CHECK_TYPE(
+      py::isinstance<py::dict>(config) || py::hasattr(config, "__dict__"),
+      "Collective config must be a dict or an object with __dict__, got ",
+      std::string(py::str(py::type::of(config).attr("__name__"))));
+  auto values =
+      py::isinstance<py::dict>(config) ? config : config.attr("__dict__");
+  static const auto type =
+      c10::DictType::create(c10::StringType::get(), c10::AnyType::get());
+  options.config = torch::jit::toIValue(values, type)
+                       .to<c10::Dict<std::string, c10::IValue>>();
+}
+
 py::bytes toPyBytes(const std::vector<uint8_t>& data) {
   return py::bytes(reinterpret_cast<const char*>(data.data()), data.size());
 }
@@ -541,7 +568,7 @@ PyTypeObject* GetReduceOpMetaclass() {
   return metaclass;
 }
 
-PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
+PyObject* c10d_init(PyObject* /*_unused*/, PyObject* /*noargs*/) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
@@ -647,7 +674,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::init(
               [](std::vector<at::Tensor> params,
                  std::vector<std::vector<size_t>> bucket_indices,
-                 const std::vector<size_t>& per_bucket_size_limits,
+                 const std::vector<size_t>& /*per_bucket_size_limits*/,
                  c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
                  std::vector<bool> expect_sparse_gradients,
                  int64_t bucket_bytes_cap,
@@ -969,7 +996,7 @@ This class does not support ``__members__`` property.)");
           // other types.
           "__eq__",
           // NOLINTNEXTLINE(performance-unnecessary-value-param)
-          [](const ::c10d::ReduceOp& self, py::object) { return false; })
+          [](const ::c10d::ReduceOp& /*self*/, py::object) { return false; })
       .def(
           "__hash__",
           [](const ::c10d::ReduceOp& self) {
@@ -980,7 +1007,7 @@ This class does not support ``__members__`` property.)");
           [](const ::c10d::ReduceOp& self) { return ::c10d::ReduceOp(self); })
       .def(
           "__deepcopy__",
-          [](const ::c10d::ReduceOp& self, const py::dict& memo) {
+          [](const ::c10d::ReduceOp& self, const py::dict& /*memo*/) {
             return ::c10d::ReduceOp(self);
           })
       .def(py::pickle(
@@ -1204,20 +1231,32 @@ Example:
       .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::BroadcastOptions::rootTensor)
       .def_readwrite("timeout", &::c10d::BroadcastOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::BroadcastOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::BroadcastOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::BroadcastOptions>,
+          &setCollectiveConfig<::c10d::BroadcastOptions>);
 
   py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllreduceOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::AllreduceOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::AllreduceOptions>,
+          &setCollectiveConfig<::c10d::AllreduceOptions>);
 
   py::class_<::c10d::AllreduceCoalescedOptions>(
       module, "AllreduceCoalescedOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceCoalescedOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::AllreduceCoalescedOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllreduceCoalescedOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::AllreduceCoalescedOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::AllreduceCoalescedOptions>,
+          &setCollectiveConfig<::c10d::AllreduceCoalescedOptions>);
 
   py::class_<::c10d::ReduceOptions>(module, "ReduceOptions")
       .def(py::init<>())
@@ -1225,18 +1264,30 @@ Example:
       .def_readwrite("rootRank", &::c10d::ReduceOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::ReduceOptions::rootTensor)
       .def_readwrite("timeout", &::c10d::ReduceOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::ReduceOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::ReduceOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::ReduceOptions>,
+          &setCollectiveConfig<::c10d::ReduceOptions>);
 
   py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllgatherOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::AllgatherOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::AllgatherOptions>,
+          &setCollectiveConfig<::c10d::AllgatherOptions>);
 
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::GatherOptions::rootRank)
       .def_readwrite("timeout", &::c10d::GatherOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::GatherOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::GatherOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::GatherOptions>,
+          &setCollectiveConfig<::c10d::GatherOptions>);
 
   py::class_<::c10d::ScatterOptions>(module, "ScatterOptions")
       .def(py::init<>())
@@ -1248,7 +1299,11 @@ Example:
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::ReduceScatterOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::ReduceScatterOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::ReduceScatterOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::ReduceScatterOptions>,
+          &setCollectiveConfig<::c10d::ReduceScatterOptions>);
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
@@ -1260,7 +1315,11 @@ Example:
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllToAllOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::AllToAllOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::AllToAllOptions>,
+          &setCollectiveConfig<::c10d::AllToAllOptions>);
 
   py::class_<::c10d::ReconfigureOptions>(module, "ReconfigureOptions")
       .def(py::init<>())
@@ -4079,6 +4138,9 @@ for details.
 #ifdef NCCL_HAS_NVLS_CTAS
       .def_readwrite("nvls_ctas", &ncclConfig_t::nvlsCTAs)
 #endif
+#ifdef NCCL_HAS_NVLS_HOST_MODE
+      .def_readwrite("nvls_host_mode", &ncclConfig_t::nvlsHostMode)
+#endif
 #ifdef NCCL_HAS_MAX_P2P_PEERS
       .def_readwrite("max_p2p_peers", &ncclConfig_t::maxP2pPeers)
 #endif
@@ -4124,7 +4186,7 @@ for details.
           [](const ncclConfig_t& self) { return ncclConfig_t(self); })
       .def(
           "__deepcopy__",
-          [](const ncclConfig_t& self, const py::dict& memo) {
+          [](const ncclConfig_t& self, const py::dict& /*memo*/) {
             return ncclConfig_t(self);
           },
           py::arg("memo"));
@@ -4188,7 +4250,7 @@ Example::
       .def(
           "__deepcopy__",
           [](const ::c10d::ProcessGroupNCCL::Options& self,
-             const py::dict& memo) {
+             const py::dict& /*memo*/) {
             return ::c10d::ProcessGroupNCCL::Options(self);
           },
           py::arg("memo"));

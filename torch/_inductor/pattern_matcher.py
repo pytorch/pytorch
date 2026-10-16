@@ -64,6 +64,7 @@ from torch._dynamo.utils import counters
 from torch._prims_common import canonicalize_dim, is_integer_dtype
 from torch._subclasses.fake_tensor import (
     is_fake_tensor,
+    maybe_clear_fake_constant,
     maybe_get_fake_constant,
     unset_fake_temporarily,
 )
@@ -82,7 +83,7 @@ from torch.utils._ordered_set import OrderedSet
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
-from .._subclasses import FakeTensor, FakeTensorMode
+from .._subclasses import FakeTensorMode
 from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
@@ -539,7 +540,11 @@ class PatternExpr(ABC):
         try:
             return MatchContext([self], graph=node.graph).match(self, node)
         except FailedMatch as e:
-            return e
+            # Drop the traceback: the caller keeps the returned FailedMatch in a
+            # local, and its traceback would hold this frame and, via f_back, the
+            # whole calling stack (e.g. the autograd backward that triggered a
+            # lazy backward compile, with its real tensors) in a reference cycle.
+            return e.with_traceback(None)
 
     def has_multiple_users(self) -> bool:
         return False
@@ -944,13 +949,24 @@ def _schema_defaults(op: torch._ops.OpOverload) -> dict[str, Any]:
     return defaults
 
 
+_AUTO_FUNCTIONALIZED = (
+    torch.ops.higher_order.auto_functionalized,
+    torch.ops.higher_order.auto_functionalized_v2,
+)
+
+
 def _has_undeclared_non_default_kwarg(
-    target: Any, kwargs: Mapping[str, Any], declared: Mapping[str, Any]
+    node: torch.fx.Node, declared: Mapping[str, Any]
 ) -> bool:
     # Patterns don't bind kwargs they don't declare, so matching a node that sets
     # one (e.g. add's alpha) would silently drop it from the replacement.
     # Patterns must declare any kwarg they accept (dtype, memory_format, ...).
-    undeclared = [(k, v) for k, v in kwargs.items() if k not in declared]
+    target = node.target
+    if target in _AUTO_FUNCTIONALIZED and node.args:
+        # functionalization passes every arg of the wrapped op as a kwarg,
+        # defaults included, so compare against the wrapped op's schema
+        target = node.args[0]
+    undeclared = [(k, v) for k, v in node.kwargs.items() if k not in declared]
     if not isinstance(target, torch._ops.OpOverload):
         # without a schema we can't tell which values are defaults
         return bool(undeclared)
@@ -1083,7 +1099,7 @@ class _TargetArgsExpr(_TargetExpr):
                 return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
         # raw kwargs, since normalization fills in every default
-        if _has_undeclared_non_default_kwarg(node.target, node.kwargs, self.kwargs):
+        if _has_undeclared_non_default_kwarg(node, self.kwargs):
             return FailedMatch("undeclared_kwarg: node={}, pattern={}", node, self)
         _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
 
@@ -1127,7 +1143,13 @@ class _TargetArgsExpr(_TargetExpr):
             return False
         if val.dtype != dtype or val.device != device or val.dim() != len(sizes):
             return False
-        return all(statically_known_true(a == b) for a, b in zip(val.shape, sizes))
+        # guard_or_false rather than statically_known_true: a rewrite can leave
+        # equal-at-runtime sizes that are not provably equal (e.g. s vs
+        # 2 * (s // 2) when the caller pads s to even outside the graph).
+        # Specializing (guarding) on backed symbols is allowed here; the only
+        # contract is to not specialize unbacked symbols, and guard_or_false
+        # returns False for those without installing a guard.
+        return all(guard_or_false(a == b) for a, b in zip(val.shape, sizes))
 
     def find_anchor_nodes(
         self, ctx: MatchContext, searched: OrderedSet[torch.fx.Node]
@@ -1327,7 +1349,8 @@ class MultiOutputPattern(PatternExpr):
         try:
             return MatchContext(self.outputs, graph=node.graph).match(self, node)
         except FailedMatch as e:
-            return e
+            # See PatternExpr.match.
+            return e.with_traceback(None)
 
     def pattern_eq(self, other: object) -> bool:
         if not super().pattern_eq(other):
@@ -2385,13 +2408,11 @@ def gen_register_replacement(
         pat = getattr(m, unique_name)
 
     for arg in pytree.tree_iter(example_inputs):
-        if isinstance(arg, FakeTensor) and maybe_get_fake_constant(arg) is not None:  # noqa: ISINSTANCE_FAKE_TENSOR
-            # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
-            # hold onto their original constant value - and by stashing it here
-            # will cause a memory leak if the constant value is on GPU.
-            # Since this is just an optimization we can clear it out.
-            # for c++ need to add a setter
-            arg.constant = None
+        # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
+        # hold onto their original constant value - and by stashing it here
+        # will cause a memory leak if the constant value is on GPU.
+        # Since this is just an optimization we can clear it out.
+        maybe_clear_fake_constant(arg)
 
     _known_precompiled_patterns.append(
         _PrecompiledPattern(search_fn, example_inputs, trace_fn, scalar_workaround, pat)

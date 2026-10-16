@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import builtins
 import contextlib
+import contextvars
 import copy
 import dataclasses
 import enum
@@ -44,10 +45,10 @@ from torch.utils._triton import get_triton_version, has_triton_stable_tma_api
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
+    forwarded_cuda_compile_options,
     get_importable_constexpr_types,
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
-    tlx_only_cuda_options,
     tlx_only_hip_options,
     TMA_ALIGNMENT,
     triton_version_uses_attrs_dict,
@@ -86,6 +87,7 @@ from .runtime_utils import (
     validate_triton_config,
 )
 from .static_triton_launcher import (
+    is_registered_static_launch_device,
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
@@ -879,16 +881,14 @@ class CachingAutotuner(KernelInterface):
             raise NoTritonConfigsError("No triton configs are available")
 
         compile_results = []
-        exc = None
+        exc_msg = ""
         for c in self.configs:
             try:
                 compile_results.append(self._precompile_config(c))
             except (OutOfResources, PTXASError, IntelGPUError) as e:
-                exc = e
+                exc_msg = f"{type(e).__name__}: {e}"
         if len(compile_results) == 0:
-            raise NoTritonConfigsError(
-                f"No valid triton configs. {type(exc).__name__}: {exc}"
-            )
+            raise NoTritonConfigsError(f"No valid triton configs. {exc_msg}")
         self.compile_results = compile_results
         self.configs = None
 
@@ -1370,7 +1370,7 @@ class CachingAutotuner(KernelInterface):
         compile_meta["device_type"] = self.device_props.type
         compile_meta["cc"] = self.device_props.cc
 
-        for k in tlx_only_cuda_options():
+        for k in forwarded_cuda_compile_options():
             if v := getattr(cfg, k, None):
                 compile_meta[k] = v
 
@@ -1414,7 +1414,7 @@ class CachingAutotuner(KernelInterface):
             )
             if compile_meta.get("disable_ftz", False):
                 options["enable_reflect_ftz"] = False
-            for k in tlx_only_cuda_options():
+            for k in forwarded_cuda_compile_options():
                 if v := getattr(cfg, k, None):
                     options[k] = v
         # Backend options are consumed by Triton out-of-band from the kernel
@@ -1430,6 +1430,9 @@ class CachingAutotuner(KernelInterface):
         self, cfg: Config, *, cc_override: str | int | None = None
     ) -> _KernelCompileResult:
         """Ahead of time compile a given autotuner config."""
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("Triton kernel compilation")
         compile_meta = self._create_compile_meta(cfg)
         if cc_override is not None:
             compile_meta["cc"] = cc_override
@@ -1532,6 +1535,9 @@ class CachingAutotuner(KernelInterface):
 
     def bench(self, launcher, *args, with_profiler=False, **kwargs):
         """Measure the performance of a given launcher."""
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("Triton kernel benchmarking")
         # we don't skip configs with spilled registers when auto-tuning custom
         # (user-written) Triton kernels, as (i) we don't have any knowledge or
         # control over the kernel code; (ii) there is empirical evidence that
@@ -1938,6 +1944,9 @@ class CachingAutotuner(KernelInterface):
 
     def autotune_to_one_config(self, *args, **kwargs):
         """Execute autotuning to select the optimal kernel configuration."""
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("Triton kernel autotuning")
         if autotuning_inputs_log.isEnabledFor(logging.DEBUG):
             self._log_autotune_inputs(args, kwargs)
 
@@ -3101,8 +3110,13 @@ class StaticTritonCompileResult(CompileResult[_T]):
             return None
 
         def check_can_launch() -> _KernelType:
-            if triton_meta.get("device_type") not in ("cuda", "xpu", "hip"):
-                raise CannotStaticallyLaunchKernel("Non-cuda/XPU/ROCm device")
+            if not is_registered_static_launch_device(
+                triton_meta.get("device_type", "")
+            ):
+                raise CannotStaticallyLaunchKernel(
+                    "No static Triton kernel launcher registered for device type "
+                    f"{triton_meta.get('device_type')}",
+                )
 
             if triton_meta.get("device_type") == "xpu" and XPU_KERNEL_FORMAT == "spv":
                 raise CannotStaticallyLaunchKernel(
@@ -3682,6 +3696,16 @@ def hash_configs(configs: list[Config]):
     return hasher.hexdigest()
 
 
+# While inductor loads a wrapper it compiled, maps each module-level kernel's name to a
+# thunk returning the kernel AsyncCompile builds from that kernel's own source (see
+# PyCodeCache.load_by_key_path), so the def binds the worker pool's result. Building it
+# from the def would compile serially, and miss Triton's cache, which keys on the def's
+# line number.
+compiled_kernels_for_load: contextvars.ContextVar[
+    dict[str, Callable[[], Any]] | None
+] = contextvars.ContextVar("compiled_kernels_for_load", default=None)
+
+
 def cached_autotune(
     size_hints: list[int] | None,
     configs: list[Config],
@@ -3698,6 +3722,13 @@ def cached_autotune(
     has additional debugging, error handling, and on-disk caching.
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
+    compiled = compiled_kernels_for_load.get()
+    # Popped, so that only the wrapper's own def binds it: the pool may reload the kernel
+    # from its source module while the wrapper loads, and that def must build it.
+    name = inductor_meta.get("kernel_name")
+    if compiled is not None and (thunk := compiled.pop(name, None)) is not None:
+        kernel = thunk()
+        return lambda fn: kernel
     if size_hints is not None and heuristic_type in (
         HeuristicType.REDUCTION,
         HeuristicType.PERSISTENT_REDUCTION,
@@ -5187,7 +5218,7 @@ def template(
             if k in triton_meta:
                 config_kwargs[k] = triton_meta[k]
 
-    for k in tlx_only_cuda_options():
+    for k in forwarded_cuda_compile_options():
         if v := triton_meta.get(k, None):
             config_args[k] = v
 
