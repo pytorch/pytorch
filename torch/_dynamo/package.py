@@ -629,10 +629,6 @@ class _DynamoCodeCacheEntry:
          of that code object included, since install() would have used none.
          TODO(#196773): prune only the guarded codes whose bytecode names the
          missing backend at write time, so the other variants stay installable.
-      11. Whether install() skips the frame and everything it calls, until
-         uninstall(). Set on a frame a precompile capture serves as plain
-         Python: its variants inlined its Python callees, which hold no entries
-         of their own.
     """
 
     python_code: SerializedCode
@@ -645,7 +641,6 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
-    skip_recursive: bool = False
 
 
 def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
@@ -1102,33 +1097,6 @@ def _compile_frame_context(
     return _ctx()
 
 
-# The skips installed packages hold on each code object, one per package, True
-# for a skip of everything the code calls. A strategy is process-global, so a
-# code keeps the widest skip still held and goes back to the default only when
-# the last holder uninstalls. A strategy set before install() (e.g. by
-# torch._dynamo.skip) is not restored: there is no getter for it.
-_SKIP_HOLDS: WeakIdKeyDictionary = WeakIdKeyDictionary()
-
-
-def _update_skip_hold(code: types.CodeType, recursive: bool, hold: bool) -> None:
-    from torch._C._dynamo.eval_frame import set_code_exec_strategy
-
-    from .types import FrameAction, FrameExecStrategy
-
-    holds = _SKIP_HOLDS.setdefault(code, [])
-    if hold:
-        holds.append(recursive)
-    else:
-        holds.remove(recursive)
-    if not holds:
-        del _SKIP_HOLDS[code]
-        strategy = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
-    else:
-        callees = FrameAction.SKIP if any(holds) else FrameAction.DEFAULT
-        strategy = FrameExecStrategy(FrameAction.SKIP, callees)
-    set_code_exec_strategy(code, strategy)
-
-
 class CompilePackage:
     """
     CompilePackage is considered a low level component and should not be directly exposed to
@@ -1157,9 +1125,6 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        # The skips install() holds in _SKIP_HOLDS, which uninstall() releases:
-        # (code, whether its callees are skipped too).
-        self._skipped_codes: list[tuple[types.CodeType, bool]] = []
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
 
@@ -1384,9 +1349,6 @@ class CompilePackage:
         # must not erase the accelerator an earlier frame named.
         self._device_types |= _graph_device_types(graph)
 
-    def note_compute(self) -> None:
-        """Called when the current compile traced a graph, even one bypass_package then drops."""
-
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
 
@@ -1483,9 +1445,6 @@ class CompilePackage:
                 module.__dict__.pop(name, None)
 
         self._installed_globals = {}
-        for code, recursive in self._skipped_codes:
-            _update_skip_hold(code, recursive, hold=False)
-        self._skipped_codes = []
 
         _reset_precompile_entries(self._innermost_fn.__code__)
 
@@ -1574,11 +1533,10 @@ class CompilePackage:
                             torch._dynamo.disable(backend),
                         )
 
-                # Dynamo generates empty graph for trivial functions, should just skip them
-                # in these cases.
-                if entry.skip_recursive or len(entry.guarded_codes) == 0:
-                    _update_skip_hold(target_code, entry.skip_recursive, hold=True)
-                    self._skipped_codes.append((target_code, entry.skip_recursive))
+                if len(entry.guarded_codes) == 0:
+                    # Dynamo generates empty graph for trivial functions, should just skip them
+                    # in these cases.
+                    torch._dynamo.eval_frame.skip_code(target_code)
 
                 for guarded_code in entry.guarded_codes:
                     with dynamo_timed("precompile_load_guards"):
