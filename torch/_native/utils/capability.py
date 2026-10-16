@@ -63,3 +63,15 @@ def cuda_device_guard(fn: Callable[..., R]) -> Callable[..., R]:
             return fn(self, *args, **kwargs)
 
     return guarded
+
+
+def resolve_conj_view(fn: Callable[..., R]) -> Callable[..., R]:
+    """Materialize a lazy conjugate input before passing it to an override."""
+
+    @functools.wraps(fn)
+    def resolved(self: torch.Tensor, *args: Any, **kwargs: Any) -> R:
+        if self.is_conj():
+            self = self.resolve_conj()
+        return fn(self, *args, **kwargs)
+
+    return resolved

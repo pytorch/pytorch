@@ -14,10 +14,10 @@ from cutlass import const_expr, Int32, Int64
 import torch
 
 from ...cutedsl import hw_caps as _hw, launch as _L
-from ...cutedsl.dtypes import torch2cute
+from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import tile
-from .kernel_general import _flat, _launch, _PART_TORCH, ReduceBlock
+from .kernel_general import _flat, _launch, ReduceBlock
 from .traits import WARP, welford_nouts
 
 
@@ -1009,7 +1009,7 @@ def reduce_ordered_col(
     kernel_x = _flat(x)
     kernel_outs = (
         [
-            torch.empty(B * C * plan.split[0], device=x.device, dtype=_PART_TORCH[d])
+            torch.empty(B * C * plan.split[0], device=x.device, dtype=cute2torch[d])
             for d in trait.fdtypes
         ]
         if split
@@ -1231,7 +1231,7 @@ def _reduce_col_tile(
             torch.empty(
                 total * npar,
                 device=x.device,
-                dtype=_PART_TORCH[trait.fdtypes[f]],
+                dtype=cute2torch[trait.fdtypes[f]],
             )
             for f in range(trait.nfields)
         ]

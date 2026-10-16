@@ -8,15 +8,15 @@ from collections.abc import Sequence
 from typing import Any, cast, Literal, NamedTuple
 
 import cutlass.cute as cute
-from cutlass import Float32, Float64, Int32, Int64
+from cutlass import Int32, Int64
 
 import torch
 from torch._tensor_iterator import reduce_op
 
 from ...cutedsl import hw_caps as _hw, launch as _L
-from ...cutedsl.dtypes import torch2cute
+from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
-from . import tile
+from . import _storage, tile
 from .traits import WARP, welford_nouts
 
 
@@ -121,13 +121,6 @@ class ReduceBlock:
 _stream = _L.stream
 # _L.compile_kernel uses fake operands and tvm-ffi, avoiding per-call tensor wrapping.
 _compile = _L.compile_kernel
-_PART_TORCH = {
-    Float32: torch.float32,
-    Float64: torch.float64,
-    Int32: torch.int32,
-    Int64: torch.int64,
-}
-
 _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
 _PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
 
@@ -218,7 +211,13 @@ def _launch(
                 # A flat input storage span can exceed 2**31 even though each
                 # decoded kept and reduced extent fits Int32.
                 _fakes(ins, int64_extent=True, alignments=alignments),
-                _fakes(outs, int64_extent=op.wide_output),
+                _fakes(
+                    outs,
+                    int64_extent=op.wide_output
+                    or (
+                        op.final and any(width == 2 for width in op.tile.output_widths)
+                    ),
+                ),
                 *_geom_args(op),
                 _stream(),
             ),
@@ -258,12 +257,20 @@ def _probe(x: torch.Tensor, red_axes: set[int]) -> torch.Tensor:
 
 def _flat(x: torch.Tensor) -> torch.Tensor:
     # View all storage at stride one because TI strides are storage-relative; reshape could copy.
-    n = max(x.untyped_storage().nbytes() // x.element_size(), 1)
-    return torch.as_strided(x, (n,), (1,), storage_offset=0)
+    storage_view = _storage.real_view(x)
+    n = max(
+        storage_view.untyped_storage().nbytes() // storage_view.element_size(),
+        1,
+    )
+    return torch.as_strided(storage_view, (n,), (1,), storage_offset=0)
 
 
-def _flat_outs(outs: Sequence[torch.Tensor]) -> list[torch.Tensor]:
-    return [out.reshape(-1) for out in outs]
+def _kernel_out(out: torch.Tensor) -> torch.Tensor:
+    return _storage.flat_view(out)
+
+
+def _kernel_outs(outs: Sequence[torch.Tensor]) -> list[torch.Tensor]:
+    return [_kernel_out(out) for out in outs]
 
 
 # Fast-path classification shared by routing and condition gates, after TI coalescing.
@@ -643,7 +650,7 @@ def _two_stage_general(
         return None
     inner = count // E
     parts = [
-        torch.empty(num_o * C, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
+        torch.empty(num_o * C, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
         for f in range(trait.nfields)
     ]
     outs = [torch.empty(num_o, device=x.device, dtype=d) for d in out_dtypes]
@@ -679,7 +686,7 @@ def _two_stage_general(
     )
     part_dtypes = tuple(p.dtype for p in parts)
     key = ("gensplit2", trait_key, tuple(out_dtypes), part_dtypes) + s2.cache_sig
-    _launch(s2, key, parts, _flat_outs(outs))
+    _launch(s2, key, parts, _kernel_outs(outs))
     return tuple(outs)
 
 
@@ -722,14 +729,14 @@ def _try_indexed_itree(
             itree=plan,
         )
         key = ("genitree", trait_key, x.dtype, tuple(out_dtypes)) + op.cache_sig
-        _launch(op, key, [_flat(x)], outs)
+        _launch(op, key, [_flat(x)], _kernel_outs(outs))
         return tuple(outs)
 
     parts = [
         torch.empty(
             num_o * nbatch,
             device=x.device,
-            dtype=_PART_TORCH[trait.fdtypes[f]],
+            dtype=cute2torch[trait.fdtypes[f]],
         )
         for f in range(trait.nfields)
     ]
@@ -774,7 +781,7 @@ def _try_indexed_itree(
         tuple(out_dtypes),
         part_dtypes,
     ) + s2.cache_sig
-    _launch(s2, key2, parts, outs)
+    _launch(s2, key2, parts, _kernel_outs(outs))
     return tuple(outs)
 
 
@@ -799,12 +806,16 @@ def _reduce(
     out_shape = [s for i, s in enumerate(x.shape) if i not in red_axes]
     num_o = max(1, math.prod(out_shape))
     count = x.numel() // num_o
+    complex_input = getattr(trait, "complex_input", False)
+
     from . import kernel_rowtile as rt
 
     order = rt.reduction_order(order)
     tune = block is None
     block = _K0_BLOCK if block is None else block
     if order == "inner_tree" and count > 0:
+        if complex_input:
+            raise ValueError("inner-tree reduction cannot serve this geometry")
         if count >= _INT32_LIMIT or num_o >= _INT32_LIMIT:
             raise ValueError("inner-tree reduction requires 32-bit logical extents")
         red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
@@ -869,7 +880,12 @@ def _reduce(
 
     # Reshape dense TensorIterator row/column views onto fast kernels; general remains
     # the fallback for other layouts and declines.
-    if len(out_shape) > 0 and count < _INT32_LIMIT and num_o < _INT32_LIMIT:
+    if (
+        not complex_input
+        and len(out_shape) > 0
+        and count < _INT32_LIMIT
+        and num_o < _INT32_LIMIT
+    ):
         kind = fast_kind(red_pairs, kept_pairs, nouts)
         red_n = x.numel() // max(1, math.prod(out_shape))
         if kind == "row" and x.is_contiguous():
@@ -963,7 +979,7 @@ def _reduce(
         order,
         config,
     ) + op.cache_sig
-    _launch(op, key, [_flat(x)], _flat_outs(outs))
+    _launch(op, key, [_flat(x)], _kernel_outs(outs))
     return tuple(outs)
 
 
@@ -1069,6 +1085,7 @@ def _reduce_all(
                 trait, trait_key, x, None, out_dtypes, nouts, block=block, order=order
             )
     L = x.numel()
+    complex_input = getattr(trait, "complex_input", False)
     xf = x.reshape(-1)
     if L == 1 and xf.stride(0) != 1:
         # A single element is contiguous at any stride; the wrap still requires unit stride.
@@ -1078,6 +1095,8 @@ def _reduce_all(
     x2 = xf.view(1, -1)
 
     if order == "inner_tree" and L > 0:
+        if complex_input:
+            raise ValueError("inner-tree reduction cannot serve this geometry")
         if L >= _INT32_LIMIT:
             raise ValueError("inner-tree reduction requires 32-bit logical extents")
         outs = rt.reduce_row_tile(
@@ -1091,7 +1110,7 @@ def _reduce_all(
         return tuple(_as_shape(o, ()) for o in outs)
     if order == "inner_tree":
         order = "unordered"
-    if _oneshot_ok(x2):
+    if not complex_input and _oneshot_ok(x2):
         # Avoid row-packing threads for a single-row launch; None keeps the existing config.
         cfg = rt.single_row_config(L, x.element_size() * 8)
         outs = rt.reduce_row_tile(
@@ -1107,20 +1126,23 @@ def _reduce_all(
         return tuple(_as_shape(o, ()) for o in outs)
     from . import kernel_xcta as xc
 
-    if nouts == 1:
-        res = xc.reduce_row_xcta(trait, trait_key, xf, out_dtypes[0], flatten=True)
-        res = None if res is None else (res,)
-    else:
-        res = xc.reduce_row_xcta_2out(trait, trait_key, xf, out_dtypes, flatten=True)
-    if res is not None:
-        return res
+    if not complex_input:
+        if nouts == 1:
+            res = xc.reduce_row_xcta(trait, trait_key, xf, out_dtypes[0], flatten=True)
+            res = None if res is None else (res,)
+        else:
+            res = xc.reduce_row_xcta_2out(
+                trait, trait_key, xf, out_dtypes, flatten=True
+            )
+        if res is not None:
+            return res
     # If xcta declines, grid-stride any L without reshaping or extent-dependent compile cost.
     sm = _hw.caps(x.device).sm_count
     G = _grid_size(L, block, sm, grid_mult)
     chunk = (L + G - 1) // G
 
     parts = [
-        torch.empty(G, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
+        torch.empty(G, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
         for f in range(trait.nfields)
     ]
     outs = [torch.empty(1, device=x.device, dtype=d) for d in out_dtypes]
@@ -1161,5 +1183,5 @@ def _reduce_all(
     # not track the value accumulator, so fp32 and fp64 argmax would share one cached kernel.
     part_dtypes = tuple(p.dtype for p in parts)
     s2_key = ("all2", trait_key, tuple(out_dtypes), part_dtypes) + s2.cache_sig
-    _launch(s2, s2_key, parts, _flat_outs(outs))
+    _launch(s2, s2_key, parts, _kernel_outs(outs))
     return tuple(_as_shape(o, ()) for o in outs)
