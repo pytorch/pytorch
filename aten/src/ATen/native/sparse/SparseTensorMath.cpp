@@ -1491,10 +1491,10 @@ SparseTensor& _sspaddmm_out_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     SparseTensor& r) {
-  AT_ASSERT(!t.is_cuda()); // dispatch argument
-  TORCH_CHECK(!r.is_cuda(), "sspaddmm: expected 'out' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!sparse_.is_cuda(), "sspaddmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
-  TORCH_CHECK(!dense.is_cuda(), "sspaddmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
+  TORCH_CHECK(t.is_cpu(), "sspaddmm: expected 'self' to be CPU tensor, but got a", r.device().type(), " tensor");
+  TORCH_CHECK(r.is_cpu(), "sspaddmm: expected 'out' to be CPU tensor, but got a", r.device().type(), " tensor");
+  TORCH_CHECK(sparse_.is_cpu(), "sspaddmm: expected 'mat1' to be a CPU tensor, but got a", sparse_.device().type(), " tensor");
+  TORCH_CHECK(dense.is_cpu(), "sspaddmm: expected 'mat2' to be a CPU tensor, but got a ", sparse_.device().type(), " tensor");
 
   TORCH_CHECK(sparse_.layout() == kSparse,
       "sspaddmm: expected 'mat1' to have sparse layout, got 'mat1' with layout ", sparse_.layout());
