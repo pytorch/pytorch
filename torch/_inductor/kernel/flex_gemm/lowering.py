@@ -14,6 +14,8 @@ import importlib.util
 import logging
 from typing import Any, cast, Literal, TYPE_CHECKING
 
+import sympy
+
 import torch
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.flex_gemm import (
@@ -38,6 +40,7 @@ from ...ir import IRNode, TensorBox
 from ...lowering import (
     constant_pad_nd,
     empty_strided,
+    expand,
     process_subgraph_nodes,
     register_lowering,
     view,
@@ -64,6 +67,7 @@ from .debug import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from ..gemm_epilogue_analysis import GemmLocalReduceAnalysis
     from .template import FlexGemmEpilogueConfig
 
 
@@ -318,6 +322,83 @@ def infer_flex_gemm_epilogue_arg_kinds(
     return tuple(epilogue_arg_kinds)
 
 
+def widen_row_capture(arg: TensorBox, group: int) -> TensorBox:
+    """Repeat a ``[1, n]`` row capture ``group`` times per column: ``[1, n * group]``."""
+    n = arg.get_size()[-1]
+    return view(expand(view(arg, [n, 1]), [n, group]), [1, n * group])
+
+
+def require_lane_domain_row_captures(
+    analysis: GemmLocalReduceAnalysis,
+    gemm: torch.fx.Node,
+    rows: Sequence[torch.fx.Node],
+) -> None:
+    """Reject row captures an output contraction would read at the wrong column.
+
+    ``widen_row_capture`` maps physical column ``c`` to ``row[c // group]``, which
+    matches eager only where the row meets selected lanes (logical columns).
+    Capture-only pointwise math and views keeping a ``[n]`` / ``[1, n]`` / ``[m, n]``
+    shape stay in logical columns; any other view or a use against physical GEMM
+    columns (such as ``acc.view(m, 2, n) * row``) is rejected.
+    """
+    from .quack_reductions import (
+        is_pointwise_node,
+        squeeze_source_node,
+        tensor_meta_shape,
+    )
+
+    m = gemm.meta["val"].shape[0]
+    for row in rows:
+        n = row.meta["val"].shape[-1]
+        pending, seen = [row], OrderedSet[torch.fx.Node]()
+        while pending:
+            for user in pending.pop().users:
+                if user in seen or user.op == "output":
+                    continue
+                seen.add(user)
+                if analysis.graph.depends_on(user, gemm):
+                    if user not in analysis.lane_domains:
+                        raise NotImplementedError(
+                            f"FlexGEMM output contractions read row capture {row.name} "
+                            "only against selected lanes, not physical GEMM columns"
+                        )
+                    continue
+                shape = tensor_meta_shape(user)
+                if not (
+                    is_pointwise_node(user)
+                    or user.target in CAPTURE_RESHAPE_TARGETS
+                    or squeeze_source_node(user) is not None
+                ) or not any(
+                    shape is not None and statically_known_shape_equal(shape, allowed)
+                    for allowed in ((n,), (1, n), (m, n))
+                ):
+                    raise NotImplementedError(
+                        f"FlexGEMM output contractions read row capture {row.name} "
+                        f"only through pointwise ops and [n] / [1, n] / [m, n] views; got {user.format_node()}"
+                    )
+                pending.append(user)
+
+
+def validate_flex_gemm_matrix_layout(name: str, layout: ir.Layout) -> None:
+    """Reject matrix layouts that cannot satisfy QuACK's TMA argument ABI."""
+    from torch._inductor.virtualized import V
+
+    if any(statically_known_equal(size, 0) for size in layout.size):
+        return
+    stride = layout.stride
+    unit = len(stride) - (1 if statically_known_equal(stride[-1], 1) else 2)
+    alignment = max(16 // layout.dtype.itemsize, 1)
+    aligned = sympy.And(
+        sympy.Eq(stride[unit], 1),
+        *(sympy.Eq(s % alignment, 0) for dim, s in enumerate(stride) if dim != unit),
+    )
+    if not V.graph.sizevars.expect_true(aligned):
+        raise NotImplementedError(
+            f"FlexGEMM QUACK {name} requires a unit-stride matrix dimension and "
+            f"16-byte aligned outer strides; got {stride} for {layout.dtype}"
+        )
+
+
 def require_tma_loadable_tile_captures(
     epilogue_args: list[TensorBox], epilogue_arg_kinds: Sequence[str]
 ) -> list[TensorBox]:
@@ -353,6 +434,10 @@ def require_tma_loadable_tile_captures(
     unit_dims = {"tile": (-1, -2), "interleaved": (-1,)}
     out = []
     for arg, kind in zip(epilogue_args, epilogue_arg_kinds, strict=True):
+        if kind in ("row", "col"):
+            if ir.is_unaligned(arg):
+                arg = ir.ExternKernel.copy_input(arg)
+            arg = cast(TensorBox, ir.ExternKernel.require_contiguous(arg))
         alignment = max(16 // arg.get_dtype().itemsize, 1)
         if kind in unit_dims and ir.is_unaligned(arg):
             arg = ir.ExternKernel.copy_input(arg)
@@ -507,8 +592,8 @@ def flex_gemm_quack_configs(
 ) -> tuple[QuackConfigKey, ...]:
     """Ask QuACK which GemmConfigs this call may pin, default first.
 
-    Legality is decided by the EpiOps, so the runtime's EpiMod is built here
-    from metadata with a stub epilogue and pruned against the GEMM shape hints;
+    EpiOps decide epilogue legality; lowering also checks MMA operand layouts.
+    The runtime's EpiMod is built from metadata and pruned against GEMM shape hints;
     ``FlexGemmEpilogueCaller.output_node`` guards the shape-dependent rules.
     """
     from torch._inductor.kernel.flex_gemm.runtime import (
@@ -517,6 +602,7 @@ def flex_gemm_quack_configs(
         selection_callback,
     )
     from torch._inductor.virtualized import V
+    from torch._vendor.quack.gemm_config import cta_tile_shape_m
     from torch._vendor.quack.gemm_runtime.autotune import legal_mod_configs
 
     output_transform = template_config.output_transform
@@ -541,6 +627,21 @@ def flex_gemm_quack_configs(
     legal = legal_mod_configs(
         epimod, device, problem, preferred_config=flex_gemm_preferred_config(problem)
     )
+    if mat1.get_dtype() is torch.float32:
+        a_k_major = statically_known_equal(mat1.get_stride()[-1], 1)
+        b_n_major = statically_known_equal(mat2.get_stride()[-1], 1)
+        # MN-major TF32 needs a 32-element SW128_32B atom per CTA. Two-CTA MMA
+        # halves B's N extent; smaller swizzles can silently produce zeros.
+        tf32_legal = []
+        for c in legal:
+            b_mn_major = not a_k_major if c.swap_ab else b_n_major
+            if c.device_capacity in (10, 11) and b_mn_major:
+                cta_m = cta_tile_shape_m(c.tile_m, c.cluster_m, c.device_capacity)
+                mma_ctas = c.tile_m // cta_m
+                if c.tile_n % (32 * mma_ctas):
+                    continue
+            tf32_legal.append(c)
+        legal = tuple(tf32_legal)
     return tuple(
         tuple(sorted(dataclasses.asdict(quack_config).items()))
         for quack_config in legal
@@ -630,6 +731,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
 
     from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         analyze_flex_gemm_epilogue,
+        epimod_local_reduce_spec,
         expand_epimod_prepare_softmax_online,
         gemm_node as flex_gemm_node,
         materialize_flex_gemm_epilogue,
@@ -760,9 +862,31 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
     outputs = epilogue_analysis.outputs
     if grouped_mm and outputs.local_reduce is not None:
-        raise NotImplementedError(
-            "FlexGEMM QUACK grouped_mm (varlen) does not yet support grouped reductions"
-        )
+        # Varlen-M rows never share a group along N, so a stored N-group reduction
+        # is per-row and group-safe; M groups would straddle experts. Feed-main is
+        # untested under varlen-M (span-1 feed-main also needs the accumulator
+        # prepass QuACK rejects with varlen).
+        local_reduce = outputs.local_reduce
+        store = local_reduce.store
+        if (
+            varlen_axis != "m"
+            or local_reduce.match.geometry.axis != 1
+            or local_reduce.feeds_main
+            or store is None
+            or store.output_layout is not None
+        ):
+            raise NotImplementedError(
+                "FlexGEMM QUACK grouped_mm (varlen) supports grouped reductions only "
+                "as stored N-group partials under varlen-M"
+            )
+        if (
+            epimod_local_reduce_spec(epilogue_analysis, local_reduce).prepass
+            is not None
+        ):
+            raise NotImplementedError(
+                "FlexGEMM QUACK grouped_mm (varlen) does not support reduction chains "
+                "that need QuACK's accumulator prepass"
+            )
     output_transform = outputs.output_transform
     if varlen_axis == "k" and output_transform is not None:
         raise NotImplementedError(
@@ -877,6 +1001,54 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     gemm_input_nodes = [
         ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args
     ]
+    if blockscaled is None:
+        for name, index in (("mat1", op_spec.mat1_index), ("mat2", op_spec.mat2_index)):
+            operand = gemm_input_nodes[index]
+            if ir.is_unaligned(operand):
+                raise NotImplementedError(
+                    f"FlexGEMM QUACK {name} requires a 16-byte aligned base"
+                )
+            validate_flex_gemm_matrix_layout(name, operand.get_layout())
+        validate_flex_gemm_matrix_layout("output", layout)
+        for meta in aux_metas:
+            validate_flex_gemm_matrix_layout(
+                "auxiliary output",
+                ir.FixedLayout(
+                    layout.device,
+                    meta.dtype,
+                    ir.convert_shape_to_inductor(meta.shape),
+                    ir.convert_shape_to_inductor(meta.stride()),
+                ),
+            )
+    if isinstance(output_transform, FlexGemmOutputContraction):
+        if output_transform.chunked and statically_known_equal(
+            gemm_input_nodes[op_spec.mat2_index].get_stride()[-1], 1
+        ):
+            raise NotImplementedError(
+                "FlexGEMM chunked grouped main output requires column-major B storage"
+            )
+        if "tile" in epilogue_arg_kinds or "interleaved" in epilogue_arg_kinds:
+            raise NotImplementedError(
+                "FlexGEMM grouped main outputs support only scalar, row, and column "
+                "captured tensors"
+            )
+        # Row captures index logical columns; the kernel reads physical columns,
+        # so repeat each value across its lane group (the epilogue reads lane 0).
+        require_lane_domain_row_captures(
+            epilogue_analysis.local_reduce,
+            gemm_fx_node,
+            [
+                node
+                for node, kind in zip(
+                    epilogue_arg_placeholders, epilogue_arg_kinds, strict=True
+                )
+                if kind == "row"
+            ],
+        )
+        epilogue_args = [
+            widen_row_capture(arg, output_transform.group) if kind == "row" else arg
+            for arg, kind in zip(epilogue_args, epilogue_arg_kinds, strict=True)
+        ]
     epilogue_args = require_tma_loadable_tile_captures(
         epilogue_args, epilogue_arg_kinds
     )
@@ -907,15 +1079,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     local_reduce_out_index = (
         aux_out_start + len(aux_input_nodes) if local_reduce_input_nodes else None
     )
-    if isinstance(output_transform, FlexGemmOutputContraction) and any(
-        kind != "scalar" for kind in epilogue_arg_kinds
-    ):
-        raise NotImplementedError(
-            "FlexGEMM grouped main outputs only support scalar captured tensors"
-        )
-    # Varlen-M tile captures load plain [total_m, N] rows, so rows past a group
-    # end only reach predicated stores; grouped reductions that would fold them
-    # are rejected above.
     if gemm_args[mat1_index].get_device_or_error().type != "cuda":
         raise NotImplementedError("FlexGEMM QUACK backend requires CUDA tensors")
     epimod_source = materialize_flex_gemm_epilogue(
