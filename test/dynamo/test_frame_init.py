@@ -149,6 +149,8 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
 
 
 class FrameClearTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Free-threaded builds immortalize code objects, so refcounts there are
     # constant and this check cannot observe a leak.
     @skipIfFreeThreaded("code objects are immortal, refcounts are not observable")
