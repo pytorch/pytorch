@@ -129,13 +129,13 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi350.1" },
         ]}
     secrets: inherit
 
   opmicrobenchmark-test-rocm:
     name: opmicrobenchmark-test-rocm
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs: opmicrobenchmark-build-rocm
     with:
       # TODO (huydo): Need to implement sharding for ops micro benchmark
