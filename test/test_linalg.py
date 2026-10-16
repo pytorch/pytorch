@@ -4939,6 +4939,20 @@ class TestLinalg(TestCase):
             for A, B, left, upper, uni in gen_inputs(shape, dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_linalg_inv_large_batch(self, device, dtype):
+        # The batched hipBLAS and rocSOLVER kernels launch nothing above 65536
+        # matrices (https://github.com/pytorch/pytorch/issues/196745), so the
+        # batch must exceed that to exercise the 65535-element chunking. Distinct
+        # unitriangular matrices keep the results exact and expose a skipped chunk.
+        batch = 2 * 65535 + 1
+        a = torch.eye(3, device=device, dtype=dtype).repeat(batch, 1, 1)
+        a[:, 0, 1] = torch.linspace(-1, 1, batch, device=device, dtype=dtype)
+        b = torch.ones(batch, 3, 1, device=device, dtype=dtype)
+        self.assertEqual(torch.linalg.inv(a), torch.linalg.inv(a.cpu()))
+        self.assertEqual(torch.linalg.solve(a, b), torch.linalg.solve(a.cpu(), b.cpu()))
+
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -5119,10 +5133,15 @@ class TestLinalg(TestCase):
 
     @onlyAccelerator
     @dtypes(torch.float)
-    def test_triangular_solve_large(self, device, dtype):
+    @parametrize("bs", [1, 2])
+    @parametrize("k", [524280, 524281, 524282])
+    def test_triangular_solve_large(self, device, dtype, bs, k):
         # Repro for https://github.com/pytorch/pytorch/issues/79191
-        A = torch.randn(1, 2, 2, device=device, dtype=dtype).tril_()
-        B = torch.randn(1, 2, 524281, device=device, dtype=dtype)
+        # k > 524280 triggers the cuBLAS large-input workaround on CUDA < 12.1,
+        # which returned silently wrong results for bs >= 2. See
+        # https://github.com/pytorch/pytorch/pull/187717
+        A = torch.randn(bs, 2, 2, device=device, dtype=dtype).tril_()
+        B = torch.randn(bs, 2, k, device=device, dtype=dtype)
         X = torch.linalg.solve_triangular(A, B, upper=False)
         self.assertEqual(A @ X, B)
 
@@ -9803,6 +9822,18 @@ class TestLinalgSVD(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @dtypes(torch.float32, torch.complex64)
+    @parametrize("shape", [(3, 8, 2), (3, 2, 8)])
+    def test_svd_full_matrices_diagonal(self, device, dtype, shape):
+        A = torch.zeros(shape, dtype=dtype, device=device)
+        A.diagonal(dim1=-2, dim2=-1).copy_(torch.arange(1, 3))
+        U, S, Vh = torch.linalg.svd(A)
+        self.assertEqual(U.mH @ U, torch.eye(U.size(-1), dtype=dtype, device=device).expand_as(U))
+        self.assertEqual(Vh @ Vh.mH, torch.eye(Vh.size(-1), dtype=dtype, device=device).expand_as(Vh))
+        self.assertEqual((U[..., :2] * S.unsqueeze(-2)) @ Vh[..., :2, :], A)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_svd_ill_conditioned(self, device, dtype):
         # Small columns must still undergo Jacobi rotations: skipping them at
@@ -9821,6 +9852,19 @@ class TestLinalgSVD(TestCase):
             (S > 1e-4 * S[..., :1]).sum(-1),
             (cpu_s > 1e-4 * cpu_s[..., :1]).sum(-1),
         )
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @skipCUDAIfRocm(msg="ROCm SVD loses accuracy on inputs scaled by 1e-12/1e12")
+    @dtypes(torch.float32, torch.complex64)
+    @parametrize("scale", [1e-12, 1e12])
+    def test_svd_scaled_entries(self, device, dtype, scale):
+        q, v = (torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q for _ in range(2))
+        A = (q * torch.logspace(0, -1, 32, dtype=q.real.dtype)) @ v.mH
+        U, S, Vh = (t.cpu() for t in torch.linalg.svd((A * scale).to(device), full_matrices=False))
+        self.assertEqual(U.mH @ U, torch.eye(32, dtype=dtype).expand(16, 32, 32), atol=1e-4, rtol=1e-4)
+        self.assertEqual(S / scale, torch.linalg.svdvals(A), atol=1e-5, rtol=1e-4)
+        self.assertEqual((U * (S / scale).unsqueeze(-2)) @ Vh, A, atol=1e-4, rtol=1e-4)
 
     @onlyCUDA
     @skipCUDAIfNoCusolver
@@ -12000,6 +12044,14 @@ class TestGroupedMM(TestCase):
         b = self._make_grouped_mm_matrix((17, 16), True, device, dtype)
         offs = torch.tensor([17], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    def test_grouped_mm_mismatched_dtypes(self, device):
+        a = torch.ones(8, 16, device=device, dtype=torch.float16)
+        b = torch.ones(4, 16, 16, device=device, dtype=torch.bfloat16)
+        offs = torch.tensor([2, 4, 6, 8], device=device, dtype=torch.int32)
+        with self.assertRaisesRegex(RuntimeError, "same dtype"):
+            F.grouped_mm(a, b, offs=offs)
 
     @onlyOn(["cuda", "mps"])
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
