@@ -809,9 +809,11 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       // effectively packing two elements into one byte.
       packed_factor = 2;
     }
-    TORCH_CHECK_VALUE(mat1.size(0) % 16 == 0 && (mat1.size(1) * packed_factor) % 128 == 0 &&
-                mat2.size(1) % 16 == 0,
-                "M, N must be multiples of 16 and K must be multiple of 128 for block-wise scaling");
+    check_mx_problem_size(
+        mat1.size(0),
+        mat2.size(1),
+        mat1.size(1) * packed_factor,
+        SwizzleType::NO_SWIZZLE);
 
     TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
                 out.scalar_type() == ScalarType::Half,
