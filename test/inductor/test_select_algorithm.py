@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI300_ARCH,
     skipIfRocmArch,
+    skipIfXpu,
     TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import (
@@ -185,6 +186,7 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
         self.assertEqual(len({eager, automatic, required, differently_unrolled}), 4)
         self.assertEqual(cpu, eager)
 
+    @skipIfXpu(msg="cudagraph is not supported on xpu")
     def test_benchmark_request_restores_serialized_cudagraph_policy(self):
         import pickle
 
@@ -235,6 +237,7 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
 
         self.assertTrue(request.config_cudagraph_benchmarking)
 
+    @skipIfXpu(msg="cudagraph is not supported on xpu")
     def test_benchmark_request_uses_automatic_cudagraph_policy(self):
         class FakeBenchmarkRequest(BenchmarkRequest):
             def do_bench(self, fn, *input_tensors, out=None):
