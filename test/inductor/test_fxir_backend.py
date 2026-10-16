@@ -417,7 +417,9 @@ class FxirTestCase(InductorTestCase):
         """
 
         def foo(x):
-            top, idx = torch.topk(x, 2)
+            # largest=False keeps topk an extern kernel (small-k topk with
+            # largest=True is decomposed into Triton on CUDA).
+            top, idx = torch.topk(x, 2, largest=False)
             return top + 1, idx * 2
 
         args = [torch.randn(8, device=self.device)]
