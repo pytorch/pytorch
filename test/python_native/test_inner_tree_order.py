@@ -291,6 +291,66 @@ class TestInnerTreeOrder(TestCase):
                     "with the launch-shape order while the gate was on",
                 )
 
+    def test_indexed_reduction_dims_preserve_the_order(self):
+        """Preserve fold order when arbitrary reduction dimensions require index decode."""
+        base = torch.randn(8, 65538, device="cuda")
+        x2 = torch.randn(5, 7, 9, device="cuda")
+        cases = [
+            ("strided", T.SumOps, base[:, ::2], [1], base[:, ::2].contiguous()),
+            (
+                "welford_strided",
+                T.WelfordOps,
+                base[:4, ::2],
+                [1],
+                base[:4, ::2].contiguous(),
+            ),
+            (
+                "full_strided",
+                T.SumOps,
+                base[:4, ::2],
+                None,
+                base[:4, ::2].contiguous().reshape(1, -1),
+            ),
+            (
+                "multidim",
+                T.SumOps,
+                x2,
+                [0, 2],
+                x2.permute(1, 0, 2).contiguous().reshape(7, 45),
+            ),
+        ]
+        for name, trait, x, dims, rows in cases:
+            with self.subTest(name=name):
+                want = self._run(trait, rows)
+                with _order_on():
+                    got = kg.reduce_dim(
+                        trait(acc=cutlass.Float32),
+                        f"inner_tree_test_indexed_{name}",
+                        x,
+                        dims,
+                        torch.float32,
+                    )
+                self.assertEqual(
+                    got.reshape(-1).view(torch.int32), want.view(torch.int32)
+                )
+
+    def test_indexed_split_cache_distinguishes_partial_dtypes(self):
+        """Compile distinct stage-one launchers when accumulator dtypes differ."""
+        x = (
+            torch.arange(2 * 65538, device="cuda", dtype=torch.float32).reshape(
+                2, 65538
+            )
+            % 17
+        )[:, ::2]
+        key = "inner_tree_test_partial_dtype_cache"
+        for acc, dtype in (
+            (cutlass.Float32, torch.float32),
+            (cutlass.Float64, torch.float64),
+        ):
+            with _order_on():
+                got = kg.reduce_dim(T.SumOps(acc=acc), key, x, [1], dtype)
+            self.assertEqual(got, x.sum(dim=1, dtype=dtype))
+
     def test_multi_field_and_two_output_traits_under_the_order(self):
         # Exercise per-field staging/partials, two outputs from one accumulator, and ragged
         # identity padding. Compare only plumbing with launch order because the DAGs differ.
