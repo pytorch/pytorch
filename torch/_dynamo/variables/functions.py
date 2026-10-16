@@ -5024,6 +5024,12 @@ class MethodDescriptorVariable(DescriptorVariable):
             )
             if result is not None:
                 return result
+        # Some builtin descriptors are modeled through slots rather than `tp_methods`, e.g.
+        # `list.__getitem__` on a subclass must still bypass its override.
+        if isinstance(obj, UserDefinedObjectVariable):
+            base_methods = obj._base_methods
+            if base_methods is not None and self.descriptor in base_methods:
+                return obj.call_base_method(tx, name, rest, kwargs)
         return self.owner.call_method(tx, name, [obj, *rest], kwargs)
 
     def tp_descr_get_impl(
