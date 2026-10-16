@@ -24,9 +24,7 @@ class FakeWork : public Work {
       : result_(std::move(result)), future_(createResultFuture(result_)) {}
 
   bool wait(std::chrono::milliseconds /* timeout */ = kNoTimeout) override {
-    if (future_) {
-      synchronize();
-    }
+    synchronize();
     return true;
   }
 
@@ -82,7 +80,10 @@ class FakeWork : public Work {
         continue;
       }
       const auto device = tensor.device();
-      if (!at::accelerator::isAccelerator(device.type())) {
+      // Future requires one device type; results on another accelerator type
+      // are left unordered, as CPU and meta results are.
+      if (!at::accelerator::isAccelerator(device.type()) ||
+          (!devices.empty() && device.type() != devices.front().type())) {
         continue;
       }
       devices.push_back(device);
