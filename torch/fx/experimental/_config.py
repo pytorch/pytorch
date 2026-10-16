@@ -106,11 +106,6 @@ backed_size_oblivious = False
 # Only applies when `backed_size_oblivious=True`. Defaults to False.
 unify_view_symbols_bso_meta = False
 
-# Allocate tensor storage offsets as DYNAMIC symbols with a [0, inf] range, so a
-# graph traced with a jagged view at offset >= 2 does not guard against offsets
-# 0 and 1 (and vice versa). Useful for precompile, which forbids recompiles.
-dynamic_storage_offset = False
-
 # Skip dtype check in meta registrations. Only used for systems that does its own dtype checking.
 skip_dtype_check_in_meta_registrations = False
 
