@@ -319,17 +319,18 @@ def require_tma_loadable_tile_captures(
     A tile load needs one unit-stride matrix dim and 16-byte multiple outer strides.
     Views such as ``h.view(m, n, 2)[..., 0]`` have neither, so they are copied to a
     contiguous layout here instead of failing QuACK's launch-time stride check.
+    The copy's row stride is padded to the alignment, so an unaligned N (a bf16
+    ``[m, 12]`` tile) stays loadable.
     Row-strided views such as ``h[:, :n]`` already qualify and load in place.
     """
     from torch._inductor.virtualized import V
 
     sizevars = V.graph.sizevars
 
-    def loadable(arg: TensorBox) -> bool:
+    def loadable(arg: TensorBox, alignment: int) -> bool:
         stride = arg.maybe_get_stride()
         if stride is None:
             return True
-        alignment = max(16 // arg.get_dtype().itemsize, 1)
         for unit in (-1, -2):
             if statically_known_equal(stride[unit], 1) and all(
                 sizevars.statically_known_multiple_of(s, alignment)
@@ -339,18 +340,22 @@ def require_tma_loadable_tile_captures(
                 return True
         return False
 
-    return [
-        arg
-        if not statically_known_shape_equal(arg.get_size(), output_size)
-        or loadable(arg)
-        else cast(
-            TensorBox,
-            ir.ExternKernel.require_exact_strides(
-                arg, ir.FlexibleLayout.contiguous_strides(arg.get_size())
-            ),
-        )
-        for arg in epilogue_args
-    ]
+    out = []
+    for arg in epilogue_args:
+        alignment = max(16 // arg.get_dtype().itemsize, 1)
+        if statically_known_shape_equal(
+            arg.get_size(), output_size
+        ) and not loadable(arg, alignment):
+            *outer, n = arg.get_size()
+            padded = [*outer, ceildiv(n, alignment) * alignment]
+            arg = cast(
+                TensorBox,
+                ir.ExternKernel.require_exact_strides(
+                    arg, ir.FlexibleLayout.contiguous_strides(padded)
+                ),
+            )
+        out.append(arg)
+    return out
 
 
 CAPTURE_RESHAPE_TARGETS = frozenset(
