@@ -3753,7 +3753,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     tp_getset = {"__class__": GetSet(_class_vt, readonly_setter)}
 
     def generic_getattr(
-        self, tx: "InstructionTranslatorBase", name: str
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        *,
+        getattr_fallback: bool = True,
     ) -> VariableTracker:
         """Dynamo implementation of CPython's PyObject_GenericGetAttr.
 
@@ -3761,10 +3765,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         - tp_getattro_impl (for objects without a custom __getattribute__)
         - SuperVariable.call_method (when super().__getattribute__() resolves
           to object.__getattribute__)
+        - BuiltinVariable.call_method for object.__getattribute__(obj, name)
 
         The algorithm: MRO walk → data descriptor → instance __dict__ →
         non-data descriptor / plain class attr → dynamic fallback →
         __getattr__ → AttributeError.
+
+        ``getattr_fallback=False`` skips the __getattr__ step, matching an
+        explicit object.__getattribute__ call: only CPython's tp_getattro slot
+        wrapper (slot_tp_getattr_hook) falls back to __getattr__.
         """
         source: Source | None = AttrSource(self.source, name) if self.source else None
 
@@ -3846,19 +3855,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 pass
 
         # Step 6: __getattr__ fallback.
-        result = self.call_getattr_fallback(tx, name)
-        if result is not None:
-            if (
-                self.source
-                and isinstance(self, variables.UnspecializedNNModuleVariable)
-                and hasattr(self.value, "__dict__")
-                and name not in self.value.__dict__
-            ):
-                # A pending deletion in the traced code can reach here with the
-                # name still in the live dict; guarding absence then would fail
-                # on the frame it was created.
-                install_not_in_instance_dict_guard(self.source, name)
-            return result
+        if getattr_fallback:
+            result = self.call_getattr_fallback(tx, name)
+            if result is not None:
+                if (
+                    self.source
+                    and isinstance(self, variables.UnspecializedNNModuleVariable)
+                    and hasattr(self.value, "__dict__")
+                    and name not in self.value.__dict__
+                ):
+                    # A pending deletion in the traced code can reach here with the
+                    # name still in the live dict; guarding absence then would fail
+                    # on the frame it was created.
+                    install_not_in_instance_dict_guard(self.source, name)
+                return result
 
         # Step 7: AttributeError.
         raise_observed_exception(

@@ -405,6 +405,119 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(AttributeError):
             torch.compile(fn, backend="eager")(MyObj())
 
+    # --- Explicit object.__getattribute__(obj, name) ---
+
+    def test_object_getattribute_resolves_like_attribute_access(self):
+        class MyObj:
+            def __init__(self):
+                self.scale = 3
+
+            @property
+            def offset(self):
+                return 2
+
+            def double(self, x):
+                return x * 2
+
+        obj = MyObj()
+
+        def fn(x):
+            double = object.__getattribute__(obj, "double")
+            scale = object.__getattribute__(obj, "scale")
+            return double(x) * scale + object.__getattribute__(obj, "offset")
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, fn(x))
+
+    def test_object_getattribute_bypasses_getattribute_override(self):
+        class MyObj:
+            def __init__(self):
+                self.val = 1
+
+            def __getattribute__(self, name):
+                if name == "val":
+                    return 100
+                return object.__getattribute__(self, name)
+
+        obj = MyObj()
+
+        def fn(x):
+            return x + object.__getattribute__(obj, "val")
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x + 1)
+
+    def test_object_getattribute_missing_skips_getattr(self):
+        class MyObj:
+            def __getattr__(self, name):
+                return 100
+
+        obj = MyObj()
+
+        def fn(x):
+            try:
+                return x + object.__getattribute__(obj, "missing")
+            except AttributeError:
+                return x - 1
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x - 1)
+
+    def test_super_getattribute_missing_skips_getattr(self):
+        class MyObj:
+            def __getattr__(self, name):
+                return 100
+
+            def probe(self):
+                try:
+                    return super().__getattribute__("missing")
+                except AttributeError:
+                    return -1
+
+        obj = MyObj()
+
+        def fn(x):
+            return x + obj.probe()
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x - 1)
+
+    def test_object_getattribute_sees_updated_value(self):
+        class MyObj:
+            def __init__(self):
+                self.scale = 2
+
+        obj = MyObj()
+
+        def fn(x):
+            return x * object.__getattribute__(obj, "scale")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(3)
+        self.assertEqual(opt_fn(x), x * 2)
+        obj.scale = 5
+        self.assertEqual(opt_fn(x), x * 5)
+
+    def test_object_getattribute_on_nn_module(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scale = 3
+
+            def forward(self, x):
+                if object.__getattribute__(self, "training"):
+                    return x * object.__getattribute__(self, "scale")
+                return x
+
+        mod = MyModule()
+        x = torch.randn(3)
+        result = torch.compile(mod, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x * 3)
+
     # --- Sparse tensor blocking ---
 
     def test_sparse_tensor_attr_access_graph_breaks(self):
