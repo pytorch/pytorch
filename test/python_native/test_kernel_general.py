@@ -28,6 +28,7 @@ from torch._native.cutedsl import launch as _L
 from torch._native.ops import reductions
 from torch._native.ops.reductions import (
     kernel_general as kg,
+    kernel_rowtile as rt,
     kernel_xcta as xc,
     tile,
     traits as T,
@@ -138,6 +139,111 @@ class TestKernelGeneral(TestCase):
             T.ArgMaxOps(acc=cutlass.Float32), "smoke_ragidx", x, [torch.int32], 1
         )
         self.assertEqual(idx, torch.full((8,), 40000, device="cuda", dtype=torch.int32))
+
+    def test_general_split_layouts_and_welford(self):
+        """Split strided, offset, multi-run, and two-output reductions correctly."""
+        base = torch.randn(4097, 9, 17, device="cuda")
+        x = base[1::2]
+        with torch.backends.python_native.cutedsl.disabled():
+            expected_var, expected_mean = torch.var_mean(x, dim=0)
+            expected_total = x.sum(dim=(0, 2))
+        with mock.patch.object(
+            kg, "_two_stage_general", wraps=kg._two_stage_general
+        ) as split:
+            var, mean = kg.reduce_dim2(
+                T.VarMeanOps(correction=1, acc=cutlass.Float32),
+                "split_var_mean",
+                x,
+                [0],
+                [torch.float32, torch.float32],
+            )
+            total = kg.reduce_dim(
+                T.SumOps(acc=cutlass.Float32),
+                "split_multi_run",
+                x,
+                [0, 2],
+                torch.float32,
+            )
+
+        self.assertEqual(split.call_count, 2)
+        self.assertEqual(var, expected_var, atol=1e-5, rtol=1e-4)
+        self.assertEqual(mean, expected_mean, atol=1e-5, rtol=1e-4)
+        self.assertEqual(total, expected_total, atol=1e-3, rtol=1e-4)
+
+        red, kept = kg._ti_pairs(x, kg._probe(x, {0, 2}))
+        declined = kg._two_stage_general(
+            T.ArgMaxOps(acc=cutlass.Float32),
+            "split_index_decline",
+            x,
+            red,
+            kept,
+            num_o=x.shape[1],
+            count=x.shape[0] * x.shape[2],
+            out_dtypes=[torch.int32],
+            nouts=1,
+        )
+        self.assertIsNone(declined)
+
+    def test_reduce_all2_route(self):
+        """Route one-element two-output reductions through reduce_all2."""
+        x = torch.randn(1, 65537, device="cuda")
+        with mock.patch.object(kg, "reduce_all2", wraps=kg.reduce_all2) as reduce_all2:
+            lo, hi = kg.reduce_dim2(
+                T.AMinMaxOps(acc=cutlass.Float32),
+                "reduce_all2",
+                x,
+                [1],
+                [torch.float32, torch.float32],
+            )
+        self.assertEqual(reduce_all2.call_count, 1)
+        with torch.backends.python_native.cutedsl.disabled():
+            expected_lo, expected_hi = torch.aminmax(x, dim=1)
+        self.assertEqual(lo, expected_lo)
+        self.assertEqual(hi, expected_hi)
+
+    def test_reduce_all_grid_stride_index_and_cache_key(self):
+        """Carry global indices and separate fp32/fp64 stage-2 kernels."""
+        n = (1 << 20) + 3
+        winner = 700000
+        for dtype, acc in (
+            (torch.float32, cutlass.Float32),
+            (torch.float64, cutlass.Float64),
+        ):
+            x = torch.zeros(n, device="cuda", dtype=dtype)
+            x[winner] = 1
+            x[winner + 100000] = 1
+            out = kg.reduce_all(
+                T.ArgMaxOps(acc=acc, idx=Int64),
+                "index_cache_key",
+                x,
+                torch.int64,
+            )
+            with self.subTest(dtype=dtype):
+                self.assertEqual(out, winner)
+
+    def test_noncontiguous_reduce_all_index_is_logical(self):
+        """Report row-major logical indices for non-contiguous inputs."""
+        x = torch.zeros(64, 128, device="cuda").t()
+        x[0, 1] = 1
+        out = kg.reduce_all(
+            T.ArgMaxOps(acc=cutlass.Float32, idx=Int64),
+            "noncontiguous_index",
+            x,
+            torch.int64,
+        )
+        self.assertEqual(out, 1)
+
+    def test_empty_inner_tree_reduce_all(self):
+        """Use the reduction identity when an empty input has no tree order."""
+        x = torch.empty(0, device="cuda")
+        with mock.patch.object(rt, "inner_tree_order_enabled", return_value=True):
+            out = kg.reduce_all(
+                T.SumOps(acc=cutlass.Float32),
+                "empty_inner_tree",
+                x,
+                torch.float32,
+            )
+        self.assertEqual(out, torch.zeros((), device="cuda"))
 
     def test_int64_mixed_radix_decode(self):
         """Decode logical indices beyond INT32_MAX without truncating strides or extents."""

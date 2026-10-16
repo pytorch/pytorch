@@ -707,7 +707,10 @@ def _reduce_all(
     if not x.is_cuda:
         raise AssertionError(f"reduce-all needs a CUDA input, got {x.device}")
     if not x.is_contiguous():
-        return _reduce(trait, trait_key, x, None, out_dtypes, nouts, block=block)
+        if getattr(trait, "has_index", False):
+            x = x.contiguous()
+        else:
+            return _reduce(trait, trait_key, x, None, out_dtypes, nouts, block=block)
     L = x.numel()
     xf = x.reshape(-1)
     if L == 1 and xf.stride(0) != 1:
@@ -718,7 +721,7 @@ def _reduce_all(
     x2 = xf.view(1, -1)
     from . import kernel_rowtile as rt
 
-    if rt.inner_tree_order_enabled() and L < _INT32_LIMIT:
+    if rt.inner_tree_order_enabled() and 0 < L < _INT32_LIMIT:
         outs = rt.reduce_row_tile(
             trait,
             trait_key,
