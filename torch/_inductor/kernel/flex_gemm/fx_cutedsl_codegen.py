@@ -247,9 +247,13 @@ def validate_output_transform_composition(
             ):
                 raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
         case OutputContractionPlan(transform=contraction):
-            # Auxiliaries store the physical accumulator tile; chunked lanes
-            # interleave B, so no physical tile is the logical GEMM output.
-            if outputs.aux_outputs and contraction.chunked:
+            # Chunked B interleaves accumulator columns. Save the unchanged
+            # accumulator by selecting each lane into its logical output half.
+            if (
+                outputs.aux_outputs
+                and contraction.chunked
+                and (contraction.group != 2 or outputs.aux_outputs != (gemm,))
+            ):
                 raise NotImplementedError(
                     FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR
                 )
@@ -288,7 +292,7 @@ class FlexGemmEpilogueAnalysis:
     Attributes:
         outputs: Classification of main, auxiliary, and local-reduction outputs.
         local_reduce: Grouped layouts and local-reduction matches from the FX graph.
-        output_expansion: Lane nodes of an interleaved ``[..., 2N]`` main output.
+        output_expansion: Lane nodes of an expanded ``[..., 2N]`` main output.
     """
 
     gemm: torch.fx.Node
@@ -1374,10 +1378,38 @@ class FlexGemmEpilogueEmitter:
             for output in self.outputs.aux_outputs
         )
         main_name = "main" if self.outputs.output_transform is not None else "D"
-        result_items = [
-            (main_name, main_result),
-            *zip(aux_names, aux_results, strict=True),
-        ]
+        result_items: list[tuple[str, CuteDSLCSEVariable | str]]
+        if (
+            self.output_expansion is not None
+            and self.output_expansion.transform.chunked
+        ):
+            # Split after scalar/dtype suffixes, not at the original cat operands.
+            result_items = [
+                (
+                    f"main{lane}",
+                    f"flex_gemm_interleaved_lane({gemm_epilogue_source_expr(main_result)}, {lane}, acc)",
+                )
+                for lane in range(2)
+            ]
+        else:
+            result_items = [(main_name, main_result)]
+        transform = self.outputs.output_transform
+        if (
+            isinstance(transform, FlexGemmOutputContraction)
+            and transform.chunked
+            and aux_results
+        ):
+            source = aux_results[0]
+            layout = GroupedTensorSSALayout(2, 1)
+            grouped = self.generate_like(
+                f"{source}.reshape({layout.tensorssa_shape(source)})", source
+            )
+            result_items.extend(
+                (f"output0_lane{lane}", f"{grouped}[((0, {lane}, None), None, None)]")
+                for lane in range(2)
+            )
+        else:
+            result_items.extend(zip(aux_names, aux_results, strict=True))
         if (
             self.local_reduce is not None
             and sink is not None
