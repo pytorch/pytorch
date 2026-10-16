@@ -1576,21 +1576,22 @@ class _CapturePackage(CompilePackage):
     """A CompilePackage that remembers which frames compiled any compute.
 
     A frame is recorded once any compile of it registers a backend graph or a
-    graph-break continuation, whether or not that compile is later bypassed.
+    graph-break continuation, or traces a graph that output_graph bypasses before
+    registering it, whether or not that compile is later bypassed.
     """
 
     def __init__(self, fn: Callable[..., Any]) -> None:
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
 
-    def _note_compute(self) -> None:
+    def note_compute(self) -> None:
         if self._current_entry is not None:
             self.computing_frames.add(_frame_key(self._current_entry.python_code))
 
     def _add_backend_id(
         self, backend_id: _BackendId, backend: Any | None = None
     ) -> None:
-        self._note_compute()
+        self.note_compute()
         super()._add_backend_id(backend_id, backend)
 
     def add_resume_function(
@@ -1599,7 +1600,7 @@ class _CapturePackage(CompilePackage):
         python_module: str,
         function_name: str,
     ) -> None:
-        self._note_compute()
+        self.note_compute()
         super().add_resume_function(python_code, python_module, function_name)
 
 
