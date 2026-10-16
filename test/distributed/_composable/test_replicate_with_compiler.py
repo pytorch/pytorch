@@ -371,9 +371,10 @@ class ReplicateTest(MultiProcessInductorTestCase):
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
+        self.assertNotIn("aten.flatten.using_ints(", code)
         fc = FileCheck()
         for _ in range(3):
-            fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
+            fc.check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_.default("
             )
         for _ in range(3):
@@ -383,9 +384,10 @@ class ReplicateTest(MultiProcessInductorTestCase):
         # Gradient is not None
         code = self._test_bucketing(init_process_group=False, loop=2)
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
+        self.assertNotIn("aten.flatten.using_ints(", code)
         fc = FileCheck()
         for _ in range(3):
-            fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
+            fc.check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_.default("
             )
         for _ in range(3):
