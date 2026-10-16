@@ -2023,7 +2023,7 @@ def _partition_joint_graph_into_fw_bw(
     rng_states = [
         n
         for n in fw_module.graph.find_nodes(op="placeholder")
-        if "fwd_rng_state" in n.name
+        if not n.name.startswith("primals_") and "fwd_rng_state" in n.name
     ]
     fw_metadata.num_graphsafe_rng_states = len(rng_states)
     if rng_states:

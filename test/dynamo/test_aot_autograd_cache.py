@@ -721,6 +721,58 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"autograd_cache_normalize_inputs": True})
+    def test_original_input_names_do_not_change_cache_key(self):
+        from torch._functorch._aot_autograd import graph_capture
+
+        def fn(features, scale):
+            return (features.sin() * scale).sum()
+
+        captured_names = []
+        original_create_graph = graph_capture._create_graph
+
+        def capture_graph(*args, **kwargs):
+            graph = original_create_graph(*args, **kwargs)
+            captured_names.append(
+                [node.name for node in graph.graph.find_nodes(op="placeholder")]
+            )
+            return graph
+
+        for names in (
+            ("fwd_rng_state_features", "bwd_rng_state_scale"),
+            ("tangents_features", "input_scale"),
+        ):
+            self._clear_dynamo_and_codecache()
+
+            def backend(graph, inputs):
+                for node, name in zip(graph.graph.find_nodes(op="placeholder"), names):
+                    node._rename(name)
+                    node.target = node.name
+                graph.recompile()
+                return compile_fx.compile_fx(graph, inputs)
+
+            compiled = torch.compile(fn, backend=backend, fullgraph=True)
+            features = torch.randn(4, requires_grad=True)
+            scale = torch.randn(4, requires_grad=True)
+            with patch.object(graph_capture, "_create_graph", capture_graph):
+                result = compiled(features, scale)
+                self.assertEqual(result, fn(features, scale))
+                self.assertEqual(
+                    torch.autograd.grad(result, (features, scale)),
+                    (features.cos() * scale, features.sin()),
+                )
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        # The cache hit reuses the first compilation's graph and debug names.
+        self.assertEqual(len(captured_names), 1)
+        for name in ("fwd_rng_state_features", "bwd_rng_state_scale"):
+            self.assertTrue(any(name in captured for captured in captured_names[0]))
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"autograd_cache_normalize_inputs": True})
     def test_multi_graph_specialization(self):
         """
         Verify multi graph specializations all cache hit
