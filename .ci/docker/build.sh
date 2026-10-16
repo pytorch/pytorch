@@ -177,7 +177,6 @@ case "$tag" in
     GCC_VERSION=11
     KATEX=yes
     DOCS=yes
-    ONNX=yes
     ;;
   pytorch-linux-jammy-py3.11-clang21)
     ANACONDA_PYTHON_VERSION=3.11
@@ -213,8 +212,8 @@ case "$tag" in
       INDUCTOR_BENCHMARKS=yes
     fi
     ;;
-  pytorch-linux-noble-rocm-preview-py3.12)
-    ANACONDA_PYTHON_VERSION=3.12
+  pytorch-linux-noble-rocm-preview-py3.11)
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
     ROCM_VERSION=$(tr -d '[:space:]' < "${TOPDIR}/.ci/docker/ci_commit_pins/rocm-preview.txt")
     THEROCK_INDEX_URL="https://nightly.repo.amd.com/rocm/core/whl-next/"
