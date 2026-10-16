@@ -10,7 +10,7 @@ from torch.package import (
     PackageImporter,
     sys_importer,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 try:
@@ -26,6 +26,8 @@ torch.fx.wrap("len")
 
 class TestPackageFX(PackageTestCase):
     """Tests for compatibility with FX."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_package_fx_simple(self):
         class SimpleTest(torch.nn.Module):

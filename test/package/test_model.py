@@ -6,7 +6,12 @@ from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter, sys_importer
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_FBCODE,
+    IS_SANDCASTLE,
+    run_tests,
+)
 
 
 try:
@@ -31,6 +36,8 @@ except ImportError:
 @skipIfNoTorchVision
 class ModelTest(PackageTestCase):
     """End-to-end tests packaging an entire model."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIf(
         IS_FBCODE or IS_SANDCASTLE,
