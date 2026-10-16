@@ -35,7 +35,7 @@ from torch._dynamo.package import (
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.precompile_package import default_guard_filter_fn
-from torch._dynamo.symbolic_convert import _import_module
+from torch._dynamo.symbolic_convert import _import_module, UNNAMED_SCOPE_PREFIX
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
@@ -1102,7 +1102,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
             for name in load_guards_state(
                 guarded.guards_state
             ).output_graph.global_scope
-            if name.startswith("___unnamed_scope_")
+            if name.startswith(UNNAMED_SCOPE_PREFIX)
         }
         self.assertTrue(names)
         for backend_id, backend in package.cached_backends.items():
@@ -1743,6 +1743,27 @@ def entry(x):
         entry.__module__ = alias
         package = self._round_trip_under_fail_on_recompile(entry, torch.randn(4))
         self.assertEqual(package.cache_entry().codes[0].python_module, alias)
+
+    # Without nested graph breaks, hooked_forward becomes a frame of its own.
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_package_keeps_the_entry_module_alias_for_frames_sharing_its_globals(
+        self,
+    ):
+        # The child frame (hooked_forward) and the resume functions run with the
+        # entry's globals, so they are recorded under the entry's alias too.
+        def entry(x):
+            y = hooked_forward(x, x) + x
+            torch._dynamo.graph_break()
+            return y + PKG_SCALE
+
+        alias = "test_package_entry_alias"
+        sys.modules[alias] = sys.modules[__name__]
+        self.addCleanup(sys.modules.pop, alias, None)
+        entry.__module__ = alias
+        package = self._round_trip_under_fail_on_recompile(entry, torch.randn(4))
+        codes = package.cache_entry().codes
+        self.assertGreater(len(codes), 2)
+        self.assertEqual({code.python_module for code in codes}, {alias})
 
     def test_package_records_a_renamed_module_under_its_spec_name(self):
         # A module that rebinds __name__ is still registered under its spec
