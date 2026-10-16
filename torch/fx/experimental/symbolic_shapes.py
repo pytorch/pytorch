@@ -5403,20 +5403,17 @@ class ShapeEnv:
             )
         # A sympy positive=True symbol would fold Eq(s, 0) to False, so the
         # dynamic offset is only sympy-nonnegative, with an explicit [0, inf] range.
-        offset_expr = self.create_symbol(
-            ex_storage_offset,
-            TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-            dynamic_dim=dynamic_offset,
-            constraint_dim=None,
-            symbolic_context=symbolic_context,
-            positive=None if config.dynamic_storage_offset else True,
-            do_not_specialize_zero_one=config.dynamic_storage_offset,
-            nonnegative=True if config.dynamic_storage_offset else None,
-        )
-        if config.dynamic_storage_offset and isinstance(offset_expr, sympy.Symbol):
-            self._update_var_to_range(offset_expr, ValueRanges(0, int_oo))
         sym_storage_offset = self.create_symintnode(
-            offset_expr,
+            self.create_symbol(
+                ex_storage_offset,
+                TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
+                dynamic_dim=dynamic_offset,
+                constraint_dim=None,
+                symbolic_context=symbolic_context,
+                positive=None if config.dynamic_storage_offset else True,
+                do_not_specialize_zero_one=config.dynamic_storage_offset,
+                nonnegative=True if config.dynamic_storage_offset else None,
+            ),
             hint=ex_storage_offset,
             source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
         )
@@ -5929,8 +5926,9 @@ class ShapeEnv:
 
         if not isinstance(source, Source):
             raise AssertionError(f"{type(source)} {source}")
-        if positive and dynamic_dim is not DimDynamic.UNBACKED and val < 0:
-            raise AssertionError(f"positive set for negative value: {val}")
+        sign_known = positive or nonnegative
+        if sign_known and dynamic_dim is not DimDynamic.UNBACKED and val < 0:
+            raise AssertionError(f"positive/nonnegative set for negative value: {val}")
         # It's always sound to allocate a symbol as DYNAMIC.  If the user
         # constrained the symbol, force the symbolic_context to DYNAMIC, because our
         # constraint code will do weird stuff if, e.g., it's duck shaped
@@ -6024,7 +6022,9 @@ class ShapeEnv:
                     )
                 else:
                     self.var_to_range[sympy_expr] = (
-                        self._default_unspecified_value_range()
+                        ValueRanges(0, int_oo)
+                        if nonnegative
+                        else self._default_unspecified_value_range()
                     )
                     self.var_to_range_sloc[sympy_expr] = ValueRangesSLoc(sloc, sloc)
 
