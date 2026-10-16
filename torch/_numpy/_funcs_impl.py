@@ -381,23 +381,45 @@ def logspace(
 
 
 def arange(
+    *args: ArrayLikeOrScalar,
     start: ArrayLikeOrScalar | None = None,
     stop: ArrayLikeOrScalar | None = None,
     step: ArrayLikeOrScalar | None = 1,
     dtype: DTypeLike | None = None,
-    *,
     like: NotImplementedType = None,
 ) -> torch.Tensor:
+    # NumPy's arange accepts positional (start, stop, step) but requires stop
+    # to be specified when start is passed by keyword: arange(start=4) raises
+    # TypeError while arange(4) is shorthand for arange(stop=4). Interface the
+    # impl as star-args so the args/kwargs distinction survives the normalizer.
+    n = len(args)
+    if n > 3:
+        raise TypeError("arange() takes at most 3 positional arguments")
+    if n >= 1 and start is not None:
+        raise TypeError("arange() got multiple values for argument 'start'")
+    if n >= 2 and stop is not None:
+        raise TypeError("arange() got multiple values for argument 'stop'")
+    if n == 3 and step != 1:
+        raise TypeError("arange() got multiple values for argument 'step'")
+    if n == 0:
+        if start is not None and stop is None:
+            raise TypeError(
+                "arange() requires stop to be specified when start is "
+                "passed as a keyword argument"
+            )
+        if start is None and stop is None:
+            raise TypeError("arange() requires stop to be specified")
+        if start is None:
+            start, stop = 0, stop
+    else:
+        if n == 1:
+            start, stop = 0, args[0]
+        elif n == 2:
+            start, stop = args
+        else:
+            start, stop, step = args
     if step == 0:
         raise ZeroDivisionError
-    if stop is None:
-        if start is None:
-            raise TypeError
-        # XXX: this breaks if start is passed as a kwarg:
-        # arange(start=4) should raise (no stop) but doesn't
-        start, stop = 0, start
-    if start is None:
-        start = 0
 
     # the dtype of the result
     # NB: a None step is not handled here (numpy would treat it as 1); passing
