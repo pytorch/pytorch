@@ -11,6 +11,13 @@ from cutlass import Boolean, const_expr, Float32, Int32, Int64
 
 WARP = 32
 
+
+def welford_nouts(key: str) -> int:
+    if key.startswith(("varmean", "stdmean")):
+        return 2
+    return int(key.startswith(("var", "std")))
+
+
 # Arg-reduction "no winner" sentinel. Use Int32 to reduce partial traffic unless the
 # extent requires Int64.
 _INT32_MAX = (1 << 31) - 1
@@ -143,6 +150,7 @@ class WelfordOps:
         self.return_mean = bool(return_mean)
         self.acc = acc
         self.fdtypes = (acc, acc, acc)
+        self.split_grid_mult = 8 if acc.width == 32 else 4
 
     def init(self):
         z = self.acc(0.0)
@@ -179,6 +187,29 @@ class WelfordOps:
             mean = ma + delta * nb_over_n
             m2 = m2a + m2b + delta * delta * na * nb_over_n
         return (mean, m2, nn)
+
+    @cute.jit
+    def combine_uniform(self, a, b, index, count: cutlass.Constexpr, weight=None):
+        # Preserve Chan's arithmetic; derive exact counts outside the accumulator chain.
+        ma, m2a, _ = a
+        mb, m2b, _ = b
+        na, nb = self.acc(index) * self.acc(count), self.acc(count)
+        nn = na + nb
+        nb_over_n = nb / nn if const_expr(weight is None) else weight
+        delta = mb - ma
+        mean = ma + delta * nb_over_n
+        m2 = m2a + m2b + delta * delta * na * nb_over_n
+        return (mean, m2, nn)
+
+    @cute.jit
+    def combine_equal(self, a, b, count: cutlass.Constexpr):
+        """Combine two nonempty states containing the same number of values."""
+        ma, m2a, _ = a
+        mb, m2b, _ = b
+        delta = mb - ma
+        mean = ma + delta * self.acc(0.5)
+        m2 = m2a + m2b + delta * delta * self.acc(count * 0.5)
+        return (mean, m2, self.acc(count * 2))
 
     @cute.jit
     def shfl_down(self, acc, offset):
