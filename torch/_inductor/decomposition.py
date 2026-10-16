@@ -194,8 +194,6 @@ def topk_small_k(self, k, dim=-1, largest=True, sorted=True):
     is canonicalized first. So a removed element is never picked again. Results
     come out in descending order, so the decomposition also serves sorted=True.
     """
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
-
     if (
         config.triton.decompose_sort_ops
         or self.device.type != "cuda"
@@ -209,13 +207,13 @@ def topk_small_k(self, k, dim=-1, largest=True, sorted=True):
     dim = utils.canonicalize_dim(self.dim(), dim)
     n = self.shape[dim]
     # Only the last dim: over a non-last dim with few outputs, the rounds read
-    # strided columns and can be slower than ATen. The size checks need static
-    # sizes, so with dynamic shapes (symbolic n) topk keeps its existing
-    # lowering.
+    # strided columns and can be slower than ATen. k must be a plain int since
+    # it sets the number of rounds; a symbolic n decomposes only when it is
+    # known to be in range (e.g. bounded by an export Dim max).
     if not (
         dim == self.dim() - 1
-        and statically_known_true(k >= 1)
-        and statically_known_true(k <= 16)
+        and isinstance(k, int)
+        and 1 <= k <= 16
         and statically_known_true(k <= n)
         and statically_known_true(n <= 1024)
     ):

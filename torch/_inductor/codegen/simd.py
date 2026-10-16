@@ -5873,15 +5873,28 @@ class SIMDScheduling(BaseScheduling):
             and get_hint(ranges[iter_vars[-1]]) >= 1024
         ):
             inner_var = iter_vars[-1]
+            reads = coalesce_analysis.norm_read_writes.reads
+            writes = coalesce_analysis.norm_read_writes.writes
             streamed: OrderedSet[str] = OrderedSet()
             per_row: OrderedSet[str] = OrderedSet()
-            for index, names in coalesce_analysis.norm_read_writes.reads.items():
+            for index, names in reads.items():
                 if inner_var in index.free_symbols:
                     streamed.update(names)
                 elif any(v in index.free_symbols for v in iter_vars):
                     per_row.update(names)
             per_row -= streamed
-            if per_row and len(per_row) >= len(streamed):
+            # 2D tiles address each row by its stride, so rows that are not a
+            # multiple of 16 bytes lose the 128-bit loads and stores the flat
+            # kernel gets.
+            rows_aligned = all(
+                V.graph.sizevars.statically_known_multiple_of(
+                    index.coeff(iter_vars[-2]) * V.graph.get_dtype(name).itemsize, 16
+                )
+                for index, names in itertools.chain(reads.items(), writes.items())
+                if inner_var in index.free_symbols
+                for name in names
+            )
+            if per_row and len(per_row) >= len(streamed) and rows_aligned:
                 row_split = (
                     process_node_vars(tuple(iter_vars[-2:]), is_pointwise=True),
                     process_node_vars(is_pointwise=False),

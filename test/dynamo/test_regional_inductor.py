@@ -1684,8 +1684,7 @@ def forward(self, primals_0, primals_1):
 def forward(self, primals_0, amax, log, convert_element_type, tangents_0):
     unsqueeze_2 = torch.ops.aten.unsqueeze.default(tangents_0, 1);  tangents_0 = None
     iota = torch.ops.prims.iota.default(64, start = 0, step = 1, dtype = torch.int32, device = device(type='cpu'), requires_grad = False)
-    view = torch.ops.aten.view.default(iota, [1, 64]);  iota = None
-    eq = torch.ops.aten.eq.Tensor(convert_element_type, view);  view = None
+    eq = torch.ops.aten.eq.Tensor(convert_element_type, iota);  iota = None
     neg_1 = torch.ops.aten.neg.default(unsqueeze_2);  unsqueeze_2 = None
     full_default_3 = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     where_3 = torch.ops.aten.where.self(eq, neg_1, full_default_3);  eq = full_default_3 = None

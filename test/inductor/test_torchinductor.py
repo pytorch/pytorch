@@ -22963,47 +22963,86 @@ if RUN_GPU:
         def test_exp_f32x2_matches_libdevice_exp(self):
             import torch._inductor.codegen.triton as triton_codegen
 
-            def fn(x):
+            def exp(x):
                 return torch.exp(x)
 
+            def exp_neg(x):
+                return torch.exp(-x)
+
             x = torch.randn(1024, device=GPU_TYPE)
-            _, code = run_and_get_code(torch.compile(fn), x)
+            _, code = run_and_get_code(torch.compile(exp), x)
             self.assertIn("triton_helpers.exp_f32x2(", " ".join(code))
+            # 2D pointwise kernels using the paired exp also try the one-warp
+            # wide config.
+            self.assertNotIn("ONE_WARP_WIDE_TILE", " ".join(code))
+            torch._dynamo.reset()
+            _, code = run_and_get_code(
+                torch.compile(lambda x, m: torch.exp(x - m)),
+                torch.randn(64, 4096, device=GPU_TYPE),
+                torch.randn(64, 1, device=GPU_TYPE),
+            )
+            self.assertIn("ynumel", " ".join(code))
+            self.assertIn("AutotuneHint.ONE_WARP_WIDE_TILE", " ".join(code))
+            # exp(-x) folds the negation into the helper.
+            torch._dynamo.reset()
+            _, code = run_and_get_code(torch.compile(exp_neg), x)
+            self.assertRegex(" ".join(code), r"exp_f32x2\(tmp\d+, True\)")
             with config.patch({"eager_numerics.disable_ftz": True}):
                 torch._dynamo.reset()
-                _, code = run_and_get_code(torch.compile(fn), x)
+                _, code = run_and_get_code(torch.compile(exp), x)
                 self.assertNotIn("exp_f32x2", " ".join(code))
 
             # Bitwise equal to libdevice.exp for every float32 bit pattern.
             chunk = 1 << 26
             bits = torch.arange(chunk, device=GPU_TYPE, dtype=torch.int64)
-            torch._dynamo.reset()
-            paired = torch.compile(fn, dynamic=False)
-            reference = torch.compile(lambda x: torch.exp(x), dynamic=False)
-            # Compile the reference without caches: its graph equals `paired`'s,
-            # and the cache key does not see the patched codegen choice.
-            with (
-                unittest.mock.patch.object(
-                    triton_codegen, "_use_exp_f32x2", lambda: False
-                ),
-                config.patch(force_disable_caches=True),
-            ):
-                _, code = run_and_get_code(
-                    reference, bits.to(torch.int32).view(torch.float32)
-                )
-            self.assertNotIn("exp_f32x2", " ".join(code))
-            for start in range(0, 1 << 32, chunk):
-                x = (bits + start).to(torch.int32).view(torch.float32)
-                self.assertTrue(
-                    torch.equal(
-                        paired(x).view(torch.int32), reference(x).view(torch.int32)
-                    )
-                )
-
-            # Scalars and float64 fall back to libdevice.exp.
-            for inp in (torch.tensor(0.5, device=GPU_TYPE), x[:1].double()):
+            for fn in (exp, exp_neg):
                 torch._dynamo.reset()
-                self.assertEqual(torch.compile(fn)(inp), fn(inp))
+                paired = torch.compile(fn, dynamic=False)
+                x = bits.to(torch.int32).view(torch.float32)
+                _, code = run_and_get_code(paired, x)
+                self.assertIn("exp_f32x2", " ".join(code))
+                reference = torch.compile(lambda x: fn(x), dynamic=False)
+                # Compile the reference without caches: its graph equals
+                # `paired`'s, and the cache key does not see the patched choice.
+                with (
+                    unittest.mock.patch.object(
+                        triton_codegen, "_use_exp_f32x2", lambda: False
+                    ),
+                    config.patch(force_disable_caches=True),
+                ):
+                    _, code = run_and_get_code(reference, x)
+                self.assertNotIn("exp_f32x2", " ".join(code))
+                for start in range(0, 1 << 32, chunk):
+                    x = (bits + start).to(torch.int32).view(torch.float32)
+                    self.assertTrue(
+                        torch.equal(
+                            paired(x).view(torch.int32), reference(x).view(torch.int32)
+                        )
+                    )
+
+            # Scalars use the helper's libdevice.exp branch; float64 is not paired.
+            for fn in (exp, exp_neg):
+                for inp in (
+                    torch.tensor(0.5, device=GPU_TYPE),
+                    torch.tensor([0.5, -3.0, 20.0], device=GPU_TYPE).double(),
+                ):
+                    torch._dynamo.reset()
+                    result, code = run_and_get_code(torch.compile(fn), inp)
+                    self.assertEqual(result, fn(inp), atol=0, rtol=0)
+                    if inp.dtype == torch.float64:
+                        self.assertNotIn("exp_f32x2", " ".join(code))
+
+            # Persistent reductions that also generate random numbers keep
+            # libdevice.exp (the paired asm makes them spill).
+            def softmax_dropout(x):
+                return torch.nn.functional.dropout(torch.softmax(x, -1), 0.1)
+
+            torch._dynamo.reset()
+            _, code = run_and_get_code(
+                torch.compile(softmax_dropout), torch.randn(64, 512, device=GPU_TYPE)
+            )
+            self.assertIn("persistent_reduction", " ".join(code))
+            self.assertNotIn("exp_f32x2", " ".join(code))
 
         def test_cross_entropy_backward_has_no_class_reduction(self):
             # nll_loss_backward's one-hot gradient is summed over the classes by
@@ -23044,6 +23083,17 @@ if RUN_GPU:
             self.assertEqual(result, normalize(x, mean, rstd))
             self.assertIn("ynumel", " ".join(code))
 
+            # Short rows and rows that are not a multiple of 16 bytes (1025 fp32
+            # elements) keep the flat 1D kernel.
+            for shape in [(64, 512), (64, 1025)]:
+                x32 = torch.randn(shape, device=GPU_TYPE)
+                torch._dynamo.reset()
+                result, code = run_and_get_code(
+                    torch.compile(normalize), x32, mean, rstd
+                )
+                self.assertEqual(result, normalize(x32, mean, rstd))
+                self.assertNotIn("ynumel", " ".join(code))
+
             # Tiling is disabled with max_tiles=1.
             torch._dynamo.reset()
             with config.patch({"triton.max_tiles": 1}):
@@ -23061,19 +23111,29 @@ if RUN_GPU:
             self.assertNotIn("ynumel", " ".join(code))
 
         def test_size_one_innermost_reduction_dim_stays_unsplit(self):
-            # A size-1 innermost reduced dim is not "constant along the
-            # reduction": the contiguous read must still vote INNER (one kernel).
+            # A read that is contiguous along one reduction var and constant along
+            # another (a size-1 or broadcast innermost dim) still votes INNER, so
+            # these stay one unsplit kernel.
             def fn(x):
                 return x.sum((1, 2))
 
-            x = torch.randn(64, 4096, 1, device=GPU_TYPE)
-            result, code = run_and_get_code(torch.compile(fn), x)
-            self.assertEqual(result, fn(x))
-            self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+            def broadcast_sum(x):
+                return x[:, :, None].expand(4096, 8, 32).sum((1, 2))
+
+            for f, x in [
+                (fn, torch.randn(64, 4096, 1, device=GPU_TYPE)),
+                (broadcast_sum, torch.randn(4096, 8, device=GPU_TYPE)),
+            ]:
+                torch._dynamo.reset()
+                result, code = run_and_get_code(torch.compile(f), x)
+                self.assertEqual(result, f(x), atol=1e-4, rtol=1e-4)
+                self.assertEqual(" ".join(code).count("@triton.jit"), 1)
 
         def test_small_strided_read_keeps_outer_reduction(self):
-            # A transposed (strided) read votes OUTER even when it is a small
-            # dtype: its per-element cost does not shrink with itemsize.
+            # Only reads constant across the whole reduction abstain from the
+            # INNER/OUTER vote; a transposed (strided) read still votes OUTER,
+            # including a small-dtype one (guards against weighting votes by
+            # itemsize).
             def fn(x, mask):
                 return (x * mask.t()).sum(1)
 
@@ -23122,7 +23182,16 @@ if RUN_GPU:
                 return torch.gather(x, dim, indices), indices
 
             specials = torch.tensor(
-                [float("inf"), -float("inf"), float("nan"), 0.0, -0.0, 1.0, 1.0],
+                [
+                    float("inf"),
+                    -float("inf"),
+                    float("nan"),
+                    -float("nan"),
+                    0.0,
+                    -0.0,
+                    1.0,
+                    1.0,
+                ],
                 device=GPU_TYPE,
             )
             for shape, k, dim, dtype, special in [
@@ -23132,6 +23201,7 @@ if RUN_GPU:
                 ((16, 128, 3), 3, 1, torch.float32, False),
                 ((512, 64), 8, -1, torch.float32, True),
                 ((512, 64), 8, -1, torch.bfloat16, True),
+                ((512, 64), 8, -1, torch.float16, True),
             ]:
                 x = torch.randn(shape, device=GPU_TYPE)
                 if special:
@@ -23156,16 +23226,8 @@ if RUN_GPU:
                     self.assertIsNotNone(fallback)
                 ref_values, ref_indices = reference(x, k, dim)
                 self.assertEqual(indices, ref_indices)
-                self.assertTrue(
-                    torch.equal(
-                        values.view(
-                            torch.int16 if dtype == torch.bfloat16 else torch.int32
-                        ),
-                        ref_values.view(
-                            torch.int16 if dtype == torch.bfloat16 else torch.int32
-                        ),
-                    )
-                )
+                bits = torch.int16 if dtype.itemsize == 2 else torch.int32
+                self.assertTrue(torch.equal(values.view(bits), ref_values.view(bits)))
 
             # As in ATen, +0 ranks above -0; equal values go to the lowest index.
             x = torch.zeros(64, 32, device=GPU_TYPE)

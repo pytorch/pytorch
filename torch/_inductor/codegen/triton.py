@@ -1256,12 +1256,16 @@ class TritonCSEVariable(CSEVariable):
         super().__init__(name, bounds, dtype, shape=shape)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: OrderedSet[str] = OrderedSet()
+        # The operand if this variable is neg(operand), so exp can fold the negation.
+        self.neg_operand: TritonCSEVariable | None = None
         if dtype is None:
             raise AssertionError("TritonCSEVariable must have dtype")
         if shape is None:
             raise AssertionError("TritonCSEVariable must have shape")
 
     def update_on_args(self, name, args, kwargs):
+        if name == "neg" and isinstance(args[0], TritonCSEVariable):
+            self.neg_operand = args[0]
         for arg in args:
             if isinstance(arg, TritonCSEVariable):
                 self.mask_vars.update(arg.mask_vars)
@@ -1293,8 +1297,8 @@ def get_dtype_handler() -> DtypePropagationOpsHandler:
 
 def _use_exp_f32x2() -> bool:
     """True if triton_helpers.exp_f32x2 can replace libdevice.exp: it relies on
-    the packed f32x2 instructions of data-center Blackwell (sm_10x) and, like
-    libdevice.exp under Triton's default, flushes denormals."""
+    the packed f32x2 instructions of data-center Blackwell (sm_10x) and matches
+    libdevice.exp as compiled under Triton's default denormal flushing."""
     device = V.graph.get_current_device_or_throw()
     return (
         device.type == "cuda"
@@ -1595,9 +1599,8 @@ class TritonOverrides(OpOverrides):
         """
         if config.use_fast_math:
             return f"tl_math.exp({x})"
-        if _use_exp_f32x2():
-            return f"triton_helpers.exp_f32x2({x})"
-        return f"libdevice.exp({x})"
+        else:
+            return f"libdevice.exp({x})"
 
     @staticmethod
     @maybe_upcast_float32()
@@ -2501,6 +2504,36 @@ class TritonKernelOverrides(TritonOverrides):
         # happens in __init__ unlike _initialize_pointwise_overrides
         # because the libdevice registrations are populated during lowerings
         self._setup_libdevice_routing()
+
+    @staticmethod
+    def exp(x):
+        kernel = V.kernel
+        if (
+            config.use_fast_math
+            or not isinstance(x, TritonCSEVariable)
+            or x.dtype != torch.float32
+            or not _use_exp_f32x2()
+            # The paired asm needs even-aligned register pairs; persistent
+            # reductions that also run Philox (e.g. softmax + dropout) spill.
+            or (
+                kernel.persistent_reduction
+                and any(
+                    kernel.features.contains_op(op)
+                    for op in ("rand", "randn", "randint64")
+                )
+            )
+        ):
+            return TritonOverrides.exp(x)
+        # The one-warp wide config exists only for 2D pointwise kernels.
+        if (
+            not kernel.features.is_reduction()
+            and "y" in kernel.numels
+            and "z" not in kernel.numels
+        ):
+            kernel.autotune_hints.add(AutotuneHint.ONE_WARP_WIDE_TILE)
+        if x.neg_operand is not None:
+            return f"triton_helpers.exp_f32x2({x.neg_operand}, True)"
+        return f"triton_helpers.exp_f32x2({x})"
 
     @classmethod
     @functools.cache
