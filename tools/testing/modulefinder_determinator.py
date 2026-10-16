@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.machinery
 import modulefinder
 import os
 import sys
@@ -23,8 +24,8 @@ TARGET_DET_LIST = [
     "test_cpp_extensions_aot_ninja",
     "test_cpp_extensions_aot_no_ninja",
     "test_cpp_extensions_jit",
-    "test_cpp_extensions_stream_and_event",
     "test_cpp_extensions_mtia_backend",
+    "test_cpp_extensions_stream_and_event",
     "test_cuda",
     "test_cuda_primary_ctx",
     "test_dataloader",
@@ -54,6 +55,15 @@ TARGET_DET_LIST = [
 
 
 _DEP_MODULES_CACHE: dict[str, set[str]] = {}
+_MODULEFINDER_RECURSION_LIMIT = 5000
+
+
+class _NamespaceAwareModuleFinder(modulefinder.ModuleFinder):
+    def find_module(self, name, path, parent=None):
+        spec = importlib.machinery.PathFinder.find_spec(name, path)
+        if spec is not None and spec.loader is None:
+            raise ImportError(name)
+        return super().find_module(name, path, parent)
 
 
 def should_run_test(
@@ -71,7 +81,7 @@ def should_run_test(
     if test.endswith("_ninja"):
         test = test[: (-1 * len("_ninja"))]
 
-    dep_modules = get_dep_modules(test)
+    dep_modules: set[str] | None = None
 
     for touched_file in touched_files:
         file_type = test_impact_of_file(touched_file)
@@ -92,6 +102,8 @@ def should_run_test(
             # test/ path does not have a "test." namespace
             if touched_module.startswith("test."):
                 touched_module = touched_module.split("test.")[1]
+            if dep_modules is None:
+                dep_modules = get_dep_modules(test)
             if touched_module in dep_modules or touched_module == test.replace(
                 "/", "."
             ):
@@ -153,7 +165,7 @@ def get_dep_modules(test: str) -> set[str]:
     test_location = REPO_ROOT / "test" / f"{test}.py"
 
     # HACK: some platforms default to ascii, so we can't just run_script :(
-    finder = modulefinder.ModuleFinder(
+    finder = _NamespaceAwareModuleFinder(
         # Ideally exclude all third party modules, to speed up calculation.
         excludes=[
             "scipy",
@@ -176,14 +188,24 @@ def get_dep_modules(test: str) -> set[str]:
             "mpl_toolkits",
             "google",
             "onnx",
+            "torch._C",
+            "optree._C",
+            "triton._C",
             # Triggers RecursionError
             "mypy",
         ],
     )
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        finder.run_script(str(test_location))
+    recursion_limit = sys.getrecursionlimit()
+    try:
+        if recursion_limit < _MODULEFINDER_RECURSION_LIMIT:
+            sys.setrecursionlimit(_MODULEFINDER_RECURSION_LIMIT)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            finder.run_script(str(test_location))
+    finally:
+        if sys.getrecursionlimit() != recursion_limit:
+            sys.setrecursionlimit(recursion_limit)
     dep_modules = set(finder.modules.keys())
     _DEP_MODULES_CACHE[test] = dep_modules
     return dep_modules
