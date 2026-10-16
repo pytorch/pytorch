@@ -605,7 +605,10 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather(
   auto timeout = operationTimeout(opts.timeout);
 
   // Fast path: distinct per-rank output buffers -> list-based all_gather.
-  bool aliased = outputList.size() > 1 &&
+  // Note: Two distinct zero-element tensors both return data_ptr() == nullptr,
+  // so null data pointers must not be treated as aliased.
+  bool aliased = outputList.size() > 1 && outputList[0].numel() > 0 &&
+      outputList[1].numel() > 0 && outputList[0].data_ptr() != nullptr &&
       outputList[0].data_ptr() == outputList[1].data_ptr();
   if (!aliased) {
     auto work = all_gather(outputList, input, opts.asyncOp, timeout, config);
