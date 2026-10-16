@@ -669,10 +669,41 @@ if(USE_ROCM)
   )
   file(GLOB native_hip_bgemm CONFIGURE_DEPENDS "native/hip/bgemm_kernels/*.hip")
   file(GLOB native_hip_ck CONFIGURE_DEPENDS "native/hip/ck*.hip")
+  file(GLOB native_hip_ck_tile CONFIGURE_DEPENDS "native/hip/ck_tile*.hip")
+  if(native_hip_ck_tile)
+    list(REMOVE_ITEM native_hip_ck ${native_hip_ck_tile})
+  endif()
   if(NOT USE_ROCM_CK_GEMM)
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
-      ${native_hip_bgemm} ${native_hip_ck})
+      ${native_hip_bgemm} ${native_hip_ck} ${native_hip_ck_tile})
   else()
+    # ck_tile headers fail to compile for archs ck_tile has no target for (e.g.
+    # gfx900/gfx906/gfx101x), and the ck_tile kernels are only dispatched on
+    # gfx942/gfx950, so build them as a separate library for just those archs.
+    exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}" ${native_hip_ck_tile})
+    set(_ck_tile_hip_arches "")
+    foreach(ARCH IN ITEMS gfx942 gfx950)
+      if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+        list(APPEND _ck_tile_hip_arches ${ARCH})
+      endif()
+    endforeach()
+    if(native_hip_ck_tile AND _ck_tile_hip_arches)
+      set_source_files_properties(${native_hip_ck_tile} PROPERTIES LANGUAGE HIP)
+      add_library(ck_tile_gemm STATIC ${native_hip_ck_tile})
+      set_target_properties(ck_tile_gemm PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        HIP_ARCHITECTURES "${_ck_tile_hip_arches}")
+      target_compile_options(ck_tile_gemm PRIVATE ${HIP_CXX_FLAGS})
+      target_include_directories(ck_tile_gemm PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/hip
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include
+        ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
+      add_dependencies(ck_tile_gemm torch_cpu)
+    else()
+      message(STATUS "ck_tile grouped GEMM disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has neither gfx942 nor gfx950")
+    endif()
+
     # composable_kernel has no gfx1250 support yet, so its CK GEMM kernels fail to
     # compile for that arch. Build CK GEMM as a separate library with gfx1250
     # filtered out of HIP_ARCHITECTURES so every other requested arch still gets
