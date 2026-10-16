@@ -51,15 +51,6 @@ def device_ok(x: torch.Tensor, majors: tuple[int, ...]) -> bool:
     return _arch_ok(x.device.index, tuple(majors))
 
 
-def on_current_device(x: torch.Tensor) -> bool:
-    if x.device.type != "cuda":
-        return False
-    try:
-        return x.device.index == torch.cuda.current_device()
-    except RuntimeError:
-        return False
-
-
 def cuda_device_guard(fn: Callable[..., R]) -> Callable[..., R]:
     """Run a CUDA override on its first tensor argument's device."""
 
@@ -72,15 +63,3 @@ def cuda_device_guard(fn: Callable[..., R]) -> Callable[..., R]:
             return fn(self, *args, **kwargs)
 
     return guarded
-
-
-def resolve_neg_view(fn: Callable[..., R]) -> Callable[..., R]:
-    """Materialize a lazy negative input before passing it to an override."""
-
-    @functools.wraps(fn)
-    def resolved(self: torch.Tensor, *args: Any, **kwargs: Any) -> R:
-        if self.is_neg():
-            self = self.resolve_neg()
-        return fn(self, *args, **kwargs)
-
-    return resolved
