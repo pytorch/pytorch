@@ -241,12 +241,14 @@ bool isMemsetApi(uint32_t id) {
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset2DAsync_spt:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset3D_spt:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset3DAsync_spt:
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 14
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D8:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D8Async:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D16:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D16Async:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D32:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D32Async:
+#endif
       return true;
     default:
       break;
