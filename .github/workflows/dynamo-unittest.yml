@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.13', '3.15']
+        python-version: ['3.12', '3.13', '3.15']
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
@@ -67,12 +67,47 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.13', '3.15']
+        python-version: ['3.12', '3.13', '3.15']
     with:
       build-environment: linux-jammy-py${{ matrix.python-version }}-clang21
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang21-${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.dynamo-build.outputs.test-matrix }}
       python-version: ${{ matrix.python-version }}
+      compiler: clang21
+      cuda-version: cpu
+    secrets: inherit
+
+  # 3.11 runs only dynamo_core, since pull.yml already runs dynamo_wrapped on this
+  # build environment. It is a separate job because a matrix job exposes only one
+  # leg's outputs.test-matrix, which every leg of dynamo-test would then use.
+  dynamo-build-py311:
+    name: dynamo-build (3.11)
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
+      build-environment: linux-jammy-py3.11-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      test-matrix: |
+        { include: [
+          { config: "dynamo_core", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+        ]}
+      python-version: "3.11"
+      compiler: clang21
+      cuda-version: cpu
+    secrets: inherit
+
+  dynamo-test-py311:
+    name: dynamo-test (3.11)
+    uses: ./.github/workflows/_linux-test.yml
+    needs: [get-label-type, dynamo-build-py311]
+    with:
+      build-environment: linux-jammy-py3.11-clang21
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-py3.11-clang21-${{ needs.get-label-type.outputs.ci-docker-hash }}
+      test-matrix: ${{ needs.dynamo-build-py311.outputs.test-matrix }}
+      python-version: "3.11"
       compiler: clang21
       cuda-version: cpu
     secrets: inherit
