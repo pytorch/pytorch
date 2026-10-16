@@ -9,12 +9,14 @@ from . import _aot_data as data, kernel_general as general, tile, traits
 
 
 _DTYPES = {
+    "bool": cutlass.Boolean,
     "float16": cutlass.Float16,
     "bfloat16": cutlass.BFloat16,
     "float32": cutlass.Float32,
     "int64": cutlass.Int64,
 }
 _DTYPE_TAG = {
+    "bool": "bool",
     "float16": "f16",
     "bfloat16": "bf16",
     "float32": "f32",
@@ -31,6 +33,22 @@ _TRAITS = {
     "maxdim": lambda: traits.MaxDimOps(acc=Float32, idx=Int32),
     "mindim": lambda: traits.MinDimOps(acc=Float32, idx=Int32),
     "varmean": lambda: traits.VarMeanOps(acc=Float32),
+    "var0": lambda: traits.WelfordOps(correction=0, acc=Float32),
+    "var1": lambda: traits.WelfordOps(correction=1, acc=Float32),
+    "std0": lambda: traits.WelfordOps(correction=0, take_sqrt=True, acc=Float32),
+    "std1": lambda: traits.WelfordOps(correction=1, take_sqrt=True, acc=Float32),
+    "varmean0": lambda: traits.VarMeanOps(correction=0, acc=Float32),
+    "varmean1": lambda: traits.VarMeanOps(correction=1, acc=Float32),
+    "stdmean0": lambda: traits.VarMeanOps(correction=0, take_sqrt=True, acc=Float32),
+    "stdmean1": lambda: traits.VarMeanOps(correction=1, take_sqrt=True, acc=Float32),
+    "vnorm1": lambda: traits.NormOps(1.0, acc=Float32),
+    "vnorm2": lambda: traits.NormOps(2.0, acc=Float32),
+    "vnorminf": lambda: traits.AbsMaxOps(acc=Float32),
+    "vnormninf": lambda: traits.AbsMinOps(acc=Float32),
+    "all": lambda: traits.AllOps(acc=Float32),
+    "any": lambda: traits.AnyOps(acc=Float32),
+    "cnz": lambda: traits.CountNonzeroOps(acc=Float32),
+    "aminmax": lambda: traits.AMinMaxOps(acc=Float32),
 }
 
 

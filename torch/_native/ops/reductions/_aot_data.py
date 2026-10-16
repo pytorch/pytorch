@@ -2,8 +2,6 @@
 
 ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a")
 
-# Welford reductions remain JIT-only because their correction overloads are
-# unstructured and therefore have no native-AOT stub insertion point.
 # aten op, trait key, has dtype= argument, dimension spelling
 CORE_OPS = (
     ("sum.dim_IntList", "sum", True, "optional_list"),
@@ -21,9 +19,52 @@ INDEX_OPS = (
     ("min.dim", "mindim", "int", ("input", "int64"), ("min", "min_indices")),
 )
 
+# aten op, trait stem, projected output dtypes
+WELFORD_OPS = (
+    ("var.correction", "var", ("input",)),
+    ("std.correction", "std", ("input",)),
+    ("var_mean.correction", "varmean", ("input", "input")),
+    ("std_mean.correction", "stdmean", ("input", "input")),
+)
+
+# aten op, trait key, dimension spelling, projected output dtypes, impl outputs
+PLAIN_OPS = (
+    ("all.dim", "all", "int", ("bool",), ("out",)),
+    ("any.dim", "any", "int", ("bool",), ("out",)),
+    ("count_nonzero.dim_IntList", "cnz", "list", ("int64",), ()),
+    ("aminmax", "aminmax", "optional_int", ("input", "input"), ("min", "max")),
+)
+
+NORM_TRAITS = ("vnorm1", "vnorm2", "vnorminf", "vnormninf")
+TRAIT_NFIELDS = {
+    **{f"{stem}{correction}": 3 for _, stem, _ in WELFORD_OPS for correction in (0, 1)},
+    "vnorm1": 1,
+    "vnorm2": 1,
+    "vnorminf": 1,
+    "vnormninf": 1,
+    "all": 1,
+    "any": 1,
+    "cnz": 1,
+    "aminmax": 2,
+}
+
 DTYPES = ("float16", "bfloat16", "float32")
-DTYPE_BYTES = {"float16": 2, "bfloat16": 2, "float32": 4}
-ORDER_SENSITIVE_TRAITS = frozenset(("sum", "mean", "prod"))
+DTYPE_BYTES = {
+    "bool": 1,
+    "float16": 2,
+    "bfloat16": 2,
+    "float32": 4,
+    "int64": 8,
+}
+ORDER_SENSITIVE_TRAITS = frozenset(
+    (
+        "sum",
+        "mean",
+        "prod",
+        *NORM_TRAITS,
+        *(f"{stem}{correction}" for _, stem, _ in WELFORD_OPS for correction in (0, 1)),
+    )
+)
 INNER_TREE_LOADS = (1, 2, 4, 8)
 
 ROW_CLASSES = {
