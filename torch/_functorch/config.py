@@ -478,6 +478,16 @@ selective_decompose: bool = False
 # then converting back to a regular tensor.
 enable_complex_wrapper: bool = False
 
+# Experimental: make the backward's recompute of an activation-checkpointed region
+# lower identically to the forward, so recomputed activations can't drift from it
+# numerically (gh-186572); see _aot_autograd/share_checkpoint_recompute.py. This
+# costs memory and time: the shared recompute runs as its own subgraph, so the
+# forward also writes out values only the backward reads, and neither graph can
+# fuse across it (bandwidth-bound regions measured up to ~1.6x slower). Regions
+# it can't share are left as partitioned (TORCH_LOGS=aot says why). Rejected
+# under non-strict train-step tracing.
+share_checkpoint_recompute: bool = False
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F403

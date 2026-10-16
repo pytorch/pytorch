@@ -93,6 +93,7 @@ from .schemas import (
     SubclassMeta,
     ViewAndMutationMeta,
 )
+from .share_checkpoint_recompute import share_checkpoint_recompute
 from .subclass_utils import (
     compute_inner_input_info_from_subclass_meta,
     compute_inner_mutated_inp_indices_from_subclass_meta,
@@ -2019,6 +2020,8 @@ def _partition_joint_graph_into_fw_bw(
         num_fwd_outputs=num_inner_fwd_outputs,
         static_lifetime_input_indices=fw_metadata.static_input_indices,
     )
+    if config.share_checkpoint_recompute:
+        share_checkpoint_recompute(fw_module, bw_module, num_inner_fwd_outputs)
 
     rng_states = [
         n
