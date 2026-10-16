@@ -8,6 +8,7 @@ import os
 import sys
 import unittest
 from contextlib import contextmanager
+from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
@@ -29,7 +30,6 @@ if not TEST_CUTEDSL:
 import cutlass
 
 from torch._native.ops.reductions import (
-    inner_tree_kernel as up,
     kernel_general as kg,
     kernel_rowtile as rt,
     tile,
@@ -140,18 +140,15 @@ class TestInnerTreeOrder(TestCase):
                             self.assertLessEqual(tm.vec * tm.loads, tile.MAX_UNROLL)
 
     @parametrize("op", ["sum", "prod"])
-    def test_exact_bits_match_golden_and_upstream(self, op):
-        # One launch checks both the durable oracle and the temporary reference.
+    def test_exact_bits_match_golden(self, op):
         dtypes = {
             "float16": torch.float16,
             "bfloat16": torch.bfloat16,
             "float32": torch.float32,
             "float64": torch.float64,
         }
-        ikind = {2: torch.int16, 4: torch.int32, 8: torch.int64}
         prod = op == "prod"
         trait = T.ProdOps if prod else T.SumOps
-        into = up.inner_tree_prod_into if prod else up.inner_tree_sum_into
         checked = 0
         for (kop, dname, m, n), want in _GOLDEN.items():
             if kop != op:
@@ -160,8 +157,6 @@ class TestInnerTreeOrder(TestCase):
             with self.subTest(dtype=dname, shape=(m, n)):
                 x = _golden_input(m, n, dtype, prod)
                 got = self._run(trait, x)
-                ref = torch.empty(m, device="cuda", dtype=dtype)
-                into(ref, x)
                 torch.cuda.synchronize()
                 kind = rt.itree_plan(n, m, x.element_size()).shape
                 self.assertEqual(
@@ -169,28 +164,65 @@ class TestInnerTreeOrder(TestCase):
                     want,
                     f"{op} {dname} ({m}, {n}) [{kind}]: bit pattern changed",
                 )
-                self.assertEqual(
-                    got.view(ikind[x.element_size()]),
-                    ref.view(ikind[x.element_size()]),
-                    msg=f"{op} {dname} ({m}, {n}) [{kind}]: bits differ from upstream",
-                )
                 checked += 1
         self.assertGreater(checked, 0)
 
-    def test_signed_zero_matches_upstream_per_shape(self):
-        # A stray identity changes all -0.0 rows because 0.0 + -0.0 is +0.0. Upstream seeds
-        # only some shapes, and close comparison hides the resulting disagreement.
-        for m, n in ((256, 8), (256, 1024), (64, 100000)):
+    def test_signed_zero_per_shape(self):
+        # A stray identity changes -0.0 to +0.0. The reference DAG seeds only multirow.
+        for m, n, bits in (
+            (256, 8, -(2**31)),
+            (256, 1024, 0),
+            (64, 100000, 0),
+        ):
             with self.subTest(shape=(m, n), shape_kind=rt.itree_plan(n, m, 4).shape):
                 x = torch.full((m, n), -0.0, device="cuda")
                 got = self._run(T.SumOps, x)
-                ref = torch.empty(m, device="cuda")
-                up.inner_tree_sum_into(ref, x)
-                torch.cuda.synchronize()
-                self.assertTrue(
-                    torch.equal(got.view(torch.int32), ref.view(torch.int32)),
-                    f"{(m, n)}: signed zero differs from upstream",
+                self.assertEqual(
+                    got.view(torch.int32),
+                    torch.full((m,), bits, device="cuda", dtype=torch.int32),
                 )
+
+    def test_staged_split_preserves_reduction_trees(self):
+        """Ensure split staging keeps the same tree as the corresponding direct fold."""
+        if not rt._itree_arch(torch.device("cuda")).split_stage_rows:
+            self.skipTest("split staging is disabled on this architecture")
+        m, n = 3, 1 << 18
+        x = torch.randn(m, n, device="cuda")
+        self.assertEqual(rt.itree_plan(n + 1, m, 4, device=x.device).stage_e, 0)
+        self.assertEqual(rt.itree_plan(n, m, 8, device=x.device).stage_e, 0)
+        cases = (
+            ("float16_sum", T.SumOps(), x.to(torch.float16), [torch.float16]),
+            ("var_mean", T.VarMeanOps(), x, [torch.float32, torch.float32]),
+        )
+        for name, trait, src, out_dtypes in cases:
+            with self.subTest(op=name):
+                staged = rt.itree_plan(n, m, src.element_size(), device=x.device)
+                unstaged = rt.itree_plan(
+                    n, m, src.element_size(), stage=False, device=x.device
+                )
+                self.assertGreater(staged.stage_e, 0)
+                got = rt._run_itree(
+                    trait,
+                    f"staged_split_{name}",
+                    src,
+                    out_dtypes,
+                    staged,
+                    len(out_dtypes),
+                )
+                ref = rt._run_itree(
+                    trait,
+                    f"unstaged_split_{name}",
+                    src,
+                    out_dtypes,
+                    unstaged,
+                    len(out_dtypes),
+                )
+                torch.cuda.synchronize()
+                for actual, expected in zip(got, ref):
+                    self.assertEqual(
+                        actual.cpu().view(torch.uint8),
+                        expected.cpu().view(torch.uint8),
+                    )
 
     def test_order_is_reproducible_across_batch(self):
         # An N-only DAG makes each row independent of batch size, unlike the default order.
@@ -215,6 +247,28 @@ class TestInnerTreeOrder(TestCase):
                     torch.equal(sub.view(torch.int32), whole[:m].view(torch.int32)),
                     f"rows={m}: the order's bits changed with the batch size",
                 )
+
+    def test_async_combine_short_blocks_preserve_bits(self):
+        """Handle short async-combine blocks without reading padded partials as data."""
+        n = 1 << 20
+        for m in (1, 33):
+            with (
+                self.subTest(rows=m),
+                mock.patch.object(
+                    rt, "_itree_arch", return_value=rt._ITREE_ARCH[(10, 0)]
+                ),
+            ):
+                torch.manual_seed(0)
+                x = torch.randn(m, n, device="cuda")
+                plan = rt.itree_plan(n, m, 4, device=x.device)
+                combine = rt.itree_combine_plan(plan, 4, x.device, nrows=m)
+                self.assertGreater(combine.combine_tile, 0)
+                got = self._run(T.SumOps, x)
+                with mock.patch.object(
+                    rt, "_itree_arch", return_value=rt._ITREE_ARCH["default"]
+                ):
+                    ref = self._run(T.SumOps, x)
+                self.assertEqual(got.view(torch.int32), ref.view(torch.int32))
 
     def test_no_plan_pairs_an_exact_tile_with_a_bound_or_an_offset_base(self):
         # Exact only covers the tile's N from column 0; a bound or offset invalidates its
@@ -301,6 +355,74 @@ class TestInnerTreeOrder(TestCase):
                     f"({m}, {n}) [{rt.itree_plan(n, m, 4).shape}]: the dispatcher served this "
                     "with the launch-shape order while the gate was on",
                 )
+
+    def test_indexed_reduction_dims_preserve_the_order(self):
+        """Preserve fold order when arbitrary reduction dimensions require index decode."""
+        base = torch.randn(8, 65538, device="cuda")
+        x2 = torch.randn(5, 7, 9, device="cuda")
+        cases = [
+            ("strided", T.SumOps, base[:, ::2], [1], base[:, ::2].contiguous()),
+            (
+                "welford_strided",
+                T.WelfordOps,
+                base[:4, ::2],
+                [1],
+                base[:4, ::2].contiguous(),
+            ),
+            (
+                "full_strided",
+                T.SumOps,
+                base[:4, ::2],
+                None,
+                base[:4, ::2].contiguous().reshape(1, -1),
+            ),
+            (
+                "multidim",
+                T.SumOps,
+                x2,
+                [0, 2],
+                x2.permute(1, 0, 2).contiguous().reshape(7, 45),
+            ),
+        ]
+        for name, trait, x, dims, rows in cases:
+            with self.subTest(name=name):
+                want = self._run(trait, rows)
+                with _order_on():
+                    got = kg.reduce_dim(
+                        trait(acc=cutlass.Float32),
+                        f"inner_tree_test_indexed_{name}",
+                        x,
+                        dims,
+                        torch.float32,
+                    )
+                self.assertEqual(
+                    got.reshape(-1).view(torch.int32), want.view(torch.int32)
+                )
+
+    def test_indexed_split_cache_distinguishes_partial_dtypes(self):
+        """Compile distinct stage-one launchers when accumulator dtypes differ."""
+        x = (
+            torch.arange(2 * 65538, device="cuda", dtype=torch.float32).reshape(
+                2, 65538
+            )
+            % 17
+        )[:, ::2]
+        key = "inner_tree_test_partial_dtype_cache"
+        for acc, dtype in (
+            (cutlass.Float32, torch.float32),
+            (cutlass.Float64, torch.float64),
+        ):
+            with _order_on():
+                got = kg.reduce_dim(T.SumOps(acc=acc), key, x, [1], dtype)
+            self.assertEqual(got, x.sum(dim=1, dtype=dtype))
+
+    def test_ragged_plan_fusion_is_trait_aware(self):
+        """Select ragged fusion from trait precision so low-precision sums stay accurate."""
+        n, m = 4097, 4096
+        default = rt.itree_plan(n, m, 2)
+        lowp = rt.trait_itree_plan(T.SumOps(), n, m, 2)
+        self.assertEqual(default.kchunk, 4)
+        self.assertEqual(lowp.kchunk, 2)
 
     def test_multi_field_and_two_output_traits_under_the_order(self):
         # Exercise per-field staging/partials, two outputs from one accumulator, and ragged
@@ -416,12 +538,17 @@ class TestInnerTreeOrder(TestCase):
                     [torch.float32],
                     order="inner_tree",
                 )
-                want = torch.empty(256, device="cuda")
-                up.inner_tree_sum_into(want, x)
-                torch.cuda.synchronize()
+                unstaged = rt.itree_plan(n, 256, 4, stage=False)
+                (want,) = rt._run_itree(
+                    T.SumOps(acc=cutlass.Float32),
+                    _trait_key(T.SumOps),
+                    x,
+                    [torch.float32],
+                    unstaged,
+                )
                 self.assertTrue(
                     torch.equal(got.view(torch.int32), want.view(torch.int32)),
-                    f"N={n}: staged fold diverged from the reference bit pattern",
+                    f"N={n}: staged fold changed the bit pattern",
                 )
 
 
