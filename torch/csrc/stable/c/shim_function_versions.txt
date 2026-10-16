@@ -141,4 +141,3 @@ torch_device_to_pyobject: TORCH_VERSION_2_15_0
 torch_dtype_from_pyobject: TORCH_VERSION_2_15_0
 torch_dtype_to_pyobject: TORCH_VERSION_2_15_0
 torch_is_tensor_pyobject: TORCH_VERSION_2_15_0
-aoti_torch_aten_add_Tensor: TORCH_VERSION_2_16_0
