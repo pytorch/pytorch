@@ -157,9 +157,9 @@ def _format_output_transform(contraction: "FlexGemmOutputTransform | None") -> s
     """Format the lane transform applied to the main output."""
     if contraction is None:
         return "none"
-    if isinstance(contraction, FlexGemmOutputExpansion):
-        return "N-axis, expansion, layout=interleaved"
     layout = "chunked" if contraction.chunked else "interleaved"
+    if isinstance(contraction, FlexGemmOutputExpansion):
+        return f"N-axis, expansion, layout={layout}"
     return f"N-axis, group={contraction.group}, layout={layout}"
 
 
