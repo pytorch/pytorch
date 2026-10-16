@@ -6354,6 +6354,14 @@ def pad_adaptive_loader(x, pad_val=0.0):
     return load
 
 
+def _adaptive_pooling_start_index(index, out_dim, inp_dim):
+    return FloorDiv(index * inp_dim, out_dim)
+
+
+def _adaptive_pooling_end_index(index, out_dim, inp_dim):
+    return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+
+
 def compute_indices_adaptive_pooling(start_index, end_index, h_in, w_in, h_out, w_out):
     h_start_index = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
     h_end_index = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
@@ -6508,15 +6516,9 @@ def _adaptive_avg_pool2d(x, output_size):
     h_kernel_max = V.graph.sizevars.guard_int(h_kernel_max)
     w_kernel_max = V.graph.sizevars.guard_int(w_kernel_max)
 
-    def start_index(index, out_dim, inp_dim):
-        return FloorDiv((index * inp_dim), out_dim)
-
-    def end_index(index, out_dim, inp_dim):
-        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
-
     fn_sum = _adaptive_pooling_fn(
-        start_index=start_index,
-        end_index=end_index,
+        start_index=_adaptive_pooling_start_index,
+        end_index=_adaptive_pooling_end_index,
         kernel_maxes=[h_kernel_max, w_kernel_max],
         in_sizes=[h_in, w_in],
         out_sizes=[h_out, w_out],
@@ -6566,10 +6568,16 @@ def _adaptive_avg_pool2d_backward(grad_output, x):
 
     h_window_size = ceildiv(pooled_height + height - 1, height)
     w_window_size = ceildiv(pooled_width + width - 1, width)
+    if V.graph.sizevars.statically_known_multiple_of(height, pooled_height):
+        h_window_size = 1
+    if V.graph.sizevars.statically_known_multiple_of(width, pooled_width):
+        w_window_size = 1
 
     window_size = h_window_size * w_window_size
     if V.graph.sizevars.guard_or_true(sympy.Gt(window_size, 25)):
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        grad_output = ir.ExternKernel.require_stride1(grad_output)
+        x = ir.ExternKernel.require_stride1(x)
         return fallback_adaptive_avg_pool2d_backward(grad_output, x)
 
     # Only the unrolled overlap bounds need to be specialized.
@@ -6580,14 +6588,14 @@ def _adaptive_avg_pool2d_backward(grad_output, x):
     def fn(idx):
         *prefix, h, w = idx
         # Invert the forward bounds to find pooled indices covering this pixel.
-        phstart = FloorDiv(h * pooled_height, height)
-        pwstart = FloorDiv(w * pooled_width, width)
+        phstart = _adaptive_pooling_start_index(h, height, pooled_height)
+        pwstart = _adaptive_pooling_start_index(w, width, pooled_width)
         phend = ops.index_expr(
-            FloorDiv((h + 1) * pooled_height + height - 1, height),
+            _adaptive_pooling_end_index(h, height, pooled_height),
             torch.int64,
         )
         pwend = ops.index_expr(
-            FloorDiv((w + 1) * pooled_width + width - 1, width),
+            _adaptive_pooling_end_index(w, width, pooled_width),
             torch.int64,
         )
         gradient = None
@@ -6605,23 +6613,15 @@ def _adaptive_avg_pool2d_backward(grad_output, x):
                     0.0,
                 )
 
-                kh = ops.maximum(
-                    ops.index_expr(
-                        FloorDiv(
-                            (ph_expr + 1) * height + pooled_height - 1, pooled_height
-                        )
-                        - FloorDiv(ph_expr * height, pooled_height),
-                        torch.int64,
-                    ),
-                    ops.constant(1, torch.int64),
+                kh = ops.index_expr(
+                    _adaptive_pooling_end_index(ph_expr, pooled_height, height)
+                    - _adaptive_pooling_start_index(ph_expr, pooled_height, height),
+                    torch.int64,
                 )
-                kw = ops.maximum(
-                    ops.index_expr(
-                        FloorDiv((pw_expr + 1) * width + pooled_width - 1, pooled_width)
-                        - FloorDiv(pw_expr * width, pooled_width),
-                        torch.int64,
-                    ),
-                    ops.constant(1, torch.int64),
+                kw = ops.index_expr(
+                    _adaptive_pooling_end_index(pw_expr, pooled_width, width)
+                    - _adaptive_pooling_start_index(pw_expr, pooled_width, width),
+                    torch.int64,
                 )
                 part = ops.truediv(ops.truediv(grad_part, kh), kw)
                 if gradient is None:
