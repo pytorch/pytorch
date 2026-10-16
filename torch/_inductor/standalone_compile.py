@@ -538,6 +538,9 @@ def _standalone_context(
         torch._functorch.config.patch(
             {
                 "bundled_autograd_cache": aot,
+                "bypass_autograd_cache_key": (
+                    aot or torch._functorch.config.bypass_autograd_cache_key
+                ),
                 # Standalone artifacts are saved immediately after compile_fx
                 # returns. Training graphs normally lower the backward lazily on
                 # first backward(), so force it while the artifact recorder is

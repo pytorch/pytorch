@@ -571,6 +571,41 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_compiled_graph_wrapper_bypasses_cache(self):
+        """
+        A cache hit would skip compiled_graph_wrapper, so it bypasses
+        AOTAutogradCache while set and normal hits resume once it is unset.
+        """
+        hook_calls: list[str] = []
+
+        def hook(compiled, graph_name, *, graph_role):
+            hook_calls.append(graph_role)
+            return compiled
+
+        def fn(x):
+            return x.sin() * 2
+
+        a = torch.rand(8)
+        compiled_fn = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn(a), compiled_fn(a))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        with functorch_config.patch(compiled_graph_wrapper=hook):
+            for _ in range(2):
+                self._clear_dynamo_and_codecache()
+                self.assertEqual(fn(a), compiled_fn(a))
+        self.assertEqual(hook_calls, ["inference", "inference"])
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(fn(a), compiled_fn(a))
+        self.assertEqual(hook_calls, ["inference", "inference"])
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )
@@ -3795,6 +3830,90 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+
+@instantiate_parametrized_tests
+class CompiledGraphWrapperSerializationTests(InductorTestCase):
+    def test_standalone_context_preserves_nonce_policy(self):
+        from torch._inductor.standalone_compile import _standalone_context
+
+        graph = torch.fx.symbolic_trace(lambda x: (x.sin(),))
+        with functorch_config.patch(bypass_autograd_cache_key=True):
+            with _standalone_context(graph, "from_example_inputs", aot=False):
+                self.assertTrue(functorch_config.bypass_autograd_cache_key)
+
+    @inductor_config.patch(fx_graph_remote_cache=False, fx_graph_cache=True)
+    @functorch_config.patch(enable_autograd_cache=True, strict_autograd_cache=True)
+    @dynamo_config.patch(strict_precompile=True)
+    @parametrize("hook_enabled", [False, True])
+    def test_compiled_graph_wrapper_standalone_serialization(self, hook_enabled):
+        from torch.testing._internal.common_utils import TemporaryDirectoryName
+
+        wrap_calls = []
+        invocations = []
+
+        def hook(compiled, graph_name, *, graph_role):
+            wrap_calls.append(graph_role)
+
+            @functools.wraps(compiled)
+            def replacement(*args):
+                invocations.append(graph_role)
+                return compiled(*args)
+
+            replacement._boxed_call = getattr(compiled, "_boxed_call", False)
+            return replacement
+
+        x = torch.ones(8)
+        graph = torch.fx.symbolic_trace(lambda x: (x.sin() * 2,))
+        with functorch_config.patch(compiled_graph_wrapper=hook if hook_enabled else None):
+            for _ in range(2):
+                artifact = torch._inductor.standalone_compile(graph, [x], aot=True)
+                self.assertEqual(artifact(x), graph(x))
+            self.assertEqual(wrap_calls, ["inference"] * (2 if hook_enabled else 0))
+            self.assertEqual(invocations, wrap_calls)
+            with TemporaryDirectoryName() as root:
+                path = os.path.join(root, "artifact.bin")
+                artifact.save(path=path)
+                loaded = torch._inductor.CompiledArtifact.load(path=path)
+                self.assertEqual(loaded(x), graph(x))
+            self.assertEqual(invocations, wrap_calls)
+
+    @inductor_config.patch(fx_graph_remote_cache=False, fx_graph_cache=True)
+    @functorch_config.patch(enable_autograd_cache=True)
+    def test_compiled_graph_wrapper_regional_backward(self):
+        import torch.fx.traceback as fx_traceback
+
+        invocations = []
+
+        def hook(compiled, graph_name, *, graph_role):
+            @functools.wraps(compiled)
+            def replacement(*args):
+                invocations.append(graph_role)
+                return compiled(*args)
+
+            replacement._boxed_call = getattr(compiled, "_boxed_call", False)
+            return replacement
+
+        def fn(x, y):
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                result = x.sin() * y
+            return result.sin()
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        eager_x = x.detach().clone().requires_grad_(True)
+        eager_y = y.detach().clone().requires_grad_(True)
+        expected = fn(eager_x, eager_y)
+        expected.sum().backward()
+        with functorch_config.patch(compiled_graph_wrapper=hook):
+            result = torch.compile(fn, backend=aot_eager_regional_inductor(), fullgraph=True)(x, y)
+            result.sum().backward()
+        self.assertEqual(result, expected)
+        self.assertEqual(x.grad, eager_x.grad)
+        self.assertEqual(y.grad, eager_y.grad)
+        self.assertIn("forward", invocations)
+        self.assertIn("backward", invocations)
+
 
 
 @functorch_config.patch({"bundled_autograd_cache": True})
