@@ -22952,6 +22952,17 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        def test_size_one_innermost_reduction_dim_stays_unsplit(self):
+            # A size-1 innermost reduced dim is not "constant along the
+            # reduction": the contiguous read must still vote INNER (one kernel).
+            def fn(x):
+                return x.sum((1, 2))
+
+            x = torch.randn(64, 4096, 1, device=GPU_TYPE)
+            result, code = run_and_get_code(torch.compile(fn), x)
+            self.assertEqual(result, fn(x))
+            self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+
         def test_small_strided_read_keeps_outer_reduction(self):
             # A transposed (strided) read votes OUTER even when it is a small
             # dtype: its per-element cost does not shrink with itemsize.
@@ -22980,6 +22991,10 @@ if RUN_GPU:
             self.assertEqual(result, fn(x, mask))
             self.assertEqual(" ".join(code).count("@triton.jit"), 1)
 
+        @unittest.skipIf(
+            GPU_TYPE != "cuda" or torch.version.hip is not None,
+            "the small-k topk decomposition is CUDA-only",
+        )
         def test_topk_small_k(self):
             def reference(x, k, dim):
                 # Stable descending order; as in ATen, NaN ranks highest and
@@ -23021,11 +23036,16 @@ if RUN_GPU:
                 (values, indices), code = run_and_get_code(
                     torch.compile(lambda t: torch.topk(t, k, dim=dim)), x
                 )
-                # Only the last dim decomposes; other dims keep the ATen fallback.
+                # Only the last dim decomposes; other dims keep the ATen fallback,
+                # called as aten.topk.default (Python wrapper) or
+                # aoti_torch_*_topk (C++ wrapper).
+                fallback = re.search(
+                    r"aten\.topk\.default\(|aoti_torch_\w+_topk\(", " ".join(code)
+                )
                 if dim in (-1, x.dim() - 1):
-                    self.assertNotIn("aten.topk.default(", " ".join(code))
+                    self.assertIsNone(fallback)
                 else:
-                    self.assertIn("aten.topk.default(", " ".join(code))
+                    self.assertIsNotNone(fallback)
                 ref_values, ref_indices = reference(x, k, dim)
                 self.assertEqual(indices, ref_indices)
                 self.assertTrue(
