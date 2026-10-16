@@ -176,9 +176,9 @@ hip_platform_files = [
     "third_party/fbgemm/src/EmbeddingSpMDM.cc",
     "third_party/gloo/cmake/Dependencies.cmake",
     "third_party/gloo/gloo/cuda.cu",
-    "third_party/kineto/libkineto/CMakeLists.txt",
     "third_party/nvfuser/CMakeLists.txt",
     "third_party/tensorpipe/cmake/Hip.cmake",
+    "torch/csrc/profiler/kineto/libkineto/CMakeLists.txt",
 ]
 
 

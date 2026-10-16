@@ -4671,8 +4671,7 @@ class TestProfilerEventsParityCudaOnly(TestCase):
 
         failure_msg = """\
 ====================================================================================
-IMPORTANT: Are you making a Kineto change or bumping the third_party/kineto
-submodule hash and seeing this message?
+IMPORTANT: Are you making a Kineto change and seeing this message?
 
 New metadata keys (see below) were found in the Chrome trace JSON that are not
 yet exposed through the profiler's events() API (i.e. EventMetadata in

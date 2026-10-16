@@ -394,8 +394,6 @@ license-files = [
     "third_party/ideep/mkl-dnn/LICENSE",
     "third_party/ideep/mkl-dnn/third_party/ittnotify/LICENSE.BSD",
     "third_party/ideep/mkl-dnn/third_party/opencl/LICENSE",
-    "third_party/kineto/LICENSE",
-    "third_party/kineto/libkineto/third_party/dynolog_headers/LICENSE",
     "third_party/llvm-openmp/LICENSE.txt",
     "third_party/mimalloc/LICENSE",
     "third_party/miniz-3.0.2/LICENSE",
@@ -416,6 +414,8 @@ license-files = [
     "third_party/tensorpipe/third_party/libnop/LICENSE",
     "third_party/tensorpipe/third_party/libuv/LICENSE",
     "third_party/tensorpipe/third_party/libuv/LICENSE-extra",
+    "torch/csrc/profiler/kineto/LICENSE",
+    "torch/csrc/profiler/kineto/libkineto/third_party/dynolog_headers/LICENSE",
 ]
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
