@@ -653,6 +653,8 @@ class TokenSwitchMoRI(TokenSwitch):
             )
             # The handle's dest map and recv count alias op-owned buffers that the
             # next routing dispatch overwrites (ROCm/mori#715), so keep a copy.
+            # TODO: once a MoRI release includes ROCm/mori#733, pass
+            # snapshot=True to the dispatch above and drop the copy.
             state.mori_handle = self._ep.EpDispatchRoutingHandle(
                 h.disp_dest_tok_id_map.clone(),
                 h.inter_node_disp_dest_tok_id_map,
