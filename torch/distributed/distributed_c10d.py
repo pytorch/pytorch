@@ -1370,7 +1370,6 @@ _pg_names: dict[ProcessGroup, GroupName] = {}
 _pg_group_ranks: dict[ProcessGroup | _NonGroupMember, dict[int, int]] = {}
 # For a pg, it is a map from ProcessGroup to BackendConfig
 _pg_backend_config: dict[ProcessGroup, str] = {}
-_pg_timeouts: dict[ProcessGroup, timedelta] = {}
 _group_count = 0
 _tags_to_pg: dict[str, list[ProcessGroup]] = {}
 _pg_to_tag: dict[ProcessGroup, str] = {}
@@ -1451,12 +1450,6 @@ class _World:
         """
         global _pg_backend_config
         return _pg_backend_config
-
-    @property
-    def pg_timeouts(self) -> dict[ProcessGroup, timedelta]:
-        """Process group to the timeout it was created with (or last set via ``set_timeout``)."""
-        global _pg_timeouts
-        return _pg_timeouts
 
     @property
     def group_count(self) -> int:
@@ -2449,7 +2442,6 @@ def set_timeout(timeout: timedelta, group: ProcessGroup | None = None) -> None:
     if not isinstance(group, ProcessGroup):
         raise AssertionError(f"Expected ProcessGroup, got {type(group)}")
     group.set_timeout(timeout)
-    _world.pg_timeouts[group] = timeout
 
 
 @deprecated(
@@ -3226,7 +3218,6 @@ def _new_process_group_helper(
             store=prefix_store,
             group_name=group_name,
             backend_config=str(backend_config),
-            timeout=timeout,
             add_to_default_tag=True,
         )
     else:
@@ -3237,7 +3228,6 @@ def _new_process_group_helper(
             store=prefix_store,
             group_name=group_name,
             backend_config=str(backend_config),
-            timeout=timeout,
             pg_tag=f"user:{pg_tag}",
         )
     return pg, prefix_store
@@ -3306,7 +3296,6 @@ def destroy_process_group(
         _world.pg_names.clear()
         _world.pg_group_ranks.clear()
         _world.pg_backend_config.clear()
-        _world.pg_timeouts.clear()
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
@@ -3347,7 +3336,6 @@ def destroy_process_group(
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
         del _world.pg_backend_config[pg]
-        _world.pg_timeouts.pop(pg, None)
         if pg in _world.pg_coalesce_state:
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
@@ -3430,7 +3418,6 @@ def _abort_process_group(
         _world.pg_names.clear()
         _world.pg_group_ranks.clear()
         _world.pg_backend_config.clear()
-        _world.pg_timeouts.clear()
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
@@ -3452,7 +3439,6 @@ def _abort_process_group(
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
         del _world.pg_backend_config[pg]
-        _world.pg_timeouts.pop(pg, None)
         if pg in _world.pg_coalesce_state:
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
@@ -7202,7 +7188,6 @@ def split_group(
         store=split_pg.get_group_store(),
         group_name=group_name,
         backend_config=str(backend_config),
-        timeout=timeout,
         rank_mapping={
             global_rank: group_rank
             for group_rank, global_rank in enumerate(global_ranks_in_my_group)
@@ -7434,7 +7419,6 @@ def _new_group_with_tag(
             store=PrefixStore(f"{group_name}/", default_store),
             group_name=group_name,
             backend_config=str(BackendConfig(backend)),
-            timeout=timeout,
             rank_mapping={
                 global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
             },
@@ -7763,10 +7747,6 @@ def _get_process_group_store(pg: ProcessGroup) -> Store:
     return _world.pg_map[pg][1]
 
 
-def _get_process_group_timeout(group: ProcessGroup | None = None) -> timedelta:
-    return _world.pg_timeouts[group or _get_default_group()]
-
-
 # Shrink flags for process group backends
 SHRINK_DEFAULT = 0x00
 SHRINK_ABORT = 0x01
@@ -7785,7 +7765,6 @@ class _GroupMetadata(TypedDict):
     backend_name: str
     store: Store
     backend_config: str
-    timeout: timedelta
     original_group_name: str
     new_group_name: GroupName
     bound_device_id: torch.device | None
@@ -8054,7 +8033,6 @@ def _finalize_shrunk_group(
         store=original_group_metadata["store"],
         group_name=original_group_metadata["new_group_name"],
         backend_config=original_group_metadata["backend_config"],
-        timeout=original_group_metadata["timeout"],
         rank_mapping=rank_mapping,
     )
 
@@ -8080,7 +8058,6 @@ def _extract_group_metadata(target_pg: ProcessGroup) -> _GroupMetadata:
         "backend_name": original_backend_name,
         "store": original_store,
         "backend_config": original_backend_config,
-        "timeout": _world.pg_timeouts[target_pg],
         "original_group_name": original_group_name,
         "new_group_name": new_group_name,
         "bound_device_id": bound_device_id,  # Safe to access after cleanup
@@ -8237,7 +8214,6 @@ def _cleanup_process_group_global_state(pg: ProcessGroup) -> None:
     - _world.pg_names (group name mapping)
     - _world.pg_group_ranks (rank mappings)
     - _world.pg_backend_config (backend configuration)
-    - _world.pg_timeouts (configured timeout)
     - _world.tags_to_pg and _world.pg_to_tag (tag mappings)
     - _world.pg_coalesce_state (coalescing state)
     - C++ internal registries via _unregister_process_group
@@ -8250,7 +8226,6 @@ def _cleanup_process_group_global_state(pg: ProcessGroup) -> None:
         _world.pg_map.pop(pg, None)
         _world.pg_group_ranks.pop(pg, None)
         _world.pg_backend_config.pop(pg, None)
-        _world.pg_timeouts.pop(pg, None)
 
         # Clean up process group name mapping
         group_name = _world.pg_names.pop(pg, None)
@@ -8296,8 +8271,6 @@ def _register_pg_in_world(
     pg_tag: str | None = None,
     user_tag: str | None = None,
     add_to_default_tag: bool = False,
-    *,
-    timeout: timedelta | None = None,
 ) -> None:
     """
     Update all global state dictionaries for a process group.
@@ -8319,16 +8292,11 @@ def _register_pg_in_world(
         add_to_default_tag (bool): When True and user_tag is None, also appends
             pg to the default "" tag in addition to pg_tag. Ignored when
             user_tag is set (the "" tag is always appended in that case).
-        timeout (timedelta, optional): Timeout the process group was created with.
-            If None, records ``_get_default_timeout(backend_name)``.
     """
     # Update main process group mappings
     _world.pg_map[pg] = (backend_name, store)
     _world.pg_names[pg] = group_name
     _world.pg_backend_config[pg] = backend_config
-    _world.pg_timeouts[pg] = (
-        timeout if timeout is not None else _get_default_timeout(backend_name)
-    )
 
     # Register the process group name
     _register_process_group(group_name, pg)
