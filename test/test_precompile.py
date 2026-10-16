@@ -5098,6 +5098,37 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertTrue(rendered["factor"]["factor"].guarded_codes)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(install_free_tensors=True)
+    def test_a_callee_whose_graph_holds_parameters_stays_bypassed(self):
+        # install_free_tensors makes apply()'s graph hold LIN's parameter as an
+        # attribute, so output_graph bypasses it before it registers a backend
+        # graph. It traced ops, so it must stay bypassed, not run eagerly.
+        name = f"{self.module_name}_params"
+        with open(os.path.join(self.dir, name + ".py"), "w") as f:
+            f.write(
+                "import torch\n\n"
+                "class Scale(torch.nn.Module):\n"
+                "    def __init__(self):\n"
+                "        super().__init__()\n"
+                "        self.w = torch.nn.Parameter(torch.ones(4))\n\n"
+                "    def forward(self, x):\n        return x * self.w\n\n"
+                "LIN = Scale()\n\n"
+                "def apply(x):\n    return LIN(x)\n\n"
+                "@torch._dynamo.disable(recursive=False)\n"
+                "def scale(x):\n    return apply(x)\n\n"
+                "def step(x):\n    return scale(x.sin())\n"
+            )
+        self.addCleanup(sys.modules.pop, name, None)
+        importlib.invalidate_caches()
+        mod = importlib.import_module(name)
+        tracer = DynamoTracer(require_complete=False)
+        with self._capture(mod.step, tracer=tracer, backend="eager") as cap:
+            cap(torch.randn(4))
+            summary = cap.summary()
+        self.assertEqual(summary.bypassed, ("apply",))
+        self.assertFalse(summary.complete)
+
+    @skipIfCrossRef
     def test_a_risky_drop_only_in_an_eager_frame_is_not_reported(self):
         # Both frames drop G['op'], a function whose globals no importable
         # module owns, so its CLOSURE_MATCH cannot be saved. The graphless
