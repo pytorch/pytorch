@@ -122,19 +122,25 @@ class TestFineTuning(DTensorTestBase):
 
         # Simulate that the fine tuning restart after 3 iterations
         for i in range(2):
-            # Load pretrain submodules checkpoint
-            pretrain_state_dict = get_model_state_dict(
-                model,
-                submodules={model.pretrain},
-                options=StateDictOptions(keep_submodule_prefixes=False),
-            )
+            # Load pretrain submodules checkpoint by manually filtering.
+            # Strip the "pretrain." prefix so keys match the checkpoint
+            # (saved from PreTrainedModel with keys like "layer1.weight").
+            full_state_dict = get_model_state_dict(model)
+            pretrain_state_dict = {
+                k[len("pretrain.") :]: v
+                for k, v in full_state_dict.items()
+                if k.startswith("pretrain.")
+            }
             dist_cp.load(
                 {"model": pretrain_state_dict},
                 storage_reader=dist_cp.FileSystemReader(pretrain_dir),
             )
+            # Re-add prefix for setting model state dict
             set_model_state_dict(
                 model,
-                model_state_dict={model.pretrain: pretrain_state_dict},
+                model_state_dict={
+                    f"pretrain.{k}": v for k, v in pretrain_state_dict.items()
+                },
                 options=StateDictOptions(strict=False),
             )
 
