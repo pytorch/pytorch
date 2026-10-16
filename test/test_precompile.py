@@ -5290,6 +5290,14 @@ class TestPrecompileDynamoCapture(TestCase):
             load(other_artifact, self.cache)
 
 
+def _exception_chain(exc: BaseException | None) -> str:
+    parts = []
+    while exc is not None:
+        parts.append(str(exc))
+        exc = exc.__cause__ or exc.__context__
+    return "\n".join(parts)
+
+
 def _capture_files(
     test, fn, example_inputs, backend, dynamic=None, tracer=None, paths=None, then=None
 ):
@@ -6418,6 +6426,9 @@ def _static_runtime_kernel(block):
 
 @contextlib.contextmanager
 def _producer_triton_cache(directory):
+    if not HAS_TRITON:
+        yield
+        return
     import triton
 
     with (
@@ -6428,15 +6439,197 @@ def _producer_triton_cache(directory):
             {"TRITON_CACHE_AUTOTUNING": "1", "TRITON_CACHE_DIR": str(directory)},
         ),
     ):
-        triton.knobs.cache.dir = str(directory)
+        # knobs.cache.dir reads TRITON_CACHE_DIR unless assigned, so later env
+        # patches (fresh_cache, a test's own directory) still take effect.
         triton.knobs.cache.manager_class = None
         triton.knobs.autotuning.cache = True
         yield
 
 
+@contextlib.contextmanager
+def _triton_settings_unchanged(test):
+    # A warm TRITON_CACHE_DIR no import could use, so repointing it is visible.
+    import triton
+
+    knobs = triton.knobs
+    with (
+        tempfile.TemporaryDirectory() as warm,
+        mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": warm}),
+        knobs.cache.scope(),
+        knobs.autotuning.scope(),
+    ):
+        pathlib.Path(warm, "kernel").mkdir()
+        knobs.autotuning.cache = False
+        yield
+        test.assertEqual(os.environ.get("TRITON_CACHE_DIR"), warm)
+        test.assertEqual(knobs.cache.dir, warm)
+        test.assertFalse(knobs.autotuning.cache)
+
+
+class _FakeTritonRuntimeCache:
+    """Stands in for a triton.runtime.cache that can export its runtime cache."""
+
+    def __init__(self, root):
+        self.root = root
+        self.imports = []
+
+    def runtime_cache_root(self):
+        return self.root
+
+    def export_runtime_cache(self, *, context):
+        return f"runtime cache from {self.root}".encode()
+
+    def _decode(self, bundle, context):
+        return [], {}
+
+    def import_runtime_cache(self, payload, *, context):
+        self.imports.append((payload, self.root))
+
+
+@contextlib.contextmanager
+def _replace_module(name, module):
+    # mock.patch.dict(sys.modules) restores the whole dict on exit, dropping modules
+    # first imported inside it; re-importing those can re-run registrations.
+    previous = sys.modules.get(name)
+    sys.modules[name] = module
+    try:
+        yield
+    finally:
+        if previous is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
+
+
+@contextlib.contextmanager
+def _fake_triton_runtime_cache(root):
+    import triton
+
+    from torch.compiler import _runtime_cache
+
+    fake = _FakeTritonRuntimeCache(root)
+    with (
+        triton.knobs.autotuning.scope(),
+        mock.patch.object(_runtime_cache, "_triton_runtime_cache", return_value=fake),
+        # A capture ships whatever root the fake has when it starts.
+        mock.patch.object(
+            _runtime_cache, "_own_triton_cache", lambda settings: str(fake.root)
+        ),
+        mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
+    ):
+        triton.knobs.autotuning.cache = True
+        yield fake
+
+
+_RUNTIME_CACHE_MODULE = """
+import torch
+import triton
+import triton.language as tl
+
+
+@triton.autotune(
+    configs=[triton.Config({"BLOCK": 64}), triton.Config({"BLOCK": 128})],
+    key=["n"],
+)
+@triton.jit
+def _scale_kernel(x_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offsets < n
+    tl.store(out_ptr + offsets, tl.load(x_ptr + offsets, mask=mask) * 3, mask=mask)
+
+
+@torch.library.custom_op("precompile_runtime_test::scale", mutates_args=())
+def scale(x: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(x)
+    n = x.numel()
+    _scale_kernel[lambda meta: (triton.cdiv(n, meta["BLOCK"]),)](x, out, n)
+    return out
+
+
+@scale.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+def fn(x, w):
+    y = (x.sin() * 2 + x.cos()).relu()
+    return torch.ops.precompile_runtime_test.scale.default((y @ w).softmax(-1))
+"""
+
+
+_RUNTIME_CACHE_DRIVER = """
+import os
+import sys
+
+phase, directory, module = sys.argv[1:4]
+os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(directory, phase, "inductor")
+# Neither phase sets TRITON_CACHE_DIR or TRITON_CACHE_AUTOTUNING: capture and
+# load pick Triton's cache directory and autotuning cache themselves.
+os.environ.pop("TRITON_CACHE_DIR", None)
+os.environ.pop("TRITON_CACHE_AUTOTUNING", None)
+if phase == "replay":
+    os.environ["TORCH_PRECOMPILE_NO_COMPILATION"] = "1"
+
+import torch
+
+sys.path.insert(0, directory)
+fn = __import__(module).fn
+pc = torch.compiler.precompile
+artifact = os.path.join(directory, "artifact.py")
+cache = os.path.join(directory, "artifact.cache")
+expected_path = os.path.join(directory, "expected.pt")
+torch._inductor.config.use_static_cuda_launcher = True
+
+
+def inputs(seed):
+    g = torch.Generator(device="cuda").manual_seed(seed)
+    x = torch.randn(64, 128, device="cuda", generator=g)
+    return x, torch.randn(128, 32, device="cuda", generator=g)
+
+
+if phase == "capture":
+    tracer = pc.DynamoTracer(require_no_risky_drops=False)
+    # _scale_kernel is first launched, and tuned, inside the capture.
+    with pc.capture(fn, artifact_path=artifact, cache_path=cache, tracer=tracer) as cap:
+        for seed in range(2):
+            cap(*inputs(seed))
+    torch.save([fn(*inputs(seed)) for seed in range(2, 4)], expected_path)
+else:
+    from triton.runtime.cache import FileCacheManager
+
+    # A Triton JIT compile or autotuning benchmark writes through the cache
+    # manager; replaying from the imported runtime cache writes nothing. The
+    # runtime-cache transport refuses a custom manager_class, so record in place.
+    writes = []
+    put = FileCacheManager.put
+
+    def recording_put(self, data, filename, binary=True):
+        writes.append(filename)
+        return put(self, data, filename, binary=binary)
+
+    expected = torch.load(expected_path)
+    FileCacheManager.put = recording_put
+    with pc.no_compilation():
+        loaded = pc.load(artifact, cache)
+        for seed, reference in zip(range(2, 4), expected):
+            torch.testing.assert_close(loaded(*inputs(seed)), reference)
+    assert not writes, writes
+print("runtime cache phase ok:", phase)
+"""
+
+
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
+    def setUp(self):
+        super().setUp()
+        # Restores the Triton settings a serving-side import turns on for the
+        # process, and gives it a cache directory to import into.
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        directory = stack.enter_context(tempfile.TemporaryDirectory())
+        stack.enter_context(_producer_triton_cache(pathlib.Path(directory, "triton")))
+
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     @parametrize("tuning", ("rblock", "coordesc", "combo"))
     def test_static_export_preserves_late_winner(self, tuning):
@@ -6839,6 +7032,42 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertEqual(owner.triton_kernels, {})
         self.assertIsNone(reference())
 
+    def test_capture_ships_late_native_dependency(self):
+        from pathlib import Path
+
+        from torch.compiler import _runtime_cache
+
+        pc = torch.compiler.precompile
+        triton_cache = _runtime_cache._triton_runtime_cache()
+        late = {}
+
+        def write_late_native_dependency():
+            if triton_cache is not None:
+                from triton.runtime.cache import get_cache_manager
+
+                native = "late_helper" + sysconfig.get_config_var("EXT_SUFFIX")
+                writer = get_cache_manager("bc" * 32)
+                writer.put(b"late native dependency", native)
+                late["path"] = Path(writer.key) / native
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, cache = _capture_files(
+                self,
+                _no_compilation_single_graph,
+                [(torch.ones(4),)],
+                backend="eager",
+                then=write_late_native_dependency,
+            )
+            with _producer_triton_cache(root / "consumer"):
+                pc.load(source, cache)
+                pc.load(source, cache)
+            if triton_cache is not None:
+                self.assertEqual(
+                    (root / "consumer" / late["path"]).read_bytes(),
+                    b"late native dependency",
+                )
+
     def test_misused_overlapping_captures_keep_one_scope(self):
         # Overlapping captures are unsupported (their cache halves mix); the
         # scope only must not close under the outer capture.
@@ -6880,6 +7109,24 @@ class TestPrecompileRuntimeCache(TestCase):
                 with _runtime_cache.capture_scope():
                     self.assertIsNot(_runtime_cache._capture, parent)
                 self.assertEqual(parent.captures, 1)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_scope_skips_deleted_driver_module(self):
+        from triton.runtime import driver
+
+        from torch.compiler import _runtime_cache
+
+        with tempfile.TemporaryDirectory() as directory:
+            module = pathlib.Path(directory, "utils_key", "cuda_utils.so")
+            module.parent.mkdir()
+            module.write_bytes(b"driver utils")
+            loaded = types.SimpleNamespace(__file__=str(module))
+            utils = types.SimpleNamespace(load_binary=types.MethodType(len, loaded))
+        active = types.SimpleNamespace(utils=utils)
+        with mock.patch.object(driver, "_active", active):
+            with _runtime_cache.capture_scope():
+                root = pathlib.Path(_runtime_cache._capture.cache_root)
+                self.assertFalse((root / "utils_key").exists())
 
     def test_failed_write_leaves_the_paths_and_a_new_capture_retries(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -7288,6 +7535,9 @@ class TestPrecompileRuntimeCache(TestCase):
     @parametrize("coordesc", (False, True))
     def test_frozen_gpu_kernel_serves_strict_load_from_empty_caches(self, coordesc):
         import gc
+        from pathlib import Path
+
+        import triton
 
         from torch._inductor import config as inductor_config
         from torch._inductor.async_compile import CompiledTritonKernels
@@ -7300,14 +7550,8 @@ class TestPrecompileRuntimeCache(TestCase):
         pc = torch.compiler.precompile
         x = torch.randn(64, 1024, device="cuda")
         with tempfile.TemporaryDirectory() as directory:
-            producer = {
-                "TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "producer"),
-                "TRITON_CACHE_DIR": os.path.join(directory, "producer_triton"),
-            }
-            consumer = {
-                "TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "consumer"),
-                "TRITON_CACHE_DIR": os.path.join(directory, "consumer_triton"),
-            }
+            producer = {"TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "producer")}
+            consumer = {"TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "consumer")}
             clear_caches()
             with (
                 mock.patch.dict(os.environ, producer),
@@ -7326,8 +7570,20 @@ class TestPrecompileRuntimeCache(TestCase):
             winner = recorded[0].launchers[0].config
             clear_caches()
             try:
-                with mock.patch.dict(os.environ, consumer), pc.no_compilation():
+                with (
+                    triton.knobs.cache.scope(),
+                    triton.knobs.autotuning.scope(),
+                    mock.patch.dict(os.environ, consumer),
+                    pc.no_compilation(),
+                ):
+                    # TRITON_CACHE_DIR holds other kernels, as Inductor's shared
+                    # cache does once it compiles, so the import gets its own.
+                    shared = Path(directory, "shared_triton")
+                    (shared / "unrelated").mkdir(parents=True)
+                    triton.knobs.cache.dir = str(shared)
                     runnable = pc.load(source, cache)
+                    self.assertNotEqual(triton.knobs.cache.dir, str(shared))
+                    self.assertEqual(os.listdir(shared), ["unrelated"])
                     with torch.no_grad():
                         self.assertEqual(runnable(x), expected)
                     [served] = _runtime_cache._loaded_triton_kernels.values()
@@ -7335,10 +7591,32 @@ class TestPrecompileRuntimeCache(TestCase):
                     self.assertEqual(served.launchers[0].config.kwargs, winner.kwargs)
                     if coordesc:
                         self.assertTrue(served.launchers[0].config.found_by_coordesc)
-                    self.assertTrue(os.listdir(consumer["TRITON_CACHE_DIR"]))
+                    self.assertTrue(os.listdir(triton.knobs.cache.dir))
             finally:
                 CompiledTritonKernels.cache_clear()
                 clear_caches()
+
+    def test_triton_root_is_importable_under_the_import_rule(self):
+        from torch.compiler._runtime_cache import _importable
+        from torch.compiler._triton_runtime_cache import _READY
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory, "triton")
+            self.assertTrue(_importable(root, "digest", {"key"}))
+            root.mkdir()
+            # What a running or killed import leaves: its staging directory and
+            # an entry it renamed into place.
+            (root / f"{_READY}.hydrate-1-ab").mkdir()
+            (root / "key").mkdir()
+            self.assertTrue(_importable(root, "digest", {"key"}))
+            (root / _READY).write_text("other")
+            self.assertFalse(_importable(root, "digest", {"key"}))
+            (root / _READY).write_text("digest")
+            # Kernels compiled into an imported directory since do not matter.
+            (root / "unrelated").mkdir()
+            self.assertTrue(_importable(root, "digest", {"key"}))
+            (root / _READY).unlink()
+            self.assertFalse(_importable(root, "digest", {"key"}))
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_capture_rejects_an_unresolved_triton_source(self):
@@ -7374,6 +7652,340 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertIn("inside the capture block", cause)
             self.assertFalse(os.path.exists(cache))
         self.assertIsNone(_runtime_cache._capture)
+
+    def test_triton_runtime_cache_hydrates_before_graph_artifacts(self):
+        from torch._inductor.codecache import InductorCacheArtifact
+        from torch.compiler._cache import CacheArtifactManager
+        from torch.compiler._runtime_cache import TritonRuntimeCacheArtifact
+
+        writes = []
+        graph = InductorCacheArtifact("graph", b"compiled graph")
+        runtime = TritonRuntimeCacheArtifact("runtime", b"runtime dependencies")
+        with (
+            mock.patch.object(
+                InductorCacheArtifact,
+                "populate_cache",
+                side_effect=lambda: writes.append("graph"),
+            ),
+            mock.patch.object(
+                TritonRuntimeCacheArtifact,
+                "populate_cache",
+                side_effect=lambda: writes.append("runtime"),
+            ),
+        ):
+            CacheArtifactManager.populate_caches(
+                {"inductor": [graph], "triton_runtime": [runtime]}
+            )
+        self.assertEqual(writes, ["runtime", "graph"])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_triton_runtime_cache_round_trips_once_per_consumer(self):
+        from pathlib import Path
+
+        import triton
+
+        pc = torch.compiler.precompile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with _fake_triton_runtime_cache(root / "producer") as fake:
+                source, cache = _capture_files(
+                    self,
+                    _no_compilation_single_graph,
+                    [(torch.ones(4),)],
+                    backend="eager",
+                )
+                fake.root = root / "consumer"
+                triton.knobs.autotuning.cache = False
+                pc.load(source, cache)
+                self.assertTrue(triton.knobs.autotuning.cache)
+                with pc.no_compilation():
+                    pc.load(artifact_path=source, cache_path=cache)
+                payload = f"runtime cache from {root / 'producer'}".encode()
+                self.assertEqual(fake.imports, [(payload, root / "consumer")])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_one_triton_runtime_cache_per_directory(self):
+        import hashlib
+
+        from triton.runtime.cache import get_cache_manager
+
+        from torch.compiler import _runtime_cache
+        from torch.compiler._triton_runtime_cache import (
+            _READY,
+            export_runtime_cache,
+            import_runtime_cache,
+        )
+
+        artifacts = []
+        with tempfile.TemporaryDirectory() as directory:
+            for name in ("first", "second"):
+                with _triton_cache_namespace(pathlib.Path(directory, name)):
+                    _write_triton_runtime_entries()
+                    if name == "second":
+                        native = "extra" + sysconfig.get_config_var("EXT_SUFFIX")
+                        get_cache_manager("cd" * 32).put(b"second", native)
+                    payload = export_runtime_cache(
+                        context=_runtime_cache._runtime_context()
+                    )
+                artifacts.append(
+                    _runtime_cache.TritonRuntimeCacheArtifact(
+                        hashlib.sha256(payload).hexdigest(), payload
+                    )
+                )
+            consumer = pathlib.Path(directory, "consumer")
+            with (
+                _triton_cache_namespace(consumer),
+                mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
+            ):
+                artifacts[0].import_into_triton()
+                hydrated = sorted(consumer.rglob("*"))
+                # The second cache gets a directory of its own.
+                artifacts[1].import_into_triton()
+                self.assertEqual(sorted(consumer.rglob("*")), hydrated)
+                second = pathlib.Path(os.environ["TRITON_CACHE_DIR"])
+                self.assertNotEqual(second, consumer)
+                self.assertEqual((second / _READY).read_text(), artifacts[1].key)
+                with self.assertRaisesRegex(RuntimeError, "its own empty"):
+                    import_runtime_cache(
+                        artifacts[0].content, context=_runtime_cache._runtime_context()
+                    )
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_repeat_triton_runtime_import_skips_directory_setup(self):
+        import hashlib
+
+        import triton
+
+        from torch.compiler import _runtime_cache
+
+        payload = b"runtime cache"
+        runtime = _runtime_cache.TritonRuntimeCacheArtifact(
+            hashlib.sha256(payload).hexdigest(), payload
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            triton.knobs.cache.scope(),
+            mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": directory}),
+            _fake_triton_runtime_cache(pathlib.Path(directory)) as fake,
+            mock.patch.object(
+                _runtime_cache,
+                "_serving_triton_root",
+                wraps=_runtime_cache._serving_triton_root,
+            ) as serving,
+        ):
+            runtime.populate_cache()
+            runtime.populate_cache()
+            self.assertEqual(serving.call_count, 1)
+            self.assertEqual(len(fake.imports), 1)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_triton_runtime_import_refused_inside_capture(self):
+        import hashlib
+
+        import triton
+
+        from torch.compiler import _runtime_cache
+
+        payload = b"runtime cache"
+        runtime = _runtime_cache.TritonRuntimeCacheArtifact(
+            hashlib.sha256(payload).hexdigest(), payload
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            triton.knobs.cache.scope(),
+            _fake_triton_runtime_cache(pathlib.Path(directory)) as fake,
+        ):
+            triton.knobs.cache.dir = directory
+            with (
+                _runtime_cache.capture_scope(),
+                torch.compiler.precompile.no_compilation(),
+                self.assertRaisesRegex(RuntimeError, "inside a precompile.capture"),
+            ):
+                runtime.populate_cache()
+            self.assertEqual(triton.knobs.cache.dir, directory)
+            self.assertEqual(fake.imports, [])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_scope_restores_triton_cache_settings(self):
+        import triton
+
+        from torch.compiler import _runtime_cache
+
+        with triton.knobs.cache.scope(), triton.knobs.autotuning.scope():
+            triton.knobs.autotuning.cache = False
+            before = triton.knobs.cache.dir
+            for raises in (False, True):
+                with contextlib.suppress(ValueError):
+                    with _runtime_cache.capture_scope():
+                        root = _runtime_cache._capture.cache_root
+                        self.assertEqual(triton.knobs.cache.dir, root)
+                        self.assertNotEqual(root, before)
+                        self.assertTrue(triton.knobs.autotuning.cache)
+                        if raises:
+                            raise ValueError
+                self.assertIsNone(_runtime_cache._capture)
+                self.assertEqual(triton.knobs.cache.dir, before)
+                self.assertFalse(triton.knobs.autotuning.cache)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_scope_restores_triton_cache_settings_when_opening_fails(self):
+        import triton
+
+        from torch.compiler import _runtime_cache
+
+        with triton.knobs.cache.scope(), triton.knobs.autotuning.scope():
+            triton.knobs.autotuning.cache = False
+            before = triton.knobs.cache.dir
+            # The live-autotuner walk runs after the knobs are overridden.
+            boom = RuntimeError("boom")
+            with mock.patch.object(_runtime_cache.gc, "get_objects", side_effect=boom):
+                # Not assertRaises, which clears the traceback's frames: that
+                # would finalize a leaked knobs scope and restore it anyway.
+                caught = None
+                try:
+                    with _runtime_cache.capture_scope():
+                        pass
+                except RuntimeError as e:
+                    caught = e
+            self.assertIs(caught, boom)
+            self.assertIsNone(_runtime_cache._capture)
+            self.assertEqual(triton.knobs.cache.dir, before)
+            self.assertFalse(triton.knobs.autotuning.cache)
+            del caught
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_refuses_changed_triton_cache_dir(self):
+        import triton
+
+        with tempfile.TemporaryDirectory() as directory:
+
+            def move_root():
+                triton.knobs.cache.dir = directory
+
+            with self.assertRaisesRegex(PrecompileError, "could not freeze") as failure:
+                _capture_files(
+                    self,
+                    _no_compilation_single_graph,
+                    [(torch.ones(4),)],
+                    backend="eager",
+                    then=move_root,
+                )
+            self.assertIn("directory changed", str(failure.exception.__cause__))
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_strict_import_rejects_corrupt_triton_runtime_cache(self):
+        import hashlib
+        from pathlib import Path
+
+        from torch.compiler._runtime_cache import TritonRuntimeCacheArtifact
+
+        runtime = TritonRuntimeCacheArtifact(
+            hashlib.sha256(b"other").hexdigest(), b"runtime cache"
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            _fake_triton_runtime_cache(Path(directory)) as fake,
+        ):
+            with _triton_settings_unchanged(self):
+                with (
+                    torch.compiler.precompile.no_compilation(),
+                    self.assertRaisesRegex(RuntimeError, "Corrupt"),
+                ):
+                    runtime.populate_cache()
+            self.assertEqual(fake.imports, [])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_strict_import_rejects_incompatible_triton_runtime_cache(self):
+        import hashlib
+
+        from torch.compiler import _runtime_cache
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as directory:
+            with _triton_cache_namespace(directory):
+                _write_triton_runtime_entries()
+                bundle = export_runtime_cache(context={"torch_key": "other"})
+            runtime = _runtime_cache.TritonRuntimeCacheArtifact(
+                hashlib.sha256(bundle).hexdigest(), bundle
+            )
+            with (
+                mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
+                _triton_settings_unchanged(self),
+                torch.compiler.precompile.no_compilation(),
+                self.assertRaisesRegex(RuntimeError, "Incompatible"),
+            ):
+                runtime.populate_cache()
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_scope_leaves_triton_alone_without_active_backend(self):
+        from triton.backends import backends
+
+        from torch.compiler import _runtime_cache
+
+        with contextlib.ExitStack() as stack:
+            for backend in backends.values():
+                stack.enter_context(
+                    mock.patch.object(backend.driver, "is_active", return_value=False)
+                )
+            stack.enter_context(_triton_settings_unchanged(self))
+            with _runtime_cache.capture_scope():
+                self.assertIsNone(_runtime_cache._capture.cache_root)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @parametrize("missing", ("import", "cache_dir"))
+    def test_unimportable_triton_runtime_cache(self, missing):
+        from pathlib import Path
+
+        from torch.compiler import _runtime_cache
+
+        pc = torch.compiler.precompile
+        x = torch.ones(4)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with _fake_triton_runtime_cache(root / "producer") as fake:
+                source, cache = _capture_files(
+                    self, _no_compilation_single_graph, [(x,)], backend="eager"
+                )
+                fake.root = root / "consumer"
+                with contextlib.ExitStack() as stack:
+                    if missing == "import":
+                        stack.enter_context(
+                            mock.patch.object(
+                                _runtime_cache,
+                                "_triton_runtime_cache",
+                                return_value=None,
+                            )
+                        )
+                        reason = "too old to import"
+                    else:
+                        stack.enter_context(
+                            mock.patch.object(
+                                fake,
+                                "runtime_cache_root",
+                                side_effect=RuntimeError("TRITON_CACHE_DIR is not set"),
+                            )
+                        )
+                        reason = "no cache directory"
+                    with (
+                        pc.no_compilation(),
+                        self.assertRaisesRegex(PrecompileError, "hydrate") as failure,
+                    ):
+                        pc.load(source, cache)
+                    self.assertIn(reason, _exception_chain(failure.exception))
+                self.assertEqual(fake.imports, [])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_triton_runtime_cache_needs_triton_cache_knobs(self):
+        import triton
+
+        from torch.compiler import _runtime_cache, _triton_runtime_cache
+
+        self.assertIs(_runtime_cache._triton_runtime_cache(), _triton_runtime_cache)
+        knobs = types.SimpleNamespace(cache=types.SimpleNamespace(dir="/tmp"))
+        with mock.patch.object(triton, "knobs", knobs):
+            self.assertIsNone(_runtime_cache._triton_runtime_cache())
+        with _replace_module("triton", None):
+            self.assertIsNone(_runtime_cache._triton_runtime_cache())
 
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     @parametrize("device", (0, None))
@@ -7445,6 +8057,34 @@ class TestPrecompileRuntimeCache(TestCase):
                 RuntimeError, "incomplete or incompatible Triton kernel file"
             ):
                 TritonBundler.read_and_emit(bundle)
+
+    @skipIfCrossRef
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
+    def test_strict_replay_in_fresh_process(self):
+        from torch.compiler._runtime_cache import _triton_runtime_cache
+
+        if _triton_runtime_cache() is None:
+            self.skipTest("requires a Triton with cache and autotuning knobs")
+        with tempfile.TemporaryDirectory() as directory:
+            module = f"precompile_runtime_{uuid.uuid4().hex}"
+            with open(os.path.join(directory, module + ".py"), "w") as f:
+                f.write(_RUNTIME_CACHE_MODULE)
+            for phase in ("capture", "replay"):
+                out = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        _RUNTIME_CACHE_DRIVER,
+                        phase,
+                        directory,
+                        module,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(f"runtime cache phase ok: {phase}", out.stdout)
 
 
 if __name__ == "__main__":
