@@ -643,34 +643,14 @@ class _DynamoCodeCacheEntry:
     bypassed: bool = False
 
 
-def _globals_module_name(
-    namespace: dict[str, Any], preferred: str | None = None
-) -> str | None:
-    """The ``sys.modules`` key of the module whose namespace IS ``namespace``.
-
-    A file imported under two names is two modules sharing one file, and
-    ``inspect.getmodule`` maps a code object to a module by its file, so it can
-    answer with the other alias, whose globals and functions are not the frame's.
-    ``preferred`` is tried first, so a key that already names the owner (e.g. an
-    importable alias of ``__main__``) is kept. A module that rebinds ``__name__``
-    is still registered under ``__spec__.name``, so that is tried last.
-    """
-    for name in (
-        preferred,
-        namespace.get("__name__"),
-        getattr(namespace.get("__spec__"), "name", None),
-    ):
-        if not isinstance(name, str):
-            continue
-        module = sys.modules.get(name)
-        if isinstance(module, types.ModuleType) and vars(module) is namespace:
-            return name
-    return None
-
-
 def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
-    name = _globals_module_name(namespace)
-    return sys.modules[name] if name is not None else None
+    name = namespace.get("__name__")
+    if not isinstance(name, str):
+        return None
+    module = sys.modules.get(name)
+    if isinstance(module, types.ModuleType) and vars(module) is namespace:
+        return module
+    return None
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
@@ -678,21 +658,12 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
         raise AssertionError(
             f"Expected exactly one function name, got {len(entry.function_names)}"
         )
-    return _lookup_code_path(
-        entry.python_module, entry.function_names[0], entry.code_source
-    )
-
-
-def _lookup_code_path(
-    python_module: str, function_name: str, code_source: str
-) -> types.CodeType:
-    entry = (python_module, function_name, code_source)
-    fn: Any = sys.modules[python_module]
-    parts = function_name.split(".")
+    fn: Any = sys.modules[entry.python_module]
+    parts = entry.function_names[0].split(".")
     for part in parts:
         fn = getattr(fn, part)
-    if code_source:
-        parts = code_source.split(".")
+    if entry.code_source:
+        parts = entry.code_source.split(".")
         for part in parts:
             if part.endswith("]"):
                 index_begin = part.rfind("[")
@@ -749,7 +720,9 @@ def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     )
 
 
-def _get_code_source(code: types.CodeType, module: types.ModuleType) -> tuple[str, str]:
+def _get_code_source(
+    code: types.CodeType, module_hint: types.ModuleType | None = None
+) -> tuple[str, str]:
     """
     Given a code object, return a fully qualified name which will be used as
     a serialized handle to access the code object from the new process.
@@ -758,28 +731,22 @@ def _get_code_source(code: types.CodeType, module: types.ModuleType) -> tuple[st
        inside a closure with the wrapper object.
     2. When a function is defined as a nested function, then the code object will be
        stored on the co_consts field of the parent code object by Python compiler.
-    This function handles all of the corner cases above, searching ``module``.
+    This function handles all of the corner cases above.
     """
 
+    code_module = inspect.getmodule(code)
+    module = code_module or module_hint
+    if module is None:
+        raise PackageError(f"Cannot find module for code {code}")
+
     toplevel: Any = module
-    # Code that is not its own module's (exec-generated, or reached through
-    # another alias) has a co_qualname that is no path from ``module``.
-    search_module_tree = (
-        sys.version_info < (3, 11) or inspect.getmodule(code) is not module
-    )
-    if not search_module_tree:
+    search_module_tree = code_module is None
+    if sys.version_info >= (3, 11) and not search_module_tree:
         parts = code.co_qualname.split(".")
 
         for part in parts:
             if not hasattr(toplevel, part):
-                # co_qualname is fixed at compile time and names where the def
-                # statement ran: a factory deleted afterwards, or one that
-                # exec'd it under a module's filename. The function can still
-                # be reachable from the module under a rewritten __qualname__,
-                # so search the module the way Python < 3.11 always does.
-                toplevel = module
-                search_module_tree = True
-                break
+                _raise_resolution_error(code, toplevel)
             toplevel = getattr(toplevel, part)
             if (
                 inspect.isfunction(toplevel)
@@ -844,7 +811,7 @@ def _get_code_source(code: types.CodeType, module: types.ModuleType) -> tuple[st
                         toplevel = obj
                         return f".__closure__[{i}].cell_contents{res}"
 
-        if search_module_tree:
+        if sys.version_info < (3, 11) or search_module_tree:
             if inspect.ismodule(obj):
                 for value in obj.__dict__.values():
                     if not (
@@ -887,26 +854,7 @@ def _get_code_source(code: types.CodeType, module: types.ModuleType) -> tuple[st
     code_source = _find_code_source(toplevel)
     if code_source is None:
         _raise_resolution_error(code, toplevel)
-    function_name, code_source = toplevel.__qualname__, code_source.strip(".")
-    # The recorded __qualname__ can be stale (a factory-made function, or a
-    # wrapper from a decorator without functools.wraps), so replay the lookup
-    # the loader will do.
-    cause: Exception | None = None
-    try:
-        found = _lookup_code_path(module.__name__, function_name, code_source)
-    except Exception as e:
-        # A replay can fail in many ways (a missing attribute, a None
-        # __closure__, an index out of range); each means unreplayable.
-        found, cause = None, e
-    if found is not code:
-        outcome = f"fails with {cause!r}" if cause else "finds other code"
-        raise PackageError(
-            f"Cannot resolve a fully qualified name for {code}. Lookup scope: "
-            f"{toplevel}. Its __qualname__ {function_name!r} does not resolve back "
-            f"to it: replaying {module.__name__}:{function_name} ({code_source}) "
-            f"{outcome}"
-        ) from cause
-    return function_name, code_source
+    return toplevel.__qualname__, code_source.strip(".")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1167,10 +1115,7 @@ class CompilePackage:
         fn: Callable[..., Any] | None,
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
-        explicit: bool = True,
     ) -> None:
-        # False for the package caching_precompile creates for every compile.
-        self.explicit = explicit
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
@@ -1229,9 +1174,6 @@ class CompilePackage:
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
-            self._resume_codes = {
-                code for code, entry in self._codes.items() if entry.install_to_global
-            }
             for key, code in self._codes.items():
                 if code.bypassed:
                     # install() skips a bypassed entry entirely, so its guarded
@@ -1256,9 +1198,9 @@ class CompilePackage:
             # set would: the re-saved string is never below the loaded one.
             self._device_types = frozenset((dynamo.device_type,))
         else:
-            fn = self._innermost_fn
-            module_name = _globals_module_name(fn.__globals__, fn.__module__)
-            self._add_function(fn.__code__, module_name or fn.__module__)
+            self._add_function(
+                self._innermost_fn.__code__, self._innermost_fn.__module__
+            )
         self._initialized = True
 
     def _add_function(
@@ -1309,42 +1251,44 @@ class CompilePackage:
             raise AssertionError("_innermost_fn is not set")
         return CompilePackage.source_id_from_fn(self._innermost_fn)
 
-    @property
-    def _entry_module_name(self) -> str | None:
-        # Frames sharing the entry's globals keep the key the entry was recorded
-        # under, e.g. an importable alias of __main__ the driver can import.
-        entry = next(iter(self._codes.values()), None)
-        return entry.python_module if entry is not None else None
-
     def _add_user_function(
         self,
         code: types.CodeType,
         global_scope: dict[str, object] | None = None,
     ) -> None:
         code_module = inspect.getmodule(code)
-        globals_module = (
+        module = code_module or (
             _globals_module(global_scope) if global_scope is not None else None
         )
-        module = code_module or globals_module
         if module is None:
             raise PackageError(f"Cannot find module for code {code}")
-        try:
-            function_name, code_source = _get_code_source(code, module)
-        except PackageError:
-            # One file imported under two names is two modules, and
-            # inspect.getmodule can answer with the alias whose namespace the
-            # frame does not run with; fall back to the one it does.
-            if globals_module is None or globals_module is module:
-                raise
-            module = globals_module
-            function_name, code_source = _get_code_source(code, module)
+        function_name, code_source = _get_code_source(code, module)
         self._add_function(
             code,
-            _globals_module_name(vars(module), self._entry_module_name)
-            or module.__name__,
+            module.__name__,
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
+        if code_module is None:
+            # The module search records the found function's __qualname__,
+            # which the loader replays with plain getattr. dataclasses rename
+            # what they exec() to its attribute path; a helper that does not
+            # would otherwise only fail at load.
+            cause: Exception | None = None
+            try:
+                resolves = _lookup_code(self._codes[code]) is code
+            except Exception as e:
+                # A replay can fail in many ways (a missing attribute, a None
+                # __closure__, an index out of range); each means unreplayable.
+                resolves, cause = False, e
+            if not resolves:
+                del self._codes[code]
+                outcome = f"fails with {cause!r}" if cause else "finds other code"
+                raise PackageError(
+                    f"Cannot resolve a fully qualified name for {code}: replaying "
+                    f"the recorded path {module.__name__}:{function_name} "
+                    f"({code_source}) {outcome}"
+                ) from cause
 
     @property
     def current_entry(self) -> _DynamoCodeCacheEntry | None:
@@ -1428,20 +1372,16 @@ class CompilePackage:
     def add_resume_function(
         self,
         python_code: types.CodeType,
-        global_scope: dict[str, Any],
+        python_module: str,
         function_name: str,
     ) -> None:
         self._add_function(
             python_code,
-            _globals_module_name(global_scope, self._entry_module_name)
-            or global_scope["__name__"],
+            python_module,
             function_name=_FunctionId(function_name),
             install_to_global=True,
         )
         self._resume_codes.add(python_code)
-
-    def is_resume_code(self, code: types.CodeType) -> bool:
-        return code in self._resume_codes
 
     def add_import_source(self, alias: str, module_name: str) -> None:
         if self._current_entry is None:
@@ -1518,9 +1458,7 @@ class CompilePackage:
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
-        from .decorators import _nonrecursive_disable_wrapper_code
         from .output_graph import get_builtins_dict
-        from .symbolic_convert import UNNAMED_SCOPE_PREFIX
 
         self.uninstall()
         for code, entry in self._codes.items():
@@ -1536,8 +1474,8 @@ class CompilePackage:
                 # AOTCompiledFunction._seed_guard_scope seeds those aliases into
                 # a live module scope and nothing re-seeds them -- so uninstall()
                 # must leave a binding this package did not create alone. The
-                # aliases and the ___unnamed_scope keys below are the only names
-                # install() records that are ever seeded that way.
+                # aliases are the only names install() records that are ever
+                # seeded that way.
                 for alias, module_name in entry.import_sources.items():
                     self._install_global(
                         module,
@@ -1579,13 +1517,6 @@ class CompilePackage:
                     # or guarded codes.
                     continue
 
-                if target_code is _nonrecursive_disable_wrapper_code:
-                    # A package keyed on a bound disable(recursive=False) method
-                    # has as its top-level code the wrapper code every such
-                    # disable shares. Dynamo never compiles it, and enrolling it
-                    # in input_codes would let reset() strip its import-time skip.
-                    continue
-
                 input_codes.add(target_code)
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
@@ -1611,20 +1542,6 @@ class CompilePackage:
                     with dynamo_timed("precompile_load_guards"):
                         guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
-                    # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict
-                    # in the tracing process, so a fresh process has no binding
-                    # for it; the artifact carries the dict. A binding already
-                    # here (a live compile's, or anyone else's) is kept and not
-                    # recorded, so uninstall() leaves it alone, and the guards
-                    # check whatever it holds.
-                    for name, value in guards_state.output_graph.global_scope.items():
-                        if name.startswith(UNNAMED_SCOPE_PREFIX):
-                            self._install_global(
-                                module,
-                                name,
-                                runtime_global_scope.get(name, value),
-                                record_only_if_new=True,
-                            )
                     # The installed builtins dict might be absent from the runtime
                     # while loading guards. Populate it if it's missing.
                     if (
