@@ -12,8 +12,8 @@
 #include <iostream>
 #include <string>
 
-#include "kineto/libkineto/stress_test/random_ops_stress_test.cuh"
-#include "kineto/libkineto/stress_test/tensor_cache.cuh"
+#include "random_ops_stress_test.cuh"
+#include "tensor_cache.cuh"
 
 #pragma once
 

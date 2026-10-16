@@ -22,8 +22,9 @@
 #include <folly/init/Init.h>
 
 #include <ApproximateClock.h>
-#include "kineto/libkineto/stress_test/stress_test_input.h"
-#include "kineto/libkineto/stress_test/utils.h"
+#include "stress_test_input.h"
+#include "utils.h"
+
 #include "mpi.h"
 
 using namespace kineto_stress_test;
