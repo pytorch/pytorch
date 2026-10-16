@@ -475,6 +475,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # comment at CppWrapperCpu `codegen_subgraph` function.
         return CppWrapperCpu()
 
+    def defines_triton_kernels_as_code(self) -> bool:
+        # The C++ wrapper keeps each Triton kernel as an async_compile.triton(...) source
+        # string: its call wrappers and its compile-time autotune block compile from it.
+        return False
+
     @contextlib.contextmanager
     def _target_buf(self, attr: str, buf: IndentedBuffer):
         """Temporarily redirect self.<attr> to a specific buffer."""
@@ -599,6 +604,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
         self.header.writeline(f"// {name} {hashed}")
+
+    def generate_tma_descriptor(self, desc):
+        raise NotImplementedError(
+            "TMA descriptors are not supported by the CPU cpp_wrapper"
+        )
 
     @staticmethod
     def get_device_include_path_jit(device: str) -> str:
