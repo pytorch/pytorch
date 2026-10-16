@@ -26,6 +26,10 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-copy-dtor")
 // NOLINTNEXTLINE(bugprone-exception-escape)
 CacheEntry::~CacheEntry() {
+  // Only an entry linked into an ExtraState set the back-references.
+  if (this->_owner == nullptr) {
+    return;
+  }
   // prevent guard_manager from use-after-free when invalidating
   this->guard_manager.attr("cache_entry") = py::none();
   this->guard_manager.attr("extra_state") = py::none();
@@ -48,6 +52,25 @@ void CacheEntry::invalidate(py::object deleted_guard_manager) {
 void CacheEntry::update_diff_guard_root_manager() {
   this->diff_guard_root_mgr = torch::dynamo::convert_to_root_guard_manager(
       this->guard_manager.attr("diff_guard_root"));
+}
+
+CacheEntry CacheEntry::copy_for_python() const {
+  CacheEntry copy(*this);
+  copy._owner = nullptr;
+  copy._source = identity();
+  return copy;
+}
+
+const CacheEntry* CacheEntry::identity() const {
+  return _source != nullptr ? _source : this;
+}
+
+bool CacheEntry::py_equal(const CacheEntry& other) const {
+  return identity() == other.identity() && compile_id.is(other.compile_id);
+}
+
+std::size_t CacheEntry::py_hash() const {
+  return std::hash<const void*>{}(identity());
 }
 
 PyObject* CacheEntry_to_obj(CacheEntry* e) {
