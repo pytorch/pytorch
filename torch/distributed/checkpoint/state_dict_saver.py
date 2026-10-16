@@ -7,12 +7,16 @@ import warnings
 from concurrent.futures import Future
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast, TYPE_CHECKING
+from typing import cast
 from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import STATE_DICT_TYPE
+from torch.distributed.checkpoint._async_executor import (
+    _AsyncCheckpointExecutor,
+    _OwnedStateDictFuture,
+)
 from torch.distributed.checkpoint._async_process_executor import (
     _ProcessBasedAsyncCheckpointExecutor,
 )
@@ -34,10 +38,6 @@ from torch.distributed.checkpoint.storage import StorageWriter, WriteResult
 from torch.distributed.distributed_c10d import _get_default_group
 
 from .utils import _api_bc_check, _DistWrapper, _profile
-
-
-if TYPE_CHECKING:
-    from torch.distributed.checkpoint._async_executor import _AsyncCheckpointExecutor
 
 
 __all__ = [
@@ -275,6 +275,8 @@ def async_save(
 
     Returns:
         Future: A future holding the resultant Metadata object from `save`.
+        Calling `result()` or `exception()` releases buffers owned by the
+        default stager.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -346,8 +348,19 @@ def async_save(
             else _ThreadBasedAsyncCheckpointExecutor()
         )
 
+        upload_input = staging_future_or_state_dict
+        if owned_async_stager is not None:
+            if isinstance(staging_future_or_state_dict, Future):
+                raise AssertionError(
+                    "internally owned default stager must stage synchronously"
+                )
+            upload_input = _OwnedStateDictFuture(
+                staging_future_or_state_dict,
+                cleanup=maybe_close_owned_async_stager,
+            )
+
         upload_future: Future = upload_executor.execute_save(
-            staging_future_or_state_dict,
+            upload_input,
             checkpoint_id=checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,
@@ -357,7 +370,6 @@ def async_save(
         )
 
         if owned_async_stager is not None:
-            upload_future.add_done_callback(lambda _: maybe_close_owned_async_stager())
             # in the success path transfer cleanup ownership to the upload future
             stack.pop_all()
 
