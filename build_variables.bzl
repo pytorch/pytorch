@@ -996,6 +996,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/stackref_bridge.c",
     "torch/csrc/functorch/init.cpp",
     "torch/csrc/fx/node.cpp",
+    "torch/csrc/fx/partition_bitset.cpp",
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/mps/Stream.cpp",
     "torch/csrc/mtia/Module.cpp",

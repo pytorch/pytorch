@@ -79,6 +79,7 @@
 #include <torch/csrc/functionalization/Module.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
+#include <torch/csrc/fx/partition_bitset.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
 #include <torch/csrc/instruction_counter/Module.h>
@@ -2598,6 +2599,7 @@ PyObject* initModule() {
   THPEvent_init(module);
   NodeBase_init(module);
   NodeIter_init(module);
+  ASSERT_TRUE(torch::fx::initPartitionBitsetBindings(module));
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
