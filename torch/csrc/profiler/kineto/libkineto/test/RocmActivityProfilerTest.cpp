@@ -20,6 +20,7 @@
 #include <iterator>
 #include <optional>
 #include <thread>
+#include <tuple>
 
 #include <unistd.h>
 
@@ -374,14 +375,30 @@ namespace libkineto {
 class RocprofActivityApiTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    api_.d = &logger_;
-    api_.activityMaskSnapshot_ =
-        1 << static_cast<uint32_t>(ActivityType::GPU_MEMCPY);
+    oldMaxEvents_ = logger_.maxBufferSize_;
+    oldPerThreadBuffers_ = logger_.perThreadBuffers_.load();
+    api_.clearActivities();
+    api_.setPerThreadBuffers(false);
+    api_.activityMaskSnapshot_ = 1
+        << static_cast<uint32_t>(ActivityType::GPU_MEMCPY);
+  }
+
+  void TearDown() override {
+    api_.clearActivities();
+    api_.setMaxEvents(oldMaxEvents_);
+    api_.setPerThreadBuffers(oldPerThreadBuffers_);
   }
 
   void appendRows(std::initializer_list<uint64_t> ids) {
-    std::lock_guard<std::mutex> lock(logger_.rowsMutex_);
-    logger_.rows_.reserve(logger_.rows_.capacity() + ids.size());
+    // Force reallocation even if a previous batch left spare capacity.
+    if (logger_.perThreadBuffers_.load()) {
+      auto* buffer = logger_.getThreadBuffer();
+      std::lock_guard<std::mutex> lock(buffer->mutex);
+      buffer->rows.reserve(buffer->rows.capacity() + ids.size());
+    } else {
+      std::lock_guard<std::mutex> lock(logger_.rowsMutex_);
+      logger_.rows_.reserve(logger_.rows_.capacity() + ids.size());
+    }
     for (auto id : ids) {
       rows_.push_back(std::make_unique<rocprofAsyncRow>(
           id,
@@ -393,69 +410,137 @@ class RocprofActivityApiTest : public ::testing::Test {
           10,
           20,
           std::string()));
-      logger_.rows_.push_back(rows_.back().get());
+      logger_.insert_row_to_buffer(rows_.back().get());
     }
   }
 
   void appendCorrelations(
-      std::initializer_list<std::pair<uint64_t, uint64_t>> correlations) {
-    std::lock_guard<std::mutex> lock(logger_.externalCorrelationsMutex_);
-    auto& pending =
-        logger_.externalCorrelations_[RocLogger::CorrelationDomain::Default];
-    pending.reserve(pending.capacity() + correlations.size());
-    pending.insert(pending.end(), correlations.begin(), correlations.end());
+      RocLogger::CorrelationDomain domain,
+      std::initializer_list<std::pair<uint64_t, uint64_t>> pairs) {
+    auto append = [&](auto& pending) {
+      pending.reserve(pending.capacity() + pairs.size());
+      pending.insert(pending.end(), pairs.begin(), pairs.end());
+    };
+    if (logger_.perThreadBuffers_.load()) {
+      auto* buffer = logger_.getThreadBuffer();
+      std::lock_guard<std::mutex> lock(buffer->mutex);
+      append(buffer->externalCorrelations[domain]);
+    } else {
+      std::lock_guard<std::mutex> lock(logger_.externalCorrelationsMutex_);
+      append(logger_.externalCorrelations_[domain]);
+    }
   }
 
-  RocprofLogger logger_;
+  std::vector<uint64_t> processRows() {
+    std::vector<uint64_t> processed;
+    const int count = api_.processActivities(
+        [&](const rocprofBase* row) { processed.push_back(row->id); },
+        [](uint64_t, uint64_t, RocLogger::CorrelationDomain) {});
+    EXPECT_EQ(count, processed.size());
+    return processed;
+  }
+
+  RocprofLogger& logger_{RocprofLogger::singleton()};
   RocprofActivityApi api_;
   std::vector<std::unique_ptr<rocprofAsyncRow>> rows_;
+  uint32_t oldMaxEvents_{};
+  bool oldPerThreadBuffers_{};
 };
 
-TEST_F(RocprofActivityApiTest, RowSnapshotSurvivesCallbackAppends) {
+class RocprofActivityApiBuffersTest
+    : public RocprofActivityApiTest,
+      public ::testing::WithParamInterface<bool> {
+ protected:
+  void SetUp() override {
+    RocprofActivityApiTest::SetUp();
+    api_.setPerThreadBuffers(GetParam());
+  }
+};
+
+TEST_P(RocprofActivityApiBuffersTest, RowSnapshotSurvivesCallbackAppends) {
   appendRows({1, 2});
-  appendCorrelations({{1, 11}});
+  appendCorrelations(RocLogger::Default, {{1, 11}});
   std::vector<uint64_t> processed;
-  const int count = api_.processActivities(
-      [&](const rocprofBase* row) {
-        processed.push_back(row->id);
-        if (processed.size() == 1) {
-          std::thread producer([&] { appendRows({5, 6}); });
-          producer.join();
-        }
-      },
-      [&](uint64_t, uint64_t, RocLogger::CorrelationDomain) {
-        std::thread producer([&] { appendRows({3, 4}); });
-        producer.join();
-      });
-  EXPECT_EQ(count, 2);
+  EXPECT_EQ(
+      api_.processActivities(
+          [&](const rocprofBase* row) {
+            processed.push_back(row->id);
+            if (processed.size() == 1) {
+              std::thread producer([&] { appendRows({5, 6}); });
+              producer.join();
+            }
+          },
+          [&](uint64_t, uint64_t, RocLogger::CorrelationDomain) {
+            std::thread producer([&] { appendRows({3, 4}); });
+            producer.join();
+          }),
+      2);
   EXPECT_EQ(processed, (std::vector<uint64_t>{1, 2}));
+  const auto firstBegin = rows_.front()->begin;
+  const auto firstEnd = rows_.front()->end;
+  EXPECT_EQ(processRows(), (std::vector<uint64_t>{3, 4, 5, 6}));
+  EXPECT_TRUE(processRows().empty());
+  // A consumed row must not have its timestamps converted a second time.
+  EXPECT_EQ(rows_.front()->begin, firstBegin);
+  EXPECT_EQ(rows_.front()->end, firstEnd);
 }
 
-TEST_F(RocprofActivityApiTest, CorrelationSnapshotPreservesCallbackAppends) {
-  appendCorrelations({{1, 11}, {2, 22}});
-  std::vector<std::pair<uint64_t, uint64_t>> processed;
+TEST_P(RocprofActivityApiBuffersTest, AllCorrelationDomainsShareSnapshot) {
+  appendCorrelations(RocLogger::Default, {{1, 11}, {2, 22}});
+  appendCorrelations(RocLogger::Domain1, {{3, 33}, {4, 44}});
+  using Correlation =
+      std::tuple<uint64_t, uint64_t, RocLogger::CorrelationDomain>;
+  std::vector<Correlation> processed;
   api_.processActivities(
       [](const rocprofBase*) {},
-      [&](uint64_t id, uint64_t externalId, RocLogger::CorrelationDomain domain) {
-        EXPECT_EQ(domain, RocLogger::CorrelationDomain::Default);
-        processed.emplace_back(id, externalId);
+      [&](uint64_t id, uint64_t external, RocLogger::CorrelationDomain domain) {
+        processed.emplace_back(id, external, domain);
         if (processed.size() == 1) {
-          std::thread producer([&] { appendCorrelations({{3, 33}}); });
+          std::thread producer([&] {
+            appendCorrelations(RocLogger::Default, {{5, 55}});
+            appendCorrelations(RocLogger::Domain1, {{6, 66}});
+          });
           producer.join();
         }
       });
   EXPECT_EQ(
       processed,
-      (std::vector<std::pair<uint64_t, uint64_t>>{{1, 11}, {2, 22}}));
-
+      (std::vector<Correlation>{
+          {1, 11, RocLogger::Default},
+          {2, 22, RocLogger::Default},
+          {3, 33, RocLogger::Domain1},
+          {4, 44, RocLogger::Domain1}}));
   processed.clear();
   api_.processActivities(
       [](const rocprofBase*) {},
-      [&](uint64_t id, uint64_t externalId, RocLogger::CorrelationDomain) {
-        processed.emplace_back(id, externalId);
+      [&](uint64_t id, uint64_t external, RocLogger::CorrelationDomain domain) {
+        processed.emplace_back(id, external, domain);
       });
   EXPECT_EQ(
-      processed, (std::vector<std::pair<uint64_t, uint64_t>>{{3, 33}}));
+      processed,
+      (std::vector<Correlation>{
+          {5, 55, RocLogger::Default}, {6, 66, RocLogger::Domain1}}));
+  api_.processActivities(
+      [](const rocprofBase*) { FAIL() << "Unexpected activity"; },
+      [](uint64_t, uint64_t, RocLogger::CorrelationDomain) {
+        FAIL() << "Correlation processed twice";
+      });
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BufferModes,
+    RocprofActivityApiBuffersTest,
+    ::testing::Bool());
+
+TEST_F(RocprofActivityApiTest, ProcessingPreservesSessionEventLimit) {
+  api_.setMaxEvents(2);
+  appendRows({1, 2});
+  EXPECT_EQ(processRows(), (std::vector<uint64_t>{1, 2}));
+  appendRows({3});
+  EXPECT_TRUE(processRows().empty());
+  api_.clearActivities();
+  appendRows({4, 5});
+  EXPECT_EQ(processRows(), (std::vector<uint64_t>{4, 5}));
 }
 
 } // namespace libkineto
