@@ -10986,6 +10986,65 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         )
         self.assertEqual(cnt.frame_count, 0)
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False, recompile_limit=2
+    )
+    def test_precompile_skip_mixed_with_peer_hit_does_not_recompile(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.eval_frame import guard_collectives_hook
+        from torch._dynamo.types import GuardCollectiveState
+
+        def skipped(x):
+            return x + 1
+
+        def compiled(x):
+            return x + 2
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(compiled, backend=cnt)
+        compiled_fn(x)
+        skipped_fn = torch.compile(skipped, backend=cnt)
+        _load_precompile_skip(skipped.__code__)
+        gathered = []
+        peer_state = None
+
+        # A 2-rank all_gather whose other rank reports peer_state.
+        def gather(out, state, group=None):
+            gathered.append(state)
+            out[:] = [state, peer_state]
+
+        fake_pg = mock.Mock(size=lambda: 2)
+        calls = 5
+        counters.clear()
+        old_hook = set_guard_complete_hook(guard_collectives_hook)
+        try:
+            with (
+                patch("torch._dynamo.distributed.get_guard_pg", lambda: fake_pg),
+                patch("torch.distributed.all_gather_object", gather),
+            ):
+                # The skipping rank, with an int input that traces no graph and
+                # a tensor input that would compile one.
+                peer_state = GuardCollectiveState.HIT
+                for _ in range(calls):
+                    self.assertEqual(skipped_fn(3), 4)
+                    self.assertEqual(skipped_fn(x), x + 1)
+                self.assertEqual(gathered, [GuardCollectiveState.SKIP] * 2 * calls)
+                # The rank that compiled the frame keeps hitting its entry.
+                gathered.clear()
+                peer_state = GuardCollectiveState.SKIP
+                for _ in range(calls):
+                    self.assertEqual(compiled_fn(x), x + 2)
+                self.assertEqual(gathered, [GuardCollectiveState.HIT] * calls)
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(counters["frames"]["total"], 0)
+
     def test_skip_code_does_not_run_guard_complete_hook(self):
         from torch._C._dynamo.eval_frame import set_guard_complete_hook
 

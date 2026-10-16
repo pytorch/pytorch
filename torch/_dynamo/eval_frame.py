@@ -907,15 +907,13 @@ def guard_collectives_hook(guard_eval_result: int) -> int:
             # TODO: a bit awkward to time, this isn't inside of the dynamo compile region
             all_results: list[int | None] = [None] * pg.size()
             dist.all_gather_object(all_results, int(guard_eval_result), group=pg)
-            # HIT = everyone hit, OK to run
-            # SKIP = everyone skips, run eagerly
-            # MISS = anything else, force recompile everywhere
-            if all(r == GuardCollectiveState.HIT for r in all_results):
-                res = GuardCollectiveState.HIT
-            elif all(r == GuardCollectiveState.SKIP for r in all_results):
-                res = GuardCollectiveState.SKIP
-            else:
+            # Any MISS forces recompile everywhere. Otherwise no rank compiles,
+            # so each keeps its own HIT (run cached code) or SKIP (run eagerly);
+            # forcing a SKIP/HIT mix to compile would recompile on every call.
+            if GuardCollectiveState.MISS in all_results:
                 res = GuardCollectiveState.MISS
+            else:
+                res = guard_eval_result
             log.debug("guard_collective %s -> %s", guard_eval_result, res)
             return res
     return guard_eval_result
