@@ -5402,7 +5402,7 @@ class ShapeEnv:
                 )
             )
         # A sympy positive=True symbol would fold Eq(s, 0) to False, so the
-        # dynamic offset is an unconstrained symbol with an explicit [0, inf] range.
+        # dynamic offset is only sympy-nonnegative, with an explicit [0, inf] range.
         offset_expr = self.create_symbol(
             ex_storage_offset,
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
@@ -5411,6 +5411,7 @@ class ShapeEnv:
             symbolic_context=symbolic_context,
             positive=None if config.dynamic_storage_offset else True,
             do_not_specialize_zero_one=config.dynamic_storage_offset,
+            nonnegative=True if config.dynamic_storage_offset else None,
         )
         if config.dynamic_storage_offset and isinstance(offset_expr, sympy.Symbol):
             self._update_var_to_range(offset_expr, ValueRanges(0, int_oo))
@@ -5818,6 +5819,7 @@ class ShapeEnv:
         positive: bool | None = True,
         do_not_specialize_zero_one: bool = False,
         symbolic_context: SymbolicContext | None = None,
+        nonnegative: bool | None = None,
     ) -> sympy.Expr:
         """Create a new symbol which is tracked by this ShapeEnv"""
         # check if constraint_dim is actually static integer
@@ -5966,7 +5968,11 @@ class ShapeEnv:
             symbol_id = self._generate_unique_id(source.name)
             if type(val) is int or is_nested_int(val):
                 sympy_expr = make_symbol(
-                    SymT.SIZE, symbol_id, positive=positive, integer=True
+                    SymT.SIZE,
+                    symbol_id,
+                    positive=positive,
+                    nonnegative=nonnegative,
+                    integer=True,
                 )
             else:
                 sympy_expr = make_symbol(
@@ -6716,8 +6722,13 @@ class ShapeEnv:
                 # This logic excludes static values found on tensors from guarding, because
                 # dynamo's check_tensor_fn does that (see guards.cpp).
                 # However, for non tensor sources, we still need to guard here.
+                # check_tensor_fn does not check the storage offset, so an offset
+                # symbol that a guard refined to a constant is still guarded here.
                 if ignore_static and isinstance(source, TensorPropertySource):
-                    if expr.is_number:
+                    if expr.is_number and not (
+                        source.prop is TensorProperty.STORAGE_OFFSET
+                        and srcname in self.source_to_var
+                    ):
                         self.log.debug(
                             "Skipping guard %s", f"{source_ref(source)} == {expr}"
                         )
