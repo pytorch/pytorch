@@ -3,7 +3,7 @@
 # this module imports cutlass.
 
 import cutlass
-from cutlass import Float32, Float64, Int32
+from cutlass import Float32, Float64, Int32, Int64
 
 import torch
 
@@ -15,6 +15,7 @@ torch2cute = {
     torch.float16: cutlass.Float16,
     torch.bfloat16: cutlass.BFloat16,
     torch.int32: Int32,
+    torch.int64: Int64,
 }
 
 # Inverse mapping for allocating torch scratch from a trait's cute accumulator dtype.
