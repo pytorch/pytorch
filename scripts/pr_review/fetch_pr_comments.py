@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect a pull request's maintainer conversation for the hardened review.
+"""Collect a pull request's title, description and maintainer conversation.
 
 Runs in the trusted `prepare` job, which holds GITHUB_TOKEN; the review job has
 neither the token nor network access to the API. The file is handed over as a
@@ -29,6 +29,8 @@ from urllib.parse import quote
 PER_PAGE = 100
 MAX_PAGES = 30
 MAX_BODY = 4000
+# Even all-\uXXXX-escaped, leaves most of MAX_TOTAL_BYTES for the comments.
+MAX_PR_BODY = 12000
 MAX_HUNK = 1500
 MAX_ITEMS = 200
 # Of the whole serialized file. One environment variable is limited to 128 KiB
@@ -100,7 +102,10 @@ def cap(text: str | None, limit: int) -> str:
 
 
 def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
-    author = human_login(api(f"repos/{repo}/pulls/{pr}"))
+    pull = api(f"repos/{repo}/pulls/{pr}")
+    author = human_login(pull)
+    title, body = pull.get("title") or "", cap(pull.get("body"), MAX_PR_BODY)
+    head = {"pr_author": author, "title": title, "body": body}
     sources = {
         "issue_comment": paginate(api, f"repos/{repo}/issues/{pr}/comments"),
         "review": paginate(api, f"repos/{repo}/pulls/{pr}/reviews"),
@@ -155,7 +160,7 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
     kept: list[dict[str, Any]] = []
     # The widest envelope: `false` and the largest possible count; +1 per comma.
     envelope = {
-        "pr_author": author,
+        **head,
         "truncated": False,
         "omitted_items": len(items),
         "items": [],
@@ -169,7 +174,7 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
     kept.reverse()
     omitted = len(items) - len(kept)
     return {
-        "pr_author": author,
+        **head,
         "truncated": omitted > 0,
         "omitted_items": omitted,
         "items": kept,

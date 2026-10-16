@@ -33,6 +33,8 @@ def user(login, kind="User"):
 
 
 class FakeApi:
+    pull = {"user": user("author")}
+
     def __init__(self, *, issue=(), reviews=(), inline=(), maintainers=(), unknown=()):
         self.pages = {
             f"repos/{REPO}/issues/{PR}/comments": list(issue),
@@ -46,7 +48,7 @@ class FakeApi:
     def __call__(self, endpoint):
         self.calls.append(endpoint)
         if endpoint == f"repos/{REPO}/pulls/{PR}":
-            return {"user": user("author")}
+            return self.pull
         base, _, query = endpoint.partition("?")
         if base in self.pages:
             page = int(query.rsplit("page=", 1)[1])
@@ -208,6 +210,17 @@ class TestCollect(unittest.TestCase):
             with mock.patch.object(fpc, "MAX_TOTAL_BYTES", limit):
                 out = fpc.collect(api, REPO, PR)
             self.assertLessEqual(len(fpc.dumps(out)), limit)
+
+    def test_the_description_is_capped_and_counted(self):
+        issue = [comment("maint", body="y" * fpc.MAX_BODY)] * 80
+        api = FakeApi(issue=issue, maintainers={"maint"})
+        api.pull = {**api.pull, "title": "\u00e9" * 256, "body": "\u00e9" * 20000}
+        out = fpc.collect(api, REPO, PR)
+        self.assertEqual(out["title"], "\u00e9" * 256)
+        self.assertTrue(out["body"].endswith(" [truncated]"))
+        self.assertLessEqual(len(fpc.dumps(out)), fpc.MAX_TOTAL_BYTES)
+        # Even a worst-case description leaves a quarter of the cap to comments.
+        self.assertGreaterEqual(len(out["items"]), 5)
 
 
 class TestFailsClosed(unittest.TestCase):
