@@ -2005,9 +2005,9 @@ def generic_richcompare_bool(
 
     https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1046-L1080
 
-    Like generic_richcompare, but with an identity shortcut first: if v
-    and w are the same Python object, eq is True and ne is False. This
-    matters for NaN (nan is nan -> True, but nan == nan -> False). Used by
+    Like generic_richcompare, but truth-tests its result and uses an identity
+    shortcut first: if v and w are the same Python object, eq is True and ne is
+    False. This matters for NaN (nan is nan -> True, but nan == nan -> False). Used by
     container comparisons (list_richcompare, tuplerichcompare) which call
     PyObject_RichCompareBool per element in CPython.
     """
@@ -2016,7 +2016,8 @@ def generic_richcompare_bool(
     identity = vt_identity_compare(v, w)
     if identity is not None and identity.as_python_constant():
         return ConstantVariable.create(op == "__eq__")
-    return generic_richcompare(tx, v, w, op)
+    result = generic_richcompare(tx, v, w, op)
+    return generic_is_true(tx, result)
 
 
 def generic_hash_impl(
