@@ -111,9 +111,10 @@ class TestBackwardPrefetch(FSDPTestContinuous):
         def patched_get_handle_to_prefetch(*args, **kwargs):
             handle = orig_get_handle_to_prefetch(*args, **kwargs)
 
-            self.assertEqual(
-                len(args), 2, "expect _get_handle_to_prefetch(state, current_handle)"
-            )
+            if len(args) != 2:
+                raise AssertionError(
+                    "expect _get_handle_to_prefetch(state, current_handle)"
+                )
             state = args[0]
             current_handle = args[1]
             training_state = _get_training_state(current_handle)
