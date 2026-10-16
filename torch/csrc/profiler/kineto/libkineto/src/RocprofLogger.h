@@ -108,6 +108,8 @@ class RocprofLogger {
   uint32_t maxBufferSize_{5000000}; // 5M GPU runtime/kernel events.
   std::vector<rocprofBase*> rows_;
   std::mutex rowsMutex_;
+  // Detached rows still count toward the session limit; guarded by rowsMutex_.
+  uint64_t processedRows_{0};
 
   // This vector collects pairs of correlationId and their respective
   // externalCorrelationId for each CorrelationDomain. This will be used

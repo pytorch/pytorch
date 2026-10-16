@@ -126,21 +126,27 @@ int RocprofActivityApi::processActivities(
   d->mergeThreadBuffers();
 
   std::vector<rocprofBase*> rows;
+  std::vector<std::pair<uint64_t, uint64_t>>
+      externalCorrelations[RocLogger::CorrelationDomain::size];
   {
-    std::lock_guard<std::mutex> lock(d->rowsMutex_);
-    rows = d->rows_;
+    // Match mergeThreadBuffers' lock order. Detach every batch before invoking
+    // handlers so callbacks can append records for the next processing pass.
+    std::lock_guard<std::mutex> rowsLock(d->rowsMutex_);
+    std::lock_guard<std::mutex> correlationsLock(d->externalCorrelationsMutex_);
+    rows.swap(d->rows_);
+    d->processedRows_ += rows.size();
+    for (int it = RocLogger::CorrelationDomain::begin;
+         it < RocLogger::CorrelationDomain::end;
+         ++it) {
+      externalCorrelations[it].swap(d->externalCorrelations_[it]);
+    }
   }
 
   // Process all external correlations pairs
   for (int it = RocLogger::CorrelationDomain::begin;
        it < RocLogger::CorrelationDomain::end;
        ++it) {
-    std::vector<std::pair<uint64_t, uint64_t>> externalCorrelations;
-    {
-      std::lock_guard<std::mutex> lock(d->externalCorrelationsMutex_);
-      externalCorrelations.swap(d->externalCorrelations_[it]);
-    }
-    for (auto& item : externalCorrelations) {
+    for (auto& item : externalCorrelations[it]) {
       correlationHandler(
           item.first,
           item.second,
@@ -164,11 +170,10 @@ int RocprofActivityApi::processActivities(
   if (isLogged(ActivityType::GPU_MEMCPY) ||
       isLogged(ActivityType::GPU_MEMSET) ||
       isLogged(ActivityType::CONCURRENT_KERNEL)) {
-    detail::backfillAsyncStreams(
-        rows, [this](const rocprofAsyncRow& async) {
-          return (isAsyncCopy(async) || isAsyncKernel(async)) &&
-              detail::isAsyncRowLogged(async, activityMaskSnapshot_);
-        });
+    detail::backfillAsyncStreams(rows, [this](const rocprofAsyncRow& async) {
+      return (isAsyncCopy(async) || isAsyncKernel(async)) &&
+          detail::isAsyncRowLogged(async, activityMaskSnapshot_);
+    });
   }
 
   // All Runtime API Calls
