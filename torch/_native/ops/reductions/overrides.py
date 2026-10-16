@@ -69,11 +69,18 @@ def _normalize_dims(dim: _Dim, ndim: int) -> _Red:
     dims = [dim] if isinstance(dim, int) else list(dim)
     if not dims:
         return None
+    if ndim == 0:
+        return None
     return {d % ndim for d in dims}
 
 
 def _dims_ok(dim: _Dim, ndim: int) -> bool:
-    if ndim == 0 or ndim > 64:
+    if ndim == 0:
+        if dim is None:
+            return True
+        dims = [dim] if isinstance(dim, int) else list(dim)
+        return len(dims) <= 1 and all(d in (0, -1) for d in dims)
+    if ndim > 64:
         return False
     if dim is None:
         return True
@@ -84,6 +91,49 @@ def _dims_ok(dim: _Dim, ndim: int) -> bool:
         return False
     norm = [d % ndim for d in dims]
     return len(set(norm)) == len(norm)
+
+
+_EMPTY_ID = {
+    "sum": 0,
+    "prod": 1,
+    "mean": float("nan"),
+    "cnz": 0,
+    "all": True,
+    "any": False,
+}
+
+
+def _empty_id_for(key: str) -> Any:
+    if key.startswith("vnorm"):
+        return 0 if math.isfinite(float(key.removeprefix("vnorm"))) else None
+    return _EMPTY_ID.get(key)
+
+
+def _reduced_shape(x_shape: Sequence[int], red: _Red, keepdim: bool) -> list[int]:
+    if red is None:
+        return [1] * len(x_shape) if keepdim else []
+    if keepdim:
+        return [1 if i in red else s for i, s in enumerate(x_shape)]
+    return [s for i, s in enumerate(x_shape) if i not in red]
+
+
+def _empty_ok(self: torch.Tensor, dim: _Dim, identity: Any) -> bool:
+    shape = _reduced_shape(self.shape, _normalize_dims(dim, self.dim()), keepdim=False)
+    return math.prod(shape) == 0 or identity is not None
+
+
+def _empty_result(
+    self: torch.Tensor,
+    red: _Red,
+    keepdim: bool,
+    dtypes: Sequence[torch.dtype],
+    fills: Sequence[Any],
+) -> tuple[torch.Tensor, ...]:
+    shape = _reduced_shape(self.shape, red, keepdim)
+    return tuple(
+        torch.full(shape, 0 if fill is None else fill, dtype=dtype, device=self.device)
+        for dtype, fill in zip(dtypes, fills)
+    )
 
 
 def _keepdim_reshape(
@@ -163,7 +213,7 @@ def _base_cond(self: torch.Tensor, dim: _Dim, key: str) -> bool:
         and not self.is_conj()
         and self.const_data_ptr() % 16 == 0  # type: ignore[attr-defined]
         and _dims_ok(dim, self.dim())
-        and self.numel() != 0
+        and (self.numel() != 0 or _empty_ok(self, dim, _empty_id_for(key)))
         and not (
             key in _INDEX_KEYS
             and _normalize_dims(dim, self.dim()) is None
@@ -216,6 +266,9 @@ def _run1(
     canonical_bool: bool = True,
     acc_dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
+    if self.numel() == 0:
+        fill = _empty_id_for(key)
+        return _empty_result(self, red, keepdim, [out_torch_dtype], [fill])[0]
     x = _kernel_input(self, canonical_bool)
     acc, kout = (
         _acc_for(x, widen) if acc_dtype is None else _acc_for_dtype(acc_dtype, widen)
@@ -286,6 +339,8 @@ def _run_arg(
     red: _Red,
     keepdim: bool,
 ) -> torch.Tensor:
+    if self.numel() == 0:
+        return _empty_result(self, red, keepdim, [torch.int64], [None])[0]
     x = _kernel_input(self)
     acc, _ = _acc_for(x, widen=False)
     idx_cute, tag = _idx_width(self, red)
@@ -307,6 +362,11 @@ def _run_dim2(
     keepdim: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     red = _normalize_dims(dim, self.dim())
+    if self.numel() == 0:
+        vals, idxs = _empty_result(
+            self, red, keepdim, [self.dtype, torch.int64], [None, None]
+        )
+        return vals, idxs
     x = _kernel_input(self)
     acc, _ = _acc_for(x, widen=False)
     idx_cute, tag = _idx_width(self, red)
@@ -360,6 +420,11 @@ def _run_dim2_vals(
     keepdim: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     red = _normalize_dims(dim, self.dim())
+    if self.numel() == 0:
+        o0, o1 = _empty_result(
+            self, red, keepdim, [self.dtype, self.dtype], [None, None]
+        )
+        return o0, o1
     x = _kernel_input(self)
     acc, _ = _acc_for(x)
     dims = None if red is None else sorted(red)
@@ -407,6 +472,8 @@ def _make_welford_impl(
 
 
 def _norm_trait(ord_val: Any) -> Callable[[Any], Any]:
+    if ord_val == 0:
+        return lambda acc: T.CountNonzeroOps(acc=acc)
     if ord_val == float("inf"):
         return lambda acc: T.AbsMaxOps(acc=acc)
     if ord_val == float("-inf"):
@@ -441,7 +508,7 @@ def _vector_norm_cond(
     dtype: torch.dtype | None = None,
 ) -> bool:
     key = f"vnorm{ord}"
-    return ord != 0 and _base_cond(self, dim, key) and _out_ok(key, dtype)
+    return _base_cond(self, dim, key) and _out_ok(key, dtype)
 
 
 def _flag_out_dtype(
