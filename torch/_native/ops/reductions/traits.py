@@ -7,6 +7,7 @@
 import cutlass
 import cutlass.cute as cute
 from cutlass import Boolean, const_expr, Float32, Int32, Int64
+from cutlass._mlir.dialects import llvm
 
 
 WARP = 32
@@ -106,6 +107,19 @@ class NormOps:
 
     @cute.jit
     def leaf(self, val, idx):
+        if const_expr(self.p == 2.0 and self.acc is Float32):
+            # Round each tree leaf before combining; contraction must not depend on mapping.
+            a = cute.math.absf(self.acc(val)).ir_value()
+            square = llvm.inline_asm(
+                a.type,
+                [a],
+                "mul.rn.f32 $0, $1, $1;",
+                "=f,f",
+                has_side_effects=False,
+                is_align_stack=False,
+                asm_dialect=llvm.AsmDialect.AD_ATT,
+            )
+            return (self.acc(square),)
         return (self._absp(val),)
 
     @cute.jit
