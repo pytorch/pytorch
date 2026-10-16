@@ -2,6 +2,7 @@
 #include <ATen/Dispatch_v2.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
 namespace at {
 namespace {
