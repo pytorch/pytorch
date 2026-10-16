@@ -20,12 +20,31 @@ from common_utils import capture_codegen_source
 import torch
 import torch._dynamo
 import torch._functorch.config as functorch_config
+from torch.autograd.grad_mode import _force_original_view_tracking as view_tracking
+from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
 )
+
+
+class SetterMode(TorchFunctionMode):
+    """Records torch function calls, raising on the one named by ``fail``."""
+
+    def __init__(self, fail=None):
+        super().__init__()
+        self.fail = fail
+        self.calls = []
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        self.calls.append((func.__name__, *args))
+        if func.__name__ == self.fail:
+            raise RuntimeError("setter failed")
+        return func(*args, **(kwargs or {}))
 
 
 class TestCodegenRuntimeWrapper(TestCase):
@@ -87,7 +106,8 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn("orig_inputs = {}", source)
-        self.assertIn("torch._C._set_grad_enabled(False)", source)
+        self.assertIn("prior = _aot_runtime_enter_(False)", source)
+        self.assertIn("_aot_runtime_exit_(prior)", source)
         self.assertNotIn("_force_view_tracking_", source)
         self.assertNotIn("_is_view_replay_enabled", source)
         self.assertNotIn("_set_view_replay_enabled", source)
@@ -112,10 +132,46 @@ class TestCodegenRuntimeWrapper(TestCase):
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("torch._C._set_view_replay_enabled(True)", source)
-        self.assertIn("if not prev_view_replay_enabled:", source)
-        self.assertIn("torch._C._set_grad_enabled(True)", source)
-        self.assertIn("if not prev_grad_enabled:", source)
+        self.assertIn("prior = _aot_runtime_enter_(True)", source)
+        self.assertIn("_aot_runtime_exit_(prior)", source)
+
+    @parametrize("training", [True, False])
+    @parametrize("grad_enabled", [True, False])
+    @parametrize("view_replay", [True, False])
+    def test_aot_runtime_enter_exit(self, training, grad_enabled, view_replay):
+        with torch.set_grad_enabled(grad_enabled), view_tracking(view_replay):
+            prior = torch._C._aot_runtime_enter(training)
+            self.assertEqual(torch.is_grad_enabled(), training)
+            self.assertEqual(
+                torch._C._is_view_replay_enabled(), training or view_replay
+            )
+            torch._C._aot_runtime_exit(prior)
+            self.assertEqual(torch.is_grad_enabled(), grad_enabled)
+            self.assertEqual(torch._C._is_view_replay_enabled(), view_replay)
+
+    @parametrize("training", [True, False])
+    def test_aot_runtime_enter_exit_torch_function_mode(self, training):
+        mode = SetterMode()
+        with torch.enable_grad(), view_tracking(False), mode:
+            torch._C._aot_runtime_exit(torch._C._aot_runtime_enter(training))
+        setter = "_set_view_replay_enabled" if training else "_set_grad_enabled"
+        self.assertEqual(mode.calls, [(setter, training), (setter, not training)])
+
+    def test_aot_runtime_enter_restores_state_on_error(self):
+        with torch.no_grad(), view_tracking(False):
+            with SetterMode(fail="_set_grad_enabled"):
+                with self.assertRaisesRegex(RuntimeError, "setter failed"):
+                    torch._C._aot_runtime_enter(True)
+            self.assertFalse(torch._C._is_view_replay_enabled())
+            self.assertFalse(torch.is_grad_enabled())
+
+    def test_aot_runtime_exit_restores_grad_mode_on_error(self):
+        with torch.no_grad(), view_tracking(False):
+            prior = torch._C._aot_runtime_enter(True)
+            with SetterMode(fail="_set_view_replay_enabled"):
+                with self.assertRaisesRegex(RuntimeError, "setter failed"):
+                    torch._C._aot_runtime_exit(prior)
+            self.assertFalse(torch.is_grad_enabled())
 
     def test_training_with_detach_indices(self):
         """
@@ -141,7 +197,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn(".detach()", source)
-        self.assertIn("torch._C._set_view_replay_enabled(True)", source)
+        self.assertIn("_aot_runtime_enter_(True)", source)
 
     def test_inference_with_mutation(self):
         """
@@ -345,7 +401,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn("_DisableAutocast_", source)
-        self.assertIn("torch._C._set_grad_enabled(False)", source)
+        self.assertIn("_aot_runtime_enter_(False)", source)
 
     def test_training_disable_amp(self):
         """
@@ -368,7 +424,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn("_DisableAutocast_", source)
-        self.assertIn("torch._C._set_view_replay_enabled(True)", source)
+        self.assertIn("_aot_runtime_enter_(True)", source)
 
     def test_dynamic_dims(self):
         """
@@ -534,6 +590,8 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertIn(".requires_grad", source)
         self.assertIn(".copy_(", source)
 
+
+instantiate_parametrized_tests(TestCodegenRuntimeWrapper)
 
 if __name__ == "__main__":
     run_tests()
