@@ -276,6 +276,12 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         r"\s+(?P<field>dynamic_strides|dynamic_shapes)\s*\[\s*(?P<bound>[^\]]*?)\s*\]\s*$",
         re.DOTALL,
     )
+    _ABI_LIST_ELEMENTS = re.compile(
+        r"\s*(?P<type>[A-Za-z_]\w*)\s+elements"
+        r"\s*\[\s*(?P<bound>[^\]]*?)\s*\]\s*$",
+        re.DOTALL,
+    )
+    _ABI_LIST_COUNT = re.compile(r"\s*int32_t\s+count\s*$")
     # An allowlist rather than "not int32_t": an unknown spelling or typedef alias is
     # refused loudly, where assuming 64-bit would restore the silent truncation.
     _ABI_INT64 = frozenset({"int64_t", "std::int64_t", "long long", "signed long long"})
@@ -324,7 +330,67 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                 f"a list, so it cannot describe the kernel's ABI. Re-export this "
                 f"point."
             )
+        flat_targs: list[tuple[object, str | None]] = []
         for a in targs:
+            if not isinstance(a, dict) or not isinstance(a.get("name"), str):
+                flat_targs.append((a, None))
+                continue
+            name = a["name"]
+            items = a.get("items")
+            if items is None:
+                flat_targs.append((a, name))
+                continue
+            if not isinstance(items, list) or not items:
+                raise RuntimeError(
+                    f"{path}: tensor list {name}'s items is {items!r}, not a "
+                    f"non-empty list. Re-export this point, and check the builder's "
+                    f"tensor_args."
+                )
+            list_name = f"{prefix}_TensorList_{name}_t"
+            found = structs.get(list_name, [])
+            if len(found) != 1:
+                raise RuntimeError(
+                    f"{path}: expected exactly one `typedef struct {{...}} "
+                    f"{list_name};`, found {len(found)}. Re-export this point; "
+                    f"the launcher must match the DSL tensor-list ABI."
+                )
+            elements = None
+            has_count = False
+            for decl_text in found[0].split(";"):
+                member = self._ABI_LIST_ELEMENTS.match(decl_text)
+                if member:
+                    elements = (member.group("type"), member.group("bound"))
+                elif self._ABI_LIST_COUNT.match(decl_text):
+                    has_count = True
+            if elements is None or not has_count:
+                raise RuntimeError(
+                    f"{path}: {list_name} does not contain readable elements[] "
+                    f"and int32_t count members. Re-export this point; if the DSL "
+                    f"changed its tensor-list ABI, update validate_abi."
+                )
+            element_type, bound = elements
+            expected_type = f"{prefix}_Tensor_{name}_t"
+            if element_type != expected_type:
+                raise RuntimeError(
+                    f"{path}: {list_name} stores {element_type}, expected "
+                    f"{expected_type}. Re-export this point; the sidecar names "
+                    f"the wrong tensor list."
+                )
+            if re.fullmatch(r"0[0-9]+[uUlL]*", bound):
+                raise RuntimeError(
+                    f"{path}: {list_name}'s elements bound `{bound}` has a leading "
+                    f"zero, which C reads as octal. Re-export this point."
+                )
+            count = re.fullmatch(r"(?P<n>[0-9]{1,6})[uUlL]*", bound)
+            if count is None or int(count.group("n")) != len(items):
+                raise RuntimeError(
+                    f"{path}: {list_name} declares elements[{bound}], but the "
+                    f"sidecar lists {len(items)} item(s). Re-export this point; "
+                    f"the launcher must fill exactly the exported list."
+                )
+            flat_targs.extend((item, name) for item in items)
+
+        for a, abi_name in flat_targs:
             if not isinstance(a, dict) or not isinstance(a.get("name"), str):
                 raise RuntimeError(
                     f"{path}: a tensor_args entry is {a!r}, which names no tensor. "
@@ -332,7 +398,7 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                     f"point, and check the builder's tensor_args."
                 )
             name = a["name"]
-            tname = f"{prefix}_Tensor_{name}_t"
+            tname = f"{prefix}_Tensor_{abi_name}_t"
             # Two names for one thing, both external: the DSL's C header declares
             # dynamic_shapes, the sidecar records dynamic_sizes after aten. Kept as
             # an explicit (header member, sidecar key) pair so each message below can
@@ -454,27 +520,46 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         targs = sidecar["tensor_args"]
         sargs = sidecar.get("scalar_args", [])
         fills = []
-        for a in targs:
+        params = []
+        call_args = []
+
+        def fill_tensor(a, target):
             n = a["name"]
-            fills.append(f"  {prefix}_Tensor_{n}_t {n}_s;")
             if a.get("read_only"):
                 # const_data_ptr: a mutable data_ptr() would materialize
                 # copy-on-write inputs. The ABI field is void*, hence the
                 # const_cast; the kernel only reads through it.
-                fills.append(f"  {n}_s.data = const_cast<void*>({n}.const_data_ptr());")
+                fills.append(
+                    f"  {target}.data = const_cast<void*>({n}.const_data_ptr());"
+                )
             else:
-                fills.append(f"  {n}_s.data = {n}.mutable_data_ptr();")
+                fills.append(f"  {target}.data = {n}.mutable_data_ptr();")
             for slot, dim in enumerate(a.get("dynamic_sizes", [])):
                 fills.append(
-                    f"  {n}_s.dynamic_shapes[{slot}] = static_cast<int32_t>({n}.size({dim}));"
+                    f"  {target}.dynamic_shapes[{slot}] = "
+                    f"static_cast<int32_t>({n}.size({dim}));"
                 )
             for slot, dim in enumerate(a.get("dynamic_strides", [])):
-                fills.append(f"  {n}_s.dynamic_strides[{slot}] = {n}.stride({dim});")
-        params = [f"const at::Tensor& {a['name']}" for a in targs]
+                fills.append(f"  {target}.dynamic_strides[{slot}] = {n}.stride({dim});")
+
+        for a in targs:
+            n = a["name"]
+            items = a.get("items")
+            if items is None:
+                fills.append(f"  {prefix}_Tensor_{n}_t {n}_s;")
+                params.append(f"const at::Tensor& {n}")
+                fill_tensor(a, f"{n}_s")
+            else:
+                fills.append(f"  {prefix}_TensorList_{n}_t {n}_s;")
+                fills.append(f"  {n}_s.count = {len(items)};")
+                for i, item in enumerate(items):
+                    params.append(f"const at::Tensor& {item['name']}")
+                    fill_tensor(item, f"{n}_s.elements[{i}]")
+            call_args.append(f"&{n}_s")
         params += [f"{a['ctype']} {a['name']}" for a in sargs]
         # Matches the exported signature: tensor structs, then scalars by value,
         # then the stream.
-        call_args = [f"&{a['name']}_s" for a in targs] + [a["name"] for a in sargs]
+        call_args += [a["name"] for a in sargs]
         return self.LAUNCHER_TMPL.format(
             prefix=prefix,
             tparams=", ".join(params),
