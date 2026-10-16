@@ -85,7 +85,7 @@ class SelectiveBuilder:
         }
         top_level_keys = set(data.keys())
         if len(top_level_keys - valid_top_level_keys) > 0:
-            raise Exception(  # noqa: TRY002
+            raise ValueError(
                 "Got unexpected top level keys: {}".format(
                     ",".join(top_level_keys - valid_top_level_keys),
                 )
