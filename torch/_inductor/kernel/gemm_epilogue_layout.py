@@ -8,17 +8,20 @@ reduction dataflow and kernel scheduling remain with their respective owners.
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR,
     FlexGemmOutputContraction,
+    FlexGemmOutputExpansion,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     FlexGemmStructuralInt,
+    is_pointwise_node,
     tensor_meta_shape,
+    view_or_reshape_args,
 )
 from torch._inductor.kernel.gemm_epilogue import (
     GemmReductionGeometry,
@@ -32,6 +35,7 @@ from torch._inductor.kernel.gemm_epilogue_utils import (
     statically_known_equal,
     statically_known_shape_equal,
 )
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -307,4 +311,96 @@ def build_output_contraction_plan(
         {node: use.index % use.group for node, use in lanes},
         {use.layout_node: GemmReductionGeometry(use.group, 1) for _, use in lanes},
         tuple(value for _, use in lanes for value in use.structural_values),
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class OutputExpansionPlan:
+    """A main output packing two lanes interleaved along N: ``pack`` is the stack
+    (or cat of unsqueezed lanes), ``alias_nodes`` the reshapes to ``[..., 2N]``."""
+
+    transform: FlexGemmOutputExpansion
+    pack: torch.fx.Node
+    lanes: tuple[torch.fx.Node, torch.fx.Node]
+    alias_nodes: frozenset[torch.fx.Node]
+
+
+def unary_pointwise_source(node: torch.fx.Node) -> torch.fx.Node | None:
+    """Return the tensor input of a shape-preserving pointwise node whose other
+    operands are literals or a dtype (``x + 1``, ``x.to(dtype)``, not broadcasts)."""
+    operands = (*node.args, *node.kwargs.values())
+    inputs = OrderedSet(arg for arg in operands if isinstance(arg, torch.fx.Node))
+    literals = (torch.fx.Node, bool, int, float, torch.dtype, type(None))
+    if (
+        not is_pointwise_node(node)
+        or len(inputs) != 1
+        or not all(isinstance(arg, literals) for arg in operands)
+    ):
+        return None
+    source = next(iter(inputs))
+    shape, source_shape = tensor_meta_shape(node) or (), tensor_meta_shape(source)
+    if source_shape is None or not statically_known_shape_equal(shape, source_shape):
+        return None
+    return source
+
+
+def match_output_expansion(
+    outputs: GemmOutputPlan, gemm: torch.fx.Node
+) -> OutputExpansionPlan | None:
+    """Match a main output ``stack([a, b], -1).view(..., 2N)`` of GEMM-shaped lanes.
+
+    ``torch.stack`` reaches the body decomposed as ``cat([a.unsqueeze(-1),
+    b.unsqueeze(-1)], -1)``; literal pointwise ops after the view lower generically.
+    """
+    aten = torch.ops.aten
+    value = outputs.output
+    while (view_args := view_or_reshape_args(value)) is None:
+        source = unary_pointwise_source(value)
+        if source is None:
+            return None
+        value = source
+    if not isinstance(view_args[0], torch.fx.Node):
+        return None
+    pack = view_args[0]
+    gemm_shape = tensor_meta_shape(gemm)
+    if gemm_shape is None or pack.target not in (aten.stack.default, aten.cat.default):
+        return None
+    lane_dims = (-1, len(gemm_shape))
+    packed = pack.args[0]
+    if not isinstance(packed, (tuple, list)) or len(packed) != 2:
+        return None
+    if pack.target is aten.stack.default:
+        lanes, aliases = list(packed), [value]
+    elif pack.target is aten.cat.default and all(
+        isinstance(lane, torch.fx.Node)
+        and lane.target is aten.unsqueeze.default
+        and lane.args[1] in lane_dims
+        for lane in packed
+    ):
+        unsqueezes = cast("list[torch.fx.Node]", list(packed))
+        lanes, aliases = [node.args[0] for node in unsqueezes], [value, *unsqueezes]
+    else:
+        return None
+    if not all(isinstance(node, torch.fx.Node) for node in lanes):
+        return None
+    lane_nodes = cast("tuple[torch.fx.Node, torch.fx.Node]", tuple(lanes))
+    dim = pack.args[1] if len(pack.args) > 1 else pack.kwargs.get("dim", 0)
+    metas = [lane.meta.get("val") for lane in lane_nodes]
+    value_shape = tensor_meta_shape(value)
+    if (
+        dim not in lane_dims
+        or value_shape is None
+        or not all(
+            isinstance(meta, torch.Tensor)
+            and statically_known_shape_equal(meta.shape, gemm_shape)
+            and meta.dtype is getattr(metas[0], "dtype", None)
+            for meta in metas
+        )
+        or not statically_known_shape_equal(
+            value_shape, (*gemm_shape[:-1], 2 * gemm_shape[-1])
+        )
+    ):
+        return None
+    return OutputExpansionPlan(
+        FlexGemmOutputExpansion(), pack, lane_nodes, frozenset(aliases)
     )
