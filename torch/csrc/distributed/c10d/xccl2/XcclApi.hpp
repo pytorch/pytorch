@@ -212,6 +212,66 @@ class XcclApi {
   [[nodiscard]] virtual onecclResult_t memAlloc(void** buff, size_t size) = 0;
   [[nodiscard]] virtual onecclResult_t memFree(void* buff) = 0;
 
+  // Memory offload (suspend/resume) operations.
+  // Not supported by oneCCL yet.
+  [[nodiscard]] virtual onecclResult_t commSuspend(
+      onecclComm_t comm,
+      int flags) = 0;
+
+  [[nodiscard]] virtual onecclResult_t commResume(onecclComm_t comm) = 0;
+
+  [[nodiscard]] virtual onecclResult_t commMemStats(
+      onecclComm_t comm,
+      int stat,
+      uint64_t* value) = 0;
+
+  // Window / one-sided RMA operations.
+  // Not supported by oneCCL yet.
+  [[nodiscard]] virtual onecclResult_t commWindowRegister(
+      onecclComm_t comm,
+      void* buffer,
+      size_t size,
+      onecclWindow_t* win,
+      int winFlags) = 0;
+
+  [[nodiscard]] virtual onecclResult_t commWindowDeregister(
+      onecclComm_t comm,
+      onecclWindow_t win) = 0;
+
+  [[nodiscard]] virtual onecclResult_t winGetUserPtr(
+      onecclComm_t comm,
+      onecclWindow_t win,
+      void** outUserPtr) = 0;
+
+  [[nodiscard]] virtual onecclResult_t putSignal(
+      const void* localbuff,
+      size_t count,
+      onecclDataType_t datatype,
+      int peer,
+      onecclWindow_t peerWin,
+      size_t peerWinOffset,
+      int sigIdx,
+      int ctx,
+      unsigned int flags,
+      onecclComm_t comm,
+      c10::xpu::XPUStream stream) = 0;
+
+  [[nodiscard]] virtual onecclResult_t signal(
+      int peer,
+      int sigIdx,
+      int ctx,
+      unsigned int flags,
+      onecclComm_t comm,
+      c10::xpu::XPUStream stream) = 0;
+
+  [[nodiscard]] virtual onecclResult_t waitSignal(
+      int peer,
+      int sigIdx,
+      int ctx,
+      int opCnt,
+      onecclComm_t comm,
+      c10::xpu::XPUStream stream) = 0;
+
   virtual void setVersionInfo() = 0;
 
   [[nodiscard]] int getVersion() const {
@@ -297,6 +357,15 @@ class DefaultXcclApi : public XcclApi {
 
   [[nodiscard]] onecclResult_t commDeregister(onecclComm_t comm, void* handle)
       override;
+
+  [[nodiscard]] onecclResult_t commSuspend(onecclComm_t comm, int flags) override;
+
+  [[nodiscard]] onecclResult_t commResume(onecclComm_t comm) override;
+
+  [[nodiscard]] onecclResult_t commMemStats(
+      onecclComm_t comm,
+      int stat,
+      uint64_t* value) override;
 
   // Point-to-point operations
   [[nodiscard]] onecclResult_t send(
@@ -401,6 +470,51 @@ class DefaultXcclApi : public XcclApi {
   // Allocator
   [[nodiscard]] onecclResult_t memAlloc(void** buff, size_t size) override;
   [[nodiscard]] onecclResult_t memFree(void* buff) override;
+
+  [[nodiscard]] onecclResult_t commWindowRegister(
+      onecclComm_t comm,
+      void* buffer,
+      size_t size,
+      onecclWindow_t* win,
+      int winFlags) override;
+
+  [[nodiscard]] onecclResult_t commWindowDeregister(
+      onecclComm_t comm,
+      onecclWindow_t win) override;
+
+  [[nodiscard]] onecclResult_t winGetUserPtr(
+      onecclComm_t comm,
+      onecclWindow_t win,
+      void** outUserPtr) override;
+
+  [[nodiscard]] onecclResult_t putSignal(
+      const void* localbuff,
+      size_t count,
+      onecclDataType_t datatype,
+      int peer,
+      onecclWindow_t peerWin,
+      size_t peerWinOffset,
+      int sigIdx,
+      int ctx,
+      unsigned int flags,
+      onecclComm_t comm,
+      c10::xpu::XPUStream stream) override;
+
+  [[nodiscard]] onecclResult_t signal(
+      int peer,
+      int sigIdx,
+      int ctx,
+      unsigned int flags,
+      onecclComm_t comm,
+      c10::xpu::XPUStream stream) override;
+
+    [[nodiscard]] onecclResult_t waitSignal(
+      int peer,
+      int sigIdx,
+      int ctx,
+      int opCnt,
+      onecclComm_t comm,
+      c10::xpu::XPUStream stream) override;
 
   void setVersionInfo() override;
 

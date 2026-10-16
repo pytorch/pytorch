@@ -287,6 +287,113 @@ onecclResult_t DefaultXcclApi::memFree(void* buff) {
   return onecclMemFree(buff);
 }
 
+// oneCCL does not have the support for suspend, resume, memstats
+// yet, so leaving the APIs as placeholders.
+// Uncomment the calls (and drop the [[maybe_unused]])
+// once it does.
+onecclResult_t DefaultXcclApi::commSuspend(
+  [[maybe_unused]] onecclComm_t comm,
+  [[maybe_unused]] int flags) {
+  // return onecclCommSuspend(comm, flags);
+  return onecclNotImplemented;
+}
+
+onecclResult_t DefaultXcclApi::commResume([[maybe_unused]] onecclComm_t comm) {
+  // return onecclCommResume(comm);
+  return onecclNotImplemented;
+}
+
+onecclResult_t DefaultXcclApi::commMemStats(
+  [[maybe_unused]] onecclComm_t comm,
+  [[maybe_unused]] int stat,
+  [[maybe_unused]] uint64_t* value) {
+  // return onecclCommMemStats(comm, static_cast<onecclCommMemStat_t>(stat), value);
+  return onecclNotImplemented;
+}
+
+// oneCCL does not have the implementation for the Window
+// and related APIs yet, so leaving the APIs as placeholders.
+// Uncomment the calls (and drop the [[maybe_unused]])
+// once it does.
+onecclResult_t DefaultXcclApi::commWindowRegister(
+  [[maybe_unused]] onecclComm_t comm,
+  [[maybe_unused]] void* buffer,
+  [[maybe_unused]] size_t size,
+  [[maybe_unused]] onecclWindow_t* win,
+  [[maybe_unused]] int winFlags) {
+  // return onecclCommWindowRegister(comm, buffer, size, win, winFlags);
+  return onecclNotImplemented;
+}
+
+onecclResult_t DefaultXcclApi::commWindowDeregister(
+  [[maybe_unused]] onecclComm_t comm,
+  [[maybe_unused]] onecclWindow_t win) {
+  // return onecclCommWindowDeregister(comm, win);
+  return onecclNotImplemented;
+}
+
+onecclResult_t DefaultXcclApi::winGetUserPtr(
+  [[maybe_unused]] onecclComm_t comm,
+  [[maybe_unused]] onecclWindow_t win,
+  [[maybe_unused]] void** outUserPtr) {
+  // return onecclWinGetUserPtr(comm, win, outUserPtr);
+  return onecclNotImplemented;
+}
+
+onecclResult_t DefaultXcclApi::putSignal(
+  [[maybe_unused]] const void* localbuff,
+  [[maybe_unused]] size_t count,
+  [[maybe_unused]] onecclDataType_t datatype,
+  [[maybe_unused]] int peer,
+  [[maybe_unused]] onecclWindow_t peerWin,
+  [[maybe_unused]] size_t peerWinOffset,
+  [[maybe_unused]] int sigIdx,
+  [[maybe_unused]] int ctx,
+  [[maybe_unused]] unsigned int flags,
+  [[maybe_unused]] onecclComm_t comm,
+  [[maybe_unused]] c10::xpu::XPUStream stream) {
+  // return onecclPutSignal(
+  //    localbuff,
+  //    count,
+  //    datatype,
+  //    peer,
+  //    peerWin,
+  //    peerWinOffset,
+  //    sigIdx,
+  //    ctx,
+  //    flags,
+  //    comm,
+  //    stream);
+  return onecclNotImplemented;
+}
+
+onecclResult_t DefaultXcclApi::signal(
+    [[maybe_unused]] int peer,
+    [[maybe_unused]] int sigIdx,
+    [[maybe_unused]] int ctx,
+    [[maybe_unused]] unsigned int flags,
+    [[maybe_unused]] onecclComm_t comm,
+    [[maybe_unused]] c10::xpu::XPUStream stream) {
+  // return onecclSignal(peer, sigIdx, ctx, flags, comm, stream);
+  return onecclNotImplemented;
+}
+
+onecclResult_t DefaultXcclApi::waitSignal(
+    [[maybe_unused]] int peer,
+    [[maybe_unused]] int sigIdx,
+    [[maybe_unused]] int ctx,
+    [[maybe_unused]] int opCnt,
+    [[maybe_unused]] onecclComm_t comm,
+    [[maybe_unused]] c10::xpu::XPUStream stream) {
+  // onecclWaitSignalDesc_t desc;
+  // desc.opCnt = opCnt;
+  // desc.peer = peer;
+  // desc.sigIdx = sigIdx;
+  // desc.ctx = ctx;
+  // return onecclWaitSignal(1, &desc, comm, stream);
+  return onecclNotImplemented;
+}
+
 void DefaultXcclApi::setVersionInfo() {
   int version = -1;
   onecclResult_t res = onecclGetVersion(&version);
