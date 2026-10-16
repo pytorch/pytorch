@@ -24,6 +24,8 @@ from torch._inductor.kernel.gemm_epilogue import (
 )
 from torch._logging import LazyString, trace_structured
 
+from .constraints import FlexGemmOutputExpansion
+
 
 if TYPE_CHECKING:
     from torch._inductor import ir
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
         FlexGemmOutputStorageLayout,
     )
 
-    from .constraints import FlexGemmLocalReduceGeometry, FlexGemmOutputContraction
+    from .constraints import FlexGemmLocalReduceGeometry, FlexGemmOutputTransform
 
 
 flex_gemm_log = logging.getLogger(__name__)
@@ -96,7 +98,7 @@ def format_flex_gemm_problem(
     *,
     alpha: float,
     beta: float,
-    tuned: bool,
+    autotune: bool,
     fast_math: bool,
     explicit_config: dict[str, Any] | None,
 ) -> str:
@@ -105,7 +107,7 @@ def format_flex_gemm_problem(
         f"gemm_op: {gemm_op}",
         "kernel_options:",
         "  backend: QUACK",
-        f"  tuned: {tuned}",
+        f"  autotune: {autotune}",
         f"  fast_math: {fast_math}",
         f"  config: {explicit_config!r}",
         f"alpha: {alpha}",
@@ -151,10 +153,12 @@ def _format_geometry(geometry: "FlexGemmLocalReduceGeometry") -> str:
     return f"axis={axis}, group={geometry.group}"
 
 
-def _format_output_contraction(contraction: "FlexGemmOutputContraction | None") -> str:
-    """Format the logical contraction applied to the main output."""
+def _format_output_transform(contraction: "FlexGemmOutputTransform | None") -> str:
+    """Format the lane transform applied to the main output."""
     if contraction is None:
         return "none"
+    if isinstance(contraction, FlexGemmOutputExpansion):
+        return "N-axis, expansion, layout=interleaved"
     layout = "chunked" if contraction.chunked else "interleaved"
     return f"N-axis, group={contraction.group}, layout={layout}"
 
@@ -201,7 +205,7 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
     lines = [
         "outputs:",
         f"  main: {_format_fx_tensor(outputs.output)}",
-        f"  output_contraction: {_format_output_contraction(outputs.output_contraction)}",
+        f"  output_transform: {_format_output_transform(outputs.output_transform)}",
     ]
     if outputs.aux_outputs:
         lines.append("  auxiliary:")
@@ -210,6 +214,14 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
         )
     else:
         lines.append("  auxiliary: (none)")
+    if outputs.indexed_output is not None:
+        lines.extend(
+            (
+                "indexed:",
+                f"  output: {_format_fx_tensor(outputs.indexed_output.node)}",
+                f"  indices: {_format_fx_tensor(outputs.indexed_output.indices)}",
+            )
+        )
 
     lines.append("")
     if outputs.local_reduce is None:
@@ -303,6 +315,7 @@ def format_flex_gemm_lowering_plan(
     output_dtype: torch.dtype,
     capture_kinds: Sequence[tuple[str, str]],
     aux_metas: Sequence[torch.Tensor],
+    indexed_metas: Sequence[torch.Tensor],
     local_reduce_metas: Sequence[torch.Tensor],
     *,
     local_reduce_layout: "FlexGemmOutputStorageLayout | None",
@@ -320,6 +333,8 @@ def format_flex_gemm_lowering_plan(
     )
     lines.append("")
     _append_items(lines, "auxiliary_storage", map(_format_tensor_meta, aux_metas))
+    lines.append("")
+    _append_items(lines, "indexed_storage", map(_format_tensor_meta, indexed_metas))
     lines.append("")
     if local_reduce_metas:
         _append_items(
@@ -339,11 +354,11 @@ def format_flex_gemm_lowering_plan(
 
 
 def format_flex_gemm_config_candidates(
-    configs: "Sequence[QuackConfigKey]", *, tuned: bool
+    configs: "Sequence[QuackConfigKey]", *, autotune: bool
 ) -> str:
     """Render the QuACK configs Inductor will benchmark or pin."""
     lines = [
-        f"mode: {'autotune' if tuned else 'default'}",
+        f"mode: {'autotune' if autotune else 'default'}",
         f"candidates: {len(configs)}",
     ]
     for config in configs:

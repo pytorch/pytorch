@@ -15,6 +15,8 @@ from torch.types import IntLikeType
 from torch.utils._ordered_set import OrderedSet
 
 
+INDEXED_OUTPUT_INDICES_ARG_NAME: Final = "indexed_output_indices"
+INDEXED_OUTPUT_STORE_ARG_NAME: Final = "indexed_output"
 LOCAL_REDUCE_FEED_MAIN_ARG_NAME: Final = "local_reduce0"
 LOCAL_REDUCE_PREPASS_FN_SUFFIX: Final = "_local_reduce_prepass"
 LOCAL_REDUCE_STORE_ARG_NAME: Final = "local_reduce_store"
@@ -96,6 +98,10 @@ FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
     "FlexGEMM grouped main outputs compose only with the unchanged physical "
     "GEMM output as an auxiliary"
 )
+FLEX_GEMM_OUTPUT_EXPANSION_COMPOSITION_ERROR = (
+    "FlexGEMM interleaved main outputs compose only with GEMM-shaped auxiliaries "
+    "computed before the lanes are packed"
+)
 FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: contracted output shape must equal the "
     "physical GEMM output shape with N divided by the contraction group"
@@ -103,6 +109,11 @@ FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
 FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: main output shape must equal the physical "
     "GEMM output shape"
+)
+FLEX_GEMM_INDEXED_OUTPUT_SOURCE_ERROR = (
+    "FlexGEMM indexed outputs must gather from the returned main output (or the "
+    "value whose dtype conversion is the main output) and keep its dtype: write "
+    "main.gather(1, indices[:, None]).squeeze(1)"
 )
 FLEX_GEMM_CAPTURE_SHAPE_ERROR = (
     "FlexGEMM captured tensor epilogue args must match the GEMM output shape "
@@ -231,6 +242,22 @@ class FlexGemmOutputContraction:
     def concat_layout(self) -> tuple[str, ...]:
         """Return QuACK inputs whose contiguous chunks must be interleaved."""
         return ("B",) if self.chunked else ()
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmOutputExpansion:
+    """Main output stores two epilogue lanes interleaved along N.
+
+    ``out[..., 2 * n + j]`` is lane ``j`` at accumulator column ``n``; the body
+    returns ``torch.stack([a, b], -1).view(..., 2 * N)``.
+    """
+
+    @property
+    def concat_layout(self) -> tuple[str, ...]:
+        return ()
+
+
+FlexGemmOutputTransform = FlexGemmOutputContraction | FlexGemmOutputExpansion
 
 
 FlexGemmLocalReduceGeometry = GemmReductionGeometry

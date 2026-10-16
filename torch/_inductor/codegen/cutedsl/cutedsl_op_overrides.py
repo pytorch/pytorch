@@ -434,6 +434,18 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def truediv(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
+        # FlexGEMM QUACK epilogues pass Python literals; Inductor IR passes rendered
+        # strings and keeps division. Reciprocal multiplication avoids costly division.
+        # Powers of two allow an exact rewrite when the reciprocal is exactly
+        # representable as a normal fp32. Other constants require fast math because
+        # results can differ in the last bit(s).
+        if isinstance(b, (int, float)) and math.isfinite(b) and b != 0:
+            reciprocal = 1.0 / b
+            exact = abs(math.frexp(b)[0]) == 0.5 and 2**-126 <= abs(reciprocal)
+            if exact or _CUTEDSL_FAST_MATH.get():
+                return CuteDSLOpOverrides._apply_binary_op(
+                    a, repr(reciprocal), "({a} * {b})"
+                )
         return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} / {b})")
 
     @staticmethod
