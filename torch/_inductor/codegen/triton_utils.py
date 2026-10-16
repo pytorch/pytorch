@@ -66,11 +66,8 @@ def should_unwrap_unspec_arg(name: str) -> bool:
     if getattr(wrapper_code, "preserve_zero_dim_tensor_args", False):
         return False
 
-    device_type = V.graph.get_current_device_or_throw().type
-    if device_type == "mtia":
-        return False
-    # Unwrap on all other accelerators.
-    if device_type != "cpu":
+    # Unwrap on all devices except CPU
+    if V.graph.get_current_device_or_throw().type != "cpu":
         return True
     # Only unwrap on CPU if the input is not used as an output.
     return name not in V.graph.mutated_buffers
