@@ -25,6 +25,7 @@ import functools
 import getpass
 import inspect
 import itertools
+import json
 import logging
 import os
 import re
@@ -843,6 +844,9 @@ class NopInputReader:
         self.total += 1
 
 
+_STORAGE_MANIFEST_SCHEMA_VERSION = 1
+
+
 # TODO: Support bundling the entire repro into a zip file for ease of
 # transferring around
 class InputReader:
@@ -855,7 +859,62 @@ class InputReader:
         # reproduces even on random data.
         if save_dir is None:
             log.warning("no save_dir specified, will generate random data")
-        self.store = ContentStoreReader(save_dir) if save_dir is not None else None
+        self.store = None
+        self.strict_storage = False
+        if save_dir is not None:
+            storage_manifest_path = os.path.join(save_dir, "storage_manifest.json")
+            capture_metadata_path = os.path.join(save_dir, "capture_metadata.json")
+            storage_manifest_required = False
+            if os.path.exists(capture_metadata_path):
+                with open(capture_metadata_path) as f:
+                    capture_metadata = json.load(f)
+                storage_manifest_required = (
+                    capture_metadata.get("storage_manifest_required") is True
+                )
+            if os.path.exists(storage_manifest_path):
+                with open(storage_manifest_path) as f:
+                    storage_manifest = json.load(f)
+                if not isinstance(storage_manifest, dict):
+                    raise ValueError("storage manifest must be a JSON object")
+                if (
+                    storage_manifest.get("schema_version")
+                    != _STORAGE_MANIFEST_SCHEMA_VERSION
+                ):
+                    raise ValueError(
+                        "unsupported storage manifest schema: "
+                        f"{storage_manifest.get('schema_version')}"
+                    )
+                store = storage_manifest.get("store")
+                if not isinstance(store, str) or not store:
+                    raise ValueError(
+                        "storage manifest 'store' must be a non-empty string"
+                    )
+                storages = storage_manifest.get("storages")
+                if not isinstance(storages, dict):
+                    raise ValueError("storage manifest 'storages' must be an object")
+                store_root = os.path.abspath(os.path.join(save_dir, store))
+                capture_root = os.path.dirname(os.path.abspath(save_dir))
+                try:
+                    inside_capture = (
+                        os.path.commonpath((capture_root, store_root)) == capture_root
+                    )
+                except ValueError:
+                    inside_capture = False
+                if not inside_capture:
+                    raise ValueError(
+                        f"content store path escapes the capture root: {store_root}"
+                    )
+                self.store = ContentStoreReader(
+                    store_root,
+                    storage_metadata=storages,
+                )
+                self.strict_storage = True
+            elif storage_manifest_required:
+                raise FileNotFoundError(
+                    f"required storage manifest is missing: {storage_manifest_path}"
+                )
+            else:
+                self.store = ContentStoreReader(save_dir)
         self.args: list[Any] = []
         self.pbar = pbar
 
@@ -875,7 +934,8 @@ class InputReader:
             try:
                 storage = self.store.read_storage(storage_hash)
             except FileNotFoundError:
-                pass
+                if self.strict_storage:
+                    raise
             else:
                 if device != storage.device:
                     log.warning("device mismatch: %s != %s", device, storage.device)
@@ -980,27 +1040,50 @@ def _serialize_sym_tuple(vals: Sequence[int | torch.SymInt]) -> str:
 
 
 class InputWriter:
-    def __init__(self, save_dir: str | None, *, stable_hash: bool = False) -> None:
+    def __init__(
+        self,
+        save_dir: str | None,
+        *,
+        stable_hash: bool = False,
+        content_store: ContentStoreWriter | None = None,
+    ) -> None:
         self._lines: list[str] = []
         # TODO: consider ensuring tensor and storage counters line up?
         self.storage_counter = itertools.count()
         self.save_dir = save_dir
-        self.store = (
-            ContentStoreWriter(save_dir, stable_hash=stable_hash)
-            if save_dir is not None
-            else None
-        )
+        self.store = content_store
+        if self.store is None and save_dir is not None:
+            self.store = ContentStoreWriter(save_dir, stable_hash=stable_hash)
         self.seen_storages: dict[StorageWeakRef, str] = {}
+        self.storage_hashes: set[str] = set()
 
     def lines(self) -> list[str]:
         r = [
             "def load_args(reader):",
         ]
-        r.extend(f"    {l}" for l in self._lines)
+        r.extend(f"    {l}" for l in self._lines or ["pass"])
         # In case we need to change the internal format of load_args
         # in an FC-breaking way
         r.append("load_args._version = 0")
         return r
+
+    def write_storage_manifest(self) -> None:
+        """Record which content-store storages this bundle's load_args reads.
+
+        InputReader uses the manifest to locate and decode those storages,
+        including from a store shared with sibling bundles.
+        """
+        if self.save_dir is None or self.store is None:
+            raise RuntimeError("a storage manifest needs a save_dir and a store")
+        manifest = {
+            "schema_version": _STORAGE_MANIFEST_SCHEMA_VERSION,
+            "store": os.path.relpath(self.store.loc, self.save_dir),
+            "storages": {
+                h: self.store.storage_metadata[h] for h in sorted(self.storage_hashes)
+            },
+        }
+        with open(os.path.join(self.save_dir, "storage_manifest.json"), "w") as f:
+            json.dump(manifest, f, indent=2)
 
     # Storages are untyped, but we need to initialize them with data if
     # we don't have the real data, so we give a hint saying what kind
@@ -1039,6 +1122,7 @@ class InputWriter:
         storage_hash = None
         if self.store is not None and untyped_storage.device.type != "meta":
             storage_hash = self.store.write_storage(untyped_storage)
+            self.storage_hashes.add(storage_hash)
         self._lines.append(
             f"{v} = reader.storage({storage_hash!r}, {nbytes_source}{maybe_device}{maybe_dtype_hint})"
         )

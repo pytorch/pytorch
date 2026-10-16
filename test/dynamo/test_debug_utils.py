@@ -2,6 +2,7 @@
 
 import ast
 import itertools
+import json
 import math
 import os
 from unittest.mock import patch
@@ -14,12 +15,20 @@ from torch._dynamo.debug_utils import (
     _serialize_sym_expr,
     aot_graph_input_parser,
     generate_env_vars_string,
+    InputReader,
+    InputWriter,
     NNModuleToString,
 )
 from torch._dynamo.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+    TemporaryDirectoryName,
+)
+from torch.utils._content_store import ContentStoreWriter
 
 
 f32 = torch.float32
@@ -1132,6 +1141,116 @@ class TestDynamoConfigOverrideIntegration(TestCase):
             UserWarning, "TORCH_COMPILE_OVERRIDE_DYNAMO_CONFIGS"
         ):
             _create_dynamo_config_router("0:specialize_float=True")
+
+
+class TestStorageManifest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def write_bundle(
+        self, root: str, args: list[torch.Tensor]
+    ) -> tuple[str, str, InputWriter]:
+        bundle = os.path.join(root, "bundle")
+        os.makedirs(bundle)
+        store = ContentStoreWriter(os.path.join(root, "store"))
+        writer = InputWriter(bundle, content_store=store)
+        for i, arg in enumerate(args):
+            writer.tensor(f"arg{i}", arg)
+        writer.write_storage_manifest()
+        return bundle, "\n".join(writer.lines()), writer
+
+    def load(self, bundle: str, source: str) -> list[object]:
+        namespace: dict[str, object] = {"torch": torch, "device": torch.device}
+        exec(source, namespace)
+        reader = InputReader(save_dir=bundle)
+        namespace["load_args"](reader)
+        return reader.args
+
+    def test_round_trip_through_shared_store(self):
+        x = torch.arange(8.0)
+        args = [x, x[2:], torch.ones(3)]
+        with TemporaryDirectoryName() as root:
+            bundle, source, writer = self.write_bundle(root, args)
+            with open(os.path.join(bundle, "storage_manifest.json")) as f:
+                manifest = json.load(f)
+            self.assertEqual(manifest["store"], os.path.join("..", "store"))
+            self.assertEqual(set(manifest["storages"]), writer.storage_hashes)
+            self.assertEqual(len(writer.storage_hashes), 2)
+            loaded = self.load(bundle, source)
+        self.assertEqual(loaded, args)
+
+    @parametrize(
+        "case,message",
+        [
+            ("not_object", "must be a JSON object"),
+            ("schema_version", "unsupported storage manifest schema"),
+            ("missing_store", "'store' must be a non-empty string"),
+            ("empty_store", "'store' must be a non-empty string"),
+            ("storages_list", "'storages' must be an object"),
+            ("store_escapes", "escapes the capture root"),
+        ],
+    )
+    def test_malformed_manifest_is_rejected(self, case, message):
+        with TemporaryDirectoryName() as root:
+            bundle, _, _ = self.write_bundle(root, [torch.ones(2)])
+            path = os.path.join(bundle, "storage_manifest.json")
+            with open(path) as f:
+                manifest = json.load(f)
+            if case == "not_object":
+                manifest = [manifest]
+            elif case == "schema_version":
+                manifest["schema_version"] = 2
+            elif case == "missing_store":
+                del manifest["store"]
+            elif case == "empty_store":
+                manifest["store"] = ""
+            elif case == "storages_list":
+                manifest["storages"] = []
+            else:
+                manifest["store"] = os.path.join("..", "..", "elsewhere")
+            with open(path, "w") as f:
+                json.dump(manifest, f)
+            with self.assertRaisesRegex(ValueError, message):
+                InputReader(save_dir=bundle)
+
+    def test_required_manifest_must_exist(self):
+        with TemporaryDirectoryName() as root:
+            bundle, _, _ = self.write_bundle(root, [torch.ones(2)])
+            os.unlink(os.path.join(bundle, "storage_manifest.json"))
+            with open(os.path.join(bundle, "capture_metadata.json"), "w") as f:
+                json.dump({"storage_manifest_required": True}, f)
+            with self.assertRaisesRegex(FileNotFoundError, "storage manifest"):
+                InputReader(save_dir=bundle)
+
+    def test_missing_storage_is_an_error_only_with_a_manifest(self):
+        x = torch.ones(4)
+        with TemporaryDirectoryName() as root:
+            bundle, source, writer = self.write_bundle(root, [x])
+            (h,) = writer.storage_hashes
+            path = writer.store.storage_metadata[h]["path"]
+            os.unlink(os.path.join(root, "store", path))
+            with self.assertRaises(FileNotFoundError):
+                self.load(bundle, source)
+
+            legacy = os.path.join(root, "legacy")
+            legacy_writer = InputWriter(legacy)
+            legacy_writer.tensor("arg0", x)
+            (legacy_h,) = legacy_writer.storage_hashes
+            os.unlink(os.path.join(legacy, "storages", legacy_h))
+            (loaded,) = self.load(legacy, "\n".join(legacy_writer.lines()))
+        self.assertEqual(loaded.shape, x.shape)
+
+    def test_load_args_without_inputs(self):
+        writer = InputWriter(None)
+        namespace: dict[str, object] = {}
+        exec("\n".join(writer.lines()), namespace)
+        reader = InputReader()
+        namespace["load_args"](reader)
+        self.assertEqual(reader.args, [])
+        with self.assertRaisesRegex(RuntimeError, "needs a save_dir"):
+            writer.write_storage_manifest()
+
+
+instantiate_parametrized_tests(TestStorageManifest)
 
 
 if __name__ == "__main__":
