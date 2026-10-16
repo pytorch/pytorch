@@ -136,6 +136,21 @@ runs:
         if-no-files-found: warn
         path: test-reports-*.zip
 
+    # One object per report, so reports from every job in the run share a folder.
+    # A job's check run id is its job id.
+    - name: Store Test Run Reports on S3
+      id: s3-upload-run-reports
+      if: ${{ inputs.skip-s3 != 'true' && job.check_run_id }}
+      uses: seemethere/upload-artifact-s3@v5
+      continue-on-error: true
+      with:
+        s3-bucket: ${{ inputs.s3-bucket }}
+        s3-prefix: |
+          torchci-reports/${{ github.repository }}/${{ github.run_id }}/${{ job.check_run_id }}
+        retention-days: 14
+        if-no-files-found: ignore
+        path: test/torchci-reports/*.report.jsonl
+
     - name: Store Usage Logs on S3
       id: s3-upload-logs
       if: ${{ inputs.skip-s3 != 'true' }}
@@ -233,6 +248,17 @@ runs:
         path: |
           test/**/*.xml
           test/**/*.csv
+
+    - name: Store Test Run Reports on Github (fallback)
+      uses: actions/upload-artifact@v4
+      if: steps.check-s3.outputs.s3-failed == 'true' && job.check_run_id
+      continue-on-error: true
+      with:
+        # Add the run attempt, see [Artifact run attempt]
+        name: torchci-reports-runattempt${{ github.run_attempt }}-${{ job.check_run_id }}.zip
+        retention-days: 14
+        if-no-files-found: ignore
+        path: test/torchci-reports/*.report.jsonl
 
     - name: Store Usage Logs on Github (fallback)
       uses: actions/upload-artifact@v4
