@@ -59,6 +59,24 @@ NATIVE_YAML = """\
 - func: embmulti.beta(Tensor self, int k) -> Tensor
   structured_delegate: embmulti.beta_out
   dispatch: {}
+
+- func: embexact.all_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CUDA: embexact_all_out_cuda
+
+- func: embexact(Tensor self) -> Tensor
+  structured_delegate: embexact.all_out
+  dispatch: {}
+
+- func: embexact.dim_out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CUDA: embexact_dim_out_cuda
+
+- func: embexact.dim(Tensor self, int dim) -> Tensor
+  structured_delegate: embexact.dim_out
+  dispatch: {}
 """
 
 
@@ -219,6 +237,18 @@ class TestManifestValidation(unittest.TestCase):
         native_aot.validate_native_aot_manifests(
             {(DispatchKey.CUDA, "embmulti.beta"): m}, self.grouped
         )
+
+    def test_exact_unqualified_overload_accepted(self) -> None:
+        m = native_aot.NativeAotManifest(op="embexact", dispatch_key=DispatchKey.CUDA)
+        native_aot.validate_native_aot_manifests(
+            {(DispatchKey.CUDA, "embexact"): m}, self.grouped
+        )
+        matches = [
+            str(group.functional.func.name)
+            for group in self.grouped
+            if isinstance(group, NativeFunctionsGroup) and m.matches_group(group)
+        ]
+        self.assertEqual(matches, ["embexact"])
 
     def test_qualified_unknown_overload_rejected(self) -> None:
         m = native_aot.NativeAotManifest(

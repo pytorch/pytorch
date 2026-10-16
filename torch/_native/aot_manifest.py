@@ -34,6 +34,7 @@ _SPEC_DTYPES: dict[str, torch.dtype] = {
     "bfloat16": torch.bfloat16,
     "float16": torch.float16,
     "float64": torch.float64,
+    "int64": torch.int64,
 }
 
 
@@ -140,33 +141,26 @@ def _load_coverage() -> dict[tuple[str, str], _Coverage]:
         mod = load_by_path(f"{entry}_aot", path)
         family = getattr(mod, "declarations", None)
         for d in family() if family is not None else [mod]:
-            coverage[(d.ATEN_OP, d.DISPATCH_KEY)] = _Coverage(
+            value = _Coverage(
                 d.ATEN_OP, d.covered_axes, expand_specs(d.kernel_precompile_grid())
             )
+            for op in (d.ATEN_OP, *getattr(d, "ATEN_ALIASES", ())):
+                key = (op, d.DISPATCH_KEY)
+                if key in coverage:
+                    raise RuntimeError(f"duplicate native-AOT coverage for {op}")
+                coverage[key] = value
     return coverage
-
-
-def _base_name(op_symbol: str) -> str:
-    # Overload-qualified ("topk.values") and in-place ("scatter_add_") symbols
-    # share the base op's declaration: one structured wrapper serves all variants.
-    base = op_symbol.split(".")[0]
-    return base.removesuffix("_") if not base.endswith("__") else base
 
 
 def get_coverage(op_symbol: str, dispatch_key: str) -> _Coverage | None:
     """The op's AOT coverage, or None if it has no declaration.
 
-    The exact registration symbol wins over the base name, since a declaration may
-    be overload-qualified ("gt.Tensor") while a base-named one serves every overload
-    of its structured group. The router calls ``covers`` once per call rather than
-    per cond, which would pay the check N times on a multi-path op for the same
-    answer.
+    Structured output overloads are explicit declaration aliases because sharing a
+    base name does not imply sharing a generated ATen wrapper. The router calls
+    ``covers`` once per call rather than per cond, which would pay the check N times
+    on a multi-path op for the same answer.
     """
-    table = _load_coverage()
-    c = table.get((op_symbol, dispatch_key))
-    if c is not None:
-        return c
-    return table.get((_base_name(op_symbol), dispatch_key))
+    return _load_coverage().get((op_symbol, dispatch_key))
 
 
 def covers(op_symbol: str, dispatch_key: str, args: tuple, kwargs: dict) -> bool:

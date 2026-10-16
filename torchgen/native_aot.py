@@ -33,9 +33,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class NativeAotManifest:
-    # Base name ("topk") when the base resolves to exactly one structured
-    # group, or overload-qualified ("gt.Tensor") when overloads have
-    # separate structured groups.
+    # Exact functional name of the structured group ("topk" or "gt.Tensor").
     op: str
     dispatch_key: DispatchKey
     # Declared UNCONDITIONAL: these kernels are the implementation, so the
@@ -55,14 +53,10 @@ class NativeAotManifest:
         return f"{self.decl_id}_aot_fn"
 
     def matches_group(self, g: NativeFunctionsGroup) -> bool:
-        """Does this structured manifest target group g? A qualified op matches the exact
-        functional overload name; a base name matches the group's base, whose
-        uniqueness validate_native_aot_manifests checks."""
+        """Whether this manifest names the group's functional overload."""
         if not self.structured or not g.structured:
             return False
-        if "." in self.op:
-            return self.op == str(g.functional.func.name)
-        return self.op == g.functional.func.name.name.base
+        return self.op == str(g.functional.func.name)
 
 
 def is_unconditional(d: object) -> bool:
@@ -222,7 +216,7 @@ def validate_native_aot_manifests(
     """Resolve structured groups or explicitly declared unstructured functions.
 
     Functional hooks require fresh Tensor returns so the result parameter cannot
-    introduce mutation or aliasing. Structured base names must be unambiguous.
+    introduce mutation or aliasing.
     """
     from collections import defaultdict
 
@@ -257,13 +251,14 @@ def validate_native_aot_manifests(
             continue
         base = op.split(".")[0]
         names = structured_by_base.get(base, [])
+        if op in names:
+            continue
         if "." in op:
-            if op not in names:
-                raise RuntimeError(
-                    f"native-aot declaration for {op}@{key}: no structured "
-                    f"group named {op!r} in native_functions.yaml "
-                    f"(structured overloads of {base!r}: {names or 'none'})"
-                )
+            raise RuntimeError(
+                f"native-aot declaration for {op}@{key}: no structured "
+                f"group named {op!r} in native_functions.yaml "
+                f"(structured overloads of {base!r}: {names or 'none'})"
+            )
         elif not names:
             raise RuntimeError(
                 f"native-aot declaration for {op}@{key}: {op} is not a "
@@ -275,4 +270,9 @@ def validate_native_aot_manifests(
                 f"native-aot declaration for {op}@{key}: base name {op!r} is "
                 f"ambiguous across structured groups {names}; qualify "
                 f"ATEN_OP with the overload (e.g. {names[0]!r})"
+            )
+        else:
+            raise RuntimeError(
+                f"native-aot declaration for {op}@{key}: name the structured "
+                f"functional overload {names[0]!r}"
             )
