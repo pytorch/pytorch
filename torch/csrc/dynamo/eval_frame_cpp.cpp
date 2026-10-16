@@ -585,7 +585,11 @@ PyObject* dynamo__custom_eval_frame(
   // need to do guard collectives the very first time we've seen a frame in
   // this region. Counting precompile entries and skips assumes every rank
   // installed the same artifact; a rank without them skips the collective the
-  // others wait in.
+  // others wait in. It also assumes the frames each rank reaches next issue
+  // matching collectives: a rank that skips runs the frame eagerly, so its
+  // callees may join their own collectives, while a rank that hit runs code
+  // with those callees inlined (or its own resume functions), and the ranks
+  // then mispair.
   if (guard_complete_hook != nullptr &&
       (precompile_skip ||
        has_relevant_cache_entries(code, isolate_recompiles_id))) {
@@ -596,8 +600,10 @@ PyObject* dynamo__custom_eval_frame(
                            : GuardCollectiveState::Miss);
     auto state = static_cast<GuardCollectiveState>(py::cast<int>(
         guard_complete_hook_handle(static_cast<int>(local_state))));
+    // Only a miss sends a skipped frame to the compiler, so a hook that
+    // returns a bool (True == Hit) still runs it eagerly.
     if (local_state == GuardCollectiveState::Skip &&
-        state == GuardCollectiveState::Skip) {
+        state != GuardCollectiveState::Miss) {
       DEBUG_TRACE("skip %s", get_frame_name(frame));
       eval_default();
       return eval_result;
