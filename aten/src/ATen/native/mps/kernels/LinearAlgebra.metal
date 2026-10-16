@@ -4642,3 +4642,724 @@ kernel void eigh_jacobi(
 
 REGISTER_EIGH_JACOBI(float);
 REGISTER_EIGH_JACOBI(float2);
+
+// linalg.eig
+//
+// The eigendecomposition of a batch of complex matrices A runs as a sequence of
+// kernels, each using one threadgroup per matrix:
+//   eig_balance     A <- D^-1 A D, with a diagonal D that evens out the row and
+//                   column norms (LAPACK's xGEBAL, scaling only)
+//   eig_hessenberg  A <- P^H A P = H, upper Hessenberg [Arbenz, Section 4.3]
+//   eig_schur       H <- Q^H H Q = T, upper triangular, by the shifted
+//                   Hessenberg QR algorithm [Arbenz, Sections 4.2 and 4.4]
+//   eig_vectors     the eigenvectors X of T [Adlerborn et al., Sections 3.1
+//                   and 4.1]
+// The host forms U = P Q and the eigenvectors D U X of A.
+//
+// [Arbenz] P. Arbenz, "The QR Algorithm", chapter 4 of the ETH Zurich lecture
+//   notes "Numerical Methods for Solving Large Scale Eigenvalue Problems",
+//   https://people.inf.ethz.ch/arbenz/ewp/Lnotes/chapter4.pdf
+// [Adlerborn et al.] B. Adlerborn, C. C. Kjelgaard Mikkelsen, L. Karlsson and
+//   B. Kagstrom, "Towards Highly Parallel and Compute-Bound Computation of
+//   Eigenvectors of Matrices in Schur Form", Report UMINF 17.10, Umea
+//   University, 2017,
+//   https://webapps.cs.umu.se/uminf/reports/2017/010/part1.pdf
+//
+// Matrices are column-major: element (i, j) of an n x n matrix M is
+// M[i + j * n]. Indices are 64-bit, so any matrix that fits in memory works.
+
+namespace eig {
+
+constant constexpr float kEps = numeric_limits<float>::epsilon();
+// Magnitudes below kSafeMin * n count as zero, as with LAPACK's SMLNUM
+constant constexpr float kSafeMin =
+    numeric_limits<float>::min() / numeric_limits<float>::epsilon();
+
+// |re| + |im|, which is cheap and within a factor sqrt(2) of |z|
+inline float abs1(float2 z) {
+  return fabs(z.x) + fabs(z.y);
+}
+
+// |z|, scaled so that squaring the components can't overflow
+inline float abs_complex(float2 z) {
+  const float m = max(fabs(z.x), fabs(z.y));
+  if (m == 0) {
+    return 0;
+  }
+  const float2 w = z / m;
+  return m * precise::sqrt(dot(w, w));
+}
+
+// a / b by Smith's algorithm, which unlike a conj(b) / |b|^2 doesn't overflow
+// or underflow when |b| is far from 1
+inline float2 div_complex(float2 a, float2 b) {
+  if (fabs(b.x) >= fabs(b.y)) {
+    const float r = b.y / b.x;
+    return float2(a.x + a.y * r, a.y - a.x * r) / (b.x + b.y * r);
+  }
+  const float r = b.x / b.y;
+  return float2(a.x * r + a.y, a.y * r - a.x) / (b.y + b.x * r);
+}
+
+// Principal square root
+inline float2 sqrt_complex(float2 z) {
+  const float t = precise::sqrt(0.5f * (fabs(z.x) + abs_complex(z)));
+  if (t == 0) {
+    return float2(0);
+  }
+  if (z.x >= 0) {
+    return float2(t, 0.5f * z.y / t);
+  }
+  return float2(0.5f * fabs(z.y) / t, copysign(t, z.y));
+}
+
+// A Givens rotation G = [c, s; -conj(s), c] with real c and c^2 + |s|^2 = 1
+// [Arbenz, eq. (4.4), with complex s so that G is unitary]
+struct Givens {
+  float c;
+  float2 s;
+};
+
+// The rotation with G [x; y] = [r; 0] [Arbenz, eq. (4.5)]: c = |x| / rho and
+// s = (x / |x|) conj(y) / rho, where rho = ||(x, y)||
+inline Givens make_givens(float2 x, float2 y) {
+  const float x_abs = abs_complex(x);
+  const float y_abs = abs_complex(y);
+  if (y_abs == 0) {
+    return {1.0f, float2(0)};
+  }
+  if (x_abs == 0) {
+    return {0.0f, c10::metal::conj(y) / y_abs};
+  }
+  const float rho = abs_complex(float2(x_abs, y_abs));
+  return {x_abs / rho, c10::metal::mul(x / x_abs, c10::metal::conj(y)) / rho};
+}
+
+// (a, b) <- G (a, b): G applied to a pair of rows
+inline void rotate_rows(Givens g, thread float2& a, thread float2& b) {
+  const float2 a_new = g.c * a + c10::metal::mul(g.s, b);
+  b = g.c * b - c10::metal::mul(c10::metal::conj(g.s), a);
+  a = a_new;
+}
+
+// (a, b) <- (a, b) G^H: G^H applied to a pair of columns
+inline void rotate_columns(Givens g, thread float2& a, thread float2& b) {
+  const float2 a_new = g.c * a + c10::metal::mul(c10::metal::conj(g.s), b);
+  b = g.c * b - c10::metal::mul(g.s, a);
+  a = a_new;
+}
+
+inline float4 pack_givens(Givens g) {
+  return float4(g.c, g.s.x, g.s.y, 0.0f);
+}
+
+inline Givens unpack_givens(float4 v) {
+  return {v.x, v.yz};
+}
+
+// Orders accesses to a matrix in threadgroup memory (P = threadgroup float2*)
+// or device memory (P = device float2*)
+template <typename P>
+inline void matrix_barrier() {
+  if IF_CONSTEXPR (::metal::is_same_v<P, threadgroup float2*>) {
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  } else {
+    threadgroup_barrier(mem_flags::mem_device);
+  }
+}
+
+// Returns the top l of the active window H(l:ihi, l:ihi): the largest l <= ihi
+// whose subdiagonal entry H(l, l-1) is negligible, or 0. That entry is set to
+// zero, deflating the problem [Arbenz, Algorithm 4.4, with the convergence test
+// of Algorithm 4.5].
+template <typename P>
+int find_active_window(
+    P H,
+    long n,
+    int ihi,
+    threadgroup int* scratch,
+    uint tid,
+    uint nthreads) {
+  const float small_num = kSafeMin * n;
+  int l = 0;
+  for (int k = 1 + tid; k <= ihi; k += nthreads) {
+    const float diag = abs1(H[(k - 1) + (k - 1) * n]) + abs1(H[k + k * n]);
+    if (abs1(H[k + (k - 1) * n]) <= max(small_num, kEps * diag)) {
+      l = k;
+    }
+  }
+  // The previous reduction may still be reading scratch
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  l = c10::metal::threadgroup_max(scratch, l, tid, nthreads);
+  if (tid == 0 && l > 0) {
+    H[l + (l - 1) * n] = float2(0);
+  }
+  return l;
+}
+
+// The shift mu for a QR step on the active window ending at row ihi. Usually
+// this is the Wilkinson shift: the eigenvalue of the trailing 2x2 block
+// [a, b; c, d] that is closer to d [Arbenz, eq. (4.9)]. With x = (a - d) / 2
+// and y = sqrt(x^2 + bc) the eigenvalues are d + x -+ y, and choosing the sign
+// of y so that |x + y| >= |x - y| makes d + x - y = d - bc / (x + y) the closer
+// one, without cancellation. Every 10 iterations without deflation it is an
+// exceptional shift instead, as in LAPACK's xLAHQR, to break out of cycles.
+template <typename P>
+float2 qr_shift(P H, long n, int ihi, int its) {
+  const float2 d = H[ihi + ihi * n];
+  const float2 c = H[ihi + (ihi - 1) * n];
+  if (its > 0 && its % 10 == 0) {
+    return d + float2(0.75f * fabs(c.x), 0.0f);
+  }
+  const float2 a = H[(ihi - 1) + (ihi - 1) * n];
+  const float2 bc = c10::metal::mul(H[(ihi - 1) + ihi * n], c);
+  const float2 x = 0.5f * (a - d);
+  float2 y = sqrt_complex(c10::metal::mul(x, x) + bc);
+  if (dot(x, y) < 0) {
+    y = -y;
+  }
+  const float2 x_plus_y = x + y;
+  if (x_plus_y.x == 0 && x_plus_y.y == 0) {
+    return d;
+  }
+  return d - div_complex(bc, x_plus_y);
+}
+
+// One implicitly shifted QR step on the active window H(l:ihi, l:ihi) [Arbenz,
+// Section 4.6.2, which shows it for tridiagonal matrices; it works the same way
+// for Hessenberg ones]. The first rotation G_l is the one that starts the QR
+// factorization of H - mu I [Arbenz, Algorithm 4.2]. Applying it to both sides
+// of H puts a bulge at H(l+2, l), and each following rotation G_k zeroes the
+// bulge at H(k+1, k-1), which moves it one row and column down, until it falls
+// out of the window. By the implicit Q theorem [Arbenz, Theorem 4.5] this gives
+// the same result as the explicit step H - mu I = QR, H <- RQ + mu I [Arbenz,
+// Algorithm 4.4], without forming H - mu I.
+//
+// The rotations are applied one after another, each in parallel over the rows
+// or columns it touches, but only inside the window. They are recorded in
+// `rotations` for apply_rotations_outside_window to apply to the rest of H and
+// to U.
+template <typename P>
+void chase_bulge(
+    P H,
+    long n,
+    int l,
+    int ihi,
+    float2 mu,
+    device float4* rotations,
+    uint tid,
+    uint nthreads) {
+  for (int k = l; k < ihi; ++k) {
+    float2 x, y;
+    if (k == l) {
+      x = H[l + l * n] - mu;
+      y = H[(l + 1) + l * n];
+      // Column l is rotated below, so all threads must read it first
+      matrix_barrier<P>();
+    } else {
+      x = H[k + (k - 1) * n];
+      y = H[(k + 1) + (k - 1) * n];
+    }
+    const Givens g = make_givens(x, y);
+    // G_k on rows k and k+1. Column k-1, where it zeroes the bulge, is written
+    // after the next barrier, once all threads have read x and y.
+    for (int j = k + tid; j <= ihi; j += nthreads) {
+      float2 a = H[k + j * n];
+      float2 b = H[(k + 1) + j * n];
+      rotate_rows(g, a, b);
+      H[k + j * n] = a;
+      H[(k + 1) + j * n] = b;
+    }
+    matrix_barrier<P>();
+    // G_k^H on columns k and k+1, which are nonzero down to row k+2
+    for (int i = l + tid; i <= min(k + 2, ihi); i += nthreads) {
+      float2 a = H[i + k * n];
+      float2 b = H[i + (k + 1) * n];
+      rotate_columns(g, a, b);
+      H[i + k * n] = a;
+      H[i + (k + 1) * n] = b;
+    }
+    if (tid == 0) {
+      if (k > l) {
+        rotate_rows(g, x, y);
+        H[k + (k - 1) * n] = x;
+        H[(k + 1) + (k - 1) * n] = float2(0);
+      }
+      rotations[k] = pack_givens(g);
+    }
+    matrix_barrier<P>();
+  }
+}
+
+// Applies rotations[l:ihi] from the right to a row whose entry j is row[j * n]
+template <typename P>
+void rotate_row(P row, long n, int l, int ihi, device const float4* rotations) {
+  float2 a = row[l * n];
+  for (int k = l; k < ihi; ++k) {
+    float2 b = row[(k + 1) * n];
+    rotate_columns(unpack_givens(rotations[k]), a, b);
+    row[k * n] = a;
+    a = b;
+  }
+  row[ihi * n] = a;
+}
+
+// Applies rotations[l:ihi] from the left to a column
+template <typename P>
+void rotate_column(P column, int l, int ihi, device const float4* rotations) {
+  float2 a = column[l];
+  for (int k = l; k < ihi; ++k) {
+    float2 b = column[k + 1];
+    rotate_rows(unpack_givens(rotations[k]), a, b);
+    column[k] = a;
+    a = b;
+  }
+  column[ihi] = a;
+}
+
+// Applies the rotations of chase_bulge where it didn't: from the right to rows
+// 0..l-1 of H and to all rows of U, and from the left to columns ihi+1..n-1 of
+// H. Each of these rows and columns only depends on its own entries, so threads
+// work through them independently, without barriers.
+template <typename P>
+void apply_rotations_outside_window(
+    P H,
+    device float2* U,
+    long n,
+    int l,
+    int ihi,
+    device const float4* rotations,
+    bool update_u,
+    uint tid,
+    uint nthreads) {
+  const long h_rows = l;
+  const long h_columns = n - 1 - ihi;
+  const long u_rows = update_u ? n : 0;
+  for (long t = tid; t < h_rows + h_columns + u_rows; t += nthreads) {
+    if (t < h_rows) {
+      rotate_row(H + t, n, l, ihi, rotations);
+    } else if (t < h_rows + h_columns) {
+      rotate_column(H + (ihi + 1 + t - h_rows) * n, l, ihi, rotations);
+    } else {
+      rotate_row(U + (t - h_rows - h_columns), n, l, ihi, rotations);
+    }
+  }
+}
+
+// Reduces the Hessenberg H to upper triangular T = Q^H H Q and updates
+// U <- U Q, by QR steps with deflation [Arbenz, Algorithm 4.4, with the shifts
+// of qr_shift and the implicit steps of chase_bulge]. Returns 0 on success,
+// or like LAPACK's xLAHQR, i > 0 if eigenvalues 0..i-1 failed to converge.
+template <typename P>
+int schur_iterate(
+    P H,
+    device float2* U,
+    device float4* rotations,
+    long n,
+    bool update_u,
+    threadgroup int* scratch,
+    uint tid,
+    uint nthreads) {
+  const int max_iterations = 30 * max(10, int(n));
+  int ihi = int(n) - 1;
+  while (ihi > 0) {
+    int l;
+    for (int its = 0;; ++its) {
+      l = find_active_window(H, n, ihi, scratch, tid, nthreads);
+      if (l == ihi) {
+        break;
+      }
+      if (its == max_iterations) {
+        return ihi + 1;
+      }
+      const float2 mu = qr_shift(H, n, ihi, its);
+      chase_bulge(H, n, l, ihi, mu, rotations, tid, nthreads);
+      threadgroup_barrier(mem_flags::mem_device);
+      apply_rotations_outside_window(
+          H, U, n, l, ihi, rotations, update_u, tid, nthreads);
+      threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+    }
+    ihi = l - 1;
+  }
+  return 0;
+}
+
+// Upper bound on intermediate magnitudes in eig_vectors [Adlerborn et al.,
+// Section 3.1]. It leaves room below FLT_MAX for the constant factors that come
+// from measuring complex numbers with abs1.
+constant constexpr float kOmega = 1e36f;
+
+// ProtectDivision [Adlerborn et al., Algorithm 3]: a factor alpha in (0, 1]
+// such that alpha b / d can't exceed kOmega, given the magnitudes b and d of
+// the numerator and divisor
+inline float protect_division(float b, float d) {
+  if (d < 1 / kOmega) {
+    if (b > d * kOmega) {
+      return d * kOmega / b;
+    }
+  } else if (d < 1) {
+    if (b > d * kOmega) {
+      return 1 / b;
+    }
+  }
+  return 1;
+}
+
+// ProtectUpdate [Adlerborn et al., Algorithm 4]: a factor zeta such that
+// zeta y - c (zeta x) can't exceed kOmega, given bounds on the magnitudes of
+// y, c and x
+inline float protect_update(float y, float c, float x) {
+  if (x <= 1) {
+    if (c * x > kOmega - y) {
+      return 0.5f;
+    }
+  } else if (c > (kOmega - y) / x) {
+    return 0.5f / x;
+  }
+  return 1;
+}
+
+} // namespace eig
+
+// Balances A <- D^-1 A D with a diagonal D of powers of 2 that makes the norm
+// of each row close to that of the corresponding column, which makes the
+// eigenvalues of badly scaled matrices more accurate. This follows LAPACK's
+// xGEBAL with JOB = 'S', sweeping over the rows until no scaling changes the
+// sum of their norms by more than 5%.
+kernel void eig_balance(
+    device float2* A [[buffer(0)]],
+    device float* D [[buffer(1)]],
+    constant EigParams& params [[buffer(2)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint nthreads [[threads_per_threadgroup]],
+    uint batch [[threadgroup_position_in_grid]]) {
+  constexpr int kMaxSweeps = 32;
+  // Limits on the norms that keep the scaling from overflowing
+  const float min_norm = 2 * eig::kSafeMin;
+  const float max_norm = 1 / min_norm;
+  const long n = params.n;
+  device float2* A_b = A + batch * n * n;
+  device float* D_b = D + batch * n;
+  threadgroup float column_scratch[32];
+  threadgroup float row_scratch[32];
+
+  for (long i = tid; i < n; i += nthreads) {
+    D_b[i] = 1;
+  }
+  threadgroup_barrier(mem_flags::mem_device);
+
+  bool converged = false;
+  for (int sweep = 0; sweep < kMaxSweeps && !converged; ++sweep) {
+    converged = true;
+    for (long i = 0; i < n; ++i) {
+      // 1-norms of column i and row i without the diagonal
+      float column_part = 0;
+      float row_part = 0;
+      for (long m = tid; m < n; m += nthreads) {
+        if (m != i) {
+          column_part += eig::abs1(A_b[m + i * n]);
+          row_part += eig::abs1(A_b[i + m * n]);
+        }
+      }
+      const auto norms = c10::metal::threadgroup_sum2(
+          column_scratch, row_scratch, column_part, row_part, tid, nthreads);
+      // The next reduction must not overwrite scratch before all threads read
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      float c = norms[0];
+      float r = norms[1];
+      if (c == 0 || r == 0) {
+        continue;
+      }
+      // The power of 2, f, that brings c * f and r / f closest together
+      const float s = c + r;
+      float f = 1;
+      float g = r / 2;
+      while (c < g && max(f, c) < max_norm && min(r, g) > min_norm) {
+        f *= 2;
+        c *= 2;
+        r /= 2;
+        g /= 2;
+      }
+      g = c / 2;
+      while (g >= r && r < max_norm && min(min(f, c), g) > min_norm) {
+        f /= 2;
+        c /= 2;
+        g /= 2;
+        r *= 2;
+      }
+      if (c + r >= 0.95f * s) {
+        continue;
+      }
+      converged = false;
+      if (tid == 0) {
+        D_b[i] *= f;
+      }
+      for (long m = tid; m < n; m += nthreads) {
+        if (m != i) {
+          A_b[i + m * n] /= f;
+          A_b[m + i * n] *= f;
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_device);
+    }
+  }
+}
+
+// Reduces A to upper Hessenberg form H = P^H A P [Arbenz, Algorithm 4.3]. The
+// unitary P = P_0 P_1 ... P_{n-3} is a product of Householder reflectors
+// P_k = I - tau_k v_k v_k^H, where P_k zeroes column k below the subdiagonal.
+// As in LAPACK's xGEHRD, v_k (whose first entry is 1) is stored below the
+// subdiagonal of column k and tau_k in `tau`, so that the host can form P with
+// linalg.householder_product.
+kernel void eig_hessenberg(
+    device float2* A [[buffer(0)]],
+    device float2* tau [[buffer(1)]],
+    constant EigParams& params [[buffer(2)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint nthreads [[threads_per_threadgroup]],
+    uint batch [[threadgroup_position_in_grid]],
+    uint simd_lane [[thread_index_in_simdgroup]],
+    uint simd_group [[simdgroup_index_in_threadgroup]]) {
+  const long n = params.n;
+  const uint num_simd_groups = nthreads / c10::metal::simdgroup_size;
+  device float2* A_b = A + batch * n * n;
+  device float2* tau_b = tau + batch * (n - 2);
+  threadgroup float scratch[32];
+
+  for (long k = 0; k < n - 2; ++k) {
+    // P_k acts on rows and columns k+1..n-1 and reflects x = A(k+1:n, k),
+    // which has m entries, onto beta e_0
+    const long m = n - k - 1;
+    device float2* x = A_b + (k + 1) + k * n;
+    const float2 alpha = x[0];
+    float tail_part = 0;
+    for (long i = 1 + tid; i < m; i += nthreads) {
+      tail_part += dot(x[i], x[i]);
+    }
+    const float tail_norm2 =
+        c10::metal::threadgroup_sum(scratch, tail_part, tid, nthreads);
+
+    // beta = -e^{i arg(alpha)} ||x|| avoids cancellation in alpha - beta
+    // [Arbenz, Section 4.3.1]. Then v = (x - beta e_0) / (alpha - beta), and
+    // tau = 2 / ||v||^2 = 1 + |alpha| / ||x|| is real, so P_k^H = P_k.
+    float t = 0;
+    if (tail_norm2 > 0) {
+      const float alpha_abs = eig::abs_complex(alpha);
+      const float x_norm = precise::sqrt(alpha_abs * alpha_abs + tail_norm2);
+      const float2 phase = alpha_abs > 0 ? alpha / alpha_abs : float2(1, 0);
+      const float2 beta = -x_norm * phase;
+      const float2 inv = eig::div_complex(float2(1, 0), alpha - beta);
+      t = 1 + alpha_abs / x_norm;
+      for (long i = 1 + tid; i < m; i += nthreads) {
+        x[i] = c10::metal::mul(x[i], inv);
+      }
+      if (tid == 0) {
+        x[0] = beta;
+      }
+    }
+    if (tid == 0) {
+      tau_b[k] = float2(t, 0);
+    }
+    threadgroup_barrier(mem_flags::mem_device);
+    if (t == 0) {
+      continue;
+    }
+
+    // A <- P_k A, with one SIMD group per column j > k
+    for (long j = k + 1 + simd_group; j < n; j += num_simd_groups) {
+      device float2* column = A_b + (k + 1) + j * n;
+      float2 w = float2(0);
+      for (long i = simd_lane; i < m; i += c10::metal::simdgroup_size) {
+        const float2 v_i = i == 0 ? float2(1, 0) : x[i];
+        w += c10::metal::mul(c10::metal::conj(v_i), column[i]);
+      }
+      w = t * c10::metal::simd_sum(w);
+      for (long i = simd_lane; i < m; i += c10::metal::simdgroup_size) {
+        const float2 v_i = i == 0 ? float2(1, 0) : x[i];
+        column[i] -= c10::metal::mul(v_i, w);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_device);
+
+    // A <- A P_k, with one thread per row
+    for (long r = tid; r < n; r += nthreads) {
+      device float2* row = A_b + r + (k + 1) * n;
+      float2 z = float2(0);
+      for (long i = 0; i < m; ++i) {
+        const float2 v_i = i == 0 ? float2(1, 0) : x[i];
+        z += c10::metal::mul(row[i * n], v_i);
+      }
+      z *= t;
+      for (long i = 0; i < m; ++i) {
+        const float2 v_i = i == 0 ? float2(1, 0) : x[i];
+        row[i * n] -= c10::metal::mul(z, c10::metal::conj(v_i));
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_device);
+  }
+}
+
+// Reduces the Hessenberg H to upper triangular T = Q^H H Q, writing the
+// eigenvalues diag(T), and if params.compute_eigenvectors, updates U <- U Q.
+// See eig::schur_iterate.
+kernel void eig_schur(
+    device float2* H [[buffer(0)]],
+    device float2* U [[buffer(1)]],
+    device float4* rotations [[buffer(2)]],
+    device float2* eigenvalues [[buffer(3)]],
+    device int* info [[buffer(4)]],
+    constant EigParams& params [[buffer(5)]],
+    threadgroup float2* H_staged [[threadgroup(0)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint nthreads [[threads_per_threadgroup]],
+    uint batch [[threadgroup_position_in_grid]]) {
+  const long n = params.n;
+  const bool update_u = params.compute_eigenvectors;
+  device float2* H_b = H + batch * n * n;
+  device float2* U_b = U + (update_u ? batch * n * n : 0);
+  device float4* rotations_b = rotations + batch * n;
+  threadgroup int scratch[32];
+
+  int status;
+  if (params.stage_h) {
+    // Keeping small matrices in threadgroup memory makes the barriers between
+    // the rotations of chase_bulge cheaper
+    for (long i = tid; i < n * n; i += nthreads) {
+      H_staged[i] = H_b[i];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    status = eig::schur_iterate(
+        H_staged, U_b, rotations_b, n, update_u, scratch, tid, nthreads);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (long i = tid; i < n * n; i += nthreads) {
+      H_b[i] = H_staged[i];
+    }
+  } else {
+    status = eig::schur_iterate(
+        H_b, U_b, rotations_b, n, update_u, scratch, tid, nthreads);
+  }
+  threadgroup_barrier(mem_flags::mem_device);
+
+  for (long i = tid; i < n; i += nthreads) {
+    eigenvalues[batch * n + i] = H_b[i + i * n];
+  }
+  if (tid == 0) {
+    info[batch] = status;
+  }
+}
+
+// Computes the eigenvectors of the upper triangular T: the upper triangular X
+// with T X = X diag(T), whose column k solves (T - T(k, k) I) x = 0 with
+// x_k = 1, up to scaling.
+//
+// This is ScalarSimEigenvector [Adlerborn et al., Algorithm 10], which computes
+// all the eigenvectors at once, one row of X at a time from the bottom up.
+// Each row j is divided by T(j, j) - T(k, k) in every column k > j, with a
+// thread per column, and then T(0:j, j) X(j, :) is subtracted from the rows
+// above, with a thread per row.
+//
+// Overflow is prevented column by column as in RobustScalarBacksolve
+// [Adlerborn et al., Algorithm 5]: before a division or update that could
+// exceed kOmega, the column is scaled down by the factor from ProtectDivision
+// or ProtectUpdate. The host normalizes the eigenvectors afterwards, so these
+// factors don't need to be kept. Instead of recomputing the norm of the part of
+// the column above row j after each update like Algorithm 5, we keep an upper
+// bound of it, which is all ProtectUpdate needs. Magnitudes are measured with
+// abs1, which bounds the real and imaginary parts of complex sums and products
+// the way |.| does for real ones, so that Theorem 1 applies to complex numbers.
+//
+// Algorithm 10 assumes distinct eigenvalues. As in LAPACK's xTREVC, divisors
+// T(j, j) - T(k, k) smaller than eps |T(k, k)| are increased to that size, so
+// that repeated eigenvalues still give finite eigenvectors.
+kernel void eig_vectors(
+    device const float2* T [[buffer(0)]],
+    device float2* X [[buffer(1)]],
+    device float* bounds [[buffer(2)]],
+    constant EigParams& params [[buffer(3)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint nthreads [[threads_per_threadgroup]],
+    uint batch [[threadgroup_position_in_grid]]) {
+  const long n = params.n;
+  device const float2* T_b = T + batch * n * n;
+  device float2* X_b = X + batch * n * n;
+  // x_bound[k] bounds the magnitudes of column k of X above the current row,
+  // and column_norm[j] is the largest magnitude in T(0:j, j)
+  device float* x_bound = bounds + batch * 2 * n;
+  device float* column_norm = x_bound + n;
+
+  for (long i = tid; i < n * n; i += nthreads) {
+    X_b[i] = float2(0);
+  }
+  threadgroup_barrier(mem_flags::mem_device);
+  for (long k = tid; k < n; k += nthreads) {
+    float norm = 0;
+    for (long i = 0; i < k; ++i) {
+      norm = max(norm, eig::abs1(T_b[i + k * n]));
+    }
+    column_norm[k] = norm;
+    x_bound[k] = 0;
+    X_b[k + k * n] = float2(1, 0);
+  }
+  threadgroup_barrier(mem_flags::mem_device);
+
+  const float small_num = eig::kSafeMin * n;
+  for (long j = n - 1; j >= 0; --j) {
+    const float2 t_jj = T_b[j + j * n];
+    for (long k = j + tid; k < n; k += nthreads) {
+      device float2* x = X_b + k * n;
+      float2 x_j = x[j];
+      if (k > j) {
+        const float2 t_kk = T_b[k + k * n];
+        const float min_divisor = max(eig::kEps * eig::abs1(t_kk), small_num);
+        float2 divisor = t_jj - t_kk;
+        if (eig::abs1(divisor) < min_divisor) {
+          divisor = float2(min_divisor, 0);
+        }
+        const float s =
+            eig::protect_division(eig::abs1(x_j), eig::abs1(divisor));
+        if (s != 1) {
+          for (long i = 0; i <= k; ++i) {
+            x[i] *= s;
+          }
+          x_bound[k] *= s;
+          x_j *= s;
+        }
+        x_j = eig::div_complex(x_j, divisor);
+        x[j] = x_j;
+      }
+      const float s =
+          eig::protect_update(x_bound[k], column_norm[j], eig::abs1(x_j));
+      if (s != 1) {
+        for (long i = 0; i <= k; ++i) {
+          x[i] *= s;
+        }
+        x_bound[k] *= s;
+        x_j *= s;
+      }
+      x_bound[k] += column_norm[j] * eig::abs1(x_j);
+    }
+    threadgroup_barrier(mem_flags::mem_device);
+
+    // X(0:j, j:n) -= T(0:j, j) X(j, j:n)
+    for (long i = tid; i < j; i += nthreads) {
+      const float2 t_ij = T_b[i + j * n];
+      for (long k = j; k < n; ++k) {
+        X_b[i + k * n] -= c10::metal::mul(t_ij, X_b[j + k * n]);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_device);
+  }
+
+  // Entries can be as large as kOmega, so scale each column to a largest
+  // magnitude of 1 to let the host compute norms without overflow
+  for (long k = tid; k < n; k += nthreads) {
+    device float2* x = X_b + k * n;
+    float largest = 0;
+    for (long i = 0; i <= k; ++i) {
+      largest = max(largest, eig::abs1(x[i]));
+    }
+    for (long i = 0; i <= k; ++i) {
+      x[i] /= largest;
+    }
+  }
+}

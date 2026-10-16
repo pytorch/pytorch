@@ -2914,8 +2914,6 @@ fake_backward_mps_xfails = {
         ("cdouble", ""),
         ("double", ""),
         ("float_power", ""),
-        ("linalg.eig", ""),
-        ("linalg.eigvals", ""),
         ("linalg.matrix_sqrth", ""),
         ("mode", ""),
         ("native_batch_norm", ""),
