@@ -16428,6 +16428,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
+    @parametrize("with_out", [False, True])
+    def test_fft_ref_irfftn(self, with_out):
+        def fn(x, out):
+            return torch._refs.fft.irfftn(x, dim=-2, out=out)
+
+        x = make_tensor((5, 6, 7), dtype=torch.float32, device=self.device)
+        out = torch.empty((5, 10, 8), device=self.device) if with_out else None
+        eager_out = out.clone() if with_out else None
+        reference = torch.fft.irfftn(x.cpu().double(), dim=-2).float().to(self.device)
+        compiled = torch.compile(fn)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            eager = fn(x, eager_out)
+            result = compiled(x, out)
+        self.assertEqual(eager, reference)
+        self.assertEqual(result, reference)
+        if with_out:
+            self.assertIs(result, out)
+            self.assertEqual(out, reference)
+
     def test_searchsorted(self):
         def fn(sorted_sequence, values, out_int32, right, side, sorter):
             return torch.searchsorted(
