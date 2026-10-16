@@ -1458,11 +1458,11 @@ target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/miniz-3.0.2)
 
 target_include_directories(torch_cpu PRIVATE
-  ${TORCH_ROOT}/third_party/kineto/libkineto/include)
+  ${TORCH_ROOT}/torch/csrc/profiler/kineto/libkineto/include)
 
 if(USE_KINETO)
   target_include_directories(torch_cpu PRIVATE
-    ${TORCH_ROOT}/third_party/kineto/libkineto/src)
+    ${TORCH_ROOT}/torch/csrc/profiler/kineto/libkineto/src)
 endif()
 
 target_include_directories(torch_cpu PRIVATE
