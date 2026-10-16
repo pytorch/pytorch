@@ -1,5 +1,6 @@
 # Owner(s): ["module: intel"]
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -127,9 +128,15 @@ class TestTorchrun(TestCase):
             _parse_core_list(core_list)
 
     def test_core_list_ranges(self):
+        # Select the CPU owned by the CI containers
+        cpus = os.sched_getaffinity(0)
+        start = min((c for c in cpus if {c + 1, c + 3} <= cpus), default=None)
+        if start is None:
+            self.skipTest("needs CPUs n, n+1 and n+3 in the affinity mask")
+        core_list = f"{start}-{start + 1},{start + 3}"
         cmds = []
         with subprocess.Popen(
-            f"python -m torch.backends.xeon.run_cpu --core-list 0-1,3 --ncores-per-instance 2 \
+            f"python -m torch.backends.xeon.run_cpu --core-list {core_list} --ncores-per-instance 2 \
             --use-default-allocator --disable-iomp --disable-numactl \
             --log-path {self._test_dir} --no-python pwd",
             shell=True,
@@ -143,7 +150,7 @@ class TestTorchrun(TestCase):
         # 3 cores with 2 cores per instance yields a single instance; the
         # contiguous pair collapses back into a range for taskset.
         self.assertEqual(len(cmds), 1)
-        self.assertTrue(cmds[0].startswith("taskset -c 0-1 "), cmds[0])
+        self.assertTrue(cmds[0].startswith(f"taskset -c {start}-{start + 1} "), cmds[0])
 
     def test_multi_threads(self):
         num = 0
