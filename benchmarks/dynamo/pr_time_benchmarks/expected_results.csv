@@ -94,7 +94,7 @@ diffusion_dit_full_inductor,compile_time_instruction_count,13340000000,0.1
 
 
 
-diffusion_dit_regional_inductor,compile_time_instruction_count,3746000000,0.1
+diffusion_dit_regional_inductor,compile_time_instruction_count,3663000000,0.1
 
 
 
@@ -138,11 +138,11 @@ dtensor_dispatch_random,instruction_count,516200,0.1
 
 
 
-dtensor_dispatch_custom_handler,instruction_count,36060,0.1
+dtensor_dispatch_custom_handler,instruction_count,35320,0.1
 
 
 
-nn_module_guard_eval,instruction_count,71160,0.1
+nn_module_guard_eval,instruction_count,69640,0.1
 
 
 
