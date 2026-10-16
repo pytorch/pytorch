@@ -5365,15 +5365,19 @@ class TestPrecompileDynamoCapture(TestCase):
         context.callback = _RefuseRecompileCallback(context.callback)
         served = context(sys.modules[names[0]].lookup)
         self.assertEqual(served(torch.nn.Module(), 3), 6)
-        # The skip is process-global: until uninstall() an unrelated compile
-        # reaching lookup() as a frame never enters Dynamo, and after it does.
+        # The skip is process-global and shared: while either of two packages
+        # that skip lookup() is installed, an unrelated compile reaching it as
+        # a frame never enters Dynamo, and after both uninstall it does.
+        other = CompilePackage(step, built.call_args.args[0])
+        other.install(built.call_args.args[1])
+        self.addCleanup(other.uninstall)
         lookup_fn = torch.compile(sys.modules[names[0]].lookup, backend="eager")
-        for uninstalled in (False, True):
-            if uninstalled:
-                package.uninstall()
+        for uninstall, compiles in ((None, False), (package, False), (other, True)):
+            if uninstall is not None:
+                uninstall.uninstall()
             counters.clear()
             self.assertEqual(lookup_fn(torch.nn.Module(), 3), 6)
-            self.assertEqual(counters["frames"]["total"] > 0, uninstalled)
+            self.assertEqual(counters["frames"]["total"] > 0, compiles)
 
     def test_a_standalone_artifact_refuses_serve_time_compiles(self):
         with self._capture(self.mod.single, backend="eager") as cap:
