@@ -317,11 +317,13 @@ def require_tma_loadable_tile_captures(
     """Give full-tile captures a layout QuACK's TMA ``TileLoad`` can read in place.
 
     A tile load needs a 16-byte aligned base, one unit-stride matrix dim, and aligned outer strides.
-    Views such as ``h.view(m, n, 2)[..., 0]`` have neither, so they are copied to a
+    Views such as ``h.view(m, n, 2)[..., 0]`` lack a unit-stride matrix dim and are copied to a
     contiguous layout here instead of failing QuACK's launch-time stride check.
     The copy's row stride is padded to the alignment, so an unaligned N (a bf16
     ``[m, 12]`` tile) stays loadable.
-    Row-strided views such as ``h[:, :n]`` already qualify and load in place.
+    Row-strided views such as ``h[:, :n]`` load in place when their base and row stride
+    are aligned. Unknown producer layouts are constrained to padded strides; symbolic
+    layouts can specialize on stride divisibility.
     """
     from torch._inductor.virtualized import V
 
@@ -344,11 +346,8 @@ def require_tma_loadable_tile_captures(
     for arg in epilogue_args:
         alignment = max(16 // arg.get_dtype().itemsize, 1)
         is_tile = statically_known_shape_equal(arg.get_size(), output_size)
-        if is_tile and arg.maybe_get_stride() is not None:
-            if not sizevars.statically_known_multiple_of(
-                arg.get_layout().offset, alignment
-            ):
-                arg = ir.ExternKernel.copy_input(arg)
+        if is_tile and ir.is_unaligned(arg):
+            arg = ir.ExternKernel.copy_input(arg)
         if is_tile and not loadable(arg, alignment):
             *outer, n = arg.get_size()
             padded = [*outer, ceildiv(n, alignment) * alignment]
