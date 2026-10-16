@@ -31,6 +31,10 @@ The entrypoint to parallelize your `nn.Module` using Tensor Parallelism is:
 .. autofunction:: parallelize_module
 ```
 
+```{eval-rst}
+.. autoclass:: torch.distributed.tensor.parallel.ParallelStyle
+```
+
 Tensor Parallelism supports the following parallel styles:
 
 ```{eval-rst}
