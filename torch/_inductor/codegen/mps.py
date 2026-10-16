@@ -279,7 +279,9 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
-        return f"{a} ? {b} : static_cast<decltype({b})>({value_to_metal(c)})"
+        typecast_b = f"static_cast<decltype({b}+{c})>({b})"
+        typecast_c = f"static_cast<decltype({b}+{c})>({c})"
+        return f"{a} ? {typecast_b} : {typecast_c}"
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> str:
