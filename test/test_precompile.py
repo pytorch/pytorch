@@ -5269,12 +5269,12 @@ class TestPrecompileDynamoCapture(TestCase):
     def test_an_installed_artifact_without_the_flag_default_refuses_it(self):
         with self._capture(self.mod.calls_breaking_helper, backend="eager") as cap:
             cap(self.model, self.x2)
-        with open(self.artifact) as f:
+        with open(self.artifact, newline="") as f:
             python_code = f.read()
         default = "\n_ALLOW_SERVE_TIME_COMPILES = False\n"
         self.assertIn(default, python_code)
         python_code = python_code.replace(default, "\n")
-        with open(self.artifact, "w") as f:
+        with open(self.artifact, "w", newline="") as f:
             f.write(python_code)
         cache = torch.load(self.cache, weights_only=True)
         cache["code_hash"] = hashlib.sha256(python_code.encode()).hexdigest()
@@ -5294,12 +5294,12 @@ class TestPrecompileDynamoCapture(TestCase):
     ):
         with self._capture(self.mod.calls_breaking_helper, backend="eager") as cap:
             cap(self.model, self.x2)
-        with open(self.artifact) as f:
+        with open(self.artifact, newline="") as f:
             python_code = f.read()
         default = "\n_ALLOW_SERVE_TIME_COMPILES = False\n"
         self.assertIn(default, python_code)
         python_code = python_code.replace(default, f"\n{line}\n")
-        with open(self.artifact, "w") as f:
+        with open(self.artifact, "w", newline="") as f:
             f.write(python_code)
         cache = torch.load(self.cache, weights_only=True)
         cache["code_hash"] = hashlib.sha256(python_code.encode()).hexdigest()
