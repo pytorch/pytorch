@@ -381,6 +381,12 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
+    # Cache hits skip compiled_graph_wrapper, so bypass while it is set. Install
+    # any env-requested wrapper first: that install otherwise runs only on a miss.
+    torch._utils_internal.maybe_init_compiled_graph_wrapper()
+    if config.compiled_graph_wrapper is not None:
+        raise BypassAOTAutogradCache("compiled_graph_wrapper is set")
+
     if torch._inductor.config.freezing:
         raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
