@@ -175,6 +175,17 @@ class Device {
   }
 
   /**
+   * @brief Checks if this is a PrivateUse1 device.
+   *
+   * @return true if the device type is PrivateUse1, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.16.
+   */
+  bool is_privateuseone() const noexcept {
+    return type_ == DeviceType::PrivateUse1;
+  }
+
+  /**
    * @brief Checks if this is a CPU device.
    *
    * @return true if the device type is CPU, false otherwise.
