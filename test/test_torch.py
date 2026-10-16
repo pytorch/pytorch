@@ -7187,11 +7187,16 @@ class TestTorchCUDA(TestCase):
             else:
                 return 2 * x
 
+        def _set_real_imag(tensor, real, imag):
+            tensor.real = real
+            tensor.imag = imag
+
         # prepare inputs for subsequent ops
         size = 4
         x = torch.rand(size, device=device)
         y = torch.rand((), device=device)
         y_cpu = y.cpu()
+        z = torch.randn(size, device=device, dtype=torch.complex64)
         ind = torch.randint(size, (3,), device=device)
         ind_2d = torch.randint(size, (2, 3), device=device)
         ind_cpu = ind.cpu()
@@ -7210,6 +7215,7 @@ class TestTorchCUDA(TestCase):
                           lambda: _ind_put_fn(x, slice(0, 1), 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
                           lambda: _ind_get_fn(x, ind),
+                          lambda: _set_real_imag(z, 3., 5.),
                           lambda: torch.nn.functional.one_hot(ind, num_classes=size),
                           lambda: torch.randperm(20000, device=device),
                           lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
@@ -9508,6 +9514,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     @unittest.skipIf(IS_FBCODE, "CXX_FLAGS is only for OSS build.")
     def test_cxx_flags(self):
         torch.__config__._cxx_flags()
+
+    def test_cxx_compiler(self):
+        name, version = torch.__config__._cxx_compiler()
+        label = {"gcc": "GCC", "clang": "clang", "msvc": "MSVC"}[name]
+        self.assertRegex(version, r"^\d+(\.\d+)*$")
+        # The line show() prints for the same compiler; for clang it also prints
+        # a GCC line, from clang's own __GNUC__.
+        self.assertIn(f"  - {label} {version}\n", torch.__config__.show())
 
     def test_parallel_info(self):
         torch.__config__.parallel_info()
