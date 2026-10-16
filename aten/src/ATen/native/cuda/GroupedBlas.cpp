@@ -23,6 +23,8 @@
 #include <ATen/native/cuda/GroupMM.h>
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
 #include <ATen/native/hip/ck_group_gemm.h>
+#endif
+#if defined(USE_ROCM) && defined(USE_ROCM_CK_TILE_GEMM)
 #include <ATen/native/hip/ck_tile_group_gemm.h>
 #endif
 #include <ATen/ceil_div.h>
@@ -734,7 +736,7 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
   }
 }
 
-#if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
+#if defined(USE_ROCM) && defined(USE_ROCM_CK_TILE_GEMM)
 // Inputs group_gemm_ck_tile handles; anything else falls through to the next grouped mm path.
 static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_b, const std::optional<at::Tensor>& offs) {
   const auto dtype = mat_a.scalar_type();
@@ -795,10 +797,14 @@ std::optional<c10::ScalarType> out_dtype) {
   // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
   // To enable CK-tile path, use env variable ROCM_ALLOW_GROUP_GEMM_CK_TILE=1.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
+#if defined(USE_ROCM_CK_TILE_GEMM)
+  // USE_ROCM_CK_TILE_GEMM is defined only when the ck_tile kernels were built (gfx942/gfx950 in PYTORCH_ROCM_ARCH).
   if (at::globalContext().rocmAllowGroupGemmCkTile() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"})
       && ck_tile_group_gemm_supported(mat_a, mat_b, offs)) {
     at::hip::detail::group_gemm_ck_tile(mat_a, mat_b, offs, bias, out);
-  } else if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
+  } else
+#endif
+  if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
     at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
