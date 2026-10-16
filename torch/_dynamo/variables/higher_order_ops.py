@@ -62,7 +62,12 @@ from ..exc import (
     Unsupported,
 )
 from ..source import AttrSource, DictGetItemSource
-from ..utils import proxy_args_kwargs, set_example_value, unpack_iterable
+from ..utils import (
+    proxy_args_kwargs,
+    set_example_value,
+    specialize_symnode,
+    unpack_iterable,
+)
 from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
@@ -4175,12 +4180,16 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-def _guard_dict_keys(vt: VariableTracker) -> None:
-    """DICT_KEYS_MATCH is shallow; nested option dicts need it too."""
+def _guard_flex_gemm_constant(vt: VariableTracker) -> Any:
+    """Specialize static metadata and guard nested option key sets."""
+    vt = vt.realize()
     if isinstance(vt, ConstDictVariable):
         vt.install_dict_keys_match_guard()
-        for value in vt.items.values():
-            _guard_dict_keys(value)
+        return {
+            key.vt.as_python_constant(): _guard_flex_gemm_constant(value)
+            for key, value in vt.items.items()
+        }
+    return specialize_symnode(vt).as_python_constant()
 
 
 class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
@@ -4223,12 +4232,10 @@ class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
 
         _check_supported_callable_arg(tx, args[1], "body_fn")
         operands = args[2].unpack_var_sequence(tx)
-        # as_python_constant guards the present values only; an option added
-        # later (fast_math, backend, a config knob) must recompile.
-        _guard_dict_keys(args[3])
-        _guard_dict_keys(args[4])
-        fn_kwargs = args[3].as_python_constant()
-        kernel_options = args[4].as_python_constant()
+        # Numeric options can be symbolic under dynamic=True, but are static
+        # HOP metadata. Guard key sets too so newly added options recompile.
+        fn_kwargs = _guard_flex_gemm_constant(args[3])
+        kernel_options = _guard_flex_gemm_constant(args[4])
         if self._HOP_NAME is None:
             raise AssertionError("_HOP_NAME must be set")
         (
