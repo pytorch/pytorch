@@ -22,7 +22,13 @@ from torch.distributed.fsdp._common_utils import collect_grad_tensors
 from torch.distributed.utils import _apply_to_tensors, _to_kwargs
 
 from ._fsdp_api import MixedPrecisionPolicy
-from ._fsdp_common import _cast_fp_tensor, _dynamo_disable, DDPMeshInfo, TrainingState
+from ._fsdp_common import (
+    _cast_fp_tensor,
+    _dynamo_disable,
+    DDPMeshInfo,
+    is_bw,
+    TrainingState,
+)
 from ._fsdp_param_group import _GradientReductionState, FSDPCommContext, FSDPParamGroup
 
 
@@ -147,6 +153,12 @@ class FSDPState(_State):
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         self._lazy_init()
         if self._state_ctx.iter_forward_root is not None:
+            return args, kwargs
+        if not self._is_root and is_bw():
+            # Activation checkpointing recomputes a nested module in backward,
+            # when no forward root is set. Its forward never ran root
+            # pre-forward, so neither may the recompute: selective
+            # checkpointing replays the forward's record_functions by count.
             return args, kwargs
         logger.debug("FSDP::root_pre_forward")
         self._state_ctx.iter_forward_root = self
