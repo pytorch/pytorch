@@ -5466,6 +5466,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("refused", out.stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_names_a_changed_helper_module_at_load(self):
         # The changed source is a helper in another module, inlined into a
         # frame of the entry's: the refusal names that module, not the entry's.
@@ -5511,6 +5512,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("refused", out.stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_refuses_a_miss_on_a_tensor_free_continuation(
         self,
     ):
