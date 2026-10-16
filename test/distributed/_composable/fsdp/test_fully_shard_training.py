@@ -18,6 +18,7 @@ from torch.distributed._composable import checkpoint, replicate
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
     apply_activation_checkpointing,
+    checkpoint_wrapper,
 )
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import (
@@ -80,6 +81,10 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
     TransformerBlock,
+)
+from torch.utils.checkpoint import (
+    CheckpointPolicy,
+    create_selective_checkpoint_contexts,
 )
 
 
@@ -1527,6 +1532,52 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         for param in model.parameters():
             if param.requires_grad:
                 self.assertIsNotNone(param.grad)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_nested_fsdp_in_selective_checkpoint(self):
+        """
+        A module with its own ``fully_shard`` inside a block checkpointed with
+        selective-checkpoint contexts runs its FSDP hooks again when backward
+        recomputes the block. The contexts replay the forward's
+        ``record_function`` calls, so the recompute must make the same ones.
+        """
+
+        def recompute_all(ctx, op, *args, **kwargs):
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def shard(model: nn.Sequential, use_checkpoint: bool) -> None:
+            nested = [mlp.out_proj for mlp in model]
+            for i, mlp in enumerate(model):
+                fully_shard(mlp.out_proj)
+                if use_checkpoint:
+                    context_fn = functools.partial(
+                        create_selective_checkpoint_contexts, recompute_all
+                    )
+                    model[i] = checkpoint_wrapper(mlp, context_fn=context_fn)
+                fully_shard(model[i])
+            fully_shard(model)
+            # Gather each nested module with its block, so that neither the
+            # forward nor the recompute gathers it inside the checkpointed block
+            model.set_modules_to_forward_prefetch([model[0], nested[0]])
+            for i in range(len(model) - 1):
+                model[i].set_modules_to_forward_prefetch([model[i + 1], nested[i + 1]])
+
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(16, device=device_type) for _ in range(2)])
+        ref_model = copy.deepcopy(model)
+        shard(ref_model, use_checkpoint=False)
+        shard(model, use_checkpoint=True)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn((4, 16), device=device_type.type)
+        for _ in range(2):
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            loss = model(inp).sum()
+            loss.backward()
+            self.assertEqual(loss, ref_loss)
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.grad.to_local(), ref_param.grad.to_local())
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_double_partial_forward_then_backward(self):
