@@ -548,6 +548,26 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         self.assertEqual(grad_input, expected_grad_input)
 
     @parametrize("device", devices)
+    def test_broadcast(self, device):
+        """Test broadcast forward and that backward reduces the grads onto src."""
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+        src = 1
+
+        input_tensor = torch.full(
+            (3, 3), float(rank + 1), requires_grad=True, device=device
+        )
+        output = fcols.broadcast(input_tensor, src, group=group_name)
+        self.assertEqual(output, torch.full_like(output, src + 1))
+
+        output.backward(torch.full_like(output, float(rank + 1)))
+        total = sum(range(1, self.world_size + 1))
+        self.assertEqual(
+            input_tensor.grad,
+            torch.full_like(input_tensor, total if rank == src else 0.0),
+        )
+
+    @parametrize("device", devices)
     @parametrize("reduce_op_name, reduce_op", reduce_ops[:4])
     def test_reduce(self, device, reduce_op_name, reduce_op):
         """Test reduce forward and that backward broadcasts the dst grad."""
@@ -879,7 +899,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         )
 
     @parametrize("test_utils", test_utils)
-    @parametrize("op", ["reduce", "gather", "scatter"])
+    @parametrize("op", ["broadcast", "reduce", "gather", "scatter"])
     def test_rooted_opcheck(self, test_utils, op):
         group_name = dist.group.WORLD.group_name
         input_tensor = torch.ones(2 * self.world_size, 3, requires_grad=True)
