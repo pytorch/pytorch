@@ -1376,13 +1376,14 @@ def _is_arange_in_dim(node, dim, ndim, length):
 def _one_hot_sum_selector(match):
     """Returns (selector, classes) if the match sums, over ``dim``,
     ``where(selector == classes, val, 0)`` where classes is arange along
-    ``dim``, selector has the full rank and selector and val are broadcast
-    along ``dim``; otherwise None."""
+    ``dim``, selector is an integer tensor of full rank and selector and val
+    are broadcast along ``dim``; otherwise None."""
     dims = match.kwargs["dim"]
     one_hot = match.output_node().args[0]
     one_hot_val = one_hot.meta.get("val")
     if (
-        len(dims) != 1
+        not isinstance(dims, (list, tuple))
+        or len(dims) != 1
         or not isinstance(one_hot_val, torch.Tensor)
         or not one_hot_val.dtype.is_floating_point
     ):
@@ -1406,9 +1407,15 @@ def _one_hot_sum_selector(match):
         (match.kwargs["lhs"], match.kwargs["rhs"]),
         (match.kwargs["rhs"], match.kwargs["lhs"]),
     ):
+        # A float selector can fall between classes (or round onto two), so
+        # "in range" would not mean "matches exactly one class".
+        selector_val = selector.meta.get("val")
         if (
-            is_broadcast(selector)
-            and selector.meta["val"].dim() == ndim
+            isinstance(selector_val, torch.Tensor)
+            and not selector_val.dtype.is_floating_point
+            and not selector_val.dtype.is_complex
+            and selector_val.dim() == ndim
+            and is_broadcast(selector)
             and _is_arange_in_dim(classes, dim, ndim, length)
         ):
             return selector, classes
@@ -1425,17 +1432,17 @@ _one_hot = CallFunction(
 
 
 @register_graph_pattern(
-    CallFunction(
-        aten.sum.dim_IntList, _one_hot, KeywordArg("dim"), KeywordArg("keepdim")
-    ),
+    # keepdim=True as in log_softmax_backward; with a full-rank selector the
+    # replacement then has the sum's shape.
+    CallFunction(aten.sum.dim_IntList, _one_hot, KeywordArg("dim"), True),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=patterns,
     extra_check=lambda m: _one_hot_sum_selector(m) is not None,
 )
-def one_hot_sum(match: Match, *, lhs, rhs, val, background, dim, keepdim):
+def one_hot_sum(match: Match, *, lhs, rhs, val, background, dim):
     """
-    Replace ``sum(where(selector == arange(N), val, 0), dim)`` by the single
-    selected term, avoiding a reduction over ``dim``. Exactly one class can
+    Replace ``sum(where(selector == arange(N), val, 0), dim, keepdim=True)`` by
+    the single selected term, avoiding a reduction over ``dim``. Exactly one class can
     match, and only if selector is in [0, N). Selecting ``val != 0`` keeps the
     sum's +0 for val == -0.
 
@@ -1452,13 +1459,11 @@ def one_hot_sum(match: Match, *, lhs, rhs, val, background, dim, keepdim):
     dtype = one_hot_val.dtype
 
     # Sizes are read from the inputs inside repl so that they stay symbolic
-    # under dynamic shapes. With a full-rank selector, the result already has
-    # the reduced (keepdim) shape: classes is 1 outside the reduced dim.
+    # under dynamic shapes.
     def repl(selector, val, classes):
         length = classes.shape[reduced_dim - ndim]
         selected = (selector >= 0) & (selector < length) & (val != 0)
-        out = torch.where(selected, val, 0).to(dtype)
-        return out if keepdim else out.squeeze(reduced_dim)
+        return torch.where(selected, val, 0).to(dtype)
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [selector, val, classes])
