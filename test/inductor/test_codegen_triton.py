@@ -264,6 +264,28 @@ class TestCodegenTriton(InductorTestCase):
                     f"triton_helpers.{reduction_type}2_strict",
                 )
 
+    def test_gen_driver_setup_default(self):
+        setup = TritonKernel.gen_driver_setup
+        self.assertEqual(setup("cpu"), "triton_helpers.set_driver_to_cpu()")
+        self.assertEqual(setup(GPU_TYPE), "triton_helpers.set_driver_to_gpu()")
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch(force_disable_caches=True)
+    def test_gen_driver_setup_override(self):
+        def fn(x):
+            return x.sin() + 1
+
+        x = torch.randn(16, device=GPU_TYPE)
+        _, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertIn("triton_helpers.set_driver_to_gpu()", " ".join(code))
+
+        torch._dynamo.reset()
+        no_setup = classmethod(lambda cls, device_type: "")
+        with patch.object(TritonKernel, "gen_driver_setup", no_setup):
+            out, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(out, fn(x))
+        self.assertNotIn("set_driver_to_gpu", " ".join(code))
+
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_strict_signed_zero_unrolled_reduction(self):
         def fn(x):
