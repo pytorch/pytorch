@@ -711,7 +711,7 @@ class TestStatelessRNGDistribution(TestCase):
 
         f64 = {"dtype": torch.float64, "device": device, "requires_grad": True}
         bounds = (torch.zeros(8, 1, **f64), torch.ones(1, 5, **f64))
-        self.assertTrue(gradcheck(f, bounds))
+        self.assertTrue(gradcheck(f, bounds, check_forward_ad=True))
         self.assertTrue(gradgradcheck(f, bounds))
 
     @dtypes(*all_floating_dtypes)
