@@ -187,7 +187,9 @@ def guard_to_detect_forward_monkeypatching(
     # not present in the mod __dict__. The common case of patching forward
     # method adds `forward` in the instance __dict__, whereas the unpatched
     # `forward` sits in the type(mod).__dict__. Patching the class's forward is
-    # caught by a code guard on the type(mod).__dict__ source, once per class.
+    # caught only for UnspecializedNNModuleVariable, by its call_function's code
+    # guard on the type(mod).__dict__ source. The specialized NNModuleVariable
+    # path does not guard the class's forward (known gap).
     if source:
         if "forward" in mod.__dict__ and callable(mod.__dict__["forward"]):
             # Monkeypatched forward method, guard on call-relevant structure.

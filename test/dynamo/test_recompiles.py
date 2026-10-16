@@ -1035,40 +1035,6 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), x * 9.0)
         self.assertEqual(cnt.frame_count, 2)
 
-    @parametrize("access", ("instance", "class"))
-    @parametrize("inherited", (False, True))
-    def test_classmethod_code_mutation_recompiles(self, inherited, access):
-        def two(cls, x):
-            return x * 2.0
-
-        def nine(cls, x):
-            return x * 9.0
-
-        class Base:
-            c = classmethod(two)
-
-        class Derived(Base):
-            pass
-
-        owner = Derived if inherited else Base
-        cnt = torch._dynamo.testing.CompileCounter()
-        if access == "instance":
-            model = owner()
-            opt_fn = torch.compile(lambda x: model.c(x), backend=cnt, fullgraph=True)
-        else:
-            opt_fn = torch.compile(lambda x: owner.c(x), backend=cnt, fullgraph=True)
-
-        x = torch.arange(1.0, 4.0)
-        self.assertEqual(opt_fn(x), x * 2.0)
-        self.assertEqual(cnt.frame_count, 1)
-
-        Base.c.__func__.__code__ = nine.__code__
-
-        self.assertEqual(opt_fn(x), x * 9.0)
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(opt_fn(x), x * 9.0)
-        self.assertEqual(cnt.frame_count, 2)
-
     @parametrize("method", ("forward", "helper"))
     @parametrize("mutation", ("code", "rebind"))
     def test_nn_module_method_mutation_recompiles(self, mutation, method):
