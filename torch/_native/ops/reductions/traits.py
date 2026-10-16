@@ -11,6 +11,13 @@ from cutlass import Boolean, const_expr, Float32, Int32, Int64
 
 WARP = 32
 
+
+def welford_nouts(key: str) -> int:
+    if key.startswith(("varmean", "stdmean")):
+        return 2
+    return int(key.startswith(("var", "std")))
+
+
 # Arg-reduction "no winner" sentinel. Use Int32 to reduce partial traffic unless the
 # extent requires Int64.
 _INT32_MAX = (1 << 31) - 1
