@@ -10,10 +10,13 @@ from torch._dynamo.convert_frame import maybe_cprofile
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided, reduce_to_scalar_loss
 from torch._inductor import config, ir, metrics
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.fx_passes import pad_mm as pad_mm_pass
+from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import ceildiv, run_and_get_code
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -977,6 +980,23 @@ class PaddingTest(TestCaseBase):
             compiled = torch.compile(program, backend="inductor")(x.clone())
 
         self.assertEqual(eager, compiled)
+
+    def test_padded_allocation_codegen(self):
+        with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda: None))):
+            wrapper = PythonWrapperCodegen()
+
+        def alloc(device, is_pinned=False):
+            args = (torch.device(device), torch.float32, (4, 3), (4, 1), (4, 4))
+            return wrapper.make_allocation("buf0", *args, is_pinned)
+
+        cuda = "buf0 = reinterpret_tensor(empty_strided_cuda((4, 4), (4, 1), torch.float32), (4, 3), (4, 1))"
+        self.assertEqual(alloc("cuda"), cuda)
+
+        pinned = "buf0 = reinterpret_tensor(empty_strided_cpu_pinned((4, 4), (4, 1), torch.float32), (4, 3), (4, 1))"
+        self.assertEqual(alloc("cpu", is_pinned=True), pinned)
+
+        other = "buf0 = empty_strided((4, 4), (4, 1), device='privateuseone', dtype=torch.float32).as_strided((4, 3), (4, 1))"
+        self.assertEqual(alloc("privateuseone"), other)
 
 
 if __name__ == "__main__":
