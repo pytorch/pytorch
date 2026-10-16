@@ -1867,8 +1867,11 @@ def entry(x):
         from torch._dynamo.package import _update_skip_hold
         from torch._dynamo.types import GuardCollectiveState
 
-        def fn(x):
+        def callee(x):
             return x + 1
+
+        def fn(x):
+            return callee(x)
 
         # No tensor ops: the frame is recorded with no guarded code.
         package = CompilePackage(fn)
@@ -1897,19 +1900,26 @@ def entry(x):
         try:
             _update_skip_hold(code, True, hold=True)
             self.assertEqual(reports(), [GuardCollectiveState.SKIP])
-            # The recursive hold goes; the package's non-recursive one remains.
+            # A recursive hold skips the callee too.
+            self.assertEqual(counter.frame_count, 0)
+            # The recursive hold goes; the package's non-recursive one remains,
+            # so the callee compiles as its own frame.
             _update_skip_hold(code, True, hold=False)
             self.assertEqual(reports(), [GuardCollectiveState.SKIP])
+            self.assertEqual(counter.frame_count, 1)
             # A second package's non-recursive hold goes; the first remains.
+            # The callee now hits its entry.
             _update_skip_hold(code, False, hold=True)
             _update_skip_hold(code, False, hold=False)
-            self.assertEqual(reports(), [GuardCollectiveState.SKIP])
-            self.assertEqual(counter.frame_count, 0)
+            self.assertEqual(
+                reports(), [GuardCollectiveState.SKIP, GuardCollectiveState.HIT]
+            )
+            self.assertEqual(counter.frame_count, 1)
             # The last hold goes: the frame compiles, with no entries to guard
             # on yet, so it issues no collective.
             package.uninstall()
             self.assertEqual(reports(), [])
-            self.assertEqual(counter.frame_count, 1)
+            self.assertEqual(counter.frame_count, 2)
         finally:
             set_guard_complete_hook(old_hook)
 
