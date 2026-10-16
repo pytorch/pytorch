@@ -6,6 +6,7 @@ Supported layouts use a fast path or the general TensorIterator decode.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Sequence
 from typing import Any, NamedTuple, TYPE_CHECKING, TypeAlias
 
@@ -27,6 +28,7 @@ else:
 
 _Dim: TypeAlias = int | Sequence[int] | None
 _Red: TypeAlias = set[int] | None
+_Result: TypeAlias = torch.Tensor | tuple[torch.Tensor, ...]
 
 
 # Compute-capability majors this family's kernels have been run on: Hopper and Blackwell.
@@ -34,6 +36,7 @@ _ARCH_MAJORS = (9, 10)
 
 _SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _STORABLE_DTYPES = _SUPPORTED_DTYPES
+_INT32_LIMIT = 1 << 31
 
 
 def _acc_policy() -> dict[torch.dtype, tuple[Any, torch.dtype]]:
@@ -113,7 +116,13 @@ _ENVELOPE = {
     "prod": _FLOAT_ONLY,
     "amax": _NO_OUT_DTYPE,
     "amin": _NO_OUT_DTYPE,
+    "argmax": _NO_OUT_DTYPE,
+    "argmin": _NO_OUT_DTYPE,
+    "max_dim": _NO_OUT_DTYPE,
+    "min_dim": _NO_OUT_DTYPE,
 }
+
+_INDEX_KEYS = {"argmax", "argmin", "max_dim", "min_dim"}
 
 
 def _env(key: str) -> _Envelope:
@@ -146,6 +155,11 @@ def _base_cond(self: torch.Tensor, dim: _Dim, key: str) -> bool:
         and self.const_data_ptr() % 16 == 0  # type: ignore[attr-defined]
         and _dims_ok(dim, self.dim())
         and self.numel() != 0
+        and not (
+            key in _INDEX_KEYS
+            and _normalize_dims(dim, self.dim()) is None
+            and not self.is_contiguous()
+        )
     )
 
 
@@ -234,6 +248,84 @@ _amin_impl = _make_impl(
 )
 
 
+def _idx_width(self: torch.Tensor, red: _Red) -> tuple[Any, str]:
+    import cutlass
+
+    extent = self.numel() if red is None else math.prod(self.shape[d] for d in red)
+    if extent >= _INT32_LIMIT:
+        return cutlass.Int64, "i64"
+    return cutlass.Int32, "i32"
+
+
+def _run_arg(
+    make_trait: Callable[[Any, Any], Any],
+    key: str,
+    self: torch.Tensor,
+    red: _Red,
+    keepdim: bool,
+) -> torch.Tensor:
+    x = _kernel_input(self)
+    acc, _ = _acc_for(x, widen=False)
+    idx_cute, tag = _idx_width(self, red)
+    trait = make_trait(acc, idx_cute)
+    if red is None:
+        out = kg.reduce_all(trait, key + tag, x, torch.int64, order="unordered")
+    else:
+        out = kg.reduce_dim(
+            trait, key + tag, x, sorted(red), torch.int64, order="unordered"
+        )
+    return _keepdim_reshape(out, self.shape, red, keepdim)
+
+
+def _run_dim2(
+    make_trait: Callable[[Any, Any], Any],
+    key: str,
+    self: torch.Tensor,
+    dim: _Dim,
+    keepdim: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    red = _normalize_dims(dim, self.dim())
+    x = _kernel_input(self)
+    acc, _ = _acc_for(x, widen=False)
+    idx_cute, tag = _idx_width(self, red)
+    dims = None if red is None else sorted(red)
+    vals, idxs = kg.reduce_dim2(
+        make_trait(acc, idx_cute),
+        key + tag,
+        x,
+        dims,
+        [self.dtype, torch.int64],
+        order="unordered",
+    )
+    vals = _keepdim_reshape(vals, self.shape, red, keepdim)
+    idxs = _keepdim_reshape(idxs, self.shape, red, keepdim)
+    return vals, idxs
+
+
+def _make_index_impl(
+    trait_type: Callable[[], Any], key: str, *, with_value: bool = False
+) -> Callable[..., _Result]:
+    def impl(self: torch.Tensor, dim: _Dim = None, keepdim: bool = False) -> _Result:
+        make_trait = lambda acc, idx: trait_type()(acc=acc, idx=idx)  # noqa: E731
+        if with_value:
+            return _run_dim2(make_trait, key, self, dim, keepdim)
+        return _run_arg(
+            make_trait,
+            key,
+            self,
+            _normalize_dims(dim, self.dim()),
+            keepdim,
+        )
+
+    return impl
+
+
+_argmax_impl = _make_index_impl(lambda: T.ArgMaxOps, "argmax")
+_argmin_impl = _make_index_impl(lambda: T.ArgMinOps, "argmin")
+_max_dim_impl = _make_index_impl(lambda: T.MaxDimOps, "max.dim", with_value=True)
+_min_dim_impl = _make_index_impl(lambda: T.MinDimOps, "min.dim", with_value=True)
+
+
 def register_reduction_overrides() -> None:
     # cu.register_op_override is a no-op when the CuteDSL runtime is unavailable.
     overrides = (
@@ -242,6 +334,10 @@ def register_reduction_overrides() -> None:
         ("amax", _make_cond("amax"), _amax_impl),
         ("amin", _make_cond("amin"), _amin_impl),
         ("prod.dim_int", _make_dtype_cond("prod"), _prod_impl),
+        ("argmax", _make_cond("argmax"), _argmax_impl),
+        ("argmin", _make_cond("argmin"), _argmin_impl),
+        ("max.dim", _make_cond("max_dim"), _max_dim_impl),
+        ("min.dim", _make_cond("min_dim"), _min_dim_impl),
     )
     for op, cond, impl in overrides:
         cu.register_op_override("aten", op, "CUDA", cond=cond, impl=impl)

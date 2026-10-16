@@ -59,11 +59,9 @@ class ReduceBlock:
         self.npairs_kept = len(self.kept_pairs)
         self.wide_count = count >= _INT32_LIMIT
         self.wide_output = num_o >= _INT32_LIMIT
+        self.wide_gidx = getattr(trait, "has_index", False) and trait.idx is Int64
         self.wide_red = any(ext >= _INT32_LIMIT for ext, _ in self.red_pairs)
         self.wide_kept = any(ext >= _INT32_LIMIT for ext, _ in self.kept_pairs)
-        index_extent = limit if limit is not None else count
-        if getattr(trait, "has_index", False) and index_extent > _INT32_LIMIT:
-            raise ValueError("index reductions require indices representable in Int32")
         self.in_base = in_base  # flat input offset of output coordinate 0
         self.limit = limit if limit is not None else count  # ragged tail bound
         # Projection divisor: count normally, or original L when stage 2 folds G partials.
@@ -89,6 +87,7 @@ class ReduceBlock:
             npairs_kept=self.npairs_kept,
             wide_count=self.wide_count,
             wide_output=self.wide_output,
+            wide_gidx=self.wide_gidx,
             wide_red=self.wide_red,
             wide_kept=self.wide_kept,
             gidx_from=gidx_from,
