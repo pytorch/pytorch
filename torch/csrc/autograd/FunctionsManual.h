@@ -1249,4 +1249,11 @@ mkldnn_rnn_layer_differentiable_backward(
 
 Tensor values_backward(const Tensor& grad, const Tensor& self);
 
+std::tuple<Tensor, Tensor> philox_uniform_bounds_backward(
+    const Tensor& grad,
+    const Tensor& key,
+    const Tensor& low,
+    const Tensor& high,
+    std::array<bool, 2> grad_input_mask);
+
 } // namespace torch::autograd::generated::details
