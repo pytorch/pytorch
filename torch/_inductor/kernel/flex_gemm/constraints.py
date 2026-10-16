@@ -95,8 +95,8 @@ LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR = (
 FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR = "FlexGEMM output plans require tensor output nodes"
 FLEX_GEMM_OUTPUT_TENSOR_ERROR = "FlexGEMM expects tensor outputs"
 FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
-    "FlexGEMM grouped main outputs compose only with the unchanged physical "
-    "GEMM output as an auxiliary"
+    "FlexGEMM grouped main outputs do not compose with indexed outputs, and "
+    "chunked lanes do not compose with auxiliary outputs"
 )
 FLEX_GEMM_OUTPUT_EXPANSION_COMPOSITION_ERROR = (
     "FlexGEMM interleaved main outputs compose only with GEMM-shaped auxiliaries "
