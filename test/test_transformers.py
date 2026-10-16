@@ -6749,9 +6749,15 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertTrue(seed.is_cuda and offset.is_cuda)
 
         grad_out = torch.ones_like(out)
-        grad_input_mask = [True, True, True, False]
-        grads = bwd(grad_out, q, k, v, None, out, lse, seed, offset, dropout_p, grad_input_mask, False)
-        grads_ref = bwd(grad_out, q, k, v, None, out, lse, seed.cpu(), offset.cpu(), dropout_p, grad_input_mask, False)
+        args = (grad_out, q, k, v, None, out, lse, seed, offset, dropout_p, [True, True, True, False], False)
+        grads = bwd(*args)
+        # Reference: the same backward captured and replayed, which has always
+        # consumed device seed/offset. ROCm backends need device seed/offset,
+        # so a CPU-copy reference is not portable.
+        g_bwd = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g_bwd):
+            grads_ref = bwd(*args)
+        g_bwd.replay()
         self.assertEqual(grads[:3], grads_ref[:3])
 
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
