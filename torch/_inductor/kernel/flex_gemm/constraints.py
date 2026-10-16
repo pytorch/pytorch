@@ -96,10 +96,10 @@ FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR = "FlexGEMM output plans require tensor output 
 FLEX_GEMM_OUTPUT_TENSOR_ERROR = "FlexGEMM expects tensor outputs"
 FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
     "FlexGEMM grouped main outputs do not compose with indexed outputs, and "
-    "chunked lanes do not compose with auxiliary outputs"
+    "chunked group-2 lanes support only one unchanged accumulator auxiliary"
 )
 FLEX_GEMM_OUTPUT_EXPANSION_COMPOSITION_ERROR = (
-    "FlexGEMM interleaved main outputs compose only with GEMM-shaped auxiliaries "
+    "FlexGEMM expanded main outputs compose only with GEMM-shaped auxiliaries "
     "computed before the lanes are packed"
 )
 FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
@@ -246,11 +246,13 @@ class FlexGemmOutputContraction:
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmOutputExpansion:
-    """Main output stores two epilogue lanes interleaved along N.
+    """Main output stores two GEMM-shaped epilogue lanes along N.
 
-    ``out[..., 2 * n + j]`` is lane ``j`` at accumulator column ``n``; the body
-    returns ``torch.stack([a, b], -1).view(..., 2 * N)``.
+    Interleaved output is ``stack([a, b], -1).view(..., 2 * N)``; chunked output
+    is ``cat([a, b], -1)`` and uses two tile stores into halves of one allocation.
     """
+
+    chunked: bool = False
 
     @property
     def concat_layout(self) -> tuple[str, ...]:

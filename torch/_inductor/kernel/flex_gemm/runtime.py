@@ -292,16 +292,25 @@ def flex_gemm_epimod(
             and local_reduce.fragment_reduced
             else None
         )
+        aux_stores = (
+            tuple(GroupedMainStore(f"output0_lane{lane}", 2) for lane in range(2))
+            if output_transform.chunked and aux_output_count
+            else aux_output_names
+        )
         outputs: tuple[Any, ...] = (
             GroupedMainStore(
                 "main",
                 output_transform.group,
                 min_fragment_n=min_fragment_n,
             ),
-            *aux_output_names,
+            *aux_stores,
         )
     elif isinstance(output_transform, FlexGemmOutputExpansion):
-        outputs = (InterleavedMainStore("main"), *aux_output_names)
+        outputs = (
+            ("main0", "main1", *aux_output_names)
+            if output_transform.chunked
+            else (InterleavedMainStore("main"), *aux_output_names)
+        )
     else:
         outputs = aux_output_names
     sinks: dict[str, Any] = {}
@@ -537,6 +546,23 @@ def gemm_epilogue(
             strict=True,
         )
     )
+    chunked_output = (
+        isinstance(output_transform, FlexGemmOutputExpansion)
+        and output_transform.chunked
+    )
+    if chunked_output:
+        # Each ordinary TileStore sees [M, N], with the full output's row stride.
+        output_buffers["main0"], output_buffers["main1"] = output_buffers.pop(
+            "main"
+        ).chunk(2, dim=-1)
+    elif (
+        isinstance(output_transform, FlexGemmOutputContraction)
+        and output_transform.chunked
+        and aux_outs
+    ):
+        output_buffers["output0_lane0"], output_buffers["output0_lane1"] = (
+            output_buffers.pop("output0").chunk(2, dim=-1)
+        )
     concat_layout = None if output_transform is None else output_transform.concat_layout
     # Generated wrappers pass the current stream; switching streams costs ~20us.
     stream_context = (
@@ -568,4 +594,4 @@ def gemm_epilogue(
             compile_dispatch=False,
             **operands,
         )
-    return result[main_name]
+    return out if chunked_output else result[main_name]

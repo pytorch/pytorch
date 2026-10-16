@@ -330,7 +330,7 @@ def require_tma_loadable_tile_captures(
 ) -> list[TensorBox]:
     """Give tile and interleaved captures a layout QuACK's TMA load can read in place.
 
-    A tile load needs one unit-stride matrix dim and 16-byte multiple outer strides;
+    A tile load needs a 16-byte aligned base, one unit-stride matrix dim, and aligned outer strides;
     an interleaved load pairs adjacent N columns, so it must be N-major. Views
     such as ``h.view(m, n, 2)[..., 0]`` have neither, so they are copied to a
     contiguous layout here instead of failing QuACK's launch-time stride check.
@@ -345,7 +345,7 @@ def require_tma_loadable_tile_captures(
     def loadable(arg: TensorBox, unit_dims: tuple[int, ...], alignment: int) -> bool:
         stride = arg.maybe_get_stride()
         if stride is None:
-            return True
+            return False
         for unit in unit_dims:
             if statically_known_equal(stride[unit], 1) and all(
                 sizevars.statically_known_multiple_of(s, alignment)
@@ -359,6 +359,11 @@ def require_tma_loadable_tile_captures(
     out = []
     for arg, kind in zip(epilogue_args, epilogue_arg_kinds, strict=True):
         alignment = max(16 // arg.get_dtype().itemsize, 1)
+        if kind in unit_dims and arg.maybe_get_stride() is not None:
+            if not sizevars.statically_known_multiple_of(
+                arg.get_layout().offset, alignment
+            ):
+                arg = ir.ExternKernel.copy_input(arg)
         if kind in unit_dims and not loadable(arg, unit_dims[kind], alignment):
             *outer, n = arg.get_size()
             padded = [*outer, ceildiv(n, alignment) * alignment]
@@ -836,7 +841,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     output_transform = outputs.output_transform
     if varlen_axis == "k" and output_transform is not None:
         raise NotImplementedError(
-            "FlexGEMM varlen-K does not support output contractions"
+            "FlexGEMM varlen-K does not support output contractions or expansions"
         )
     if (
         blockscaled is not None
@@ -864,8 +869,18 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if isinstance(output_transform, FlexGemmOutputExpansion)
         else logical_output_size
     )
-    # Auxiliaries are plain GEMM-shaped tiles under either lane transform.
+    # Auxiliary buffers keep the GEMM shape, including saved chunked pre-activations.
     aux_metas = validate_flex_gemm_aux_outputs(gemm_op, outputs.aux_outputs, gemm_size)
+    if (
+        isinstance(output_transform, FlexGemmOutputContraction)
+        and output_transform.chunked
+        and aux_metas
+    ):
+        alignment = max(16 // aux_metas[0].dtype.itemsize, 1)
+        if aux_metas[0].shape[-1] // 2 % alignment:
+            raise NotImplementedError(
+                "FlexGEMM chunked accumulator auxiliary requires 16-byte aligned halves"
+            )
     if varlen_axis == "k":
         for meta in (output_meta, *aux_metas):
             alignment = max(16 // meta.dtype.itemsize, 1)
@@ -886,6 +901,15 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if output_storage is None
         else output_storage.meta["val"].dtype
     )
+    if (
+        isinstance(output_transform, FlexGemmOutputExpansion)
+        and output_transform.chunked
+    ):
+        alignment = max(16 // output_storage_dtype.itemsize, 1)
+        if gemm_fx_node.meta["val"].shape[-1] % alignment:
+            raise NotImplementedError(
+                "FlexGEMM chunked output expansion requires 16-byte aligned halves"
+            )
     packed_uint8_main = (
         isinstance(output_transform, FlexGemmOutputContraction)
         and output_storage_dtype is torch.uint8
@@ -1181,8 +1205,8 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if not isinstance(autotune, bool):
             raise NotImplementedError("NVGEMM FlexGEMM autotune must be a bool")
         decompose_nvgemm_additive_gemm(subgraph.graph_module)
-        # NVGEMM templates are only generated under max_autotune. Without
-        # autotune, keep only the top heuristic-ranked config, as QUACK does.
+        # NVGEMM templates require max_autotune. autotune=False caps each heuristic
+        # family at one config; supplemental wide-tile EFC choices may remain.
         nvgemm_config: dict[str, Any] = {
             "max_autotune": True,
             "max_autotune_gemm_backends": "NVGEMM",
