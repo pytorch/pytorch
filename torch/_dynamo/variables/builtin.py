@@ -1969,6 +1969,20 @@ class BuiltinVariable(BaseBuiltinVariable):
             ):
                 return obj.method_setattr_standard(tx, name_var, val)
 
+        if (
+            self.fn is object
+            and name == "__getattribute__"
+            and len(args) == 2
+            and not kwargs
+            and args[1].is_python_constant()
+            and isinstance(args[1].as_python_constant(), str)
+        ):
+            obj = args[0].realize()
+            if isinstance(obj, UserDefinedObjectVariable):
+                return obj.generic_getattr(
+                    tx, args[1].as_python_constant(), explicit_call=True
+                )
+
         if name == "__new__":
             # Supported __new__ methods
             if self.fn is object and len(args) == 1:
