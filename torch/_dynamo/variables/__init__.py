@@ -20,6 +20,7 @@ from .base import VariableTracker
 from .builtin import (
     BaseBuiltinVariable,
     BuiltinVariable,
+    ByteArrayBuiltinVariable,
     DictBuiltinVariable,
     GetAttrBuiltinVariable,
     HasAttrBuiltinVariable,
@@ -68,6 +69,14 @@ from .dicts import (
     OrderedDictVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable
+from .exception import (
+    AttributeErrorVariable,
+    ExceptionVariable,
+    FrameSummaryVariable,
+    NameErrorVariable,
+    StopIterationVariable,
+    TracebackVariable,
+)
 from .functions import (
     BaseUserFunctionVariable,
     BoundBuiltinMethodVariable,
@@ -123,6 +132,8 @@ from .iter import (
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    ByteArrayIteratorVariable,
+    ByteArrayVariable,
     DequeIteratorVariable,
     DequeReverseIteratorVariable,
     DequeVariable,
@@ -137,27 +148,22 @@ from .lists import (
 )
 from .memory import CUDAMemPoolContextVariable, CUDAMemPoolVariable
 from .misc import (
-    AttributeErrorVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     CallMethodVariable,
     CellVariable,
     ContextVarVariable,
     DeletedVariable,
-    ExceptionVariable,
     GetAttrVariable,
     LambdaVariable,
-    NameErrorVariable,
     NewGlobalVariable,
     NumpyVariable,
     ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
-    StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
-    TracebackVariable,
     TypingVariable,
     UnknownVariable,
     WeakRefVariable,
@@ -205,12 +211,15 @@ from .user_defined import (
     StructSequenceVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
+    UserDefinedDefaultDictVariable,
     UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedExceptionObjectVariable,
+    UserDefinedFrozensetVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedOrderedDictVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
     UserDefinedVariable,
@@ -225,8 +234,11 @@ __all__ = [
     "BackwardHookVariable",
     "BaseBuiltinVariable",
     "BaseListVariable",
-    "CallMethodVariable",
     "BuiltinVariable",
+    "ByteArrayBuiltinVariable",
+    "ByteArrayIteratorVariable",
+    "ByteArrayVariable",
+    "CallMethodVariable",
     "CatchWarningsCtxManagerVariable",
     "CellVariable",
     "ConstantVariable",

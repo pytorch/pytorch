@@ -156,6 +156,12 @@ class Vectorized<double> {
     }
     return loadu(tmp);
   }
+  double reduce_add() const {
+    return svaddv_f64(ptrue, values);
+  }
+  double reduce_max() const {
+    return svmaxv_f64(ptrue, values);
+  }
   Vectorized<double> abs() const {
     return svabs_f64_x(ptrue, values);
   }

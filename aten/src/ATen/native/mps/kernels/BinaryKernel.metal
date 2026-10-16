@@ -317,8 +317,7 @@ struct nextafter_functor {
 struct hypot_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return static_cast<T>(
-        c10::metal::hypot(::metal::fabs(a), ::metal::fabs(b)));
+    return static_cast<T>(c10::metal::hypot(a, b));
   }
 };
 
@@ -624,6 +623,12 @@ struct logical_xor_functor {
   REGISTER_BINARY_CASTOUT_OP(NAME, uchar, bool);  \
   REGISTER_BINARY_OP(NAME, char, bool);           \
   REGISTER_BINARY_CASTOUT_OP(NAME, char, bool);   \
+  REGISTER_BINARY_OP(NAME, ushort, bool);         \
+  REGISTER_BINARY_CASTOUT_OP(NAME, ushort, bool); \
+  REGISTER_BINARY_OP(NAME, uint, bool);           \
+  REGISTER_BINARY_CASTOUT_OP(NAME, uint, bool);   \
+  REGISTER_BINARY_OP(NAME, ulong, bool);          \
+  REGISTER_BINARY_CASTOUT_OP(NAME, ulong, bool);  \
   REGISTER_BINARY_OP(NAME, bool, bool);           \
   REGISTER_BINARY_CASTOUT_OP(NAME, bool, bool)
 
