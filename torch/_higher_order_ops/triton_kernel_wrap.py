@@ -2186,6 +2186,10 @@ class TritonHOPifier:
     def get_value(self, val: Any) -> Any:
         raise NotImplementedError("abstract method")
 
+    def wrap_default(self, value: Any) -> Any:
+        """Wrap a kernel parameter's declared default as a call argument."""
+        return value
+
     def call_grid(  # type: ignore[no-untyped-def]
         self,
         grid,
@@ -2740,6 +2744,22 @@ class TritonHOPifier:
         # when materializing target-specific backend options.
 
         combined_args_raw = {**dict(zip(iter_kernel.arg_names, args)), **kwargs}
+
+        # Triton binds omitted parameters to their declared defaults. Do the same
+        # so the captured call matches the kernel signature; otherwise TTIR
+        # analysis and the generated launcher see too few arguments.
+        config_kwarg_names: set[str] = (
+            set().union(*(set(config.kwargs) for config in variable.kernel.configs))
+            if isinstance(variable.kernel, Autotuner)
+            else set()
+        )
+        for param in iter_kernel.params:
+            if (
+                param.has_default
+                and param.name not in combined_args_raw
+                and param.name not in config_kwarg_names
+            ):
+                combined_args_raw[param.name] = self.wrap_default(param.default)
 
         # precompute the grid for the kernel
         configs = (

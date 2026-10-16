@@ -3948,6 +3948,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
     def get_value(self, val: VariableTracker) -> Any:
         return val.value  # type: ignore[attr-defined]
 
+    def wrap_default(self, value: Any) -> VariableTracker:
+        return ConstantVariable.create(value)
+
     def check_grid(self, grid: "BaseListVariable") -> tuple[torch.fx.proxy.Proxy, ...]:
         from .lists import BaseListVariable
 
