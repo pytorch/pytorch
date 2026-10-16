@@ -1345,6 +1345,7 @@ class TritonOverrides(OpOverrides):
 
     _LOG_2_E = math.log2(math.e)
 
+    @override
     @staticmethod
     def _strict_cuda_pointwise() -> bool:
         return (
@@ -1439,6 +1440,13 @@ class TritonOverrides(OpOverrides):
             and (src_dtype == torch.bool or is_integer_dtype(src_dtype))
         ):
             return f"{x}.to(tl.float32).to({out_dtype})"
+
+        if (
+            isinstance(x, CSEVariable)
+            and x.dtype is not None
+            and triton_type(x.dtype) == out_dtype
+        ):
+            return x
 
         return f"{x}.to({out_dtype})"
 
