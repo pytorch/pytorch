@@ -125,10 +125,6 @@ if has_triton():
         ref_global(x_ptr, output_ptr, n_elements, BLOCK_SIZE)
 
 
-from torch.testing._internal.inductor_utils import GPU_TYPE
-from torch.testing._internal.triton_utils import requires_gpu
-
-
 class FxGraphRunnableArtifactFilter(logging.Filter):
     def filter(self, record):
         return (
@@ -233,116 +229,6 @@ class FxGraphRunnableTest(FxGraphRunnableTestBase, TestCase):
         compiled(args)
 
         self.assertIn("is_inference=True", self._get_payload())
-        self._exec_and_verify_payload()
-
-    @unittest.skipUnless(has_triton(), "Triton not available")
-    @requires_gpu
-    def test_user_defined_triton_kernel_autotune(self):
-        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
-            n_elements = output.numel()
-
-            def grid(
-                meta,
-            ):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            add_kernel_autotune[grid](x, y, output, n_elements)
-            return output
-
-        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
-        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
-
-        torch.compile(add)(x, y)  # noqa: UNSPECIFIED_BACKEND
-        self._exec_and_verify_payload()
-
-    @unittest.skipUnless(has_triton(), "Triton not available")
-    @requires_gpu
-    def test_user_defined_triton_kernel(self):
-        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
-            n_elements = x.numel()
-            add_kernel[n_elements,](x, y, output, n_elements, BLOCK_SIZE=4)
-            return output
-
-        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
-        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
-
-        torch.compile(add)(x, y)  # noqa: UNSPECIFIED_BACKEND
-        self._exec_and_verify_payload()
-
-    @unittest.skipUnless(has_triton(), "Triton not available")
-    @requires_gpu
-    def test_user_defined_nested_triton_kernel(self):
-        def subtract_nested(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            output = torch.empty_like(x)
-            n_elements = x.numel()
-            nested_kernel_with_inner_call[(n_elements,)](
-                x, y, output, n_elements, BLOCK_SIZE=1024
-            )
-            return output
-
-        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
-        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16) * 0.5
-
-        torch.compile(subtract_nested)(x, y)  # noqa: UNSPECIFIED_BACKEND
-        self._exec_and_verify_payload()
-
-    @unittest.skipUnless(has_triton(), "Triton not available")
-    @requires_gpu
-    def test_nested_and_autotuned_same_kernel(self):
-        def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            output1 = torch.empty_like(x)
-            output2 = torch.empty_like(x)
-            n_elements = x.numel()
-
-            def grid(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            autotuned_subtract[grid](x, y, output2, n_elements)
-            subtract_kernel_inner[(n_elements,)](
-                x, y, output1, n_elements, BLOCK_SIZE=1024
-            )
-            return output1 + output2
-
-        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
-        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16) * 0.5
-
-        torch.compile(f)(x, y)  # noqa: UNSPECIFIED_BACKEND
-        self._exec_and_verify_payload()
-
-    @unittest.skipUnless(has_triton(), "Triton not available")
-    @requires_gpu
-    # in-process compile: preexisting async workers lack the env patched on this class
-    @torch._inductor.config.patch(compile_threads=1)
-    def test_multi_kernel_nesting_and_global_constexpr(self):
-        def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            n_elements = x.numel()
-
-            output1 = torch.empty_like(x)
-            ref_global[(n_elements,)](x, output1, n_elements, BLOCK_SIZE=1024)
-
-            output2 = torch.empty_like(x)
-            nested_ref_global_constexpr[(n_elements,)](
-                x, output2, n_elements, BLOCK_SIZE=1024
-            )
-
-            output3 = torch.empty_like(x)
-            nested_kernel_with_inner_call[(n_elements,)](
-                x, y, output3, n_elements, BLOCK_SIZE=1024
-            )
-
-            output4 = torch.empty_like(x)
-            subtract_kernel_inner[(n_elements,)](
-                x, y, output4, n_elements, BLOCK_SIZE=1024
-            )
-
-            return output1 + output2 + output3 + output4
-
-        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
-        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16) * 0.5
-
-        torch.compile(f)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     def test_two_inputs_matmul(self):
@@ -715,6 +601,8 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
+    # in-process compile: preexisting async workers lack the env patched on this class
+    @torch._inductor.config.patch(compile_threads=1)
     def test_multi_kernel_nesting_and_global_constexpr(self, device):
         def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             n_elements = x.numel()
