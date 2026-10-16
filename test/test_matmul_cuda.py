@@ -47,6 +47,8 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_WINDOWS,
     MI200_ARCH,
+    NAVI3_5_ARCH,
+    NAVI3_ARCH,
     NAVI_ARCH,
     getRocmVersion,
     isRocmArchAnyOf,
@@ -614,8 +616,11 @@ class TestMatmulCuda(InductorTestCase):
 
 
     @onlyCUDA
-    # Fails with triton 3.7
-    @skipIfRocmArch(NAVI_ARCH)
+    # Fails with triton 3.7 on RDNA3/RDNA3.5 with the cublaslt backend
+    @decorateIf(
+        skipIfRocmArch(NAVI3_ARCH + NAVI3_5_ARCH),
+        lambda params: params["backend"] == "cublaslt",
+    )
     @dtypes(torch.float16)
     # m == 4 chooses OUTPUT_TYPE reduction on H200
     # m == 8 chooses OUTPUT_TYPE reduction on A100
@@ -1242,9 +1247,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("batch_size", [None, 1, 16])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
-        if torch.version.hip and (
-            _get_torch_rocm_version() < (7, 2, 1) or isRocmArchAnyOf(MI200_ARCH)
-        ):
+        if torch.version.hip and _get_torch_rocm_version() < (7, 2, 1):
             msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
                 raise unittest.SkipTest(msg)

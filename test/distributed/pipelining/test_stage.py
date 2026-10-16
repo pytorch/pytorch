@@ -911,7 +911,11 @@ class StageTest(MultiProcContinuousTest):
             else:
                 schedule.step()
 
-        torch.nn.MSELoss(reduction="sum")(ref_mod(x), target).backward()
+        # Run the reference on the same microbatches as the schedule. A
+        # full-batch GEMM can round differently, and a single ReLU input that
+        # flips sign shifts many gradient elements past these tolerances.
+        for x_mb, target_mb in zip(x.chunk(chunks), target.chunk(chunks)):
+            torch.nn.MSELoss(reduction="sum")(ref_mod(x_mb), target_mb).backward()
         ref_stage = ref_mod.get_submodule(f"layers.{self.rank}")
         for name, parameter in stage_mod.named_parameters():
             self.assertEqual(

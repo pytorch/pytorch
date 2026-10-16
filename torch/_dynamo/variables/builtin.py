@@ -32,7 +32,6 @@ import operator
 import sys
 import types
 import typing
-from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, NoReturn, TYPE_CHECKING
 
@@ -58,11 +57,13 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    DictGetItemSource,
     GetItemSource,
     GlobalSource,
     is_constant_source,
     LocalSource,
     Source,
+    TypeDictSource,
     TypeSource,
 )
 from ..utils import (
@@ -76,9 +77,9 @@ from ..utils import (
     get_fake_value,
     has_torch_function,
     is_tensor_getset_descriptor,
+    is_torch_class,
     istype,
     no_keywords,
-    no_positional,
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -104,9 +105,8 @@ from .dicts import (
     DictItemsVariable,
     DictKeysVariable,
     DictViewVariable,
-    OrderedDictVariable,
+    pydict_checkexact,
 )
-from .hashable import is_hashable
 from .lists import (
     BaseListVariable,
     ByteArrayVariable,
@@ -159,7 +159,12 @@ from .object_protocol import (
     type_implements_sq_length,
     vt_identity_compare,
 )
-from .sets import FrozensetVariable, OrderedSetVariable, SetVariable
+from .sets import (
+    FrozensetVariable,
+    OrderedSetVariable,
+    pyanyset_checkexact,
+    SetVariable,
+)
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
@@ -503,6 +508,29 @@ class BaseBuiltinVariable(VariableTracker):
             attr = getattr(fn, name)
         except AttributeError as e:
             raise_observed_exception(AttributeError, tx, args=list(e.args))
+        if name == "__dict__":
+            # Each access allocates a fresh mappingproxy. Keep sources on its
+            # immutable builtin-type entries, not on the allocation itself.
+            dict_source = self.source and TypeDictSource(self.source)
+            items: dict[VariableTracker, VariableTracker] = {}
+            for key, value in attr.items():
+                value_source = dict_source and DictGetItemSource(dict_source, key)
+                value_vt = (
+                    variables.LazyVariableTracker.create(value, value_source, tx=tx)
+                    if value_source
+                    else VariableTracker.build(tx, value)
+                )
+                items[ConstantVariable.create(key)] = value_vt
+            return variables.MappingProxyVariable(variables.ConstDictVariable(items))
+        if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
+            # Unbound C method read off a builtin type, e.g. list.count. Torch
+            # types keep their trace-rule path through GetAttrVariable.
+            from .functions import MethodDescriptorVariable
+
+            owner: VariableTracker = self
+            if attr.__objclass__ is not fn:
+                owner = VariableTracker.build(tx, attr.__objclass__)
+            return MethodDescriptorVariable(attr, owner=owner, source=source)
         return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
 
     def call_obj_hasattr(
@@ -1880,6 +1908,16 @@ class BuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if self.fn is type and len(args) == 3:
+            unimplemented(
+                gb_type="Dynamic class creation with type",
+                context="type(name, bases, namespace)",
+                explanation="Dynamo does not support tracing class creation with type().",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
+
         if self.fn is object and not args and not kwargs:
             # object() -> a fresh opaque instance, wrapped as ObjectVariable to
             # match how SourcelessBuilder wraps bare `object` instances. Falling
@@ -2130,9 +2168,32 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
-        no_positional(tx, "bytes", list(args))
-        no_keywords(tx, "bytes", kwargs)
-        return variables.ConstantVariable.create(b"")
+        if not args and not kwargs:
+            return variables.ConstantVariable.create(b"")
+        if all(a.is_python_constant() for a in args) and all(
+            v.is_python_constant() for v in kwargs.values()
+        ):
+            try:
+                res = bytes(
+                    *(a.as_python_constant() for a in args),
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+                return VariableTracker.build(tx, res)
+            except (TypeError, ValueError) as e:
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=list(e.args),
+                )
+        unimplemented(
+            gb_type="bytes() with non-constant arguments",
+            context=f"bytes(*{args}, **{kwargs})",
+            explanation="Attempted to call bytes() with non-constant args.",
+            hints=[
+                "Ensure that the args to bytes() are constant (int, str, etc.).",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs) -> NoReturn:
@@ -2932,6 +2993,16 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         return variables.SuperVariable(a, b)
 
+    def call_classmethod(
+        self, tx: "InstructionTranslatorBase", func: VariableTracker
+    ) -> VariableTracker:
+        return variables.ClassMethodVariable(func)
+
+    def call_staticmethod(
+        self, tx: "InstructionTranslatorBase", func: VariableTracker
+    ) -> VariableTracker:
+        return variables.StaticMethodVariable(func)
+
     def call_next(
         self,
         tx: "InstructionTranslatorBase",
@@ -3010,24 +3081,23 @@ class BuiltinVariable(BaseBuiltinVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        # Declarative type-attribute dispatch (__name__, __bases__, __base__,
-        # __flags__), mirroring the consultation at the top of
-        # VariableTracker.getattro_impl. Inlined because this override keeps its
-        # own object / GetAttrVariable handling below instead of delegating.
+        # Mirror CPython getattr on a builtin function/type: raise AttributeError
+        # for a missing attribute, resolve literal introspection attributes
+        # (__doc__, __module__, __qualname__, __type_params__) to real guarded
+        # values so they are usable during tracing, and defer everything else
+        # (callables, complex objects) to a GetAttrVariable.
+        if name == "__dict__":
+            return super().tp_getattro_impl(tx, name)
         source = self.source and AttrSource(self.source, name)
-        if self.fn is object:
-            # for object, we can just directly read the attribute
-            try:
-                value = getattr(self.fn, name)
-            except AttributeError:
-                raise_observed_exception(AttributeError, tx)
-            if not callable(value):
-                return VariableTracker.build(tx, value, source)
         try:
-            attr = getattr(self.fn, name)
-        except AttributeError as e:
-            raise_observed_exception(AttributeError, tx, args=list(e.args))
-        return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
+            value = getattr(self.fn, name)
+        except AttributeError as exc:
+            raise_observed_exception(AttributeError, tx, args=list(exc.args))
+        if self.fn is object and not callable(value):
+            return VariableTracker.build(tx, value, source)
+        if ConstantVariable.is_literal(value):
+            return VariableTracker.build(tx, value, source)
+        return variables.GetAttrVariable(self, name, py_type=type(value), source=source)
 
     def call_delattr(
         self,
@@ -3127,7 +3197,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
-        return StringFormatVariable.create(format_string, list(args), kwargs)
+        return StringFormatVariable.create(tx, format_string, list(args), kwargs)
 
     def call_id(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
@@ -3482,7 +3552,16 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+        no_keywords(tx, "dict.fromkeys", kwargs)
+        check_positional(tx, "fromkeys", len(args), 1, 2)
+        # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
+        if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
+            value = args[1] if len(args) == 2 else ConstantVariable.create(None)
+            return ConstDictVariable(
+                dict.fromkeys(args[0].items.keys(), value),  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
+            )
+        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args, **kwargs)
 
     tp_methods = {
         "fromkeys": Method(fromkeys),
@@ -3538,116 +3617,15 @@ class DictBuiltinVariable(BaseBuiltinVariable):
     @staticmethod
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslatorBase",
-        user_cls: type,
+        user_cls: VariableTracker,
         /,
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if user_cls not in {dict, OrderedDict, defaultdict}:
-            unimplemented(
-                gb_type="Unsupported dict type for fromkeys()",
-                context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
-                explanation=f"Failed to call {user_cls.__name__}.fromkeys() because "
-                f"{user_cls.__name__} is not any type of dict, OrderedDict, or defaultdict",
-                hints=[
-                    f"Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict.",
-                ],
-            )
-        if kwargs:
-            # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
-            if (
-                user_cls is not OrderedDict
-                or len(args) != 1
-                or len(kwargs) != 1
-                or "value" not in kwargs
-            ):
-                raise_args_mismatch(
-                    tx,
-                    f"{user_cls.__name__}.fromkeys",
-                    "1 args and 1 kwargs (`value`)",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            args = (*args, kwargs.pop("value"))
-        if len(args) == 0:
-            raise_args_mismatch(
-                tx,
-                f"{user_cls.__name__}.fromkeys",
-                "at least 1 args",
-                f"{len(args)} args",
-            )
-        if len(args) == 1:
-            args = (*args, ConstantVariable.create(None))
-        if len(args) != 2:
-            raise_args_mismatch(
-                tx,
-                f"{user_cls.__name__}.fromkeys",
-                "2 args",
-                f"{len(args)} args",
-            )
-
-        arg, value = args
-
-        def _make_result(
-            items: dict[VariableTracker, VariableTracker],
-        ) -> VariableTracker:
-            if user_cls is OrderedDict:
-                return OrderedDictVariable(items, mutation_type=ValueMutationNew())
-            elif user_cls is defaultdict:
-                from .builder import SourcelessBuilder
-                from .user_defined import DefaultDictVariable
-
-                result = tx.output.side_effects.track_new_user_defined_object(
-                    SourcelessBuilder.create(tx, dict),
-                    SourcelessBuilder.create(tx, defaultdict),
-                    [],
-                    tx=tx,
-                )
-                if not isinstance(result, DefaultDictVariable):
-                    raise AssertionError(
-                        f"Expected DefaultDictVariable, got {type(result)}"
-                    )
-                # Route through ConstDictVariable to wrap raw VT keys into
-                # HashableTrackers before populating the defaultdict's storage.
-                wrapped = ConstDictVariable(items, mutation_type=ValueMutationNew())
-                result.items.update(wrapped.items)
-                return result
-            else:
-                return ConstDictVariable(items, mutation_type=ValueMutationNew())
-
-        # Reuse the operand's existing HashableTracker keys instead of
-        # re-wrapping (and thus re-hashing) the underlying VTs, mirroring
-        # CPython's do-not-rehash-dict-keys behavior when building a dict from
-        # an existing set/frozenset/dict.
-        if isinstance(
-            arg,
-            (
-                variables.SetVariable,
-                variables.FrozensetVariable,
-                variables.DictKeySetVariable,
-                variables.OrderedSetVariable,
-                ConstDictVariable,
-            ),
-        ):
-            # HashableTracker keys are accepted by ConstDictVariable.__init__.
-            return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[arg-type]
-        if isinstance(arg, dict):
-            arg_list = [VariableTracker.build(tx, k) for k in arg]
-            return _make_result(dict.fromkeys(arg_list, value))
-        elif iterator := generic_getiter(tx, arg):
-            keys = unpack_iterable(tx, iterator)
-            if all(is_hashable(v) for v in keys):
-                return _make_result(dict.fromkeys(keys, value))
-
-        unimplemented(
-            gb_type="failed to call dict.fromkeys()",
-            context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
-            explanation=f"Failed to call {user_cls.__name__}.fromkeys() because "
-            "arguments could not be automatically converted to a list, "
-            "or some dict key is not hashable.",
-            hints=[
-                "Manually convert the argument to a list.",
-                "Ensure all keys are hashable.",
-            ],
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, polyfills.dict_fromkeys),
+            [user_cls, *args],
+            kwargs,
         )
 
 

@@ -1,12 +1,10 @@
 # mypy: allow-untyped-defs
 """Distributed Collective Communication (c10d)."""
 
-import builtins
 import collections.abc
 import contextlib
 import ctypes
 import hashlib
-import importlib.util
 import io
 import itertools
 import logging
@@ -15,7 +13,6 @@ import os
 import pickle
 import sys
 import time
-import traceback
 import types
 import warnings
 from collections.abc import Callable, Sequence
@@ -53,6 +50,7 @@ from torch._C._distributed_c10d import (
     FlightRecorderHook,
     GatherOptions,
     get_debug_level,
+    HealthCheckHook,
     NanCheckHook,
     PrefixStore,
     ProcessGroup,
@@ -193,88 +191,37 @@ _GLOO_AVAILABLE = True
 _UCC_AVAILABLE = True
 _XCCL_AVAILABLE = True
 
-# find_spec does not import the package. Importing torchcomms here would
-# dlopen the native extension whenever the wheel is installed, including CPU
-# doctests that share a venv with install_torchcomms.
-_TORCHCOMM_AVAILABLE = importlib.util.find_spec("torchcomms") is not None
-_torchcomms_loaded: dict[str, Callable[..., object]] | None = None
-if TYPE_CHECKING:
-    # Real types for checkers only. These imports are not executed, so they
-    # do not dlopen torchcomms.
-    # pyrefly: ignore [missing-import]
-    from torchcomms import new_comm
+try:
+    try:
+        # pyrefly: ignore [missing-import]
+        from torchcomms._comms import (
+            _BackendWrapper,
+            _is_backend_registered as _torchcomms_is_backend_registered,
+        )
+    except ImportError:
+        # pyrefly: ignore [missing-import]
+        from torchcomms._backend_wrapper import _BackendWrapper
+
+        def _torchcomms_is_backend_registered(backend: str) -> bool:
+            return False
 
     # pyrefly: ignore [missing-import]
-    from torchcomms._backend_wrapper import _BackendWrapper
+    from torchcomms import is_backend_built as _torchcomms_is_backend_built, new_comm
 
+    # Aliased: the unqualified name is the c10d hook imported above, which is
+    # attached to a ProcessGroup rather than to a TorchComms comm.
     # pyrefly: ignore [missing-import]
     from torchcomms.hooks import FlightRecorderHook as _TorchCommsFlightRecorderHook
-else:
-    # None until torchcomms is used. Tests may patch these before that.
-    _BackendWrapper = None
-    new_comm = None
-    _TorchCommsFlightRecorderHook = None
 
+    _TORCHCOMM_AVAILABLE = True
+except ImportError:
+    _TORCHCOMM_AVAILABLE = False
 
-def _import_torchcomms() -> dict[str, Callable[..., object]]:
-    """Load torchcomms natives. Only call when torchcomms is actually used.
-
-    A name that is already set is left alone. Tests patch ``new_comm`` and
-    ``_BackendWrapper``; assigning unconditionally replaces those patches.
-    """
-    global _torchcomms_loaded
-    global _BackendWrapper, new_comm, _TorchCommsFlightRecorderHook
-    if _torchcomms_loaded is None:
-        try:
-            # pyrefly: ignore [missing-import]
-            from torchcomms._comms import (
-                _BackendWrapper as BackendWrapper,
-                _is_backend_registered as is_backend_registered,
-            )
-        except ImportError:
-            # pyrefly: ignore [missing-import]
-            from torchcomms._backend_wrapper import _BackendWrapper as BackendWrapper
-
-            def is_backend_registered(backend: str) -> bool:
-                return False
-
-        # pyrefly: ignore [missing-import]
-        from torchcomms import is_backend_built, new_comm as imported_new_comm
-
-        # Aliased: the unqualified name is the c10d hook imported above, which is
-        # attached to a ProcessGroup rather than to a TorchComms comm.
-        # pyrefly: ignore [missing-import]
-        from torchcomms.hooks import FlightRecorderHook as TorchCommsFlightRecorderHook
-
-        _torchcomms_loaded = {
-            "is_backend_built": is_backend_built,
-            "is_backend_registered": is_backend_registered,
-            "BackendWrapper": BackendWrapper,
-            "new_comm": imported_new_comm,
-            "FlightRecorderHook": TorchCommsFlightRecorderHook,
-        }
-    # Fill only unset slots, including after a cached import. mock.patch
-    # restores a name to None, and a later call must bind the real object
-    # without clobbering a patch that is currently installed.
-    if _BackendWrapper is None:
-        _BackendWrapper = _torchcomms_loaded["BackendWrapper"]
-    if new_comm is None:
-        new_comm = _torchcomms_loaded["new_comm"]
-    if _TorchCommsFlightRecorderHook is None:
-        _TorchCommsFlightRecorderHook = _torchcomms_loaded["FlightRecorderHook"]
-    return _torchcomms_loaded
-
-
-def _torchcomms_is_backend_built(backend: str) -> bool:
-    if not _TORCHCOMM_AVAILABLE:
+    def _torchcomms_is_backend_built(backend: str) -> bool:
         return False
-    return bool(_import_torchcomms()["is_backend_built"](backend))
 
-
-def _torchcomms_is_backend_registered(backend: str) -> bool:
-    if not _TORCHCOMM_AVAILABLE:
+    def _torchcomms_is_backend_registered(backend: str) -> bool:
         return False
-    return bool(_import_torchcomms()["is_backend_registered"](backend))
 
 
 def _use_torchcomms_enabled() -> bool:
@@ -371,19 +318,6 @@ def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
-# Object collectives can serialize via torch.save/torch.load(weights_only=True)
-# by passing weights_only=True. Exceptions and stack summaries are commonly
-# transmitted for error propagation (e.g. torch.distributed.checkpoint), so
-# allowlist them.
-torch.serialization.add_safe_globals(
-    [
-        t
-        for t in vars(builtins).values()
-        if isinstance(t, type) and issubclass(t, BaseException)
-    ]
-    + [traceback.StackSummary, traceback.FrameSummary]
-)
-
 GroupName = NewType("GroupName", str)
 
 
@@ -410,17 +344,12 @@ def _create_torchcomms_backend(
     store: Store,
     device_id: torch.device | None,
     backend_options: object | None,
+    timeout: timedelta | None = None,
+    enable_reconfigure: bool = False,
 ) -> C10DBackend:
     """Create a c10d BackendWrapper for one TorchComms backend instance."""
     if not _TORCHCOMM_AVAILABLE:
         raise RuntimeError("TorchComms is not available")
-    # Tests patch ``new_comm`` before this runs. Import fills only unset names.
-    if (
-        new_comm is None
-        or _BackendWrapper is None
-        or _TorchCommsFlightRecorderHook is None
-    ):
-        _import_torchcomms()
 
     torch_device = _resolve_torchcomms_device(device, device_id)
 
@@ -439,12 +368,18 @@ def _create_torchcomms_backend(
     os.environ["TORCHCOMM_RANK"] = str(group_rank)
     os.environ["TORCHCOMM_SIZE"] = str(group_size)
     try:
+        dynamic_options: dict[str, object] = {}
+        if enable_reconfigure:
+            dynamic_options["enable_reconfigure"] = True
+            if timeout is not None:
+                dynamic_options["timeout"] = timeout
         comm = new_comm(
             _resolve_torchcomms_backend(backend),
             torch_device,
             name=group_name,
             store=store,
             hints=hints,
+            **dynamic_options,
         )
     finally:
         for key, value in zip(("TORCHCOMM_RANK", "TORCHCOMM_SIZE"), saved_rank_size):
@@ -453,14 +388,20 @@ def _create_torchcomms_backend(
             else:
                 os.environ[key] = value
 
+    # Local references retain ownership until publication, so setup failures
+    # release the communicator through C++ RAII.
+    backend_wrapper = _BackendWrapper(comm)
+
     buffer_size = os.environ.get(
         "TORCH_FR_BUFFER_SIZE",
         os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
     )
     recorder = _TorchCommsFlightRecorderHook(max_entries=int(buffer_size))
     recorder.register_with_comm(comm)
+
+    # Publish only after hook registration and wrapper setup succeed.
     _world.comms.append(comm)
-    return _BackendWrapper(comm)
+    return backend_wrapper
 
 
 # Change __module__ of all imported types from torch._C._distributed_c10d that are public
@@ -1401,6 +1342,7 @@ class _CollOp:
         dst_tensor (Tensor, optional): Provided when source and destination tensors are not the same.
         redop (ReduceOp, optional): reduce operation.
         root (int, optional): root of broadcast or reduce.
+        config (optional): per-collective configuration.
     """
 
     def __init__(
@@ -1410,12 +1352,15 @@ class _CollOp:
         dst_tensor: torch.Tensor | None = None,
         redop: _ReduceOp | None = None,
         root: int | None = None,
+        *,
+        config: object | None = None,
     ) -> None:
         self.op = op
         self.tensor = tensor
         self.dst_tensor = dst_tensor
         self.redop = redop
         self.root = root
+        self.config = config
 
 
 # DO NOT USE THESE FIELDS DIRECTLY.
@@ -1599,7 +1544,12 @@ class _WorldMeta(type):
 
 
 class group(metaclass=_WorldMeta):
-    """Group class. Placeholder."""
+    """
+    Namespace for the default process group.
+
+    ``group.WORLD`` is the default :class:`ProcessGroup` created by
+    :func:`init_process_group`, or ``None`` before initialization.
+    """
 
 
 class GroupMember(metaclass=_WorldMeta):
@@ -3049,7 +2999,13 @@ def _new_process_group_helper(
     # communicators in some backends, we have to be careful and only
     # split when we *know* the default PG has already started communicator initialization.
     # We know this if we have bound a device id to the default pg (eager initialized).
-    if is_initialized() and _get_default_group().bound_device_id:
+    # A lazy_init group is not created by splitting: splitting is eager and collective
+    # over the parent.
+    if (
+        is_initialized()
+        and _get_default_group().bound_device_id
+        and not getattr(backend_options, "lazy_init", False)
+    ):
         split_from = _get_split_source(_get_default_group(), backend)
     else:
         split_from = None
@@ -3133,6 +3089,8 @@ def _new_process_group_helper(
                 store=backend_prefix_store,
                 device_id=device_id,
                 backend_options=backend_options,
+                timeout=timeout,
+                enable_reconfigure=enable_reconfigure,
             )
             # Use the underlying backend's BackendType so distinct torchcomms
             # backends (e.g. gloo vs nccl in a "cpu:gloo,cuda:nccl" PG) don't
@@ -3239,6 +3197,8 @@ def _new_process_group_helper(
     if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
         NanCheckHook.attach(pg)
 
+    HealthCheckHook.attach(pg)
+
     # Backend-agnostic FlightRecorder recording, for backends with no native
     # integration. Attached here (rather than lazily) so a group is recorded
     # from its very first collective, and after _set_group_name/_set_group_desc
@@ -3276,6 +3236,13 @@ def _new_process_group_helper(
             pg_tag=f"user:{pg_tag}",
         )
     return pg, prefix_store
+
+
+def _release_nvshmem_team_pool(group_name: str) -> None:
+    # NVSHMEM is optional, so this binding is present only in NVSHMEM builds.
+    release = getattr(torch._C._distributed_c10d, "_release_nvshmem_team_pool", None)
+    if release is not None:
+        release(group_name)
 
 
 def destroy_process_group(
@@ -3326,6 +3293,7 @@ def destroy_process_group(
         for pg_to_shutdown in sorted(
             _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
         ):
+            _release_nvshmem_team_pool(_world.pg_names[pg_to_shutdown])
             pg_to_shutdown.shutdown()
 
         _update_default_pg(None)
@@ -3349,15 +3317,11 @@ def destroy_process_group(
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
-        # Import only if a torchcomms comm exists, or tests already patched
-        # _BackendWrapper. An installed wheel alone must not dlopen here.
-        if _world.comms or _BackendWrapper is not None:
-            if _BackendWrapper is None:
-                _import_torchcomms()
+        if _TORCHCOMM_AVAILABLE:
             # A single comm may be shared across multiple device types (e.g. a
             # gloo group reports both 'cuda' and 'cpu' device types backed by the
             # same _BackendWrapper). Deduplicate by comm identity so we finalize
-            # each comm exactly once. finalize() is not idempotent and raises
+            # each comm exactly once — finalize() is not idempotent and raises
             # "already finalized" on a second call.
             finalized_comm_ids: set[int] = set()
             for device_type in pg._device_types:
@@ -3371,6 +3335,7 @@ def destroy_process_group(
                 _world.comms[:] = [
                     comm for comm in _world.comms if id(comm) not in finalized_comm_ids
                 ]
+        _release_nvshmem_team_pool(_world.pg_names[pg])
         pg.shutdown()
         del _world.pg_map[pg]
         del _world.pg_names[pg]
@@ -3827,6 +3792,7 @@ def _coalescing_manager(
         group._start_coalescing(device)
     cm = _CoalescingManager()
     yield cm
+
     work = None
     op_list = _world.pg_coalesce_state.pop(group)
     if op_list:
@@ -3842,12 +3808,20 @@ def _coalescing_manager(
                 "Coalescing manager requires all collectives to be the same type, "
                 f"but got mixed types: {set(op.op.__name__ for op in op_list)}"  # noqa: C401
             )
+        config = op_list[0].config
+        if any(op.config != config for op in op_list):
+            if device:
+                group._end_coalescing(device)
+            raise RuntimeError(
+                "Coalescing manager requires all collectives to use the same config"
+            )
 
         if op0 is all_reduce:
             tensors = [op.tensor for op in op_list]
             all_reduce_opts = AllreduceCoalescedOptions()
             all_reduce_opts.reduceOp = not_none(op_list[0].redop)
             all_reduce_opts.asyncOp = async_ops
+            all_reduce_opts.config = config
             work = group.allreduce_coalesced(tensors, all_reduce_opts)
         elif op0 is all_gather_single:
             inputs = []
@@ -3857,6 +3831,7 @@ def _coalescing_manager(
                 outputs.append(not_none(op.dst_tensor))
             all_gather_opts = AllgatherOptions()
             all_gather_opts.asyncOp = async_ops
+            all_gather_opts.config = config
             work = group.all_gather_single_coalesced(outputs, inputs, all_gather_opts)
         elif op0 is reduce_scatter_single:
             inputs = []
@@ -3867,6 +3842,7 @@ def _coalescing_manager(
             reduce_opts = ReduceScatterOptions()
             reduce_opts.reduceOp = not_none(op_list[0].redop)
             reduce_opts.asyncOp = async_ops
+            reduce_opts.config = config
             work = group.reduce_scatter_single_coalesced(outputs, inputs, reduce_opts)
         else:
             raise AssertionError(
@@ -4046,6 +4022,8 @@ def broadcast(
     group: ProcessGroup | None = None,
     async_op: bool = False,
     group_src: int | None = None,
+    *,
+    config: object | None = None,
 ) -> Work | None:
     """
     Broadcasts the tensor to the whole group.
@@ -4062,6 +4040,8 @@ def broadcast(
         async_op (bool, optional): Whether this op should be an async op
         group_src (int): Source rank on ``group``.  Must specify one of ``group_src``
             and ``src`` but not both.
+        config (object, optional): Backend-specific per-collective configuration.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4078,6 +4058,7 @@ def broadcast(
             group=group,
             async_op=async_op,
             group_src=group_src,
+            **({"config": config} if config is not None else {}),
         )
 
     group = _group_or_default_group(group)
@@ -4091,12 +4072,13 @@ def broadcast(
     opts.rootRank = group_src
     opts.rootTensor = 0
     opts.asyncOp = async_op
-    sm90_or_more = not (
+    opts.config = config
+    sm90_or_more = (
         tensor.is_cuda and torch.cuda.get_device_capability(tensor.device)[0] >= 9
     )
     if tensor.is_complex():
         tensor = torch.view_as_real(tensor)
-    elif _is_fp8(tensor) and not sm90_or_more:
+    elif _is_fp8(tensor) and not sm90_or_more and tensor.device.type != "hpu":
         # FP8 is supported by NCCL on sm90+, use workaround for older GPUs
         tensor = tensor.view(torch.uint8)
     work = group.broadcast([tensor], opts)
@@ -4117,6 +4099,7 @@ def all_reduce(
     group: ProcessGroup | None = None,
     *,
     async_op: Literal[True],
+    config: object | None = None,
 ) -> Work: ...
 
 
@@ -4126,6 +4109,8 @@ def all_reduce(
     op: _ReduceOp = ReduceOp.SUM,
     group: ProcessGroup | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None: ...
 
 
@@ -4135,6 +4120,8 @@ def all_reduce(
     op: _ReduceOp = ReduceOp.SUM,
     group: ProcessGroup | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None:
     """
     Reduces the tensor data across all machines in a way that all get the final result.
@@ -4152,6 +4139,8 @@ def all_reduce(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
+        config (object, optional): Backend-specific per-collective configuration.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4160,7 +4149,7 @@ def all_reduce(
     Examples:
         >>> # xdoctest: +SKIP("no rank")
         >>> # All tensors below are of torch.int64 type.
-        >>> # We have 2 process groups, 2 ranks.
+        >>> # We have 2 ranks.
         >>> device = torch.device(f"cuda:{rank}")
         >>> tensor = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
         >>> tensor
@@ -4172,7 +4161,7 @@ def all_reduce(
         tensor([4, 6], device='cuda:1') # Rank 1
 
         >>> # All tensors below are of torch.cfloat type.
-        >>> # We have 2 process groups, 2 ranks.
+        >>> # We have 2 ranks.
         >>> tensor = torch.tensor(
         ...     [1 + 1j, 2 + 2j], dtype=torch.cfloat, device=device
         ... ) + 2 * rank * (1 + 1j)
@@ -4197,6 +4186,7 @@ def all_reduce(
             op=op,
             group=group,
             async_op=async_op,  # pyrefly: ignore[bad-argument-type]
+            **({"config": config} if config is not None else {}),
         )
 
     _check_single_tensor(tensor, "tensor")
@@ -4212,12 +4202,13 @@ def all_reduce(
     opts = AllreduceOptions()
     opts.reduceOp = op
     opts.asyncOp = async_op
+    opts.config = config
     if group is None:
         group = _get_default_group()
 
     if group in _world.pg_coalesce_state:
         # We are in coalescing context, do not issue single operation, just append a collective representation
-        coll = _CollOp(all_reduce, tensor, None, op, None)
+        coll = _CollOp(all_reduce, tensor, None, op, None, config=config)
         _world.pg_coalesce_state[group].append(coll)
         if async_op:
             return _IllegalWork()
@@ -4248,6 +4239,8 @@ def all_reduce_coalesced(
     op: _ReduceOp = ReduceOp.SUM,
     group: ProcessGroup | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> torch.Future | None:
     """
     WARNING: at this time individual shape checking is not implemented across nodes.
@@ -4276,6 +4269,8 @@ def all_reduce_coalesced(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (Optional[bool]): Whether this op should be an async op.
+        config (object, optional): Backend-specific per-collective configuration.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4293,6 +4288,7 @@ def all_reduce_coalesced(
             op=op,
             group=group,
             async_op=async_op,
+            **({"config": config} if config is not None else {}),
         )
 
     _check_tensor_list(tensors, "tensor")
@@ -4309,6 +4305,7 @@ def all_reduce_coalesced(
     opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
     opts.asyncOp = async_op
+    opts.config = config
     group = group or _get_default_group()
     work = group.allreduce_coalesced(tensors, opts)
 
@@ -4329,6 +4326,8 @@ def reduce(
     group: ProcessGroup | None = None,
     async_op: bool = False,
     group_dst: int | None = None,
+    *,
+    config: object | None = None,
 ) -> Work | None:
     """
     Reduces the tensor data across all machines.
@@ -4347,6 +4346,8 @@ def reduce(
         async_op (bool, optional): Whether this op should be an async op
         group_dst (int): Destination rank on ``group``.  Must specify one of ``group_dst``
             and ``dst`` but not both.
+        config (object, optional): Backend-specific per-collective configuration.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4364,6 +4365,7 @@ def reduce(
             group=group,
             async_op=async_op,
             group_dst=group_dst,
+            **({"config": config} if config is not None else {}),
         )
 
     group = _group_or_default_group(group)
@@ -4377,6 +4379,7 @@ def reduce(
     opts.reduceOp = op
     opts.rootRank = group_dst
     opts.asyncOp = async_op
+    opts.config = config
     work = group.reduce([tensor], opts)
     if async_op:
         return work
@@ -4522,27 +4525,19 @@ def all_gather_object(
     object_sizes_tensor = torch.zeros(
         group_size, dtype=torch.long, device=current_device
     )
-    object_size_list = [
-        object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
-    ]
     # Allgather tensor sizes
-    all_gather(object_size_list, local_size, group=group)
-    max_object_size = int(max(object_size_list).item())  # type: ignore[type-var]
+    all_gather_single(object_sizes_tensor, local_size, group=group)
+    max_object_size = int(object_sizes_tensor.max().item())
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     coalesced_output_tensor = torch.empty(
         max_object_size * group_size, dtype=torch.uint8, device=current_device
     )
-    # Output tensors are nonoverlapping views of coalesced_output_tensor
-    output_tensors = [
-        coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
-        for i in range(group_size)
-    ]
-    all_gather(output_tensors, input_tensor, group=group)
+    # Allgather the object data into a single coalesced output tensor.
+    all_gather_single(coalesced_output_tensor, input_tensor, group=group)
     # Deserialize outputs back to object.
-    for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.uint8)
-        tensor_size = object_size_list[i]
+    for i, tensor in enumerate(coalesced_output_tensor.chunk(group_size)):
+        tensor_size = object_sizes_tensor[i]
         object_list[i] = cast(
             _T, _tensor_to_object(tensor, tensor_size, group, weights_only)
         )
@@ -5258,6 +5253,7 @@ def all_gather(
     group: ProcessGroup | C10DBackend | None = None,
     *,
     async_op: Literal[True],
+    config: object | None = None,
 ) -> Work: ...
 
 
@@ -5267,6 +5263,8 @@ def all_gather(
     tensor: torch.Tensor,
     group: ProcessGroup | C10DBackend | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None: ...
 
 
@@ -5276,6 +5274,8 @@ def all_gather(
     tensor: torch.Tensor,
     group: ProcessGroup | C10DBackend | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None:
     """
     Gathers tensors from the whole group in a list.
@@ -5290,6 +5290,8 @@ def all_gather(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
+        config (object, optional): Backend-specific per-collective configuration.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -5298,7 +5300,7 @@ def all_gather(
     Examples:
         >>> # xdoctest: +SKIP("need process group init")
         >>> # All tensors below are of torch.int64 dtype.
-        >>> # We have 2 process groups, 2 ranks.
+        >>> # We have 2 ranks.
         >>> device = torch.device(f"cuda:{rank}")
         >>> tensor_list = [
         ...     torch.zeros(2, dtype=torch.int64, device=device) for _ in range(2)
@@ -5316,7 +5318,7 @@ def all_gather(
         [tensor([1, 2], device='cuda:1'), tensor([3, 4], device='cuda:1')] # Rank 1
 
         >>> # All tensors below are of torch.cfloat dtype.
-        >>> # We have 2 process groups, 2 ranks.
+        >>> # We have 2 ranks.
         >>> tensor_list = [
         ...     torch.zeros(2, dtype=torch.cfloat, device=device) for _ in range(2)
         ... ]
@@ -5347,6 +5349,7 @@ def all_gather(
             tensor,
             group=group,
             async_op=async_op,  # pyrefly: ignore[bad-argument-type]
+            **({"config": config} if config is not None else {}),
         )
 
     _check_tensor_list(tensor_list, "tensor_list")
@@ -5364,6 +5367,7 @@ def all_gather(
     group = group or _get_default_group()
     opts = AllgatherOptions()
     opts.asyncOp = async_op
+    opts.config = config
     work = group.allgather(  # pyrefly: ignore[missing-attribute]
         [tensor_list], [tensor], opts
     )
@@ -5384,6 +5388,8 @@ def all_gather_single(
     input_tensor: torch.Tensor,
     group: ProcessGroup | C10DBackend | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None:
     """
     Gather tensors from all ranks and put them in a single output tensor.
@@ -5405,6 +5411,8 @@ def all_gather_single(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
+        config (object, optional): Backend-specific per-collective configuration.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -5446,6 +5454,7 @@ def all_gather_single(
             input_tensor,
             group=group,
             async_op=async_op,
+            **({"config": config} if config is not None else {}),
         )
 
     _check_single_tensor(input_tensor, "input_tensor")
@@ -5467,12 +5476,13 @@ def all_gather_single(
 
     opts = AllgatherOptions()
     opts.asyncOp = async_op
+    opts.config = config
 
     group = group or _get_default_group()
 
     if group in _world.pg_coalesce_state:
         # We are in coalescing context, do not issue single operation, just append a collective representation
-        coll = _CollOp(all_gather_single, input_tensor, output_tensor)
+        coll = _CollOp(all_gather_single, input_tensor, output_tensor, config=config)
         _world.pg_coalesce_state[group].append(coll)
         if async_op:
             return _IllegalWork()
@@ -5499,6 +5509,8 @@ def all_gather_into_tensor(
     input_tensor: torch.Tensor,
     group: ProcessGroup | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None:
     """
     Gather tensors from all ranks and put them in a single output tensor.
@@ -5507,7 +5519,9 @@ def all_gather_into_tensor(
     code should call :func:`all_gather_single`, which takes the same arguments.
 
     """
-    return all_gather_single(output_tensor, input_tensor, group, async_op)
+    return all_gather_single(
+        output_tensor, input_tensor, group, async_op, config=config
+    )
 
 
 @_exception_logger
@@ -5521,6 +5535,8 @@ def _all_gather_base(
     input_tensor: torch.Tensor,
     group: ProcessGroup | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None:
     """
     Single tensor all gather. Gathers a single tensor from all ranks, and puts them in a single output tensor.
@@ -5542,7 +5558,9 @@ def _all_gather_base(
         `all_gather_single` instead.
 
     """
-    return all_gather_single(output_tensor, input_tensor, group, async_op)
+    return all_gather_single(
+        output_tensor, input_tensor, group, async_op, config=config
+    )
 
 
 @_exception_logger
@@ -5557,6 +5575,8 @@ def all_gather_coalesced(
     input_tensor_list: list[torch.Tensor],
     group: ProcessGroup | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> torch.Future | None:
     """
     Gathers input tensors from the whole group in a list in a coalesced manner.
@@ -5571,6 +5591,8 @@ def all_gather_coalesced(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
+        config (object, optional): Backend-specific per-collective configuration.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -5618,6 +5640,7 @@ def all_gather_coalesced(
             input_tensor_list,
             group=group,
             async_op=async_op,
+            **({"config": config} if config is not None else {}),
         )
 
     # We only check basic compatibility with C++ params here, C++ code will
@@ -5646,6 +5669,7 @@ def all_gather_coalesced(
     group = group or _get_default_group()
     opts = AllgatherOptions()
     opts.asyncOp = async_op
+    opts.config = config
     work = group.allgather_coalesced(output_tensor_lists, input_tensor_list, opts)
 
     if async_op:
@@ -5705,7 +5729,7 @@ def gather(
 
     Example::
         >>> # xdoctest: +SKIP("no rank")
-        >>> # We have 2 process groups, 2 ranks.
+        >>> # We have 2 ranks.
         >>> tensor_size = 2
         >>> device = torch.device(f'cuda:{rank}')
         >>> tensor = torch.ones(tensor_size, device=device) + rank
@@ -5784,6 +5808,8 @@ def gather_single(
     group: ProcessGroup | None = None,
     async_op: bool = False,
     group_dst: int | None = None,
+    *,
+    config: object | None = None,
 ):
     """
     Gather the input tensor from all ranks into a single output tensor on ``dst``.
@@ -5816,6 +5842,8 @@ def gather_single(
         async_op (bool, optional): Whether this op should be an async op
         group_dst (int, optional): Destination rank on ``group``. Invalid to
             specify both ``dst`` and ``group_dst``
+        config (object, optional): Backend-specific per-collective configuration.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -5847,6 +5875,7 @@ def gather_single(
             group=group,
             async_op=async_op,
             group_dst=group_dst,
+            **({"config": config} if config is not None else {}),
         )
 
     _check_single_tensor(tensor, "tensor")
@@ -5873,6 +5902,7 @@ def gather_single(
     opts = GatherOptions()
     opts.rootRank = group_dst
     opts.asyncOp = async_op
+    opts.config = config
     work = group.gather_single(output_tensor, tensor, opts)
 
     if async_op:
@@ -5892,6 +5922,8 @@ def gather_into_tensor(
     group: ProcessGroup | None = None,
     async_op: bool = False,
     group_dst: int | None = None,
+    *,
+    config: object | None = None,
 ):
     """
     Gather the input tensor from all ranks into a single output tensor on ``dst``.
@@ -5900,7 +5932,15 @@ def gather_into_tensor(
     should call :func:`gather_single`, which takes the same arguments.
 
     """
-    return gather_single(tensor, gather_tensor, dst, group, async_op, group_dst)
+    return gather_single(
+        tensor,
+        gather_tensor,
+        dst,
+        group,
+        async_op,
+        group_dst,
+        config=config,
+    )
 
 
 @_exception_logger
@@ -6030,6 +6070,7 @@ def reduce_scatter(
     group: ProcessGroup | None = None,
     *,
     async_op: Literal[True],
+    config: object | None = None,
 ) -> Work: ...
 
 
@@ -6040,6 +6081,8 @@ def reduce_scatter(
     op: _ReduceOp = ReduceOp.SUM,
     group: ProcessGroup | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None: ...
 
 
@@ -6050,6 +6093,8 @@ def reduce_scatter(
     op: _ReduceOp = ReduceOp.SUM,
     group: ProcessGroup | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None:
     """
     Reduces, then scatters a list of tensors to all processes in a group.
@@ -6063,10 +6108,46 @@ def reduce_scatter(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
+        config (object, optional): Backend-specific per-collective configuration.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group.
+
+    Examples:
+        >>> # xdoctest: +SKIP("need process group init")
+        >>> # All tensors below are of torch.int64 dtype.
+        >>> # We have 2 ranks.
+        >>> device = torch.device(f"cuda:{rank}")
+        >>> tensor_list = [
+        ...     torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank + i * 2
+        ...     for i in range(2)
+        ... ]
+        >>> tensor_list
+        [tensor([1, 2], device='cuda:0'), tensor([3, 4], device='cuda:0')] # Rank 0
+        [tensor([3, 4], device='cuda:1'), tensor([5, 6], device='cuda:1')] # Rank 1
+        >>> output = torch.zeros(2, dtype=torch.int64, device=device)
+        >>> dist.reduce_scatter(output, tensor_list)
+        >>> output
+        tensor([4, 6], device='cuda:0') # Rank 0 (1+3, 2+4)
+        tensor([8, 10], device='cuda:1') # Rank 1 (3+5, 4+6)
+
+        >>> # All tensors below are of torch.cfloat dtype.
+        >>> # We have 2 ranks.
+        >>> tensor_list = [
+        ...     torch.tensor([1 + 1j, 2 + 2j], dtype=torch.cfloat, device=device)
+        ...     + (2 * rank + i * 2) * (1 + 1j)
+        ...     for i in range(2)
+        ... ]
+        >>> tensor_list
+        [tensor([1.+1.j, 2.+2.j], device='cuda:0'), tensor([3.+3.j, 4.+4.j], device='cuda:0')] # Rank 0
+        [tensor([3.+3.j, 4.+4.j], device='cuda:1'), tensor([5.+5.j, 6.+6.j], device='cuda:1')] # Rank 1
+        >>> output = torch.zeros(2, dtype=torch.cfloat, device=device)
+        >>> dist.reduce_scatter(output, tensor_list)
+        >>> output
+        tensor([4.+4.j, 6.+6.j], device='cuda:0') # Rank 0
+        tensor([8.+8.j, 10.+10.j], device='cuda:1') # Rank 1
 
     """
     relevant_args = (output,)
@@ -6079,6 +6160,7 @@ def reduce_scatter(
             op=op,
             group=group,
             async_op=async_op,  # pyrefly: ignore[bad-argument-type]
+            **({"config": config} if config is not None else {}),
         )
 
     _check_single_tensor(output, "output")
@@ -6091,6 +6173,7 @@ def reduce_scatter(
     opts = ReduceScatterOptions()
     opts.reduceOp = op
     opts.asyncOp = async_op
+    opts.config = config
 
     group = group or _get_default_group()
     work = group.reduce_scatter([output], [input_list], opts)
@@ -6113,6 +6196,7 @@ def reduce_scatter_single(
     group: ProcessGroup | None = None,
     *,
     async_op: Literal[True],
+    config: object | None = None,
 ) -> Work: ...
 
 
@@ -6123,6 +6207,8 @@ def reduce_scatter_single(
     op: _ReduceOp = ReduceOp.SUM,
     group: ProcessGroup | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None: ...
 
 
@@ -6133,6 +6219,8 @@ def reduce_scatter_single(
     op: _ReduceOp = ReduceOp.SUM,
     group: ProcessGroup | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None:
     """
     Reduces, then scatters a tensor to all ranks in a group.
@@ -6148,9 +6236,14 @@ def reduce_scatter_single(
             (ii) a stack of the output tensors along the primary dimension.
             For definition of "concatenation", see ``torch.cat()``.
             For definition of "stack", see ``torch.stack()``.
+        op (optional): One of the values from
+            ``torch.distributed.ReduceOp``
+            enum.  Specifies an operation used for element-wise reductions.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
+        config (object, optional): Backend-specific per-collective configuration.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -6197,6 +6290,7 @@ def reduce_scatter_single(
             op=op,
             group=group,
             async_op=async_op,  # pyrefly: ignore[bad-argument-type]
+            **({"config": config} if config is not None else {}),
         )
 
     _check_single_tensor(output, "output")
@@ -6209,13 +6303,14 @@ def reduce_scatter_single(
     opts = ReduceScatterOptions()
     opts.reduceOp = op
     opts.asyncOp = async_op
+    opts.config = config
 
     group = group or _get_default_group()
 
     # Check if we are in coalescing context
     # If we are, do not issue single operation, just append a collective representation
     if group in _world.pg_coalesce_state:
-        coll = _CollOp(reduce_scatter_single, input, output, op, None)
+        coll = _CollOp(reduce_scatter_single, input, output, op, None, config=config)
         _world.pg_coalesce_state[group].append(coll)
         if async_op:
             return _IllegalWork()
@@ -6241,6 +6336,8 @@ def reduce_scatter_tensor(
     op: _ReduceOp = ReduceOp.SUM,
     group: ProcessGroup | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None:
     """
     Reduces, then scatters a tensor to all ranks in a group.
@@ -6250,7 +6347,7 @@ def reduce_scatter_tensor(
     arguments.
 
     """
-    return reduce_scatter_single(output, input, op, group, async_op)
+    return reduce_scatter_single(output, input, op, group, async_op, config=config)
 
 
 @deprecated(
@@ -6264,6 +6361,8 @@ def _reduce_scatter_base(
     op: _ReduceOp = ReduceOp.SUM,
     group: ProcessGroup | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None:
     """
     Reduces, then scatters a flattened tensor to all processes in a group.
@@ -6284,7 +6383,7 @@ def _reduce_scatter_base(
         `reduce_scatter_single` instead.
 
     """
-    return reduce_scatter_single(output, input, op, group, async_op)
+    return reduce_scatter_single(output, input, op, group, async_op, config=config)
 
 
 @_exception_logger
@@ -6295,6 +6394,8 @@ def all_to_all_single(
     input_split_sizes: list[int] | None = None,
     group: ProcessGroup | None = None,
     async_op: bool = False,
+    *,
+    config: object | None = None,
 ) -> Work | None:
     """
     Split input tensor and then scatter the split list to all processes in a group.
@@ -6316,6 +6417,8 @@ def all_to_all_single(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
+        config (object, optional): Backend-specific per-collective configuration.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -6402,6 +6505,7 @@ def all_to_all_single(
             input_split_sizes=input_split_sizes,
             group=group,
             async_op=async_op,
+            **({"config": config} if config is not None else {}),
         )
 
     if _rank_not_in_group(group):
@@ -6413,6 +6517,7 @@ def all_to_all_single(
     _check_single_tensor(output, "output")
     _check_single_tensor(input, "input")
     _ensure_all_tensors_same_dtype(output, input)
+    opts.config = config
 
     if input.is_complex():
         input = torch.view_as_real(input)
@@ -7081,6 +7186,7 @@ def split_group(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
         )
 
+    HealthCheckHook.attach(split_pg)
     _maybe_attach_flight_recorder(split_pg, backend_config, global_ranks_in_my_group)
 
     # update global state
@@ -7158,9 +7264,9 @@ def new_group(
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams. For other available options to config nccl,
-            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-tuse_local_synchronization
-            (bool, optional): perform a group-local barrier at the end of the process group creation.
-            This is different in that non-member ranks don't need to call into API and don't
+            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
+        use_local_synchronization (bool, optional): perform a group-local barrier
+            at the end of the process group creation. This is different in that non-member ranks don't need to call into API and don't
             join the barrier.
         group_desc (str, optional): a string to describe the process group.
         device_id (torch.device, optional): a single, specific device
@@ -7714,6 +7820,12 @@ def shrink_group(
     Notes:
         - Only non-excluded ranks should call this function; excluded ranks
           must not participate in the shrink operation.
+        - With ``SHRINK_DEFAULT``, the healthy parent group is destroyed normally.
+          With ``SHRINK_ABORT``, the parent group is aborted on surviving ranks.
+          Excluded ranks that remain alive must also abort the parent group
+          (e.g. via ``_abort_process_group``). For NCCL, destruction is an
+          intra-node collective; mixing abort and destroy on the same
+          communicator can hang with NCCL >= 2.31.2.
         - Shrinking the default group destroys all other process groups since
           rank reassignment makes them inconsistent.
     """
@@ -7740,7 +7852,9 @@ def shrink_group(
 
     # Step 6: Handle cleanup and creation of new process group
     target_group_info["pg_options_override"] = pg_options
-    return _finalize_shrunk_group(target_group_info, excluded_ranks_set, new_backend)
+    return _finalize_shrunk_group(
+        target_group_info, excluded_ranks_set, new_backend, shrink_flags
+    )
 
 
 def _validate_shrink_inputs(ranks_to_exclude: list[int], shrink_flags: int) -> None:
@@ -7886,6 +8000,7 @@ def _finalize_shrunk_group(
     group_info: _ShrinkGroupInfo,
     excluded_ranks_set: set[int],
     new_backend: C10DBackend,
+    shrink_flags: int,
 ) -> ProcessGroup:
     """Clean up old group and create new shrunk process group."""
     target_pg = group_info["process_group"]
@@ -7904,8 +8019,7 @@ def _finalize_shrunk_group(
         rank for rank in original_ranks if rank not in excluded_ranks_set
     ]
 
-    # Clean up the original group
-    _cleanup_original_group(target_pg, is_default_group)
+    _cleanup_original_group(target_pg, is_default_group, shrink_flags)
 
     # Create and configure the new process group
     new_pg = _create_shrunk_process_group(
@@ -7958,17 +8072,25 @@ def _extract_group_metadata(target_pg: ProcessGroup) -> _GroupMetadata:
     }
 
 
-def _cleanup_original_group(target_pg: ProcessGroup, is_default_group: bool) -> None:
+def _cleanup_original_group(
+    target_pg: ProcessGroup, is_default_group: bool, shrink_flags: int
+) -> None:
     """Clean up the original process group safely."""
     try:
-        destroy_process_group(target_pg)
+        # Excluded ranks abort the parent with SHRINK_ABORT. NCCL destroy is
+        # an intra-node collective, so surviving ranks must abort it too.
+        if shrink_flags & SHRINK_ABORT:
+            _abort_process_group(target_pg)
+        else:
+            destroy_process_group(target_pg)
     except Exception:
+        action = "abort" if shrink_flags & SHRINK_ABORT else "destroy"
         group_type = "default" if is_default_group else "non-default"
         logger.warning(
-            "Failed to destroy %s group during shrinking", group_type, exc_info=True
+            "Failed to %s %s group during shrinking", action, group_type, exc_info=True
         )
 
-    # Ensure global state cleanup even if destroy_process_group fails
+    # Ensure global state cleanup even if the destroy/abort above fails
     _cleanup_process_group_global_state(target_pg)
 
 

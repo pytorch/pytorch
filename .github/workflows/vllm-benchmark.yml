@@ -56,7 +56,7 @@ jobs:
       benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
       docker_image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       torch_cuda_arch_list: '8.0 8.9 9.0 10.0 12.0'
-      build_environment: linux-jammy-cuda13.0-py3.12-gcc11
+      build_environment: linux-jammy-cuda13.2-py3.12-gcc11
     steps:
       - uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
@@ -101,7 +101,7 @@ jobs:
         run: |
           set -eux
           DOCKER_TAG=$(git rev-parse HEAD:.ci/docker)
-          IMAGE="308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm-${DOCKER_TAG}"
+          IMAGE="308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11-vllm-${DOCKER_TAG}"
           echo "docker-image=${IMAGE}" >> "${GITHUB_OUTPUT}"
 
   build:

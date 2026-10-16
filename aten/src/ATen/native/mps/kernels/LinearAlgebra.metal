@@ -13,8 +13,8 @@ constant uint TILE_DIM = 16;
 
 template <typename T1, typename T2, typename TA>
 inline TA matmul_inner(
-    constant T1* mat1Data,
-    constant T2* mat2Data,
+    device const T1* mat1Data,
+    device const T2* mat2Data,
     constant array<ulong2, 3>& strides,
     constant uint3& sizes,
     threadgroup TA A_tile[TILE_DIM][TILE_DIM],
@@ -55,8 +55,8 @@ inline TA matmul_inner(
 
 template <typename T, uint N>
 inline c10::metal::opmath_t<T> batched_matmul_inner(
-    constant T* mat1Data,
-    constant T* mat2Data,
+    device const T* mat1Data,
+    device const T* mat2Data,
     uint batch,
     constant array<ulong, N>& strides,
     constant uint4& sizes,
@@ -104,8 +104,8 @@ inline c10::metal::opmath_t<T> batched_matmul_inner(
 
 template <typename T>
 kernel void matmul(
-    constant T* mat1Data [[buffer(0)]],
-    constant T* mat2Data [[buffer(1)]],
+    device const T* mat1Data [[buffer(0)]],
+    device const T* mat2Data [[buffer(1)]],
     device T* outputData [[buffer(2)]],
     constant array<ulong2, 3>& strides [[buffer(3)]],
     constant uint3& sizes [[buffer(4)]],
@@ -124,8 +124,8 @@ kernel void matmul(
 
 template <typename T>
 kernel void int_mm(
-    constant T* mat1Data [[buffer(0)]],
-    constant char* mat2Data [[buffer(1)]],
+    device const T* mat1Data [[buffer(0)]],
+    device const char* mat2Data [[buffer(1)]],
     device int* outputData [[buffer(2)]],
     constant array<ulong2, 3>& strides [[buffer(3)]],
     constant uint3& sizes [[buffer(4)]],
@@ -143,10 +143,10 @@ kernel void int_mm(
 
 template <typename T>
 kernel void addmm(
-    constant T* mat1Data [[buffer(0)]],
-    constant T* mat2Data [[buffer(1)]],
+    device const T* mat1Data [[buffer(0)]],
+    device const T* mat2Data [[buffer(1)]],
     device T* outputData [[buffer(2)]],
-    constant T* biasData [[buffer(3)]],
+    device const T* biasData [[buffer(3)]],
     constant array<c10::metal::opmath_t<T>, 2>& alpha_beta [[buffer(4)]],
     constant array<ulong2, 4>& strides [[buffer(5)]],
     constant uint3& sizes [[buffer(6)]],
@@ -177,8 +177,8 @@ kernel void addmm(
 
 template <typename T>
 kernel void naive_bmm(
-    constant T* mat1Data [[buffer(0)]],
-    constant T* mat2Data [[buffer(1)]],
+    device const T* mat1Data [[buffer(0)]],
+    device const T* mat2Data [[buffer(1)]],
     device T* outputData [[buffer(2)]],
     constant array<ulong, 9>& strides [[buffer(3)]],
     constant uint4& sizes [[buffer(4)]],
@@ -202,10 +202,10 @@ kernel void naive_bmm(
 
 template <typename T>
 kernel void naive_baddbmm(
-    constant T* mat1Data [[buffer(0)]],
-    constant T* mat2Data [[buffer(1)]],
+    device const T* mat1Data [[buffer(0)]],
+    device const T* mat2Data [[buffer(1)]],
     device T* outputData [[buffer(2)]],
-    constant T* biasData [[buffer(3)]],
+    device const T* biasData [[buffer(3)]],
     constant array<c10::metal::opmath_t<T>, 2>& alpha_beta [[buffer(4)]],
     constant array<ulong, 12>& strides [[buffer(5)]],
     constant uint4& sizes [[buffer(6)]],
@@ -235,10 +235,10 @@ kernel void naive_baddbmm(
 
 template <typename T>
 kernel void naive_addbmm(
-    constant T* mat1Data [[buffer(0)]],
-    constant T* mat2Data [[buffer(1)]],
+    device const T* mat1Data [[buffer(0)]],
+    device const T* mat2Data [[buffer(1)]],
     device T* outputData [[buffer(2)]],
-    constant T* biasData [[buffer(3)]],
+    device const T* biasData [[buffer(3)]],
     constant array<c10::metal::opmath_t<T>, 2>& alpha_beta [[buffer(4)]],
     constant array<ulong, 12>& strides [[buffer(5)]],
     constant uint4& sizes [[buffer(6)]],
@@ -561,6 +561,15 @@ inline T tri_opA(
   return conj ? c10::metal::conj(v) : v;
 }
 
+// Offset of element (row, col) of an n x k right-hand side or solution.
+inline ulong rhs_offset(
+    uint row,
+    ulong col,
+    constant TriangularSolveParams& p,
+    bool col_major) {
+  return col_major ? row + col * p.n : ulong(row) * p.k + col;
+}
+
 // Batched triangular solve by forward/back substitution. One threadgroup owns
 // one right-hand side and walks the n substitution steps serially; the dot
 // product against the already-solved prefix is split across the group and
@@ -596,8 +605,11 @@ kernel void triangular_solve(
   // A is upper before op; a transpose flips the effective triangle, and a lower
   // one substitutes forward.
   const bool forward = p.upper == p.transpose;
-  device const T* b = B + batch * n * k + vec;
-  device T* x = X + batch * n * k + vec;
+  // Keep layout handling off the serial per-step path below.
+  device const T* b = B + batch * n * k + (p.b_col_major ? vec * n : vec);
+  device T* x = X + batch * n * k + (p.x_col_major ? vec * n : vec);
+  const uint b_stride = p.b_col_major ? 1 : k;
+  const uint x_stride = p.x_col_major ? 1 : k;
 
   for (uint step = 0; step < n; ++step) {
     const uint t = forward ? step : n - 1 - step;
@@ -615,14 +627,14 @@ kernel void triangular_solve(
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     if (lid == 0) {
-      T sum = b[t * k];
+      T sum = b[t * b_stride];
       for (uint s = 0; s < nsimd; ++s) {
         sum = sum - red[s];
       }
       const T xt =
           p.unit ? sum : c10::metal::div(sum, tri_opA(Ab, t, t, n, tr, cj));
       xs[t] = xt;
-      x[t * k] = xt;
+      x[t * x_stride] = xt;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
@@ -680,8 +692,15 @@ METAL_FUNC bool apply_triangular_inverse(
   const uint frag_col = (quad & 2) * 2 + (lane % 2) * 2;
   bool nonfinite = false;
   for (tile_index_t tile = sg; tile < groups * col_tiles; tile += groups) {
-    const uint row = tile / col_tiles;
-    const uint col = tile % col_tiles * tile_size;
+    // Each pass of the simdgroups covers one row block of x when it is
+    // row-major, or one column block when it is column-major, so that stores
+    // walk the contiguous dimension. The column-major order rotates the rows
+    // so every simdgroup does the same amount of work.
+    const tile_index_t col_tile =
+        p.x_col_major ? tile / groups : tile % col_tiles;
+    const uint row =
+        p.x_col_major ? (tile + col_tile) % groups : tile / col_tiles;
+    const uint col = col_tile * tile_size;
     const bool scalar_io = general && (reverse || p.k - col < tile_size);
     simdgroup_float8x8 lhs_tile, rhs_tile, result_tile(0);
     for (uint j = 0; j <= row; ++j) {
@@ -692,11 +711,17 @@ METAL_FUNC bool apply_triangular_inverse(
 #pragma unroll
         for (uint i = 0; i < 2; ++i) {
           const uint c = col + frag_col + i;
-          rhs_tile.thread_elements()[i] =
-              c < p.k ? b[ulong(reverse ? n - 1 - r : r) * p.k + c] : 0;
+          rhs_tile.thread_elements()[i] = c < p.k
+              ? b[rhs_offset(reverse ? n - 1 - r : r, c, p, p.b_col_major)]
+              : 0;
         }
       } else {
-        simdgroup_load(rhs_tile, b + ulong(j * tile_size) * p.k + col, p.k);
+        simdgroup_load(
+            rhs_tile,
+            b + rhs_offset(j * tile_size, col, p, p.b_col_major),
+            p.b_col_major ? n : p.k,
+            ulong2(0),
+            p.b_col_major);
       }
       simdgroup_multiply_accumulate(
           result_tile, lhs_tile, rhs_tile, result_tile);
@@ -712,51 +737,70 @@ METAL_FUNC bool apply_triangular_inverse(
       for (uint i = 0; i < 2; ++i) {
         const uint c = col + frag_col + i;
         if (c < p.k) {
-          x[ulong(reverse ? n - 1 - r : r) * p.k + c] =
+          x[rhs_offset(reverse ? n - 1 - r : r, c, p, p.x_col_major)] =
               result_tile.thread_elements()[i];
         }
       }
     } else {
-      simdgroup_store(result_tile, x + ulong(row * tile_size) * p.k + col, p.k);
+      simdgroup_store(
+          result_tile,
+          x + rhs_offset(row * tile_size, col, p, p.x_col_major),
+          p.x_col_major ? n : p.k,
+          ulong2(0),
+          p.x_col_major);
     }
   }
   return nonfinite;
 }
 
 #if C10_METAL_HAS_MPP
-template <uint n, bool general>
-METAL_FUNC bool apply_triangular_inverse(
-    bool_constant<true>,
+// MPP tensors need a unit stride along their first dimension, so a
+// column-major x is produced as x^T = b^T inv(L)^T, whose tiles are row-major.
+// The matrix inputs are then (col, row) of x and the operands swap sides.
+// b is loaded in its own layout and transposed by the matmul when it differs
+// from x's.
+template <uint n, bool general, bool x_col_major, bool b_col_major>
+METAL_FUNC bool apply_triangular_inverse_mpp(
     threadgroup const float* inverse,
     device const float* b,
     device float* x,
     constant TriangularSolveParams& p,
-    uint,
     uint sg) {
-  constexpr uint tile_size = kTriangularSolveTileSize;
-  constexpr uint groups = n / tile_size;
+  constexpr uint groups = n / kTriangularSolveTileSize;
   const bool reverse = general && (p.upper != p.transpose);
   bool nonfinite = false;
   constexpr uint mpp_rows = kTriangularSolveMppRows;
   constexpr uint mpp_cols = kTriangularSolveMppCols;
+  constexpr bool transpose_b = x_col_major != b_col_major;
   constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
+      x_col_major ? mpp_cols : mpp_rows,
+      x_col_major ? mpp_rows : mpp_cols,
       mpp_rows,
-      mpp_cols,
-      mpp_rows,
-      false,
-      false,
+      x_col_major && transpose_b,
+      !x_col_major && transpose_b,
       false,
       mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate);
   mpp::tensor_ops::matmul2d<desc, execution_simdgroup> op;
   const uint col_tiles = c10::metal::ceil_div(p.k, mpp_cols);
-  for (uint tile = sg; tile < (n / mpp_rows) * col_tiles; tile += groups) {
-    const uint row = tile / col_tiles * mpp_rows;
-    const uint col = tile % col_tiles * mpp_cols;
+  constexpr uint row_tiles = n / mpp_rows;
+  const int x_ld = x_col_major ? int(n) : int(p.k);
+  const int b_ld = b_col_major ? int(n) : int(p.k);
+  for (uint tile = sg; tile < row_tiles * col_tiles; tile += groups) {
+    // Same traversal as the simdgroup_matrix overload, but a pass spans
+    // groups / row_tiles column tiles, so rotate by the pass, not the column.
+    const uint col_tile = x_col_major ? tile / row_tiles : tile % col_tiles;
+    const uint row =
+        (x_col_major ? (tile + tile / groups) % row_tiles : tile / col_tiles) *
+        mpp_rows;
+    const uint col = col_tile * mpp_cols;
     const int cols = min(mpp_cols, p.k - col);
+    // (unit-stride, outer) extents of a row block by column block tile
+    const auto row_inner = dextents<int32_t, 2>(mpp_rows, cols);
+    const auto col_inner = dextents<int32_t, 2>(cols, mpp_rows);
     tensor<device float, dextents<int32_t, 2>, tensor_inline> out(
-        x + ulong(row) * p.k + col,
-        dextents<int32_t, 2>(cols, mpp_rows),
-        array<int32_t, 2>{1, int(p.k)});
+        x + rhs_offset(row, col, p, x_col_major),
+        x_col_major ? row_inner : col_inner,
+        array<int32_t, 2>{1, x_ld});
     auto lhs =
         op.template get_left_input_cooperative_tensor<float, float, float>();
     auto rhs =
@@ -765,32 +809,51 @@ METAL_FUNC bool apply_triangular_inverse(
         decltype(lhs),
         decltype(rhs),
         float>();
+    // inv(L) is the left operand of a row-major x and inv(L)^T the right
+    // operand of a column-major one; b (or b^T) is the other.
+    thread auto& inv_op = [&]() -> thread auto& {
+      if constexpr (x_col_major) {
+        return rhs;
+      } else {
+        return lhs;
+      }
+    }();
+    thread auto& b_op = [&]() -> thread auto& {
+      if constexpr (x_col_major) {
+        return lhs;
+      } else {
+        return rhs;
+      }
+    }();
 #pragma unroll
     for (uint16_t i = 0; i < result.get_capacity(); ++i) {
       result[i] = 0;
     }
     for (uint j = 0; j <= row; j += mpp_rows) {
 #pragma unroll
-      for (uint16_t i = 0; i < lhs.get_capacity(); ++i) {
-        auto idx = lhs.get_multidimensional_index(i);
-        const uint r = row + idx[1];
-        const uint c = j + idx[0];
-        lhs[i] = r >= c ? inverse[triangular_elem_offset(r, c)] : 0;
+      for (uint16_t i = 0; i < inv_op.get_capacity(); ++i) {
+        auto idx = inv_op.get_multidimensional_index(i);
+        const uint r = row + idx[x_col_major ? 0 : 1];
+        const uint c = j + idx[x_col_major ? 1 : 0];
+        inv_op[i] = r >= c ? inverse[triangular_elem_offset(r, c)] : 0;
       }
-      if (reverse) {
+      if (!reverse) {
+        tensor<device float, dextents<int32_t, 2>, tensor_inline> in(
+            const_cast<device float*>(b + rhs_offset(j, col, p, b_col_major)),
+            b_col_major ? row_inner : col_inner,
+            array<int32_t, 2>{1, b_ld});
+        b_op.load(in);
+      } else {
 #pragma unroll
-        for (uint16_t i = 0; i < rhs.get_capacity(); ++i) {
-          auto idx = rhs.get_multidimensional_index(i);
-          rhs[i] = idx[0] < cols
-              ? b[ulong(n - 1 - j - idx[1]) * p.k + col + idx[0]]
+        for (uint16_t i = 0; i < b_op.get_capacity(); ++i) {
+          // Indices follow the stored layout, which is b's.
+          auto idx = b_op.get_multidimensional_index(i);
+          const uint r = j + idx[b_col_major ? 0 : 1];
+          const uint c = idx[b_col_major ? 1 : 0];
+          b_op[i] = int(c) < cols
+              ? b[rhs_offset(reverse ? n - 1 - r : r, col + c, p, b_col_major)]
               : 0;
         }
-      } else {
-        tensor<device float, dextents<int32_t, 2>, tensor_inline> in(
-            const_cast<device float*>(b + ulong(j) * p.k + col),
-            dextents<int32_t, 2>(cols, mpp_rows),
-            array<int32_t, 2>{1, int(p.k)});
-        rhs.load(in);
       }
       op.run(lhs, rhs, result);
     }
@@ -802,8 +865,10 @@ METAL_FUNC bool apply_triangular_inverse(
 #pragma unroll
       for (uint16_t i = 0; i < result.get_capacity(); ++i) {
         auto idx = result.get_multidimensional_index(i);
-        if (idx[0] < cols) {
-          x[ulong(n - 1 - row - idx[1]) * p.k + col + idx[0]] = result[i];
+        const uint r = row + idx[x_col_major ? 0 : 1];
+        const uint c = idx[x_col_major ? 1 : 0];
+        if (int(c) < cols) {
+          x[rhs_offset(n - 1 - r, col + c, p, x_col_major)] = result[i];
         }
       }
     } else {
@@ -811,6 +876,28 @@ METAL_FUNC bool apply_triangular_inverse(
     }
   }
   return nonfinite;
+}
+
+template <uint n, bool general>
+METAL_FUNC bool apply_triangular_inverse(
+    bool_constant<true>,
+    threadgroup const float* inverse,
+    device const float* b,
+    device float* x,
+    constant TriangularSolveParams& p,
+    uint,
+    uint sg) {
+  if (p.x_col_major) {
+    return p.b_col_major
+        ? apply_triangular_inverse_mpp<n, general, true, true>(
+              inverse, b, x, p, sg)
+        : apply_triangular_inverse_mpp<n, general, true, false>(
+              inverse, b, x, p, sg);
+  }
+  return p.b_col_major ? apply_triangular_inverse_mpp<n, general, false, true>(
+                             inverse, b, x, p, sg)
+                       : apply_triangular_inverse_mpp<n, general, false, false>(
+                             inverse, b, x, p, sg);
 }
 #endif
 
@@ -949,18 +1036,18 @@ kernel void triangular_solve_small(
     for (ulong col = tid; col < p.k; col += threads) {
       for (uint step = 0; step < n; ++step) {
         const uint row = reverse ? n - 1 - step : step;
-        float value = b[ulong(row) * p.k + col];
+        float value = b[rhs_offset(row, col, p, p.b_col_major)];
         for (uint j = 0; j < step; ++j) {
           const uint prior = reverse ? n - 1 - j : j;
           value =
               fma(-tri_opA(a, row, prior, n, transpose, p.conj),
-                  x[ulong(prior) * p.k + col],
+                  x[rhs_offset(prior, col, p, p.x_col_major)],
                   value);
         }
         if (!unit) {
           value /= tri_opA(a, row, row, n, transpose, p.conj);
         }
-        x[ulong(row) * p.k + col] = value;
+        x[rhs_offset(row, col, p, p.x_col_major)] = value;
       }
     }
   }
@@ -3291,7 +3378,7 @@ static T calc_H_irc(
     device T* A,
     uint32_t A_stride_r,
     uint32_t A_stride_c,
-    constant T* tau,
+    device const T* tau,
     uint32_t tau_stride,
     uint32_t r,
     uint32_t c,
@@ -3343,7 +3430,7 @@ static T calc_matmul_rc(
 template <typename T>
 kernel void orgqr(
     device T* A [[buffer(0)]],
-    constant T* tau [[buffer(1)]],
+    device const T* tau [[buffer(1)]],
     device T* H [[buffer(2)]],
     device T* H_prod [[buffer(3)]],
     device T* H_prod_work [[buffer(4)]],
@@ -3450,7 +3537,7 @@ kernel void orgqr(
 template <typename TO, typename TI>
 kernel void unpack_pivots(
     device TO* perm [[buffer(0)]],
-    constant TI* pivots [[buffer(1)]],
+    device const TI* pivots [[buffer(1)]],
     constant UnpackPivotsParams& params [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
   auto perm_batch_stride = params.perm_batch_stride;
@@ -3753,54 +3840,54 @@ REGISTER_GEQRF(float);
 
 #define INSTANTIATE_MM_OPS(DTYPE)                                           \
   template [[host_name("matmul_" #DTYPE)]] kernel void matmul<DTYPE>(       \
-      constant DTYPE * mat1Data [[buffer(0)]],                              \
-      constant DTYPE * mat2Data [[buffer(1)]],                              \
-      device DTYPE * outputData [[buffer(2)]],                              \
-      constant array<ulong2, 3> & strides [[buffer(3)]],                    \
-      constant uint3 & sizes [[buffer(4)]],                                 \
+      device const DTYPE* mat1Data [[buffer(0)]],                           \
+      device const DTYPE* mat2Data [[buffer(1)]],                           \
+      device DTYPE* outputData [[buffer(2)]],                               \
+      constant array<ulong2, 3>& strides [[buffer(3)]],                     \
+      constant uint3& sizes [[buffer(4)]],                                  \
       uint2 tid [[thread_position_in_threadgroup]],                         \
       uint2 group_id [[threadgroup_position_in_grid]]);                     \
   template [[host_name("naive_bmm_" #DTYPE)]] kernel void naive_bmm<DTYPE>( \
-      constant DTYPE * mat1Data [[buffer(0)]],                              \
-      constant DTYPE * mat2Data [[buffer(1)]],                              \
-      device DTYPE * outputData [[buffer(2)]],                              \
-      constant array<ulong, 9> & strides [[buffer(3)]],                     \
-      constant uint4 & sizes [[buffer(4)]],                                 \
+      device const DTYPE* mat1Data [[buffer(0)]],                           \
+      device const DTYPE* mat2Data [[buffer(1)]],                           \
+      device DTYPE* outputData [[buffer(2)]],                               \
+      constant array<ulong, 9>& strides [[buffer(3)]],                      \
+      constant uint4& sizes [[buffer(4)]],                                  \
       uint3 tid [[thread_position_in_threadgroup]],                         \
       uint3 group_id [[threadgroup_position_in_grid]]);                     \
   template [[host_name("addmm_" #DTYPE)]] kernel void addmm<DTYPE>(         \
-      constant DTYPE * mat1Data [[buffer(0)]],                              \
-      constant DTYPE * mat2Data [[buffer(1)]],                              \
-      device DTYPE * outputData [[buffer(2)]],                              \
-      constant DTYPE * biasData [[buffer(3)]],                              \
-      constant array<c10::metal::opmath_t<DTYPE>, 2> &                      \
-          alpha_beta [[buffer(4)]],                                         \
-      constant array<ulong2, 4> & strides [[buffer(5)]],                    \
-      constant uint3 & sizes [[buffer(6)]],                                 \
+      device const DTYPE* mat1Data [[buffer(0)]],                           \
+      device const DTYPE* mat2Data [[buffer(1)]],                           \
+      device DTYPE* outputData [[buffer(2)]],                               \
+      device const DTYPE* biasData [[buffer(3)]],                           \
+      constant array<c10::metal::opmath_t<DTYPE>, 2>& alpha_beta            \
+      [[buffer(4)]],                                                        \
+      constant array<ulong2, 4>& strides [[buffer(5)]],                     \
+      constant uint3& sizes [[buffer(6)]],                                  \
       uint2 tid [[thread_position_in_threadgroup]],                         \
       uint2 group_id [[threadgroup_position_in_grid]]);                     \
   template [[host_name("naive_baddbmm_" #DTYPE)]]                           \
   kernel void naive_baddbmm<DTYPE>(                                         \
-      constant DTYPE * mat1Data [[buffer(0)]],                              \
-      constant DTYPE * mat2Data [[buffer(1)]],                              \
-      device DTYPE * outputData [[buffer(2)]],                              \
-      constant DTYPE * biasData [[buffer(3)]],                              \
-      constant array<c10::metal::opmath_t<DTYPE>, 2> &                      \
-          alpha_beta [[buffer(4)]],                                         \
-      constant array<ulong, 12> & strides [[buffer(5)]],                    \
-      constant uint4 & sizes [[buffer(6)]],                                 \
+      device const DTYPE* mat1Data [[buffer(0)]],                           \
+      device const DTYPE* mat2Data [[buffer(1)]],                           \
+      device DTYPE* outputData [[buffer(2)]],                               \
+      device const DTYPE* biasData [[buffer(3)]],                           \
+      constant array<c10::metal::opmath_t<DTYPE>, 2>& alpha_beta            \
+      [[buffer(4)]],                                                        \
+      constant array<ulong, 12>& strides [[buffer(5)]],                     \
+      constant uint4& sizes [[buffer(6)]],                                  \
       uint3 tid [[thread_position_in_threadgroup]],                         \
       uint3 group_id [[threadgroup_position_in_grid]]);                     \
   template [[host_name("naive_addbmm_" #DTYPE)]]                            \
   kernel void naive_addbmm<DTYPE>(                                          \
-      constant DTYPE * mat1Data [[buffer(0)]],                              \
-      constant DTYPE * mat2Data [[buffer(1)]],                              \
-      device DTYPE * outputData [[buffer(2)]],                              \
-      constant DTYPE * biasData [[buffer(3)]],                              \
-      constant array<c10::metal::opmath_t<DTYPE>, 2> &                      \
-          alpha_beta [[buffer(4)]],                                         \
-      constant array<ulong, 12> & strides [[buffer(5)]],                    \
-      constant uint4 & sizes [[buffer(6)]],                                 \
+      device const DTYPE* mat1Data [[buffer(0)]],                           \
+      device const DTYPE* mat2Data [[buffer(1)]],                           \
+      device DTYPE* outputData [[buffer(2)]],                               \
+      device const DTYPE* biasData [[buffer(3)]],                           \
+      constant array<c10::metal::opmath_t<DTYPE>, 2>& alpha_beta            \
+      [[buffer(4)]],                                                        \
+      constant array<ulong, 12>& strides [[buffer(5)]],                     \
+      constant uint4& sizes [[buffer(6)]],                                  \
       uint3 tid [[thread_position_in_threadgroup]],                         \
       uint3 group_id [[threadgroup_position_in_grid]])
 
@@ -3821,8 +3908,8 @@ INSTANTIATE_MM_OPS(uchar);
 
 #define INSTANTIATE_INT_MM_OP(DTYPE)                                  \
   template [[host_name("int_mm_" #DTYPE)]] kernel void int_mm<DTYPE>( \
-      constant DTYPE * mat1Data [[buffer(0)]],                        \
-      constant char* mat2Data [[buffer(1)]],                          \
+      device const DTYPE* mat1Data [[buffer(0)]],                     \
+      device const char* mat2Data [[buffer(1)]],                      \
       device int* outputData [[buffer(2)]],                           \
       constant array<ulong2, 3>& strides [[buffer(3)]],               \
       constant uint3& sizes [[buffer(4)]],                            \
@@ -3832,17 +3919,17 @@ INSTANTIATE_MM_OPS(uchar);
 INSTANTIATE_INT_MM_OP(char);
 INSTANTIATE_INT_MM_OP(uchar);
 
-#define REGISTER_ORGQR(T)                            \
-  template [[host_name("orgqr_" #T)]]                \
-  kernel void orgqr<T>(                              \
-      device T * A [[buffer(0)]],                    \
-      constant T * tau [[buffer(1)]],                \
-      device T * H [[buffer(2)]],                    \
-      device T * H_prod [[buffer(3)]],               \
-      device T * H_prod_work [[buffer(4)]],          \
-      constant OrgqrParams<> & params [[buffer(5)]], \
-      uint tid [[thread_position_in_threadgroup]],   \
-      uint tptg [[threads_per_threadgroup]],         \
+#define REGISTER_ORGQR(T)                           \
+  template [[host_name("orgqr_" #T)]]               \
+  kernel void orgqr<T>(                             \
+      device T * A [[buffer(0)]],                   \
+      device const T* tau [[buffer(1)]],            \
+      device T* H [[buffer(2)]],                    \
+      device T* H_prod [[buffer(3)]],               \
+      device T* H_prod_work [[buffer(4)]],          \
+      constant OrgqrParams<>& params [[buffer(5)]], \
+      uint tid [[thread_position_in_threadgroup]],  \
+      uint tptg [[threads_per_threadgroup]],        \
       uint tgid [[threadgroup_position_in_grid]]);
 
 REGISTER_ORGQR(float);
@@ -3866,12 +3953,12 @@ REGISTER_ORGQR(half2);
 REGISTER_HOUSEHOLDER_BLOCK(float);
 REGISTER_HOUSEHOLDER_BLOCK(float2);
 
-#define REGISTER_UNPACK_PIVOTS(TO, TI)                    \
-  template [[host_name("unpack_pivots_" #TO "_" #TI)]]    \
-  kernel void unpack_pivots<TO, TI>(                      \
-      device TO * perm [[buffer(0)]],                     \
-      constant TI * pivots [[buffer(1)]],                 \
-      constant UnpackPivotsParams & params [[buffer(2)]], \
+#define REGISTER_UNPACK_PIVOTS(TO, TI)                   \
+  template [[host_name("unpack_pivots_" #TO "_" #TI)]]   \
+  kernel void unpack_pivots<TO, TI>(                     \
+      device TO * perm [[buffer(0)]],                    \
+      device const TI* pivots [[buffer(1)]],             \
+      constant UnpackPivotsParams& params [[buffer(2)]], \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_UNPACK_PIVOTS(int, int);
@@ -3969,10 +4056,28 @@ kernel void svd_jacobi(
   device T* V_b = V + batch_idx * params.v_bstride;
   device T* Vacc_b = Vacc + batch_idx * n * n;
 
+  float amax = 0;
+  for (uint32_t i = tid; i < m * n * sizeof(T) / 4; i += group_size) {
+    amax = max(amax, fabs(reinterpret_cast<device const float*>(A_b)[i]));
+  }
+  amax = c10::metal::simd_max(amax);
+  threadgroup float* maxima = reinterpret_cast<threadgroup float*>(Atg);
+  if (simd_lane == 0) {
+    maxima[simd_group] = amax;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  amax = simd_lane < num_sg ? maxima[simd_lane] : 0.0f;
+  amax = c10::metal::simd_max(amax);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  // 2^+/-kMaxScaleExp are both normal fp32 (Metal flushes subnormals).
+  constexpr int kMaxScaleExp = 1 - ::metal::numeric_limits<float>::min_exponent;
+  const int scale_exp = clamp(ilogb(amax), -kMaxScaleExp, kMaxScaleExp);
+  const float scale = ldexp(1.0f, -scale_exp);
+
   // Stage A column-major so each lane's row access is contiguous.
   for (uint32_t idx = tid; idx < m * n; idx += group_size) {
     uint32_t row = idx / n, col = idx % n;
-    Atg[col * m + row] = A_b[idx];
+    Atg[col * m + row] = A_b[idx] * scale;
   }
   if (params.compute_uv) {
     if (params.stage_v) {
@@ -4143,9 +4248,9 @@ kernel void svd_jacobi(
     uint32_t src = ord[j];
     float sigma = sig[src];
     if (simd_lane == 0) {
-      S[batch_idx * n + j] = sigma;
+      S[batch_idx * n + j] = ldexp(sigma, scale_exp);
     }
-    float inv = sigma > eps ? (1 / sigma) : 0.0f;
+    float inv = sigma > 0.0f ? (1 / sigma) : 0.0f;
     threadgroup T* colsrc = Atg + src * m;
     if (!params.transposed) {
       for (uint32_t i = simd_lane; i < m; i += kSimd) {

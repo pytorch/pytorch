@@ -21,6 +21,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCUDA,
     OpDTypes,
     ops,
     skipXPU,
@@ -1222,6 +1223,56 @@ class TestForeachDevice(TestCase):
             ),
         )
 
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float64)
+    def test_foreach_norm_ragged_chunks(self, device, dtype):
+        # Heavily ragged list stresses the compact per-tensor partial offsets:
+        # tensors span very different chunk counts (kChunkSize == 65536) and
+        # empty tensors are interspersed among the non-empty ones.
+        import math
+
+        chunk = 65536
+        sizes = [chunk * 3 + 7, 1, chunk + 1, 5, chunk * 2, 3, chunk - 1]
+        for out_dtype in (None, torch.float64):
+            for ord in (0, 1, 2, math.inf):
+                tensors = []
+                for i, n in enumerate(sizes):
+                    tensors.append(
+                        make_tensor((n,), dtype=dtype, device=device, low=-1, high=1)
+                    )
+                    if i in (1, 4):
+                        tensors.append(torch.empty(0, dtype=dtype, device=device))
+                if ord == math.inf:
+                    # inf norm has no identity for empty tensors
+                    tensors = [t for t in tensors if t.numel() != 0]
+                kwargs = {"ord": ord}
+                if out_dtype is not None:
+                    kwargs["dtype"] = out_dtype
+                actual = torch._foreach_norm(tensors, **kwargs)
+                expect = [
+                    torch.linalg.vector_norm(
+                        t if out_dtype is None else t.to(out_dtype), ord
+                    )
+                    if t.numel() != 0
+                    else torch.zeros((), dtype=out_dtype or dtype, device=device)
+                    for t in tensors
+                ]
+                self.assertEqual(expect, actual)
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
+    def test_foreach_max_ragged_chunks(self, device, dtype):
+        # Heavily ragged list stresses the compact per-tensor partial offsets
+        # for _foreach_max (all tensors must be non-empty for max).
+        chunk = 65536
+        sizes = [chunk * 3 + 7, 1, chunk + 1, 5, chunk * 2, 3, chunk - 1]
+        tensors = [
+            make_tensor((n,), dtype=dtype, device=device, low=-1, high=1) for n in sizes
+        ]
+        actual = torch._foreach_max(tensors)
+        expect = [t.max() for t in tensors]
+        self.assertEqual(expect, actual)
+
     @ops(
         [o for o in foreach_reduce_op_db if o.name == "_foreach_norm"],
     )
@@ -1747,6 +1798,19 @@ class TestForeachDevice(TestCase):
         torch.foreach.copy_([self_tensor], [src_tensor])
         ref_out = torch.empty_like(self_tensor).copy_(src_tensor)
         self.assertEqual(self_tensor, ref_out)
+
+    @onlyAccelerator
+    @skipXPU
+    @dtypes(torch.uint16, torch.uint32, torch.uint64)
+    def test_foreach_copy_barebones_unsigned(self, device, dtype):
+        # The fused kernel doesn't instantiate these, so they take the slow path.
+        dtype_pairs = ((dtype, dtype), (dtype, torch.int64), (torch.float32, dtype))
+        for dst_dtype, src_dtype in dtype_pairs:
+            src = [torch.arange(n, device=device).to(src_dtype) for n in (3, 5)]
+            dst = [torch.zeros(n, device=device, dtype=dst_dtype) for n in (3, 5)]
+            ref = [torch.empty_like(d).copy_(s) for d, s in zip(dst, src)]
+            torch._foreach_copy_(dst, src)
+            self.assertEqual(dst, ref)
 
     @requires_gpu_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
