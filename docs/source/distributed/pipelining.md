@@ -66,14 +66,19 @@ creating send/recv ops to communicate with its peers. It manages intermediate
 buffers e.g. for the outputs of forward that have not been consumed yet, and it
 provides a utility for running the backwards for the stage model.
 
-A `PipelineStage` needs to know the input and output shapes for the stage
-model, so that it can correctly allocate communication buffers. The shapes must
-be static, e.g. at runtime the shapes can not change from step to step. A class
-`PipeliningShapeError` will be raised if runtime shapes do not match the
-expected shapes. When composing with other parallelisms or applying mixed
-precision, these techniques must be taken into account so the `PipelineStage`
-knows the correct shape (and dtype) for the output of the stage module at
-runtime.
+A `PipelineStage` needs to know the input and output metadata (shape, dtype,
+and DTensor placements) for the stage model, so that it can correctly allocate
+communication buffers. If every stage in the pipeline is constructed with
+complete metadata (`input_args` and `output_args`, plus `input_grads` and
+`output_grads` for DTensors with backward), it is used as is (static mode).
+Otherwise all stages infer it by running the first microbatch of the first step
+(dynamic mode); any provided args are then only used to validate the inferred
+metadata. Either way, the metadata is fixed after the first step, so shapes can
+not change from step to step. Set `TORCH_DISTRIBUTED_DEBUG=DETAIL` to
+validate runtime tensors against it. When passing static metadata while composing with other
+parallelisms or applying mixed precision, these techniques must be taken into
+account so the `PipelineStage` knows the correct shape (and dtype) for the
+output of the stage module at runtime.
 
 Users may construct a `PipelineStage` instance directly, by passing in an
 `nn.Module` representing the portion of the model that should run on the
@@ -123,6 +128,34 @@ schedule.step(
     target_mbs=target_mbs,
 )
 ```
+
+If your loss takes extra arguments, pass the ones shared by every microbatch in
+`loss_kwargs`, and the ones that differ per microbatch, such as per-token
+weights, in `loss_kwarg_mbs`, one dict per microbatch. Like the other pre-split
+inputs, `loss_kwarg_mbs` goes with `target_mbs`. Microbatch `i` computes
+`loss_fn(output, target_mbs[i], **loss_kwargs, **loss_kwarg_mbs[i])`, so a key
+must not appear in both:
+
+```python
+def loss_fn(output, target, *, num_tokens, token_weights):
+    per_token_loss = torch.nn.functional.cross_entropy(
+        output.transpose(1, 2), target, reduction="none"
+    )
+    return (per_token_loss * token_weights).sum() / num_tokens
+
+schedule = ScheduleGPipe(stage, n_microbatches, loss_fn=loss_fn)
+schedule.step(
+    arg_mbs=arg_mbs,
+    target_mbs=target_mbs,
+    loss_kwargs={"num_tokens": num_tokens},  # same for every microbatch
+    loss_kwarg_mbs=[{"token_weights": w0}, {"token_weights": w1}],
+    losses=losses,
+)
+```
+
+While inferring stage metadata (on the first step by default), the schedule
+also calls `loss_fn` once with microbatch 0's inputs, so `loss_fn` must not
+accumulate into objects passed through `loss_kwarg_mbs`.
 
 Note that the above code needs to be launched for each worker, thus we use a
 launcher service to launch multiple processes:
@@ -340,7 +373,7 @@ stage = build_stage(dp_mod, stage_idx, info, device, group)
 :::{note}
 The `pipeline` frontend uses a tracer (`torch.export`) to capture your
 model into a single graph. If your model is not full-graph'able, you can use
-our manual frontend below.
+our manual frontend above.
 :::
 
 ## Hugging Face Examples
@@ -405,8 +438,8 @@ All stages assigned to one rank must execute on one device; adjacent same-rank
 stages pass activations and gradients directly without device copies.
 
 For example, `ScheduleGPipe` and `Schedule1F1B` are subclasses of `PipelineScheduleSingle`.
-Whereas, `ScheduleInterleaved1F1B`, `ScheduleLoopedBFS`, `ScheduleInterleavedZeroBubble`, and `ScheduleZBVZeroBubble`
-are subclasses of `PipelineScheduleMulti`.
+Whereas, `ScheduleInterleaved1F1B`, `ScheduleLoopedBFS`, `ScheduleInterleavedZeroBubble`, `ScheduleZBVZeroBubble`,
+and `ScheduleDualPipeV` are subclasses of `PipelineScheduleMulti`.
 
 ### Accessing Stage Forward Information
 
