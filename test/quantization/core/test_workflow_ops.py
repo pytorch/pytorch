@@ -30,7 +30,6 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo, HardwareClassification
 
 # Reference method for fake quantize
@@ -550,54 +549,12 @@ class TestFakeQuantizeOps(TestCase):
             loaded_module = torch.jit.load(buf)
             self.assertEqual(fq_module.calculate_qparams(), loaded_module.calculate_qparams())
 
-
-class TestFakeQuantizeOpsDevice(TestCase):
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
-                       qparams=hu.qparams(dtypes=torch.quint8)))
-    def test_forward_per_tensor(self, device, X):
-        r"""Tests the forward path of the FakeQuantizePerTensorAffine op.
-        """
-        np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point, torch_type) = X
-        quant_min = torch.iinfo(torch_type).min
-        quant_max = torch.iinfo(torch_type).max
-
-        X = to_tensor(X, device)
-        Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
-        Y_prime = torch.fake_quantize_per_tensor_affine(
-            X, scale, zero_point, quant_min, quant_max)
-        np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
-
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
-                       qparams=hu.qparams(dtypes=torch.quint8)))
-    @unittest.skip("temporarily disable the test")
-    def test_backward_per_tensor(self, device, X):
-        r"""Tests the backward method.
-        """
-        np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point, torch_type) = X
-        quant_min = torch.iinfo(torch_type).min
-        quant_max = torch.iinfo(torch_type).max
-
-        X = to_tensor(X, device)
-        X.requires_grad_()
-        Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
-        Y_prime = torch.fake_quantize_per_tensor_affine(
-            X, scale, zero_point, quant_min, quant_max)
-        dout = torch.rand_like(X, dtype=torch.float).to(device)
-        dX = _fake_quantize_per_tensor_affine_grad_reference(
-            dout, X, scale, zero_point, quant_min, quant_max)
-        Y_prime.backward(dout)
-        np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
-
     def test_forward_backward_per_tensor_with_amp(self):
         net = nn.Sequential(nn.Conv2d(1, 1, 3))
         net.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
         net_prep = torch.ao.quantization.prepare_qat(net)
 
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast("cuda", dtype=torch.float16, cache_enabled=True):
             x = torch.randn(4, 1, 5, 5)
             out = net_prep(x).sum()
             out.backward()
@@ -629,6 +586,101 @@ class TestFakeQuantizeOpsDevice(TestCase):
         Y3r = _fake_quantize_per_tensor_affine_reference(X3, scale, zero, mini, maxi)
         self.assertEqual(Y3, Y3r, rtol=tolerance, atol=tolerance)
 
+    def test_forward_per_channel_half_precision_numerics(self):
+        scale = torch.randn(5).abs()
+        zero = torch.randn(5).to(dtype=torch.int)
+        axis = 1
+        mini = 0
+        maxi = 255
+
+        for _ in range(20):
+            X1 = torch.randn(4, 5).to(torch.float16)
+            Y1 = torch.fake_quantize_per_channel_affine(X1, scale, zero, axis, mini, maxi)
+            Y1r = _fake_quantize_per_channel_affine_reference(X1, scale, zero, axis, mini, maxi)
+            self.assertEqual(Y1, Y1r, rtol=tolerance, atol=tolerance)
+
+        # to force overflow
+        X2 = torch.randn(4, 5).to(torch.float16)
+        X2[0, 0] = 2**15 + .01
+        Y2 = torch.fake_quantize_per_channel_affine(X2, scale, zero, axis, mini, maxi)
+        Y2r = _fake_quantize_per_channel_affine_reference(X2, scale, zero, axis, mini, maxi)
+        self.assertEqual(Y2, Y2r, rtol=tolerance, atol=tolerance)
+
+        scale = torch.zeros(5) + 10
+
+        # to force underflow
+        X3 = torch.randn(4, 5).to(torch.float16)
+        X3[0, 0] = 2**-24
+        Y3 = torch.fake_quantize_per_channel_affine(X3, scale, zero, axis, mini, maxi)
+        Y3r = _fake_quantize_per_channel_affine_reference(X3, scale, zero, axis, mini, maxi)
+        self.assertEqual(Y3, Y3r, rtol=tolerance, atol=tolerance)
+
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_fake_quantize_per_channel_affine_scale_dtypes(self):
+        """
+        Ensure the error message is more helpful
+        """
+        dtype_list = [torch.float, torch.float64, torch.bfloat16, torch.half]
+        for scale_dtype in dtype_list:
+            input = torch.randn(3, 4, 5, 6)
+            scale = torch.Tensor([0.1, 0.2, 0.3, 0.4]).to(scale_dtype)
+            zero_point = torch.tensor([1, 2, 3, 4], dtype=torch.int32)
+            axis = 1
+            quant_min = 0
+            quant_max = 255
+            if scale_dtype != torch.float:
+                with self.assertRaises(RuntimeError):
+                    torch.fake_quantize_per_channel_affine(
+                        input, scale, zero_point, axis, quant_min, quant_max
+                    )
+            else:
+                torch.fake_quantize_per_channel_affine(
+                    input, scale, zero_point, axis, quant_min, quant_max
+                )
+
+
+class TestFakeQuantizeOpsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_forward_per_tensor(self, device, X):
+        r"""Tests the forward path of the FakeQuantizePerTensorAffine op.
+        """
+        np.random.seed(NP_RANDOM_SEED)
+        X, (scale, zero_point, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
+        X = to_tensor(X, device)
+        Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
+        Y_prime = torch.fake_quantize_per_tensor_affine(
+            X, scale, zero_point, quant_min, quant_max)
+        np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, ),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip("temporarily disable the test")
+    def test_backward_per_tensor(self, device, X):
+        r"""Tests the backward method.
+        """
+        np.random.seed(NP_RANDOM_SEED)
+        X, (scale, zero_point, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
+        X = to_tensor(X, device)
+        X.requires_grad_()
+        Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
+        Y_prime = torch.fake_quantize_per_tensor_affine(
+            X, scale, zero_point, quant_min, quant_max)
+        dout = torch.rand_like(X, dtype=torch.float).to(device)
+        dX = _fake_quantize_per_tensor_affine_grad_reference(
+            dout, X, scale, zero_point, quant_min, quant_max)
+        Y_prime.backward(dout)
+        np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+
+
     def _test_forward_per_tensor_cachemask_impl(self, device):
         float_types = (torch.float32, torch.float16, torch.float64, torch.bfloat16)
         torch_types = (torch.qint8, torch.quint8)
@@ -651,14 +703,9 @@ class TestFakeQuantizeOpsDevice(TestCase):
             self.assertEqual(Y_test, Y_ref, rtol=tolerance, atol=tolerance)
             self.assertTrue(Y_test.dtype == float_type)
 
-    def test_forward_per_tensor_cachemask_cpu(self):
-        device = torch.device('cpu')
+    def test_forward_per_tensor_cachemask(self, device):
         self._test_forward_per_tensor_cachemask_impl(device)
 
-    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
-    def test_forward_per_tensor_cachemask_cuda(self):
-        device = torch.device('cuda')
-        self._test_forward_per_tensor_cachemask_impl(device)
 
     def _test_backward_per_tensor_cachemask_impl(self, device):
         float_types = (torch.float32, torch.float16, torch.float64)
@@ -691,18 +738,11 @@ class TestFakeQuantizeOpsDevice(TestCase):
             self.assertEqual(dX, X.grad)
             self.assertTrue(X.grad.dtype == float_type)
 
-    def test_backward_per_tensor_cachemask_cpu(self):
-        device = torch.device('cpu')
-        self._test_backward_per_tensor_cachemask_impl(device)
-
-    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
-    def test_backward_per_tensor_cachemask_cuda(self):
-        device = torch.device('cuda')
+    def test_backward_per_tensor_cachemask(self, device):
         self._test_backward_per_tensor_cachemask_impl(device)
 
 
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=[torch.quint8])),
            )
     def test_fq_module_per_tensor(self, device, X):
@@ -728,8 +768,7 @@ class TestFakeQuantizeOpsDevice(TestCase):
         dX = _fake_quantize_per_tensor_affine_grad_reference(dout, X, fq_module.scale, fq_module.zero_point, quant_min, quant_max)
         np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
     def test_fixed_qparams_fq_module(self, device, X):
         X, (scale, zero_point, torch_type) = X
@@ -745,8 +784,7 @@ class TestFakeQuantizeOpsDevice(TestCase):
         self.assertEqual(fixed_zero_point, fq_module.zero_point)
 
 
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
     def test_forward_per_channel(self, device, X):
         r"""Tests the forward path of the FakeQuantizePerTensorAffine op.
@@ -787,72 +825,38 @@ class TestFakeQuantizeOpsDevice(TestCase):
             torch.testing.assert_close(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
             self.assertTrue(Y.dtype == float_type)
 
-    def test_forward_per_channel_cachemask_cpu(self):
-        self._test_forward_per_channel_cachemask_impl('cpu')
+    def test_forward_per_channel_cachemask(self, device):
+        self._test_forward_per_channel_cachemask_impl(device)
 
-    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
-    def test_forward_per_channel_cachemask_cuda(self):
-        self._test_forward_per_channel_cachemask_impl('cuda')
 
-    def test_forward_per_channel_half_precision_numerics(self):
-        scale = torch.randn(5).abs()
-        zero = torch.randn(5).to(dtype=torch.int)
-        axis = 1
-        mini = 0
-        maxi = 255
-
-        for _ in range(20):
-            X1 = torch.randn(4, 5).to(torch.float16)
-            Y1 = torch.fake_quantize_per_channel_affine(X1, scale, zero, axis, mini, maxi)
-            Y1r = _fake_quantize_per_channel_affine_reference(X1, scale, zero, axis, mini, maxi)
-            self.assertEqual(Y1, Y1r, rtol=tolerance, atol=tolerance)
-
-        # to force overflow
-        X2 = torch.randn(4, 5).to(torch.float16)
-        X2[0, 0] = 2**15 + .01
-        Y2 = torch.fake_quantize_per_channel_affine(X2, scale, zero, axis, mini, maxi)
-        Y2r = _fake_quantize_per_channel_affine_reference(X2, scale, zero, axis, mini, maxi)
-        self.assertEqual(Y2, Y2r, rtol=tolerance, atol=tolerance)
-
-        scale = torch.zeros(5) + 10
-
-        # to force underflow
-        X3 = torch.randn(4, 5).to(torch.float16)
-        X3[0, 0] = 2**-24
-        Y3 = torch.fake_quantize_per_channel_affine(X3, scale, zero, axis, mini, maxi)
-        Y3r = _fake_quantize_per_channel_affine_reference(X3, scale, zero, axis, mini, maxi)
-        self.assertEqual(Y3, Y3r, rtol=tolerance, atol=tolerance)
-
-    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
-           qparams=hu.qparams(dtypes=torch.quint8)))
-    def test_fake_quant_per_channel_qparam_range(self, X):
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5, ),
+                                   qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_fake_quant_per_channel_qparam_range(self, device, X):
         X, (scale, zero_point, axis, torch_type) = X
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
 
-        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
-            X = to_tensor(X, device)
-            scale = to_tensor(scale, device)
+        X = to_tensor(X, device)
+        scale = to_tensor(scale, device)
 
-            # Ensure that zero_point < quant_min.
-            zero_point = torch.full(zero_point.shape, -1 - quant_min).to(dtype=torch.int32, device=device)
+        # Ensure that zero_point < quant_min.
+        zero_point = torch.full(zero_point.shape, -1 - quant_min).to(dtype=torch.int32, device=device)
 
-            # For non-float zero_point, fakequant requires zero_point between quant_min and quant_max.
-            with self.assertRaisesRegex(RuntimeError, "`zero_point` must be between `quant_min` and `quant_max`."):
-                Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, axis, quant_min, quant_max)
+        # For non-float zero_point, fakequant requires zero_point between quant_min and quant_max.
+        with self.assertRaisesRegex(RuntimeError, "`zero_point` must be between `quant_min` and `quant_max`."):
+            Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, axis, quant_min, quant_max)
 
-            # For float zero_point, fakequant can be outside quant_min and quant_max.
-            for zero_point_dtype in [torch.float32, torch.float16]:
-                zero_point = zero_point.to(dtype=zero_point_dtype)
-                Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, axis, quant_min, quant_max)
-                Y_ref = _fake_quantize_per_channel_affine_reference(X.cpu(), scale.cpu(), zero_point.cpu(),
-                                                                    axis, quant_min, quant_max)
-                np.testing.assert_allclose(Y.cpu().numpy(), Y_ref.cpu().numpy(), rtol=tolerance, atol=tolerance)
+        # For float zero_point, fakequant can be outside quant_min and quant_max.
+        for zero_point_dtype in [torch.float32, torch.float16]:
+            zero_point = zero_point.to(dtype=zero_point_dtype)
+            Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, axis, quant_min, quant_max)
+            Y_ref = _fake_quantize_per_channel_affine_reference(X.cpu(), scale.cpu(), zero_point.cpu(),
+                                                                axis, quant_min, quant_max)
+            np.testing.assert_allclose(Y.cpu().numpy(), Y_ref.cpu().numpy(), rtol=tolerance, atol=tolerance)
 
 
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
-           qparams=hu.qparams(dtypes=torch.quint8)))
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5, ),
+                                   qparams=hu.qparams(dtypes=torch.quint8)))
     @unittest.skip(
         "this is broken without changes to any relevant code, "
         "we need to remove hypothesis testing in CI")
@@ -876,7 +880,8 @@ class TestFakeQuantizeOpsDevice(TestCase):
             dX = _fake_quantize_per_channel_affine_grad_reference(
                 dout, X, scale, zero_point, axis, quant_min, quant_max)
             Y_prime.backward(dout)
-            np.testing.assert_allclose(dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+            np.testing.assert_allclose(dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance,
+                                       atol=tolerance)
 
     def _test_backward_per_channel_cachemask_impl(self, device):
         torch_types = (torch.qint8, torch.quint8)
@@ -908,21 +913,17 @@ class TestFakeQuantizeOpsDevice(TestCase):
                 )
 
 
-    def test_backward_per_channel_cachemask_cpu(self):
-        self._test_backward_per_channel_cachemask_impl('cpu')
-
-    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
-    def test_backward_per_channel_cachemask_cuda(self):
-        self._test_backward_per_channel_cachemask_impl('cuda')
+    def test_backward_per_channel_cachemask(self, device):
+        self._test_backward_per_channel_cachemask_impl(device)
 
 
-    def test_numerical_consistency_per_tensor(self):
-        self._test_numerical_consistency('per_tensor')
+    def test_numerical_consistency_per_tensor(self, device):
+        self._test_numerical_consistency('per_tensor', device)
 
-    def test_numerical_consistency_per_channel(self):
-        self._test_numerical_consistency('per_channel')
+    def test_numerical_consistency_per_channel(self, device):
+        self._test_numerical_consistency('per_channel', device)
 
-    def _test_numerical_consistency(self, test_type):
+    def _test_numerical_consistency(self, test_type, device):
         r"""Comparing numerical consistency between quantize/dequantize op and the fake quantize op across devices and dtypes
         """
         torch.random.manual_seed(NP_RANDOM_SEED)
@@ -932,10 +933,10 @@ class TestFakeQuantizeOpsDevice(TestCase):
             zero_types = [torch.int, torch.float, torch.float16]
         else:
             zero_types = [torch.int]
-        devices = [torch.device('cpu'), torch.device('cuda')] if torch.cuda.is_available() else [torch.device('cpu')]
         axis = 1
+
         for _ in range(20):
-            for torch_type, float_type, device, zero_type in itertools.product(torch_types, float_types, devices, zero_types):
+            for torch_type, float_type, zero_type in itertools.product(torch_types, float_types, zero_types):
                 X = torch.randn(3, 3, device=device).to(float_type)
                 scales = (10 * torch.randn(3, device=device)).abs()
                 scale = scales.mean().to(float).item()
@@ -962,33 +963,10 @@ class TestFakeQuantizeOpsDevice(TestCase):
                         Y, Y_prime, "Difference found between dequant+quant_per_channel and fake_quantize_per_channel")
                 self.assertTrue(test_was_run)
 
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    def test_fake_quantize_per_channel_affine_scale_dtypes(self):
-        """
-        Ensure the error message is more helpful
-        """
-        dtype_list = [torch.float, torch.float64, torch.bfloat16, torch.half]
-        for scale_dtype in dtype_list:
-            input = torch.randn(3, 4, 5, 6)
-            scale = torch.Tensor([0.1, 0.2, 0.3, 0.4]).to(scale_dtype)
-            zero_point = torch.tensor([1, 2, 3, 4], dtype=torch.int32)
-            axis = 1
-            quant_min = 0
-            quant_max = 255
-            if scale_dtype != torch.float:
-                with self.assertRaises(RuntimeError):
-                    torch.fake_quantize_per_channel_affine(
-                        input, scale, zero_point, axis, quant_min, quant_max
-                    )
-            else:
-                torch.fake_quantize_per_channel_affine(
-                    input, scale, zero_point, axis, quant_min, quant_max
-                )
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    @given(dtype=st.sampled_from([torch.float, torch.float64, torch.half, torch.bfloat16]),
-           device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
-    def test_fake_quantize_per_tensor_affine_inf(self, dtype, device) -> None:
+    @given(dtype=st.sampled_from([torch.float, torch.float64, torch.half, torch.bfloat16]))
+    def test_fake_quantize_per_tensor_affine_inf(self, device, dtype) -> None:
         # https://github.com/pytorch/pytorch/issues/154328
         input_tensor = torch.tensor([torch.inf], dtype=dtype).to(device)
         scale = 0.01
@@ -1356,6 +1334,7 @@ class TestFusedObsFakeQuantDevice(TestCase):
         self.assertEqual(dX, x.grad)
         self.assertTrue(x.grad.dtype == torch.float32)
 
+instantiate_device_type_tests(TestFakeQuantizeOpsDevice, globals())
 instantiate_device_type_tests(TestFakeQuantizeOpsLearnableAccelerator, globals())
 instantiate_device_type_tests(TestFusedObsFakeQuantDevice, globals())
 if __name__ == '__main__':
