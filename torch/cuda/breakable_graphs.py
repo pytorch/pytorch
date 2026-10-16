@@ -262,7 +262,7 @@ class _EagerSegment:
 
 
 class BreakableCUDAGraph:
-    r"""BreakableCUDAGraph(pool=None)
+    r"""BreakableCUDAGraph(*, pool=None)
 
     Capture output from :class:`~torch.cuda.breakable_graph` that can be replayed.
 
@@ -280,7 +280,7 @@ class BreakableCUDAGraph:
         This API is in prototype and may change in future releases.
     """
 
-    def __init__(self, pool: _GraphPool | None = None) -> None:
+    def __init__(self, *, pool: _GraphPool | None = None) -> None:
         self._pool = pool
         self._segments: list[torch.cuda.CUDAGraph | _EagerSegment] = []
 
@@ -316,7 +316,7 @@ class BreakableCUDAGraph:
 
 
 class breakable_graph:
-    r"""breakable_graph(cuda_graph, stream=None, capture_error_mode="global", barrier_fn=None)
+    r"""breakable_graph(cuda_graph, *, stream=None, capture_error_mode="global", barrier_fn=None)
 
     Capture CUDA work as multiple graph segments with eager breaks.
 
@@ -373,6 +373,7 @@ class breakable_graph:
     def __init__(
         self,
         cuda_graph: BreakableCUDAGraph,
+        *,
         stream: torch.cuda.Stream | None = None,
         capture_error_mode: str = "global",
         barrier_fn: Callable[[], Any] | None = None,

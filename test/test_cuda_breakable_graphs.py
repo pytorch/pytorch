@@ -133,7 +133,9 @@ class TestBreakableGraphAPI(TestCase):
 class TestBreakableCUDAGraph(TestCase):
     def setUp(self):
         super().setUp()
-        self.enterContext(torch.compiler.config.patch(force_cudagraph_gc=True))
+        ctx = torch.compiler.config.patch(force_cudagraph_gc=True)
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
 
     def warmup(self, fn):
         stream = torch.cuda.Stream()
