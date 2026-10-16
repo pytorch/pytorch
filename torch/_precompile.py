@@ -3294,21 +3294,13 @@ def capture(
     freeze. That includes kernels launched directly through ``@triton.jit`` and
     ``@triton.autotune`` inside the block: Triton compiles into a fresh cache
     directory there, with its autotuning cache on, so a ``TRITON_CACHE_DIR``
-    you set is not used inside the block, and a JIT kernel or autotuner already
-    used before the block compiles and tunes again on its first launch inside
-    it. That retune benchmarks on the block's real inputs, and the config it
-    picks, which is what ships and what the process keeps using afterwards, may
-    differ from the one picked before the block. Compiled JIT kernel
-    specializations and autotuning decisions the block does not produce again
-    are kept afterwards.
+    you set is not used inside the block and its kernels compile again. A JIT
+    kernel or autotuner already used before the block reuses what it compiled
+    or tuned then, which is not carried, so launch each one for the first time
+    inside the block.
     Triton does not cache the decision of an autotuner with ``pre_hook``
-    configs, so one that does not prune its configs keeps its earlier decision
-    in the block and is benchmarked again on first use in the serving process.
-    No other thread should launch Triton kernels while the block opens or
-    closes: the in-memory caches are dropped and restored then without
-    synchronizing with launches, so a concurrent autotuner launch can fail.
-    Triton kernels another thread compiles or tunes while the block is open
-    go into the block's cache directory and ship with it.
+    configs, so such a kernel is benchmarked again on first use in the serving
+    process.
 
     ``tracer`` picks the capture front-end and carries its tracer-specific
     configuration. :class:`DynamoTracer` (the default) is an execution-driven
