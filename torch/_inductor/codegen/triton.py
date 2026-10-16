@@ -7763,6 +7763,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return "pointwise"
 
     @classmethod
+    def gen_driver_setup(cls, device_type: str) -> str:
+        """
+        Code that selects the Triton driver when the kernel module is imported, or ""
+        to leave the active driver alone. Backends that trace on one device but run
+        kernels on another override this.
+        """
+        if device_type == "cpu":
+            return "triton_helpers.set_driver_to_cpu()"
+        return "triton_helpers.set_driver_to_gpu()"
+
+    @classmethod
     @lru_cache(None)
     def gen_common_triton_imports(cls) -> str:
         imports = IndentedBuffer()
@@ -8074,10 +8085,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if name is None:
             code.splice(self.gen_common_triton_imports())
             device_type = V.graph.get_current_device_or_throw().type
-            if device_type == "cpu":
-                code.splice("triton_helpers.set_driver_to_cpu()")
-            else:
-                code.splice("triton_helpers.set_driver_to_gpu()")
+            if driver_setup := self.gen_driver_setup(device_type):
+                code.splice(driver_setup)
 
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
