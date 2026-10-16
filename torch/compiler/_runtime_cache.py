@@ -25,7 +25,6 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
-from torch.compiler._no_compile import is_compilation_forbidden
 from torch.utils._appending_byte_serializer import AppendingByteSerializer
 
 
@@ -161,70 +160,42 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
         return True
 
     def populate_cache(self) -> None:
-        self.import_into_triton(strict=is_compilation_forbidden())
+        self.import_into_triton()
 
-    def import_into_triton(self, *, strict: bool) -> None:
+    def import_into_triton(self) -> None:
         cache = _triton_runtime_cache()
-        context = _runtime_context()
-        problem = cause = root = None
+        message = "The precompile cache contains a Triton runtime cache, but"
         if cache is None:
-            problem = "Triton is not installed or too old to import one"
-        elif _active_capture() is not None:
-            problem = "it cannot be imported inside a precompile.capture block"
-        else:
-            # A failing lookup is reported by _serving_triton_root below.
-            with contextlib.suppress(Exception), _imported_triton_runtime_lock:
-                served = (self.key, str(cache.runtime_cache_root()))
-                if served in _imported_triton_runtime:
-                    return
-            # Validate before _serving_triton_root repoints Triton for the process.
-            try:
-                if hashlib.sha256(self.content).hexdigest() != self.key:
-                    raise RuntimeError("Corrupt Triton runtime-cache artifact")
-                try:
-                    keys = {key for key, _ in cache._decode(self.content, context)[1]}
-                except (AttributeError, KeyError, TypeError, ValueError) as exc:
-                    raise RuntimeError("Malformed Triton runtime-cache bundle") from exc
-            except RuntimeError as exc:
-                problem = f"it was rejected ({exc})"
-                cause = exc
-            else:
-                try:
-                    root = _serving_triton_root(cache, self.key, keys)
-                except Exception as exc:
-                    problem = f"Triton has no cache directory to import it into ({exc})"
-                    cause = exc
-        # root is None whenever cache is; the cache check narrows cache for pyrefly.
-        if cache is None or root is None:
-            message = (
-                f"The precompile cache contains a Triton runtime cache, but {problem}"
+            raise RuntimeError(
+                f"{message} Triton is not installed or too old to import one"
             )
-            if strict:
-                raise RuntimeError(message) from cause
-            log.warning(
-                "%s; Triton JIT kernels will compile or autotune on first use", message
+        if _active_capture() is not None:
+            raise RuntimeError(
+                f"{message} it cannot be imported inside a precompile.capture block"
             )
-            return
+        # A failing lookup is reported by _serving_triton_root below.
+        with contextlib.suppress(Exception), _imported_triton_runtime_lock:
+            if (self.key, str(cache.runtime_cache_root())) in _imported_triton_runtime:
+                return
+        # Validate before _serving_triton_root repoints Triton for the process.
+        if hashlib.sha256(self.content).hexdigest() != self.key:
+            raise RuntimeError("Corrupt Triton runtime-cache artifact")
+        context = _runtime_context()
+        try:
+            keys = {key for key, _ in cache._decode(self.content, context)[1]}
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("Malformed Triton runtime-cache bundle") from exc
+        try:
+            root = _serving_triton_root(cache, self.key, keys)
+        except Exception as exc:
+            raise RuntimeError(
+                f"{message} Triton has no cache directory to import it into ({exc})"
+            ) from exc
         imported = (self.key, root)
         with _imported_triton_runtime_lock:
             if imported in _imported_triton_runtime:
                 return
-            try:
-                cache.import_runtime_cache(self.content, context=context)
-            except Exception as exc:
-                if strict:
-                    raise
-                # Raising here would stop the artifacts populated after this one
-                # (populate_first), leaving the frozen Inductor kernels cold too.
-                # A failure here (the directory's entries conflict, or a write
-                # fails) keeps the TRITON_CACHE_DIR and autotuning settings
-                # _serving_triton_root made, so later JIT compiles land there.
-                log.warning(
-                    "Could not import the precompile cache's Triton runtime cache "
-                    "(%s); Triton JIT kernels will compile or autotune on first use",
-                    exc,
-                )
-                return
+            cache.import_runtime_cache(self.content, context=context)
             _imported_triton_runtime.add(imported)
 
 
@@ -322,16 +293,6 @@ def record_triton_kernel(key: str, kernel: CachingAutotuner) -> None:
         instances = owner.triton_kernels.setdefault(key, [])
         if not any(instance is kernel for instance in instances):
             instances.append(kernel)
-
-
-def record_inductor_triton_binary(cache_key: str) -> None:
-    # Inductor's binaries, including losing autotune candidates, share the
-    # Triton cache with JIT kernels; inductor_triton already ships the ones
-    # replay needs, so triton_runtime excludes these keys.
-    with _capture_lock:
-        owner = _capture
-        if owner is not None and owner.pid == os.getpid():
-            owner.inductor_triton_keys.add(cache_key)
 
 
 def clear_triton_kernels() -> None:
@@ -533,7 +494,6 @@ class _RuntimeCapture:
         self.freeze_lock = threading.Lock()
         self.triton_kernels: dict[str, list[CachingAutotuner]] = {}
         self.cpp_kernels: dict[str, tuple[str, Callable[[], object]]] = {}
-        self.inductor_triton_keys: set[str] = set()
 
 
 _capture: _RuntimeCapture | None = None
@@ -617,7 +577,6 @@ def capture_scope() -> Iterator[None]:
             if owner.captures == 0:
                 owner.triton_kernels.clear()
                 owner.cpp_kernels.clear()
-                owner.inductor_triton_keys.clear()
                 # Under the lock, or a capture opening meanwhile would save
                 # this scope's directory as the settings to restore.
                 try:
@@ -704,13 +663,10 @@ def freeze_runtime_cache(
         with _capture_lock:
             kernels = {key: list(found) for key, found in owner.triton_kernels.items()}
             cpp_kernels = {key: path for key, (path, _) in owner.cpp_kernels.items()}
-            inductor_triton_keys = frozenset(owner.inductor_triton_keys)
         static_payload = _freeze_triton_kernels(kernels)
         cpp_payload = _freeze_cpp_kernels(cpp_kernels)
         if cache is not None:
-            payload = cache.export_runtime_cache(
-                context=_runtime_context(), exclude=inductor_triton_keys
-            )
+            payload = cache.export_runtime_cache(context=_runtime_context())
             artifacts[TritonRuntimeCacheArtifact.type()] = [
                 TritonRuntimeCacheArtifact(hashlib.sha256(payload).hexdigest(), payload)
             ]
