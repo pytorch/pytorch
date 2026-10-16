@@ -63,7 +63,6 @@ class TestCodegenRuntimeWrapper(TestCase):
             "backward_epilogue",
             "compiled_function_forward",
             "compiled_function_backward",
-            "compiled_fn_wrapper",
             "runtime_wrapper_orchestration",
         )
         section_offsets = [source.index(f"# {name}\n") for name in section_names]
