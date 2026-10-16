@@ -330,6 +330,7 @@ dev = [
     # This list should be kept in sync with the requirements.txt in
     # PyTorch root until the project fully migrates to pyproject.toml
     "build[uv]",  # for building sdist and wheel
+    "bitarray>=3.11.0",
     "expecttest>=0.3.0",
     "filelock",
     "fsspec>=0.8.5",

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 __all__ = ["dynamic_metadata", "dynamic_wheel"]
 
 BASE_DEPENDENCIES = [
+    "bitarray>=3.11.0",
     "filelock",
     "typing-extensions>=4.13.0",
     "setuptools>=77.0.3",
