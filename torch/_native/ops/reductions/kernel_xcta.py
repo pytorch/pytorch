@@ -199,7 +199,16 @@ def _reduce_row_xcta(
     # M only sizes grid and scratch, so one plan serves any batch size. Stage 1 uses Int64
     # tile coordinates beyond 2**31. subrow_target belongs in the geometry key because it changes C.
     out_dtypes = tuple(out_dtypes)
-    gkey = (trait_key, x.dtype, out_dtypes, N, block, subrow_target, str(x.device))
+    gkey = (
+        trait_key,
+        x.dtype,
+        out_dtypes,
+        N,
+        block,
+        subrow_target,
+        _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
+        str(x.device),
+    )
     geom = _GEOM.get(gkey)
     if geom is None and gkey not in _GEOM:
         geom = _GEOM[gkey] = _build_geom(
@@ -271,6 +280,7 @@ def _build_geom(
         threads_per_block % threads_per_row
     )  # rows_per_block must be whole
     unroll = 16 if svec == 1 else 4  # scalar sub-rows want more loads in flight
+    align = _L.supported_alignment(x, svec * elsize)
     pkey = (
         "xcta",
         trait_key,
@@ -281,9 +291,9 @@ def _build_geom(
         threads_per_block,
         unroll,
         block,
+        align,
         str(device),
     )
-    align = svec * elsize
     # Stage-1 rolled-loop counts: vector groups, then waves of threads_per_row.
     s1_counts = (Int32(s // svec), Int32(-(-(s // svec) // threads_per_row)))
 
