@@ -7877,10 +7877,10 @@ class TestMPS(TestCaseMPS):
         # Small numerics: when |im| << |re|, computing the smaller component as
         # sqrt((|z| - |re|) / 2) cancels catastrophically and returns ~0. Compare
         # components separately, as a complex-magnitude check would hide the error.
-        for dtype in (torch.cfloat, torch.chalf):
+        for dtype, op in itertools.product((torch.cfloat, torch.chalf), (torch.sqrt, torch.rsqrt)):
             x = torch.tensor([1 + 1e-4j, -1 + 1e-4j, 1 - 1e-4j, -1 - 1e-4j], dtype=dtype)
-            rc = torch.view_as_real(x.to('mps').sqrt().cpu())
-            ref = torch.view_as_real(x.cfloat().sqrt().to(dtype))
+            rc = torch.view_as_real(op(x.to('mps')).cpu())
+            ref = torch.view_as_real(op(x.cfloat()).to(dtype))
             self.assertEqual(rc, ref)
 
     def test_signed_zero_max_min(self):
