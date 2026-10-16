@@ -2733,8 +2733,11 @@ class DUAL_LEVEL_MATCH : public LeafGuard {
   }
 
   bool _check() {
-    PyObject* current_level = PyObject_GetAttrString(
-        forward_ad_module.ptr(), "_current_level"); // new ref
+    // Interned once; PyObject_GetAttrString builds a new string every call.
+    static PyObject* current_level_name =
+        PyUnicode_InternFromString("_current_level");
+    PyObject* current_level = PyObject_GetAttr(
+        forward_ad_module.ptr(), current_level_name); // new ref
     if (current_level == nullptr) {
       // Attribute absent, clear the exception and return false.
       PyErr_Clear();
@@ -5367,8 +5370,7 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
     }
 
     for (int64_t idx = 0; (size_t)idx < len; idx++) {
-      std::shared_ptr<c10::SafePyObject> mode =
-          at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
+      const auto& mode = at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
 
       PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
       if (mode_type != _ref_stack.at(idx)) {
@@ -6335,7 +6337,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
     if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
       return false;
     }
-    at::Tensor tensor = THPVariable_Unpack(obj);
+    const at::Tensor& tensor = THPVariable_Unpack(obj);
     std::optional<int64_t> opt_value;
     if (_prop == TensorProperty::SIZE) {
       if (_index >= tensor.dim()) {
@@ -6370,7 +6372,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
     if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
       return GuardDebugInfo(false, "not a tensor" + get_source(), 0);
     }
-    at::Tensor tensor = THPVariable_Unpack(obj);
+    const at::Tensor& tensor = THPVariable_Unpack(obj);
     std::optional<int64_t> opt_value;
     if (_prop == TensorProperty::SIZE) {
       if (_index >= tensor.dim()) {
