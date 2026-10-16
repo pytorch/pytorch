@@ -633,6 +633,10 @@ class _DynamoCodeCacheEntry:
          uninstall(). Set on a frame a precompile capture serves as plain
          Python: its variants inlined its Python callees, which hold no entries
          of their own.
+      12. The module each function name is bound in, where that is not
+         python_module. Under config.nested_graph_breaks, a continuation of an
+         inlined frame runs with the inlined function's globals but is bound
+         in, and loaded by LOAD_GLOBAL from, the root frame's globals.
     """
 
     python_code: SerializedCode
@@ -646,6 +650,7 @@ class _DynamoCodeCacheEntry:
     has_compile_id: bool = False
     bypassed: bool = False
     skip_recursive: bool = False
+    bound_in: dict[_FunctionId, str] = dataclasses.field(default_factory=dict)
 
 
 def _globals_module_name(
@@ -1287,6 +1292,7 @@ class CompilePackage:
                         backend_ids=[],
                         function_names=list(code.function_names),
                         import_sources=dict(code.import_sources),
+                        bound_in=dict(code.bound_in),
                     )
             # The codes come back, so the device they recorded must too, or one
             # recompile after a reload re-saves the entry as what that frame
@@ -1307,6 +1313,7 @@ class CompilePackage:
         function_name: _FunctionId | None = None,
         code_source: str | None = None,
         install_to_global: bool = False,
+        bound_in: str | None = None,
     ) -> None:
         if python_code not in self._codes:
             code = _DynamoCodeCacheEntry(
@@ -1337,6 +1344,8 @@ class CompilePackage:
 
         if function_name is not None:
             code.function_names.append(function_name)
+            if bound_in is not None and bound_in != python_module:
+                code.bound_in[function_name] = bound_in
 
     @property
     def cached_backends(self) -> dict[_BackendId, Any]:
@@ -1472,13 +1481,18 @@ class CompilePackage:
         python_code: types.CodeType,
         global_scope: dict[str, Any],
         function_name: str,
+        root_scope: dict[str, Any],
     ) -> None:
+        module_name, bound_in = (
+            _globals_module_name(scope, self._entry_module_name) or scope["__name__"]
+            for scope in (global_scope, root_scope)
+        )
         self._add_function(
             python_code,
-            _globals_module_name(global_scope, self._entry_module_name)
-            or global_scope["__name__"],
+            module_name,
             function_name=_FunctionId(function_name),
             install_to_global=True,
+            bound_in=bound_in,
         )
         self._resume_codes.add(python_code)
 
@@ -1592,6 +1606,10 @@ class CompilePackage:
                 target_code = code
                 if entry.install_to_global:
                     for function_name in entry.function_names:
+                        bound_module = entry.bound_in.get(
+                            function_name, entry.python_module
+                        )
+                        scope = sys.modules[bound_module]
                         if code.co_freevars:
                             # Resume functions with freevars need a factory
                             # that takes a closure tuple, matching
@@ -1609,12 +1627,12 @@ class CompilePackage:
                                     _code, _globals, _name, None, closure
                                 )
 
-                            self._install_global(module, function_name, _make_fn)
+                            self._install_global(scope, function_name, _make_fn)
                         else:
                             fn = types.FunctionType(
                                 code, module.__dict__, function_name
                             )
-                            self._install_global(module, function_name, fn)
+                            self._install_global(scope, function_name, fn)
                 if entry.code_source:
                     target_code = _lookup_code(entry)
 

@@ -4993,6 +4993,60 @@ class TestPrecompileDynamoCapture(TestCase):
         self._serve_in_fresh_process(calls, mode="installed")
 
     @skipIfCrossRef
+    @parametrize("backend", ["inductor", "eager"])
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_an_inlined_frames_resume_is_bound_in_the_root_module(self, backend):
+        # Under nested graph breaks the helper is inlined, so the entry reaches
+        # every frame and the artifact is standalone. The continuation of the
+        # helper's break runs with the helper's globals but the entry's bytecode
+        # loads it from the entry's module, which is where it must be bound.
+        helper = f"{self.module_name}_helper"
+        entry = f"{self.module_name}_ngb"
+        sources = {
+            helper: (
+                "import torch\n\n"
+                "OFF = 3.0\n\n"
+                "def helper(y):\n"
+                "    y = y.sin() + OFF\n"
+                "    torch._dynamo.graph_break()\n"
+                "    return y.cos() * OFF\n"
+            ),
+            entry: (
+                f"import {helper}\n\n"
+                "def fn(x):\n"
+                f"    return {helper}.helper(x * 2) + 1\n"
+            ),
+        }
+        for name, source in sources.items():
+            with open(os.path.join(self.dir, name + ".py"), "w") as f:
+                f.write(source)
+            self.addCleanup(sys.modules.pop, name, None)
+        importlib.invalidate_caches()
+        fn = importlib.import_module(entry).fn
+        with self._capture(fn, backend=backend) as cap:
+            y = cap(self.x2)
+        self.assertEqual(y, fn(self.x2))
+        with open(self.artifact) as f:
+            self.assertIn('SERVING_MODE = "standalone"', f.read())
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "mod = __import__(sys.argv[4])\n"
+            "x, y = torch.load(sys.argv[5])\n"
+            "f = torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "torch.testing.assert_close(f(x), y)\n"
+            "print('served')\n"
+        )
+        state = os.path.join(self.dir, "state.pt")
+        torch.save((self.x2, y), state)
+        argv = [self.dir, self.artifact, self.cache, entry, state]
+        cmd = [sys.executable, "-c", script, *argv]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("served", out.stdout)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_seeds_unnamed_scope_globals(self):
         # Inlining namedtuple's exec-generated __new__ roots record_helper's
         # guards at the ___unnamed_scope_<id>_c<n> key Dynamo mints for globals
@@ -5104,6 +5158,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
     @skipIfCrossRef
     @parametrize("installed", [False, True])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_graphless_frames_that_lose_guards_are_served_eagerly(self, installed):
         # The disabled scale() leaves its callees compiled, so the registry
         # lookup compiles WeakKeyDictionary.__contains__ and __getitem__ as
@@ -5351,6 +5406,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
     @skipIfCrossRef
     @parametrize("caching_precompile", [False, True])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_can_opt_into_serve_time_compiles(
         self, caching_precompile
     ):
@@ -5370,6 +5426,8 @@ class TestPrecompileDynamoCapture(TestCase):
         script = (
             "import sys, torch\n"
             "from torch._dynamo.utils import _compilation_metrics as metrics\n"
+            "# The serve-time compile must compile breaking_helper as its own frame.\n"
+            "torch._dynamo.config.nested_graph_breaks = False\n"
             "sys.path.insert(0, sys.argv[1])\n"
             "mod = __import__(sys.argv[4])\n"
             "saved = torch.load(sys.argv[5])\n"
@@ -5419,6 +5477,7 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(PrecompileError, "only to an installed artifact"):
             load(self.artifact, self.cache, allow_serve_time_compiles=True)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_without_the_flag_default_refuses_it(self):
         with self._capture(self.mod.calls_breaking_helper, backend="eager") as cap:
             cap(self.model, self.x2)
@@ -5442,6 +5501,7 @@ class TestPrecompileDynamoCapture(TestCase):
             ("_ALLOW_SERVE_TIME_COMPILES = False  # edited", True, "not in the form"),
         ],
     )
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_with_an_edited_flag_line_refuses_to_load(
         self, line, allow, msg
     ):
@@ -5751,6 +5811,7 @@ class TestPrecompileDynamoCapture(TestCase):
             self.assertEqual(p.grad, ref.grad)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_a_cold_bundled_autotune_cache_does_not_break_an_installed_load(self):
         # An installed artifact's load post-compiles the forward and the
         # backward in install()'s one compile context, so it hits the same
