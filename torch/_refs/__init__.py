@@ -6810,7 +6810,12 @@ def normal(
     if layout is not None and layout != torch.strided:
         raise AssertionError(f"layout must be None or torch.strided, got {layout}")
 
-    if not isinstance(std, TensorLike):
+    if isinstance(std, TensorLike):
+        torch._check(
+            not utils.is_complex_dtype(std.dtype),
+            lambda: "normal expects standard deviation to be non-complex",
+        )
+    else:
         torch._check(
             std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}"
         )
