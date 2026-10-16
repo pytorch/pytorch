@@ -121,6 +121,9 @@ jobs:
     secrets: inherit
 
   linux-jammy-py3_11-clang21-build:
+    # On pushes and schedules, pull.yml / trunk.yml run these slow tests on their
+    # identical builds (see skip_on_pr); build here only for ciflow/slow and dispatches.
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/ciflow/slow/') }}
     name: linux-jammy-py3.11-clang21
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -154,6 +157,9 @@ jobs:
     secrets: inherit
 
   linux-jammy-py3_11-clang21-asan-build:
+    # On pushes and schedules, pull.yml / trunk.yml run these slow tests on their
+    # identical builds (see skip_on_pr); build here only for ciflow/slow and dispatches.
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/ciflow/slow/') }}
     name: linux-jammy-py3.11-clang21-asan
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -191,6 +197,9 @@ jobs:
     secrets: inherit
 
   linux-noble-rocm-py3_11-mi350-build:
+    # On pushes and schedules, pull.yml / trunk.yml run these slow tests on their
+    # identical builds (see skip_on_pr); build here only for ciflow/slow and dispatches.
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/ciflow/slow/') }}
     name: linux-noble-rocm-py3.11-mi350
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
