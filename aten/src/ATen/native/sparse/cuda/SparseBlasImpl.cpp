@@ -530,6 +530,12 @@ void spmm(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
+#if !defined(USE_ROCM)
+  TORCH_CHECK(
+      result.dim() != 3 || result.size(0) <= 65535,
+      "cuSPARSE SpMM supports at most 65535 batches, got ",
+      result.dim() == 3 ? result.size(0) : 1);
+#endif
   c10::MaybeOwned<Tensor> result_ = prepare_dense_matrix_for_cusparse(result);
   c10::MaybeOwned<Tensor> mat2_ = prepare_dense_matrix_for_cusparse(mat2);
 

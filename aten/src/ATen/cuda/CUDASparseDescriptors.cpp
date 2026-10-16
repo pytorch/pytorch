@@ -160,15 +160,6 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
   auto values_batch_stride =
       values.dim() >= 2 && batch_offset >= 0 ? values_->stride(-2) : 0;
 
-  // cuSPARSE ignores the strides and uses only the first batch.
-  if (ndim == 3 && batch_offset == -1) {
-    TORCH_CHECK(
-        crow_indices.dim() < 2 && col_indices.dim() < 2 && values.dim() < 2,
-        "CUDA sparse matrix operations do not support batched CSR indices or values "
-        "(crow_indices, col_indices, or values with 2 or more dimensions). "
-        "Loop over the batch instead.");
-  }
-
   cusparseSpMatDescr_t raw_descriptor = nullptr;
   TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
       &raw_descriptor, // output descriptor
@@ -190,16 +181,34 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
       value_type // data type of values
       ));
 
+  descriptor_.reset(raw_descriptor);
+
   if (ndim == 3 && batch_offset == -1) {
     int batch_count =
         at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
-    // cuSPARSE allows broadcasting of indices and values across batches for
-    // batched matmul
-    TORCH_CUDASPARSE_CHECK(
-        cusparseCsrSetStridedBatch(raw_descriptor, batch_count, 0, 0));
+    if (crow_indices.dim() >= 2 || values.dim() >= 2 ||
+        col_indices.dim() >= 2) {
+      TORCH_CHECK(
+          crow_indices.dim() >= 2 && col_indices.dim() >= 2 &&
+              values.dim() >= 2,
+          "Expected crow_indices, col_indices and values of a batched CSR "
+          "tensor to be batched, got dimensionalities ",
+          crow_indices.dim(), ", ", col_indices.dim(), " and ", values.dim());
+      TORCH_CHECK(
+          col_indices.stride(-2) == values_->stride(-2),
+          "Expected col_indices and values of a batched CSR tensor to have "
+          "equal batch strides, got ",
+          col_indices.stride(-2), " and ", values_->stride(-2));
+      TORCH_CUDASPARSE_CHECK(cusparseCsrSetStridedBatch(
+          raw_descriptor,
+          batch_count,
+          crow_indices.stride(-2),
+          values_->stride(-2)));
+    } else {
+      TORCH_CUDASPARSE_CHECK(
+          cusparseCsrSetStridedBatch(raw_descriptor, batch_count, 0, 0));
+    }
   }
-
-  descriptor_.reset(raw_descriptor);
 }
 
 } // namespace at::cuda::sparse
