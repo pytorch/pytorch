@@ -37,7 +37,7 @@
 
 #ifndef _MSC_VER
 // TODO: TO be removed, once this properly works from libkineto
-// Literal copy-n-paste from libkineto/src/WeakSymbols.cpp
+// Literal copy-n-paste from third_party/kineto/libkineto/src/WeakSymbols.cpp
 extern "C" {
 // This function is needed to avoid superfluous dependency on GNU OpenMP library
 // when cuPTI is linked statically For more details see
