@@ -13,7 +13,6 @@ all:
 
 .PHONY: triton
 triton:
-	$(PIP) uninstall -y triton
 	@./scripts/install_triton_wheel.sh
 
 .PHONY: clean
