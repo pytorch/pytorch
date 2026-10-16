@@ -2866,7 +2866,7 @@ class OutputGraph(OutputGraphCommon):
         is enabled, otherwise None.
         """
         with torch._guards.TracingContext.clear_frame():
-            from .decorators import disable
+            from .eval_frame import _disable_compiled_graph
 
             if not self.should_exit:
                 raise AssertionError(
@@ -3117,7 +3117,7 @@ class OutputGraph(OutputGraphCommon):
 
                 compiled_fn = _tf_subclass_disabled_wrapper
 
-            compiled_fn = disable(
+            compiled_fn = _disable_compiled_graph(
                 compiled_fn, reason="do not trace Dynamo-compiled graph"
             )
 

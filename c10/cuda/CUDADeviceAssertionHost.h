@@ -2,6 +2,7 @@
 
 #include <c10/cuda/CUDAMacros.h>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -19,6 +20,13 @@ constexpr int C10_CUDA_DSA_ASSERTION_COUNT = 10;
 constexpr int C10_CUDA_DSA_MAX_STR_LEN = 512;
 
 namespace c10::cuda {
+
+namespace detail {
+/// Set once any device has an assertion buffer, the only way has_failed() can
+/// return true, so C10_CUDA_CHECK can skip that check on success. Only ever
+/// set, so relaxed accesses are no racier than has_failed()'s own reads.
+C10_CUDA_API extern std::atomic<bool> dsa_buffer_allocated;
+} // namespace detail
 
 /// Holds information about any device-side assertions that fail.
 /// Held in managed memory and access by both the CPU and the GPU.

@@ -27,6 +27,8 @@
 
 namespace c10::cuda {
 
+std::atomic<bool> detail::dsa_buffer_allocated{false};
+
 namespace {
 
 #ifdef TORCH_USE_CUDA_DSA
@@ -337,6 +339,7 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
   // Ownership and lifetime management of `uvm_assertions_ptr` now passes to the
   // uvm_assertions unique_ptr vector
   uvm_assertions.at(device_num).reset(uvm_assertions_ptr);
+  detail::dsa_buffer_allocated.store(true, std::memory_order_relaxed);
 
   return uvm_assertions_ptr;
 #else
