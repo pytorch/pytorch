@@ -450,9 +450,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.all_reduce(t)
 
         def abortpg():
-            c10d.distributed_c10d._get_default_group()._get_backend(
-                torch.device(device)
-            ).abort()
+            dist.get_backend_impl(device=torch.device(device)).abort()
 
         # Initialize DDP to ensure "destroy_process_group" will not call
         # ProcessGroupNCCL destructor since DDP holds a reference to process group.
@@ -600,7 +598,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
-        backend = pg._get_backend(torch.device("cuda"))
+        backend = dist.get_backend_impl(pg, torch.device("cuda"))
 
         device = self.rank_to_GPU[self.rank][0]
         # Cover different buffer sizes
@@ -982,7 +980,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         t2 = torch.rand(10, 10, device=device)
         new_pg1.allreduce(t1).wait()
         new_pg2.allreduce(t2).wait()
-        backend = pg._get_backend(torch.device(device))
+        backend = dist.get_backend_impl(pg, torch.device(device))
         # default PG's backend should have a split count of 0 because
         # it's not eager initialized
         self.assertEqual(backend.comm_split_count(), 0)
@@ -1006,7 +1004,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         t2 = torch.rand(10, 10, device=device)
 
         new_pg2.allreduce(t2).wait()
-        backend = pg._get_backend(torch.device(device))
+        backend = dist.get_backend_impl(pg, torch.device(device))
         # default PG's backend should have a split count of 0
         self.assertEqual(backend.comm_split_count(), 0)
         # shutdown all NCCL PGs in one shot
@@ -1040,8 +1038,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     def _check_nccl_timeout(self, expected_timeout):
-        pg = dist.distributed_c10d._get_default_group()
-        options = pg._get_backend(torch.device(f"cuda:{self.rank}")).options
+        options = dist.get_backend_impl(
+            device=torch.device(f"cuda:{self.rank}")
+        ).options
         self.assertEqual(options._timeout, expected_timeout)
 
     @requires_nccl()
@@ -1208,7 +1207,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank}")
         pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
-        backend = pg._get_backend(torch.device(device))
+        backend = dist.get_backend_impl(pg, torch.device(device))
 
         tensor = torch.full((1,), self.rank).cuda(device)
         original_tensor = tensor.clone()
@@ -1233,7 +1232,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         device = torch.device(f"cuda:{self.rank}")
         # default PG comm is not initialized yet
         pg = self._create_process_group_nccl(store, self.opts())
-        backend = pg._get_backend(torch.device(device))
+        backend = dist.get_backend_impl(pg, torch.device(device))
         self.assertEqual(backend._is_initialized(), False)
         # create a subgroup eagerly
         new_group = c10d.new_group([0, 1], device_id=device)
@@ -1253,7 +1252,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank}")
         pg = self._create_process_group_nccl(store, self.opts())
-        backend = pg._get_backend(device)
+        backend = dist.get_backend_impl(pg, device)
         opts = self.opts()
         opts.config.blocking = blocking
         child = backend.split(c10d.distributed_c10d._get_default_store(), [0], opts)
@@ -1274,13 +1273,13 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank}")
         pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
-        backend = pg._get_backend(torch.device(device))
+        backend = dist.get_backend_impl(pg, torch.device(device))
 
         tensor = torch.full((1,), self.rank).cuda(device)
         # Create subgroup between ranks 0, 1
         subg_ranks = [0, 1]
         ng1 = c10d.split_group(pg, [subg_ranks])
-        backend1 = ng1._get_backend(torch.device(device))
+        backend1 = dist.get_backend_impl(ng1, torch.device(device))
 
         # check basic options are the same between parent and child
         self.assertEqual(backend.options._timeout, backend1.options._timeout)
@@ -1315,12 +1314,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank}")
         default_pg = self._create_process_group_nccl(store, self.opts())
-        default_backend = default_pg._get_backend(device)
+        default_backend = dist.get_backend_impl(default_pg, device)
         self.assertFalse(default_backend._is_initialized())
 
         ranks = list(range(self.world_size))
         parent = c10d.new_group(ranks)
-        parent_backend = parent._get_backend(device)
+        parent_backend = dist.get_backend_impl(parent, device)
         self.assertFalse(parent_backend._is_initialized())
         with self.assertRaisesRegex(RuntimeError, "Parent process group backend"):
             c10d.split_group(parent, [ranks])
@@ -1374,7 +1373,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         ng = c10d.split_group(pg, [ranks])
         self.assertIsNotNone(ng)
         self.assertEqual(dist.get_process_group_ranks(ng), ranks)
-        self.assertEqual(ng._get_backend(device).options.global_ranks_in_group, ranks)
+        self.assertEqual(
+            dist.get_backend_impl(ng, device).options.global_ranks_in_group, ranks
+        )
 
         tensor = torch.full((1,), self.rank).cuda(device)
         dist.broadcast(tensor, 0, group=ng)
@@ -1400,14 +1401,14 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             device_id=device,
         )
         pg = c10d.distributed_c10d._get_default_group()
-        backend = pg._get_backend(torch.device(device))
+        backend = dist.get_backend_impl(pg, torch.device(device))
 
         cuda_tensor = torch.full((1,), self.rank).cuda(device)
         cpu_tensor = torch.full((1,), self.rank)
         # Create subgroup between ranks 0, 1
         subg_ranks = [0, 1]
         ng1 = c10d.split_group(pg, [subg_ranks])
-        backend1 = ng1._get_backend(torch.device(device))
+        backend1 = dist.get_backend_impl(ng1, torch.device(device))
 
         # check basic options are the same between parent and child
         self.assertEqual(backend.options._timeout, backend1.options._timeout)
@@ -1478,17 +1479,17 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             device_id=device,
         )
         pg = c10d.distributed_c10d._get_default_group()
-        cuda_backend = pg._get_backend(torch.device("cuda"))
+        cuda_backend = dist.get_backend_impl(pg, torch.device("cuda"))
 
         subg_ranks = [0, 1]
         ng = c10d.split_group(pg, [subg_ranks], backend="cuda:nccl-legacy")
         if self.rank in subg_ranks:
             self.assertIsNotNone(ng)
-            ng_cuda = ng._get_backend(torch.device("cuda"))
+            ng_cuda = dist.get_backend_impl(ng, torch.device("cuda"))
             self.assertEqual(cuda_backend.options._timeout, ng_cuda.options._timeout)
             # cpu backend should not be present in the child.
             with self.assertRaises(Exception):
-                ng._get_backend(torch.device("cpu"))
+                dist.get_backend_impl(ng, torch.device("cpu"))
             self.assertEqual(
                 c10d.distributed_c10d._world.pg_backend_config[ng], "cuda:nccl-legacy"
             )
@@ -1554,7 +1555,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = self.rank_to_GPU[self.rank][0]
         pg = self._create_process_group_nccl(store, self.opts())
-        backend = pg._get_backend(torch.device(device))
+        backend = dist.get_backend_impl(pg, torch.device(device))
         self.assertEqual(backend.comm_split_count(), 0)
         reduce_tensor = torch.rand(10, 10, device=device)
         # Run an allreduce, which should trigger a comm init for pg
@@ -1578,7 +1579,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         device = torch.device(f"cuda:{self.rank}")
         # bound device to trigger eager init mode
         pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
-        backend = pg._get_backend(torch.device(device))
+        backend = dist.get_backend_impl(pg, torch.device(device))
         self.assertEqual(backend.comm_split_count(), 0)
         reduce_tensor = torch.rand(10, 10, device=device)
         # Run an allreduce, comm should have already started initilizaing,
@@ -1716,7 +1717,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         original_timeout = None
         original_high_priority = None
         if not is_excluded:
-            original_backend = pg._get_backend(device)
+            original_backend = dist.get_backend_impl(pg, device)
             original_timeout = original_backend.options._timeout
             original_high_priority = original_backend.options.is_high_priority_stream
             log_test_info(
@@ -1741,7 +1742,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         _ = self._validate_shrunk_group(shrunk_pg, expected_size, test_name)
 
         # Add custom backend properties validation
-        new_backend = shrunk_pg._get_backend(device)
+        new_backend = dist.get_backend_impl(shrunk_pg, device)
         log_test_info(self.rank, "Validating backend properties are preserved")
 
         new_timeout = new_backend.options._timeout
@@ -1839,7 +1840,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # Prepare pg_options with NCCL config overrides
         # Capture parent's current backend options to ensure we can prove override vs inherit
-        parent_backend = pg._get_backend(torch.device("cuda"))
+        parent_backend = dist.get_backend_impl(pg, torch.device("cuda"))
         parent_hp = parent_backend.options.is_high_priority_stream
         parent_blocking = parent_backend.options.config.blocking
 
@@ -1858,7 +1859,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         shrunk_pg = c10d.shrink_group([self.world_size - 1], pg_options=opts)
 
         # Validate backend options propagated
-        backend = shrunk_pg._get_backend(torch.device("cuda"))
+        backend = dist.get_backend_impl(shrunk_pg, torch.device("cuda"))
         # is_high_priority_stream should exactly match our override and differ from parent
         self.assertEqual(backend.options.is_high_priority_stream, override_hp)
         self.assertNotEqual(backend.options.is_high_priority_stream, parent_hp)
@@ -2116,7 +2117,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         """
         if self.rank in ranks_to_exclude:
             if shrink_flags & NCCL_SHRINK_ABORT:
-                pg._get_backend(torch.device(device)).abort()
+                dist.get_backend_impl(pg, torch.device(device)).abort()
             else:
                 c10d.destroy_process_group(pg)
             return
@@ -2222,7 +2223,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             log_test_info(self.rank, "Excluded from shrink test - exiting immediately")
             # Survivors shrink with NCCL_SHRINK_ABORT and abort the parent, so
             # the excluded rank must abort too; destroy here would hang.
-            pg1._get_backend(torch.device(device)).abort()
+            dist.get_backend_impl(pg1, torch.device(device)).abort()
             return
 
         # Performance analysis (only for participating ranks)
@@ -2299,7 +2300,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Run a large collective to cause NCCL to allocate internal memory
         dist.all_reduce(torch.zeros(1024 * 1024 * 512, device=device))
 
-        backend = pg._get_backend(device)
+        backend = dist.get_backend_impl(pg, device)
         backend.suspend()
         # Confirm that the memory is suspended
         stats = backend.memory_stats()
@@ -2318,7 +2319,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Run a large collective to cause NCCL to allocate internal memory
         dist.all_reduce(torch.zeros(1024 * 1024 * 512, device=device))
 
-        backend = pg._get_backend(device)
+        backend = dist.get_backend_impl(pg, device)
         stats = backend.memory_stats()
         self.assertIsInstance(stats, dict)
         for key in ("suspend", "suspended", "persist", "total"):
@@ -2335,7 +2336,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank}")
         pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
-        backend = pg._get_backend(device)
+        backend = dist.get_backend_impl(pg, device)
 
         # Run a large collective to cause NCCL to allocate internal memory
         dist.all_reduce(torch.zeros(1024 * 1024 * 512, device=device))
@@ -4488,7 +4489,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             store=store,
         )
         pg = c10d.distributed_c10d._get_default_group()
-        nccl_backend = pg._get_backend(torch.device(device))
+        nccl_backend = dist.get_backend_impl(pg, torch.device(device))
         self.assertEqual(nccl_backend.get_error(), ErrorType.SUCCESS)
         barrier_work = nccl_backend.barrier()
         barrier_work.wait()
@@ -4526,8 +4527,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             store=new_store,
         )
 
-        new_pg = c10d.distributed_c10d._get_default_group()
-        new_nccl_backend = new_pg._get_backend(torch.device(device))
+        new_nccl_backend = dist.get_backend_impl(device=torch.device(device))
         t = torch.rand(5, 5, device=device)
         dist.all_reduce(t)
         self.assertEqual(new_nccl_backend.get_error(), ErrorType.SUCCESS)
@@ -4607,7 +4607,7 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         )
         torch.cuda.set_device(self.rank)
         pg = c10d.distributed_c10d._get_default_group()
-        backend = pg._get_backend(torch.device(device))
+        backend = dist.get_backend_impl(pg, torch.device(device))
 
         # Use NCCL memory allocator
         pool = torch.cuda.MemPool(backend.mem_allocator)
@@ -4657,7 +4657,7 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
                 device_id=device,
             )
             pg = c10d.distributed_c10d._get_default_group()
-            backend = pg._get_backend(torch.device(device))
+            backend = dist.get_backend_impl(pg, torch.device(device))
 
             # Use NCCL memory allocator
             # enable symmetric memory usage in NCCL
@@ -6377,7 +6377,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         a = torch.full((3, 4), float(self.rank), device=device)
         opts = c10d.BarrierOptions()
         opts.device_ids = [device.index]
-        f = pg._get_backend(device).barrier(opts)
+        f = dist.get_backend_impl(pg, device).barrier(opts)
         f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
@@ -7726,7 +7726,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank}")
         pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
-        backend = pg._get_backend(torch.device(device))
+        backend = dist.get_backend_impl(pg, torch.device(device))
 
         tensor = torch.full((1,), self.rank).cuda(device)
         ng1 = c10d.split_group(pg, [[0, 1], [2, 3, 4, 5, 6, 7]])
@@ -7762,12 +7762,12 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank}")
         pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
-        backend = pg._get_backend(torch.device(device))
+        backend = dist.get_backend_impl(pg, torch.device(device))
 
         # split the default PG into 2 subgroups, each subgroup (ng1) has 4 ranks.
         tensor1 = torch.full((1,), self.rank).cuda(device)
         ng1 = c10d.split_group(pg, [[0, 1, 2, 3], [4, 5, 6, 7]])
-        backend1 = ng1._get_backend(torch.device(device))
+        backend1 = dist.get_backend_impl(ng1, torch.device(device))
         if self.rank < 4:
             dist.broadcast(tensor1, 0, group=ng1)
             self.assertEqual(tensor1, torch.full((1,), 0))
@@ -7782,7 +7782,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         # further split ng1 into 2 subgroups, each subgroup (ng2) has 2 ranks.
         tensor2 = torch.full((1,), self.rank).cuda(device)
         ng2 = c10d.split_group(ng1, [[0, 1], [2, 3]])
-        backend2 = ng2._get_backend(torch.device(device))
+        backend2 = dist.get_backend_impl(ng2, torch.device(device))
         self.assertEqual(backend.comm_split_count(), 1)
         self.assertEqual(backend1.comm_split_count(), 1)
         self.assertEqual(backend2.comm_split_count(), 0)
@@ -7807,7 +7807,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         # Test the case when the split changes the pg option of split group
         # while the parent pg option is not changed.
         new_pg = c10d.new_group([0, 1, 2, 3, 4, 5, 6, 7], device_id=device)
-        backend_new_pg = new_pg._get_backend(torch.device(device))
+        backend_new_pg = dist.get_backend_impl(new_pg, torch.device(device))
         self.assertEqual(len(backend_new_pg.options.global_ranks_in_group), 8)
         c10d.split_group(new_pg, [[0, 2, 4, 6], [1, 3, 5, 7]])
         self.assertEqual(len(backend_new_pg.options.global_ranks_in_group), 8)

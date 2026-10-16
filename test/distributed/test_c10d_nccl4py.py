@@ -81,7 +81,7 @@ class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
     def test_allreduce(self):
         device = torch.device(f"cuda:{self.rank}")
         pg = dist.distributed_c10d._get_default_group()
-        backend = pg._get_backend(device)
+        backend = dist.get_backend_impl(pg, device)
         self.assertEqual(
             backend.options.group_name,
             dist.distributed_c10d._get_process_group_name(pg),
@@ -270,8 +270,7 @@ class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     def test_coalescing(self):
         device = torch.device(f"cuda:{self.rank}")
-        pg = dist.distributed_c10d._get_default_group()
-        backend = pg._get_backend(torch.device(device))
+        backend = dist.get_backend_impl(device=device)
         t1 = torch.ones(4, device=device) * (self.rank + 1)
         t2 = torch.ones(4, device=device) * (self.rank + 1) * 10
         backend.start_coalescing()
@@ -365,7 +364,7 @@ class TestNCCL4PyBackendLifecycle(MultiProcessTestCase):
     def _split_pg(self, device, timeout=None):
         self._init_pg(device_id=device)
         subgroup = dist.split_group(split_ranks=[[0, 1]], timeout=timeout)
-        return subgroup, subgroup._get_backend(device)
+        return subgroup, dist.get_backend_impl(subgroup, device)
 
     @skip_if_lt_x_gpu(2)
     def test_split_group(self):

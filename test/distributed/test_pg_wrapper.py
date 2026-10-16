@@ -546,8 +546,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 store=store,
                 device_id=device,
             )
-            pg = c10d.distributed_c10d._get_default_group()
-            pg_backend = pg._get_backend(device)
+            pg_backend = c10d.get_backend_impl(device=device)
             self.assertIsInstance(pg_backend, _ProcessGroupWrapper)
             self.assertEqual(pg_backend.wrapped_pg.bound_device_id, device)
 

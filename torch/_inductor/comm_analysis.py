@@ -924,7 +924,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
 
         device = torch.device("cuda")
         try:
-            backend = pg._get_backend(device)
+            backend = torch.distributed.get_backend_impl(pg, device)
         except RuntimeError:
             return None
         if not backend._supports_time_estimate:

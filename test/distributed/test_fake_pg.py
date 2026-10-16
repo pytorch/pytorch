@@ -852,9 +852,8 @@ class TestFakePG(TestCase):
             device_id=torch.device(device_type, 0),
         )
 
-        parent_pg = dist.distributed_c10d._get_default_group()
         self.assertTrue(
-            parent_pg._get_backend(torch.device(device_type)).supports_splitting
+            dist.get_backend_impl(device=torch.device(device_type)).supports_splitting
         )
 
         # Interleaved, unsorted subgroups: each rank shares a group with the
@@ -1049,9 +1048,7 @@ class TestFakePGUniformRanks(TestCase):
             store=FakeStore(),
             pg_options=opts,
         )
-        return dist.distributed_c10d._get_default_group()._get_backend(
-            torch.device("cpu")
-        )
+        return dist.get_backend_impl(device=torch.device("cpu"))
 
     def test_option_defaults_to_off(self):
         """Existing behavior must be untouched unless the flag is set."""
@@ -1084,7 +1081,7 @@ class TestFakePGUniformRanks(TestCase):
 
         process_group = dist.new_group(ranks=[0, 1], backend="fake")
         self.assertIsInstance(process_group, dist.ProcessGroup)
-        backend = process_group._get_backend(torch.device("cpu"))
+        backend = dist.get_backend_impl(process_group, torch.device("cpu"))
         self.assertIsInstance(backend, FakeProcessGroup)
         self.assertTrue(backend.options.simulate_uniform_ranks)
         self.assertEqual(backend.options.fake_option, 0)
@@ -1099,7 +1096,7 @@ class TestFakePGUniformRanks(TestCase):
         process_group = parent.split_group([0, 1], device_types=[torch.device("cpu")])
 
         self.assertIsInstance(process_group, dist.ProcessGroup)
-        backend = process_group._get_backend(torch.device("cpu"))
+        backend = dist.get_backend_impl(process_group, torch.device("cpu"))
         self.assertIsInstance(backend, FakeProcessGroup)
         self.assertTrue(backend.options.simulate_uniform_ranks)
 
