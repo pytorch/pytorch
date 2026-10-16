@@ -4,7 +4,9 @@
 #include <torch/csrc/utils/pybind.h>
 
 #if defined(USE_CUFILE)
+#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 
 #include <cuda_runtime.h>
 #include <cufile.h>
@@ -33,38 +35,107 @@ std::string cuGDSFileGetErrorString(T status) {
         cudaGetErrorString(static_cast<cudaError_t>(status.cu_err)));
   return errStr;
 }
+
+// Helper to get the correct stream and do some error handling.
+c10::cuda::CUDAStream getGdsStream(
+    const at::Storage& storage,
+    std::optional<c10::Stream> stream) {
+  // Make sure device of stream and device of storage device matches.
+  TORCH_CHECK(
+      !stream.has_value() || stream->device() == storage.device(),
+      "Expected a stream on ",
+      storage.device(),
+      " but got a stream on ",
+      stream->device());
+  c10::cuda::CUDAStream cuda_stream = stream.has_value()
+      ? c10::cuda::CUDAStream(*stream)
+      : c10::cuda::getCurrentCUDAStream(storage.device().index());
+
+  // cuFile's async API does not support CUDA graphs:
+  // https://docs.nvidia.com/gpudirect-storage/release-notes/index.html#known-limitations
+  cudaStreamCaptureStatus status{};
+  C10_CUDA_CHECK(cudaStreamIsCapturing(cuda_stream.stream(), &status));
+  TORCH_CHECK(
+      status == cudaStreamCaptureStatusNone,
+      "GDS load_storage/save_storage is not supported during CUDA graph capture");
+  return cuda_stream;
+}
 } // namespace
 
 void gds_load_storage(
     int64_t handle,
     const at::Storage& storage,
-    off_t offset) {
+    off_t offset,
+    std::optional<c10::Stream> stream) {
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
   c10::cuda::CUDAGuard gpuGuard(storage.device());
+  c10::cuda::CUDAStream cuda_stream = getGdsStream(storage, stream);
 
   void* dataPtr = storage.mutable_data();
-  const size_t nbytes = storage.nbytes();
+  size_t nbytes = storage.nbytes();
+  off_t buf_offset = 0;
+  ssize_t bytes_read = 0;
 
-  // Read the binary file
-  ssize_t ret = cuFileRead(cf_handle, dataPtr, nbytes, offset, 0);
-  TORCH_CHECK(ret >= 0, "cuFileRead failed: ", cuGDSFileGetErrorString(ret));
+  // Use the stream-ordered API to avoid race conditions with other async
+  // operations enqueued in the stream.
+  CUfileError_t status = cuFileReadAsync(
+      cf_handle,
+      dataPtr,
+      &nbytes,
+      &offset,
+      &buf_offset,
+      &bytes_read,
+      cuda_stream.stream());
+  // Synchronize immediately after to avoid race conditions with other host
+  // operations, such as open(file).read().
+  cuda_stream.synchronize();
+  TORCH_CHECK(
+      status.err == CU_FILE_SUCCESS,
+      "cuFileReadAsync failed to enqueue: ",
+      cuGDSFileGetErrorString(status));
+  TORCH_CHECK(
+      bytes_read >= 0,
+      "cuFileReadAsync I/O failed: ",
+      cuGDSFileGetErrorString(bytes_read));
 }
 
 void gds_save_storage(
     int64_t handle,
     const at::Storage& storage,
-    off_t offset) {
+    off_t offset,
+    std::optional<c10::Stream> stream) {
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
   c10::cuda::CUDAGuard gpuGuard(storage.device());
+  c10::cuda::CUDAStream cuda_stream = getGdsStream(storage, stream);
 
   void* dataPtr = storage.mutable_data();
-  const size_t nbytes = storage.nbytes();
+  size_t nbytes = storage.nbytes();
+  off_t buf_offset = 0;
+  ssize_t bytes_written = 0;
 
-  // Write device memory contents to the file
-  ssize_t ret = cuFileWrite(cf_handle, dataPtr, nbytes, offset, 0);
-  TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
+  // Use the stream-ordered API to avoid race conditions with other async
+  // operations enqueued in the stream.
+  CUfileError_t status = cuFileWriteAsync(
+      cf_handle,
+      dataPtr,
+      &nbytes,
+      &offset,
+      &buf_offset,
+      &bytes_written,
+      cuda_stream.stream());
+  // Synchronize immediately after to avoid race conditions with other host
+  // operations, such as open(file).read().
+  cuda_stream.synchronize();
+  TORCH_CHECK(
+      status.err == CU_FILE_SUCCESS,
+      "cuFileWriteAsync failed to enqueue: ",
+      cuGDSFileGetErrorString(status));
+  TORCH_CHECK(
+      bytes_written >= 0,
+      "cuFileWriteAsync I/O failed: ",
+      cuGDSFileGetErrorString(bytes_written));
 }
 
 void gds_register_buffer(const at::Storage& storage) {
@@ -125,8 +196,22 @@ void initGdsBindings(PyObject* module) {
   m.def("_gds_deregister_handle", &gds_deregister_handle);
   m.def("_gds_register_buffer", &gds_register_buffer);
   m.def("_gds_deregister_buffer", &gds_deregister_buffer);
-  m.def("_gds_load_storage", &gds_load_storage);
-  m.def("_gds_save_storage", &gds_save_storage);
+  m.def(
+      "_gds_load_storage",
+      &gds_load_storage,
+      py::arg("handle"),
+      py::arg("storage"),
+      py::arg("offset"),
+      py::arg("stream") = std::nullopt,
+      py::call_guard<py::gil_scoped_release>());
+  m.def(
+      "_gds_save_storage",
+      &gds_save_storage,
+      py::arg("handle"),
+      py::arg("storage"),
+      py::arg("offset"),
+      py::arg("stream") = std::nullopt,
+      py::call_guard<py::gil_scoped_release>());
 #endif
 }
 
