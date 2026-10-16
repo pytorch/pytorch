@@ -8131,6 +8131,71 @@ def forward(self, primals_1, tangents_1):
         self.assertTrue(all(0 <= i < len(shapes) for i in indices))
         self.assertEqual(sorted(shapes[i] for i in indices), [(3,), (5,)])
 
+    @parametrize("with_effect", [False, True])
+    def test_backward_static_stamp_with_forward_effect_tokens(self, with_effect):
+        # The joint graph prepends forward effect tokens to its primals. The
+        # backward is_static_input stamp must still land on the parameter, not
+        # on the user input that precedes it, or the backward skips the user
+        # input's runtime alignment fixup.
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch.partitioners import min_cut_rematerialization_partition
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_bw_static_stamp", mutates_args=())
+        def log(x: torch.Tensor) -> None:
+            pass
+
+        @log.register_fake
+        def _(x):
+            pass
+
+        stamps = {}
+
+        def bw_compiler(gm, example_inputs):
+            for node in gm.graph.find_nodes(op="placeholder"):
+                if "is_static_input" in node.meta:
+                    stamps[node.name] = node.meta["is_static_input"]
+            return make_boxed_func(gm.forward)
+
+        def fw_compiler(gm, example_inputs):
+            return make_boxed_func(gm.forward)
+
+        def f(x, w):
+            y = torch.cumsum(x * w, dim=0)
+            if with_effect:
+                log(y)
+            return (y - x).sum()
+
+        handle = _register_effectful_op(log, EffectType.ORDERED)
+        torch._dynamo.reset()
+        try:
+            with torch._functorch.config.patch(enable_autograd_cache=False):
+                compiled = torch.compile(
+                    f,
+                    backend=aot_autograd(
+                        fw_compiler=fw_compiler,
+                        bw_compiler=bw_compiler,
+                        partition_fn=min_cut_rematerialization_partition,
+                    ),
+                    fullgraph=True,
+                    dynamic=False,
+                )
+                x = torch.randn(8, requires_grad=True)
+                w = torch.nn.Parameter(torch.randn(8))
+                compiled(x, w).backward()
+        finally:
+            handle.destroy()
+            torch._dynamo.reset()
+
+        # Joint primals are [tokens..., x, w]; x is a user input, w the param.
+        num_tokens = int(with_effect)
+        x_name = f"primals_{1 + num_tokens}"
+        w_name = f"primals_{2 + num_tokens}"
+        self.assertIn(x_name, stamps)
+        self.assertFalse(stamps[x_name])
+        self.assertTrue(stamps.get(w_name, True))
+
     def _make_effectful_op(self, name):
         @torch.library.custom_op(f"test::{name}", mutates_args=())
         def op(x: torch.Tensor) -> torch.Tensor:

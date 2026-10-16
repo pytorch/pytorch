@@ -2013,11 +2013,24 @@ def _partition_joint_graph_into_fw_bw(
         ):
             node.meta["aot_runtime_epilogue_input_mutation"] = True
 
+    # The joint trace prepends the forward effect tokens to the primals but
+    # leaves static_input_indices pointing at the user inputs (see
+    # handle_effect_tokens_fn). The partitioner indexes primals positionally,
+    # including token placeholders, so shift the indices past the tokens.
+    # Otherwise the backward stamps a user input N places before a param as
+    # static and skips its runtime alignment fixup.
+    num_fwd_token_primals = sum(
+        1
+        for node in fx_g.graph.find_nodes(op="placeholder")
+        if isinstance(node.meta.get("desc"), ForwardTokenAOTInput)
+    )
     fw_module, bw_module = partition_fn(
         fx_g,
         joint_inputs,
         num_fwd_outputs=num_inner_fwd_outputs,
-        static_lifetime_input_indices=fw_metadata.static_input_indices,
+        static_lifetime_input_indices=[
+            idx + num_fwd_token_primals for idx in fw_metadata.static_input_indices
+        ],
     )
 
     rng_states = [
