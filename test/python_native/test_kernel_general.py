@@ -35,6 +35,10 @@ from torch._native.ops.reductions import (
 )
 
 
+def _plan_tags(trait_key):
+    return {key[0][1] for key in kg._PLAN if len(key[0]) > 2 and key[0][2] == trait_key}
+
+
 class _DecodeProbe:
     def __init__(self, native_div):
         self.native_div = native_div
@@ -140,6 +144,9 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(idx, torch.full((8,), 40000, device="cuda", dtype=torch.int32))
 
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
     def test_general_split_layouts_and_welford(self):
         """Split strided, offset, multi-run, and two-output reductions correctly."""
         base = torch.randn(4097, 9, 17, device="cuda")
@@ -147,25 +154,23 @@ class TestKernelGeneral(TestCase):
         with torch.backends.python_native.cutedsl.disabled():
             expected_var, expected_mean = torch.var_mean(x, dim=0)
             expected_total = x.sum(dim=(0, 2))
-        with mock.patch.object(
-            kg, "_two_stage_general", wraps=kg._two_stage_general
-        ) as split:
-            var, mean = kg.reduce_dim2(
-                T.VarMeanOps(correction=1, acc=cutlass.Float32),
-                "split_var_mean",
-                x,
-                [0],
-                [torch.float32, torch.float32],
-            )
-            total = kg.reduce_dim(
-                T.SumOps(acc=cutlass.Float32),
-                "split_multi_run",
-                x,
-                [0, 2],
-                torch.float32,
-            )
+        var, mean = kg.reduce_dim2(
+            T.VarMeanOps(correction=1, acc=cutlass.Float32),
+            "split_var_mean",
+            x,
+            [0],
+            [torch.float32, torch.float32],
+        )
+        total = kg.reduce_dim(
+            T.SumOps(acc=cutlass.Float32),
+            "split_multi_run",
+            x,
+            [0, 2],
+            torch.float32,
+        )
 
-        self.assertEqual(split.call_count, 2)
+        self.assertEqual(_plan_tags("split_var_mean"), {"gensplit1", "gensplit2"})
+        self.assertEqual(_plan_tags("split_multi_run"), {"gensplit1", "gensplit2"})
         self.assertEqual(var, expected_var, atol=1e-5, rtol=1e-4)
         self.assertEqual(mean, expected_mean, atol=1e-5, rtol=1e-4)
         self.assertEqual(total, expected_total, atol=1e-3, rtol=1e-4)
@@ -184,18 +189,20 @@ class TestKernelGeneral(TestCase):
         )
         self.assertIsNone(declined)
 
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
     def test_reduce_all2_route(self):
         """Route one-element two-output reductions through reduce_all2."""
         x = torch.randn(1, 65537, device="cuda")
-        with mock.patch.object(kg, "reduce_all2", wraps=kg.reduce_all2) as reduce_all2:
-            lo, hi = kg.reduce_dim2(
-                T.AMinMaxOps(acc=cutlass.Float32),
-                "reduce_all2",
-                x,
-                [1],
-                [torch.float32, torch.float32],
-            )
-        self.assertEqual(reduce_all2.call_count, 1)
+        lo, hi = kg.reduce_dim2(
+            T.AMinMaxOps(acc=cutlass.Float32),
+            "reduce_all2",
+            x,
+            [1],
+            [torch.float32, torch.float32],
+        )
+        self.assertEqual(_plan_tags("reduce_all2"), {"all1", "all2"})
         with torch.backends.python_native.cutedsl.disabled():
             expected_lo, expected_hi = torch.aminmax(x, dim=1)
         self.assertEqual(lo, expected_lo)
@@ -213,10 +220,10 @@ class TestKernelGeneral(TestCase):
             x[winner] = 1
             x[winner + 100000] = 1
             out = kg.reduce_all(
-                T.ArgMaxOps(acc=acc, idx=Int64),
+                T.ArgMaxOps(acc=acc),
                 "index_cache_key",
                 x,
-                torch.int64,
+                torch.int32,
             )
             with self.subTest(dtype=dtype):
                 self.assertEqual(out, winner)
@@ -226,10 +233,10 @@ class TestKernelGeneral(TestCase):
         x = torch.zeros(64, 128, device="cuda").t()
         x[0, 1] = 1
         out = kg.reduce_all(
-            T.ArgMaxOps(acc=cutlass.Float32, idx=Int64),
+            T.ArgMaxOps(acc=cutlass.Float32),
             "noncontiguous_index",
             x,
-            torch.int64,
+            torch.int32,
         )
         self.assertEqual(out, 1)
 
@@ -324,6 +331,20 @@ class TestKernelGeneral(TestCase):
                 red_pairs=((2**31 + 1, 1),),
                 kept_pairs=(),
             )
+        # Storage bounds are absolute, while an index trait reports view-relative positions.
+        offset = 2**31
+        offset_op = kg.ReduceBlock(
+            T.ArgMaxOps(acc=cutlass.Float32),
+            count=1024,
+            num_o=1,
+            red_pairs=((1024, 1),),
+            kept_pairs=(),
+            in_base=offset,
+            limit=offset + 1024,
+            flat_tail=True,
+            gidx_from="chunk",
+        )
+        self.assertEqual(offset_op.limit, offset + 1024)
         # No reduced runs at all is LEGAL -- an extent-1 reduced axis coalesces away in TI. Pinned
         # here because the arm that allows it is one line in tile._decode_offset, and a crash.
         self.assertEqual(

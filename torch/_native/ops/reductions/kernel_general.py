@@ -60,7 +60,8 @@ class ReduceBlock:
         self.wide_output = num_o >= _INT32_LIMIT
         self.wide_red = any(ext >= _INT32_LIMIT for ext, _ in self.red_pairs)
         self.wide_kept = any(ext >= _INT32_LIMIT for ext, _ in self.kept_pairs)
-        index_extent = limit if limit is not None else count
+        index_extent = limit - in_base if flat_tail and limit is not None else limit
+        index_extent = count if index_extent is None else index_extent
         if getattr(trait, "has_index", False) and index_extent > _INT32_LIMIT:
             raise ValueError("index reductions require indices representable in Int32")
         self.in_base = in_base  # flat input offset of output coordinate 0
