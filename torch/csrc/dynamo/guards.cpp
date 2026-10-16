@@ -46,6 +46,10 @@
 #include <ATen/native/mtia/EmptyTensor.h>
 #endif
 
+#ifdef USE_MPS
+#include <ATen/mps/EmptyTensor.h>
+#endif
+
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -1386,6 +1390,12 @@ static PyObject* _empty_strided_device(
         sizes, strides, dtype, c10::DeviceType::MTIA));
   }
 #endif
+#ifdef USE_MPS
+  else if constexpr (device_type == c10::DeviceType::MPS) {
+    return THPVariable_Wrap(at::detail::empty_strided_mps(
+        sizes, strides, dtype, c10::DeviceType::MPS));
+  }
+#endif
   else {
     TORCH_CHECK(
         false, "PyTorch compiled without support for the specified device.");
@@ -1434,6 +1444,13 @@ static PyObject* _empty_strided_mtia(
     PyObject* const* args,
     Py_ssize_t nargs) {
   return _empty_strided_device<c10::DeviceType::MTIA>(args, nargs);
+}
+
+static PyObject* _empty_strided_mps(
+    PyObject* /*self*/,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  return _empty_strided_device<c10::DeviceType::MPS>(args, nargs);
 }
 
 static PyObject* _reinterpret_tensor(
@@ -7767,7 +7784,7 @@ PyObject* torch_c_dynamo_guards_init() {
   if (PyType_Ready(&GlobalStateGuardType) < 0)
     return nullptr;
 
-  static std::array<PyMethodDef, 14> _methods{
+  static std::array<PyMethodDef, 15> _methods{
       {{"check_type_id",
         castPyCFunctionFast(check_type_id),
         METH_FASTCALL,
@@ -7808,6 +7825,10 @@ PyObject* torch_c_dynamo_guards_init() {
         nullptr},
        {"_empty_strided_mtia",
         castPyCFunctionFast(_empty_strided_mtia),
+        METH_FASTCALL,
+        nullptr},
+       {"_empty_strided_mps",
+        castPyCFunctionFast(_empty_strided_mps),
         METH_FASTCALL,
         nullptr},
        {"_reinterpret_tensor",
