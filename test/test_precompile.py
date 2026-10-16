@@ -4949,7 +4949,6 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("stances ok", out.stdout)
 
     @skipIfCrossRef
-    @skipIfCrossRef
     @parametrize("installed", [False, True])
     def test_graphless_frames_that_lose_guards_are_served_eagerly(self, installed):
         # The disabled scale() leaves its callees compiled, so the registry
@@ -5165,6 +5164,7 @@ class TestPrecompileDynamoCapture(TestCase):
             self.assertEqual(lookup_fn(torch.nn.Module(), 3), 6)
             self.assertEqual(counters["frames"]["total"] > 0, compiles)
 
+    @skipIfCrossRef
     def test_an_installed_artifact_refuses_to_load_with_dynamo_disabled(self):
         fn = self.mod.calls_breaking_helper
         with self._capture(fn, backend="eager") as cap:
