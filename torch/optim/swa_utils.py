@@ -203,15 +203,15 @@ class AveragedModel(Module):
         >>> swa_start = 160
         >>> swa_scheduler = SWALR(optimizer, swa_lr=0.05)
         >>> for i in range(300):
-        >>>      for input, target in loader:
-        >>>          optimizer.zero_grad()
-        >>>          loss_fn(model(input), target).backward()
-        >>>          optimizer.step()
-        >>>      if i > swa_start:
-        >>>          swa_model.update_parameters(model)
-        >>>          swa_scheduler.step()
-        >>>      else:
-        >>>          scheduler.step()
+        >>>     for input, target in loader:
+        >>>         optimizer.zero_grad()
+        >>>         loss_fn(model(input), target).backward()
+        >>>         optimizer.step()
+        >>>     if i > swa_start:
+        >>>         swa_model.update_parameters(model)
+        >>>         swa_scheduler.step()
+        >>>     else:
+        >>>         scheduler.step()
         >>>
         >>> # Update bn statistics for the swa_model at the end
         >>> torch.optim.swa_utils.update_bn(loader, swa_model)
@@ -224,7 +224,7 @@ class AveragedModel(Module):
         >>> # xdoctest: +SKIP("undefined variables")
         >>> # Compute exponential moving averages of the weights and buffers
         >>> ema_model = torch.optim.swa_utils.AveragedModel(model,
-        >>>             torch.optim.swa_utils.get_ema_multi_avg_fn(0.9), use_buffers=True)
+        >>>             multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(0.9), use_buffers=True)
 
     .. note::
         When using SWA/EMA with models containing Batch Normalization you may
@@ -238,7 +238,7 @@ class AveragedModel(Module):
         approach yields the best results in your problem.
 
     .. note::
-        :attr:`avg_fn` and `multi_avg_fn` are not saved in the :meth:`state_dict` of the model.
+        :attr:`avg_fn` and :attr:`multi_avg_fn` are not saved in the :meth:`state_dict` of the model.
 
     .. note::
         When :meth:`update_parameters` is called for the first time (i.e.
@@ -458,14 +458,14 @@ class SWALR(LRScheduler):
         >>>        anneal_strategy="linear", anneal_epochs=20, swa_lr=0.05)
         >>> swa_start = 160
         >>> for i in range(300):
-        >>>      for input, target in loader:
-        >>>          optimizer.zero_grad()
-        >>>          loss_fn(model(input), target).backward()
-        >>>          optimizer.step()
-        >>>      if i > swa_start:
-        >>>          swa_scheduler.step()
-        >>>      else:
-        >>>          scheduler.step()
+        >>>     for input, target in loader:
+        >>>         optimizer.zero_grad()
+        >>>         loss_fn(model(input), target).backward()
+        >>>         optimizer.step()
+        >>>     if i > swa_start:
+        >>>         swa_scheduler.step()
+        >>>     else:
+        >>>         scheduler.step()
 
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
         https://arxiv.org/abs/1803.05407
