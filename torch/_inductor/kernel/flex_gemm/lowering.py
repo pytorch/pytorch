@@ -316,7 +316,7 @@ def require_tma_loadable_tile_captures(
 ) -> list[TensorBox]:
     """Give full-tile captures a layout QuACK's TMA ``TileLoad`` can read in place.
 
-    A tile load needs one unit-stride matrix dim and 16-byte multiple outer strides.
+    A tile load needs a 16-byte aligned base, one unit-stride matrix dim, and aligned outer strides.
     Views such as ``h.view(m, n, 2)[..., 0]`` have neither, so they are copied to a
     contiguous layout here instead of failing QuACK's launch-time stride check.
     The copy's row stride is padded to the alignment, so an unaligned N (a bf16
@@ -330,7 +330,7 @@ def require_tma_loadable_tile_captures(
     def loadable(arg: TensorBox, alignment: int) -> bool:
         stride = arg.maybe_get_stride()
         if stride is None:
-            return True
+            return False
         for unit in (-1, -2):
             if statically_known_equal(stride[unit], 1) and all(
                 sizevars.statically_known_multiple_of(s, alignment)
@@ -343,9 +343,13 @@ def require_tma_loadable_tile_captures(
     out = []
     for arg in epilogue_args:
         alignment = max(16 // arg.get_dtype().itemsize, 1)
-        if statically_known_shape_equal(arg.get_size(), output_size) and not loadable(
-            arg, alignment
-        ):
+        is_tile = statically_known_shape_equal(arg.get_size(), output_size)
+        if is_tile and arg.maybe_get_stride() is not None:
+            if not sizevars.statically_known_multiple_of(
+                arg.get_layout().offset, alignment
+            ):
+                arg = ir.ExternKernel.copy_input(arg)
+        if is_tile and not loadable(arg, alignment):
             *outer, n = arg.get_size()
             padded = [*outer, ceildiv(n, alignment) * alignment]
             arg = cast(
