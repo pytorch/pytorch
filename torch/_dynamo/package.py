@@ -1384,6 +1384,9 @@ class CompilePackage:
         # must not erase the accelerator an earlier frame named.
         self._device_types |= _graph_device_types(graph)
 
+    def note_compute(self) -> None:
+        """Called when the current compile traced a graph, even one bypass_package then drops."""
+
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
 
