@@ -794,8 +794,18 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if isinstance(output_transform, FlexGemmOutputExpansion)
         else logical_output_size
     )
-    # Auxiliaries are plain GEMM-shaped tiles under either lane transform.
+    # Auxiliary buffers keep the GEMM shape, including saved chunked pre-activations.
     aux_metas = validate_flex_gemm_aux_outputs(gemm_op, outputs.aux_outputs, gemm_size)
+    if (
+        isinstance(output_transform, FlexGemmOutputContraction)
+        and output_transform.chunked
+        and aux_metas
+    ):
+        alignment = max(16 // aux_metas[0].dtype.itemsize, 1)
+        if aux_metas[0].shape[-1] // 2 % alignment:
+            raise NotImplementedError(
+                "FlexGEMM chunked accumulator auxiliary requires 16-byte aligned halves"
+            )
     if varlen_axis == "k":
         for meta in (output_meta, *aux_metas):
             alignment = max(16 // meta.dtype.itemsize, 1)
@@ -815,6 +825,15 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if output_storage is None
         else output_storage.meta["val"].dtype
     )
+    if (
+        isinstance(output_transform, FlexGemmOutputExpansion)
+        and output_transform.chunked
+    ):
+        alignment = max(16 // output_storage_dtype.itemsize, 1)
+        if gemm_fx_node.meta["val"].shape[-1] % alignment:
+            raise NotImplementedError(
+                "FlexGEMM chunked output expansion requires 16-byte aligned halves"
+            )
     packed_uint8_main = (
         isinstance(output_transform, FlexGemmOutputContraction)
         and output_storage_dtype is torch.uint8
