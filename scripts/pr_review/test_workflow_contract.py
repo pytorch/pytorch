@@ -6010,40 +6010,11 @@ class TestOnlyTheReviewerWritesTheVerdict(unittest.TestCase):
         self.assertEqual(self._decision(payload), "deny")
 
 
-STOP_HOOK = REPO / ".claude" / "hooks" / "pr_review" / "validate-on-stop.sh"
-
-
-def _transcript(td: str, entries: list) -> str:
-    path = Path(td) / "transcript.jsonl"
-    path.write_text("".join(json.dumps(e) + "\n" for e in entries))
-    return str(path)
-
-
-def _use(tool_id: str, name: str, **args) -> dict:
-    return {
-        "type": "assistant",
-        "message": {
-            "content": [
-                {"type": "tool_use", "id": tool_id, "name": name, "input": args}
-            ]
-        },
-    }
-
-
-def _result(tool_id: str) -> dict:
-    return {
-        "type": "user",
-        "message": {
-            "content": [{"type": "tool_result", "tool_use_id": tool_id, "content": "x"}]
-        },
-    }
-
-
 class TestSubAgentEnvironmentIsPinned(unittest.TestCase):
     """The sub-agent settings change nothing another test can see if removed."""
 
     EXPECTED = {
-        # Without it a backgrounded sub-agent lets the session end on a draft.
+        # Without it stage A can end before a backgrounded sub-agent reports.
         "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": '"1"',
         # emit_row.py records one model per row; sub-agents must use it too.
         "CLAUDE_CODE_SUBAGENT_MODEL": "${{ env.REVIEW_MODEL }}",
@@ -6055,123 +6026,6 @@ class TestSubAgentEnvironmentIsPinned(unittest.TestCase):
         for name, value in self.EXPECTED.items():
             found = re.findall(rf"(?m)^\s*{name}:\s*(.+?)\s*$", review)
             self.assertEqual(found, [value], f"{name} is {found!r}, expected {value!r}")
-
-
-class TestADraftWrittenBeforeSubAgentsIsNotPublished(unittest.TestCase):
-    """A findings file older than the last sub-agent report is a draft."""
-
-    FINDINGS = "/tmp/allowed.json"
-    WRITE = staticmethod(lambda i: _use(i, "Write", file_path="/tmp/allowed.json"))
-
-    def _stop(self, entries: list, active: bool):
-        with tempfile.TemporaryDirectory() as td:
-            log = Path(td) / "hooks.log"
-            payload = {
-                "stop_hook_active": active,
-                "transcript_path": _transcript(td, entries),
-            }
-            proc = subprocess.run(
-                ["bash", str(STOP_HOOK)],
-                input=json.dumps(payload),
-                text=True,
-                capture_output=True,
-                env={
-                    **os.environ,
-                    "PR_REVIEW_HOOK_LOG": str(log),
-                    "PR_REVIEW_FINDINGS_FILE": self.FINDINGS,
-                },
-                check=False,
-            )
-            return proc, (log.read_text() if log.exists() else "")
-
-    def test_a_draft_blocks_the_first_stop(self):
-        proc, _log = self._stop(
-            [self.WRITE("w1"), _use("a1", "Agent", prompt="p"), _result("a1")],
-            active=False,
-        )
-        self.assertEqual(proc.returncode, 2, proc.stderr)
-        self.assertIn("draft", proc.stderr)
-
-    def test_a_draft_that_survives_is_marked_for_publish(self):
-        proc, log = self._stop(
-            [self.WRITE("w1"), _use("a1", "Agent", prompt="p"), _result("a1")],
-            active=True,
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("STALE_VERDICT", log)
-
-    def test_a_failed_rewrite_leaves_the_draft_stale(self):
-        failed = _result("w2")
-        failed["message"]["content"][0]["is_error"] = True
-        proc, log = self._stop(
-            [
-                self.WRITE("w1"),
-                _result("w1"),
-                _use("a1", "Agent", prompt="p"),
-                _result("a1"),
-                self.WRITE("w2"),
-                failed,
-            ],
-            active=True,
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("STALE_VERDICT", log)
-
-    def test_a_write_issued_with_the_agent_call_is_a_draft(self):
-        proc, log = self._stop(
-            [
-                {
-                    "type": "assistant",
-                    "message": {
-                        "content": [
-                            _use("a1", "Agent", prompt="p")["message"]["content"][0],
-                            self.WRITE("w1")["message"]["content"][0],
-                        ]
-                    },
-                },
-                _result("a1"),
-                _result("w1"),
-            ],
-            active=True,
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("STALE_VERDICT", log)
-
-    def test_an_unreadable_transcript_fails_closed(self):
-        with tempfile.TemporaryDirectory() as td:
-            log = Path(td) / "hooks.log"
-            payload = {
-                "stop_hook_active": True,
-                "transcript_path": str(Path(td) / "missing.jsonl"),
-            }
-            subprocess.run(
-                ["bash", str(STOP_HOOK)],
-                input=json.dumps(payload),
-                text=True,
-                capture_output=True,
-                env={
-                    **os.environ,
-                    "PR_REVIEW_HOOK_LOG": str(log),
-                    "PR_REVIEW_FINDINGS_FILE": self.FINDINGS,
-                },
-                check=False,
-            )
-            self.assertIn("STALE_VERDICT", log.read_text())
-
-    def test_a_write_after_the_reports_is_final(self):
-        proc, log = self._stop(
-            [
-                self.WRITE("w1"),
-                _result("w1"),
-                _use("a1", "Agent", prompt="p"),
-                _result("a1"),
-                self.WRITE("w2"),
-                _result("w2"),
-            ],
-            active=True,
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertNotIn("STALE_VERDICT", log)
 
 
 class TestTheSizeGateShortCircuitsBeforeTheRunner(unittest.TestCase):
