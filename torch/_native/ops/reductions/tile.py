@@ -1298,6 +1298,7 @@ class TileReduce:
             rb = nchunks
             if const_expr(self.flat_tail):
                 # Clamp reduce-all stage 1's overhanging final chunk.
+                chunk_base = unit * nchunks
                 left = limit - obase
                 c64 = cutlass.Int64(nchunks)
                 left = left if left < c64 else c64  # noqa: FURB136 -- no DSL builtin min
