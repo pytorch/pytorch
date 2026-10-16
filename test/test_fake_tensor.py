@@ -3503,10 +3503,6 @@ class TestFakeTensorOperatorInvariantsDevice(TestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipXPUIf(
-        True,
-        "MetadataMismatchError, see https://github.com/intel/torch-xpu-ops/issues/2802",
-    )
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
