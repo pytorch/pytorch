@@ -298,17 +298,9 @@ class _FailOnRecompileCallback:
     def __call__(
         self, frame: DynamoFrameType, *args: Any, **kwargs: Any
     ) -> ConvertFrameReturn:
-        if trace_rules.check(frame.f_code, frame=frame):
+        if trace_rules.check(frame.f_code):
             return ConvertFrameReturn()
-        # A frame the backend would not compile is no recompile. The backend's
-        # package sits on the first wrapper in the chain that keeps one.
-        backend: Any = self._torchdynamo_orig_backend
-        while not hasattr(backend, "_package") and hasattr(
-            backend, "_torchdynamo_orig_backend"
-        ):
-            backend = backend._torchdynamo_orig_backend
-        package = getattr(backend, "_package", None)
-        if convert_frame.skips_tensor_free_frame(package, frame):
+        if not convert_frame.has_tensor_in_frame(frame):
             return ConvertFrameReturn()
 
         # convert_frame would skip a disable(recursive=False) frame rather than
@@ -750,24 +742,17 @@ def remove_from_cache(f: Any) -> None:
     """
     Make sure f.__code__ is not cached to force a recompile
     """
-    from .decorators import _nonrecursive_disable_wrapper_code
-
     if isinstance(f, types.CodeType):
-        code = f
+        reset_code(f)
     elif hasattr(f, "__code__"):
-        code = f.__code__
+        reset_code(f.__code__)
     elif hasattr(getattr(f, "forward", None), "__code__"):
-        code = f.forward.__code__
+        reset_code(f.forward.__code__)
     else:
         from . import reset  # type: ignore[attr-defined]
 
         reset()
         log.warning("could not determine __code__ for %s", f)
-        return
-    # Every disable(recursive=False) wrapper shares this code; resetting it
-    # would drop its import-time skip for all of them.
-    if code is not _nonrecursive_disable_wrapper_code:
-        reset_code(code)
 
 
 def nothing() -> None:
@@ -1970,9 +1955,7 @@ def _optimize(
     if config.caching_precompile and package is None:
         from .package import CompilePackage
 
-        package = CompilePackage(
-            fn=None, dynamo=None, ignore_inlined_sources=False, explicit=False
-        )
+        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
 
     return _optimize_catch_errors(
         convert_frame.convert_frame(
@@ -2915,9 +2898,7 @@ def _optimize_assert(
         # and OptimizeContext.
         from .package import CompilePackage
 
-        package = CompilePackage(
-            fn=None, dynamo=None, ignore_inlined_sources=False, explicit=False
-        )
+        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(

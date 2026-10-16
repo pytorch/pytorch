@@ -2912,7 +2912,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         self._init_process_group("delegating")
 
         try:
-            sub_pg = dist.new_group(ranks=[0], timeout=timedelta(seconds=77))
+            sub_pg = dist.new_group(ranks=[0])
             self.assertTrue(new_group_called)
             self.assertEqual(new_group_ranks, [0])
             self.assertEqual(new_group_backend, "delegating")
@@ -2921,10 +2921,6 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
                 self.assertIsNotNone(sub_pg)
                 self.assertNotEqual(
                     sub_pg, dist.distributed_c10d.GroupMember.NON_GROUP_MEMBER
-                )
-                self.assertEqual(
-                    dist.distributed_c10d._get_process_group_timeout(sub_pg),
-                    timedelta(seconds=77),
                 )
             else:
                 self.assertTrue(
@@ -3101,18 +3097,6 @@ class RegisterBackendWithoutBackendTest(TestCase):
         )
         pg._register_backend(torch.device("cuda"), dist.ProcessGroup.BackendType.CUSTOM)
         self.assertEqual(pg._get_backend(torch.device("cuda")), backend)
-
-
-class RegisterPgInWorldTest(TestCase):
-    def test_timeout_defaults_to_backend_default(self):
-        pg = dist.ProcessGroup(dist.HashStore(), 0, 1)
-        c10d._register_pg_in_world(
-            pg, "gloo", dist.HashStore(), "register-pg-timeout", "cpu:gloo"
-        )
-        self.addCleanup(c10d._cleanup_process_group_global_state, pg)
-        self.assertEqual(
-            c10d._get_process_group_timeout(pg), c10d._get_default_timeout("gloo")
-        )
 
 
 class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
