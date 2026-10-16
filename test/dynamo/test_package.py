@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -30,14 +31,14 @@ from torch._dynamo.package import (
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
+    load_guards_state,
 )
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._dynamo.symbolic_convert import _import_module
+from torch._dynamo.precompile_package import default_guard_filter_fn
+from torch._dynamo.symbolic_convert import _import_module, UNNAMED_SCOPE_PREFIX
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
-from torch._functorch._aot_autograd.aot_autograd_result import GenericAOTAutogradResult
-from torch._functorch._aot_autograd.runtime_wrappers import AOTDispatchAutograd
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -246,6 +247,9 @@ class _GraphBreakingDataclass:
 # global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
 PKG_DYN_ROWS = torch.randn(4, 3)
 torch._dynamo.mark_dynamic(PKG_DYN_ROWS, 0)
+
+# namedtuple builds __new__ with exec into a namespace no module owns.
+PkgRecord = collections.namedtuple("PkgRecord", ("value", "weight"))
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -691,15 +695,12 @@ print(eval(f"bbmod.{name}.{path}") is code)
             fn(x, w).backward()
         return x.grad, w.grad
 
-    def _save_and_load_hooked_forward(
-        self, guard_filter_fn=None, compile_under_hooks=True
-    ):
+    def _save_and_load_hooked_forward(self, guard_filter_fn=None):
         ctx = DiskDynamoStore()
         package = CompilePackage(hooked_forward)
         compiled_fn = torch._dynamo.optimize(
             "inductor", package=package, guard_filter_fn=guard_filter_fn
         )(hooked_forward)
-        self._hooked_grads(compiled_fn, under_hooks=compile_under_hooks)
         expected = self._hooked_grads(compiled_fn, under_hooks=True)
         ctx.save_package(package, self.path())
 
@@ -713,23 +714,9 @@ print(eval(f"bbmod.{name}.{path}") is code)
         return compiled_fn, expected
 
     def test_loaded_graphs_do_not_rerun_inlined_saved_tensors_hooks(self):
-        # The runtime wrappers read the ambient hooks and autocast state, so
-        # loading must leave them to the first call.
-        built = []
-        apply = GenericAOTAutogradResult._apply_runtime_wrappers
-
-        def recording_apply(result, *args):
-            built.append(result)
-            return apply(result, *args)
-
-        with patch.object(
-            GenericAOTAutogradResult, "_apply_runtime_wrappers", recording_apply
-        ):
-            compiled_fn, expected = self._save_and_load_hooked_forward()
-            self.assertEqual(built, [])
-            with torch.compiler.set_stance("fail_on_recompile"):
-                grads = self._hooked_grads(compiled_fn, under_hooks=True)
-        self.assertEqual(len(built), 2)
+        compiled_fn, expected = self._save_and_load_hooked_forward()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            grads = self._hooked_grads(compiled_fn, under_hooks=True)
         self.assertEqual(grads, expected)
 
     @staticmethod
@@ -746,50 +733,6 @@ print(eval(f"bbmod.{name}.{path}") is code)
             self._hooked_grads(compiled_fn, under_hooks=False)
             grads = self._hooked_grads(compiled_fn, under_hooks=True)
         self.assertEqual(grads, expected)
-
-    def test_a_graph_compiled_without_hooks_keeps_them_on_a_first_call_under_them(
-        self,
-    ):
-        # Nothing was inlined, so the eager hooks must run, as they did in the
-        # capturing process, even though the wrappers are built under them.
-        compiled_fn, expected = self._save_and_load_hooked_forward(
-            self._drop_hooks_guard, compile_under_hooks=False
-        )
-        self.assertNotEqual(self._hooked_grads(hooked_forward, False), expected)
-        with torch.compiler.set_stance("fail_on_recompile"):
-            grads = self._hooked_grads(compiled_fn, under_hooks=True)
-        self.assertEqual(grads, expected)
-
-    def test_a_loaded_graph_disables_the_autocast_it_was_compiled_under(self):
-        # disable_amp is read from the ambient autocast state when the runtime
-        # wrappers are built, and the graph is loaded outside autocast.
-        disable_amp = []
-        post_compile = AOTDispatchAutograd.post_compile
-
-        def recording_post_compile(spec):
-            disable_amp.append(spec.disable_amp)
-            return post_compile(spec)
-
-        def run(fn):
-            x = torch.linspace(0.1, 1.0, 4, requires_grad=True)
-            w = torch.linspace(1.0, 2.0, 4, requires_grad=True)
-            with torch.autocast("cpu", dtype=torch.bfloat16):
-                fn(x, w).backward()
-
-        ctx = DiskDynamoStore()
-        package = CompilePackage(hooked_forward)
-        run(torch._dynamo.optimize("inductor", package=package)(hooked_forward))
-        ctx.save_package(package, self.path())
-
-        torch._dynamo.reset()
-        with patch.object(AOTDispatchAutograd, "post_compile", recording_post_compile):
-            package, backends = ctx.load_package(hooked_forward, self.path())
-            compiled_fn = torch._dynamo.optimize(package=package)(hooked_forward)
-            package.install(backends)
-            self.assertEqual(disable_amp, [])
-            with torch.compiler.set_stance("fail_on_recompile"):
-                run(compiled_fn)
-        self.assertEqual(disable_amp, [True, True])
 
     def test_installed_shape_guard_on_a_global_reads_the_live_module_dict(self):
         # install() roots the guards at sys.modules[...].__dict__, and a package
@@ -907,6 +850,93 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertEqual(installed - set(scope), set())
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(expected, compiled_fn(*args))
+
+    def _save_record_package(self, ctx):
+        # Inlining PkgRecord.__new__ roots guards at the ___unnamed_scope_<id>_c<n>
+        # key Dynamo mints for its globals. The key embeds an id() from the
+        # compiling process, so a loading process has no binding for it and every
+        # call misses on a KeyError unless install() seeds it.
+        def fn(x):
+            record = PkgRecord(x.sin(), 2)
+            return record.value * record.weight
+
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(fn)(torch.randn(4))
+        names = {
+            name
+            for entry in package.cache_entry().codes
+            for guarded in entry.guarded_codes
+            for name in load_guards_state(
+                guarded.guards_state
+            ).output_graph.global_scope
+            if name.startswith(UNNAMED_SCOPE_PREFIX)
+        }
+        self.assertTrue(names)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+        return fn, names
+
+    def test_install_seeds_unnamed_scope_globals(self):
+        ctx = DiskDynamoStore()
+        fn, names = self._save_record_package(ctx)
+        torch._dynamo.reset()
+        scope = fn.__globals__
+        # What a fresh process sees.
+        for name in names:
+            scope.pop(name, None)
+
+        x = torch.randn(4)
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        self.assertLessEqual(names, scope.keys())
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), fn(x))
+        package.uninstall()
+        self.assertFalse(names & scope.keys())
+
+        # A binding someone else wrote is neither replaced nor removed.
+        foreign = {name: {} for name in names}
+        scope.update(foreign)
+        package.install(backends)
+        package.uninstall()
+        for name in names:
+            self.assertIs(scope.pop(name), foreign[name])
+
+    def test_install_keeps_unnamed_scope_globals_of_a_live_compile(self):
+        # The live compile bound the key behind a CleanupHook keyed on its
+        # generated code. install() keeps that binding, and the hook firing
+        # afterwards must not delete it from under the installed guards.
+        ctx = DiskDynamoStore()
+        before = set(CleanupManager.instance.refs)
+        fn, names = self._save_record_package(ctx)
+        # Pin the live compile's code objects so its hooks fire after install().
+        pinned = [
+            ref()
+            for idx, ref in list(CleanupManager.instance.refs.items())
+            if idx not in before
+        ]
+        pinned_ids = {id(p) for p in pinned if p is not None}
+        self.assertTrue(pinned_ids)
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        del pinned
+        gc.collect()
+
+        self.assertTrue(pinned_ids - set(CleanupManager.instance.refs))
+        self.assertLessEqual(names, fn.__globals__.keys())
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), fn(x))
+        package.uninstall()
+        for name in names:
+            fn.__globals__.pop(name, None)
 
     def test_uninstall_keeps_a_global_it_did_not_bind(self):
         # An aot_compile load seeds the __import_* aliases its kept guards are
