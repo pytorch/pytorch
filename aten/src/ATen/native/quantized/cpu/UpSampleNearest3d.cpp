@@ -50,7 +50,7 @@ static void upsample_nearest3d_out_frame(
   auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata);
 
   // special case: just copy
-  if (input_depth == output_depth && input_height == output_height && input_width == output_width) {
+  if (input_depth == output_depth && input_height == output_height && input_width == output_width && (!scales_d.has_value() || scales_d.value() == 1.0) && (!scales_h.has_value() || scales_h.value() == 1.0) && (!scales_w.has_value() || scales_w.value() == 1.0)) {
     std::memcpy(o_p, i_p, channels * input_depth * input_height * input_width * sizeof(typename scalar_t::underlying));
     return;
   }
@@ -103,7 +103,7 @@ static void upsample_nearest3d_out_frame_nhwc(
     auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata + b * input_depth * input_height * input_width * channels);
     auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata + b * output_depth * output_height * output_width * channels);
     // special case: just copy
-    if (input_depth == output_depth && input_height == output_height && input_width == output_width) {
+    if (input_depth == output_depth && input_height == output_height && input_width == output_width && (!scales_d.has_value() || scales_d.value() == 1.0) && (!scales_h.has_value() || scales_h.value() == 1.0) && (!scales_w.has_value() || scales_w.value() == 1.0)) {
       std::memcpy(o_p, i_p, channels * input_depth * input_height * input_width * sizeof(typename scalar_t::underlying));
       return;
     }
