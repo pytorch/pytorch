@@ -5,7 +5,6 @@ from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
 
 import torch
 import torch.distributed as c10d
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -198,10 +197,6 @@ if not TEST_WITH_DEV_DBG_ASAN:
 
             x_s = 2 * (3 * torch.ones(5, 5, device=device)).cos()
             self.assertEqual(x.grad, x_s)
-
-    instantiate_device_type_tests(
-        TestDistributedNNFunctionsNccl, globals(), only_for=("cuda",)
-    )
 
 
 if __name__ == "__main__":
