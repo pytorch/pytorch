@@ -98,12 +98,12 @@ def _capture_config() -> Iterator[None]:
     inference call therefore compiles a backward too, and a backward the
     backend cannot compile fails the capture; capturing under
     ``torch.no_grad()`` avoids both.
-    The bundled autotune remote cache stays off: it allows one open bundle per
-    compile context and closes it on the first compiled call, but eager
-    lowering compiles the forward and the backward in one context before either
-    runs, so the second would fail opening its own. This works around an
-    AOTAutograd bug that every eager backward lowering can hit, not only
-    capture's.
+    The bundled autotune remote cache stays off: AutotuneCacheBundler keeps one
+    bundle per compile context, left open on a remote-cache miss until the
+    first compiled call, but eager lowering compiles the forward and the
+    backward in one context before either runs, so on a miss the backward
+    fails opening its own. Every eager backward lowering can hit this, not only
+    capture's; an installed artifact's load does too (_build_installed_forward).
     ``allow_empty_graphs`` keeps an empty graph as a compiled frame so its
     guards reach the artifact; it also extends the lifetime of objects the frame
     holds -- with it on, a weakref callback on a value the frame captured does
