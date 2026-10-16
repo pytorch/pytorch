@@ -918,9 +918,12 @@ def _reduce_all(
 
     order = rt.reduction_order(order)
     if not x.is_contiguous():
-        return _reduce(
-            trait, trait_key, x, None, out_dtypes, nouts, block=block, order=order
-        )
+        if getattr(trait, "has_index", False):
+            x = x.contiguous()
+        else:
+            return _reduce(
+                trait, trait_key, x, None, out_dtypes, nouts, block=block, order=order
+            )
     L = x.numel()
     xf = x.reshape(-1)
     if L == 1 and xf.stride(0) != 1:
@@ -930,7 +933,7 @@ def _reduce_all(
     # Direct routing measured 1.2-2.1x over ATen.
     x2 = xf.view(1, -1)
 
-    if order == "inner_tree":
+    if order == "inner_tree" and L > 0:
         if L >= _INT32_LIMIT:
             raise ValueError("inner-tree reduction requires 32-bit logical extents")
         outs = rt.reduce_row_tile(
@@ -942,6 +945,8 @@ def _reduce_all(
             order="inner_tree",
         )
         return tuple(_as_shape(o, ()) for o in outs)
+    if order == "inner_tree":
+        order = "unordered"
     if _oneshot_ok(x2):
         # Avoid row-packing threads for a single-row launch; None keeps the existing config.
         cfg = rt.single_row_config(L, x.element_size() * 8)
