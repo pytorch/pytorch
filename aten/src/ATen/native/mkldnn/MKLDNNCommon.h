@@ -49,16 +49,21 @@ TORCH_API int64_t nbytes_from_mkldnn(const Tensor& mkldnn_tensor);
 
 // Construct an `ideep::tensor` "view" from dense tensor, note the
 // ideep::tensor will share the underlying buffer
-TORCH_API ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data_ptr=false);
+TORCH_API ideep::tensor itensor_view_from_dense(const Tensor& tensor);
+TORCH_API ideep::tensor itensor_view_from_const_dense(const Tensor& tensor);
 
 // Construct an `ideep::tensor` "view" from dense tensor using given desc, note
 // the ideep::tensor will share the underlying buffer
 TORCH_API ideep::tensor itensor_view_from_dense(
     const at::Tensor& tensor,
-    const ideep::tensor::desc& desc);
+  const ideep::tensor::desc& desc);
+TORCH_API ideep::tensor itensor_view_from_const_dense(
+  const at::Tensor& tensor,
+  const ideep::tensor::desc& desc);
 
 // Helper function for getting an ideep tensor out of an aten Tensor or MKL-DNN tensor.
-TORCH_API ideep::tensor itensor_from_tensor(const Tensor& tensor, bool from_const_data_ptr=false);
+TORCH_API ideep::tensor itensor_from_tensor(const Tensor& tensor);
+TORCH_API ideep::tensor itensor_from_const_tensor(const Tensor& tensor);
 
 // Set MKLDNN verbose level
 TORCH_API int set_verbose(int level);
