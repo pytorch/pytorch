@@ -182,6 +182,16 @@ class WelfordOps:
         return (mean, m2, nn)
 
     @cute.jit
+    def combine_equal(self, a, b, count: cutlass.Constexpr):
+        """Combine two nonempty states containing the same number of values."""
+        ma, m2a, _ = a
+        mb, m2b, _ = b
+        delta = mb - ma
+        mean = ma + delta * self.acc(0.5)
+        m2 = m2a + m2b + delta * delta * self.acc(count * 0.5)
+        return (mean, m2, self.acc(count * 2))
+
+    @cute.jit
     def shfl_down(self, acc, offset):
         return (
             cute.arch.shuffle_sync_bfly(acc[0], offset=offset),
