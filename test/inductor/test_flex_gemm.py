@@ -7480,7 +7480,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("layout", ("contiguous", "lane_view"))
+    @parametrize("layout", ("contiguous", "lane_view", "computed", "offset"))
     def test_mm_unaligned_n_bf16_tile_capture_matches_reference(self, layout):
         # N=12 is legal for a K-major B and fp32 output, but a bf16 [M, 12] tile
         # has a 24-byte row stride, so QuACK's TMA load needs a padded copy.
@@ -7491,22 +7491,33 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         cap = h.view(m, n, 2)[..., 0]
         if layout == "contiguous":
             cap = h[:, :n].contiguous()
+        elif layout == "offset":
+            cap = torch.randn(m, 16, device="cuda", dtype=torch.bfloat16)
 
-        def fn(a, b):
+        def capture(cap):
+            if layout == "computed":
+                return cap * 2
+            if layout == "offset":
+                return cap[:, 1 : n + 1]
+            return cap
+
+        def fn(a, b, cap):
+            tile = capture(cap)
             return flex_gemm(
                 torch.mm,
                 (a, b),
-                lambda acc: acc.float() * cap,
+                lambda acc: acc.float() * tile,
                 kernel_options={"backend": "QUACK"},
             )
 
         actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, cap
         )
+        tile = capture(cap)
 
         self.assertIn("flex_gemm_epilogue(", code)
         self.assertMatchesLowPrecisionEager(
-            actual, (a @ b).float() * cap, (a.double() @ b.double()) * cap.double(), k
+            actual, (a @ b).float() * tile, (a.double() @ b.double()) * tile.double(), k
         )
 
     @skipIfNoCuteDSL
@@ -9062,6 +9073,10 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         )
 
         self.assertGroupedMmQuackCode(code)
+        self.assertEqual(
+            re.search(r"'\*(bf16|fp16|fp32)'", code) is not None,
+            layout == "interleaved",
+        )
         self.assertGroupedMmMatches(actual, x, w_t, offs, epilogue_fn)
 
     @parametrize("capture_dtype", (torch.float32, torch.bfloat16, torch.float16))
