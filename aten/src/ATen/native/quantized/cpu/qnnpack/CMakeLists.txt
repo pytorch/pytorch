@@ -18,7 +18,7 @@ option(PYTORCH_QNNPACK_BUILD_TESTS "Build QNNPACK unit tests" ON)
 option(PYTORCH_QNNPACK_BUILD_BENCHMARKS "Build QNNPACK benchmarks" ON)
 
 # Enable runtime requantization.
-add_definitions(-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION=1)
+add_compile_definitions("PYTORCH_QNNPACK_RUNTIME_QUANTIZATION=1")
 
 # ---[ Target processor
 SET(PYTORCH_QNNPACK_TARGET_PROCESSOR "${CMAKE_SYSTEM_PROCESSOR}")

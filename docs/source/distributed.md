@@ -18,72 +18,27 @@ for a brief introduction to all features related to distributed training.
 .. currentmodule:: torch.distributed
 ```
 
-```{eval-rst}
-.. currentmodule:: torch.distributed.elastic.utils.api
-```
-
-```{eval-rst}
-.. autofunction:: get_env_variable_or_raise
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.elastic.utils.distributed
-```
-
-```{eval-rst}
-.. autofunction:: get_free_port
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.elastic.utils.log_level
-```
-
-```{eval-rst}
-.. autofunction:: get_log_level
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.elastic.utils.logging
-```
-
-```{eval-rst}
-.. autofunction:: get_logger
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.rendezvous
-```
-
-```{eval-rst}
-.. autofunction:: register_rendezvous_handler
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.algorithms.model_averaging.utils
-```
-
-```{eval-rst}
-.. autofunction:: average_parameters
-```
-
-```{eval-rst}
-.. autofunction:: average_parameters_or_parameter_groups
-```
-
-```{eval-rst}
-.. autofunction:: get_params_to_average
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed
-```
+(distributed-backends)=
 
 ## Backends
 
-`torch.distributed` supports four built-in backends, each with
-different capabilities. The table below shows which functions are available
-for use with a CPU or GPU for each backend. For NCCL, GPU refers to CUDA GPU
-while for XCCL to XPU GPU.
+`torch.distributed` ships the following backends. Backends are registered
+through the `torch.distributed.backends` entry point group and loaded on first use.
+
+- `gloo`: CPU and CUDA.
+- `nccl`: CUDA.
+- `nccl-lazy`: CUDA. Variant of `nccl` that runs collectives on one communicator and
+  creates a 2-rank communicator per point-to-point peer pair on first use.
+- `nccl-legacy`: CUDA. The legacy `ProcessGroupNCCL` implementation.
+- `mpi`: only when PyTorch is built with MPI.
+- `ucc`: CPU and CUDA; only when PyTorch is built with UCC.
+- `xccl`: Intel XPU.
+- `fake`: no-op backend for testing; registered by importing
+  `torch.testing._internal.distributed.fake_pg`.
+
+The table below shows which functions are available for use with a CPU or GPU
+for four of these backends. For NCCL, GPU refers to CUDA GPU while for XCCL to
+XPU GPU.
 
 MPI supports CUDA only if the implementation used to build PyTorch supports it.
 
@@ -208,9 +163,49 @@ for some cloud providers, such as AWS or GCP.
 For a full list of NCCL environment variables, please refer to
 [NVIDIA NCCL's official documentation](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html)
 
-You can tune NCCL communicators even further using `torch.distributed.ProcessGroupNCCL.NCCLConfig`
-and `torch.distributed.ProcessGroupNCCL.Options`. Learn more about them using `help`
+You can tune NCCL communicators even further using `torch.distributed.ProcessGroupNCCL.NCCLConfig`,
+set through the `config` attribute of `torch.distributed.ProcessGroupNCCL.Options`.
+Pass the `Options` to {func}`torch.distributed.init_process_group` or
+{func}`torch.distributed.new_group` as `pg_options`.
+The same `Options` type is used by the `nccl`, `nccl-lazy` and `nccl-legacy`
+backends. Learn more about them using `help`
 (e.g. `help(torch.distributed.ProcessGroupNCCL.NCCLConfig)`) in the interpreter.
+
+(nccl-collective-config)=
+
+### Per-collective NCCL configuration
+
+The `nccl` and `nccl-lazy` backends accept a keyword-only `config` on supported collective functions. This requires NCCL 2.31 or later and
+[nccl4py](https://pypi.org/project/nccl4py/) 0.5.0 or later:
+
+```python
+from nccl.core import NCCLCollConfig
+import torch.distributed as dist
+
+dist.init_process_group("nccl")
+config = NCCLCollConfig(max_ctas=4, alg_selection="ring")
+dist.all_reduce(tensor, config=config)
+```
+
+Supported functions: `broadcast`, `all_reduce`, `all_reduce_coalesced`, `reduce`,
+`all_gather`, `all_gather_single`, `all_gather_coalesced`, `gather_single`,
+`reduce_scatter`, `reduce_scatter_single` and `all_to_all_single`, plus the
+back-compat aliases `all_gather_into_tensor`, `gather_into_tensor` and
+`reduce_scatter_tensor`.
+
+Unset fields inherit NCCL or communicator defaults; a config with no set fields
+is treated as `None`. Config presence and values must be identical on every
+participating rank; mismatches can hang. Configurations within an NCCL group must
+agree on `cga_cluster_size`. Passing `None` preserves existing behavior and does
+not require nccl4py.
+
+Backends receive `config` as its attribute dictionary (`vars(config)`); a plain
+`dict` with the same keys is equivalent. `nccl-legacy`, `gloo` and the other built-in backends ignore it.
+`nccl` rejects vendor options and unsupported operations. `all_to_all_single`
+with a config requires even splits on every rank. External NCCL group scopes are unsupported.
+
+Supported synchronous calls can use `torch.compile` and `torch.export`.
+Configuration values are graph constants; changing them recompiles.
 
 (distributed-basics)=
 
@@ -382,6 +377,14 @@ The machine with rank 0 will be used to set up all connections.
 This is the default method, meaning that `init_method` does not have to be specified (or
 can be `env://`).
 
+### Custom initialization methods
+
+Other `init_method` URL schemes can be added by registering a rendezvous handler.
+
+```{eval-rst}
+.. autofunction:: torch.distributed.rendezvous.register_rendezvous_handler
+```
+
 ### Improving initialization time
 
 - `TORCH_GLOO_LAZY_INIT` - establishes connections on demand rather than
@@ -420,6 +423,18 @@ check whether the process group has already been initialized use {func}`torch.di
 
 ```{eval-rst}
 .. autofunction:: get_debug_level
+```
+
+```{eval-rst}
+.. autofunction:: set_debug_level
+```
+
+```{eval-rst}
+.. autofunction:: set_debug_level_from_env
+```
+
+```{eval-rst}
+.. autoclass:: DebugLevel
 ```
 
 ```{eval-rst}
@@ -463,11 +478,11 @@ process-launcher level.
 
 if {func}`destroy_process_group` is not called by all ranks in a pg within the timeout duration,
 especially when there are multiple process-groups in the application e.g. for N-D parallelism,
-hangs on exit are possible. This is because the destructor for ProcessGroupNCCL calls ncclCommAbort,
-which must be called collectively, but the order of calling ProcessGroupNCCL's destructor if called
+hangs on exit are possible. This is because the NCCL backends call ncclCommAbort in their destructor if the group was not shut down,
+which must be called collectively, but the order of calling the destructors if called
 by python's GC is not deterministic. Calling {func}`destroy_process_group` helps by ensuring
-ncclCommAbort is called in a consistent order across ranks, and avoids calling ncclCommAbort
-during ProcessGroupNCCL's destructor.
+communicators are torn down in a consistent order across ranks, and avoids calling ncclCommAbort
+during the destructor.
 
 ### Reinitialization
 
@@ -492,7 +507,23 @@ an opaque group handle that can be given as a `group` argument to all collective
 (collectives are distributed functions to exchange information in certain well-known programming patterns).
 
 ```{eval-rst}
+.. autoclass:: ProcessGroup
+```
+
+```{eval-rst}
+.. autoclass:: group
+```
+
+```{eval-rst}
 .. autofunction:: new_group
+```
+
+```{eval-rst}
+.. autofunction:: new_subgroups
+```
+
+```{eval-rst}
+.. autofunction:: new_subgroups_by_enumeration
 ```
 
 ```{eval-rst}
@@ -729,6 +760,10 @@ if rank == 0:
 
 ```
 
+## Functional collectives
+
+Functional collectives return new tensors instead of mutating their inputs and are traceable by `torch.compile`. See {doc}`distributed/functional_collectives`.
+
 ## Distributed Key-Value Store
 
 The distributed package comes with a distributed key-value store, which can be
@@ -795,8 +830,8 @@ Please refer to the [profiler documentation](https://pytorch.org/docs/main/profi
 
 NCCL 2.27 and later ship device kernels written specifically for symmetric,
 window-registered buffers, using low-latency, multimem/NVLS, and TMA algorithms
-rather than the generic ring/tree path. ``all_reduce``, ``all_gather_into_tensor``
-and ``reduce_scatter_tensor`` dispatch to them automatically once their buffers
+rather than the generic ring/tree path. ``all_reduce``, ``all_gather_single``
+and ``reduce_scatter_single`` dispatch to them automatically once their buffers
 are registered — the call site does not change. When the buffers are not
 registered, or the op/dtype combination has no symmetric implementation, NCCL
 silently falls back to the regular path.
@@ -825,16 +860,6 @@ changes to the collective call.
 
 For details on scope, supported domains, and version requirements, see
 [Higher-Precision Reduction](higher-precision-reduction) in the Symmetric Memory documentation.
-
-## Multi-GPU collective functions
-
-:::{warning}
-The multi-GPU functions (which stand for multiple GPUs per CPU thread) are
-deprecated. As of today, PyTorch Distributed's preferred programming model
-is one device per thread, as exemplified by the APIs in this document. If
-you are a backend developer and want to support multiple devices per thread,
-please contact PyTorch Distributed's maintainers.
-:::
 
 (object_collectives)=
 
@@ -877,26 +902,11 @@ Unpickling a tensor will implicitly activate a CUDA context if it is the first
 time a GPU is used by the process, which can waste significant amounts of GPU memory. This issue can be avoided by
 moving tensors to CPU before passing them as inputs to an object collective.
 
-## Third-party backends
+## Custom backends
 
-Besides the builtin GLOO/MPI/NCCL backends, PyTorch distributed supports
-third-party backends through a run-time register mechanism.
-For references on how to develop a third-party backend through C++ Extension,
-please refer to [Tutorials - Custom C++ and CUDA Extensions](https://pytorch.org/tutorials/advanced/cpp_extension.html) and
-`test/cpp_extensions/cpp_c10d_extension.cpp`. The capability of third-party
-backends are decided by their own implementations.
-
-The new backend derives from `c10d::ProcessGroup` and registers the backend
-name and the instantiating interface through {func}`torch.distributed.Backend.register_backend`
-when imported.
-
-When manually importing this backend and invoking {func}`torch.distributed.init_process_group`
-with the corresponding backend name, the `torch.distributed` package runs on
-the new backend.
-
-:::{warning}
-The support of third-party backend is experimental and subject to change.
-:::
+Besides the built-in backends listed under Backends, `torch.distributed` supports
+backends registered at run time, written in C++ or Python. See
+{doc}`distributed/custom_backends`.
 
 ## TorchComms backend
 
@@ -1016,8 +1026,6 @@ can be used for multiprocess distributed training as well.
 For references on how to use it, please refer to [PyTorch example - ImageNet
 implementation](https://github.com/pytorch/examples/tree/master/imagenet)
 
-Note that this function requires Python 3.4 or higher.
-
 ## Debugging `torch.distributed` applications
 
 Debugging distributed applications can be challenging due to hard to understand hangs, crashes, or inconsistent behavior across ranks. `torch.distributed` provides
@@ -1028,7 +1036,7 @@ a suite of tools to help debug training applications in a self-serve fashion:
 It is extremely convenient to use python's debugger in a distributed environment, but because it does not work out of the box many people do not use it at all.
 PyTorch offers a customized wrapper around pdb that streamlines the process.
 
-`torch.distributed.breakpoint` makes this process easy. Internally, it customizes `pdb`'s breakpoint behavior in two ways but otherwise behaves as normal `pdb`.
+`torch.distributed.breakpoint` makes this process easy. Internally, it customizes `pdb`'s breakpoint behavior in three ways but otherwise behaves as normal `pdb`.
 1. Attaches the debugger only on one rank (specified by the user).
 2. Ensures all other ranks stop, by using a `torch.distributed.barrier()` that will release once the debugged rank issues a `continue`
 3. Reroutes stdin from the child process such that it connects to your terminal.
@@ -1374,6 +1382,17 @@ torchrun --nproc-per-node=2 train.py
 # Open http://localhost:25999
 ```
 
+For an end-to-end NCCL failure example, see
+{download}`verify_nccl2_flight_recorder.py <../../torch/distributed/examples/verify_nccl2_flight_recorder.py>`.
+The example deliberately hangs an NCCL collective and verifies that the c10d
+health check causes the debug server to write a Flight Recorder dump for every
+rank. Run it on a host with at least two GPUs:
+
+```bash
+torchrun --standalone --nproc-per-node=2 \
+  torch/distributed/examples/verify_nccl2_flight_recorder.py
+```
+
 #### Configuration Reference
 
 `start_debug_server()` accepts the following parameters:
@@ -1471,6 +1490,11 @@ capability.
 **TorchComms FlightRecorder JSON** ``/torchcomms_fr_trace_json``
   Same data as ``/torchcomms_fr_trace`` but rendered as raw formatted JSON.
 
+**c10d Health Check** ``/c10d_health_check``
+  Fetches the c10d health state from every rank. When any rank reports an
+  unhealthy backend, the server requests a Flight Recorder dump for that
+  backend from every worker.
+
 **torch.profiler** ``/profile``
   Triggers ``torch.profiler.profile()`` on every worker for a configurable
   duration, then returns the Chrome trace JSON. The frontend page provides a
@@ -1531,6 +1555,22 @@ collective operations, their metadata, and timing information.
 ```bash
 curl -X POST \
   http://worker-host:port/handler/fr_trace_json  # @lint-ignore
+```
+
+**``fr_dump_file``** — Starts a Flight Recorder dump for one backend. The
+``backend`` query parameter selects the backend-specific recorder.
+
+```bash
+curl -X POST \
+  "http://worker-host:port/handler/fr_dump_file?backend=nccl2"  # @lint-ignore
+```
+
+**``c10d_health_check``** — Returns the process-wide c10d health state and the
+names of any unhealthy backends (application/json).
+
+```bash
+curl -X POST \
+  http://worker-host:port/handler/c10d_health_check  # @lint-ignore
 ```
 
 **``dump_nccl_trace_json``** — NCCL flight-recorder trace (application/json).
@@ -1615,14 +1655,16 @@ Handlers that support dumping:
 +------------------------------------+------------------------+---------------------------------------------------+
 | ``TorchCommsFlightRecorderHandler``| ``torchcomms_fr_trace``| TorchComms flight-recorder tables.                |
 +------------------------------------+------------------------+---------------------------------------------------+
+| ``C10dHealthCheckHandler``         | ``c10d_health_check``  | c10d health and backend Flight Recorder dumps.    |
++------------------------------------+------------------------+---------------------------------------------------+
 | ``WaitCountersHandler``            | ``wait_counters``      | Wait counter JSON for all ranks.                  |
 +------------------------------------+------------------------+---------------------------------------------------+
 | ``TCPStoreHandler``                | ``tcpstore``           | All TCPStore key-value pairs.                     |
 +------------------------------------+------------------------+---------------------------------------------------+
 ```
 
-By default (when ``enabled_dumps=None``), only ``"stacks"`` and ``"fr_trace"``
-are enabled.
+By default (when ``enabled_dumps=None``), ``"stacks"``, ``"fr_trace"``, and
+``"c10d_health_check"`` are enabled.
 
 #### Registering Custom Handlers
 
@@ -1762,8 +1804,27 @@ all thread stack traces and abort the process.
 This module is experimental and subject to change.
 :::
 
+Arguments passed to {func}`~torch.distributed._watchdog.init` override these environment variables:
+
+```{list-table}
+:header-rows: 1
+
+* - **Variable**
+  - **Description**
+* - ``TORCH_WATCHDOG_POLL_INTERVAL_SECS``
+  - Seconds between CUDA event polls. Default: ``1.0``.
+* - ``TORCH_WATCHDOG_HEALTH_INTERVAL_SECS``
+  - Seconds between health pings of the watchdog event loop. Default: ``30.0``.
+* - ``TORCH_WATCHDOG_STUCK_ACTION``
+  - Action when the event loop does not answer a health ping: ``log``, ``abort`` or ``exit``. Default: ``log``.
+```
+
 ```{eval-rst}
 .. currentmodule:: torch.distributed._watchdog
+```
+
+```{eval-rst}
+.. autofunction:: init
 ```
 
 ```{eval-rst}
@@ -2270,14 +2331,15 @@ not that the remote application consumed or acknowledged the data. Asyncio calle
 can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains valid
 until unregistration or close, and tensors must not be resized or have their storage replaced.
 
-CUDA stream semantics, graph capture, tracing, batching, remote slicing, and
-rank-based bootstrap helpers are outside this initial API. Rank-to-endpoint
-lookup belongs in a separate control-plane adapter. Descriptor classes define explicit ``serialize()``/``deserialize()`` methods.
+Ordinary reads and writes are not ordered on CUDA streams. The API does not
+provide tracing, batching, or remote slicing. Descriptor classes define explicit
+``serialize()``/``deserialize()`` methods.
 The built-in backends declare their fields in a versioned JSON envelope; binary
 metadata is base64-encoded. Unknown fields, versions, backends, and invalid field
 types are rejected. Tensor contents and native handles are never serialized.
 
 .. autofunction:: torch.distributed._transport.new_transport
+.. autofunction:: torch.distributed._transport.new_transport_rank
 .. autoclass:: torch.distributed._transport.Transport
    :members:
 .. autoclass:: torch.distributed._transport.Memory
@@ -2289,6 +2351,42 @@ types are rejected. Tensor contents and native handles are never serialized.
 .. autofunction:: torch.distributed._transport.wait_all
 .. autofunction:: torch.distributed._transport.available_transports
 .. autofunction:: torch.distributed._transport.register_transport
+
+CUDA streams
+~~~~~~~~~~~~
+
+``read_stream`` and ``write_stream`` order a transfer on ``stream``, or the
+current CUDA stream if ``None``. The transfer starts after prior work on the
+stream; later work waits for it to complete. Calls return after enqueueing and
+no kernel runs while the transfer is in flight.
+
+.. code-block:: python
+
+    with torch.cuda.stream(stream):
+        source.copy_(producer)
+        transport.write_stream(source_view, remote_destination)
+        transport.read_stream(destination_view, remote_source)
+        consume(destination)
+
+Stream transfers can be captured with ``torch.cuda.graph``; each replay submits
+a new transfer. Register buffers and warm up transfers before capture. Captured
+buffers stay registered until ``close``; replaying after ``close`` terminates
+the process.
+
+.. code-block:: python
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        source.copy_(producer)
+        transport.write_stream(source_view, remote_destination)
+    graph.replay()
+
+The default implementation awaits ``write_async``/``read_async`` on a shared
+asyncio loop thread and gates the stream with a CUDA stream memory wait. It requires Linux
+and GPUDirect RDMA write ordering, and allows 64 outstanding transfers per
+stream; captured transfers hold their slot until ``close``. Since consumers may
+already be enqueued, a failed transfer terminates the process. Backends with
+native stream support may override these methods.
 
 NIXL backend
 ~~~~~~~~~~~~
