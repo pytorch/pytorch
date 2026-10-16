@@ -737,9 +737,9 @@ def _descriptor_functions(obj: Any) -> list[tuple[str, Any]]:
     return []
 
 
-def _raise_resolution_error(code: types.CodeType, scope: Any, note: str = "") -> Never:
+def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     raise PackageError(
-        f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}{note}"
+        f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}"
     )
 
 
