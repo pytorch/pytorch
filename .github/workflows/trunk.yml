@@ -368,6 +368,9 @@ jobs:
           { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.2" },
           { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.2" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.2" },
+          { config: "slow", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.1", owners: ["module:rocm"], skip_on_pr: true, unstable: "unstable" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.1", owners: ["module:rocm"], skip_on_pr: true, unstable: "unstable" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.1", owners: ["module:rocm"], skip_on_pr: true, unstable: "unstable" },
         ]}
       python-version: "3.11"
     secrets: inherit
