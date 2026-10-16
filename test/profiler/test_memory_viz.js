@@ -220,13 +220,89 @@ function test_non_pool_free_without_alloc() {
     }],
   });
 
-  const result = process_alloc_data(snapshot, 0, false, 15000, false);
-  // max_size is only updated inside the actions loop AFTER the free decrements total_mem,
-  // so for a free-without-alloc element, max_size ends up 0.
-  // The actual peak (300) is captured in max_at_time instead.
-  assertEqual(result.max_size, 0, 'non-pool free-without-alloc: max_size is 0 (peak is in max_at_time)');
-  assert(Math.max(...result.max_at_time) === 300,
-    'non-pool free-without-alloc: max_at_time peak should be 300');
+  for (const detail of [0, 15000]) {
+    const result = process_alloc_data(snapshot, 0, false, detail, false);
+    assertEqual(result.max_size, 300, 'peak includes the initially allocated block');
+    assertEqual(Math.max(...result.max_at_time), 300, 'minimap includes the initial peak');
+  }
+}
+
+function test_peak_independent_of_detail() {
+  console.log('test_peak_independent_of_detail');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 2048, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1800, size: 1024, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x1800, size: 1024, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x1000, size: 2048, frames: [], stream: 0 },
+    ],
+  });
+
+  for (const detail of [0, 1, 2]) {
+    const result = process_alloc_data(snapshot, 0, false, detail, false);
+    assertEqual(result.max_size, 3072, `detail ${detail}: peak includes summarized allocations`);
+    assertEqual(result.max_size, Math.max(...result.max_at_time), 'plot and minimap peaks agree');
+  }
+}
+
+function test_global_summary_coordinates() {
+  console.log('test_global_summary_coordinates');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 512, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1200, size: 2048, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1a00, size: 256, frames: [], stream: 0 },
+    ],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 1, false);
+  const summary = result.summarized_mem;
+  assertEqual(summary.offsets.length, summary.timesteps.length, 'summary coordinates align');
+  assertEqual(summary.size.length, summary.timesteps.length, 'summary sizes align');
+  assertEqual(summary.offsets.join(','), '0,2048,2048,2048', 'summary stays above the drawn allocation');
+  assertEqual(summary.size.join(','), '512,512,768,768', 'summary includes both small allocations');
+  assertEqual(summary.timesteps.at(-1), result.max_at_time.length, 'summary reaches the end of the trace');
+}
+
+function test_summarized_only_allocation() {
+  console.log('test_summarized_only_allocation');
+  const snapshot = makeSnapshot({
+    traces: [{ action: 'alloc', addr: 0x1000, size: 512, frames: [], stream: 0 }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 0, false);
+  const summary = result.summarized_mem;
+  assertEqual(summary.timesteps.join(','), '0,1', 'summarized allocation has nonzero width');
+  assertEqual(summary.offsets.join(','), '0,0', 'summary starts at the bottom');
+  assertEqual(summary.size.join(','), '512,512', 'summary retains its size to the end');
+}
+
+function test_annotations_do_not_accumulate_on_rerender() {
+  console.log('test_annotations_do_not_accumulate_on_rerender');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 512, frames: [], stream: 0,
+        pool_id: [1, 1], annotations: ['existing'] },
+      { action: 'annotate', addr: 0x1000, user_metadata: 'first allocation' },
+      { action: 'free_completed', addr: 0x1000, size: 512, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1000, size: 1024, frames: [], stream: 0, pool_id: [1, 1] },
+      { action: 'annotate', addr: 0x1000, user_metadata: 'second allocation' },
+      { action: 'annotate', addr: 0x1000, user_metadata: 'second allocation' },
+      { action: 'free_completed', addr: 0x3000, size: 256, frames: [], stream: 0 },
+    ],
+  });
+  const original = JSON.stringify(snapshot);
+
+  for (const include_private of [false, true, false]) {
+    const result = process_alloc_data(snapshot, 0, false, 15000, include_private);
+    const first = result.context_for_id(0);
+    const second = result.context_for_id(1);
+    assertContains(first, 'Annotations:\n  existing\n  first allocation', 'existing annotations are preserved');
+    assertEqual((first.match(/first allocation/g) || []).length, 1, 'annotation is added once per render');
+    assertEqual((second.match(/second allocation/g) || []).length, 2, 'distinct identical annotations are preserved');
+    assert(!second.includes('first allocation'), 'annotations do not follow reused addresses');
+    assertEqual(JSON.stringify(snapshot), original, 'processing leaves the input snapshot unchanged');
+  }
 }
 
 function test_mixed_pool_and_nonpool() {
@@ -931,6 +1007,39 @@ function test_ghost_blocks_private_pool() {
   assertEqual(envs_false.length, 0, 'no pool envelopes when include_private_inactive=false');
 }
 
+function test_initial_pool_summary_follows_envelope() {
+  console.log('test_initial_pool_summary_follows_envelope');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 2048, frames: [], stream: 0, pool_id: [0, 0] },
+      { action: 'free_completed', addr: 0x1000, size: 2048, frames: [], stream: 0 },
+    ],
+    segments: [
+      { device: 0, address: 0x10000, total_size: 8192, segment_pool_id: [1, 1],
+        stream: 0, blocks: [
+          { address: 0x10000, requested_size: 1024, state: 'active_allocated', frames: [] },
+          { address: 0x10400, requested_size: 256, state: 'active_allocated', frames: [] },
+        ] },
+      { device: 0, address: 0x20000, total_size: 4096, segment_pool_id: [1, 2],
+        stream: 0, blocks: [
+          { address: 0x20000, requested_size: 512, state: 'active_allocated', frames: [] },
+        ] },
+    ],
+  });
+
+  for (const detail of [1, 2]) {
+    const result = process_alloc_data(snapshot, 0, false, detail, true);
+    const envelope = result.allocations_over_time.find(d => d.elem === 'pool:1,1,s0');
+    const drawn = detail === 1 ? 0 : 1024;
+    const summary = result.allocations_over_time.find(
+      d => d.opacity === 0.3 && d.size[0] === 1280 - drawn);
+    assertEqual(envelope.offsets[0], 4096, 'lower pool reservation moves the upper envelope');
+    assertEqual(summary.offsets[0], envelope.offsets[0] + drawn, 'summary follows its own envelope');
+    assert(summary.offsets[0] + summary.size[0] <= envelope.offsets[0] + envelope.size[0],
+      'summary remains inside the pool reservation');
+  }
+}
+
 function test_ghost_stripe_offset_with_multiple_pools() {
   console.log('test_ghost_stripe_offset_with_multiple_pools');
   // When multiple private pools have initially_allocated blocks, pool envelopes
@@ -1496,6 +1605,485 @@ function test_per_pool_summarization_interleaved() {
 }
 
 // ============================================================
+// Segment timeline: range lifetimes, event geometry and provenance
+// ============================================================
+
+function segmentEvent(action, addr, size, name, extra = {}) {
+  return { action, addr, size, stream: 0, version: 0,
+    frames: name ? [{ filename: 'segments.py', line: 10, name }] : [], ...extra };
+}
+
+function finalSegment(address, total_size, is_expandable = true, extra = {}) {
+  return { device: 0, address, total_size, is_expandable, stream: 0,
+    segment_pool_id: [0, 0], blocks: [], ...extra };
+}
+
+// MemoryPlot joins these vertices with straight lines. Sample each plateau,
+// checking the actual polygons as well as the minimap capacity series.
+function assertSegmentGeometry(result, expected, label) {
+  assertEqual(result.max_at_time.join(','), expected.join(','), label + ': capacity');
+  assertEqual(result.max_size, Math.max(...expected), label + ': peak');
+  assertEqual(result.final_size, expected.at(-1), label + ': final capacity');
+  for (const p of result.allocations_over_time) {
+    assert(p.timesteps.every(t => Number.isInteger(t) && t >= 0 && t <= expected.length),
+      label + ': polygon vertices use segment-event coordinates');
+  }
+  for (let t = 0; t < expected.length; t++) {
+    const x = t + 0.5;
+    const spans = [];
+    for (const p of result.allocations_over_time) {
+      if (x < p.timesteps[0] || x >= p.timesteps.at(-1)) continue;
+      const i = p.timesteps.findLastIndex(v => v <= x);
+      const fraction = (x - p.timesteps[i]) / (p.timesteps[i + 1] - p.timesteps[i]);
+      const lerp = values => values[i] + fraction * (values[i + 1] - values[i]);
+      const bottom = lerp(p.offsets);
+      const height = Array.isArray(p.size) ? lerp(p.size) : p.size;
+      if (height > 0) spans.push([bottom, bottom + height]);
+    }
+    spans.sort((a, b) => a[0] - b[0]);
+    let top = 0;
+    for (const [bottom, end] of spans) {
+      assertEqual(bottom, top, label + ': contiguous stack at x=' + x);
+      top = end;
+    }
+    assertEqual(top, expected[t], label + ': polygon capacity at x=' + x);
+  }
+}
+
+function segmentResults(snapshot, expected, label) {
+  const results = [0, 1, 15000].map(detail => {
+    const result = process_alloc_data(snapshot, 0, true, detail, false);
+    assert(!result.history_error, label + ': coherent history at detail ' + detail);
+    assertSegmentGeometry(result, expected, label + '/detail=' + detail);
+    return result;
+  });
+  return results.at(-1);
+}
+
+function segmentContexts(result) {
+  return Array.from({ length: result.elements_length }, (_, i) => result.context_for_id(i));
+}
+
+function test_expandable_repro_geometry() {
+  console.log('test_expandable_repro_geometry');
+  const MiB = 1024 * 1024;
+  const base = 0x320000000;
+  const side = 0x7a0000000;
+  const snapshot = makeSnapshot({
+    traces: [
+      segmentEvent('segment_map', base, 40 * MiB, 'initial_growth'),
+      segmentEvent('alloc', base, 1, 'tensor_alloc'), // Not a segment timestep.
+      segmentEvent('segment_map', base + 40 * MiB, 120 * MiB, 'second_growth'),
+      segmentEvent('segment_map', base + 160 * MiB, 260 * MiB, 'third_growth'),
+      segmentEvent('segment_unmap', base + 40 * MiB, 380 * MiB, 'release'),
+      segmentEvent('segment_map', base + 40 * MiB, 200 * MiB, 'remap'),
+      segmentEvent('segment_map', side, 140 * MiB, 'unexpected_side_stream_allocation',
+        { stream: 7 }),
+    ],
+    segments: [finalSegment(base, 240 * MiB),
+      finalSegment(side, 140 * MiB, true, { stream: 7 })],
+  });
+  const expected = [0, 40, 160, 420, 40, 240, 380].map(n => n * MiB);
+  const result = segmentResults(snapshot, expected, 'CUDA repro/coalesced unmap');
+  assert(!result.max_at_time.includes(300 * MiB), 'coalesced unmap has no artificial 300 MiB step');
+  const sideContext = segmentContexts(result).find(c => c.includes('unexpected_side_stream_allocation'));
+  assert(sideContext !== undefined, 'side-stream creation stack remains searchable');
+  assertContains(sideContext || '', 'stream 7', 'side-stream creation metadata');
+  assertContains(sideContext || '', 'mapped range', 'physical mapping is labeled as a mapped range');
+}
+
+function test_segment_partial_unmap_and_remap() {
+  console.log('test_segment_partial_unmap_and_remap');
+  for (const [offset, size] of [[0, 40], [30, 40]]) {
+    const address = offset === 0 ? 1000 : (1n << 60n) + 1000n;
+    const removedAddress = typeof address === 'bigint' ? address + BigInt(offset) : address + offset;
+    const snapshot = makeSnapshot({
+      traces: [
+        segmentEvent('segment_map', address, 100, 'original_creator'),
+        segmentEvent('segment_unmap', removedAddress, size, 'unmap_stack'),
+        segmentEvent('segment_map', removedAddress, size, 'new_creator'),
+      ],
+      segments: [finalSegment(address, 100)],
+    });
+    const result = segmentResults(snapshot, [0, 100, 100 - size, 100], 'partial ' + offset);
+    const surviving = result.allocations_over_time.filter(p => typeof p.elem === 'number'
+      && p.timesteps[0] === 1 && p.timesteps.at(-1) === 4);
+    assertEqual(surviving.length, offset === 0 ? 1 : 2, 'surviving pieces keep original birth');
+    for (const p of surviving) {
+      const ctx = result.context_for_id(p.elem);
+      assertContains(ctx, 'original_creator', 'partial unmap preserves original creation stack');
+      assert(!ctx.includes('unmap_stack'), 'release stack is never the creation stack');
+    }
+    const contexts = segmentContexts(result);
+    assert(contexts.some(c => c.includes('new_creator')), 'remap has a fresh creator');
+  }
+}
+
+function test_segment_retained_history_and_mixed_types() {
+  console.log('test_segment_retained_history_and_mixed_types');
+  const cases = [
+    { label: 'all ended', traces: [
+      segmentEvent('segment_map', 1000, 100, 'creator'),
+      segmentEvent('segment_unmap', 1000, 100, 'release')],
+      segments: [], totals: [0, 100, 0] },
+    { label: 'ordinary ended', traces: [
+      segmentEvent('segment_alloc', 1000, 100, 'creator'),
+      segmentEvent('segment_free', 1000, 100, 'release')],
+      segments: [], totals: [0, 100, 0] },
+    { label: 'legacy snapshot type unknown', traces: [
+      segmentEvent('segment_map', 1000, 100, 'creator')],
+      segments: [{ device: 0, address: 1000, total_size: 100, stream: 0,
+        segment_pool_id: [0, 0], blocks: [] }],
+      totals: [0, 100] },
+    { label: 'initial range later freed', traces: [
+      segmentEvent('segment_unmap', 1000, 100, 'release_only')],
+      segments: [], totals: [100, 0] },
+    { label: 'mixed streams and pools', traces: [
+      segmentEvent('segment_map', 1000, 20, 'private_map', { stream: 1, pool_id: [1, 4] }),
+      segmentEvent('segment_alloc', 2000, 40, 'ordinary', { stream: 2, segment_pool_id: [2, 5] }),
+      segmentEvent('segment_map', 3000, 60, 'default_map', { stream: 3 }),
+      segmentEvent('segment_unmap', 1000, 20, 'release', { stream: 1, pool_id: [1, 4] })],
+      segments: [finalSegment(2000, 40, false, { stream: 2, segment_pool_id: [2, 5] }),
+        finalSegment(3000, 60, true, { stream: 3 })], totals: [0, 20, 60, 120, 100] },
+  ];
+  for (const c of cases) {
+    const result = segmentResults(makeSnapshot(c), c.totals, c.label);
+    if (c.label === 'initial range later freed') {
+      const ctx = result.context_for_id(0);
+      assertContains(ctx, 'outside the retained history', 'initial range has unknown creation');
+      assert(!ctx.includes('release_only'), 'initial range does not borrow unmap frames');
+    }
+    if (c.label === 'mixed streams and pools') {
+      const contexts = segmentContexts(result);
+      assert(contexts.some(ctx => ctx.includes('pool_id (1, 4)') && ctx.includes('stream 1')),
+        'event pool_id survives after range is unmapped');
+      assert(contexts.some(ctx => ctx.includes('pool_id (2, 5)') && ctx.includes('stream 2')),
+        'legacy segment_pool_id and ordinary stream survive');
+    }
+  }
+}
+
+function test_segment_address_reuse_and_bigint() {
+  console.log('test_segment_address_reuse_and_bigint');
+  for (const oldPool of [undefined, [1, 4]]) {
+    for (const address of [1000, (1n << 60n) + 1000n]) {
+      const oldIdentity = oldPool ? { pool_id: oldPool } : {};
+      const snapshot = makeSnapshot({
+        traces: [
+          segmentEvent('segment_map', address, 100, 'old_creator', oldIdentity),
+          segmentEvent('segment_unmap', address, 100, 'release', oldIdentity),
+          segmentEvent('segment_map', address, 100, 'new_creator', { pool_id: [2, 5] }),
+        ],
+        segments: [finalSegment(BigInt(address), 100, true, { segment_pool_id: [2, 5] })],
+      });
+      const result = segmentResults(snapshot, [0, 100, 0, 100], 'address reuse ' + address);
+      const contexts = segmentContexts(result);
+      const oldContext = contexts.find(c => c.includes('old_creator')) || '';
+      assertContains(oldContext, oldPool ? 'pool_id (1, 4)' : 'pool_id unknown',
+        'older lifetime keeps its own pool identity');
+      assert(!oldContext.includes('pool_id (2, 5)'), 'older lifetime never inherits final reused pool');
+      assert(contexts.some(c => c.includes('new_creator') && c.includes('pool_id (2, 5)')),
+        'new lifetime uses new recorded pool and creator');
+    }
+  }
+}
+
+function test_segment_missing_creation_frames() {
+  console.log('test_segment_missing_creation_frames');
+  for (const traces of [[], [segmentEvent('segment_map', 1000, 100)]]) {
+    const snapshot = makeSnapshot({ traces, segments: [finalSegment(1000, 100)] });
+    const result = segmentResults(snapshot, traces.length ? [0, 100] : [100], 'missing frames');
+    const ctx = result.context_for_id(0);
+    assertContains(ctx, traces.length ? 'stack unavailable' : 'outside the retained history',
+      'missing provenance is labeled honestly');
+    assert(!ctx.includes('undefined') && !ctx.includes('Invalid Date'),
+      'missing timestamp and frames do not leak invalid values');
+  }
+}
+
+function test_segment_category_and_recorded_context() {
+  console.log('test_segment_category_and_recorded_context');
+  const snapshot = makeSnapshot({
+    categories: ['unknown', 'activation'],
+    traces: [segmentEvent('segment_alloc', 1000, 100, 'creator', {
+      category: 'activation', compile_context: 'compiled_region',
+      user_metadata: { phase: 'training_phase' }, annotations: ['annotation_text'],
+      forward_frames: ['forward.py:25:model_forward\n'],
+    })],
+    segments: [finalSegment(1000, 100, false)],
+  });
+  const result = segmentResults(snapshot, [0, 100], 'ordinary category and context');
+  assertEqual(result.allocations_over_time.find(p => p.elem === 0).color, 1,
+    'ordinary segment keeps its category color');
+  const ctx = result.context_for_id(0);
+  for (const text of ['Compile context: compiled_region', 'User Metadata:', 'training_phase',
+    'Annotations:', 'annotation_text', 'Forward Pass Stack Trace', 'forward.py:25:model_forward']) {
+    assertContains(ctx, text, 'recorded segment context retains ' + text);
+  }
+}
+
+function test_segment_history_contradictions() {
+  console.log('test_segment_history_contradictions');
+  const cases = [
+    { label: 'overlapping maps', traces: [
+      segmentEvent('segment_map', 1000, 100),
+      segmentEvent('segment_map', 1050, 50)], segments: [finalSegment(1000, 100)] },
+    { label: 'unmap crosses a gap', traces: [
+      segmentEvent('segment_map', 1000, 40),
+      segmentEvent('segment_unmap', 1010, 40)], segments: [] },
+    ...[
+      ['pool mismatch', { pool_id: [1, 4] }, { pool_id: [2, 5] }],
+      ['stream mismatch', { stream: 1 }, { stream: 2 }],
+    ].map(([label, before, after]) => ({ label, traces: [
+      segmentEvent('segment_map', 1000, 100, null, before),
+      segmentEvent('segment_unmap', 1000, 100, null, after)], segments: [] })),
+    ...[
+      ['adjacent pools with unmap metadata omitted', { pool_id: [1, 4] }, { pool_id: [2, 5] }],
+      ['adjacent streams with unmap metadata omitted', { stream: 1 }, { stream: 2 }],
+    ].map(([label, before, after]) => ({ label, traces: [
+      segmentEvent('segment_map', 1000, 50, null, before),
+      segmentEvent('segment_map', 1050, 50, null, after),
+      { action: 'segment_unmap', addr: 1000, size: 100, frames: [] }], segments: [] })),
+    ...[
+      ['NaN address', NaN, 100], ['unsafe Number address', Number.MAX_SAFE_INTEGER + 1, 100],
+      ['zero size', 1000, 0],
+    ].map(([label, address, size]) => ({ label,
+      traces: [segmentEvent('segment_map', address, size)], segments: [finalSegment(2000, 100)] })),
+    { label: 'segment type mismatch', traces: [
+      segmentEvent('segment_map', 1000, 100),
+      segmentEvent('segment_free', 1000, 100)], segments: [] },
+    { label: 'partial ordinary free', traces: [
+      segmentEvent('segment_alloc', 1000, 100),
+      segmentEvent('segment_free', 1000, 40)], segments: [finalSegment(1040, 60, false)] },
+  ];
+  for (const c of cases) {
+    const snapshot = makeSnapshot(c);
+    const total = c.segments.reduce((sum, s) => sum + s.total_size, 0);
+    for (const detail of [0, 1, 15000]) {
+      const result = process_alloc_data(snapshot, 0, true, detail, false);
+      assert(Boolean(result.history_error), c.label + ': history contradiction is surfaced');
+      assertSegmentGeometry(result, [total], c.label + ': final snapshot fallback');
+      if (total > 0) {
+        const ctx = result.context_for_id(0);
+        assertContains(ctx, 'recorded history cannot be reconciled', 'fallback explains unavailable provenance');
+        assert(!ctx.includes('Creation event outside the retained history'),
+          'fallback does not mislabel a retained creation event as absent');
+      }
+    }
+  }
+}
+
+function groupedSegments(snapshot, detail = 15000, stream = null) {
+  return process_alloc_data(snapshot, 0, true, detail, false, {grouped: true, stream});
+}
+
+function segmentBands(result) {
+  return result.allocations_over_time.filter(p => typeof p.elem === 'number');
+}
+
+function test_grouped_growth_detail_and_streams() {
+  console.log('test_grouped_growth_detail_and_streams');
+  const snapshot = makeSnapshot({traces: [
+    segmentEvent('segment_map', 1000, 20, 'first_map'),
+    segmentEvent('segment_map', 1020, 20, 'second_map'),
+    segmentEvent('segment_map', 1040, 20, 'third_map'),
+    segmentEvent('segment_map', 2000, 50, 'side_map', {stream: 7}),
+  ], segments: [finalSegment(1000, 60), finalSegment(2000, 50, true, {stream: 7})]});
+  const full = groupedSegments(snapshot);
+  assert(full.grouped_segments && full.has_expandable, 'expandable groups are explicitly enabled');
+  assertEqual(segmentBands(full).length, 2, 'three contiguous maps become one band');
+  assertEqual(full.streams.join(','), '0,7', 'stream choices come from the full history');
+  for (const detail of [0, 1, 15000]) {
+    const result = groupedSegments(snapshot, detail);
+    assertSegmentGeometry(result, [0, 20, 40, 60, 110], 'group detail=' + detail);
+    for (const p of segmentBands(result)) {
+      assertEqual(p.color, segmentBands(full).find(other => other.elem === p.elem).color,
+        'group colors are stable through detail changes');
+    }
+  }
+  const detailed = segmentBands(groupedSegments(snapshot, 1));
+  assertEqual(detailed.length, 1, 'detail selects a whole group');
+  assertEqual(full.segment_events_for_id(detailed[0].elem).length, 3,
+    'detail ranks group peak rather than the largest constituent map');
+  for (const [stream, expected] of [['0', [0, 20, 40, 60, 60]], ['7', [0, 0, 0, 0, 50]],
+    ['unknown', [0, 0, 0, 0, 0]]]) {
+    const filtered = groupedSegments(snapshot, 15000, stream);
+    assertSegmentGeometry(filtered, expected, 'stream=' + stream);
+    assertEqual(filtered.streams.join(','), full.streams.join(','), 'filter retains full stream choices');
+    for (const p of segmentBands(filtered)) {
+      const original = segmentBands(full).find(other => other.elem === p.elem);
+      assertEqual(p.color, original.color, 'group color survives stream isolation');
+      assertEqual(p.timesteps[0], original.timesteps[0], 'isolation retains event coordinates');
+    }
+  }
+  const group = segmentBands(full).find(p => p.stream === '0');
+  const events = full.segment_events_for_id(group.elem);
+  assertEqual(events.map(e => e.timestep).join(','), '1,2,3', 'map event selector keeps every growth');
+  assertEqual(events.map(e => e.before).join(','), '0,20,40', 'group event capacities before');
+  assertEqual(events.map(e => e.after).join(','), '20,40,60', 'group event capacities after');
+  events.forEach((event, i) => {
+    assertContains(event.context, ['first_map', 'second_map', 'third_map'][i], 'actual map creator');
+    if (i > 0) assert(!event.context.includes('first_map'), 'later maps never borrow first creator');
+  });
+  assert(!full.context_for_id(group.elem).includes('first_map'), 'group summary does not impersonate a creator');
+  assertContains(full.search_context_for_id(group.elem), 'third_map', 'search covers later creators');
+  assertContains(full.search_context_for_id(group.elem), 's\'410_0', 'search covers constituent addresses');
+}
+
+function test_grouped_holes_and_lifetime_loss() {
+  console.log('test_grouped_holes_and_lifetime_loss');
+  for (const address of [1000, (1n << 60n) + 1000n]) {
+    const middle = BigInt(address) + 30n;
+    const snapshot = makeSnapshot({traces: [
+      segmentEvent('segment_map', address, 100, 'original_creator'),
+      segmentEvent('segment_unmap', middle, 40, 'release_creator'),
+      segmentEvent('segment_map', middle, 40, 'remap_creator'),
+      segmentEvent('segment_unmap', address, 100, 'full_release'),
+      segmentEvent('segment_map', address, 100, 'new_lifetime'),
+    ], segments: [finalSegment(address, 100)]});
+    const result = groupedSegments(snapshot);
+    assertSegmentGeometry(result, [0, 100, 60, 100, 0, 100], 'hole and full unmap ' + address);
+    assertEqual(segmentBands(result).length, 2, 'full continuity loss creates a new group');
+    const old = segmentBands(result).find(p => p.timesteps[0] === 1);
+    const fresh = segmentBands(result).find(p => p.timesteps[0] === 5);
+    assert(old.color !== fresh.color, 'address reuse gets a new color identity');
+    const events = result.segment_events_for_id(old.elem);
+    assertEqual(events.length, 4, 'split pieces do not duplicate recorded map/unmap events');
+    assertEqual(events.map(e => e.after).join(','), '100,60,100,0', 'height counts mapped bytes across holes');
+    assertEqual(events[0].size, 100, 'original event keeps its complete map size');
+    assertContains(events[0].context, 'original_creator', 'old map provenance retained');
+    assertContains(events[1].context, 'Release stack', 'unmap provenance is a release stack');
+    assertContains(events[2].context, 'remap_creator', 'remap event has fresh provenance');
+    assert(!events[2].context.includes('original_creator'), 'remap does not borrow survivor provenance');
+    assert(!result.search_context_for_id(old.elem).includes('new_lifetime'), 'old search excludes reused lifetime');
+  }
+  const touching = makeSnapshot({traces: [segmentEvent('segment_map', 1000, 10),
+    segmentEvent('segment_unmap', 1000, 10), segmentEvent('segment_map', 1010, 10)],
+    segments: [finalSegment(1010, 10)]});
+  assertEqual(segmentBands(groupedSegments(touching)).length, 2,
+    'historically touching maps without overlapping lifetimes remain separate');
+}
+
+function test_grouped_metadata_conflicts() {
+  console.log('test_grouped_metadata_conflicts');
+  const unknown = {stream: null, pool_id: null, segment_pool_id: null};
+  for (const [left, right] of [[{stream: 1}, {stream: 2}],
+    [{pool_id: [0, 0]}, {pool_id: [2, 5]}]]) {
+    for (const reverse of [false, true]) {
+      const maps = [segmentEvent('segment_map', 1000, 10, 'left', left),
+        segmentEvent('segment_map', 1020, 10, 'right', right)];
+      if (reverse) maps.reverse();
+      maps.push(segmentEvent('segment_map', 1010, 10, 'ambiguous_bridge', unknown));
+      const segments = [finalSegment(1000, 10, true, {...left, segment_pool_id: left.pool_id}),
+        finalSegment(1010, 10, true, unknown),
+        finalSegment(1020, 10, true, {...right, segment_pool_id: right.pool_id})];
+      const result = groupedSegments(makeSnapshot({traces: maps, segments}));
+      assert(!result.history_error, 'metadata ambiguity is distinct from invalid history');
+      assertEqual(segmentBands(result).length, 3, 'unknown bridge cannot merge conflicting groups');
+      assertSegmentGeometry(result, [0, 10, 20, 30], 'unknown bridge order=' + reverse);
+    }
+    const snapshot = makeSnapshot({traces: [segmentEvent('segment_map', 1000, 10, 'old_known', left),
+      segmentEvent('segment_map', 1010, 10, 'unknown_survivor', unknown),
+      segmentEvent('segment_unmap', 1000, 10, 'release_known', left),
+      segmentEvent('segment_map', 1000, 10, 'new_conflict', right)],
+      segments: [finalSegment(1000, 10, true, {...right, segment_pool_id: right.pool_id}),
+        finalSegment(1010, 10, true, unknown)]});
+    const result = groupedSegments(snapshot);
+    assertSegmentGeometry(result, [0, 10, 20, 10, 20], 'surviving unknown metadata');
+    assertEqual(segmentBands(result).length, 2, 'unmapped known member leaves group constraint intact');
+    const old = segmentBands(result).find(p => p.timesteps[0] === 1);
+    assert(!result.search_context_for_id(old.elem).includes('new_conflict'),
+      'continuing unknown sibling does not acquire conflicting metadata');
+  }
+  const separated = makeSnapshot({segments: [finalSegment(1000, 10), finalSegment(1020, 10)]});
+  assertEqual(segmentBands(groupedSegments(separated)).length, 2, 'same stream/pool alone cannot group');
+  const retained = makeSnapshot({traces: [segmentEvent('segment_unmap', 1010, 10, 'release_only')],
+    segments: [finalSegment(1000, 10), finalSegment(1020, 10)]});
+  const result = groupedSegments(retained);
+  assertSegmentGeometry(result, [30, 20], 'retained interior unmap');
+  assertEqual(segmentBands(result).length, 1, 'retained bridge evidence reconstructs continuing group');
+  const initial = result.segment_events_for_id(segmentBands(result)[0].elem).filter(e => e.timestep === 0);
+  assert(initial.every(e => e.context.includes('outside the retained history')),
+    'initial observations honestly lack recorded creation');
+  assert(initial.every(e => !e.context.includes('release_only')), 'initial observation never borrows release stack');
+}
+
+function test_grouped_legacy_and_categories() {
+  console.log('test_grouped_legacy_and_categories');
+  const ordinary = makeSnapshot({traces: [segmentEvent('segment_alloc', 1000, 10, 'ordinary_one'),
+    segmentEvent('segment_alloc', 2000, 20, 'ordinary_two'), segmentEvent('segment_free', 1000, 10)],
+    segments: [finalSegment(2000, 20, false)]});
+  const legacy = process_alloc_data(ordinary, 0, true, 15000);
+  const enabled = groupedSegments(ordinary);
+  assert(!enabled.grouped_segments && !enabled.has_expandable, 'ordinary-only stays on published layout');
+  assertEqual(JSON.stringify(enabled.allocations_over_time), JSON.stringify(legacy.allocations_over_time),
+    'ordinary polygons are identical with grouping requested');
+  assertEqual(segmentContexts(enabled).join('\n'), segmentContexts(legacy).join('\n'),
+    'ordinary provenance is unchanged');
+  assertEqual(JSON.stringify(segmentBands(enabled)), JSON.stringify([
+    {elem: 0, timesteps: [1, 3], offsets: [0, 0], size: 10, color: 0},
+    {elem: 1, timesteps: [2, 3, 3, 4], offsets: [10, 10, 0, 0], size: 20, color: 1},
+  ]), 'ordinary geometry matches published golden data');
+  const categories = makeSnapshot({categories: ['unknown', 'activation', 'parameter'], traces: [
+    segmentEvent('segment_map', 1000, 10, 'activation_map', {category: 'activation'}),
+    segmentEvent('segment_map', 1010, 10, 'parameter_map', {category: 'parameter'}),
+  ], segments: [finalSegment(1000, 20)]});
+  const maps = process_alloc_data(categories, 0, true, 15000, false, {grouped: false});
+  assertEqual(segmentBands(maps).map(p => p.color).join(','), '1,2', 'ungrouped category colors preserved');
+  assertEqual(segmentBands(groupedSegments(categories)).length, 1, 'explicit grouped view uses group identity');
+  const isolated = process_alloc_data(categories, 0, true, 15000, false, {grouped: false, stream: '0'});
+  assertSegmentGeometry(isolated, [0, 10, 20], 'ungrouped stream coordinates');
+  const unknown = groupedSegments(makeSnapshot({segments: [finalSegment(1000, 10, true, {stream: null})]}),
+    15000, 'unknown');
+  assertEqual(unknown.streams.join(','), 'unknown', 'missing stream has explicit unknown choice');
+  assertSegmentGeometry(unknown, [10], 'unknown stream capacity');
+}
+
+function test_grouped_alternating_geometry_bound() {
+  console.log('test_grouped_alternating_geometry_bound');
+  const count = 400;
+  const traces = [];
+  for (let i = 0; i < count; ++i) {
+    traces.push(segmentEvent('segment_map', 1000 + i, 1, 'a'));
+    traces.push(segmentEvent('segment_map', 10000 + i, 1, 'b', {stream: 7}));
+  }
+  const result = groupedSegments(makeSnapshot({traces, segments: [finalSegment(1000, count),
+    finalSegment(10000, count, true, {stream: 7})]}));
+  assertEqual(segmentBands(result).length, 2, 'alternating growth directly aggregates into two bands');
+  assertEqual(result.max_at_time.join(','), Array.from({length: 2 * count + 1}, (_, i) => i).join(','),
+    'alternating map capacities remain exact');
+  const vertices = segmentBands(result).reduce((sum, p) => sum + p.timesteps.length, 0);
+  assert(vertices <= 6 * traces.length, 'two-group polygon geometry is linear in map events');
+
+  const ordinary_count = 50;
+  const mixed_traces = [segmentEvent('segment_map', 1000, 1, 'a'),
+    segmentEvent('segment_map', 10000, 1, 'b', {stream: 7})];
+  const ordinary_segments = [];
+  for (let i = 0; i < ordinary_count; ++i) {
+    mixed_traces.push(segmentEvent('segment_alloc', 20000 + i * 10, 1, 'ordinary'));
+    ordinary_segments.push(finalSegment(20000 + i * 10, 1, false));
+  }
+  mixed_traces.push(...traces.slice(2));
+  const mixed = groupedSegments(makeSnapshot({traces: mixed_traces,
+    segments: [...ordinary_segments, finalSegment(1000, count),
+      finalSegment(10000, count, true, {stream: 7})]}));
+  assertEqual(segmentBands(mixed).length, ordinary_count + 2, 'mixed view preserves ordinary lifetimes');
+  const mixed_vertices = segmentBands(mixed).reduce((sum, p) => sum + p.timesteps.length, 0);
+  assert(mixed_vertices <= 6 * mixed_traces.length,
+    'expandable growth does not repeatedly shift all ordinary bands');
+  const ordinary_bands = segmentBands(mixed).filter(p =>
+    mixed.context_for_id(p.elem).includes('cached segment'));
+  assert(ordinary_bands.every(p => p.timesteps.length === 2),
+    'ordinary bands keep fixed offsets through expandable growth');
+  const isolated = groupedSegments(makeSnapshot({traces: mixed_traces,
+    segments: [...ordinary_segments, finalSegment(1000, count),
+      finalSegment(10000, count, true, {stream: 7})]}), 15000, '7');
+  assertEqual(isolated.elements_length, 1, 'filtered detail count uses included groups');
+  assertEqual(segmentBands(isolated)[0].color,
+    segmentBands(mixed).find(p => p.stream === '7').color, 'mixed stack order retains stable IDs/colors');
+}
+
+// ============================================================
 // unpickleData tests
 // ============================================================
 
@@ -1581,6 +2169,10 @@ test_pool_free_without_alloc_no_inflation();
 test_pool_alloc_then_free_normal();
 test_multiple_pool_frees_without_alloc();
 test_non_pool_free_without_alloc();
+test_peak_independent_of_detail();
+test_global_summary_coordinates();
+test_summarized_only_allocation();
+test_annotations_do_not_accumulate_on_rerender();
 test_mixed_pool_and_nonpool();
 test_include_private_inactive_false_ignores_pools();
 test_formatSize_bytes();
@@ -1611,6 +2203,7 @@ test_ghost_blocks_not_created_for_traced_addrs();
 test_ghost_blocks_default_pool_collected();
 test_ghost_blocks_not_in_segment_mode();
 test_ghost_blocks_private_pool();
+test_initial_pool_summary_follows_envelope();
 test_ghost_stripe_offset_with_multiple_pools();
 test_full_snapshot_private_pools();
 test_full_snapshot_no_private_pools();
@@ -1623,6 +2216,18 @@ test_per_pool_summarization();
 test_per_pool_summarization_with_frees();
 test_per_pool_summarization_initially_allocated();
 test_per_pool_summarization_interleaved();
+test_expandable_repro_geometry();
+test_segment_partial_unmap_and_remap();
+test_segment_retained_history_and_mixed_types();
+test_segment_address_reuse_and_bigint();
+test_segment_missing_creation_frames();
+test_segment_category_and_recorded_context();
+test_segment_history_contradictions();
+test_grouped_growth_detail_and_streams();
+test_grouped_holes_and_lifetime_loss();
+test_grouped_metadata_conflicts();
+test_grouped_legacy_and_categories();
+test_grouped_alternating_geometry_bound();
 test_unpickle_protocol5_accepted();
 test_unpickle_protocol4_still_works();
 test_unpickle_protocol6_rejected();
