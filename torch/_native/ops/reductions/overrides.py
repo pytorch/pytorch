@@ -35,8 +35,25 @@ _Result: TypeAlias = torch.Tensor | tuple[torch.Tensor, ...]
 # Compute-capability majors this family's kernels have been run on: Hopper and Blackwell.
 _ARCH_MAJORS = (9, 10)
 
-_SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
-_STORABLE_DTYPES = _SUPPORTED_DTYPES
+_SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+_FLOAT8_DTYPES = (
+    torch.float8_e4m3fn,
+    torch.float8_e4m3fnuz,
+    torch.float8_e5m2,
+    torch.float8_e5m2fnuz,
+    torch.float8_e8m0fnu,
+)
+_COMPLEX_DTYPES = (torch.complex64, torch.complex128)
+_FLOAT_OR_COMPLEX_DTYPES = _SUPPORTED_DTYPES + _COMPLEX_DTYPES
+_INT_DTYPES = (torch.int32, torch.int64)
+_SMALL_INT_DTYPES = (torch.int8, torch.int16, torch.uint8)
+_UNSIGNED_DTYPES = (torch.uint16, torch.uint32, torch.uint64)
+_NUMERIC_DTYPES = _SUPPORTED_DTYPES + _INT_DTYPES + _SMALL_INT_DTYPES
+# Integer-capable ops also accept bool, served through its uint8 storage. The arg
+# reductions are the exception because ATen rejects bool input.
+_INT_OK_DTYPES = _NUMERIC_DTYPES + (torch.bool,)
+# Cute's Boolean is 1-bit, so bool results use a storable accumulator dtype and cast.
+_STORABLE_DTYPES = _NUMERIC_DTYPES + _COMPLEX_DTYPES
 
 
 def _acc_policy() -> dict[torch.dtype, tuple[Any, torch.dtype]]:
@@ -48,19 +65,51 @@ def _acc_policy() -> dict[torch.dtype, tuple[Any, torch.dtype]]:
         torch.float16: (cutlass.Float32, torch.float32),
         torch.bfloat16: (cutlass.Float32, torch.float32),
         torch.float32: (cutlass.Float32, torch.float32),
+        torch.float64: (cutlass.Float64, torch.float64),
+        torch.complex64: (cutlass.Float32, torch.float32),
+        torch.complex128: (cutlass.Float64, torch.float64),
+        # Int64 matches ATen's integral acc_type: an int32 sum must not wrap at 2**31.
+        # _acc_for lets the max/min family opt out of the widening.
+        torch.int32: (cutlass.Int64, torch.int64),
+        torch.int64: (cutlass.Int64, torch.int64),
+        torch.int8: (cutlass.Int64, torch.int64),
+        torch.int16: (cutlass.Int64, torch.int64),
+        torch.uint8: (cutlass.Int64, torch.int64),
+        torch.uint16: (cutlass.Int64, torch.int64),
+        torch.uint32: (cutlass.Int64, torch.int64),
+        torch.uint64: (cutlass.Int64, torch.int64),
     }
 
 
 def _acc_for_dtype(dtype: torch.dtype, widen: bool = True) -> tuple[Any, torch.dtype]:
-    return _acc_policy()[dtype]
+    # widen=True (sum-like): integers accumulate in Int64. widen=False (value/flag): the
+    # result IS an input value, and widening measured 0.77x on int32 amax, 0.69x on all.
+    dtype = torch.uint8 if dtype is torch.bool else dtype
+    acc, kout = _acc_policy()[dtype]
+    if widen or dtype.is_floating_point or dtype.is_complex:
+        return acc, kout
+    import cutlass
+
+    if dtype is torch.int64:
+        return cutlass.Int64, dtype
+    return cutlass.Int32, dtype
 
 
 def _acc_for(self: torch.Tensor, widen: bool = True) -> tuple[Any, torch.dtype]:
     return _acc_for_dtype(self.dtype, widen)
 
 
+# Half-to-float is exact, and the trait already converts each load into its accumulator.
+def _fused_input_cast(src: torch.dtype, dst: torch.dtype | None) -> bool:
+    return src in (torch.float16, torch.bfloat16) and dst is torch.float32
+
+
 def _kernel_input(self: torch.Tensor, canonical_bool: bool = True) -> torch.Tensor:
-    return self
+    # Cute's Boolean is 1-bit while an ATen bool tensor stores one byte per element.
+    # Arithmetic and indexed reductions need nonstandard True bytes canonicalized to 1.
+    if self.dtype is not torch.bool:
+        return self
+    return self.to(torch.uint8) if canonical_bool else self.view(torch.uint8)
 
 
 def _normalize_dims(dim: _Dim, ndim: int) -> _Red:
@@ -141,10 +190,13 @@ def _empty_result(
     # Nothing to launch: an allocation (empty output) or a fill (the identity over the kept
     # shape). torch.full covers both -- over an empty shape it writes nothing.
     shape = _reduced_shape(self.shape, red, keepdim)
-    return tuple(
-        torch.full(shape, 0 if f is None else f, dtype=d, device=self.device)
-        for d, f in zip(dtypes, fills)
-    )
+    values = []
+    for dtype, fill in zip(dtypes, fills):
+        value = 0 if fill is None else fill
+        if dtype.is_complex and isinstance(value, float) and math.isnan(value):
+            value = complex(value, value)
+        values.append(torch.full(shape, value, dtype=dtype, device=self.device))
+    return tuple(values)
 
 
 def _keepdim_reshape(
@@ -166,6 +218,14 @@ def _out_dtype(self: torch.Tensor, dtype: torch.dtype | None) -> torch.dtype:
     return dtype if dtype is not None else self.dtype
 
 
+def _real_dtype(dtype: torch.dtype) -> torch.dtype:
+    if dtype is torch.complex64:
+        return torch.float32
+    if dtype is torch.complex128:
+        return torch.float64
+    return dtype
+
+
 class _Envelope(NamedTuple):
     inputs: tuple[torch.dtype, ...]
     outs: tuple[torch.dtype, ...]
@@ -173,29 +233,52 @@ class _Envelope(NamedTuple):
 
 # THE DTYPE ENVELOPE, one row per op: widening a dtype is a row edit, not a pass over
 # every cond. Empty `outs` means no `dtype=` argument; vector_norm's key carries its ord.
-_FLOAT_ONLY = _Envelope(_SUPPORTED_DTYPES, _SUPPORTED_DTYPES)
-_NO_OUT_DTYPE = _Envelope(_SUPPORTED_DTYPES, ())
+_MEAN_OUT_DTYPES = _SUPPORTED_DTYPES + _COMPLEX_DTYPES
+_MEAN_INTEGRAL_OUT_DTYPES = (
+    torch.int8,
+    torch.uint8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
+_MEAN_INPUT_DTYPES = (
+    _INT_OK_DTYPES + _UNSIGNED_DTYPES + _FLOAT8_DTYPES + _COMPLEX_DTYPES
+)
+_NANSUM_INTEGRAL_OUT_DTYPES = _INT_DTYPES + _SMALL_INT_DTYPES + (torch.bool,)
+_MEAN = _Envelope(_MEAN_INPUT_DTYPES, _MEAN_OUT_DTYPES)
+_FLOAT_OR_COMPLEX = _Envelope(_FLOAT_OR_COMPLEX_DTYPES, _FLOAT_OR_COMPLEX_DTYPES)
+_SUM_LIKE = _Envelope(
+    _INT_OK_DTYPES + _UNSIGNED_DTYPES + _FLOAT8_DTYPES + _COMPLEX_DTYPES,
+    _INT_OK_DTYPES + _COMPLEX_DTYPES,
+)
+_INT_NO_OUT_DTYPE = _Envelope(_INT_OK_DTYPES, ())
+_TRUTH_INPUTS = _Envelope(_INT_OK_DTYPES + _COMPLEX_DTYPES, ())
+_COUNT_INPUTS = _Envelope(
+    _INT_OK_DTYPES + _UNSIGNED_DTYPES + _FLOAT8_DTYPES + _COMPLEX_DTYPES, ()
+)
+_ARG_NO_OUT_DTYPE = _Envelope(_NUMERIC_DTYPES, ())
+_FLOAT_OR_COMPLEX_NO_DTYPE = _Envelope(_FLOAT_OR_COMPLEX_DTYPES, ())
 
 _ENVELOPE = {
-    "sum": _FLOAT_ONLY,
-    "nansum": _FLOAT_ONLY,
-    "prod": _FLOAT_ONLY,
-    "mean": _FLOAT_ONLY,
-    "vnorm": _FLOAT_ONLY,
-    "var": _NO_OUT_DTYPE,
-    "std": _NO_OUT_DTYPE,
-    "var_mean": _NO_OUT_DTYPE,
-    "std_mean": _NO_OUT_DTYPE,
-    "amax": _NO_OUT_DTYPE,
-    "amin": _NO_OUT_DTYPE,
-    "max_dim": _NO_OUT_DTYPE,
-    "min_dim": _NO_OUT_DTYPE,
-    "aminmax": _NO_OUT_DTYPE,
-    "argmax": _NO_OUT_DTYPE,
-    "argmin": _NO_OUT_DTYPE,
-    "all": _NO_OUT_DTYPE,
-    "any": _NO_OUT_DTYPE,
-    "cnz": _NO_OUT_DTYPE,
+    "sum": _SUM_LIKE,
+    "nansum": _SUM_LIKE,
+    "prod": _SUM_LIKE,
+    "mean": _MEAN,
+    "vnorm": _FLOAT_OR_COMPLEX,
+    "var": _FLOAT_OR_COMPLEX_NO_DTYPE,
+    "std": _FLOAT_OR_COMPLEX_NO_DTYPE,
+    "var_mean": _FLOAT_OR_COMPLEX_NO_DTYPE,
+    "std_mean": _FLOAT_OR_COMPLEX_NO_DTYPE,
+    "amax": _INT_NO_OUT_DTYPE,
+    "amin": _INT_NO_OUT_DTYPE,
+    "max_dim": _INT_NO_OUT_DTYPE,
+    "min_dim": _INT_NO_OUT_DTYPE,
+    "aminmax": _INT_NO_OUT_DTYPE,
+    "argmax": _ARG_NO_OUT_DTYPE,
+    "argmin": _ARG_NO_OUT_DTYPE,
+    "all": _TRUTH_INPUTS,
+    "any": _TRUTH_INPUTS,
+    "cnz": _COUNT_INPUTS,
 }
 
 
@@ -210,23 +293,40 @@ def _out_ok(key: str, dtype: torch.dtype | None) -> bool:
     return dtype is None or dtype in _env(key).outs
 
 
+def _nansum_dtype_ok(
+    self: torch.Tensor, dtype: torch.dtype | None, *, explicit: bool
+) -> bool:
+    if dtype not in _NANSUM_INTEGRAL_OUT_DTYPES:
+        return True
+    if self.dtype in _FLOAT8_DTYPES:
+        return False
+    return explicit or not (self.dtype.is_floating_point or self.dtype.is_complex)
+
+
 def _sum_out_dtype(self: torch.Tensor, dtype: torch.dtype | None) -> torch.dtype:
     # aten's rule for the SUM-like ops: an explicit `dtype` wins, a float keeps its own, and
     # an INTEGRAL input promotes to int64 (torch.sum on int32 returns int64).
     if dtype is not None:
         return dtype
-    return self.dtype if self.dtype.is_floating_point else torch.int64
+    return (
+        self.dtype
+        if self.dtype.is_floating_point or self.dtype.is_complex
+        else torch.int64
+    )
 
 
-def _base_cond(self: torch.Tensor, dim: _Dim, key: str) -> bool:
+def _base_cond(
+    self: torch.Tensor,
+    dim: _Dim,
+    key: str,
+    extra_inputs: tuple[torch.dtype, ...] = (),
+) -> bool:
     # Shared capability gate; never raises, since a throwing cond crashes the dispatcher
-    # instead of falling back. Complex inputs are outside the dtype envelope, so only CONJ
-    # needs an explicit metadata-bit check. Implementations resolve lazy negative inputs.
+    # instead of falling back. Implementations resolve lazy conjugate and negative inputs.
     return (
         not cap.is_traced(self)
         and cap.device_ok(self, _ARCH_MAJORS)
-        and self.dtype in _env(key).inputs
-        and not self.is_conj()
+        and (self.dtype in _env(key).inputs or self.dtype in extra_inputs)
         and _dims_ok(dim, self.dim())
         and (self.numel() != 0 or _empty_ok(self, dim, _empty_id_for(key)))
     )
@@ -247,9 +347,31 @@ def _make_dtype_cond(key: str) -> Callable[..., bool]:
         *,
         dtype: torch.dtype | None = None,
     ) -> bool:
-        return _base_cond(self, dim, key) and _out_ok(key, dtype)
+        return (
+            _base_cond(self, dim, key)
+            and _out_ok(key, dtype)
+            and (self.dtype not in _FLOAT8_DTYPES or dtype is not None)
+            and (
+                key != "nansum"
+                or _nansum_dtype_ok(self, dtype, explicit=dtype is not None)
+            )
+        )
 
     return cond
+
+
+def _mean_cond(
+    self: torch.Tensor,
+    dim: _Dim = None,
+    keepdim: bool = False,
+    *,
+    dtype: torch.dtype | None = None,
+) -> bool:
+    return (
+        _base_cond(self, dim, "mean")
+        and _out_ok("mean", dtype)
+        and (dtype is not None or self.dtype in _SUPPORTED_DTYPES + _COMPLEX_DTYPES)
+    )
 
 
 def _make_dof_cond(key: str) -> Callable[..., bool]:
@@ -302,6 +424,7 @@ def _make_impl(
     key: str,
     out_dtype: Callable[[torch.Tensor, torch.dtype | None], torch.dtype],
     *,
+    complex_trait_type: Callable[[], Any] | None = None,
     widen: bool = True,
     canonical_bool: bool = True,
     cast_input: bool = True,
@@ -314,13 +437,21 @@ def _make_impl(
         dtype: torch.dtype | None = None,
     ) -> torch.Tensor:
         # NanSum keeps the source type to identify NaNs and changes its accumulator.
-        x = (
-            self
-            if not cast_input or dtype is None or dtype is self.dtype
-            else self.to(dtype)
+        x = self
+        fused_cast = _fused_input_cast(self.dtype, dtype)
+        if dtype is not None and dtype is not self.dtype:
+            representation_changes = self.dtype.is_complex != dtype.is_complex
+            if not fused_cast and (
+                cast_input or representation_changes or self.dtype in _FLOAT8_DTYPES
+            ):
+                x = self.to(dtype)
+        selected_trait = (
+            complex_trait_type
+            if x.is_complex() and complex_trait_type is not None
+            else trait_type
         )
         return _run1(
-            lambda acc: trait_type()(acc=acc),
+            lambda acc: selected_trait()(acc=acc),
             key,
             x,
             _normalize_dims(dim, x.dim()),
@@ -414,7 +545,11 @@ def _make_index_impl(
     trait_type: Callable[[], Any], key: str, *, with_value: bool = False
 ) -> Callable[..., _Result]:
     def impl(self: torch.Tensor, dim: _Dim = None, keepdim: bool = False) -> _Result:
-        make_trait = lambda acc, idx: trait_type()(acc=acc, idx=idx)  # noqa: E731
+        make_trait = lambda acc, idx: trait_type()(  # noqa: E731
+            acc=acc,
+            idx=idx,
+            canonical_bool=with_value and self.dtype is torch.bool,
+        )
         if with_value:
             return _run_dim2(make_trait, key, self, dim, keepdim)
         return _run_arg(
@@ -482,15 +617,17 @@ def _run_welford(
     c = _correction(correction)
     _warn_invalid_dof(op_name, self, dim, c)
     red = _normalize_dims(dim, self.dim())
+    default_dtypes = [_real_dtype(self.dtype)]
+    if with_mean:
+        default_dtypes.append(self.dtype)
+    dtypes = default_dtypes if out_dtypes is None else list(out_dtypes)
     if self.numel() == 0:
-        dtypes = (
-            [self.dtype] * (2 if with_mean else 1)
-            if out_dtypes is None
-            else list(out_dtypes)
-        )
         result = _empty_result(self, red, keepdim, dtypes, [float("nan")] * len(dtypes))
         return result if with_mean else result[0]
-    trait = T.VarMeanOps if with_mean else T.WelfordOps
+    if self.is_complex():
+        trait = T.ComplexVarMeanOps if with_mean else T.ComplexWelfordOps
+    else:
+        trait = T.VarMeanOps if with_mean else T.WelfordOps
     make_trait = lambda acc: trait(  # noqa: E731
         correction=c, take_sqrt=take_sqrt, acc=acc
     )
@@ -502,7 +639,7 @@ def _run_welford(
             self,
             dim,
             keepdim,
-            out_dtypes=out_dtypes,
+            out_dtypes=dtypes,
         )
     return _run1(
         make_trait,
@@ -510,7 +647,7 @@ def _run_welford(
         self,
         red,
         keepdim,
-        self.dtype if out_dtypes is None else out_dtypes[0],
+        dtypes[0],
     )
 
 
@@ -543,14 +680,18 @@ def _make_welford_impl(
 
 
 # linalg_vector_norm ord -> trait factory.
-def _norm_trait(ord_val: Any) -> Callable[[Any], Any]:
+def _norm_trait(ord_val: Any, complex_input: bool) -> Callable[[Any], Any]:
     if ord_val == float("inf"):
-        return lambda acc: T.AbsMaxOps(acc=acc)
+        trait = T.ComplexAbsMaxOps if complex_input else T.AbsMaxOps
+        return lambda acc: trait(acc=acc)
     if ord_val == float("-inf"):
-        return lambda acc: T.AbsMinOps(acc=acc)
+        trait = T.ComplexAbsMinOps if complex_input else T.AbsMinOps
+        return lambda acc: trait(acc=acc)
     if ord_val == 0:
-        return lambda acc: T.CountNonzeroOps(acc=acc)
-    return lambda acc: T.NormOps(float(ord_val), acc=acc)
+        trait = T.ComplexCountNonzeroOps if complex_input else T.CountNonzeroOps
+        return lambda acc: trait(acc=acc)
+    trait = T.ComplexNormOps if complex_input else T.NormOps
+    return lambda acc: trait(float(ord_val), acc=acc)
 
 
 def _vector_norm_impl(
@@ -561,10 +702,11 @@ def _vector_norm_impl(
     *,
     dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
-    x = self if dtype is None or dtype is self.dtype else self.to(dtype)
+    fused_cast = _fused_input_cast(self.dtype, dtype)
+    x = self if dtype is None or dtype is self.dtype or fused_cast else self.to(dtype)
     red = _normalize_dims(dim, x.dim())
-    odt = _out_dtype(self, dtype)
-    return _run1(_norm_trait(ord), f"vnorm{ord}", x, red, keepdim, odt)
+    odt = _real_dtype(_out_dtype(self, dtype))
+    return _run1(_norm_trait(ord, x.is_complex()), f"vnorm{ord}", x, red, keepdim, odt)
 
 
 def _flag_out_dtype(
@@ -574,12 +716,31 @@ def _flag_out_dtype(
     return torch.uint8 if self.dtype is torch.uint8 else torch.bool
 
 
-_sum_impl = _make_impl(lambda: T.SumOps, "sum", _sum_out_dtype)
-_mean_impl = _make_impl(lambda: T.MeanOps, "mean", _out_dtype)
-_nansum_impl = _make_impl(
-    lambda: T.NanSumOps, "nansum", _sum_out_dtype, cast_input=False
+_sum_impl = _make_impl(
+    lambda: T.SumOps,
+    "sum",
+    _sum_out_dtype,
+    complex_trait_type=lambda: T.ComplexSumOps,
 )
-_prod_impl = _make_impl(lambda: T.ProdOps, "prod", _sum_out_dtype)
+_mean_impl = _make_impl(
+    lambda: T.MeanOps,
+    "mean",
+    _out_dtype,
+    complex_trait_type=lambda: T.ComplexMeanOps,
+)
+_nansum_impl = _make_impl(
+    lambda: T.NanSumOps,
+    "nansum",
+    _sum_out_dtype,
+    complex_trait_type=lambda: T.ComplexNanSumOps,
+    cast_input=False,
+)
+_prod_impl = _make_impl(
+    lambda: T.ProdOps,
+    "prod",
+    _sum_out_dtype,
+    complex_trait_type=lambda: T.ComplexProdOps,
+)
 _amax_impl = _make_impl(
     lambda: T.AMaxOps, "amax", _out_dtype, widen=False, canonical_bool=False
 )
@@ -587,17 +748,37 @@ _amin_impl = _make_impl(
     lambda: T.AMinOps, "amin", _out_dtype, widen=False, canonical_bool=False
 )
 _all_impl = _make_impl(
-    lambda: T.AllOps, "all", _flag_out_dtype, widen=False, canonical_bool=False
+    lambda: T.AllOps,
+    "all",
+    _flag_out_dtype,
+    complex_trait_type=lambda: T.ComplexAllOps,
+    widen=False,
+    canonical_bool=False,
 )
 _any_impl = _make_impl(
-    lambda: T.AnyOps, "any", _flag_out_dtype, widen=False, canonical_bool=False
+    lambda: T.AnyOps,
+    "any",
+    _flag_out_dtype,
+    complex_trait_type=lambda: T.ComplexAnyOps,
+    widen=False,
+    canonical_bool=False,
 )
-_count_nonzero_impl = _make_impl(
+_count_nonzero_base_impl = _make_impl(
     lambda: T.CountNonzeroOps,
     "cnz",
     lambda self, dtype: torch.int64,
+    complex_trait_type=lambda: T.ComplexCountNonzeroOps,
     canonical_bool=False,
 )
+
+
+def _count_nonzero_impl(
+    self: torch.Tensor,
+    dim: _Dim = None,
+    keepdim: bool = False,
+) -> torch.Tensor:
+    x = self.ne(0) if self.dtype in _FLOAT8_DTYPES else self
+    return _count_nonzero_base_impl(x, dim, keepdim)
 
 
 def _vector_norm_cond(
@@ -608,7 +789,11 @@ def _vector_norm_cond(
     *,
     dtype: torch.dtype | None = None,
 ) -> bool:
-    return _base_cond(self, dim, key=f"vnorm{ord}") and _out_ok(f"vnorm{ord}", dtype)
+    if not _base_cond(self, dim, key=f"vnorm{ord}") or not _out_ok(
+        f"vnorm{ord}", dtype
+    ):
+        return False
+    return dtype is None or self.dtype.is_complex == dtype.is_complex
 
 
 # --- Group D: two-output VALUE reductions (var_mean / std_mean / aminmax). Same
@@ -775,14 +960,11 @@ def _make_dtype_out_cond(
     ) -> bool:
         if dtype is not None and out.dtype is not dtype:
             return False
-        if (
-            nansum_rules
-            and dtype is None
-            and self.dtype.is_floating_point
-            and not out.dtype.is_floating_point
+        effective_dtype = out.dtype if dtype is None else dtype
+        if nansum_rules and not _nansum_dtype_ok(
+            self, effective_dtype, explicit=dtype is not None
         ):
             return False
-        effective_dtype = out.dtype if dtype is None else dtype
         return (
             _base_cond(self, dim, key)
             and _out_ok(key, effective_dtype)
@@ -795,6 +977,72 @@ def _make_dtype_out_cond(
         )
 
     return cond
+
+
+def _make_mean_out_cond(*, full: bool = False) -> Callable[..., bool]:
+    def cond(
+        self: torch.Tensor,
+        dim: _Dim = None,
+        keepdim: bool = False,
+        *,
+        dtype: torch.dtype | None = None,
+        out: torch.Tensor,
+    ) -> bool:
+        if dtype is not None and out.dtype is not dtype:
+            return False
+        if not _base_cond(self, dim, "mean"):
+            return False
+        if full and not torch.can_cast(self.dtype, out.dtype):
+            return False
+        if dtype is None:
+            if not (self.dtype.is_floating_point or self.dtype.is_complex):
+                return False
+            allowed_outs = _MEAN_OUT_DTYPES + _MEAN_INTEGRAL_OUT_DTYPES
+        else:
+            allowed_outs = _MEAN_OUT_DTYPES
+        if out.dtype not in allowed_outs:
+            return False
+        if out.dtype in _MEAN_INTEGRAL_OUT_DTYPES and _reduced_count(self, dim) == 0:
+            return False
+        return _outputs_ok(
+            self,
+            [out],
+            _result_shape(self, dim, keepdim),
+            [(out.dtype,)],
+        )
+
+    return cond
+
+
+def _mean_out_impl(
+    self: torch.Tensor,
+    dim: _Dim = None,
+    keepdim: bool = False,
+    *,
+    dtype: torch.dtype | None = None,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    if dtype is None and out.dtype in _MEAN_INTEGRAL_OUT_DTYPES:
+        count = _reduced_count(self, dim)
+        # CUDA ATen casts 1 / count to the integer output type before multiplying.
+        result = (
+            _sum_impl(self, dim, keepdim, dtype=out.dtype)
+            if count == 1
+            else torch.zeros(
+                _result_shape(self, dim, keepdim),
+                device=self.device,
+                dtype=out.dtype,
+            )
+        )
+    else:
+        result = _mean_impl(
+            self,
+            dim,
+            keepdim,
+            dtype=out.dtype if dtype is None else dtype,
+        )
+    _copy_results(result, [out])
+    return out
 
 
 def _make_out_cond(
@@ -851,6 +1099,8 @@ def _make_welford_out_cond(
     key: str,
     names: tuple[str, ...],
     dtypes: Callable[[torch.Tensor], Sequence[Sequence[torch.dtype]]],
+    *,
+    extra_inputs: tuple[torch.dtype, ...] = (),
 ) -> Callable[..., bool]:
     def cond(
         self: torch.Tensor,
@@ -862,7 +1112,7 @@ def _make_welford_out_cond(
     ) -> bool:
         outs = [kwargs[name] for name in names]
         return (
-            _base_cond(self, dim, key)
+            _base_cond(self, dim, key, extra_inputs)
             and _dof_supported(correction)
             and _outputs_ok(
                 self,
@@ -893,7 +1143,7 @@ def _make_welford_out_impl(
         outs = [kwargs[name] for name in names]
         x = (
             self
-            if len(outs) == 2 or outs[0].dtype is self.dtype
+            if self.is_complex() or len(outs) == 2 or outs[0].dtype is self.dtype
             else self.to(outs[0].dtype)
         )
         result = _run_welford(
@@ -921,7 +1171,7 @@ def _vector_norm_out_cond(
     dtype: torch.dtype | None = None,
     out: torch.Tensor,
 ) -> bool:
-    result_dtype = _out_dtype(self, dtype)
+    result_dtype = _real_dtype(_out_dtype(self, dtype))
     return _vector_norm_cond(self, ord, dim, keepdim, dtype=dtype) and _outputs_ok(
         self,
         [out],
@@ -975,12 +1225,18 @@ def _same_pair_dtypes(
     return (self.dtype,), (self.dtype,)
 
 
+def _welford_pair_dtypes(
+    self: torch.Tensor,
+) -> tuple[tuple[torch.dtype], tuple[torch.dtype]]:
+    return (_real_dtype(self.dtype),), (self.dtype,)
+
+
 def register_reduction_overrides() -> None:
     # CUDA overrides; cu.register_op_override short-circuits when the CuteDSL
     # runtime is unavailable, so this is safe to call unconditionally at import.
     overrides = (
         ("sum.dim_IntList", _make_dtype_cond("sum"), _sum_impl),
-        ("mean.dim", _make_dtype_cond("mean"), _mean_impl),
+        ("mean.dim", _mean_cond, _mean_impl),
         ("nansum", _make_dtype_cond("nansum"), _nansum_impl),
         ("amax", _make_cond("amax"), _amax_impl),
         ("amin", _make_cond("amin"), _amin_impl),
@@ -1011,8 +1267,6 @@ def register_reduction_overrides() -> None:
     dtype_outs = (
         ("sum.IntList_out", "sum", _sum_impl),
         ("sum.out", "sum", _sum_impl),
-        ("mean.out", "mean", _mean_impl),
-        ("mean.dtype_out", "mean", _mean_impl),
         ("nansum.out", "nansum", _nansum_impl),
         ("prod.int_out", "prod", _prod_impl),
         ("prod.out", "prod", _prod_impl),
@@ -1024,6 +1278,10 @@ def register_reduction_overrides() -> None:
             _make_out_impl(impl, out_sets_dtype=True),
         )
         for op, key, impl in dtype_outs
+    )
+    overrides += (
+        ("mean.out", _make_mean_out_cond(), _mean_out_impl),
+        ("mean.dtype_out", _make_mean_out_cond(full=True), _mean_out_impl),
     )
 
     # op, trait key, output kwarg names, accepted dtypes, implementation, [] semantics
@@ -1100,7 +1358,7 @@ def register_reduction_overrides() -> None:
             "var_mean",
             "var",
             ("out0", "out1"),
-            _same_pair_dtypes,
+            _welford_pair_dtypes,
             False,
         ),
         (
@@ -1108,14 +1366,19 @@ def register_reduction_overrides() -> None:
             "std_mean",
             "std",
             ("out0", "out1"),
-            _same_pair_dtypes,
+            _welford_pair_dtypes,
             True,
         ),
     )
     overrides += tuple(
         (
             op,
-            _make_welford_out_cond(cond_key, names, dtypes),
+            _make_welford_out_cond(
+                cond_key,
+                names,
+                dtypes,
+                extra_inputs=_FLOAT8_DTYPES if len(names) == 1 else (),
+            ),
             _make_welford_out_impl(
                 impl_key,
                 names,
@@ -1135,5 +1398,5 @@ def register_reduction_overrides() -> None:
             op,
             "CUDA",
             cond=cond,
-            impl=cap.cuda_device_guard(cap.resolve_neg_view(impl)),
+            impl=cap.cuda_device_guard(cap.resolve_conj_view(impl)),
         )

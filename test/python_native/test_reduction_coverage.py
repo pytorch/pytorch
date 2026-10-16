@@ -24,6 +24,23 @@ DTYPES = {
     "f16": torch.float16,
     "bf16": torch.bfloat16,
     "f32": torch.float32,
+    "f64": torch.float64,
+    "f8e4m3": torch.float8_e4m3fn,
+    "f8e4m3z": torch.float8_e4m3fnuz,
+    "f8e5m2": torch.float8_e5m2,
+    "f8e5m2z": torch.float8_e5m2fnuz,
+    "f8e8m0": torch.float8_e8m0fnu,
+    "c64": torch.complex64,
+    "c128": torch.complex128,
+    "i32": torch.int32,
+    "i64": torch.int64,
+    "i8": torch.int8,
+    "i16": torch.int16,
+    "u8": torch.uint8,
+    "u16": torch.uint16,
+    "u32": torch.uint32,
+    "u64": torch.uint64,
+    "bool": torch.bool,
 }
 
 OPS = {
@@ -70,7 +87,15 @@ def _build(dtype, contiguous=True, empty=None, zerodim=False):
     if zerodim:
         return torch.zeros((), device="cuda").to(dtype)
     shape = {"output": (0, 5), "axis": (5, 0)}.get(empty, (64, 128))
-    t = torch.randn(shape, device="cuda", dtype=torch.float32).to(dtype)
+    if dtype.is_complex:
+        real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+        real = torch.randn(shape, device="cuda", dtype=real_dtype)
+        imag = torch.randn(shape, device="cuda", dtype=real_dtype)
+        t = torch.complex(real, imag)
+    elif dtype.is_floating_point:
+        t = torch.randn(shape, device="cuda", dtype=torch.float32).to(dtype)
+    else:
+        t = torch.randint(0, 7, shape, device="cuda").to(dtype)
     return t if contiguous else t.transpose(0, 1)
 
 
@@ -125,7 +150,7 @@ class TestReductionCoverage(TestCase):
         for g, r in pairs:
             if g.dtype != r.dtype:
                 return False
-            if g.is_floating_point():
+            if g.is_floating_point() or g.is_complex():
                 if not torch.allclose(g, r, rtol=1e-2, atol=1e-2, equal_nan=True):
                     return False
             elif not torch.equal(g, r):

@@ -4,6 +4,8 @@
 # SharedReduceOps.h. Accumulator dtypes provide their identities. Scalar conditionals lower
 # only inside cute.jit methods; cute.arch.fmax suppresses NaNs, so traits handle them.
 
+from typing import Any
+
 import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr, Float32, Int32, Int64
@@ -256,13 +258,18 @@ class ArgMaxOps:
     nouts = 1
     has_index = True
 
-    def __init__(self, acc=Float32, idx=Int32):
+    def __init__(self, acc=Float32, idx=Int32, canonical_bool=False):
         self.acc = acc
         self.idx = idx
+        self.canonical_bool = bool(canonical_bool)
         self.fdtypes = (acc, idx)
 
     def init(self):
         return (_neg_id(self.acc), _idx_sentinel(self.idx))
+
+    @cute.jit
+    def _value(self, val):
+        return self.acc(val != 0) if const_expr(self.canonical_bool) else self.acc(val)
 
     @cute.jit
     def _pick(self, bv, bi, cv, ci):
@@ -278,11 +285,11 @@ class ArgMaxOps:
 
     @cute.jit
     def leaf(self, val, idx):
-        return (self.acc(val), self.idx(idx))
+        return (self._value(val), self.idx(idx))
 
     @cute.jit
     def reduce(self, acc, val, idx, valid):
-        nv, ni = self._pick(acc[0], acc[1], val, self.idx(idx))
+        nv, ni = self._pick(acc[0], acc[1], self._value(val), self.idx(idx))
         out_v = nv if valid else acc[0]
         out_i = ni if valid else acc[1]
         return (out_v, out_i)
@@ -406,6 +413,190 @@ class NanSumOps:
         return acc[0]
 
 
+class ComplexSumOps:
+    # Complex values use adjacent real storage elements and two real accumulator fields.
+    nfields = 2
+    complex_input = True
+    output_widths = (2,)
+
+    def __init__(self, acc=Float32):
+        self.acc = acc
+        self.fdtypes = (acc, acc)
+
+    def init(self):
+        z = self.acc(0.0)
+        return (z, z)
+
+    @cute.jit
+    def leaf(self, val, idx):
+        return val
+
+    @cute.jit
+    def reduce(self, acc, val, idx, valid):
+        re = acc[0] + val[0]
+        im = acc[1] + val[1]
+        return (re if valid else acc[0], im if valid else acc[1])
+
+    @cute.jit
+    def combine(self, a, b):
+        return (a[0] + b[0], a[1] + b[1])
+
+    @cute.jit
+    def shfl_down(self, acc, offset):
+        return (
+            cute.arch.shuffle_sync_bfly(acc[0], offset=offset),
+            cute.arch.shuffle_sync_bfly(acc[1], offset=offset),
+        )
+
+    @cute.jit
+    def project(self, acc, n):
+        return acc
+
+
+class ComplexMeanOps(ComplexSumOps):
+    @cute.jit
+    def project(self, acc, n):
+        return (acc[0] / n, acc[1] / n)
+
+
+class ComplexNanSumOps(ComplexSumOps):
+    @cute.jit
+    def _clean(self, val):
+        keep = (val[0] == val[0]) & (val[1] == val[1])
+        z = self.acc(0.0)
+        return (val[0] if keep else z, val[1] if keep else z)
+
+    @cute.jit
+    def leaf(self, val, idx):
+        return self._clean(val)
+
+    @cute.jit
+    def reduce(self, acc, val, idx, valid):
+        val = self._clean(val)
+        re = acc[0] + val[0]
+        im = acc[1] + val[1]
+        return (re if valid else acc[0], im if valid else acc[1])
+
+
+class ComplexProdOps(ComplexSumOps):
+    def init(self):
+        return (self.acc(1.0), self.acc(0.0))
+
+    @cute.jit
+    def _mul(self, a, b):
+        return (a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0])
+
+    @cute.jit
+    def reduce(self, acc, val, idx, valid):
+        out = self._mul(acc, val)
+        return (out[0] if valid else acc[0], out[1] if valid else acc[1])
+
+    @cute.jit
+    def combine(self, a, b):
+        return self._mul(a, b)
+
+
+class ComplexWelfordOps:
+    nfields = 4
+    complex_input = True
+
+    def __init__(self, correction=1, take_sqrt=False, acc=Float32):
+        self.correction = float(correction)
+        self.take_sqrt = bool(take_sqrt)
+        self.acc = acc
+        self.fdtypes = (acc, acc, acc, acc)
+        self.split_grid_mult = 8 if acc.width == 32 else 4
+
+    def init(self):
+        z = self.acc(0.0)
+        return (z, z, z, z)
+
+    @cute.jit
+    def leaf(self, val, idx):
+        z = self.acc(0.0)
+        return (val[0], val[1], z, self.acc(1.0))
+
+    @cute.jit
+    def reduce(self, acc, val, idx, valid):
+        mean_re, mean_im, m2, nf = acc
+        new_nf = nf + self.acc(1.0)
+        delta_re = val[0] - mean_re
+        delta_im = val[1] - mean_im
+        new_mean_re = mean_re + delta_re / new_nf
+        new_mean_im = mean_im + delta_im / new_nf
+        new_m2 = m2 + delta_re * (val[0] - new_mean_re)
+        new_m2 = new_m2 + delta_im * (val[1] - new_mean_im)
+        return (
+            new_mean_re if valid else mean_re,
+            new_mean_im if valid else mean_im,
+            new_m2 if valid else m2,
+            new_nf if valid else nf,
+        )
+
+    @cute.jit
+    def combine(self, a, b):
+        mean_re, mean_im, m2, nf = a
+        b_re, b_im, b_m2, b_nf = b
+        zero = self.acc(0.0)
+        if nf == zero:
+            mean_re, mean_im, m2, nf = b_re, b_im, b_m2, b_nf
+        elif b_nf != zero:
+            new_nf = nf + b_nf
+            b_weight = b_nf / new_nf
+            delta_re = b_re - mean_re
+            delta_im = b_im - mean_im
+            mean_re = mean_re + delta_re * b_weight
+            mean_im = mean_im + delta_im * b_weight
+            delta2 = delta_re * delta_re + delta_im * delta_im
+            m2 = m2 + b_m2 + delta2 * nf * b_weight
+            nf = new_nf
+        return (mean_re, mean_im, m2, nf)
+
+    @cute.jit
+    def shfl_down(self, acc, offset):
+        return (
+            cute.arch.shuffle_sync_bfly(acc[0], offset=offset),
+            cute.arch.shuffle_sync_bfly(acc[1], offset=offset),
+            cute.arch.shuffle_sync_bfly(acc[2], offset=offset),
+            cute.arch.shuffle_sync_bfly(acc[3], offset=offset),
+        )
+
+    @cute.jit
+    def _variance(self, acc):
+        var = acc[2] / _welford_denom(self.acc, acc[3], self.correction)
+        return cute.math.sqrt(var) if const_expr(self.take_sqrt) else var
+
+    @cute.jit
+    def project(self, acc, n):
+        return self._variance(acc)
+
+
+@cute.jit
+def _complex_abs(acc, val):
+    re = acc(cute.math.absf(val[0]))
+    im = acc(cute.math.absf(val[1]))
+    hi = max(re, im)
+    lo = min(re, im)
+    ratio = lo / hi if hi != acc(0.0) else acc(0.0)
+    finite = hi * cute.math.sqrt(acc(1.0) + ratio * ratio)
+    result = hi if hi == acc.inf else finite
+    return re + im if (re != re) | (im != im) else result
+
+
+class ComplexNormOps(NormOps):
+    complex_input = True
+
+    @cute.jit
+    def _absp(self, val):
+        a = _complex_abs(self.acc, val)
+        if const_expr(self.p == 1.0):
+            return a
+        elif const_expr(self.p == 2.0):
+            return a * a
+        else:
+            return cute.math.exp(self.acc(self.p) * cute.math.log(a))
+
+
 class AllOps:
     # acc is the product of 0/1 truth flags; NaN is truthy, matching torch.all.
     nfields = 1
@@ -511,6 +702,41 @@ class CountNonzeroOps:
         return acc[0]
 
 
+class _ComplexTruthMixin:
+    complex_input = True
+    acc: Any
+
+    @cute.jit
+    def _flag(self, val):
+        nz = (val[0] != self.acc(0.0)) | (val[1] != self.acc(0.0))
+        return self.acc(1.0) if nz else self.acc(0.0)
+
+    @cute.jit
+    def leaf(self, val, idx):
+        return (self._flag(val),)
+
+
+class ComplexAllOps(_ComplexTruthMixin, AllOps):
+    @cute.jit
+    def reduce(self, acc, val, idx, valid):
+        flag = self._flag(val) if valid else self.acc(1.0)
+        return (acc[0] * flag,)
+
+
+class ComplexAnyOps(_ComplexTruthMixin, AnyOps):
+    @cute.jit
+    def reduce(self, acc, val, idx, valid):
+        flag = self._flag(val) if valid else self.acc(0.0)
+        return (max(acc[0], flag),)
+
+
+class ComplexCountNonzeroOps(_ComplexTruthMixin, CountNonzeroOps):
+    @cute.jit
+    def reduce(self, acc, val, idx, valid):
+        flag = self._flag(val) if valid else self.acc(0.0)
+        return (acc[0] + flag,)
+
+
 class AbsMaxOps:
     # acc = (max|x|,). p=inf norm. Validates vs vector_norm(x, ord=inf, dim=-1).
     nfields = 1
@@ -581,6 +807,32 @@ class AbsMinOps:
         return acc[0]
 
 
+class ComplexAbsMaxOps(AbsMaxOps):
+    complex_input = True
+
+    @cute.jit
+    def leaf(self, val, idx):
+        return (_complex_abs(self.acc, val),)
+
+    @cute.jit
+    def reduce(self, acc, val, idx, valid):
+        out = max(acc[0], _complex_abs(self.acc, val))
+        return (out if valid else acc[0],)
+
+
+class ComplexAbsMinOps(AbsMinOps):
+    complex_input = True
+
+    @cute.jit
+    def leaf(self, val, idx):
+        return (_complex_abs(self.acc, val),)
+
+    @cute.jit
+    def reduce(self, acc, val, idx, valid):
+        out = min(acc[0], _complex_abs(self.acc, val))
+        return (out if valid else acc[0],)
+
+
 class ArgMinOps:
     # acc = (value, index). NaN wins, then smaller value, with lower-index tie-breaking.
     nfields = 2
@@ -589,13 +841,18 @@ class ArgMinOps:
         True  # index dtype parametric (Int32 default / Int64 huge-N); see ArgMaxOps
     )
 
-    def __init__(self, acc=Float32, idx=Int32):
+    def __init__(self, acc=Float32, idx=Int32, canonical_bool=False):
         self.acc = acc
         self.idx = idx
+        self.canonical_bool = bool(canonical_bool)
         self.fdtypes = (acc, idx)
 
     def init(self):
         return (_pos_id(self.acc), _idx_sentinel(self.idx))
+
+    @cute.jit
+    def _value(self, val):
+        return self.acc(val != 0) if const_expr(self.canonical_bool) else self.acc(val)
 
     @cute.jit
     def _pick(self, bv, bi, cv, ci):
@@ -612,11 +869,11 @@ class ArgMinOps:
 
     @cute.jit
     def leaf(self, val, idx):
-        return (self.acc(val), self.idx(idx))
+        return (self._value(val), self.idx(idx))
 
     @cute.jit
     def reduce(self, acc, val, idx, valid):
-        nv, ni = self._pick(acc[0], acc[1], val, self.idx(idx))
+        nv, ni = self._pick(acc[0], acc[1], self._value(val), self.idx(idx))
         out_v = nv if valid else acc[0]
         out_i = ni if valid else acc[1]
         return (out_v, out_i)
@@ -789,6 +1046,15 @@ class VarMeanOps(WelfordOps):
         var = m2 / _welford_denom(self.acc, nf, self.correction)
         result = cute.math.sqrt(var) if const_expr(self.take_sqrt) else var
         return (result, mean)
+
+
+class ComplexVarMeanOps(ComplexWelfordOps):
+    nouts = 2
+    output_widths = (1, 2)
+
+    @cute.jit
+    def project(self, acc, n):
+        return (self._variance(acc), (acc[0], acc[1]))
 
 
 class MaxDimOps(ArgMaxOps):

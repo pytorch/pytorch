@@ -139,6 +139,24 @@ class TileMap:
 
 
 @cute.jit
+def _load_reduction_value(trait, mX, off, complex_input: cutlass.Constexpr):
+    if const_expr(complex_input):
+        base = off * 2
+        return (trait.acc(mX[base]), trait.acc(mX[base + 1]))
+    return trait.acc(mX[off])
+
+
+@cute.jit
+def _store_reduction_value(mOut, index, value, width: cutlass.Constexpr):
+    if const_expr(width == 1):
+        mOut[index] = mOut.element_type(value)
+    else:
+        index = index * 2
+        mOut[index] = mOut.element_type(value[0])
+        mOut[index + 1] = mOut.element_type(value[1])
+
+
+@cute.jit
 def fold_decoded(
     trait,
     mX,
@@ -153,13 +171,14 @@ def fold_decoded(
     chunk_base,
     gidx: cutlass.Constexpr = "r",
     native_div: cutlass.Constexpr = False,
+    complex_input: cutlass.Constexpr = False,
 ):
     """Grid-stride one output using mixed-radix addressing.
 
     Runtime decodes cover arbitrary layouts; threads_per_block threads cooperate and gidx selects
     the index reported to traits.
     """
-    reduce_fn, acc_dt = trait.reduce, trait.acc
+    reduce_fn = trait.reduce
     acc = trait.init()
     n_full = rb // threads_per_block
     base_r = tidx
@@ -168,11 +187,11 @@ def fold_decoded(
         if const_expr(gidx == "flat"):
             acc = reduce_fn(
                 acc,
-                acc_dt(
-                    mX[
-                        obase
-                        + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
-                    ]
+                _load_reduction_value(
+                    trait,
+                    mX,
+                    obase + _decode_offset(base_r, rdivs, rstrides, npairs, native_div),
+                    complex_input,
                 ),
                 Int32(
                     obase + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
@@ -182,11 +201,11 @@ def fold_decoded(
         elif const_expr(gidx == "chunk"):
             acc = reduce_fn(
                 acc,
-                acc_dt(
-                    mX[
-                        obase
-                        + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
-                    ]
+                _load_reduction_value(
+                    trait,
+                    mX,
+                    obase + _decode_offset(base_r, rdivs, rstrides, npairs, native_div),
+                    complex_input,
                 ),
                 chunk_base + base_r,
                 True,
@@ -194,11 +213,11 @@ def fold_decoded(
         else:
             acc = reduce_fn(
                 acc,
-                acc_dt(
-                    mX[
-                        obase
-                        + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
-                    ]
+                _load_reduction_value(
+                    trait,
+                    mX,
+                    obase + _decode_offset(base_r, rdivs, rstrides, npairs, native_div),
+                    complex_input,
                 ),
                 base_r,
                 True,
@@ -208,7 +227,7 @@ def fold_decoded(
     valid = base_r < rb
     off = obase + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
     off_s = off if valid else in_base
-    val = acc_dt(mX[off_s])
+    val = _load_reduction_value(trait, mX, off_s, complex_input)
     if const_expr(gidx == "flat"):
         return reduce_fn(acc, val, Int32(off_s), valid)
     if const_expr(gidx == "chunk"):
@@ -234,7 +253,7 @@ def fold_decoded_uniform_tree(
     for load in cutlass.range_constexpr(nloads):
         r = tidx + Int32(const_expr(load * threads_per_block))
         carry = trait.leaf(
-            trait.acc(mX[obase + Int64(r) * stride]),
+            _load_reduction_value(trait, mX, obase + Int64(r) * stride, False),
             r,
         )
         width = 1
@@ -251,7 +270,7 @@ def fold_decoded_uniform_tree(
         valid = tidx < Int32(remainder)
         safe = r if valid else Int32(0)
         leaf = trait.leaf(
-            trait.acc(mX[obase + Int64(safe) * stride]),
+            _load_reduction_value(trait, mX, obase + Int64(safe) * stride, False),
             safe,
         )
         ident = trait.init()
@@ -787,6 +806,7 @@ class TileReduce:
             or wide_gidx
             or wide_red
             or gidx_from != "r"
+            or getattr(trait, "complex_input", False)
             or not hasattr(trait, "combine_equal")
             or general_tree_count < threads_per_block
         ):
@@ -798,10 +818,11 @@ class TileReduce:
                 axis != "col"
                 or combine
                 or vec != 1
+                or getattr(trait, "complex_input", False)
                 or not hasattr(trait, "combine_equal")
             )
         ):
-            raise ValueError("column groups need scalar Welford columns")
+            raise ValueError("column groups need scalar real Welford columns")
         if ragged_vector and (
             axis != "row"
             or order != "linear"
@@ -810,8 +831,9 @@ class TileReduce:
             or vec & (vec - 1)
             or use_tma
             or combine
+            or getattr(trait, "complex_input", False)
         ):
-            raise ValueError("ragged vectors require a linear row reduction")
+            raise ValueError("ragged vectors require a real linear row reduction")
         if order == "inner_tree":
             if axis not in ("row", "general") or itree is None:
                 raise ValueError(
@@ -875,6 +897,18 @@ class TileReduce:
             # caller-set use_tma can bypass tma_ok.
             raise ValueError(f"TMA staging needs a power-of-two row length, got {N=}")
         self.trait = trait
+        self.complex_input = getattr(trait, "complex_input", False)
+        self.output_widths = (
+            tuple(getattr(trait, "output_widths", (1,) * nouts))
+            if final
+            else (1,) * nouts
+        )
+        if len(self.output_widths) != nouts or any(
+            width not in (1, 2) for width in self.output_widths
+        ):
+            raise ValueError(
+                f"output widths must contain one 1 or 2 per output, got {self.output_widths}"
+            )
         self.dtype = dtype
         self.axis = axis
         self.N = N
@@ -965,6 +999,9 @@ class TileReduce:
             self.batched_col,
             self.pc,
             self.trait.nfields,
+            self.complex_input,
+            self.output_widths,
+            getattr(self.trait, "canonical_bool", False),
             self.N if self.use_tma or self.ragged_vector else 0,
             self.npairs_red,
             self.npairs_kept,
@@ -1574,17 +1611,14 @@ class TileReduce:
             gy = Int32(1)
         elif const_expr(self.axis == "general"):
             if const_expr(self.wide_output):
-                gx, gy = q, npar
+                # Host geometry splits output blocks over CUDA's signed 32-bit grid x.
+                gx = q
+                gy = npar
             else:
-                gx = mOuts[0].shape[0]
+                gx = mOuts[0].shape[0] // const_expr(self.output_widths[0])
                 gy = Int32(1)
         elif const_expr(self.axis == "row"):
-            # Split inner-tree writes (row, batch) partials, so count outputs, not input rows.
-            nout = (
-                mOuts[0].shape[0]
-                if const_expr(self.order == "inner_tree")
-                else mIns[0].shape[0]
-            )
+            nout = mIns[0].shape[0]
             gx = cute.ceil_div(nout, const_expr(self.rows_per_block))
             gy = Int32(1)
         else:
@@ -1692,7 +1726,7 @@ class TileReduce:
             elif const_expr(self.itree.shape == "combine" and self.itree.combine_tile):
                 raw = Int32(bx) * const_expr(self.itree.rows_per_block) + Int32(tx)
                 alive = (Int32(tx) < const_expr(self.itree.rows_per_block)) & (
-                    raw < Int32(mOuts[0].shape[0])
+                    raw < Int32(mOuts[0].shape[0] // const_expr(self.output_widths[0]))
                 )
             elif const_expr(wpr == 0):
                 raw = Int32(bx) * const_expr(self.threads_per_block) + Int32(tx)
@@ -1709,7 +1743,9 @@ class TileReduce:
             )
             lane = Int32(tx)
             alive = (
-                raw < Int64(mOuts[0].shape[0]) if const_expr(self.wide_output) else True
+                raw < Int64(mOuts[0].shape[0] // const_expr(self.output_widths[0]))
+                if const_expr(self.wide_output)
+                else True
             )
         elif const_expr(self.axis == "row"):
             raw = Int32(bx) * const_expr(self.rows_per_block) + Int32(
@@ -1869,6 +1905,7 @@ class TileReduce:
                         chunk_base,
                         const_expr(self.gidx_from),
                         const_expr(self.wide_count or self.wide_red),
+                        const_expr(self.complex_input),
                     ),
                 )
             accs = (merge_lanes(trait, accs[0], const_expr(self.threads_per_row)),)
@@ -1980,11 +2017,19 @@ class TileReduce:
             if lane == 0 and alive:
                 for s in cutlass.range_constexpr(self.nslots):
                     if const_expr(self.nouts == 1):
-                        mOuts[0][out_base + Int32(s)] = mOuts[0].element_type(res[s])
+                        _store_reduction_value(
+                            mOuts[0],
+                            out_base + Int32(s),
+                            res[s],
+                            const_expr(self.output_widths[0]),
+                        )
                     else:
                         for k in cutlass.range_constexpr(self.nouts):
-                            mOuts[k][out_base + Int32(s)] = mOuts[k].element_type(
-                                res[s][k]
+                            _store_reduction_value(
+                                mOuts[k],
+                                out_base + Int32(s),
+                                res[s][k],
+                                const_expr(self.output_widths[k]),
                             )
         else:
             # Emit raw per-field partials for stage 2.
