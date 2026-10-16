@@ -222,8 +222,9 @@ def fully_shard(
               ``fully_shard``.
             - :class:`Shard`: Shard the parameter on the specified dimension
               using the mesh passed to ``fully_shard``.
-            - :class:`ShardPlacementResult`: Specify both the shard placement
-              and a custom :class:`FSDPMeshInfo`. This allows different
+            - ``ShardPlacementResult``: Specify both the shard placement
+              (``placement``) and a custom ``FSDPMeshInfo`` (``mesh_info``).
+              Both are currently private types. This allows different
               parameters to be sharded across different process groups, enabling
               use cases like Mixture of Experts where expert params use a
               different mesh than regular params.
