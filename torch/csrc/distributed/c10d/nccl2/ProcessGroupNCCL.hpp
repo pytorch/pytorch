@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -30,6 +31,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <c10/core/GeneratorImpl.h>
 #include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime.h>
 #include <nccl.h>
@@ -240,8 +242,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 #endif
   }
   bool supportsSplitting() const override {
-    return true;
+    // A lazy_init communicator is created by every member on the first
+    // operation, so ranks agree once it has started.
+    return !options_c10d_->lazy_init ||
+        init_state_ != InitializationState::UNINITIALIZED;
   }
+  bool isInitialized() override;
   bool supportsShrinking() const override {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
     return true;
@@ -294,12 +300,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::unordered_map<std::string, uint64_t> getMemoryStats() override;
 
   // Fault tolerance / reconfigure API (see Backend.hpp). The handle encodes
-  // "nccl2:<rank>:<uuid>:<store host:port>"; reconfigure() tears down the
-  // current communicator generation (if any) and bootstraps a fresh ncclComm
-  // over the surviving/new members. Implemented in
+  // "nccl2:<rank>:<uuid>:<instance id>:<store host:port>"; reconfigure() tears
+  // down the current communicator generation (if any) and bootstraps a fresh
+  // ncclComm over the surviving/new members. Implemented in
   // ReconfigureNCCL.cpp.
   bool supportsReconfigure() const override {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0) && !defined(USE_ROCM)
+#ifdef NCCL_HAS_COMM_REVOKE
     return true;
 #else
     return false;
@@ -323,23 +329,40 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Unlike the stock backend, plain ncclCommRegister of every private-pool
   // segment already happens unconditionally through NCCLCachingAllocatorHook,
   // so this only has to cover the segments the hook could not reach and -- for
-  // symm -- perform the collective NCCL_WIN_COLL_SYMMETRIC upgrade that the
-  // hook must not do from an allocator thread. Collective when symm is set:
-  // every rank must call it with the same pool contents, in the same order.
+  // symm -- upgrade the pool's existing segments to collective
+  // NCCL_WIN_COLL_SYMMETRIC windows. Segments the pool allocates afterwards are
+  // upgraded by register_address. Collective when symm is set: every rank must
+  // call it with the same pool contents, in the same order.
   void registerMemPool(at::cuda::MemPool* pool, bool symm = false);
   void deregisterMemPool(at::cuda::MemPool* pool);
 
   // Caching-allocator segment registration (called by
-  // NCCLCachingAllocatorHook, potentially from allocator threads).
-  void register_address(void* addr, size_t len);
+  // NCCLCachingAllocatorHook, potentially from allocator threads). `pool` is
+  // the segment's owning pool, passed only for a fresh SEGMENT_ALLOC: if it was
+  // registered with symm=True the segment is also window-registered, which is
+  // collective, so every rank must allocate the pool's segments in the same
+  // order (the same contract as the stock backend).
+  void register_address(
+      void* addr,
+      size_t len,
+      const std::optional<c10::MempoolId_t>& pool = std::nullopt);
   // from_allocator_hook only controls diagnostics: tearing a symmetric window
   // down from the hook is the uncollective path worth warning about.
   void deregister_address(void* addr, bool from_allocator_hook = false);
   // Returns {window handle, byte offset of ptr within the segment}, or
   // {nullptr, 0} if ptr is not inside a window-registered segment.
   std::pair<ncclWindow_t, size_t> lookupSegmentWindow(const void* ptr);
+#if defined(USE_ROCM)
+  // Returns true when ptr exactly matches an ncclMemAlloc segment base on this
+  // process group's device and len does not exceed the allocation size.
+  bool isNcclAllocatorSegment(const void* ptr, size_t len) const;
+#endif
   // Registers the segment containing ptr as a NCCL_WIN_COLL_SYMMETRIC window
   // if it is not one already. Collective: all ranks must call it together.
+  // On ROCm the segment must be a live ncclMemAlloc/getMemAllocator range:
+  // an ineligible segment returns ncclInvalidArgument (caller should throw),
+  // while ncclInvalidUsage stays reserved for a missing symmetric transport
+  // (caller keeps the plain registration and warns).
   ncclResult_t ensureSegmentWindow(const void* ptr);
 
   bool supportsAbortHooks() const override {
@@ -371,21 +394,16 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Underlying host ncclComm_t as an opaque integer pointer.
   int64_t getCommPtr() const;
   bool collectivesTimingEnabled() const {
-    return timing_enabled_.load();
+    return event_pool_->timingEnabled();
+  }
+  const std::shared_ptr<NCCLEventPool>& getEventPool() const {
+    return event_pool_;
   }
 
   friend class WorkNCCL;
   friend class WindowNCCL;
 
  protected:
-  // Events are pooled per timing mode: an event created with timing disabled
-  // cannot serve a work that needs elapsed_time(), so `timing_enabled` must
-  // describe the work the event is taken for / returned from.
-  [[nodiscard]] std::unique_ptr<at::cuda::CUDAEvent> getEvent(
-      bool timing_enabled);
-  void returnEvent(
-      std::unique_ptr<at::cuda::CUDAEvent> event,
-      bool timing_enabled);
   void waitForNcclOperation(
       ncclResult_t status,
       std::chrono::milliseconds timeout,
@@ -421,6 +439,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::atomic<CommState> comm_state_{CommState::NORMAL};
   std::atomic<bool> revoked_{false};
+  // Serializes revokeNcclComm() with reconfigure()'s teardown, so abort() on
+  // another thread cannot still be inside commRevoke when the comm is aborted.
+  std::mutex revoke_mutex_;
 
   ncclDataType_t getNcclDataType(const at::Tensor& tensor);
   c10::intrusive_ptr<WorkNCCL> createWork(
@@ -509,49 +530,59 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const std::vector<BatchSendRecv::P2POp>& ops,
       bool async_op,
       std::chrono::milliseconds timeout);
+  MaterializedCollectiveConfig materializeConfig(
+      const OptionalCollectiveConfig& config);
   c10::intrusive_ptr<WorkNCCL> broadcastImpl(
       at::Tensor& tensor,
       int root,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> all_reduce(
       at::Tensor& tensor,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> reduceImpl(
       const at::Tensor& tensor,
       int root,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> all_gather(
       const std::vector<at::Tensor>& tensor_list,
       const at::Tensor& tensor,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> allGatherSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> reduce_scatter(
       at::Tensor& output,
       const std::vector<at::Tensor>& input_list,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> reduceScatterSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> allToAllSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> all_to_all_v_single(
       at::Tensor& output,
       const at::Tensor& input,
@@ -578,7 +609,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const at::Tensor& input_tensor,
       int root,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      bool contiguous_output = false,
+      const MaterializedCollectiveConfig& config = {});
 
   // Resolve a c10d per-op timeout (kUnsetTimeout -> communicator default).
   std::chrono::milliseconds operationTimeout(
@@ -590,9 +623,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       ncclComm_t comm,
       const at::Tensor& tensor);
   void timeoutWatchdog() noexcept;
-  void checkInitialized() const;
+  // Creates a lazy_init communicator and checks that it is ready.
+  void checkInitialized();
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
+  void drainRetiredGraphWork();
   std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
   applyEphemeralTimeout(std::chrono::milliseconds timeout);
   void releaseEphemeralTimeout(std::chrono::milliseconds timeout);
@@ -629,7 +664,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // NOTE: the rank is stored in the inherited c10d::Backend::rank_ (set in the
   // ctor and refreshed from NCCL in initNcclResources). The ported engine code
   // reads/writes `rank_` directly, which resolves to that protected member.
-  size_t max_event_pool_size_{};
   std::optional<at::cuda::CUDAStream> internal_stream_;
   std::optional<at::cuda::CUDAEvent> dependency_event_;
   at::DataPtr barrier_buffer_;
@@ -647,12 +681,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::shared_ptr<NcclApi> nccl_api_;
   std::unique_ptr<at::cuda::MemPool> memPool_;
 
-  std::queue<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
-  std::mutex event_pool_mutex_;
-  const bool event_cache_enabled_;
-  // Set by enableCollectivesTiming(); mutated under event_pool_mutex_ so the
-  // pool never holds events whose timing mode disagrees with it.
-  std::atomic<bool> timing_enabled_{false};
+  std::shared_ptr<NCCLEventPool> event_pool_;
 
   WorkNCCLQueue workq_;
 
@@ -677,6 +706,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // -1 until the first reconfigure(). Baked into the reconfigure handle so
   // peers can detect membership of the same generation.
   int64_t reconfigure_uuid_{-1};
+  // Keeps handles unique when rank and uuid collide, e.g. a fresh process and
+  // a rank that lost its communicator both advertising uuid -1.
+  const uint64_t reconfigure_instance_id_{
+      c10::detail::getNonDeterministicRandom()};
 
   // Registration handle for a caching-allocator segment (and its symmetric
   // window, once ensureSegmentWindow upgraded it). Sorted by base address so
@@ -686,16 +719,23 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     ncclWindow_t winHandle{nullptr};
     size_t len{0};
   };
-  std::map<void*, RegistrationHandle, std::less<>> memoryRegistrationHandles_;
+  using RegistrationMap = std::map<void*, RegistrationHandle, std::less<>>;
+  RegistrationMap memoryRegistrationHandles_;
+  // Caller must hold memory_registration_mutex_. Returns end() when ptr is not
+  // inside a registered segment.
+  RegistrationMap::iterator findContainingRegistrationLocked(const void* ptr);
+  // ensureSegmentWindow for a known registration; caller must hold
+  // memory_registration_mutex_.
+  ncclResult_t ensureSymmetricWindow(RegistrationMap::iterator it);
   // Guards memoryRegistrationHandles_ and registeredMemPools_:
   // register/deregister_address run on allocator threads while window ops look
   // segments up on the main thread.
   std::mutex memory_registration_mutex_;
-  // MemPools passed to registerMemPool, so deregisterMemPool can reject a pool
-  // that was never registered (stock does the same via its global
-  // ncclCommMemPoolMap). The symm mode is not tracked: a segment carries its
-  // own window handle, so teardown does not need to be told which mode to use.
-  std::set<c10::cuda::MempoolId_t> registeredMemPools_;
+  // MemPools passed to registerMemPool -> whether any registration asked for
+  // symm. deregisterMemPool uses it to reject a pool that was never registered
+  // (stock does the same via its global ncclCommMemPoolMap); register_address
+  // uses the symm flag to window-register segments the pool allocates later.
+  std::map<c10::cuda::MempoolId_t, bool> registeredMemPools_;
   // Caller must hold memory_registration_mutex_ and have checked that `addr`
   // is not already registered.
   void registerAddressLocked(void* addr, size_t len);
@@ -719,10 +759,16 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::optional<BatchSendRecv> coalescing_batch_;
   c10::intrusive_ptr<WorkNCCL> coalesced_work_;
 
+  // Configs issued between startTimeEstimate() and endTimeEstimate().
+  bool time_estimate_active_ = false;
+  std::vector<std::shared_ptr<const void>> time_estimate_configs_;
+
   std::unordered_map<
       unsigned long long,
       std::vector<std::shared_ptr<WorkNCCL::State>>>
       graph_capture_work_refs_;
+  std::list<std::vector<std::shared_ptr<WorkNCCL::State>>>
+      retired_graph_work_refs_;
   std::mutex graph_capture_work_mutex_;
 
   struct GraphCleanupData {

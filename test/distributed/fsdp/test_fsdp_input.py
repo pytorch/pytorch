@@ -40,7 +40,7 @@ class TestInput(FSDPTestContinuous):
     def world_size(self):
         return 1
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(1)
     @parametrize("input_cls", [subtest(dict, name="dict"), subtest(list, name="list")])
     def test_input_type(self, device, input_cls):
@@ -80,7 +80,7 @@ class TestInput(FSDPTestContinuous):
             optim.step()
             optim.zero_grad()
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(1)
     @parametrize("input_cls", [subtest(dict, name="dict"), subtest(list, name="list")])
     def test_input_identity_preserved(self, device, input_cls):

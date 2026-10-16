@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 
+#include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/record_function.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
@@ -30,12 +31,12 @@ std::shared_ptr<torch::ParamCommsDebugInfo> TracingGuard::getDebugInfo(
     const std::vector<int64_t>& input_split_sizes,
     const std::vector<int64_t>& output_split_sizes) {
   int64_t input_total_numel = 0;
-  for (const auto r : c10::irange(input_tensor_list.size())) {
-    input_total_numel += input_tensor_list[r].numel();
+  for (const auto& input_tensor_list_elem : input_tensor_list) {
+    input_total_numel += input_tensor_list_elem.numel();
   }
   int64_t output_total_numel = 0;
-  for (const auto r : c10::irange(output_tensor_list.size())) {
-    output_total_numel += output_tensor_list[r].numel();
+  for (const auto& output_tensor_list_elem : output_tensor_list) {
+    output_total_numel += output_tensor_list_elem.numel();
   }
 
   // If both input and output tensor lists are empty, use a default data type.
@@ -69,14 +70,9 @@ void TracingGuard::initializeTracingCommon(
     uint64_t sequence_number,
     const std::vector<at::Tensor>& input_tensor_list,
     const std::vector<at::Tensor>& output_tensor_list) {
-  std::vector<int64_t> in_split_sizes;
-  for (const auto r : c10::irange(input_tensor_list.size())) {
-    in_split_sizes.push_back(input_tensor_list[r].numel());
-  }
-  std::vector<int64_t> out_split_sizes;
-  for (const auto r : c10::irange(output_tensor_list.size())) {
-    out_split_sizes.push_back(output_tensor_list[r].numel());
-  }
+  auto numel = [](const at::Tensor& t) { return t.numel(); };
+  std::vector<int64_t> in_split_sizes = c10::fmap(input_tensor_list, numel);
+  std::vector<int64_t> out_split_sizes = c10::fmap(output_tensor_list, numel);
 
   auto debug_info = getDebugInfo(
       comm_name,

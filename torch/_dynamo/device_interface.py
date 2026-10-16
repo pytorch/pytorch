@@ -154,6 +154,19 @@ class DeviceInterface:
     def get_device_properties(cls, device: torch.types.Device = None) -> Any:
         return cls.Worker.get_device_properties(device)
 
+    @classmethod
+    def get_cache_system_info(cls) -> dict[str, object] | None:
+        """Return stable, JSON-serializable metadata for the code cache key.
+
+        Returning None opts out. An empty dict still contributes metadata.
+        Implementations should return only metadata that invalidates generated
+        or autotuned code when changed, without unnecessarily initializing hardware.
+        Only called when is_available() returns True. This hook is sampled through
+        the cached CacheBase.get_system() path, so interfaces must be registered
+        and available before its first use.
+        """
+        return None
+
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> Any:
         raise NotImplementedError
@@ -177,6 +190,39 @@ class DeviceInterface:
         """
         Returns True if the device has Triton support, False otherwise, even if
         the appropriate Triton backend is not available.
+        """
+        return False
+
+    @staticmethod
+    def is_gpu() -> bool:
+        """
+        Returns True if Inductor should treat this device as a GPU-class
+        accelerator (device guards, GPU codegen/fusion, cudagraph eligibility).
+        Defaults to False so unknown backends stay conservative until they opt in.
+        """
+        return False
+
+    @classmethod
+    def exposes_streams(cls) -> bool:
+        """
+        True when a subclass provides its own Stream. The base Stream is a
+        raising sentinel, so compare against it rather than None.
+
+        Overriding the Stream slot is the contract for stream support: it is
+        what opts a GPU-class device into stream guards (device_need_guard),
+        so stream-capable backends must override it. The override must be a
+        real, instantiable torch.Stream subclass: a placeholder that raises on
+        construction is still reported as stream-capable here and fails later,
+        at guard time.
+        """
+        return cls.Stream is not DeviceInterface.Stream
+
+    @staticmethod
+    def allow_tf32() -> bool:
+        """Whether the backend permits MM templates to set ALLOW_TF32.
+
+        CUDA applies an additional shape threshold at the call site. bmm,
+        tl.dot input precision, and device TFLOPS do not use this method.
         """
         return False
 
@@ -218,6 +264,63 @@ class DeviceInterface:
                 "This device is not capable of supporting Triton"
             )
 
+    @staticmethod
+    def get_fp32_attention_precision() -> str:
+        """Device-specific fp32 attention precision policy.
+
+        Returns "none" by default, meaning no device-specific policy applies
+        and the caller should use its generic fallback. Backends with a real
+        policy (e.g. CUDA, MTIA) override this to return "ieee", "tf32",
+        or "bfx9".
+        """
+        return "none"
+
+    @staticmethod
+    def is_fp32_attention_fusion_safe(dtype: torch.dtype) -> bool:
+        """Queried by inductor's SDPA pattern matcher (_sfdp_params_check) to
+        decide whether fusing an fp32 attention pattern is safe. True fuses;
+        False keeps the unfused code. Base default allows fusion everywhere;
+        CudaInterface gates it on the tf32 precision knob."""
+        return True
+
+    @staticmethod
+    def should_warn_tf32_disabled() -> bool:
+        """Queried right after is_fp32_attention_fusion_safe returns False, to
+        decide whether to emit the tf32-disabled perf hint. True emits the
+        warning. Base default never warns; CudaInterface warns on CUDA SM >=
+        8.0 unless the bfx9 precision mode is selected."""
+        return False
+
+    @staticmethod
+    def is_fp32_softmax_attention_fusion_safe() -> bool:
+        """Queried by _sfdp_extra_check for the fp32-upcast-softmax SDPA
+        patterns (25-27): whether fusing them is numerically safe on this
+        device. True fuses; False keeps the unfused code. Base default allows
+        it; CudaInterface rejects CUDA (and ROCm, which shares CudaInterface)
+        because the fused kernel's numerics fail the tight checks those
+        patterns require."""
+        return True
+
+    @staticmethod
+    def keep_attention_on_math_path() -> bool:
+        """Queried by _sfdp_replacement_16 (and, via _sfdp_extra_check's
+        math_path_only flag, by pattern 16's match gate) to keep Bert-style
+        patterns on the explicit matmul/div/add/softmax/dropout math path
+        instead of fused SDPA, whose scaling/dropout numerics fail tight
+        checks for some patterns. True stays on the math path (and rejects the
+        pattern-16 fusion match); False uses fused SDPA. Base default uses
+        fused SDPA; CudaInterface stays on the math path on CUDA only."""
+        return False
+
+    @staticmethod
+    def needs_contiguous_attn_mask() -> bool:
+        """Queried by _sfdp_replacement_25/26 before passing attn_mask to fused
+        SDPA: whether the device's SDPA kernel requires a contiguous attn_mask.
+        True makes attn_mask contiguous first; False passes it through as-is.
+        Base default passes it through; XpuInterface forces contiguity because
+        the XPU fused SDPA kernel does not accept a non-contiguous mask."""
+        return False
+
 
 class DeviceGuard:
     """
@@ -253,6 +356,10 @@ class CudaInterface(DeviceInterface):
     # make sure Event and Stream are implemented and inherited from the torch.Event and torch.Stream
     Event = torch.cuda.Event  # type: ignore[assignment]
     Stream = torch.cuda.Stream  # type: ignore[assignment]
+
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -329,6 +436,10 @@ class CudaInterface(DeviceInterface):
         )
 
     @staticmethod
+    def allow_tf32() -> bool:
+        return torch.backends.cuda.matmul.fp32_precision == "tf32"
+
+    @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
         from torch._dynamo.exc import TritonUnavailableError
         from torch._inductor.exc import GPUTooOldForTriton
@@ -345,6 +456,33 @@ class CudaInterface(DeviceInterface):
         elif "nvidia" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'nvidia' backend")
 
+    @staticmethod
+    def get_fp32_attention_precision() -> str:
+        return torch.backends.cuda.matmul.fp32_precision
+
+    @staticmethod
+    def is_fp32_attention_fusion_safe(dtype: torch.dtype) -> bool:
+        return (
+            dtype != torch.float32
+            or CudaInterface.get_fp32_attention_precision() == "tf32"
+        )
+
+    @staticmethod
+    def should_warn_tf32_disabled() -> bool:
+        if CudaInterface.get_fp32_attention_precision() == "bfx9":
+            return False
+        return torch.cuda.is_available() and torch.cuda.is_tf32_supported()
+
+    @staticmethod
+    def is_fp32_softmax_attention_fusion_safe() -> bool:
+        return False
+
+    @staticmethod
+    def keep_attention_on_math_path() -> bool:
+        # Keep Bert-style patterns on their original math path; generic SDPA can
+        # pick fused backends whose scaling/dropout numerics fail tight checks.
+        return torch.version.hip is None
+
 
 get_mtia_stream: Callable[[int], int] | None
 if torch.mtia._is_compiled():
@@ -357,6 +495,10 @@ class MtiaInterface(DeviceInterface):
     device = torch.mtia.device  # type: ignore[assignment]
     Event = torch.mtia.Event  # type: ignore[assignment]
     Stream = torch.mtia.Stream  # type: ignore[assignment]
+
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -395,7 +537,19 @@ class MtiaInterface(DeviceInterface):
 
     current_device = staticmethod(torch.mtia.current_device)
     set_device = staticmethod(torch.mtia.set_device)  # type: ignore[assignment]
-    device_count = staticmethod(torch.mtia.device_count)
+
+    # Unlike torch.cuda/torch.xpu, torch.mtia.device_count() has no
+    # _is_compiled() guard: it goes straight to at::detail::getMTIAHooks(),
+    # which latches a process-lifetime static on first call and would
+    # permanently shadow an MTIAHooks impl that registers later (e.g. a
+    # JIT-built extension loaded in a test's setUpClass). Report 0 until the
+    # registry has one, so no registry-driven consumer can latch the fallback.
+    @staticmethod
+    def device_count() -> int:
+        if not torch.mtia._is_compiled():
+            return 0
+        return torch.mtia.device_count()
+
     stream = staticmethod(torch.mtia.stream)  # type: ignore[assignment]
     current_stream = staticmethod(torch.mtia.current_stream)
     set_stream = staticmethod(torch.mtia.set_stream)  # type: ignore[assignment]
@@ -452,6 +606,14 @@ class XpuInterface(DeviceInterface):
     device = torch.xpu.device  # type: ignore[assignment]
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
+
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+    @staticmethod
+    def needs_contiguous_attn_mask() -> bool:
+        return True
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -524,6 +686,10 @@ class XpuInterface(DeviceInterface):
     @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
         return True
+
+    @staticmethod
+    def allow_tf32() -> bool:
+        return bool(torch.backends.mkldnn.allow_tf32)
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
@@ -602,6 +768,10 @@ class CpuInterface(DeviceInterface):
 
 
 class MpsInterface(DeviceInterface):
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
     @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
         return True
@@ -692,6 +862,18 @@ _device_initialized = False
 def register_interface_for_device(
     device: str | torch.device, device_interface: type[DeviceInterface]
 ) -> None:
+    """Register a DeviceInterface for a device type.
+
+    Registration must happen before ``torch._inductor.utils`` is imported:
+    the registry-derived GPU classification (GPU_TYPES / is_gpu() /
+    get_gpu_type()) is scanned exactly once, at that import. In-tree backends
+    satisfy this by construction (init_device_reg() runs inside the scan
+    itself). Out-of-tree backends register at package import, either
+    autoloaded during ``import torch`` (TORCH_DEVICE_BACKEND_AUTOLOAD) or via
+    an explicit ``import torch_npu``-style import, both of which precede any
+    import of inductor. Registering later is not supported and will not be
+    reflected in the snapshot.
+    """
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
@@ -719,17 +901,8 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
 def init_device_reg() -> None:
     global _device_initialized
     register_interface_for_device("cuda", CudaInterface)
-    for i in range(torch.cuda.device_count()):
-        register_interface_for_device(f"cuda:{i}", CudaInterface)
-
     register_interface_for_device("xpu", XpuInterface)
-    for i in range(torch.xpu.device_count()):
-        register_interface_for_device(f"xpu:{i}", XpuInterface)
-
     register_interface_for_device("mtia", MtiaInterface)
-    for i in range(torch.mtia.device_count()):
-        register_interface_for_device(f"mtia:{i}", MtiaInterface)
-
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
     register_interface_for_device("tpu", TpuInterface)

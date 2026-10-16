@@ -217,8 +217,10 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
-    if not index.has(sympy.Rel):
-        index = sympy.simplify(index)
+    # Avoid full-expression sympy.simplify here.  This helper only needs to
+    # expose lane-uniform FloorDiv/ModularIndexing terms for later stride
+    # analysis, and sympy's general simplifier can be superlinear on the large
+    # dynamic-shape index expressions produced by real models.
     if index != original_index:
         return simplify_index_in_vec_range(index, var, vec_length)
 
@@ -1579,15 +1581,22 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
     divisor = sympy.Wild("divisor", integer=True)
     mod1 = sympy.Wild("modulus", integer=True)
     mod2 = sympy.Wild("modulus2", integer=True)
-    for term1 in expr.args:
+    # sympy matching is slow, and a term can only match a pattern containing
+    # ModularIndexing or FloorDiv if it contains that function. Substituting a
+    # match can simplify the function away (FloorDiv(64 * x, 64) is x), in
+    # which case every term is still tried.
+    modular_terms = [term for term in expr.args if term.has(ModularIndexing)]
+    floordiv_terms = [term for term in expr.args if term.has(FloorDiv)]
+    for term1 in modular_terms:
         m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
         if m1:
-            for term2 in expr.args:
-                m2 = term2.match(
-                    m1[scale]
-                    * m1[mod1]
-                    * ModularIndexing(m1[base], m1[divisor] * m1[mod1], mod2)
-                )
+            pattern = (
+                m1[scale]
+                * m1[mod1]
+                * ModularIndexing(m1[base], m1[divisor] * m1[mod1], mod2)
+            )
+            for term2 in modular_terms if pattern.has(ModularIndexing) else expr.args:
+                m2 = term2.match(pattern)
                 if m2 and term1 != term2:
                     expr = join_dimensions(
                         expr
@@ -1597,13 +1606,12 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
                         * ModularIndexing(m1[base], m1[divisor], m1[mod1] * m2[mod2])
                     )
                     return expr
-    for term1 in expr.args:
+    for term1 in modular_terms:
         m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
         if m1:
-            for term2 in expr.args:
-                m2 = term2.match(
-                    m1[scale] * m1[mod1] * FloorDiv(m1[base], m1[divisor] * m1[mod1])
-                )
+            pattern = m1[scale] * m1[mod1] * FloorDiv(m1[base], m1[divisor] * m1[mod1])
+            for term2 in floordiv_terms if pattern.has(FloorDiv) else expr.args:
+                m2 = term2.match(pattern)
                 if m2 is not None:  # in case of success we get an empty dict here
                     expr = join_dimensions(
                         expr
