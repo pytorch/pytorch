@@ -10630,9 +10630,14 @@ class TestFlexGemmInterleavedDevice(FlexGemmTestCase):
             )
 
         a = self.makeTensor(self.M, self.K, device=device)
+        if out_dtype is torch.bool:
+            # Integer dot products make sign checks independent of reduction order.
+            a.sign_()
         # Change N after compilation; column-major B does not itself require aligned N.
         for n in (144, 136, 132):
             b = self.makeTensor(n, self.K, device=device).t()
+            if out_dtype is torch.bool:
+                b.sign_()
             if n not in valid_widths:
                 with self.assertRaisesRegex(InductorError, "16-byte aligned halves"):
                     fn(a, b)
@@ -10664,16 +10669,23 @@ class TestFlexGemmInterleavedDevice(FlexGemmTestCase):
 
     def test_mm_chunked_accumulator_aux_alignment(self, device):
         a = self.makeTensor(self.M, self.K, device=device)
-        b = self.makeTensor(264, self.K, device=device).t()
 
         def epilogue_fn(acc):
             gate, up = acc.float().chunk(2, dim=-1)
             return (F.silu(gate) * up).to(acc.dtype), acc
 
-        with self.assertRaisesRegex(
-            InductorError, "auxiliary requires 16-byte aligned halves"
-        ):
-            self.compileMm(epilogue_fn, a, b)
+        for n in (264, 272):
+            b = self.makeTensor(n, self.K, device=device).t()
+            if n == 264:
+                with self.assertRaisesRegex(
+                    InductorError, "auxiliary requires 16-byte aligned halves"
+                ):
+                    self.compileMm(epilogue_fn, a, b)
+                continue
+            actual, _ = self.compileMm(epilogue_fn, a, b)
+            self.assertMatchesEpilogue(
+                actual, epilogue_fn(a @ b), epilogue_fn(a.double() @ b.double()), self.K
+            )
 
     def test_mm_interleaved_capture_negative_select_index(self, device):
         a = self.makeTensor(self.M, self.K, device=device)
