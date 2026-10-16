@@ -125,26 +125,34 @@ int RocprofActivityApi::processActivities(
 
   d->mergeThreadBuffers();
 
+  std::vector<rocprofBase*> rows;
+  {
+    std::lock_guard<std::mutex> lock(d->rowsMutex_);
+    rows = d->rows_;
+  }
+
   // Process all external correlations pairs
   for (int it = RocLogger::CorrelationDomain::begin;
        it < RocLogger::CorrelationDomain::end;
        ++it) {
-    auto& externalCorrelations = d->externalCorrelations_[it];
+    std::vector<std::pair<uint64_t, uint64_t>> externalCorrelations;
+    {
+      std::lock_guard<std::mutex> lock(d->externalCorrelationsMutex_);
+      externalCorrelations.swap(d->externalCorrelations_[it]);
+    }
     for (auto& item : externalCorrelations) {
       correlationHandler(
           item.first,
           item.second,
           static_cast<RocLogger::CorrelationDomain>(it));
     }
-    std::lock_guard<std::mutex> lock(d->externalCorrelationsMutex_);
-    externalCorrelations.clear();
   }
 
   // Classify runtime-internal fill/copy kernels (dispatched to implement
   // hipMemset/hipMemcpy calls) as GPU memsets/memcpies.  Done here, after
   // the per-thread buffers are merged, so that every memset/memcpy runtime
   // row is visible to the correlation lookup.
-  detail::classifyRuntimeInternalDispatches(d->rows_);
+  detail::classifyRuntimeInternalDispatches(rows);
 
   // Async ops are in CLOCK_MONOTONIC rather than junk clock.
   // Convert these timestamps, poorly.
@@ -157,14 +165,14 @@ int RocprofActivityApi::processActivities(
       isLogged(ActivityType::GPU_MEMSET) ||
       isLogged(ActivityType::CONCURRENT_KERNEL)) {
     detail::backfillAsyncStreams(
-        d->rows_, [this](const rocprofAsyncRow& async) {
+        rows, [this](const rocprofAsyncRow& async) {
           return (isAsyncCopy(async) || isAsyncKernel(async)) &&
               detail::isAsyncRowLogged(async, activityMaskSnapshot_);
         });
   }
 
   // All Runtime API Calls
-  for (auto& item : d->rows_) {
+  for (auto& item : rows) {
     bool filtered = false;
     if (item->type != ROCTRACER_ACTIVITY_ASYNC &&
         !isLogged(ActivityType::CUDA_RUNTIME)) {
