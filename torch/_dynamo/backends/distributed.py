@@ -324,7 +324,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             has_tracing_context = torch._guards.TracingContext.try_get() is not None
             if has_tracing_context:
                 fakify_ctx = torch._guards.TracingContext.patch(fakify_first_call=True)
-           else:
+            else:
                 fakify_ctx = contextlib.nullcontext()
 
             from torch._dynamo.utils import counters
