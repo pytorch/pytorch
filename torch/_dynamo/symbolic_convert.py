@@ -6654,6 +6654,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def _load_global(self, inst: Instruction) -> None:
         name = inst.argval
         if name not in self.f_globals:
+            registered_module = _registered_module_for_globals(
+                self.f_globals.get("__name__"), self.f_globals
+            )
+            if (
+                registered_module is not None
+                and registered_module[1] in self.output.side_effects
+            ):
+                _, fglobals_vt, _ = self.get_globals_source_and_value(name)
+                if self.output.side_effects.has_pending_mutation_of_attr(
+                    fglobals_vt, name
+                ):
+                    self.push(self.output.side_effects.load_attr(fglobals_vt, name))
+                    return
+
             return self.load_builtin(inst)
 
         if self.output.global_scope is self.f_globals:
