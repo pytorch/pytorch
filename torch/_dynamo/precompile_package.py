@@ -187,7 +187,7 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
         # stance path (eval_frame._create_wrapped_callback, behind set_stance)
         # rebuilds a plain ConvertFrame with no package and is outside a capture
         # session's contract.
-        if self._package is None:
+        if self._inner_convert._package is None:
             return lambda backend: type(self)(
                 backend, self._hooks, recompile_limit=self._recompile_limit
             )
