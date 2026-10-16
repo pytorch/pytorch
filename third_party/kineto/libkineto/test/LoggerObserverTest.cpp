@@ -243,47 +243,21 @@ TEST(LoggerObserverTest, MacrosImmuneToGlogLogCollision) {
 #pragma pop_macro("LOG_IS_ON")
 #pragma pop_macro("LOG")
 
-// Regression test for the second arm of the fix: the macros must
-// continue to honor Logger::severityLevel(). suppressLibkinetoLogMessages()
-// in init.cpp raises the threshold to ERROR, which historically suppressed
-// STAGE output (STAGE=3 < ERROR=4) via LOG_IF. Since the macros no longer
-// expand through LOG_IF, the gating must be re-implemented in the macro
-// expansion itself.
-//
-// USDT (=5) is the highest severity value in the enum, so it is never
-// suppressed by setSeverityLevel(ERROR); to verify USDT is also gated we set
-// the threshold one step above USDT.
-TEST(LoggerObserverTest, UstMacrosRespectSeverityThreshold) {
+// Stage and USDT events must reach observers at any severity threshold,
+// including PyTorch's diagnostic suppression at ERROR.
+TEST(LoggerObserverTest, UstMacrosIgnoreSeverityThreshold) {
   auto observer = std::make_unique<CapturingObserver>();
   Logger::addLoggerObserver(observer.get());
 
   const int originalLevel = Logger::severityLevel();
 
-  // STAGE (3) < ERROR (4): UST_LOGGER_MARK_COMPLETED must be suppressed.
-  Logger::setSeverityLevel(LoggerOutputType::ERROR);
-  UST_LOGGER_MARK_COMPLETED("suppressed_stage");
-  auto md = observer->extractCollectorMetadata();
-  EXPECT_EQ(md[LoggerOutputType::STAGE].size(), 0u);
-
-  // USDT (5) is the highest severity; to suppress it the threshold must be
-  // higher than USDT itself.
   Logger::setSeverityLevel(LoggerOutputType::USDT + 1);
-  USDT_LOGGER_EMIT_MESSAGE("suppressed_usdt");
-  md = observer->extractCollectorMetadata();
-  EXPECT_EQ(md[LoggerOutputType::USDT].size(), 0u);
+  UST_LOGGER_MARK_COMPLETED("stage");
+  USDT_LOGGER_EMIT_MESSAGE("usdt");
 
-  // Lower the threshold and confirm the macros now emit messages.
-  Logger::setSeverityLevel(LoggerOutputType::VERBOSE);
-  UST_LOGGER_MARK_COMPLETED("emitted_stage");
-  USDT_LOGGER_EMIT_MESSAGE("emitted_usdt");
-
-  md = observer->extractCollectorMetadata();
-  ASSERT_EQ(md[LoggerOutputType::STAGE].size(), 1u);
-  EXPECT_NE(
-      md[LoggerOutputType::STAGE][0].find("emitted_stage"), std::string::npos);
-  ASSERT_EQ(md[LoggerOutputType::USDT].size(), 1u);
-  EXPECT_NE(
-      md[LoggerOutputType::USDT][0].find("emitted_usdt"), std::string::npos);
+  auto md = observer->extractCollectorMetadata();
+  EXPECT_EQ(md[LoggerOutputType::STAGE].size(), 1u);
+  EXPECT_EQ(md[LoggerOutputType::USDT].size(), 1u);
 
   Logger::setSeverityLevel(originalLevel);
   Logger::removeLoggerObserver(observer.get());

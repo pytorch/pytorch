@@ -1399,7 +1399,7 @@ static PyObject* aot_runtime_enter(PyObject* self, PyObject* training) {
     aot_set_state(self, prior_view_replay, prior_grad_mode);
     throw;
   }
-  return PyLong_FromLong(prior_view_replay | (prior_grad_mode << 1));
+  return THPUtils_packInt32(prior_view_replay | (prior_grad_mode << 1));
   END_HANDLE_TH_ERRORS
 }
 
