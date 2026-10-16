@@ -429,6 +429,129 @@ class _LearnableFakeQuantizeTestMixin:
 
 
 class TestFakeQuantizeOps(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_fq_serializable_per_tensor(self):
+        observer = default_observer
+        quant_min = 0
+        quant_max = 127
+        for FakeQuantizeClass in [FakeQuantize, _LearnableFakeQuantize]:
+            fq_module = FakeQuantizeClass(observer, quant_min, quant_max)
+            X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
+            y_ref = fq_module(X)
+            state_dict = fq_module.state_dict()
+            self.assertEqual(state_dict['scale'], 0.094488)
+            self.assertEqual(state_dict['zero_point'], 53)
+            b = io.BytesIO()
+            torch.save(state_dict, b)
+            for weights_only in [True, False]:
+                b.seek(0)
+                loaded_dict = torch.load(b, weights_only=weights_only)
+                loaded_fq_module = FakeQuantizeClass(observer, quant_min, quant_max)
+                loaded_fq_module.load_state_dict(loaded_dict)
+                for key in state_dict:
+                    self.assertEqual(state_dict[key], loaded_fq_module.state_dict()[key])
+
+                self.assertEqual(loaded_fq_module.calculate_qparams(), fq_module.calculate_qparams())
+
+    def test_fake_quant_control(self):
+        for fq_module in [torch.ao.quantization.default_fake_quant(),
+                          _LearnableFakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0,
+                                                           quant_max=255,
+                                                           dtype=torch.quint8, qscheme=torch.per_tensor_affine,
+                                                           reduce_range=True)()]:
+            torch.manual_seed(42)
+            X = torch.rand(20, 10, dtype=torch.float32)
+            # Output of fake quant is not identical to input
+            Y = fq_module(X)
+            self.assertNotEqual(Y, X)
+            if type(fq_module) is _LearnableFakeQuantize:
+                fq_module.toggle_fake_quant(False)
+            else:
+                torch.ao.quantization.disable_fake_quant(fq_module)
+            X = torch.rand(20, 10, dtype=torch.float32)
+            Y = fq_module(X)
+            # Fake quant is disabled,output is identical to input
+            self.assertEqual(Y, X)
+
+            # Explicit copy at this point in time, because FakeQuant keeps internal
+            # state in mutable buffers.
+            scale = fq_module.scale.detach().clone()
+            zero_point = fq_module.zero_point.detach().clone()
+
+            if type(fq_module) is _LearnableFakeQuantize:
+                fq_module.toggle_observer_update(False)
+                fq_module.toggle_fake_quant(True)
+            else:
+                torch.ao.quantization.disable_observer(fq_module)
+                torch.ao.quantization.enable_fake_quant(fq_module)
+            X = 10.0 * torch.rand(20, 10, dtype=torch.float32) - 5.0
+            Y = fq_module(X)
+            self.assertNotEqual(Y, X)
+            # Observer is disabled, scale and zero-point do not change
+            self.assertEqual(fq_module.scale, scale)
+            self.assertEqual(fq_module.zero_point, zero_point)
+            if type(fq_module) is _LearnableFakeQuantize:
+                fq_module.toggle_observer_update(True)
+            else:
+                torch.ao.quantization.enable_observer(fq_module)
+            Y = fq_module(X)
+            self.assertNotEqual(Y, X)
+            # Observer is enabled, scale and zero-point are different
+            self.assertNotEqual(fq_module.scale, scale)
+            self.assertNotEqual(fq_module.zero_point, zero_point)
+
+    def test_fake_quant_preserves_qparam_shapes_for_activations(self):
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = nn.Linear(4, 4)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        m = Model()
+
+        m.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
+        torch.ao.quantization.prepare_qat(m, inplace=True)
+
+        scale_shape_before = m.linear.activation_post_process.scale.shape
+        zero_point_shape_before = m.linear.activation_post_process.zero_point.shape
+
+        x = torch.rand(4, 4, 4, 4)
+        m(x)
+        scale_shape_after = m.linear.activation_post_process.scale.shape
+        zero_point_shape_after = m.linear.activation_post_process.zero_point.shape
+        self.assertEqual(
+            scale_shape_before, scale_shape_after,
+            msg="FakeQuant scale shape must stay consistent")
+        self.assertEqual(
+            zero_point_shape_before, zero_point_shape_after,
+            msg="FakeQuant zero_point shape must stay consistent")
+
+    def fake_quant_scriptable(self):
+        observer = default_observer
+        quant_min = 0
+        quant_max = 255
+        for FakeQuantizeClass in [FakeQuantize, _LearnableFakeQuantize]:
+            fq_module = FakeQuantizeClass(observer, quant_min, quant_max)
+            scripted_module = torch.jit.script(fq_module)
+
+            X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
+
+            fq_module(X)
+            scripted_module(X)
+            self.assertEqual(fq_module.calculate_qparams(), scripted_module.calculate_qparams())
+
+            buf = io.BytesIO()
+            torch.jit.save(scripted_module, buf)
+            buf.seek(0)
+            loaded_module = torch.jit.load(buf)
+            self.assertEqual(fq_module.calculate_qparams(), loaded_module.calculate_qparams())
+
+
+class TestFakeQuantizeOpsDevice(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
@@ -620,125 +743,6 @@ class TestFakeQuantizeOps(TestCase):
         fq_module(X)
         self.assertEqual(fixed_scale, fq_module.scale)
         self.assertEqual(fixed_zero_point, fq_module.zero_point)
-
-    def test_fq_serializable_per_tensor(self):
-        observer = default_observer
-        quant_min = 0
-        quant_max = 127
-        for FakeQuantizeClass in [FakeQuantize, _LearnableFakeQuantize]:
-            fq_module = FakeQuantizeClass(observer, quant_min, quant_max)
-            X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
-            y_ref = fq_module(X)
-            state_dict = fq_module.state_dict()
-            self.assertEqual(state_dict['scale'], 0.094488)
-            self.assertEqual(state_dict['zero_point'], 53)
-            b = io.BytesIO()
-            torch.save(state_dict, b)
-            for weights_only in [True, False]:
-                b.seek(0)
-                loaded_dict = torch.load(b, weights_only=weights_only)
-                loaded_fq_module = FakeQuantizeClass(observer, quant_min, quant_max)
-                loaded_fq_module.load_state_dict(loaded_dict)
-                for key in state_dict:
-                    self.assertEqual(state_dict[key], loaded_fq_module.state_dict()[key])
-
-                self.assertEqual(loaded_fq_module.calculate_qparams(), fq_module.calculate_qparams())
-
-    def test_fake_quant_control(self):
-        for fq_module in [torch.ao.quantization.default_fake_quant(),
-                          _LearnableFakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0,
-                                                           quant_max=255,
-                                                           dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                                                           reduce_range=True)()]:
-            torch.manual_seed(42)
-            X = torch.rand(20, 10, dtype=torch.float32)
-            # Output of fake quant is not identical to input
-            Y = fq_module(X)
-            self.assertNotEqual(Y, X)
-            if type(fq_module) is _LearnableFakeQuantize:
-                fq_module.toggle_fake_quant(False)
-            else:
-                torch.ao.quantization.disable_fake_quant(fq_module)
-            X = torch.rand(20, 10, dtype=torch.float32)
-            Y = fq_module(X)
-            # Fake quant is disabled,output is identical to input
-            self.assertEqual(Y, X)
-
-            # Explicit copy at this point in time, because FakeQuant keeps internal
-            # state in mutable buffers.
-            scale = fq_module.scale.detach().clone()
-            zero_point = fq_module.zero_point.detach().clone()
-
-            if type(fq_module) is _LearnableFakeQuantize:
-                fq_module.toggle_observer_update(False)
-                fq_module.toggle_fake_quant(True)
-            else:
-                torch.ao.quantization.disable_observer(fq_module)
-                torch.ao.quantization.enable_fake_quant(fq_module)
-            X = 10.0 * torch.rand(20, 10, dtype=torch.float32) - 5.0
-            Y = fq_module(X)
-            self.assertNotEqual(Y, X)
-            # Observer is disabled, scale and zero-point do not change
-            self.assertEqual(fq_module.scale, scale)
-            self.assertEqual(fq_module.zero_point, zero_point)
-            if type(fq_module) is _LearnableFakeQuantize:
-                fq_module.toggle_observer_update(True)
-            else:
-                torch.ao.quantization.enable_observer(fq_module)
-            Y = fq_module(X)
-            self.assertNotEqual(Y, X)
-            # Observer is enabled, scale and zero-point are different
-            self.assertNotEqual(fq_module.scale, scale)
-            self.assertNotEqual(fq_module.zero_point, zero_point)
-
-    def test_fake_quant_preserves_qparam_shapes_for_activations(self):
-        class Model(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = nn.Linear(4, 4)
-
-            def forward(self, x):
-                x = self.linear(x)
-                return x
-
-        m = Model()
-
-        m.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
-        torch.ao.quantization.prepare_qat(m, inplace=True)
-
-        scale_shape_before = m.linear.activation_post_process.scale.shape
-        zero_point_shape_before = m.linear.activation_post_process.zero_point.shape
-
-        x = torch.rand(4, 4, 4, 4)
-        m(x)
-        scale_shape_after = m.linear.activation_post_process.scale.shape
-        zero_point_shape_after = m.linear.activation_post_process.zero_point.shape
-        self.assertEqual(
-            scale_shape_before, scale_shape_after,
-            msg="FakeQuant scale shape must stay consistent")
-        self.assertEqual(
-            zero_point_shape_before, zero_point_shape_after,
-            msg="FakeQuant zero_point shape must stay consistent")
-
-    def fake_quant_scriptable(self):
-        observer = default_observer
-        quant_min = 0
-        quant_max = 255
-        for FakeQuantizeClass in [FakeQuantize, _LearnableFakeQuantize]:
-            fq_module = FakeQuantizeClass(observer, quant_min, quant_max)
-            scripted_module = torch.jit.script(fq_module)
-
-            X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
-
-            fq_module(X)
-            scripted_module(X)
-            self.assertEqual(fq_module.calculate_qparams(), scripted_module.calculate_qparams())
-
-            buf = io.BytesIO()
-            torch.jit.save(scripted_module, buf)
-            buf.seek(0)
-            loaded_module = torch.jit.load(buf)
-            self.assertEqual(fq_module.calculate_qparams(), loaded_module.calculate_qparams())
 
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
