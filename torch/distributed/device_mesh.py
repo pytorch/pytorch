@@ -48,6 +48,7 @@ else:
         _register_process_group_opaque_type,
         _resolve_process_group,
         get_backend,
+        get_backend_impl,
         get_process_group_ranks,
         get_rank,
         get_world_size,
@@ -610,8 +611,8 @@ else:
                 and torch.accelerator.is_available()
                 and (
                     backend is None
-                    or default_group._get_backend(
-                        torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
+                    or get_backend_impl(
+                        device=torch.accelerator.current_accelerator()
                     ).name()
                     == backend
                 )

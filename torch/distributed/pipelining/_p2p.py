@@ -265,7 +265,7 @@ def _build_p2p_edge_groups(
     use_torchcomms = dist.distributed_c10d._use_torchcomms_enabled()
     timeout = None
     if not use_torchcomms:
-        parent_backend = parent._get_backend(device)
+        parent_backend = dist.get_backend_impl(parent, device)
         if not parent_backend.supports_splitting:
             raise RuntimeError(
                 f"Pipeline P2P edge groups require backend {backend_name!r} to "

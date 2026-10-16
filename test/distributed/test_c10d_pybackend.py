@@ -590,7 +590,8 @@ class TestPyBackend(TestCase):
         self.assertTrue(group.supports_window)
         self.assertTrue(group.supports_abort_hooks)
         self.assertEqual(
-            group._get_backend(torch.device("cpu")).options.backend, "python-backend"
+            dist.get_backend_impl(group, torch.device("cpu")).options.backend,
+            "python-backend",
         )
 
         group._set_group_name("name")
@@ -738,7 +739,7 @@ class TestPyBackend(TestCase):
         group.unregister_abort_hook(7)
         self.assertNotIn(7, backend.abort_hooks)
 
-        shrunk = group._get_backend(torch.device("cpu")).shrink([1], 7, None)
+        shrunk = dist.get_backend_impl(group, torch.device("cpu")).shrink([1], 7, None)
         self.assertEqual(shrunk.name(), "shrunk-python-backend")
         self.assertEqual(backend.calls[-1], ("shrink", [1], 7, None))
 
@@ -776,12 +777,12 @@ class TestPyBackend(TestCase):
         split_opts = dist.BackendBase.Options("split")
         split = group.split_group([0], opts=split_opts)
         self.assertEqual(
-            split._get_backend(torch.device("cpu")).name(), "split-backend"
+            dist.get_backend_impl(split, torch.device("cpu")).name(), "split-backend"
         )
 
         merge = group.merge_remote_group(store, 1)
         self.assertEqual(
-            merge._get_backend(torch.device("cpu")).name(), "merged-backend"
+            dist.get_backend_impl(merge, torch.device("cpu")).name(), "merged-backend"
         )
 
         device = torch.device("cpu:0")
@@ -1063,7 +1064,7 @@ class TestPyBackendSplitGroup(TestCase):
                 split_ranks=[[0]],
                 pg_options=dist.BackendBase.Options("pybackend_split"),
             )
-            backend = split._get_backend(torch.device("cpu"))
+            backend = dist.get_backend_impl(split, torch.device("cpu"))
             self.assertIsInstance(backend, SplittableBackend)
             self.assertEqual(split.size(), 1)
             t = torch.zeros(2)
@@ -1099,7 +1100,7 @@ class TestPyBackendProcessGroup(MultiProcessTestCase):
         dist.init_process_group("pybackend", rank=self.rank, world_size=self.world_size)
 
         pg = _get_default_group()
-        backend = pg._get_backend(torch.device("cpu"))
+        backend = dist.get_backend_impl(pg, torch.device("cpu"))
         self.assertIsInstance(backend, dist.BackendBase)
         self.assertNotIsInstance(backend, dist.ProcessGroup)
         self.assertEqual(backend.name(), "registered-python-backend")

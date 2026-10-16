@@ -346,13 +346,11 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
         return self.rank + 1
 
     def test_default_pg_has_cpu_backend(self):
-        default_pg = dist.distributed_c10d._get_default_group()
-        cpu_be = default_pg._get_backend(torch.device("cpu"))
+        cpu_be = dist.get_backend_impl(device=torch.device("cpu"))
         self.assertIsNotNone(cpu_be)
 
     def test_default_pg_has_cuda_backend(self):
-        default_pg = dist.distributed_c10d._get_default_group()
-        cuda_be = default_pg._get_backend(torch.device("cuda"))
+        cuda_be = dist.get_backend_impl(device=torch.device("cuda"))
         self.assertIsNotNone(cuda_be)
 
     def test_allreduce_on_auto_qualified_pg(self):
@@ -431,7 +429,7 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
 
         ranks = list(range(self.world_size))
         g = dist.new_group(ranks=ranks, backend=name)
-        be = g._get_backend(torch.device("cpu"))
+        be = dist.get_backend_impl(g, torch.device("cpu"))
         # The c10d creator ran (real ProcessGroupGloo), not a TorchComms wrapper.
         self.assertNotIn("BackendWrapper", type(be).__name__)
         t = torch.tensor([self._rank_value], dtype=torch.float32)

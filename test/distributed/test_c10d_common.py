@@ -3097,7 +3097,7 @@ class RegisterBackendWithoutBackendTest(TestCase):
             torch.device("cpu"), dist.ProcessGroup.BackendType.CUSTOM, backend
         )
         pg._register_backend(torch.device("cuda"), dist.ProcessGroup.BackendType.CUSTOM)
-        self.assertEqual(pg._get_backend(torch.device("cuda")), backend)
+        self.assertEqual(dist.get_backend_impl(pg, torch.device("cuda")), backend)
 
 
 class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):

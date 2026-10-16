@@ -497,7 +497,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         # recorder that _dump_nccl_trace reads; a hooked one ("nccl2") gets its
         # own c10::Event instance keyed by backend name. Both name their entries
         # after the backend, so read whichever instance this group records into.
-        backend_name = pg._get_backend(torch.device(self.device)).name()
+        backend_name = dist.get_backend_impl(pg, torch.device(self.device)).name()
         records_natively = backend_name == "nccl"
         try:
             if records_natively:

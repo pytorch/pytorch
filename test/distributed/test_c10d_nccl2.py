@@ -446,7 +446,7 @@ class ProcessGroupNCCL2LazyInitTest(_ProcessGroupNCCL2OptionsTest):
     @skip_if_lt_x_gpu(2)
     def test_new_group_defers_comm(self) -> None:
         group = dist.new_group(pg_options=self._lazy_opts(), device_id=self.device)
-        backend = group._get_backend(self.device)
+        backend = dist.get_backend_impl(group, self.device)
         self.assertFalse(backend.supports_splitting)
         self.assertEqual(backend.comm_ptr, 0)
 
@@ -1166,7 +1166,7 @@ class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
         pg = self._new_subgroup()
         self._check_all_reduce(pg)
 
-        backend = pg._get_backend(self.device)
+        backend = dist.get_backend_impl(pg, self.device)
         # Must return instead of ::abort()ing the process, like stock NCCL.
         backend.abort()
         self.assertEqual(backend.get_error(), ErrorType.COMM_ERROR)
@@ -1204,7 +1204,7 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
         env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "0"}
         with mock.patch.dict(os.environ, env):
             pg = self._new_subgroup(timeout=timedelta(seconds=5))
-        backend = pg._get_backend(self.device)
+        backend = dist.get_backend_impl(pg, self.device)
         self._check_all_reduce(pg)
 
         if self.rank == 0:
@@ -1234,7 +1234,7 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
         env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "2"}
         with mock.patch.dict(os.environ, env):
             pg = self._new_subgroup(timeout=timedelta(seconds=5))
-        backend = pg._get_backend(self.device)
+        backend = dist.get_backend_impl(pg, self.device)
         self._check_all_reduce(pg)
 
         if self.rank == 0:
@@ -1890,7 +1890,7 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
             else list(range(half, self.world_size))
         )
         child = pg.split_group(halves, group_name=f"halves{halves}")
-        child_options = child._get_backend(self.device).options
+        child_options = dist.get_backend_impl(child, self.device).options
         self.assertEqual(child_options.global_ranks_in_group, halves)
         if hasattr(child_options.config, "comm_name"):
             # split() points config.commName at the group_name string for the
@@ -1903,7 +1903,9 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
         mine = [halves.index(self.rank)]
         grandchild = child.split_group(mine, group_name=f"single{self.rank}")
         self.assertEqual(
-            grandchild._get_backend(self.device).options.global_ranks_in_group,
+            dist.get_backend_impl(
+                grandchild, self.device
+            ).options.global_ranks_in_group,
             [self.rank],
         )
 

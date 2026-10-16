@@ -1249,7 +1249,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         )
 
         pg = dist.distributed_c10d._get_default_group()
-        backend = pg._get_backend(torch.device("cpu"))
+        backend = dist.get_backend_impl(pg, torch.device("cpu"))
         self.assertEqual(backend.options._timeout, timedelta(seconds=50))
 
         # operations work normally with default timeout
@@ -1286,7 +1286,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         )
 
         pg = dist.distributed_c10d._get_default_group()
-        backend = pg._get_backend(torch.device("cpu"))
+        backend = dist.get_backend_impl(pg, torch.device("cpu"))
 
         with self.assertWarnsRegex(FutureWarning, "_set_pg_timeout"):
             c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=23), pg)
@@ -2166,7 +2166,7 @@ class DistributedDataParallelTest(
         )
         process_group = c10d.distributed_c10d._get_default_group()
         device = devices[-1]
-        backend = process_group._get_backend(device)
+        backend = dist.get_backend_impl(process_group, device)
         backend.create_device(interface=LOOPBACK)
         self._test_ddp_with_process_group(
             process_group, devices, device_ids, multi_device, gradient_as_bucket_view
@@ -3546,7 +3546,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         )
         process_group = c10d.distributed_c10d._get_default_group()
         device = torch.device(f"cuda:{self.rank:d}")
-        backend = process_group._get_backend(device)
+        backend = dist.get_backend_impl(process_group, device)
         backend.create_device(interface=LOOPBACK)
         ranks = list(range(self.world_size))
         for root_rank in ranks:
@@ -3560,7 +3560,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         )
         process_group = c10d.distributed_c10d._get_default_group()
         device = torch.device("cpu")
-        backend = process_group._get_backend(device)
+        backend = dist.get_backend_impl(process_group, device)
         backend.create_device(interface=LOOPBACK)
         ranks = list(range(self.world_size))
         for root_rank in ranks:
@@ -3607,7 +3607,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         )
         pg = c10d.distributed_c10d._get_default_group()
         cpu = torch.device("cpu")
-        parent_options = pg._get_backend(cpu).options
+        parent_options = dist.get_backend_impl(pg, cpu).options
         parent_group_name = parent_options.group_name
 
         half = self.world_size // 2
@@ -3619,7 +3619,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         child = pg.split_group(
             halves, timeout=timedelta(seconds=222), group_name=f"halves{halves}"
         )
-        child_options = child._get_backend(cpu).options
+        child_options = dist.get_backend_impl(child, cpu).options
         self.assertIsNot(child_options, parent_options)
         self.assertEqual(parent_options.group_name, parent_group_name)
         self.assertEqual(parent_options._timeout, timedelta(seconds=111))
@@ -3632,7 +3632,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         second = pg.split_group(
             parity, timeout=timedelta(seconds=333), group_name=f"parity{parity}"
         )
-        self.assertEqual(second._get_backend(cpu).options.global_ranks_in_group, parity)
+        self.assertEqual(
+            dist.get_backend_impl(second, cpu).options.global_ranks_in_group, parity
+        )
 
         c10d.destroy_process_group()
 
@@ -3649,7 +3651,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         )
         ranks = list(range(self.world_size))
         child = c10d.split_group(split_ranks=[ranks], timeout=timedelta(seconds=222))
-        options = child._get_backend(torch.device("cpu")).options
+        options = dist.get_backend_impl(child, torch.device("cpu")).options
         self.assertEqual(options._timeout, timedelta(seconds=222))
         self.assertEqual(options.group_name, child.group_name)
         self.assertEqual(options.global_ranks_in_group, ranks)
