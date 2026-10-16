@@ -6715,6 +6715,27 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), expected)
 
+    @parametrize("bound", [False, True])
+    def test_method_descriptor_list_subclass_getitem(self, bound):
+        class List(list):
+            def __getitem__(self, index):
+                if bound:
+                    result = list.__getitem__.__get__(self)(index)
+                else:
+                    result = list.__getitem__(self, index)
+                return result if isinstance(index, slice) else result + 100
+
+        def fn(x):
+            values = List([x, x + 1, x + 2])
+            return values[0], values[-1], values[1:]
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertEqual(expected[:2], (x + 100, x + 102))
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertIs(type(actual[2]), list)
+
     def test_method_descriptor_list_count_tensor_equality(self):
         def fn(x):
             try:

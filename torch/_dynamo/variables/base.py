@@ -55,6 +55,8 @@ _RICHCOMPARE_OPS = frozenset(
 
 
 if TYPE_CHECKING:
+    import types
+
     from torch._guards import Guard
     from torch.fx.proxy import Node
 
@@ -346,12 +348,15 @@ def _check_method_arity(
     flags: MethodFlags,
     args: Any,
     kwargs: Any,
+    *,
+    qualname: str | None = None,
 ) -> None:
     # Centralized arity check for a tp_methods handler, driven by MethodFlags,
     # raising the same TypeErrors CPython raises for builtin methods. Shared by
     # Method and callers that run the handler directly (e.g. tensor.py).
     n = len(args)
-    qualname = f"{vt.python_type_name()}.{name}"
+    if qualname is None:
+        qualname = f"{vt.python_type_name()}.{name}"
     if kwargs and not (flags & MethodFlags.KEYWORDS):
         raise_type_error(tx, f"{qualname}() takes no keyword arguments")
     if flags & (MethodFlags.NOARGS | MethodFlags.O):
@@ -418,9 +423,16 @@ class Method:
         name: str,
         args: Any,
         kwargs: Any,
+        *,
+        descriptor: types.MethodDescriptorType | None = None,
+        qualname: str | None = None,
     ) -> VariableTracker | None:
-        flags = _derive_method_flags(vt, name)
-        _check_method_arity(vt, tx, name, flags, args, kwargs)
+        flags = (
+            _derive_method_flags(vt, name)
+            if descriptor is None
+            else _flags_from_ml_flags(descriptor.__objclass__, name)
+        )
+        _check_method_arity(vt, tx, name, flags, args, kwargs, qualname=qualname)
         return self.handler(vt, tx, args, kwargs)
 
 
@@ -1806,6 +1818,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
+
+    def lookup_method_descriptor(
+        self, descriptor: types.MethodDescriptorType
+    ) -> Method | None:
+        # Match the descriptor, e.g. `dict.update(ordered, src)` must select
+        # `dict.update`, even when the receiver's tracker models `OrderedDict`.
+        name = descriptor.__name__
+        python_type = self._cpython_type
+        for cls in type(self).__mro__:
+            python_type = cls.__dict__.get("_cpython_type", python_type)
+            table = cls.__dict__.get("tp_methods")
+            if table is None or name not in table:
+                continue
+            python_types = (
+                python_type if isinstance(python_type, tuple) else (python_type,)
+            )
+            if any(typ is descriptor.__objclass__ for typ in python_types):
+                return table[name]
+        return None
 
     def lookup_slotdefs(self, name: str) -> SlotDef | None:
         return self._slotdefs.get(name)
