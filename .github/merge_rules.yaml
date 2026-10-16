@@ -196,8 +196,7 @@
 
 - name: MPS
   patterns:
-  - test/test_mps.py
-  - test/inductor/test_mps_basic.py
+  - test/**
   - torch/testing/_internal/common_mps.py
   - torch/testing/_internal/common_methods_invocations.py
   - torch/testing/_internal/opinfo/**
