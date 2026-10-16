@@ -5,53 +5,7 @@
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
-#include <vector>
-
 namespace at::native::mkldnn {
-
-// Ported from ideep::convolution_forward::compute_v2 (with bias).
-// DEPRECATED
-// 2-in-1 compute (prepare & compute) with bias
-// Bias is not used if it is empty.
-// Zero points are passed explicitly as arguments for quantization
-void convolution_forward_compute_v2(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
-    const dnnl::memory::dims& strides,
-    const dnnl::memory::dims& dilates,
-    const dnnl::memory::dims& padding_l,
-    const dnnl::memory::dims& padding_r,
-    int groups,
-    const std::vector<float>& src_scales = std::vector<float>(),
-    const std::vector<float>& weights_scales = std::vector<float>(),
-    const std::vector<float>& dst_scales = std::vector<float>(),
-    const std::vector<int32_t>& src_zero_point = std::vector<int32_t>(),
-    const std::vector<int32_t>& dst_zero_point = std::vector<int32_t>(),
-    const ideep::attr_t& attr = ideep::attr_t());
-
-// Ported from ideep::convolution_forward::compute_v2 (without bias).
-// DEPRECATED
-// 2-in-1 compute (prepare & compute) without bias
-// Zero points are passed explicitly as arguments for quantization
-void convolution_forward_compute_v2(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
-    const dnnl::memory::dims& strides,
-    const dnnl::memory::dims& dilates,
-    const dnnl::memory::dims& padding_l,
-    const dnnl::memory::dims& padding_r,
-    int groups,
-    const std::vector<float>& src_scales = std::vector<float>(),
-    const std::vector<float>& weights_scales = std::vector<float>(),
-    const std::vector<float>& dst_scales = std::vector<float>(),
-    const std::vector<int32_t>& src_zero_point = std::vector<int32_t>(),
-    const std::vector<int32_t>& dst_zero_point = std::vector<int32_t>(),
-    const ideep::attr_t& attr = ideep::attr_t());
 
 // Ported from ideep::convolution_forward::compute_v3 (with bias).
 // 2-in-1 Conv computation with bias for fp32
@@ -145,49 +99,6 @@ ideep::tensor::desc convolution_forward_expected_weights_desc(
     const dnnl::memory::dims& src_dims = dnnl::memory::dims(),
     const ideep::attr_t& attr = ideep::attr_t(),
     bool is_channels_last = false);
-
-// Ported from ideep::convolution_backward_data::compute_v2.
-void convolution_backward_data_compute_v2(
-    const ideep::tensor& diff_dst,
-    const ideep::tensor& weights,
-    const dnnl::memory::dims& diff_src_dims,
-    ideep::tensor& diff_src,
-    const dnnl::memory::dims& strides,
-    const dnnl::memory::dims& dilates,
-    const dnnl::memory::dims& padding_l,
-    const dnnl::memory::dims& padding_r,
-    const int groups,
-    bool is_channels_last = false,
-    ideep::attr_t op_attr = ideep::attr_t());
-
-// Ported from ideep::convolution_backward_weights::compute_v2 (with bias).
-void convolution_backward_weights_compute_v2(
-    const ideep::tensor& src,
-    const ideep::tensor& diff_dst,
-    const dnnl::memory::dims& diff_weights_dims,
-    ideep::tensor& diff_weights,
-    ideep::tensor& diff_bias,
-    const dnnl::memory::dims& strides,
-    const dnnl::memory::dims& dilates,
-    const dnnl::memory::dims& padding_l,
-    const dnnl::memory::dims& padding_r,
-    int groups,
-    bool is_channels_last = false,
-    const ideep::attr_t& attr = ideep::attr_t());
-
-// Ported from ideep::convolution_backward_weights::compute_v2 (without bias).
-void convolution_backward_weights_compute_v2(
-    const ideep::tensor& src,
-    const ideep::tensor& diff_dst,
-    const dnnl::memory::dims& diff_weights_dims,
-    ideep::tensor& diff_weights,
-    const dnnl::memory::dims& strides,
-    const dnnl::memory::dims& dilates,
-    const dnnl::memory::dims& padding_l,
-    const dnnl::memory::dims& padding_r,
-    int groups,
-    bool is_channels_last = false,
-    const ideep::attr_t& attr = ideep::attr_t());
 
 } // namespace at::native::mkldnn
 
