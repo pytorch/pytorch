@@ -210,7 +210,10 @@ class TestScatterGatherDevice(TestCase):
     @dtypes(torch.int8, torch.bfloat16)
     def test_gather_large(self, device, dtype):
         # test larger shapes to check vectorized implementation
-        for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192)):
+        # (4096, 3072, 16), (4096, 3072, 32) and (4096, 1024, 8) cover
+        # 16/32-byte rows that must skip the vectorized kernel
+        for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192),
+                          (4096, 3072, 16), (4096, 3072, 32), (4096, 1024, 8)):
             if torch.accelerator.is_available():
                 torch.accelerator.empty_cache()
             src = make_tensor((m, k), device=device, dtype=dtype)
@@ -463,7 +466,11 @@ class TestScatterGatherDevice(TestCase):
             atol, rtol = 0.2, 0.5
         # The large shape tests grid.y clipping at maxGridSize[1]=65535.
         # Use it only for small dtypes to avoid OOM on CI (22GB GPUs).
-        shapes = [(4096, 3072, 4096), (4096, 3072, 4100)]
+        # The short-row shapes cover 16/32/64/128-byte rows that must skip
+        # the vectorized/TMA fast paths.
+        shapes = [(4096, 3072, 4096), (4096, 3072, 4100),
+                  (4096, 3072, 4), (4096, 3072, 8),
+                  (4096, 3072, 16), (4096, 3072, 32)]
         if dtype.itemsize <= 2:
             shapes.append((4, 4, 16384 * 8192))
         else:
@@ -1284,19 +1291,22 @@ class TestScatterAddOverrideCorrectness(TestCase):
         tol = _override_tol(torch.bfloat16)
         self.assertEqual(out_mis, ref, atol=tol, rtol=tol)
 
-    @parametrize("dtype,N", [
-        # chunk_bytes < 128 (small D)
-        subtest((torch.float32, 8), name="fp32_N8_cb32"),
-        subtest((torch.float32, 16), name="fp32_N16_cb64"),
-        subtest((torch.bfloat16, 8), name="bf16_N8_cb16"),
-        subtest((torch.bfloat16, 16), name="bf16_N16_cb32"),
+    @parametrize("dtype,N,direct", [
+        # chunk_bytes < 128 (small D): rows below the 256B dispatch floor,
+        # so drive the TMA kernel directly to cover the smem stage
+        # stride padding.
+        subtest((torch.float32, 8, True), name="fp32_N8_cb32"),
+        subtest((torch.float32, 16, True), name="fp32_N16_cb64"),
+        subtest((torch.bfloat16, 8, True), name="bf16_N8_cb16"),
+        subtest((torch.bfloat16, 16, True), name="bf16_N16_cb32"),
         # 128 < chunk_bytes < 512 but not a multiple of 128 -- stage 1
-        # also misaligns here without the stage-stride padding.
-        subtest((torch.float32, 36), name="fp32_N36_cb144"),
-        subtest((torch.bfloat16, 72), name="bf16_N72_cb144"),
+        # also misaligns here without the stage-stride padding. Sized to
+        # stay above the 256B dispatch floor so the TMA path runs.
+        subtest((torch.float32, 68, False), name="fp32_N68_cb272"),
+        subtest((torch.bfloat16, 136, False), name="bf16_N136_cb272"),
     ])
     @unittest.skipUnless(SM90OrLater, "TMA path requires sm_90+")
-    def test_smem_stage_alignment_multi_iter(self, dtype, N):
+    def test_smem_stage_alignment_multi_iter(self, dtype, N, direct):
         # Regression for TMA stage-1 smem misalignment: stage 1 of the
         # 2-stage pipeline buffer lands at offset chunk_bytes, so any
         # chunk_bytes that isn't 128B-aligned (small D < 128, or D's
@@ -1305,7 +1315,7 @@ class TestScatterAddOverrideCorrectness(TestCase):
         # stage 1. Stage 1 is only reached when a CTA does >= 2
         # iterations, i.e. M_src > grid_x. _plan_grid caps grid_x at
         # sm*64, so M_src must exceed that to expose the bug.
-        from torch._native.ops.scatter_add import cutedsl_impl
+        from torch._native.ops.scatter_add import cutedsl_impl, tma_kernel
 
         torch.manual_seed(0)
         sm = torch.cuda.get_device_properties(0).multi_processor_count
@@ -1313,15 +1323,20 @@ class TestScatterAddOverrideCorrectness(TestCase):
         self_t, idx, src, idx_1d = _make_override_triple(
             M_out, M_src, (N,), dtype=dtype
         )
-        # Assert the TMA path is the one that actually runs -- otherwise
-        # the test would silently regress to vec-scatter (which has no
-        # smem stage stride and can't reproduce this bug).
-        self.assertTrue(
-            cutedsl_impl._is_tma_supported(self_t, 0, idx, src),
-            msg="test bug: TMA cond rejected; this test would not exercise the regressed path",
-        )
         ref = _naive_scatter_add(self_t, idx_1d, src)
-        got = torch.scatter_add(self_t, 0, idx, src)
+        if direct:
+            # Below the dispatch floor: exercise the kernel directly.
+            tma_kernel.tma_scatter_add_into(self_t, idx_1d, src)
+            got = self_t
+        else:
+            # Assert the TMA path is the one that actually runs --
+            # otherwise the test would silently regress to vec-scatter
+            # (which has no smem stage stride and can't reproduce this bug).
+            self.assertTrue(
+                cutedsl_impl._is_tma_supported(self_t, 0, idx, src),
+                msg="test bug: TMA cond rejected; this test would not exercise the regressed path",
+            )
+            got = torch.scatter_add(self_t, 0, idx, src)
         torch.cuda.synchronize()
         tol = _override_tol(dtype)
         self.assertEqual(got, ref, atol=tol, rtol=tol)
