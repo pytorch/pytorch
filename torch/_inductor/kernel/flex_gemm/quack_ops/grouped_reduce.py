@@ -67,10 +67,13 @@ Tails and dynamic group counts
 ------------------------------
 The store is predicated on the *runtime* extents of the compressed tensor
 (``limit_groups``) and of the GEMM output (``limit_m`` / ``limit_n``), so a
-ragged last tile writes fewer groups without host-side padding. Groups must not
-straddle the GEMM boundary: ``group`` has to divide both the CTA tile and the
-grouped GEMM dimension (``GroupedReduceBase.host_validate`` checks both host-side
-and the tile divisibility is asserted again at compile time). OOB accumulator
+ragged last tile writes fewer groups without host-side padding. Under varlen_m
+only N groups are allowed (M groups would straddle sequences); the compressed
+``[total_m, groups]`` buffer is offset per sequence and predicated by its
+length. Groups must not straddle the GEMM boundary: ``group`` has to divide both
+the CTA tile and the grouped GEMM dimension (``GroupedReduceBase.host_validate``
+checks both host-side and the tile divisibility is asserted again at compile
+time). OOB accumulator
 lanes are zero, which is the identity for ``add`` only - with ``mul``/``max``/
 ``min`` a partially OOB group would be wrong, and the divisibility rule is what
 makes that unrepresentable.
@@ -817,7 +820,13 @@ class GroupedReduceBase(EpiOp):
     ):
         """Validate caller-owned carrier geometry against the GEMM problem."""
         if varlen_m:
-            raise ValueError(f"{self.name}: grouped reductions do not support varlen_m")
+            if self.axis != 1 or self.output_layout is not None:
+                raise ValueError(
+                    f"{self.name}: varlen_m supports compressed N-group reductions only"
+                )
+            # The compressed buffer is [total_m, groups]; the store offsets each
+            # sequence's rows by cu_seqlens_m.
+            batch = None
         if value is None:
             if self.keep_tensorless:
                 return
@@ -1130,6 +1139,10 @@ class GroupedReduceBase(EpiOp):
         batch_idx = tile_coord_mnkl[3]
         if const_expr(cute.rank(param) == 3):
             mReduce = param[batch_idx, None, None]
+        elif const_expr(varlen_manager.varlen_m):
+            mReduce = cute.domain_offset(
+                (varlen_manager.params.cu_seqlens_m[batch_idx], 0), param
+            )
         else:
             mReduce = param[None, None]
         if const_expr(axis == 1):

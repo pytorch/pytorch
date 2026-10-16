@@ -38,6 +38,7 @@ from ...ir import IRNode, TensorBox
 from ...lowering import (
     constant_pad_nd,
     empty_strided,
+    expand,
     process_subgraph_nodes,
     register_lowering,
     view,
@@ -316,6 +317,12 @@ def infer_flex_gemm_epilogue_arg_kinds(
                 f"against GEMM output {list(output_size)}"
             )
     return tuple(epilogue_arg_kinds)
+
+
+def widen_row_capture(arg: TensorBox, group: int) -> TensorBox:
+    """Repeat a ``[1, n]`` row capture ``group`` times per column: ``[1, n * group]``."""
+    n = arg.get_size()[-1]
+    return view(expand(view(arg, [n, 1]), [n, group]), [1, n * group])
 
 
 def require_tma_loadable_tile_captures(
@@ -783,9 +790,23 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
     outputs = epilogue_analysis.outputs
     if grouped_mm and outputs.local_reduce is not None:
-        raise NotImplementedError(
-            "FlexGEMM QUACK grouped_mm (varlen) does not yet support grouped reductions"
-        )
+        # Varlen-M rows never share a group along N, so a stored N-group reduction
+        # is per-row and group-safe; M groups would straddle experts. Feed-main is
+        # untested under varlen-M (span-1 feed-main also needs the accumulator
+        # prepass QuACK rejects with varlen).
+        local_reduce = outputs.local_reduce
+        store = local_reduce.store
+        if (
+            varlen_axis != "m"
+            or local_reduce.match.geometry.axis != 1
+            or local_reduce.feeds_main
+            or store is None
+            or store.output_layout is not None
+        ):
+            raise NotImplementedError(
+                "FlexGEMM QUACK grouped_mm (varlen) supports grouped reductions only "
+                "as stored N-group partials under varlen-M"
+            )
     indexed_output = outputs.indexed_output
     indexed_input = None
     if indexed_output is not None:
@@ -904,6 +925,18 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     gemm_input_nodes = [
         ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args
     ]
+    if isinstance(output_transform, FlexGemmOutputContraction):
+        if "tile" in epilogue_arg_kinds or "interleaved" in epilogue_arg_kinds:
+            raise NotImplementedError(
+                "FlexGEMM grouped main outputs support only scalar, row, and column "
+                "captured tensors"
+            )
+        # Row captures index logical columns; the kernel reads physical columns,
+        # so repeat each value across its lane group (the epilogue reads lane 0).
+        epilogue_args = [
+            widen_row_capture(arg, output_transform.group) if kind == "row" else arg
+            for arg, kind in zip(epilogue_args, epilogue_arg_kinds, strict=True)
+        ]
     epilogue_args = require_tma_loadable_tile_captures(
         epilogue_args, epilogue_arg_kinds
     )
@@ -952,15 +985,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     local_reduce_out_index = (
         local_reduce_out_indices[0] if local_reduce_out_indices else None
     )
-    if isinstance(output_transform, FlexGemmOutputContraction) and any(
-        kind != "scalar" for kind in epilogue_arg_kinds
-    ):
-        raise NotImplementedError(
-            "FlexGEMM grouped main outputs only support scalar captured tensors"
-        )
-    # Varlen-M tile captures load plain [total_m, N] rows, so rows past a group
-    # end only reach predicated stores; grouped reductions that would fold them
-    # are rejected above.
     if gemm_args[mat1_index].get_device_or_error().type != "cuda":
         raise NotImplementedError("FlexGEMM QUACK backend requires CUDA tensors")
     epimod_source = materialize_flex_gemm_epilogue(
