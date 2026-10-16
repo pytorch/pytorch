@@ -861,7 +861,7 @@ def _codegen_compiled_fn_invocation(
     buf.add_global("_aot_runtime_exit_", torch._C._aot_runtime_exit)
     buf.emit("with _first_ctx_():", indent=1)
     call_args = "args"
-    if trace_joint:
+    if trace_joint and indices_of_inps_to_detach:
         call_args = "args_"
         buf.emit("args_ = list(args)", indent=2)
         for idx in indices_of_inps_to_detach:
@@ -3368,11 +3368,11 @@ def _codegen_save_from_forward(fw_metadata: ViewAndMutationMeta) -> Callable[...
     )
 
     with buf.indent():
-        buf.writeline(f"_vc = fw_outs[{slice_src(vc_slice)}]")
-        buf.writeline(f"_no_vc = fw_outs[{slice_src(no_vc_slice)}]")
         buf.writeline(f"_symints = fw_outs[{slice_src(symints_slice)}]")
         buf.writeline(f"_opaque = fw_outs[{slice_src(opaque_slice)}]")
         if config.debug_assert:
+            buf.writeline(f"_vc = fw_outs[{slice_src(vc_slice)}]")
+            buf.writeline(f"_no_vc = fw_outs[{slice_src(no_vc_slice)}]")
             checks = (
                 ("_vc", "isinstance(x, torch.Tensor)", "tensors_saved_with_vc_check to be Tensors"),
                 ("_no_vc", "isinstance(x, torch.Tensor)", "tensors_saved_no_vc_check to be Tensors"),
@@ -3392,7 +3392,11 @@ def _codegen_save_from_forward(fw_metadata: ViewAndMutationMeta) -> Callable[...
         for i, graph_input in enumerate(is_graph_input):
             name = f"_t{i}"
             names.append(name)
-            src = f"_vc[{i}]" if i < num_vc_check else f"_no_vc[{i - num_vc_check}]"
+            # Index fw_outs directly rather than slicing out _vc / _no_vc per call.
+            if i < num_vc_check:
+                src = f"fw_outs[{(vc_slice.start or 0) + i}]"
+            else:
+                src = f"fw_outs[{(no_vc_slice.start or 0) + i - num_vc_check}]"
             buf.writeline(f"{name} = {src}")
             if not graph_input:
                 buf.writeline(f"if {name}._is_view():")
