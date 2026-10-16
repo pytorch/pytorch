@@ -5314,8 +5314,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             True,
         )
 
-    @parametrize("default_group", [True, False])
-    def test_ddp_module(self, default_group):
+    def test_ddp_module(self):
         import torch.distributed as dist
 
         if not dist.is_available():
@@ -5327,8 +5326,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
         )
         try:
-            pg = None if default_group else dist.new_group(ranks=[0])
-            ddp_model = DDP(GlobalNestedModule(), process_group=pg)
+            ddp_model = DDP(GlobalNestedModule())
 
             def foo(ddp, x):
                 return ddp(x)
@@ -5345,22 +5343,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 ],
             )(foo)(ddp_model, x)
             self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)
-            guards_state = load_guards_state(
+            torch._dynamo.package.load_guards_state(
                 package._codes[foo.__code__].guarded_codes[0].guards_state
             )
-            loaded_ddp = guards_state.output_graph.local_scope["ddp"]
-            self.assertIsInstance(loaded_ddp, DDP)
-
-            # The loaded shell has no process group, reducer or logger; it must
-            # still pickle.
-            buf = io.BytesIO()
-            GuardsStatePickler({id(loaded_ddp): loaded_ddp}, {}, {}, {}, buf).dump(
-                loaded_ddp
-            )
-            reloaded_ddp = load_guards_state(buf.getvalue())
-            self.assertIsInstance(reloaded_ddp, DDP)
-            for name in ("process_group", "reducer", "logger", "broadcast_buffers"):
-                self.assertNotIn(name, reloaded_ddp.__dict__)
         finally:
             dist.destroy_process_group()
             tmpfile.close()

@@ -25,6 +25,7 @@ is the multi-graph capture itself.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import functools
 import hashlib
 import importlib.machinery
@@ -186,7 +187,7 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
         # stance path (eval_frame._create_wrapped_callback, behind set_stance)
         # rebuilds a plain ConvertFrame with no package and is outside a capture
         # session's contract.
-        if self._package is None:
+        if self._inner_convert._package is None:
             return lambda backend: type(self)(
                 backend, self._hooks, recompile_limit=self._recompile_limit
             )
@@ -1579,6 +1580,41 @@ def _varying_guard_slots(
     return frozenset(varying)
 
 
+def _frame_key(code: Any) -> tuple[str, str, int]:
+    return (code.co_name, code.co_filename, code.co_firstlineno)
+
+
+class _CapturePackage(CompilePackage):
+    """A CompilePackage that remembers which frames compiled any compute.
+
+    A frame is recorded once any compile of it registers a backend graph or a
+    graph-break continuation, whether or not that compile is later bypassed.
+    """
+
+    def __init__(self, fn: Callable[..., Any]) -> None:
+        super().__init__(fn)
+        self.computing_frames: set[tuple[str, str, int]] = set()
+
+    def _note_compute(self) -> None:
+        if self._current_entry is not None:
+            self.computing_frames.add(_frame_key(self._current_entry.python_code))
+
+    def _add_backend_id(
+        self, backend_id: _BackendId, backend: Any | None = None
+    ) -> None:
+        self._note_compute()
+        super()._add_backend_id(backend_id, backend)
+
+    def add_resume_function(
+        self,
+        python_code: types.CodeType,
+        global_scope: dict[str, Any],
+        function_name: str,
+    ) -> None:
+        self._note_compute()
+        super().add_resume_function(python_code, global_scope, function_name)
+
+
 def _summarize(
     entry: _DynamoCacheEntry,
     *,
@@ -1590,6 +1626,7 @@ def _summarize(
     capture_errors: Sequence[str],
     guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
     dropped_code: Mapping[tuple[str, str], str],
+    served_eagerly: frozenset[tuple[str, str, int]] = frozenset(),
 ) -> PrecompileSummary:
     """Assemble the report. ``dropped_code`` maps a dropped slot to the one
     rendering the report carries for it, the caller's pick among the variants
@@ -1608,6 +1645,8 @@ def _summarize(
     the entry and leaves its ids in place. ``truncated`` comes from the compile
     path, which sees a frame hit the limit once and records it as ``co_name
     (filename:firstlineno)``, so that set cannot merge two frames.
+    ``served_eagerly`` names the frames ``PrecompileSession._served_entry``
+    emptied: they hold no guarded code by design, not for lack of coverage.
     """
     return PrecompileSummary(
         frames=len(entry.codes),
@@ -1621,7 +1660,10 @@ def _summarize(
         uncovered_frames=tuple(
             c.python_code.co_name
             for c in entry.codes
-            if c.has_compile_id and not c.guarded_codes and not c.bypassed
+            if c.has_compile_id
+            and not c.guarded_codes
+            and not c.bypassed
+            and _frame_key(c.python_code) not in served_eagerly
         ),
         wont_generalize=_wont_generalize(kept, guard_sets),
         dropped_guards=tuple(sorted(dropped)),
@@ -1674,15 +1716,16 @@ class PrecompileSession(Generic[_P, _R]):
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
-        self._dropped_guards: set[tuple[str, str]] = set()
-        self._kept_guards: set[tuple[str, str]] = set()
-        self._risky_dropped_guards: set[tuple[str, str]] = set()
         self._dropped_guard_code: dict[tuple[str, str], str] = {}
+        # slot -> the frames whose compiles kept / dropped / riskily dropped it
+        self._keep_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
+        self._drop_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
+        self._risky_drop_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
         # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
         self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
         self._capture_errors: list[str] = []
         self._backend_artifacts: dict[_BackendId, BackendCacheArtifact[Any]] = {}
-        self._package = CompilePackage(fn)
+        self._package = _CapturePackage(fn)
         self._guard_filter_fn = self._recording_filter(
             default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
         )
@@ -1710,6 +1753,12 @@ class PrecompileSession(Generic[_P, _R]):
                 if self._custom_guard_filter
                 else decisions
             )
+            current = self._package.current_entry
+            key = (
+                _frame_key(current.python_code)
+                if current is not None
+                else ("<unknown>", "<unknown>", 0)
+            )
             namespaces = _module_namespaces(entries)
             global_state_kept = any(
                 keep and e.guard_type == "GLOBAL_STATE"
@@ -1725,14 +1774,14 @@ class PrecompileSession(Generic[_P, _R]):
                     _is_noop_guard_type(entry.guard_type) and global_state_kept
                 )
                 if enforced:
-                    self._kept_guards.add(slot)
+                    self._keep_frames.setdefault(slot, set()).add(key)
                 else:
-                    self._dropped_guards.add(slot)
+                    self._drop_frames.setdefault(slot, set()).add(key)
                     rendered = " ; ".join(_render_code(entry.code_parts))
                     if rendered:
                         self._dropped_guard_code.setdefault(slot, rendered)
                     if by_default or _is_risky_drop(entry, namespaces):
-                        self._risky_dropped_guards.add(slot)
+                        self._risky_drop_frames.setdefault(slot, set()).add(key)
                 if entry.guard_type in _UNMODELLED_GUARD_TYPES:
                     # Never compared, so never claimed to hold or to vary.
                     continue
@@ -1745,12 +1794,6 @@ class PrecompileSession(Generic[_P, _R]):
                         enforced=enforced,
                     )
                 )
-            current = self._package.current_entry
-            if current is not None:
-                code = current.python_code
-                key = (code.co_name, code.co_filename, code.co_firstlineno)
-            else:
-                key = ("<unknown>", "<unknown>", 0)
             self._guard_sets.setdefault(key, []).append(frozenset(facts))
             return decisions
 
@@ -1852,8 +1895,51 @@ class PrecompileSession(Generic[_P, _R]):
             )
         return collected
 
+    def _served_entry(
+        self,
+    ) -> tuple[_DynamoCacheEntry, frozenset[tuple[str, str, int]]]:
+        """The entry to render, and the frames it serves eagerly.
+
+        A frame Dynamo compiled on its own can hold no graph at all, e.g. a
+        ``WeakKeyDictionary`` lookup called from a non-recursively disabled
+        frame. Its variants fold what they read into constants behind guards,
+        so one that lost a guard to the filter, or whose guards could not be
+        serialized at all (a bypass), could serve a stale answer or none.
+        Running its original bytecode instead is always correct and gives up
+        no compiled code, which is how torch.compile treats a frame that traced
+        no ops. Such a frame is rendered with no variants and not bypassed:
+        install() skips it and everything it calls (its variants inlined its
+        Python callees, which have no entries of their own to serve), and the
+        standalone driver runs it as plain Python. The entry frame is left alone, since the artifact serves it.
+        """
+        entry = self._package.cache_entry()
+        lossy = {frame for frames in self._drop_frames.values() for frame in frames}
+        computing = self._package.computing_frames
+        eager: set[tuple[str, str, int]] = set()
+        codes = list(entry.codes)
+        for i, code in enumerate(codes[1:], start=1):
+            key = _frame_key(code.python_code)
+            if (
+                code.has_compile_id
+                and key not in computing
+                and (code.bypassed or (code.guarded_codes and key in lossy))
+            ):
+                codes[i] = dataclasses.replace(
+                    code, guarded_codes=[], bypassed=False, skip_recursive=True
+                )
+                eager.add(key)
+        return dataclasses.replace(entry, codes=codes), frozenset(eager)
+
     def summary(self) -> PrecompileSummary:
         """Coverage and guard information for everything captured so far."""
+        entry, eager = self._served_entry()
+        # A frame served eagerly checks no guard, so neither its guards nor
+        # its drops describe what the artifact serves.
+        guard_sets = {k: v for k, v in self._guard_sets.items() if k not in eager}
+
+        dropped = {s for s, frames in self._drop_frames.items() if not frames <= eager}
+        kept = {s for s, frames in self._keep_frames.items() if not frames <= eager}
+
         # A dropped slot is risky when the SAME source held DIFFERENT values
         # across a frame's variants: a dropped guard that told the variants
         # apart cannot pick between them at serve time. Merely being absent
@@ -1861,8 +1947,10 @@ class PrecompileSession(Generic[_P, _R]):
         # Only variants some kept guard split apart can be compared, so a
         # dropped slot that is the sole difference between two calls never
         # recompiles and is never reported here.
-        risky = set(self._risky_dropped_guards)
-        for variants in self._guard_sets.values():
+        risky = {
+            s for s, frames in self._risky_drop_frames.items() if not frames <= eager
+        }
+        for variants in guard_sets.values():
             values: dict[tuple[str, str], set[str]] = {}
             for facts in variants:
                 for f in facts:
@@ -1870,15 +1958,16 @@ class PrecompileSession(Generic[_P, _R]):
                         values.setdefault((f.guard_type, f.source), set()).add(f.value)
             risky |= {slot for slot, seen in values.items() if len(seen) > 1}
         return _summarize(
-            self._package.cache_entry(),
-            dropped=self._dropped_guards,
-            kept=self._kept_guards,
+            entry,
+            dropped=dropped,
+            kept=kept,
             policy_dropped=set(),
             risky=risky,
             truncated=frozenset(),
             capture_errors=self._capture_errors,
-            guard_sets=self._guard_sets,
+            guard_sets=guard_sets,
             dropped_code=self._dropped_guard_code,
+            served_eagerly=eager,
         )
 
     def _gated_summary(
@@ -1968,7 +2057,7 @@ class PrecompileSession(Generic[_P, _R]):
         )
         backends = self._collect_backends()
         return _build_multigraph_artifact(
-            self._package.cache_entry(), backends, summary, self._backend, self._fn
+            self._served_entry()[0], backends, summary, self._backend, self._fn
         )
 
 
