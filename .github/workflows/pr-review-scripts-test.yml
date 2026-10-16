@@ -7,30 +7,24 @@ on:
     branches: [main]
     paths:
       - "scripts/pr_review/**"
-      - ".claude/hooks/pr_review/**"
       - ".github/workflows/hardened-pr-review.yml"
       - ".github/workflows/hardened-pr-review-run.yml"
       - ".github/workflows/pr-review-scripts-test.yml"
-      # Both skill directories are under contract here: the suite asserts the
-      # rubric names no severity the sanitizer would drop, and the rubric
-      # delegates to pr-review. Without these a skill-only change skips the
-      # one check that would catch it.
-      - ".agents/skills/pr-review-readiness/**"
+      # The skill is under contract here (its files are hashed and its gh/git
+      # commands are pinned). Without this a skill-only change skips the one
+      # check that would catch it.
       - ".agents/skills/pr-review/**"
       # Stage A's prompt is checked against the interactive one in here.
       - ".github/workflows/claude-code.yml"
   pull_request:
     paths:
       - "scripts/pr_review/**"
-      - ".claude/hooks/pr_review/**"
       - ".github/workflows/hardened-pr-review.yml"
       - ".github/workflows/hardened-pr-review-run.yml"
       - ".github/workflows/pr-review-scripts-test.yml"
-      # Both skill directories are under contract here: the suite asserts the
-      # rubric names no severity the sanitizer would drop, and the rubric
-      # delegates to pr-review. Without these a skill-only change skips the
-      # one check that would catch it.
-      - ".agents/skills/pr-review-readiness/**"
+      # The skill is under contract here (its files are hashed and its gh/git
+      # commands are pinned). Without this a skill-only change skips the one
+      # check that would catch it.
       - ".agents/skills/pr-review/**"
       # Stage A's prompt is checked against the interactive one in here.
       - ".github/workflows/claude-code.yml"

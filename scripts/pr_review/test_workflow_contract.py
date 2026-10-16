@@ -77,11 +77,9 @@ HERE_MANIFEST = Path(__file__).resolve().parent / "_suite_manifest.py"
 # value matters as much as the key — a bare `1` inherited from anywhere else
 # disables the test in the parent too, silently.
 REENTRY_MARKER = "PR_REVIEW_ENTRY_POINT_CHILD"
-RUBRIC = REPO / ".agents" / "skills" / "pr-review-readiness" / "SKILL.md"
 PR_REVIEW_SKILL = REPO / ".agents" / "skills" / "pr-review" / "SKILL.md"
 # The two claude-code-action steps: stage A reviews, stage B maps its review.
 MODEL_STEP_IDS = ("a", "claude")
-HOOK = REPO / ".claude" / "hooks" / "pr_review" / "restrict-write.sh"
 
 
 def strip_comments(text: str) -> str:
@@ -1759,11 +1757,9 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         "scripts/pr_review/**",
         ".github/workflows/hardened-pr-review.yml",
         ".github/workflows/hardened-pr-review-run.yml",
-        ".claude/hooks/pr_review/**",
-        ".agents/skills/pr-review-readiness/**",
-        # Both skill directories: an edit confined to `pr-review/` changes what
-        # the review reports and moves the prompt hash, and without this line it
-        # schedules no run of the suite that asserts either.
+        # The skill: an edit to it changes what the review reports and moves
+        # the prompt hash, and without this line it schedules no run of the
+        # suite that asserts either.
         ".agents/skills/pr-review/**",
         # The interactive review prompt that stage A's must stay in step with.
         ".github/workflows/claude-code.yml",
@@ -2261,10 +2257,10 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
 
         Whole entries, because substring membership is not the same test and
         the difference defeats exactly the coverage this filter provides: both
-        `"!.claude/hooks/pr_review/**"` — an EXCLUSION — and
-        `".claude/hooks/pr_review/**/*.py"` — a NARROWING that misses
-        `restrict-write.sh` — contain the required string while the filter no
-        longer schedules the run.
+        `"!.agents/skills/pr-review/**"` — an EXCLUSION — and
+        `".agents/skills/pr-review/**/*.py"` — a NARROWING that misses
+        `SKILL.md` — contain the required string while the filter no longer
+        schedules the run.
         """
         lines = half.splitlines()
         pat = _key_re("paths")  # `"paths":` is the same key, quoted
@@ -2584,11 +2580,8 @@ class TestReviewJobConfigDiscoveryIsClosed(unittest.TestCase):
     `user,project,local`. So the empty form left discovery fully ON while this
     test passed, because it greps YAML rather than the parser.
 
-    And the empty form must not start working either: the action installs the
-    `settings:` block — our three hooks — into ~/.claude/settings.json, the
-    `user` source. `[]` would disable restrict-write.sh, the only fence on the
-    bare `Write` grant. `user` is the single value that excludes the PR tree and
-    keeps the hooks.
+    `user` excludes the PR tree while keeping ~/.claude, where stage A's skill
+    is copied.
     """
 
     @staticmethod
@@ -2640,25 +2633,19 @@ class TestTheFindingsPathIsPinned(unittest.TestCase):
 
     # One expected value, and every site that must carry it named explicitly.
     # A regex over "whatever follows runner.temp" cannot see the drift that
-    # matters: retargeting the prompt to `...findings.txt`, or the hook env to
-    # `nested/...findings.json`, stops matching and so stops being checked,
+    # matters: retargeting one site to `nested/...findings.json` stops
+    # matching and so stops being checked,
     # while the remaining references keep any aggregate assertion green.
     EXPECTED = "${{ runner.temp }}/pr-review-findings.json"
 
     def test_every_env_var_that_names_it_is_present_and_agrees(self):
         # Presence asserted FIRST. Iterating matches alone made DELETING a
-        # binding pass vacuously, after which the hooks fall back to their own
-        # /tmp default and silently disagree with the prompt.
+        # binding pass vacuously.
         for var in ("FINDINGS_FILE",):
             values = env_values(self.review, var)
             self.assertTrue(values, f"{var} is no longer set in the review job")
             for value in values:
                 self.assertEqual(value, self.EXPECTED, f"{var} drifted to {value!r}")
-
-    def test_the_hooks_default_agrees_with_the_workflow(self):
-        # The hook falls back to its own literal when the env var is unset, and
-        # the executable tests override that var — so nothing compared it.
-        self.assertIn("pr-review-findings.json", HOOK.read_text())
 
     def test_no_model_step_is_granted_the_file(self):
         # Stage B returns its result through `--json-schema`; a trusted step
@@ -5000,153 +4987,6 @@ class TestLabelComparisonsAreCaseInsensitive(unittest.TestCase):
         self.assertNotIn("any(.labels[]?.name; . == $l)", prepare)
 
 
-class TestRubricSpeaksTheSchemaSeverities(unittest.TestCase):
-    """The rubric and the schema in the prompt must name the same severities.
-
-    `extract_verdict.SEVERITIES` drops a finding whose severity is outside the
-    set, as `bad_severity`, before anyone reads it. The rubric used to prescribe
-    `blocking` — and to prescribe it specifically for reporting a prompt-injection
-    attempt, so the one finding the rubric most wants surfaced was the one
-    guaranteed to be discarded.
-    """
-
-    def setUp(self):
-        self.rubric = RUBRIC.read_text()
-        self.stage2 = STAGE2.read_text()
-
-    def test_the_rubric_names_no_severity_the_sanitizer_would_drop(self):
-        # Every emphasised or code-quoted word the rubric uses as a severity,
-        # however the sentence is phrased. An earlier version keyed on the
-        # literal " finding" suffix and went blind the moment the wording
-        # changed — while still passing, because one other occurrence matched.
-        # No vocabulary filter — enumerating the words we already know about is
-        # how `critical` walks in unnoticed — but scoped to the sentences that
-        # DECLARE a severity, so ordinary prose citing a schema field is not
-        # read as one. Sweeping the whole Report section and subtracting a
-        # denylist did that: adding "with `path` and `line`" to the anchoring
-        # instruction failed the test for no reason.
-        declarations = [
-            ln
-            for ln in self.rubric.splitlines()
-            if re.search(
-                r"Report (a finding as|such an attempt as a)|`severity` must be", ln
-            )
-        ]
-        self.assertTrue(
-            declarations, "premise changed: the rubric declares no severity"
-        )
-        named = {
-            m.lower()
-            for ln in declarations
-            for pair in re.findall(r"\*\*`?(\w+)`?\*\*|`(\w+)`", ln)
-            for m in pair
-            if m and m != "severity"
-        }
-        self.assertTrue(named, "premise changed: the rubric names no severity at all")
-        self.assertEqual(
-            named - SEVERITIES,
-            set(),
-            f"rubric prescribes severities the sanitizer drops: {sorted(named - SEVERITIES)}",
-        )
-
-    def test_the_injection_report_uses_a_severity_that_survives(self):
-        sentence = next(
-            ln for ln in self.rubric.splitlines() if "Report such an attempt" in ln
-        )
-        # `major` specifically, not merely a surviving severity: `minor` would
-        # pass a membership check and would no longer force changes_requested.
-        self.assertIn(
-            "`major`",
-            sentence,
-            f"an injection attempt is no longer reported as major: {sentence}",
-        )
-
-    # IN THE ORDER THEY APPEAR, so a reordering that separates a definition
-    # from the paragraph qualifying it is also caught.
-    EXPECTED_SEVERITY_DEFINITIONS = [
-        "Report a finding as **`major`** when it would stop pr-review "
-        "recommending Approve: the change is wrong, unsafe, cannot work as "
-        "written, or a maintainer would send it back. This includes pr-review's "
-        "explicit gate—new functionality without tests or a bug fix without a "
-        "regression test—and tests that cannot fail.",
-        "Report a finding as **`minor`** when pr-review would write it up and "
-        "still recommend Approve.",
-        "Report a finding as **`info`** when it is a real problem below "
-        "pr-review's reporting threshold that it would not write up. This is "
-        "the rarest severity.",
-    ]
-
-    def test_the_rubric_defines_every_severity_the_schema_accepts(self):
-        """A value the schema offers and the rubric never defines is a guess.
-
-        pr-review's findings are undifferentiated, so mapping them onto these
-        three is the whole of what the wrapper adds.
-
-        ONE DEFINING LINE EACH, not a set union over all of them. A union is
-        satisfied by a bare enumeration — a single "Report a finding as `info`,
-        `minor`, or `major`" line names the whole set while defining nothing,
-        and equality alone cannot tell that from three real definitions.
-
-        AND EACH LINE STATES A CONDITION. Naming is not defining either: three
-        lines reading "Report a finding as `major`." satisfy one-per-line and
-        the set equality while saying nothing about when to use it, which is the
-        only thing the model needs from this section.
-        """
-        per_line = [
-            (
-                ln,
-                {
-                    m.lower()
-                    for pair in re.findall(r"\*\*`?(\w+)`?\*\*|`(\w+)`", ln)
-                    for m in pair
-                    if m
-                },
-            )
-            for ln in self.rubric.splitlines()
-            if "Report a finding as" in ln
-        ]
-        # EXACTLY ONE LINE PER SEVERITY, checked before the union below, which
-        # collapses duplicates: a second, contradictory `major` definition
-        # appended to the section leaves the union unchanged and every per-line
-        # check satisfied.
-        self.assertEqual(
-            len(per_line),
-            len(SEVERITIES),
-            f"{len(per_line)} defining lines for {len(SEVERITIES)} severities; "
-            f"two definitions of one severity contradict each other: "
-            f"{[ln for ln, _ in per_line]}",
-        )
-        for ln, named in per_line:
-            self.assertEqual(
-                len(named),
-                1,
-                f"a defining line names {sorted(named)}; one severity per line, "
-                "otherwise an enumeration passes as a definition",
-            )
-        # AND EACH DEFINITION VERBATIM, like EXPECTED_DELEGATION. A shape check
-        # cannot tell a condition from a sentence wearing one: "Report a finding
-        # as `minor`; consult the delegated skill to determine when this
-        # severity applies." carries the keyword and the length while supplying
-        # no condition — and pointing at the delegated skill is circular, since
-        # it assigns no severities. These three sentences ARE the mapping the
-        # wrapper adds, so editing one is a deliberate act.
-        self.assertEqual(
-            [ln for ln, _ in per_line],
-            self.EXPECTED_SEVERITY_DEFINITIONS,
-            "a severity definition changed. These three sentences are the whole "
-            "of the mapping from pr-review's one recommendation onto the "
-            "schema's three severities; review the change, then update "
-            "EXPECTED_SEVERITY_DEFINITIONS.",
-        )
-        defined = set().union(*(n for _, n in per_line)) if per_line else set()
-        self.assertEqual(
-            defined,
-            SEVERITIES,
-            f"the rubric defines {sorted(defined)}; the schema accepts "
-            f"{sorted(SEVERITIES)}",
-        )
-
-
 def prompt_scalar(review: str) -> str:
     """The `prompt:` block scalar's body, BLANK LINES INTACT.
 
@@ -5895,119 +5735,6 @@ class TestTheStage1ArtifactDownloadRetries(unittest.TestCase):
         # Comments stripped: the retry loop's own comment names the action it
         # replaced, and that prose must not be able to fail this.
         self.assertNotIn("actions/download-artifact", strip_comments(self.prepare))
-
-
-class TestTheHookLogCannotForgeAWorkflowCommand(unittest.TestCase):
-    """The refused write target is model-controlled and reaches the job log.
-
-    The runner parses `::command::` at the start of a line, so a target holding
-    a newline would reach that parser even though the write was denied. Denying
-    the filesystem operation does not close the output channel. This EXECUTES
-    the hook rather than grepping it, because the neutralization has to hold on
-    the value, not in the source text.
-    """
-
-    def _run(self, file_path: str, log: Path) -> str:
-        payload = json.dumps(
-            {"tool_name": "Write", "tool_input": {"file_path": file_path}}
-        )
-        subprocess.run(
-            ["bash", str(HOOK)],
-            input=payload,
-            text=True,
-            capture_output=True,
-            env={
-                **os.environ,
-                "PR_REVIEW_HOOK_LOG": str(log),
-                "PR_REVIEW_FINDINGS_FILE": "/tmp/allowed.json",
-            },
-            check=False,
-        )
-        return log.read_text() if log.exists() else ""
-
-    def test_a_newline_in_the_refused_path_cannot_start_a_log_line(self):
-        # The V2 form. actions/runner Runner.Common/ActionCommand.cs
-        # TryParseV2 accepts `::cmd::` only when the line starts with it after
-        # TrimStart, so this models the parser exactly.
-        with tempfile.TemporaryDirectory() as td:
-            log = Path(td) / "hooks.log"
-            written = self._run("/tmp/x\n::add-mask::secret", log)
-        self.assertTrue(written, "the hook logged nothing; premise changed")
-        for line in written.splitlines():
-            self.assertFalse(
-                line.lstrip().startswith("::"),
-                f"model-controlled text began a workflow command: {line!r}",
-            )
-
-    def test_the_legacy_command_form_is_neutralized_anywhere_in_the_line(self):
-        # The V1 form, and the reason position is not a defence. The same file's
-        # TryParse uses `IndexOf("##[")`, which matches ANYWHERE in the line, so
-        # a `DENY `-prefixed line is no protection against it.
-        with tempfile.TemporaryDirectory() as td:
-            log = Path(td) / "hooks.log"
-            written = self._run("/tmp/x ##[error]forged", log)
-        self.assertTrue(written, "the hook logged nothing; premise changed")
-        self.assertNotIn("##[", written, "a legacy workflow command survived")
-
-    def test_the_v2_introducer_is_neutralized_mid_line_too(self):
-        with tempfile.TemporaryDirectory() as td:
-            log = Path(td) / "hooks.log"
-            written = self._run("/tmp/x ::add-mask::secret", log)
-        self.assertNotIn("::", written, "a `::` introducer survived mid-line")
-
-    def test_the_refused_path_is_still_reported_for_diagnosis(self):
-        with tempfile.TemporaryDirectory() as td:
-            log = Path(td) / "hooks.log"
-            written = self._run("/tmp/somewhere-else.json", log)
-        self.assertIn("DENY", written)
-        self.assertIn("somewhere-else.json", written)
-
-    def test_the_logged_path_is_bounded(self):
-        with tempfile.TemporaryDirectory() as td:
-            log = Path(td) / "hooks.log"
-            written = self._run("/tmp/" + "a" * 5000, log)
-        self.assertTrue(written, "the hook logged nothing; the bound is vacuous")
-        self.assertTrue(
-            all(len(ln) < 600 for ln in written.splitlines()), written[:200]
-        )
-
-
-class TestOnlyTheReviewerWritesTheVerdict(unittest.TestCase):
-    """A sub-agent's Write is refused even when it targets the findings file."""
-
-    def _decision(self, payload: dict) -> str:
-        proc = subprocess.run(
-            ["bash", str(HOOK)],
-            input=json.dumps(payload),
-            text=True,
-            capture_output=True,
-            env={
-                **os.environ,
-                "PR_REVIEW_HOOK_LOG": "/dev/null",
-                "PR_REVIEW_FINDINGS_FILE": "/tmp/allowed.json",
-            },
-            check=False,
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        if not proc.stdout.strip():
-            return "allow"
-        return json.loads(proc.stdout)["hookSpecificOutput"]["permissionDecision"]
-
-    def test_the_reviewer_may_write_the_findings_file(self):
-        payload = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/tmp/allowed.json"},
-        }
-        self.assertEqual(self._decision(payload), "allow")
-
-    def test_a_sub_agent_may_not_write_the_findings_file(self):
-        payload = {
-            "tool_name": "Write",
-            "agent_id": "a7468cde0dec8d4c0",
-            "agent_type": "general-purpose",
-            "tool_input": {"file_path": "/tmp/allowed.json"},
-        }
-        self.assertEqual(self._decision(payload), "deny")
 
 
 class TestSubAgentEnvironmentIsPinned(unittest.TestCase):
