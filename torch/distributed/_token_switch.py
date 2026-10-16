@@ -5,7 +5,7 @@ import abc
 import ctypes
 import importlib.util
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -106,7 +106,10 @@ def _import_mori() -> tuple[Any, Any]:
     # MoRI EP v2 imports its flydsl kernel backend only when an op selects it, so
     # check for flydsl here to fail at construction rather than at first dispatch.
     try:
+        # pyrefly: ignore [missing-import]  # optional, from ROCm/mori
         import mori.cco as cco
+
+        # pyrefly: ignore [missing-import]  # optional, from ROCm/mori
         import mori.ops.dispatch_combine_v2 as ep
     except ImportError as e:
         raise ImportError(
@@ -479,8 +482,8 @@ class _MoRIRoutingState:
     mori_handle: Any = None
     # expert_major: (recv row * top_k + k) feeding each slot, and each slot's recv
     # row (recv_cap for unused slots, which combine drops).
-    slot_src: torch.Tensor | None = None
-    slot_dest_row: torch.Tensor | None = None
+    slot_src: torch.Tensor = field(default_factory=lambda: torch.empty(0))
+    slot_dest_row: torch.Tensor = field(default_factory=lambda: torch.empty(0))
 
 
 class TokenSwitchMoRI(TokenSwitch):
@@ -614,6 +617,15 @@ class TokenSwitchMoRI(TokenSwitch):
             tokens.new_zeros(max_recv_tokens, K, dtype=torch.int64),
         )
 
+    @staticmethod
+    def _state(routing: Routing) -> _MoRIRoutingState:
+        state = routing.handle
+        if not isinstance(state, _MoRIRoutingState):
+            raise TypeError(
+                f"TokenSwitchMoRI got a Routing from another backend ({type(state)})"
+            )
+        return state
+
     def _set_expert_major_slots(
         self, state: _MoRIRoutingState, out_idx: torch.Tensor, total_recv: torch.Tensor
     ) -> None:
@@ -644,7 +656,7 @@ class TokenSwitchMoRI(TokenSwitch):
                 "TokenSwitchMoRI needs out_topk_weights (and flat: out_topk_idx)"
             )
         self._fence_if_repeat("dispatch")
-        state = routing.handle
+        state = self._state(routing)
         tokens = tokens.contiguous()
         weights = topk_weights.to(torch.float32).contiguous()
         if state.mori_handle is None:
@@ -685,6 +697,7 @@ class TokenSwitchMoRI(TokenSwitch):
         epr = self._experts_per_rank
         local = out_idx[:n].long() - self._rank * epr
         other = (local < 0) | (local >= epr)
+        # pyrefly: ignore [unsupported-operation]  # flat: checked on entry
         out_topk_idx[:n].copy_(local.masked_fill_(other, -1))
         out_topk_weights[:n].copy_(out_w[:n]).masked_fill_(other, 0.0)
 
@@ -694,7 +707,8 @@ class TokenSwitchMoRI(TokenSwitch):
         expert_tokens: torch.Tensor,
         out_tokens: torch.Tensor,
     ) -> None:
-        mori_handle = routing.handle.mori_handle
+        state = self._state(routing)
+        mori_handle = state.mori_handle
         if mori_handle is None:
             raise RuntimeError(
                 "TokenSwitchMoRI: combine() before the first dispatch() on this Routing"
@@ -707,7 +721,7 @@ class TokenSwitchMoRI(TokenSwitch):
             # its own staging copy when handed that buffer.
             staged, cap = self._op.combine_in_view(), self._recv_cap
             m = min(expert_tokens.shape[0], self._em_slots)
-            dest = routing.handle.slot_dest_row[:m]
+            dest = state.slot_dest_row[:m]
             acc = staged.new_zeros(cap + 1, staged.shape[1], dtype=torch.float32)
             acc.index_add_(0, dest, expert_tokens[:m].float())
             staged.copy_(acc[:cap])
