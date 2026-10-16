@@ -8527,7 +8527,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("layout", ("contiguous", "lane_view", "computed", "offset"))
+    @parametrize(
+        "layout", ("contiguous", "lane_view", "computed", "offset", "input_offset")
+    )
     def test_mm_unaligned_n_bf16_tile_capture_matches_reference(self, layout):
         # N=12 is legal for a K-major B and fp32 output, but a bf16 [M, 12] tile
         # has a 24-byte row stride, so QuACK's TMA load needs a padded copy.
@@ -8538,8 +8540,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         cap = h.view(m, n, 2)[..., 0]
         if layout == "contiguous":
             cap = h[:, :n].contiguous()
-        elif layout == "offset":
+        elif layout in ("offset", "input_offset"):
             cap = torch.randn(m, 16, device="cuda", dtype=torch.bfloat16)
+            if layout == "input_offset":
+                cap = cap[:, 1 : n + 1]
 
         def capture(cap):
             if layout == "computed":
