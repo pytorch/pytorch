@@ -9,6 +9,7 @@
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
+#include <string>
 #include <unordered_map>
 
 namespace py = pybind11;
@@ -134,6 +135,14 @@ PyObject* get_backend(PyObject* callback);
 
 } // extern "C"
 
+// The outcome of a lookup.  code is null after a guard error (with the Python
+// error set), None on a miss, and the cached code on a hit.  Both are owned,
+// so a concurrent torch._dynamo.reset() cannot free them under the caller.
+struct CacheLookupResult {
+  py::object code;
+  std::string trace_annotation;
+};
+
 // What the Dynamo callback is handed.  cache_entry is borrowed and is only
 // valid until the code object's cache is reset.
 struct CompileInputs {
@@ -161,27 +170,17 @@ bool try_lookup_without_guard_eval(
     PyCodeObject* code,
     PyObject* backend,
     int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
-    bool is_skip_guard_eval_unsafe);
+    bool is_skip_guard_eval_unsafe,
+    CacheLookupResult* result);
 
 // Lookup the cache held by a code object.
-// Ownership contract
-// args:
-//   - code: Borrowed reference
-//   - f_locals: Borrowed reference
-//   - backend: Borrowed reference
-// return:
-//   - maybe_cached_code: Borrowed reference or Py_None
-//   - trace_annotation: Borrowed pointer to cache entry
 void lookup(
     PyCodeObject* code,
     FrameLocalsMapping* f_locals,
     PyObject* backend,
     int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
-    bool is_skip_guard_eval_unsafe);
+    bool is_skip_guard_eval_unsafe,
+    CacheLookupResult* result);
 
 // Whether the region or the default bucket has any entries, for
 // guard_complete_hook.
@@ -194,9 +193,9 @@ CompileInputs get_compile_inputs(
     int64_t isolate_recompiles_id);
 
 // Applies the callback's result: the new strategy when apply_to_code, and a
-// cache entry for guarded_code unless it is None.  Returns the new entry, or
-// null; it is borrowed and only valid until the code object's cache is reset.
-CacheEntry* record_compile_result(
+// cache entry for guarded_code unless it is None.  Returns the new entry's
+// code, or None.
+CacheLookupResult record_compile_result(
     PyCodeObject* code,
     int64_t isolate_recompiles_id,
     bool apply_to_code,
