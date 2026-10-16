@@ -131,7 +131,7 @@ from .exc import (
     Unsupported,
     UserError,
 )
-from .graph_bytecode_inputs import reset_user_object_tracking
+from .graph_bytecode_inputs import reset_user_object_tracking, UserObjectRegistry
 from .guards import (
     CheckFunctionManager,
     get_and_maybe_log_recompilation_reasons,
@@ -394,6 +394,10 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     "cuda", "matmul", cuda_matmul_fp32_prec
                 )
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
+                # The trace-time objects are stale once compilation ends; leaving
+                # them makes every forward of a graph without a pre-graph store
+                # snapshot them for backward.
+                reset_user_object_tracking()
                 if not guards.check():
                     raise AssertionError(
                         f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
@@ -1113,6 +1117,7 @@ class DynamoOutput:
             argdefs,
             kwdefaults,
             self.tracer_output.f_globals,
+            output_graph.user_objects,
         )
 
 
@@ -1259,6 +1264,7 @@ class GraphCaptureOutput:
     argdefs: tuple[object, ...] | None
     kwdefaults: dict[str, object] | None
     f_globals: dict[str, Any]
+    user_objects: UserObjectRegistry
 
     def build_guards(
         self,
